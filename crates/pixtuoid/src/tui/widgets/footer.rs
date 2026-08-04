@@ -10,38 +10,24 @@ use ratatui::widgets::Paragraph;
 
 use super::{to_color, StateCounts};
 
-/// The TUI keybind tails handed to `build_footer` — the ONE place the terminal's
-/// hint chrome is spelled. The stats tiers carry the full hint; the death tier
-/// (a partially-frozen office) keeps only quit. (The floating painter supplies
-/// its own tails — the tail is the one painter-specific input to the shared model.)
 const KEYS_STATS: &str = " [?]help [p]ause [t]heme [q]uit ";
 const KEYS_ALERT: &str = " [q]uit ";
 
-/// The pre-computed office/floor tallies the footer renders — assembled once per
-/// frame at each of the three `paint_footer` sites (C3). `counts` is the CURRENT
-/// (projected) floor's per-state breakdown (the rungs); `per_floor` + `gateway`
-/// are office-wide (the cross-floor `▲F{n}` cue + the `⬢gw` chip), always present
-/// so they render on a single-floor office too (C1). Marshalled into
-/// `pixtuoid_scene::footer::FooterInputs` — the shared model owns the tier policy.
+/// `counts` is the CURRENT (projected) floor's per-state breakdown; `per_floor`
+/// and `gateway` are office-wide, and are present even on a single-floor office.
 pub(crate) struct FooterStats<'a> {
     pub counts: StateCounts,
     pub per_floor: &'a [StateCounts; MAX_FLOORS],
     pub gateway: Option<DaemonState>,
-    /// "You would hear sound right now": the audio system is live AND not
-    /// effectively muted (m-state OR pause). Drives the ♩ suffix glyph.
+    /// The audio system is live AND not effectively muted (m-state OR pause).
     pub audio_audible: bool,
-    /// Transient +/- readout: `Some(percent)` for ~1s after a volume nudge
-    /// (the lowfi volume-timer pattern) — renders as `♩ N%`.
+    /// `Some(percent)` for ~1s after a volume nudge; renders as `♩ N%`.
     pub volume_flash: Option<u8>,
 }
 
-/// One-line footer warning for dead sources (#157); `None` while healthy.
-/// Deliberately terse — it shares the footer row — with the full error in the
-/// log file (written by default since #157's logging fix; a failed log-file
-/// install is announced on pre-altscreen stderr). `pub`: the snapshot
-/// example's --source-warning reuses this exact formatter so screenshots
-/// can't drift from production wording. (The death>drift MERGE stays in
-/// `doctor::footer_warning`; `build_footer` renders the merged string.)
+/// One-line footer warning for dead sources; `None` while healthy. `pub` because the
+/// snapshot example reuses this exact formatter, so screenshots can't drift from
+/// production wording.
 pub fn source_warning_message(
     deaths: &[pixtuoid_core::source::manager::SourceDeath],
 ) -> Option<String> {
@@ -58,9 +44,6 @@ pub fn source_warning_message(
     }
 }
 
-/// Marshal this binary's per-frame footer state into the shared model's
-/// [`FooterInputs`]. `tools` is held by the caller (borrowed here) so
-/// `build_footer` stays a pure function of pre-computed inputs.
 fn footer_inputs<'a>(
     stats: &FooterStats<'a>,
     floor_info: Option<crate::tui::renderer::FloorInfo>,
@@ -103,9 +86,8 @@ pub(crate) fn paint_footer(
         theme,
         source_warning,
     );
-    // Base style on the whole row (label_idle) for parity with the old
-    // single-Span footer: cells past the rendered spans (quit-only tier on a
-    // wide-ish terminal) keep the muted footer tone rather than default.
+    // Base style on the whole row so cells past the rendered spans keep the muted
+    // footer tone rather than the terminal default.
     let footer =
         Paragraph::new(Line::from(spans)).style(Style::default().fg(to_color(theme.ui.label_idle)));
     f.render_widget(
@@ -119,9 +101,6 @@ pub(crate) fn paint_footer(
     );
 }
 
-/// Colored footer — renders the shared [`build_footer`] model, each segment
-/// tinted by its tone via the ONE shared [`footer_tone_rgb`] authority (so the
-/// TUI and floating painters can't drift), then to this backend's ratatui `Color`.
 pub(crate) fn build_status_spans<'a>(
     scene: &SceneState,
     stats: &FooterStats<'_>,
@@ -144,10 +123,8 @@ pub(crate) fn build_status_spans<'a>(
         .collect()
 }
 
-/// Plain-string footer — the text-contract oracle (insta snapshots + direct
-/// substring asserts) that locks the exact footer wording. Delegates to the
-/// shared model's [`FooterModel::text`](pixtuoid_scene::footer::FooterModel::text),
-/// so it stays byte-identical to the colored `build_status_spans` content.
+/// Byte-identical to `build_status_spans`'s content — the oracle that locks the exact
+/// footer wording.
 #[cfg(test)]
 pub(crate) fn build_status_summary(
     scene: &SceneState,
@@ -171,11 +148,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::SystemTime;
 
-    // The pure tier/policy logic is pinned in `pixtuoid_scene::footer`'s own
-    // tests (ported there in the model migration). These pin the BINARY ADAPTER:
-    // the FooterStats→FooterInputs marshalling + the ratatui span coloring route
-    // through the shared `footer_tone_rgb`, so a rung tints to `label_active` here
-    // exactly as `footer_tone_rgb` resolves it.
     #[test]
     fn build_status_spans_tints_the_active_rung_via_the_shared_tone_authority() {
         let theme = &pixtuoid_scene::theme::NORMAL;
@@ -218,8 +190,6 @@ mod tests {
             volume_flash: None,
         };
         let spans = build_status_spans(&scene, &stats, 200, None, theme, None);
-        // The `●1 A` active rung span carries the label_active fg — proving the
-        // adapter routes tone→color through the shared `footer_tone_rgb`.
         let active_rgb = footer_tone_rgb(FooterTone::Rung(RungKind::Active), theme);
         let rung = spans
             .iter()

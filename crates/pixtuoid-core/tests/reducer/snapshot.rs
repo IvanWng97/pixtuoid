@@ -1,11 +1,7 @@
-//! Full-scene serialization regression net (#279). Drives a deterministic,
-//! fixed-timestamp script through the reducer and snapshots the ENTIRE
-//! serialized `SceneState`. Where the sibling reducer tests assert individual
-//! fields, this locks the whole tree's shape in one golden: a refactor that
-//! adds / renames / reshapes any `SceneState` / `AgentSlot` / `ActivityState`
-//! field — or changes which timestamp the reducer stamps — surfaces as a
-//! reviewable snapshot diff. Serialization itself is what #279 added; this
-//! regression net is its standing, daemon-independent payoff.
+//! Full-scene serialization regression net: a fixed-timestamp script through
+//! the reducer, snapshotted whole, so any added / renamed / reshaped
+//! `SceneState` / `AgentSlot` / `ActivityState` field — or a change to which
+//! timestamp the reducer stamps — surfaces as a reviewable snapshot diff.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -31,11 +27,7 @@ fn full_scene_serialization_is_stable() {
     let idle = AgentId::from_transcript_path("/idle/sess.jsonl");
     let winding = AgentId::from_transcript_path("/wind/sess.jsonl");
 
-    // A delegating CC parent (Hook) with its subagent (Jsonl), an independent
-    // Codex session parked on a permission prompt, a freshly-started Idle CC
-    // session, and one CC session in the Active→Idle debounce window (its
-    // ActivityEnd armed pending_idle_at without flipping state). Covers all
-    // FOUR ActivityState shapes — incl. Idle — plus a populated
+    // The five agents cover all FOUR ActivityState shapes plus a populated
     // Option<SystemTime>, across three sources.
     r.apply(
         &mut scene,
@@ -104,7 +96,6 @@ fn full_scene_serialization_is_stable() {
         at(4),
         Transport::Hook,
     );
-    // Idle: a session that started and did nothing else.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -117,8 +108,8 @@ fn full_scene_serialization_is_stable() {
         at(5),
         Transport::Hook,
     );
-    // Active→Idle debounce: ActivityEnd arms pending_idle_at but keeps Active
-    // (the documented grace window), pinning a populated Option<SystemTime>.
+    // Active→Idle debounce: the trailing ActivityEnd arms pending_idle_at but
+    // keeps Active, pinning a populated Option<SystemTime>.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {

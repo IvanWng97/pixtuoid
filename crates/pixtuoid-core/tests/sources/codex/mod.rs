@@ -1,15 +1,11 @@
 //! Regression for the real Codex subagent hook lifecycle.
 //!
 //! Codex's `spawn_agent` subagents signal their lifecycle ONLY via the
-//! `SubagentStart`/`SubagentStop` hooks (the subagent has its own rollout file,
-//! so the JSONL watcher renders the sprite — but orphaned, since a flat
-//! `~/.codex/sessions/.../rollout-*.jsonl` path has no `/subagents/` to derive a
-//! parent). The payloads here were captured live (Codex 0.135, gpt-5.5) and
-//! sanitized: synthetic UUIDs, generic cwd, the huge `last_assistant_message`
-//! truncated. This guards two things that regressed before:
-//!   1. the hooks decode at all (they used to `bail!` → silently dropped), and
-//!   2. the subagent joins the scope tree so it cascades with its parent,
-//!      in BOTH transport arrival orders (hook-first and JSONL-first).
+//! `SubagentStart`/`SubagentStop` hooks: the subagent has its own rollout file,
+//! but a flat `~/.codex/sessions/.../rollout-*.jsonl` path has no `/subagents/`
+//! segment to derive a parent from. The payloads here were captured live (Codex
+//! 0.135, gpt-5.5) and sanitized: synthetic UUIDs, generic cwd, the huge
+//! `last_assistant_message` truncated.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -23,8 +19,6 @@ use pixtuoid_core::AgentId;
 const PARENT: &str = "01000000-0000-7000-8000-000000000001";
 const CHILD: &str = "01000000-0000-7000-8000-000000000002";
 
-/// Decode the captured hook payloads in file order (a payload can decode to
-/// multiple events — Identity ahead of a tool/permission event, #221).
 fn captured_hook_events() -> Vec<AgentEvent> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/sources/codex/fixtures/hook-payloads.jsonl");
@@ -51,8 +45,6 @@ fn codex_subagent_hook_lifecycle_links_child_and_exits_on_stop() {
         r.apply(&mut scene, ev, now, Transport::Hook);
     }
 
-    // UserPromptSubmit created the parent; SubagentStart created the child
-    // keyed on `agent_id` and linked to the parent session.
     let child_slot = scene
         .agents
         .get(&child)
@@ -62,9 +54,8 @@ fn codex_subagent_hook_lifecycle_links_child_and_exits_on_stop() {
         Some(parent),
         "subagent must be linked to its parent session"
     );
-    // SubagentStop ends the CHILD (prompt removal); the parent keeps running
-    // (its `Stop` is only turn-end → idle; the parent's own end is the
-    // teardown-only SessionEnd hook, #710 — not fired here).
+    // SubagentStop ends the CHILD; the parent's `Stop` is only turn-end → idle
+    // (its teardown SessionEnd hook is not in this capture).
     assert!(
         child_slot.exiting_at.is_some(),
         "SubagentStop must mark the subagent exiting"
@@ -78,16 +69,12 @@ fn codex_subagent_hook_lifecycle_links_child_and_exits_on_stop() {
 
 #[test]
 fn codex_subagent_jsonl_first_orphan_is_enriched_by_subagent_start() {
-    // The transports race: the subagent's own rollout (JSONL) can create the
-    // sprite ORPHANED before the SubagentStart hook arrives. The hook must then
-    // enrich the existing slot with the parent link, not be dropped as a dup.
     let parent = AgentId::from_parts("codex", PARENT);
     let child = AgentId::from_parts("codex", CHILD);
     let mut scene = SceneState::uniform(8);
     let mut r = Reducer::new();
     let now = SystemTime::now();
 
-    // Parent session + the subagent's orphan JSONL sprite arrive first.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -127,10 +114,9 @@ fn codex_subagent_jsonl_first_orphan_is_enriched_by_subagent_start() {
     );
 }
 
-// #242 (the CC twin lives in `sources/claude`): a SubagentStop decoded before
-// its SubagentStart tombstones the unknown child id — the late Start must not
-// register a slot whose end already passed (Codex has no further end signal
-// of any kind, so the phantom would ride the stale sweeps).
+// A SubagentStop decoded before its SubagentStart tombstones the unknown child
+// id: Codex has no further end signal of any kind, so a phantom slot registered
+// by the late Start would ride the stale sweeps forever (#242).
 #[test]
 fn codex_reordered_subagent_stop_before_start_does_not_mint_a_phantom() {
     let parent = AgentId::from_parts("codex", PARENT);
@@ -142,12 +128,9 @@ fn codex_reordered_subagent_stop_before_start_does_not_mint_a_phantom() {
     let (stops, rest): (Vec<_>, Vec<_>) = captured_hook_events()
         .into_iter()
         .partition(|ev| matches!(ev, AgentEvent::SessionEnd { .. }));
-    // The child's SessionEnd is delivered first (per-connection reorder)…
     for ev in stops {
         r.apply(&mut scene, ev, now, Transport::Hook);
     }
-    // …then the rest in capture order: the parent's UserPromptSubmit
-    // SessionStart, the child's SubagentStart, the parent's Stop.
     let later = now + std::time::Duration::from_millis(50);
     for ev in rest {
         r.apply(&mut scene, ev, later, Transport::Hook);
@@ -166,9 +149,6 @@ fn codex_reordered_subagent_stop_before_start_does_not_mint_a_phantom() {
 
 #[test]
 fn codex_subagent_stop_before_start_is_a_safe_noop() {
-    // The hooks are best-effort and unordered: a SubagentStop can win the race
-    // against the child's slot creation. SessionEnd for a not-yet-existing child
-    // must be harmless — no panic, no phantom slot, no spurious parent cascade.
     let parent = AgentId::from_parts("codex", PARENT);
     let child = AgentId::from_parts("codex", CHILD);
     let mut scene = SceneState::uniform(8);
@@ -187,8 +167,6 @@ fn codex_subagent_stop_before_start_is_a_safe_noop() {
         now,
         Transport::Hook,
     );
-    // SubagentStop decodes to SessionEnd{child, as_child: true}; apply with
-    // no child present.
     r.apply(
         &mut scene,
         AgentEvent::SessionEnd {

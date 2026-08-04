@@ -1,31 +1,16 @@
 //! Process-level contracts of the REAL `pixtuoid` binary — anything that only
 //! holds once clap, config resolution, and the runtime are wired together, which
-//! no in-process test can reach.
+//! no in-process test can reach. Keep new tests to that bar rather than letting
+//! this become a general binary-test dumping ground.
 //!
-//! SCOPE NOTE: this file began as the `sources --json` golden alone and was
-//! widened deliberately. The second contract here is the CONNECTION GATE, which
-//! is process-level by nature: it is the composition of `resolve_connected`
-//! (config) with `reducer_task`'s per-event drop (runtime). Each half is
-//! individually correct and the composition still silently ate every Codex
-//! event, which no in-process test could observe. Keep new tests to that bar —
-//! a contract that genuinely needs the real process — rather than letting this
-//! become a general binary-test dumping ground.
-//!
-//! 1. `sources --json` — the shape the Raycast extension parses. Exercises clap
-//!    parse → `sources::status` → the JSON presenter → stdout, which the
-//!    in-process `source_status_*` unit tests (struct shape + committed schema)
-//!    never cover.
-//! 2. The connection gate end-to-end — a real rollout dripped into a real
-//!    `run --headless` appears as a sprite iff its source is connected.
-//!
-//! Determinism: each source's `connected`/`cli_present` is a function of whether
-//! it is target-bearing (probed absent in an empty HOME → disconnected) or
-//! no-target (always present + migrate-default connected), NOT of what's installed
-//! on the test machine — SO LONG AS the environment is fully isolated. We clear the
-//! env and point HOME at an empty tempdir so every presence/hook probe sees nothing
-//! (see the e2e-isolate-home lesson). Unix-only: the Windows home-var isolation
-//! differs and can't be verified from here; the wire SHAPE is pinned cross-platform
-//! by `source_status_json_shape_is_the_raycast_contract` + the schema golden.
+//! Determinism: the goldens are a function of the REGISTRY, not of what's
+//! installed on the test machine — SO LONG AS the environment is fully isolated,
+//! which is why every arm clears the env and points HOME at an empty tempdir.
+//! Every row is then `connected: false` (a source is connected only on an
+//! explicit `[sources]` `true`), so `cli_present` is the only field that varies,
+//! and it splits on registry shape: a target-bearing source probes absent in the
+//! empty HOME → `false`, a no-target one has no target to probe → `true`.
+//! Unix-only: the Windows home-var isolation differs and can't be verified here.
 #![cfg(unix)]
 
 #[test]
@@ -34,9 +19,7 @@ fn sources_json_lists_every_source_in_an_isolated_home() {
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
         .args(["sources", "--json"])
-        // Full isolation: an empty env + empty HOME means every CLI's presence /
-        // hook probe resolves absent, so the output depends only on the registry —
-        // deterministic across machines. A minimal PATH is kept for the spawn.
+        // A minimal PATH survives the `env_clear` only so the spawn works.
         .env_clear()
         .env("HOME", home.path())
         .env("PATH", "/usr/bin:/bin")
@@ -50,25 +33,23 @@ fn sources_json_lists_every_source_in_an_isolated_home() {
     );
 
     let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    // `.json` golden → snapbox compares structurally (key-order-insensitive), so a
-    // serde field reorder doesn't churn it; update with `SNAPSHOTS=overwrite`.
+    // A `.json` golden compares structurally (key-order-insensitive), so a serde
+    // field reorder doesn't churn it; update with `SNAPSHOTS=overwrite`.
     snapbox::assert_data_eq!(stdout, snapbox::file!["snapshots/cli/sources.json"]);
 }
 
 /// The `--json` DELIVERY contract, not just its row shape: a FAILING
 /// `connect`/`disconnect` still prints the `OutcomeRow` array to STDOUT and
-/// exits NON-ZERO. `run_change` emits BEFORE it bails, so a `$?`-checking caller
-/// (Raycast's `execFile` catch recovers the rows via `stdout.startsWith("[")`,
-/// then reads `rows[0]`) gets BOTH the per-source detail and a real error signal.
-/// The exit-code + stream + cardinality invariant is invisible to the row-shape
-/// schema goldens — this is its only gate (design review finding #2).
+/// exits NON-ZERO, so a `$?`-checking caller (Raycast recovers the rows from a
+/// rejected `execFile` via `stdout.startsWith("[")`) gets BOTH the per-source
+/// detail and a real error signal. Invisible to the row-shape schema goldens.
 #[test]
 fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
     let home = tempfile::tempdir().expect("tempdir");
-    // Block claude-code's hook install deterministically: make `~/.claude` a
-    // regular FILE, so writing `~/.claude/settings.json` errors. The pixtuoid
-    // config under `~/.config` still writes fine, so connect reaches the install
-    // step, fails it, rolls the flag back, and surfaces a `failed` row.
+    // Block claude-code's hook install deterministically: `~/.claude` as a
+    // regular FILE makes writing `~/.claude/settings.json` error, while the
+    // pixtuoid config under `~/.config` still writes — so connect reaches the
+    // install step, fails it, and rolls the flag back.
     std::fs::write(home.path().join(".claude"), b"not a directory").expect("seed .claude file");
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
@@ -85,13 +66,9 @@ fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
         String::from_utf8_lossy(&output.stderr)
     );
     let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    // Stream: the rows land on STDOUT even though the process exits non-zero, and
-    // they PARSE as the OutcomeRow array — the exact value the Raycast consumer
-    // recovers from a rejected execFile (`stdout.startsWith("[")` then `rows[0]`).
     let rows: Vec<serde_json::Value> = serde_json::from_str(stdout.trim()).unwrap_or_else(|e| {
         panic!("failing connect must still print the OutcomeRow array to stdout: {e}: {stdout:?}")
     });
-    // Cardinality: exactly one row per requested id.
     assert_eq!(
         rows.len(),
         1,
@@ -101,33 +78,25 @@ fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
         rows[0]["id"], "claude-code",
         "the row names the requested id"
     );
-    // The blocked install is a `failed` outcome, not a silent success — the token
-    // Raycast's `rows[0].outcome === "failed"` branch surfaces per-source.
     assert_eq!(
         rows[0]["outcome"], "failed",
         "a blocked install surfaces as `failed`, never a clean success: {rows:?}"
     );
 }
 
-// ── the connection gate, end to end ─────────────────────────────────────────
-
 /// The gate's own announcement, from `runtime/driver.rs`'s reducer_task. Paired
-/// by this literal because an integration test cannot see a `pub(crate)` const
-/// and the message is not worth widening the API for; the negative arm below is
-/// what fails if the two drift apart.
+/// by literal because an integration test cannot see a `pub(crate)` const; the
+/// negative arm below is what fails if the two drift apart.
 const GATE_DROP_MSG: &str = "dropping events: source not connected";
 
 /// Everything a caller needs to tell "the gate kept the scene empty" apart from
 /// "the replay never happened" — an assertion of ABSENCE is only evidence when
 /// the thing that should have produced presence demonstrably reached the code.
 struct Replay {
-    /// The child's stdout: the `agents=[…]` summary lines.
     out: String,
-    /// The child's stderr, captured to its OWN file. Headless routes tracing to
-    /// stderr, so this carries the gate's announcement; and discarding it would
-    /// make a binary that died at startup indistinguishable from one that ran
-    /// and rendered nothing. It must not share `out`'s file: two handles on one
-    /// `NamedTempFile` keep independent offsets and overwrite each other.
+    /// The child's stderr, which carries the gate's announcement. It must not
+    /// share `out`'s file: two handles on one `NamedTempFile` keep independent
+    /// offsets and overwrite each other.
     err: String,
     /// Whether the fixture is readable under the WATCHED sessions root.
     fixture_landed: bool,
@@ -146,16 +115,14 @@ impl Drop for Reaped {
 }
 
 /// Run a headless pixtuoid against an isolated everything and drip a real Codex
-/// rollout into its sessions root.
-///
-/// `sources_toml` is the `[sources]` body and the ONLY difference between the
-/// two arms below, so any behavioural difference is attributable to it alone —
-/// which is why the log level is fixed here rather than varied per arm.
+/// rollout into its sessions root. `sources_toml` is the ONLY difference between
+/// the two arms below, so any behavioural difference is attributable to it alone
+/// — which is why the log level is fixed here rather than varied per arm.
 fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     use std::io::Write;
 
-    // Read the fixture BEFORE spawning: it has no dependency on the child, and
-    // read-then-spawn keeps the panic off the far side of the kill.
+    // Read the fixture BEFORE spawning, so a read panic stays on the near side
+    // of the kill.
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../pixtuoid-core/tests/sources/fixtures/codex/permission-flow")
         .join("rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000001.jsonl");
@@ -181,8 +148,7 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     let sock = home.path().join("hook.sock");
 
     // `debug` is required, not incidental: the gate's announcement is the only
-    // observable proof of WHY a scene stayed empty, and headless floors nothing
-    // (unlike TUI mode, which caps at warn).
+    // observable proof of WHY a scene stayed empty.
     let child = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
         .args(["run", "--headless"])
         .arg("--codex-sessions-root")
@@ -201,9 +167,8 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
         .expect("spawn pixtuoid run --headless");
     let mut child = Reaped(child);
 
-    // Give the watcher a moment to bind. Deliberately short: the rollout is
-    // picked up whether it arrives as an append or is already present at first
-    // sight, so this is startup slack, not a path selector.
+    // Startup slack for the watcher to bind, not a path selector: the rollout is
+    // picked up whether it arrives as an append or is already present.
     std::thread::sleep(std::time::Duration::from_millis(200));
 
     let landed = sessions
@@ -214,11 +179,10 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     f.sync_all().unwrap();
     drop(f);
 
-    // Poll until the run has DECIDED — a sprite rendered, or the gate announced
-    // the drop. Both arms therefore exit on a POSITIVE signal and share one
-    // budget; neither waits out a fixed timeout to conclude an absence.
-    // `if let Ok` rather than `unwrap_or_default`: a torn read mid-write must
-    // not blank an already-good buffer ("·" is two bytes).
+    // Poll until the run has DECIDED, so both arms exit on a POSITIVE signal
+    // rather than waiting out a fixed timeout to conclude an absence. `if let
+    // Ok` rather than `unwrap_or_default`: a torn read mid-write must not blank
+    // an already-good buffer.
     let deadline = std::time::Instant::now() + budget;
     let (mut seen_out, mut seen_err) = (String::new(), String::new());
     while std::time::Instant::now() < deadline {
@@ -229,10 +193,10 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
         if let Ok(s) = std::fs::read_to_string(err.path()) {
             seen_err = s;
         }
-        // Each arm waits for ALL the evidence it will assert, not just its
-        // first signal: the gate announces the drop before the summary loop has
-        // printed its first line, so breaking on the announcement alone returns
-        // an empty stdout and reds the very assertion it was meant to satisfy.
+        // Each arm waits for ALL the evidence it will assert: the gate announces
+        // the drop before the summary loop has printed its first line, so
+        // breaking on the announcement alone returns an empty stdout and reds
+        // the very assertion it was meant to satisfy.
         let rendered = seen_out.contains("cx·");
         let gated = seen_err.contains(GATE_DROP_MSG) && seen_out.contains("agents=[");
         if rendered || gated {
@@ -249,8 +213,6 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     }
 }
 
-/// A connected source's rollout becomes a sprite — the assertion whose only
-/// carrier used to be a manual script that could not fail.
 #[test]
 fn connected_codex_rollout_becomes_a_sprite() {
     let r = headless_replay("codex = true\n", std::time::Duration::from_secs(20));
@@ -273,13 +235,9 @@ fn connected_codex_rollout_becomes_a_sprite() {
 }
 
 /// The same rollout with the flag absent renders nothing — and, crucially, for
-/// the RIGHT reason. `resolve_connected` treats a missing key as disconnected
-/// (0.12.0 dropped the install-state inference) and reducer_task drops the
-/// events ahead of the reducer.
-///
-/// Asserting only the absence would be satisfied by any breakage that stopped
-/// the rollout reaching the watcher at all, so the gate's own announcement is
-/// what this pins; the fixture-landed check closes the remaining gap.
+/// the RIGHT reason. Asserting only the absence would be satisfied by any
+/// breakage that stopped the rollout reaching the watcher at all, so what this
+/// pins is the gate's own announcement plus the fixture-landed check.
 #[test]
 fn disconnected_codex_rollout_is_dropped_by_the_gate() {
     let r = headless_replay("claude-code = true\n", std::time::Duration::from_secs(20));

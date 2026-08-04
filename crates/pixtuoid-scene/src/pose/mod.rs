@@ -1,13 +1,8 @@
-//! Pose layer: pure derivation + the routed authority, split file-level.
-//!
-//! `pure` (sibling file) is the stateless state → pose derivation — a
-//! function of the snapshot inputs only, no routing, no per-frame history.
-//! This module re-exports its whole surface and adds the routed machinery:
-//!   * `PoseHistory` — per-agent cache of the last rendered position.
-//!   * `derive_with_routing` — the routed variant of `derive` that consults
-//!     a `&mut dyn Router` so walking poses follow A*-routed polylines and
-//!     so state transitions are smoothed with a snap-back walk instead of
-//!     teleporting back to the desk.
+//! Pose layer: re-exports the stateless state → pose derivation from the `pure`
+//! sibling and adds the routed machinery — `PoseHistory` plus
+//! `derive_with_routing`, which consults a `&mut dyn Router` so walking poses
+//! follow A*-routed polylines and state transitions are smoothed with a
+//! snap-back walk instead of teleporting back to the desk.
 
 mod pure;
 
@@ -21,7 +16,7 @@ use crate::motion::{
     advance_wander, snapshot_leg_profile, walking_position, MotionState, WalkLeg, WalkPathSnapshot,
     WanderKind, WanderPhase,
 };
-use crate::physics::{walk_arrived, walk_progress, WalkIntent};
+use crate::physics::{walk_arrived, walk_progress, WalkIntent, WalkProfile};
 use pixtuoid_core::walkable::{OccupancyOverlay, WalkableMask};
 
 pub use pure::{
@@ -31,9 +26,8 @@ pub use pure::{
     STALE_RESUME_GAP_BASE_MS, STALE_RESUME_GAP_RANGE_MS, THINKING_WINDOW_SECS, TYPING_FRAMES,
     TYPING_FRAME_MS, WALKING_FRAMES, WALKING_FRAME_MS, WANDER_DWELL_EST_MS, WANDER_WALK_EST_MS,
 };
-// `resolve_wander_target` + its `SpotClaims` input stay crate-internal (the
-// motion authority delegates to it and builds the claims); a `pub use` would try
-// to widen their `pub(crate)` visibility.
+// These stay crate-internal: a `pub use` would try to widen their `pub(crate)`
+// visibility.
 pub(crate) use pure::{resolve_wander_target, SpotClaims};
 
 use crate::layout::{desk_walk_anchor, Layout, Point};
@@ -41,8 +35,7 @@ use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
 /// character anchoring, hit-testing and label placement. `now`/`layout` stay
-/// separate args (frame inputs, not engine state). `overlay` is shared (&) —
-/// none of these fns mutate it; router/history/motion are &mut.
+/// separate args — frame inputs, not engine state.
 pub struct RouteCtx<'a> {
     /// The A* router for this frame.
     pub router: &'a mut dyn Router,
@@ -54,10 +47,9 @@ pub struct RouteCtx<'a> {
     pub motion: &'a mut HashMap<AgentId, MotionState>,
 }
 
-/// Per-agent rendered position cache. Updated each frame by
-/// `derive_with_routing`, consulted on state transitions so an agent
-/// who was mid-walk when their state flipped can complete the walk
-/// visually instead of teleporting back to their desk.
+/// Per-agent rendered position cache, consulted on state transitions so an agent
+/// who was mid-walk when their state flipped can complete the walk visually
+/// instead of teleporting back to their desk.
 #[derive(Debug, Default, Clone)]
 pub struct PoseHistory {
     last: std::collections::HashMap<AgentId, (Point, SystemTime)>,
@@ -72,13 +64,12 @@ impl PoseHistory {
     pub fn record(&mut self, agent_id: AgentId, anchor: Point, now: SystemTime) {
         self.last.insert(agent_id, (anchor, now));
     }
-    /// Drop entries for agents no longer in `scene` (mirrors
-    /// `FrameCache::evict_missing`). Without this, one `(Point, SystemTime)`
-    /// per AgentId ever rendered lived for the process lifetime, per floor.
+    /// Drop entries for agents no longer in `scene`. Without this, every AgentId
+    /// ever rendered leaks an entry for the process lifetime, per floor.
     pub fn evict_missing(&mut self, scene: &pixtuoid_core::state::SceneState) {
         self.last.retain(|id, _| scene.agents.contains_key(id));
     }
-    /// Whether an entry exists for `agent_id` (test seam for eviction checks).
+    /// Whether an entry exists for `agent_id`.
     pub fn contains(&self, agent_id: AgentId) -> bool {
         self.last.contains_key(&agent_id)
     }
@@ -95,72 +86,48 @@ impl PoseHistory {
 }
 
 /// Snap-back ARM window (ms): only trigger a snap-back walk if the desk-bound
-/// state flip happened within this long. It is NOT a render cap — the walk runs
-/// to completion by physics (`walk_arrived`), kept brisk by the snap-back's
-/// higher accel (`physics::WALK_ACCEL_SNAPBACK`). Past this window we just show
-/// the seated pose directly (too late to bother animating a return).
+/// state flip happened within this long. NOT a render cap — the armed walk runs
+/// to completion by physics (`walk_arrived`).
 const SNAP_BACK_MS: u64 = 900;
-/// Minimum manhattan distance (px) from current rendered position to
-/// the desk before we bother animating the snap-back. Below this the
-/// teleport is invisible and animating wastes a frame.
+/// Minimum manhattan distance (px) from the current rendered position to the
+/// desk before animating the snap-back; below this the teleport is invisible.
 const SNAP_BACK_MIN_DIST: i32 = 8;
 /// Max age (ms) for a recorded `PoseHistory` position to count as "where the
-/// agent is now" — the start point for both the exit walk and the snap-back.
+/// agent is now".
 const HISTORY_RECENT_MS: u64 = 300;
-/// Safety margin (ms) shaved off `EXIT_GRACE_WINDOW` so the time-compressed
-/// exit walk reaches the door before the reducer GCs the slot. Coincides with
-/// `HISTORY_RECENT_MS` in value but is independently motivated (GC-timing slack,
-/// not a recency window) — the two may diverge, so they stay separate consts.
+/// Safety margin (ms) shaved off `EXIT_GRACE_WINDOW` so the time-compressed exit
+/// walk reaches the door before the reducer GCs the slot. Equal to
+/// `HISTORY_RECENT_MS` by coincidence, not by motivation — don't merge them.
 const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 
 /// The home desk's ARRIVAL target: a reachable cell on an ALLOWED side
-/// (`DESK_APPROACH` = N/E/W, excluding the south front) via the SAME
-/// `approach_point` the wander seats use — so an arriving agent walks AROUND to
-/// sit behind the desk instead of straight through its front. The chair
-/// (`desk_walk_anchor`) is inside the blocked desk footprint, so targeting it
-/// directly made A\* fall back to a straight `door→chair` line THROUGH the desk
-/// body (the "walk through the table" bug). `None` only in a degenerate layout
-/// where every allowed side is walled off — the caller then falls back to the
-/// old direct target. The chair is the SETTLE endpoint, appended after this.
+/// (`DESK_APPROACH` = N/E/W, excluding the south front), so an arriving agent
+/// walks AROUND to sit behind the desk instead of straight through its front.
+/// The chair itself is blocked, so targeting it directly made A\* fall back to a
+/// straight `door→chair` line THROUGH the desk body.
 ///
 /// Scans from the CHAIR, not the desk's top-left origin: the footprint is
-/// anchored top-left, so a scan from the corner is lopsided and can't clear the
-/// 16px-wide body to the EAST (the east side would read as walled-off). From the
-/// chair (≈ footprint centre) all three allowed sides are within reach, so the
-/// approach cell sits directly off the seat and the settle glide is a short
-/// straight hop onto the chair.
+/// anchored top-left, so a corner scan is lopsided and can't clear the body to
+/// the EAST — the east side would read as walled-off. `None` only in a
+/// degenerate layout where every allowed side is walled off.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
     use crate::layout::{desk_walk_anchor, Facing, Furniture};
     let chair = desk_walk_anchor(desk);
-    // The desk sitter faces the camera (South); DESK_APPROACH then allows
-    // N/E/W (the south front is excluded — that is the bug-prone side).
     let cell = layout.approach_point(Furniture::Desk, chair, chair, Facing::South);
-    // approach_point returns the scanned `pos` (== chair) as the "no valid
-    // approach" sentinel when no allowed+reachable side exists.
+    // `approach_point` returns the scanned pos (== chair) as its "no approach"
+    // sentinel when no allowed+reachable side exists.
     (cell != chair).then_some(cell)
 }
 
 /// The desk-side endpoint of a desk-bound walk leg, resolved the ONE unified way
-/// so no leg can regress to aiming A\* at the blocked chair. Used by EVERY leg
-/// that arrives at or departs from the chair — entry, wander-out, wander-back,
-/// the exit DEPARTURE, AND snap-back — so "approach via an allowed side, then
-/// settle onto the chair" is defined exactly once.
+/// so no leg can regress to aiming A\* at the blocked chair: aiming there makes
+/// `find_path` snap to the NEAREST walkable cell — the south front for a
+/// south-facing chair — so the agent arrives through the desk front.
 ///
-/// Returns `(routing_endpoint, chair_settle)`:
-///   * `routing_endpoint` — the cell to hand A\* as the leg's desk-side `from`/`to`
-///     (a reachable N/E/W [`desk_approach_cell`], NEVER the chair: aiming A\* at
-///     the blocked chair makes `find_path` snap to the *nearest* walkable cell —
-///     the SOUTH front for a south-facing chair — so the agent arrives through
-///     the desk front).
-///   * `chair_settle` — `Some(chair)` to prepend/append via [`Settle`] (the short
-///     glide on/off the seat the router never plans), or `None` in the degenerate
-///     boxed-in layout where every allowed side is walled off and the leg reverts
-///     to the direct chair target (resolved by `find_path`'s coarse-cell `snap`).
-///
-/// NOTE: snap-back is now a caller too (the urgent Idle→Active return routes via
-/// the approach cell + settle like the rest, run by pure physics with a brisk
-/// profile — no fixed-time compression). The ONLY non-caller is a mid-wander EXIT:
-/// there the agent departs from its live wander position, not the chair.
+/// Returns `(routing_endpoint, chair_settle)`: the reachable N/E/W cell to hand
+/// A\*, plus `Some(chair)` to prepend/append via [`Settle`] (the short glide
+/// on/off the seat the router never plans), or `None` in the degenerate boxed-in
+/// layout where the leg reverts to the direct chair target.
 pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
     let chair = crate::layout::desk_walk_anchor(desk);
     match desk_approach_cell(desk, layout) {
@@ -168,45 +135,80 @@ pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<
         None => (chair, None),
     }
 }
+/// Where a cancelled walkout must re-enter FROM, or `None` when there was no
+/// walkout to cancel.
+enum ReEnter {
+    /// The walkout ARRIVED — the sprite is off-floor, so the door is the only
+    /// honest origin.
+    Door,
+    Live(Point),
+}
 
-/// Routed variant of `derive`. For Walking poses, asks `router` for an
-/// A*-routed polyline (composed against the layout's static mask + the
-/// per-frame `overlay`) and converts the global t (0..1000) into a
-/// per-segment Walking pose so the character traces the path
-/// corner-by-corner instead of cutting through obstacles or other agents.
+/// Take a spent EXIT leg off the non-exiting path and say where entry re-arms.
 ///
-/// `motion` drives entry/exit physics: on first sighting an entering or
-/// exiting agent the A* path length is snapshotted into a `WalkProfile`
-/// (commit-to-route); subsequent frames compute `t_x1000` from
-/// `walk_progress` against the frozen profile.
+/// An exit leg surviving onto this path means `exiting_at` was cleared under us
+/// without re-stamping `created_at`, so the entry branch's spawn-window gate can
+/// never re-arm on its own and the agent would pop onto its chair. The take is
+/// load-bearing on its own: a retained arrived leg is replayed by the NEXT exit,
+/// vanishing the sprite on its first frame instead of walking out.
+fn take_cancelled_walkout(
+    ms: Option<&mut MotionState>,
+    now: SystemTime,
+    live: Option<Point>,
+) -> Option<ReEnter> {
+    let ms = ms?;
+    let leg = ms.exit.take()?;
+    ms.entry = None;
+    let elapsed = crate::anim::elapsed_ms(now, leg.started_at);
+    Some(
+        if walk_arrived(&leg.profile, exit_elapsed_ms(&leg.profile, elapsed)) {
+            ReEnter::Door
+        } else {
+            live.map_or(ReEnter::Door, ReEnter::Live)
+        },
+    )
+}
+
+/// Time-compressed elapsed for an EXIT leg, so the walk REACHES the door before
+/// the reducer's `EXIT_GRACE_WINDOW` reaps the slot; without it the slot is GC'd
+/// mid-walk and the sprite vanishes in the corridor. (Entry has no such cap —
+/// nothing GCs an entering agent.)
 ///
-/// `history` is consulted on state transitions: if the agent's pose
-/// flipped from a wander walk (or from AtWaypoint) to a desk-bound
-/// pose (SeatedTyping / SeatedIdle / StandingAtDesk), we override the
-/// instant teleport with a brief walk from the recorded previous
-/// position to the desk.
+/// `floor::recompute_door_anim_max_ms` asks "has the walkout finished?" too and
+/// deliberately stays UNCOMPRESSED: it wants the physics window for a door
+/// cosmetic, not the render's deadline.
+fn exit_elapsed_ms(profile: &WalkProfile, elapsed_ms: u64) -> u64 {
+    let budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
+        .saturating_sub(EXIT_BUDGET_MARGIN_MS);
+    if profile.duration_ms.saturating_add(profile.pause_ms) > budget {
+        (elapsed_ms.saturating_mul(profile.duration_ms) / budget.max(1)).max(elapsed_ms)
+    } else {
+        elapsed_ms
+    }
+}
+
+/// Routed variant of `derive`: Walking poses trace an A*-routed polyline
+/// (layout mask + per-frame `overlay`) corner-by-corner instead of cutting
+/// through obstacles or other agents.
+///
+/// `motion` drives entry/exit physics — the A* path length is snapshotted into a
+/// `WalkProfile` on first sighting (commit-to-route), and later frames compute
+/// `t_x1000` against that frozen profile. `history` is consulted on state
+/// transitions so an agent whose pose flipped mid-wander walks back to the desk
+/// instead of teleporting.
 pub fn derive_with_routing(
     slot: &AgentSlot,
     now: SystemTime,
     layout: &Layout,
     rctx: &mut RouteCtx<'_>,
 ) -> Option<Pose> {
-    // The four engine borrows stay behind `rctx`: direct `rctx.router` /
-    // `rctx.overlay` / `rctx.history` / `rctx.motion` accesses are disjoint
-    // field borrows, and `rctx` auto-reborrows (`&mut *rctx`) at each
-    // `route_walking_pose` call — no per-branch `RouteCtx { .. }` rebuild.
     let desk = layout.home_desk(slot.desk_index.single_floor_local())?;
 
-    // ---- EXIT branch -------------------------------------------------------
-    // Takes priority over entry and state-driven poses.
     if let Some(exit_time) = slot.exiting_at {
         let Some(door_target) = layout.door_threshold else {
-            // No door in this layout (very narrow terminal — Layout can
-            // return door_threshold: None). Skip the physics exit walk and
-            // let the reducer's grace window GC the slot. Returning None
-            // here would make the exiting agent VANISH on its first frame
-            // instead of holding at the desk; the old linear exit code
-            // handled this gracefully too.
+            // No door in this layout (a very narrow terminal). Returning None
+            // here would VANISH the exiting agent on its first frame; hold at the
+            // desk and let the reducer's grace window GC the slot.
             let raw = derive_state_only(slot, now, layout)?;
             return match raw {
                 Pose::Walking { .. } => {
@@ -221,30 +223,20 @@ pub fn derive_with_routing(
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
-        // Snapshot the exit profile on first sighting.
         if mstate.exit.is_none() {
-            // Start the exit from wherever the agent actually is: its current
-            // wander position if it was out on a trip (fresh history), else the
-            // desk anchor (the common case — exiting from a seated state).
-            // Without this, an agent that's mid-coffee-run when its session
-            // ends teleports back to the desk before walking to the door.
+            // Start the exit from wherever the agent actually is; without this an
+            // agent mid-coffee-run when its session ends teleports back to the
+            // desk before walking to the door.
             let desk_anchor = desk_walk_anchor(desk);
             let from = rctx
                 .history
                 .recent(slot.agent_id, HISTORY_RECENT_MS, now)
                 .unwrap_or(desk_anchor);
-            // Exit is a desk DEPARTURE: when leaving the seated chair, rise off it
-            // via the N/E/W approach cell so the walk to the (NE) door doesn't dip
-            // SOUTH first — aiming A* from the blocked chair snaps it to the
-            // nearest (south) cell, sending the agent the wrong way around the
-            // desk. When already out on a wander trip, start from the live
-            // position. The profile covers the chair-glide so duration matches.
             let (route_from, chair_rise) = if from == desk_anchor {
                 desk_leg_endpoint(desk, layout)
             } else {
                 (from, None)
             };
-            // Rise off the chair (start settle); the door has no seat (end None).
             let profile = snapshot_leg_profile(
                 rctx.router,
                 &layout.walkable,
@@ -256,8 +248,8 @@ pub fn derive_with_routing(
                 None,
                 WalkIntent::Exit,
             );
-            // Store the ORIGIN (chair when a desk exit) so the render can detect
-            // the desk-departure and re-derive the approach+settle.
+            // Store the ORIGIN so the render can detect a desk departure and
+            // re-derive the same approach + settle.
             mstate.exit = Some(WalkLeg {
                 started_at: exit_time,
                 profile,
@@ -272,21 +264,8 @@ pub fn derive_with_routing(
 
         let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
-        // Compress the exit walk so it REACHES the door before the reducer's
-        // EXIT_GRACE_WINDOW reaps the slot. Physics exit duration for far/slow
-        // desks can exceed 4500ms; without this the slot is GC'd mid-walk and
-        // the sprite vanishes in the corridor instead of reaching the door.
-        // (Entry has no such cap — nothing GCs an entering agent.)
-        let exit_budget = (pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW.as_millis() as u64)
-            .saturating_sub(EXIT_BUDGET_MARGIN_MS);
-        let eff_elapsed = if profile.duration_ms.saturating_add(profile.pause_ms) > exit_budget {
-            (elapsed_ms.saturating_mul(profile.duration_ms) / exit_budget.max(1)).max(elapsed_ms)
-        } else {
-            elapsed_ms
-        };
+        let eff_elapsed = exit_elapsed_ms(profile, elapsed_ms);
 
-        // GC: walk fully done including pause → return None so the slot
-        // disappears (same as old ENTRY_ANIMATION_MS gate).
         if walk_arrived(profile, eff_elapsed) {
             return None;
         }
@@ -294,9 +273,8 @@ pub fn derive_with_routing(
         let t_x1000 = walk_progress(profile, eff_elapsed);
         let frame = walking_frame(eff_elapsed);
 
-        // Desk departure: when the stored origin is the chair, rise off it via
-        // the approach cell (matching the snapshotted profile + every other
-        // desk-touching leg). Mid-wander exit starts straight from the live pos.
+        // Must reproduce the snapshotted profile's endpoints, or the leg's
+        // duration no longer matches the distance it renders.
         let (from, exit_settle) = if stored_from == desk_walk_anchor(desk) {
             let (approach, chair) = desk_leg_endpoint(desk, layout);
             (approach, chair.map_or(Settle::None, Settle::Start))
@@ -320,19 +298,17 @@ pub fn derive_with_routing(
         );
     }
 
-    // ---- ENTRY branch ------------------------------------------------------
-    // Gate: spawn window check reuses ENTRY_ANIMATION_MS only as a bound on
-    // how long we try to route. Physics duration is the real walk time.
+    let live_now = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now);
+    let re_enter = take_cancelled_walkout(rctx.motion.get_mut(&slot.agent_id), now, live_now);
+
+    // ENTRY_ANIMATION_MS bounds only how long we try to ROUTE; the physics
+    // duration is the real walk time.
     let since_spawn = now
         .duration_since(slot.created_at)
         .unwrap_or(Duration::ZERO)
         .as_millis() as u64;
 
     if let Some(door) = layout.door_threshold {
-        // Unified ARRIVAL: walk to a reachable allowed-side cell (approach_point),
-        // then Settle::End glides onto the chair — the SAME path the wander seats
-        // use. Degenerate (every N/E/W side walled off): fall back to the old
-        // direct target with no settle.
         let (approach, chair_settle) = desk_leg_endpoint(desk, layout);
         let settle = chair_settle.map_or(Settle::None, Settle::End);
 
@@ -341,25 +317,39 @@ pub fn derive_with_routing(
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
 
-        // Snapshot on first sighting if we're within the spawn window.
-        if mstate.entry.is_none() && since_spawn < ENTRY_ANIMATION_MS {
-            // Profile covers door→approach PLUS the short settle glide onto the chair
-            // (end settle; the door start has no seat).
+        let entry_from = match re_enter {
+            Some(ReEnter::Live(p)) => p,
+            _ => door,
+        };
+        if mstate.entry.is_none() && (since_spawn < ENTRY_ANIMATION_MS || re_enter.is_some()) {
             let profile = snapshot_leg_profile(
                 rctx.router,
                 &layout.walkable,
                 rctx.overlay,
                 slot.agent_id,
-                door,
+                entry_from,
                 approach,
                 None,
                 chair_settle,
                 WalkIntent::Entry,
             );
-            mstate.entry = Some((slot.created_at, profile));
+            mstate.entry = Some(WalkLeg {
+                started_at: if re_enter.is_some() {
+                    now
+                } else {
+                    slot.created_at
+                },
+                profile,
+                from: entry_from,
+            });
         }
 
-        if let Some((started_at, profile)) = mstate.entry {
+        if let Some(WalkLeg {
+            started_at,
+            profile,
+            from,
+        }) = mstate.entry
+        {
             let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
 
             if !walk_arrived(&profile, elapsed_ms) {
@@ -371,7 +361,7 @@ pub fn derive_with_routing(
                     layout,
                     rctx,
                     Pose::Walking {
-                        from: door,
+                        from,
                         to: approach,
                         t_x1000,
                         frame,
@@ -380,34 +370,23 @@ pub fn derive_with_routing(
                     settle,
                 );
             }
-            // walk_arrived — fall through to state-driven pose (Correction C).
-            // DO NOT call `derive()` here as that would re-fire the linear
-            // entry override and cause a double-walk.
+            // DO NOT call `derive()` here — it re-fires the linear entry override
+            // and causes a double-walk. Fall through to the state-driven pose.
         }
     }
 
-    // ---- WANDER DISPATCH (Idle agents whose entry walk is done) ------------
-    // Reaching this line means the entry branch above already returned for any
-    // in-flight entry walk, so the agent's entry is complete (arrived early for
-    // near desks, or never started). Gate on Idle, NOT on `since_spawn >=
-    // ENTRY_ANIMATION_MS` — that fixed 4000ms gate made a near-desk agent that
-    // physically arrived in ~1s sit in core's fixed-fraction idle_pose until 4s
-    // and then snap to physics wander. Drive `advance_wander` right away.
-    // SeatedThinking still takes priority so the thinking-pose window is intact.
+    // Wander dispatch gates on Idle, NOT on `since_spawn >= ENTRY_ANIMATION_MS`:
+    // that fixed gate made a near-desk agent who physically arrived in ~1s sit in
+    // core's fixed-fraction idle_pose for seconds and then snap to physics wander.
     let is_idle = matches!(slot.state, pixtuoid_core::state::ActivityState::Idle);
     if is_idle && slot.exiting_at.is_none() {
-        // Check thinking-pose seam: if the agent recently finished active work
-        // and is within the thinking window, return SeatedThinking now
-        // regardless of wander phase — before `advance_wander`, so the routed
-        // render and the pure overlay share the ONE `pure::in_thinking_window`
-        // gate and can't drift.
+        // Before `advance_wander`, so the routed render and the pure overlay share
+        // the ONE `pure::in_thinking_window` gate and can't drift.
         if pure::in_thinking_window(slot, now) {
             return Some(Pose::SeatedThinking);
         }
 
-        // Snapshot of the phase + trip facts for THIS frame — the arms read it
-        // instead of re-borrowing `rctx.motion` (which is what forced the
-        // WalkingBack "copy off `ms` before `&mut motion`" dance).
+        // A per-frame snapshot, so the arms below never re-borrow `rctx.motion`.
         let wf = advance_wander(slot, now, layout, rctx.router, rctx.overlay, rctx.motion);
 
         match wf.phase {
@@ -415,14 +394,7 @@ pub fn derive_with_routing(
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
                 let dest = wf.dest;
                 let seat = wf.kind.seat();
-                // Leave the desk via the approach cell (a reachable N/E/W side),
-                // never straight through the south front: `from` is the approach
-                // cell and the chair is PREPENDED via Settle so the sprite first
-                // glides off the seat. Mirrors the entry/walk-back legs — all
-                // desk-touching legs share `desk_leg_endpoint`. The profile in
-                // advance_wander adds the same chair-glide so duration matches.
                 let (from, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                // Rise off the desk chair (start), glide onto the waypoint seat (end).
                 let settle = settle_from_pair(chair_settle, seat);
                 let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
                 let frame = walking_frame(elapsed_phase);
@@ -443,33 +415,20 @@ pub fn derive_with_routing(
             }
             WanderPhase::AtWaypoint(_) => {
                 let pose = wf.kind.at_pose(wf.dest);
-                // Record the RENDERED position so snap-back/exit (which read
-                // history.recent as their walk origin) start where the sprite
-                // actually is: the seat cell for a seat waypoint (the sprite sits
-                // ON the furniture, ~half_extent off `dest`), else `dest` (an
-                // obstacle stands AT its approach cell, seat = None). Recording
-                // `dest` for a seat popped the sprite ~10px to the off-side
-                // approach cell on the first snap-back/exit frame — the one seated
-                // departure the WalkingBack Settle machinery didn't cover.
+                // The RENDERED position, which snap-back/exit read as their walk
+                // origin: the seat cell for a seat waypoint (the sprite sits ON the
+                // furniture, offset from `dest`), else `dest`. Recording `dest` for
+                // a seat popped the sprite to the off-side approach cell on the
+                // first snap-back/exit frame.
                 let pt = wf.kind.seat().unwrap_or(wf.dest);
                 rctx.history.record(slot.agent_id, pt, now);
                 return Some(pose);
             }
             WanderPhase::WalkingBack(_) => {
                 let desk_point = layout.home_desk(slot.desk_index.single_floor_local())?;
-                // The trip facts come from the `wf` snapshot, so no `motion`
-                // borrow is held here — `route_walking_pose` can take `&mut motion`
-                // freely (the old copy-off-`ms`-first borrow dance is gone).
                 let carrying_coffee = wf.kind.carries_coffee();
                 let seat = wf.kind.seat();
-                // Arrive at the desk via the approach cell (a reachable N/E/W
-                // side), never up through the south front: `to` is the approach
-                // cell and the chair is APPENDED via Settle so the sprite glides
-                // onto the seat. The waypoint seat (if any) is the leg's START
-                // settle (stand up off it). Shares `desk_leg_endpoint` with the
-                // entry/walk-out legs; advance_wander adds the matching glide len.
                 let (snap_target, chair_settle) = desk_leg_endpoint(desk_point, layout);
-                // Rise off the waypoint seat (start), glide onto the desk chair (end).
                 let settle = settle_from_pair(seat, chair_settle);
                 let elapsed_phase = crate::anim::elapsed_ms(now, wf.phase_started_at);
                 let frame = walking_frame(elapsed_phase);
@@ -489,36 +448,29 @@ pub fn derive_with_routing(
                 );
             }
             WanderPhase::Seated => {
-                // The tui motion machine is the wander authority: during its
-                // Seated phase the agent is at its desk. Render SeatedIdle
-                // DIRECTLY rather than falling through to derive_state_only —
-                // that re-runs core's *stateless* wander (`idle_pose`), whose
-                // independent fixed-fraction timeline can disagree with this
-                // machine and return AtWaypoint/AimlessAt at an unrelated
-                // location, teleporting the sprite between desk and waypoint
-                // as the two clocks drift. (SeatedThinking is already handled
-                // above, before advance_wander.)
+                // Render SeatedIdle DIRECTLY rather than falling through to
+                // derive_state_only: that re-runs core's STATELESS wander
+                // (`idle_pose`), whose independent timeline can return
+                // AtWaypoint/AimlessAt at an unrelated location and teleport the
+                // sprite between desk and waypoint as the two clocks drift.
                 return Some(Pose::SeatedIdle);
             }
         }
     }
 
     // Went Active/Waiting: drop any exclusive-spot claim, else the frozen
-    // `wander.target` blocks that spot all burst. Idempotent, non-Idle only, and
-    // NOT reached by exits (see `motion::spot_claims` + the SpotClaims sharp edge).
+    // `wander.target` blocks that spot for the whole burst.
     if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
         ms.wander.target.kind = WanderKind::Aimless;
     }
 
-    // ---- STATE-DRIVEN pose -------------------------------------------------
-    // Use derive_state_only (not derive) to avoid re-triggering the linear
-    // entry/exit overrides in core's derive() (Correction C — no double-walk).
+    // derive_state_only, NOT derive: derive() re-triggers the linear entry/exit
+    // overrides and produces a double-walk.
     let raw = derive_state_only(slot, now, layout)?;
 
-    // Snap-back override: state-driven poses (SeatedTyping etc.) at the
-    // desk would teleport the agent if they were mid-wander when state
-    // changed. Replace them with a Walking pose from the previous
-    // rendered position over SNAP_BACK_MS.
+    // Snap-back override: a desk-bound state pose would teleport an agent who was
+    // mid-wander when state changed, so replace it with a walk from the previous
+    // rendered position.
     let desk_pose = matches!(
         raw,
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } | Pose::StandingAtDesk
@@ -530,50 +482,32 @@ pub fn derive_with_routing(
             .motion
             .entry(slot.agent_id)
             .or_insert_with(|| MotionState::new(slot.agent_id));
-        // ARM ONCE per state transition. The distance gate is checked ONLY when not
-        // already armed for this `state_started_at`; once armed, the leg renders to
-        // completion (by physics — `walk_arrived`) from the FROZEN origin. This is
-        // what makes the override idempotent within a frame: `route_walking_pose`
-        // records the advancing walker position into history every call, so a second
-        // `derive` in the same frame sees a CLOSER `prev` — re-checking the distance
-        // gate there would drop the agent back to Seated mid-walk (the K-call
-        // desync). Keying the arm on `slot.state_started_at` (not `now`) lets a NEW
-        // desk-bound transition re-arm with a fresh clock. `SNAP_BACK_MS` is now just
-        // the ARM window (only snap-back for a RECENT flip) — NOT a render cap; the
-        // render runs until the physics walk arrives, so it never teleports.
+        // ARM ONCE per state transition: `route_walking_pose` records the advancing
+        // walker position into history on every call, so re-checking the distance
+        // gate on a second `derive` in the same frame would see a CLOSER `prev` and
+        // drop the agent back to Seated mid-walk. Keying the arm on
+        // `slot.state_started_at` (not `now`) lets a NEW desk-bound transition
+        // re-arm with a fresh clock.
         let already_armed =
             matches!(&ms_entry.snap_back, Some(leg) if leg.started_at == slot.state_started_at);
         if !already_armed {
-            // A snap_back here is STALE (a previous transition) — clear it, then arm
-            // a fresh leg, but only for a recent flip (the arm window).
             ms_entry.snap_back = None;
             if since_state < SNAP_BACK_MS {
                 if let Some(prev) = rctx.history.recent(slot.agent_id, HISTORY_RECENT_MS, now) {
-                    // Distance to the CHAIR (where the agent actually sits), NOT the
-                    // desk origin: the chair is offset (+5,+4) from the origin, so a
-                    // desk-origin gate would re-fire forever once the agent settles ON
-                    // the chair (9px from the origin ≥ MIN). Gating on the seat makes
-                    // the snap-back stop the instant the walk reaches it.
+                    // Distance to the CHAIR, not the desk origin: the chair is offset
+                    // from the origin, so a desk-origin gate would re-fire forever
+                    // once the agent has settled ON the chair.
                     let chair = desk_walk_anchor(desk);
                     let dist = (prev.x as i32 - chair.x as i32).abs()
                         + (prev.y as i32 - chair.y as i32).abs();
                     if dist >= SNAP_BACK_MIN_DIST {
-                        // Snap-back joins the unified desk-leg path: route to the N/E/W
-                        // approach cell and SETTLE onto the chair, so the correction
-                        // arrives from an allowed side instead of the south front
-                        // (aiming A* at the blocked chair would snap the goal to the
-                        // nearest — south — cell). Route ONCE here at arm time —
-                        // mirroring the entry/exit arms, same jittered goal as the
-                        // render route — because the leg renders through
-                        // route_walking_pose's A* polyline: the profile must measure
-                        // that polyline (+ the chair-glide), or a detouring return
-                        // traverses a longer path inside a straight-line duration
-                        // (too fast). The arm stays once-per-transition; the rendered
-                        // leg itself is still frozen (no per-frame re-route). Higher
-                        // accel (WalkIntent::SnapBack → WALK_ACCEL_SNAPBACK) keeps the
-                        // urgent return brisk under pure physics.
+                        // Route ONCE at arm time, against the same jittered goal the
+                        // render route uses: the leg renders through
+                        // `route_walking_pose`'s A* polyline, so the profile must
+                        // measure THAT polyline (+ the chair-glide) or a detouring
+                        // return traverses a longer path inside a straight-line
+                        // duration, and arrives too fast.
                         let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
-                        // Glide onto the chair (end settle); `prev` start has no seat.
                         let p = snapshot_leg_profile(
                             rctx.router,
                             &layout.walkable,
@@ -594,9 +528,6 @@ pub fn derive_with_routing(
                 }
             }
         }
-        // Render the armed leg (idempotent — NO per-frame gate). A stale snap_back
-        // (different `started_at`) fails the guard → `raw`; it is re-armed or cleared
-        // on a later frame.
         match ms_entry.snap_back.clone() {
             Some(WalkLeg {
                 started_at,
@@ -604,31 +535,23 @@ pub fn derive_with_routing(
                 from: snap_prev,
             }) if started_at == slot.state_started_at => {
                 let elapsed_ms = crate::anim::elapsed_ms(now, started_at);
-                // PURE physics — no time-compression. Snap-back's higher accel
-                // (WALK_ACCEL_SNAPBACK) keeps the urgent return brisk on its own, so
-                // we render the eased walk to completion by `walk_arrived` rather than
-                // compressing it into a fixed 900ms window. It never teleports because
-                // physics drives the whole walk (a far snap-back is a real ~1s walk,
-                // not a hard-compressed dash).
+                // PURE physics, no time-compression: `WalkIntent::SnapBack`'s higher
+                // accel keeps the urgent return brisk on its own.
                 if walk_arrived(&profile, elapsed_ms) {
-                    // Completed + paused — clear so the next transition re-snapshots.
                     ms_entry.snap_back = None;
                     raw
                 } else {
                     let t_x1000 = walk_progress(&profile, elapsed_ms);
                     let frame = walking_frame(elapsed_ms);
-                    // Recompute the desk endpoint (deterministic) so the rendered leg
-                    // matches the armed profile: route to the approach cell and SETTLE
-                    // onto the chair (`desk_walk_anchor`, == seated_foot_cell(Desk), so
-                    // the walk ends on the exact seated anchor — no transition flash),
-                    // like every other desk leg. Degenerate (no approach) → direct.
+                    // Deterministic, so the rendered leg reproduces the armed
+                    // profile's endpoint.
                     let (snap_target, chair_settle) = desk_leg_endpoint(desk, layout);
                     final_settle = chair_settle.map_or(Settle::None, Settle::End);
                     // Walk from the FROZEN origin captured when the leg armed, not the
-                    // per-frame `prev`: route_walking_pose re-records the advancing
+                    // per-frame `prev`: `route_walking_pose` re-records the advancing
                     // walker position into history every frame, so reading it back as
                     // the origin would creep `from` toward the desk and break the
-                    // walk_path freeze's `wp.from == from` reuse guard. Mirrors exit.
+                    // walk-path freeze's `wp.from == from` reuse guard.
                     Pose::Walking {
                         from: snap_prev,
                         to: snap_target,
@@ -641,8 +564,8 @@ pub fn derive_with_routing(
             _ => raw,
         }
     } else {
-        // Hard wall: clear any stale snap-back profile so the next state transition
-        // gets a fresh snapshot rather than replaying a previous one.
+        // Clear any stale snap-back so the next transition snapshots afresh rather
+        // than replaying a previous one.
         if let Some(ms) = rctx.motion.get_mut(&slot.agent_id) {
             if ms.snap_back.is_some() {
                 ms.snap_back = None;
@@ -654,19 +577,9 @@ pub fn derive_with_routing(
     route_walking_pose(slot, now, layout, rctx, pose, final_settle)
 }
 
-/// Apply A*-based polyline routing to a `Pose::Walking`, recording
-/// history with `now`. For non-Walking poses, records waypoint/aimless
-/// positions to history and returns `Some(pose)`.
-///
-/// This is the single shared helper for entry, exit, snap-back, and
-/// state-driven walks (Correction B). Records history with `now` (not
-/// `slot.last_event_at`) so snap-back lookups are fresh.
 /// How a walk leg extends its polyline onto a seat — a short terminal motion the
 /// A* router never plans (the seat cell may be blocked). `End` = sit down on
-/// arrival (append the seat); `Start` = stand up on departure (prepend it);
-/// `Both` = a leg that BOTH rises off one seat and glides onto another (a
-/// wander-out rises off the desk chair then sits on the waypoint seat; a
-/// wander-back rises off the waypoint seat then glides onto the desk chair).
+/// arrival (append the seat); `Start` = stand up on departure (prepend it).
 /// Makes walk-end ≡ render-feet so seat arrival/departure don't pop.
 #[derive(Clone, Copy)]
 enum Settle {
@@ -677,10 +590,8 @@ enum Settle {
 }
 
 /// Collapse a leg's `(start_settle, end_settle)` pair into a single [`Settle`].
-/// The wander legs both rise off one seat and glide onto another, so the
-/// presence of each end decides `Both`/`Start`/`End`/`None`. Argument order
-/// encodes direction: `start` = the seat to rise OFF (prepended), `end` = the
-/// seat to glide ONTO (appended).
+/// Argument order encodes direction: `start` = the seat to rise OFF (prepended),
+/// `end` = the seat to glide ONTO (appended).
 fn settle_from_pair(start: Option<Point>, end: Option<Point>) -> Settle {
     match (start, end) {
         (Some(start), Some(end)) => Settle::Both { start, end },
@@ -710,13 +621,11 @@ fn route_walking_pose(
         carrying_coffee,
     } = pose
     else {
-        // Not walking any more — drop the frozen leg path so the next walk
-        // re-snapshots a fresh polyline.
         if let Some(ms) = motion.get_mut(&slot.agent_id) {
             ms.walk_path = None;
         }
-        // Record AtWaypoint / AimlessAt positions too — they're a valid
-        // "previous position" for a subsequent snap-back walk.
+        // AtWaypoint / AimlessAt positions are a valid "previous position" for a
+        // subsequent snap-back walk, so record them too.
         let pt = match &pose {
             Pose::AtWaypoint { wp, .. } => layout.waypoints.get(*wp).map(|w| w.pos),
             Pose::AimlessAt { dest } => Some(*dest),
@@ -729,18 +638,11 @@ fn route_walking_pose(
     };
 
     // Freeze the leg's polyline: snapshot the A* route the first frame this
-    // (from, to) leg appears, then reuse it unchanged until the endpoints
-    // change. Without this, per-frame occupancy-overlay churn invalidates the
-    // A* cache and re-routes the walker onto a differently-shaped path, making
-    // the frozen-profile progress `t` land on a new pixel — the visible
-    // "flash"/teleport. Re-routing every frame is also what spikes a frame's
-    // A* cost (the periodic stutter). See [`WalkPathSnapshot`].
-    //
-    // Per-agent path personality: perturb the routing destination by a few
-    // pixels hashed from the agent_id so converging agents take visibly
-    // different polylines (breaks the "ant trail"). The last polyline point is
-    // restored to the true `to` so the walker ends at the canonical
-    // destination, not the jittered approximation.
+    // (from, to) leg appears, then reuse it unchanged until the endpoints change.
+    // Without this, per-frame occupancy-overlay churn invalidates the A* cache and
+    // re-routes the walker onto a differently-shaped path, making the
+    // frozen-profile progress `t` land on a new pixel — the visible "flash" — and
+    // re-routing every frame is what spikes a frame's A* cost.
     let path = {
         let ms = motion
             .entry(slot.agent_id)
@@ -750,8 +652,6 @@ fn route_walking_pose(
             _ => {
                 let mut p =
                     route_jittered(router, &layout.walkable, overlay, slot.agent_id, from, to);
-                // Settle: extend the polyline onto/off the seat (terminal "sit
-                // down" / "stand up" the router never plans). walk-end ≡ render.
                 match settle {
                     Settle::End(s) if p.last() != Some(&s) => p.push(s),
                     Settle::Start(s) if p.first() != Some(&s) => p.insert(0, s),
@@ -766,13 +666,10 @@ fn route_walking_pose(
                     }
                     _ => {}
                 }
-                // Only freeze genuinely CORNERED routes (>2 points). A straight
-                // 2-point walk has no interior corners to remap `t` onto, so it
-                // can't flash — and re-routing it each frame is cheap AND
-                // self-healing: if A* transiently fell back to a straight
-                // `[from, to]` (find_path returned None this frame), freezing it
-                // would stick that "walk through walls" for the whole leg;
-                // leaving it unfrozen lets the next frame recover the real route.
+                // Only freeze genuinely CORNERED routes (>2 points). Freezing a
+                // straight 2-point walk would stick a transient A* fallback
+                // (`find_path` returned None this frame) — a walk through walls —
+                // for the whole leg; unfrozen, the next frame recovers the route.
                 if p.len() > 2 {
                     ms.walk_path = Some(WalkPathSnapshot {
                         from,
@@ -787,8 +684,7 @@ fn route_walking_pose(
         }
     };
     if path.len() <= 2 {
-        // Straight-line walk — record the interpolated position for next
-        // frame's snap-back lookup. Use `now` not `last_event_at`.
+        // Record the interpolated position for the next frame's snap-back lookup.
         history.record(slot.agent_id, walking_position(from, to, t_x1000), now);
         return Some(Pose::Walking {
             from,
@@ -798,9 +694,9 @@ fn route_walking_pose(
             carrying_coffee,
         });
     }
-    // Map global t to a (segment_idx, t_within_segment) using cumulative
-    // octile distance — same metric A* used to plan the path, so timing
-    // stays uniform along diagonals.
+    // Map global t to (segment_idx, t_within_segment) by cumulative octile
+    // distance — the same metric A* planned with, so timing stays uniform along
+    // diagonals.
     let mut leg_lens: Vec<u32> = Vec::with_capacity(path.len() - 1);
     for w in path.windows(2) {
         leg_lens.push(octile_distance(w[0], w[1]));
@@ -818,8 +714,6 @@ fn route_walking_pose(
                 .checked_div(leg)
                 .map(|t| t.min(1000) as u16)
                 .unwrap_or(1000);
-            // Record the walker's current position for the next frame's
-            // snap-back lookup. Use `now` not `last_event_at`.
             let cur_pos = walking_position(path[i], path[i + 1], seg_t);
             history.record(slot.agent_id, cur_pos, now);
             return Some(Pose::Walking {
@@ -832,7 +726,6 @@ fn route_walking_pose(
         }
         acc += leg;
     }
-    // Past the last segment — snap to final.
     let last = path.len() - 1;
     history.record(slot.agent_id, path[last], now);
     Some(Pose::Walking {
@@ -855,14 +748,11 @@ pub(crate) fn octile_distance(a: Point, b: Point) -> u32 {
 const JITTER_MAX_PX: i32 = 4;
 const JITTER_SPAN: u64 = (2 * JITTER_MAX_PX + 1) as u64;
 
-/// Per-agent ±4px routing-destination jitter, hashed from the agent_id, so
-/// converging agents take visibly different polylines (breaks the "ant trail")
-/// — the entry/exit/snap-back walk targets, the wander walk-path freeze, and
-/// the motion-side wander profile snapshots (via [`route_jittered`]) all
-/// perturb the GOAL the same way. Output must stay bit-identical across every
-/// call site (same hash, same `saturating_add_signed`) — a site routing the
-/// RAW goal measures a differently-shaped polyline than the one rendered AND
-/// mints a second router-cache key per leg.
+/// Per-agent routing-destination jitter, hashed from the agent_id, so converging
+/// agents take visibly different polylines (breaks the "ant trail"). Output must
+/// stay bit-identical across every call site — a site routing the RAW goal
+/// measures a differently-shaped polyline than the one rendered AND mints a
+/// second router-cache key per leg.
 pub(crate) fn jitter_dest(id: AgentId, p: Point) -> Point {
     let h = id.raw();
     let jx = ((h % JITTER_SPAN) as i32 - JITTER_MAX_PX) as i16;
@@ -874,13 +764,9 @@ pub(crate) fn jitter_dest(id: AgentId, p: Point) -> Point {
 }
 
 /// Route `from → to` against the per-agent JITTERED goal, then restore the
-/// polyline's endpoint to the true `to` — the routing call shared by EVERY walk
-/// leg: the render-side walk-path freeze ([`route_walking_pose`]), the wander
-/// profile snapshots (`advance_wander` / `snapshot_back_profile`), AND the
-/// one-shot entry/exit/snap-back profile snapshots (which measure the restored
-/// polyline so their duration matches the rendered leg), so the rendered shape,
-/// the measured profile length, and the router-cache key can't diverge (the
-/// [`jitter_dest`] lockstep contract).
+/// polyline's endpoint to the true `to`. EVERY walk leg routes through here, so
+/// the rendered shape, the measured profile length and the router-cache key
+/// can't diverge (the [`jitter_dest`] lockstep contract).
 pub(crate) fn route_jittered(
     router: &mut dyn Router,
     mask: &WalkableMask,

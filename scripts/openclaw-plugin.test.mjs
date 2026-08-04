@@ -1,21 +1,7 @@
-// Executable contract test for the bundled OpenClaw plugin
-// (`crates/pixtuoid/src/install/openclaw_plugin.js`) — run by `just npm-check`.
-//
-// The Rust side can only grep the template as a STRING; this drives the RENDERED
-// module the way OpenClaw's plugin loader does (default export → `register(api)` →
-// `api.on(hook, handler)`) and asserts the three contracts that break a user's
-// gateway or leak their data if they regress:
-//
-//   1. NEVER BLOCK (pixtuoid invariant #5) — `before_agent_run` is an awaited,
-//      fail-closed decision gate: it must return EXACTLY `{ outcome: "pass" }`,
-//      synchronously, and must not throw even when the shim is unspawnable.
-//   2. PRIVACY — the forwarded payload is the allowlist + identity and NOTHING
-//      else, even when the event carries prompts / messages / file paths.
-//   3. IDENTITY — every envelope carries `gatewayPort`, and the port observed on
-//      a hook (the real bound port) outranks the registration-time fallback.
-//
-// The shim is a REAL recorder executable, so the spawn path itself is exercised
-// rather than stubbed — that path is what must never block the gateway.
+// Contract test for `crates/pixtuoid/src/install/openclaw_plugin.js`. The Rust side
+// can only grep the template as a STRING; this drives the RENDERED module the way
+// OpenClaw's plugin loader does, against a REAL recorder executable, so the spawn
+// path — the one that must never block the gateway — is exercised, not stubbed.
 
 import assert from "node:assert/strict";
 import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -26,11 +12,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const PLUGIN_SOURCE = join(REPO_ROOT, "crates", "pixtuoid", "src", "install", "openclaw_plugin.js");
-// Must match `HOOK_PLACEHOLDER` in `crates/pixtuoid/src/install/openclaw.rs` —
-// the QUOTED token, so the template stays valid JS before rendering.
+// Must match `HOOK_PLACEHOLDER` in `crates/pixtuoid/src/install/openclaw.rs` — the
+// QUOTED token, so the template stays valid JS before rendering.
 const HOOK_PLACEHOLDER = '"{{HOOK_PATH_JSON}}"';
-// The six hooks pixtuoid depends on; must match `OPENCLAW_EVENTS` (Rust side
-// pins template ⇔ const already, this pins the REGISTERED set at runtime).
+// Must match `OPENCLAW_EVENTS` — the Rust side pins template ⇔ const, this pins
+// the REGISTERED set at runtime.
 const EXPECTED_HOOKS = [
   "gateway_start",
   "gateway_stop",
@@ -39,14 +25,13 @@ const EXPECTED_HOOKS = [
   "before_agent_run",
   "agent_end",
 ];
-// OpenClaw's own default gateway port — the plugin's last-resort fallback.
+// OpenClaw's own default — the plugin's last-resort fallback.
 const DEFAULT_GATEWAY_PORT = 18789;
 
 const POSIX = process.platform !== "win32";
 
-/// Render the template into a temp dir and import it. `shim: "recorder"` bakes a
-/// real executable that appends each payload to a file; `shim: "missing"` bakes a
-/// path that does not exist (the unspawnable case).
+// `shim: "recorder"` bakes a real executable that appends each payload to a file;
+// `shim: "missing"` bakes a path that does not exist (the unspawnable case).
 async function renderPlugin(t, { shim = "recorder" } = {}) {
   const root = await mkdtemp(join(tmpdir(), "pixtuoid-openclaw-plugin-"));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -59,9 +44,8 @@ async function renderPlugin(t, { shim = "recorder" } = {}) {
   );
 
   const outFile = join(root, "payloads.ndjson");
-  // The recorder also logs its own argv, so the spawn CONTRACT (the `--source`
-  // attribution flag the shim needs) is pinned at runtime and not just by the Rust
-  // side's grep of the template text — which cannot see the argv ARRAY or its value.
+  // The recorder logs argv too: the Rust side's grep of the template text cannot
+  // see the argv ARRAY or its values.
   const argvFile = join(root, "argv.txt");
   const hookPath = join(root, shim === "missing" ? "absent-hook" : "recorder-hook");
   if (shim === "recorder") {
@@ -85,7 +69,6 @@ function cacheBust() {
   return bust;
 }
 
-/// `register` the plugin against a fake api, returning the handler map.
 function register(plugin, { config = {} } = {}) {
   const handlers = new Map();
   plugin.register({
@@ -97,8 +80,7 @@ function register(plugin, { config = {} } = {}) {
   return handlers;
 }
 
-/// Poll for `n` recorded payloads — the shim is spawned DETACHED, so delivery is
-/// asynchronous by design (that is exactly why the gateway is never blocked).
+// Poll: the shim is spawned DETACHED, so delivery is asynchronous by design.
 async function recorded(outFile, n) {
   const deadline = Date.now() + 5_000;
   for (;;) {
@@ -124,11 +106,8 @@ test("the decision hook passes EXPLICITLY and the observers are void", async (t)
   const decision = handlers.get("before_agent_run")({ runId: "r" }, {});
   assert.deepEqual(decision, { outcome: "pass" });
   assert.deepEqual(Object.keys(decision), ["outcome"]);
-  // A FRESH object per decision, not one shared module-level literal. The gateway
-  // receives this value, so under a shared literal any key a consumer stamps onto
-  // it persists into EVERY later turn — and an extra key is exactly what fails
-  // closed. Mutating turn 1's result and re-checking turn 2 is what distinguishes
-  // the two implementations; the shape assertions above only ever see turn 1.
+  // A FRESH object per decision, not one shared module-level literal: under a shared
+  // literal a key a consumer stamps on persists into every later turn, failing closed.
   decision.reason = "a consumer stamped this";
   const next = handlers.get("before_agent_run")({ runId: "r2" }, {});
   assert.deepEqual(Object.keys(next), ["outcome"], "each decision must be a fresh object");
@@ -138,9 +117,7 @@ test("the decision hook passes EXPLICITLY and the observers are void", async (t)
 });
 
 test("an unspawnable shim still passes the gate and never throws", async (t) => {
-  // The worst realistic case: the baked shim path no longer exists (a moved
-  // binary). Every handler must stay a synchronous, non-throwing no-op — a throw
-  // here would discard the user's prompt.
+  // A moved binary dangles the baked shim path; a throw here discards the prompt.
   const { plugin } = await renderPlugin(t, { shim: "missing" });
   const handlers = register(plugin);
   assert.deepEqual(handlers.get("before_agent_run")({ runId: "r" }, {}), { outcome: "pass" });
@@ -175,8 +152,8 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
     {},
   );
 
-  // Look the payloads up BY TYPE: the shims are detached, so their appends race —
-  // arrival order is deliberately not part of the contract.
+  // BY TYPE: the shims are detached, so their appends race — arrival order is
+  // deliberately not part of the contract.
   const lines = await recorded(outFile, 2);
   const byType = new Map(lines.map((l) => [l.type, l]));
   const run = byType.get("before_agent_run");
@@ -194,10 +171,6 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
     runId: "event-run",
     sessionId: "event-session",
     success: false,
-    // The error's PRESENCE rides along as a bare boolean — that is what separates a
-    // provider outage from a user abort, both of which upstream reports as
-    // `success: false`. The string itself stays behind (asserted below), which is
-    // the whole point of forwarding a discriminator instead of the message.
     errored: true,
     gatewayPort: 19789,
     _pid: process.pid,
@@ -208,8 +181,7 @@ test("forwards ONLY the allowlist plus identity, never content", { skip: !POSIX 
 
 test("the port observed on a hook outranks the config fallback", { skip: !POSIX }, async (t) => {
   // `--port` reaches neither `api.config.gateway.port` nor the environment, so
-  // `gateway_start`'s `event.port` is the ONLY authoritative source; once seen it
-  // must own every later envelope too (a session event carries no port).
+  // `gateway_start`'s `event.port` is the ONLY authoritative source.
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
   handlers.get("gateway_start")({ port: 19790 }, { port: 19790 });
@@ -230,7 +202,6 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
     else process.env.OPENCLAW_GATEWAY_PORT = original;
   });
 
-  // No env, no config → OpenClaw's documented default.
   delete process.env.OPENCLAW_GATEWAY_PORT;
   {
     const { outFile, plugin } = await renderPlugin(t);
@@ -238,7 +209,6 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
     const [only] = await recorded(outFile, 1);
     assert.equal(only.gatewayPort, DEFAULT_GATEWAY_PORT);
   }
-  // Config only.
   {
     const { outFile, plugin } = await renderPlugin(t);
     register(plugin, { config: { gateway: { port: 20001 } } }).get("session_start")(
@@ -248,7 +218,6 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
     const [only] = await recorded(outFile, 1);
     assert.equal(only.gatewayPort, 20001);
   }
-  // Env wins over config (upstream's own precedence).
   process.env.OPENCLAW_GATEWAY_PORT = "20002";
   {
     const { outFile, plugin } = await renderPlugin(t);
@@ -259,7 +228,6 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
     const [only] = await recorded(outFile, 1);
     assert.equal(only.gatewayPort, 20002);
   }
-  // A junk env value falls through to the config rather than stamping NaN.
   process.env.OPENCLAW_GATEWAY_PORT = "not-a-port";
   {
     const { outFile, plugin } = await renderPlugin(t);
@@ -272,13 +240,10 @@ test("port resolution falls back env > config > default", { skip: !POSIX }, asyn
   }
 });
 
-// Verified against the SHIPPED bundle (openclaw 2026.7.1,
-// `dist/paths-*.js::parseGatewayPortEnvValue` → `parseTcpPort`): a bare
-// `Number.parseInt` agrees with upstream on plain digits and diverges on every
-// other form — it stops at the first non-digit, so `127.0.0.1:18902` became port
-// `127`. That port IS the mascot's identity, so the divergence keyed the lobster
-// to a gateway nobody was running. `CONFIG_PORT` is distinct from every expected
-// value so "fell through to config" can never be mistaken for a parse.
+// A bare `Number.parseInt` matches upstream's parser on plain digits and diverges on
+// every other form — it stops at the first non-digit, so `127.0.0.1:18902` became
+// port `127`, keying the mascot to a gateway nobody was running. `CONFIG_PORT` is
+// distinct from every expected value, so a fall-through can't be read as a parse.
 const CONFIG_PORT = 20100;
 for (const [raw, want, why] of [
   ["18902", 18902, "bare digits"],
@@ -310,9 +275,9 @@ for (const [raw, want, why] of [
 
 test("agent_end forwards the errored discriminator, never the error string", { skip: !POSIX }, async (t) => {
   // Upstream builds `success` as `!aborted && !promptError`, so success:false alone
-  // cannot tell a user CANCELLING a turn from a provider outage — and Degraded is
-  // sticky. Only a prompt error carries `error`, so its PRESENCE is the signal. The
-  // string itself can embed prompt content and must never leave the gateway.
+  // cannot tell a user CANCELLING a turn from a provider outage. Only a prompt error
+  // carries `error`, so its PRESENCE is the signal; the string can embed prompt
+  // content and must never leave the gateway.
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18789 } } });
   handlers.get("agent_end")(
@@ -341,8 +306,8 @@ test("agent_end forwards the errored discriminator, never the error string", { s
 });
 
 test("an out-of-range observed port is refused, keeping the resolved one", { skip: !POSIX }, async (t) => {
-  // Defence in depth at the producer: pixtuoid's decoder REJECTS an envelope whose
-  // port is unusable, so stamping a bogus value would silently drop the mascot.
+  // pixtuoid's decoder REJECTS an envelope whose port is unusable, so stamping a
+  // bogus value here would silently drop the mascot.
   const { outFile, plugin } = await renderPlugin(t);
   const handlers = register(plugin, { config: { gateway: { port: 18999 } } });
   for (const bad of [0, -1, 65_536, 1.5, "19001", null]) {
@@ -356,9 +321,7 @@ test("an out-of-range observed port is refused, keeping the resolved one", { ski
 
 test("the shim is spawned with the source-attribution flag", { skip: !POSIX }, async (t) => {
   // `--source openclaw` is how the shim stamps `_pixtuoid_source` — its ONLY
-  // attribution channel, and the reason a payload is demuxed to the daemon lane at
-  // all. The Rust side can only grep the template for the literal, so the VALUE is
-  // pinned here, against the argv the spawned process actually received.
+  // attribution channel, and the reason a payload reaches the daemon lane at all.
   const { argvFile, module, outFile, plugin } = await renderPlugin(t);
   assert.equal(module.default.id, "pixtuoid", "the export id must match the manifest id");
   register(plugin).get("gateway_stop")({ reason: "shutdown" }, {});

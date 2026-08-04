@@ -1,16 +1,12 @@
 //! The Sources panel: a modal listing every agent CLI with its connection
 //! state (bound / unbound) and its live activity. This module is the PURE model
-//! — no ratatui. The painter lives in `tui::widgets::connection`; the event-loop
-//! wiring lives in `tui::mod`.
+//! — no ratatui. The painter lives in `tui::widgets::connection`.
 //!
 //! Rows are the UNION of install targets and registry sources, keyed on the
 //! source id (`SourceDescriptor.name`, joined to an install target via
 //! `Target.core_source` — NOT `Target.name`, which differs for Claude). A row's
 //! `state` is driven by the live connected-set (the persisted per-source intent),
-//! NOT by whether hooks happen to be installed: connecting a source opens its
-//! gate (characters appear); disconnecting closes it (characters walk out) AND,
-//! for target-bearing sources, removes its hooks. Users bind/unbind a source;
-//! they never think in terms of hooks vs JSONL.
+//! NOT by whether hooks happen to be installed.
 
 use std::time::{Duration, SystemTime};
 
@@ -19,9 +15,8 @@ use pixtuoid_core::state::SceneState;
 
 use crate::install::{InstallOutcome, InstallReport, UninstallOutcome, UninstallReport};
 
-// The source-status MODEL (rows, state, builders) lives in `crate::sources` (the
-// TUI-free control core shared by the panel, the CLI, and onboarding). Re-export
-// it here so this module + the painter + harness keep their `connection::…` paths.
+// Re-exported so this module, the painter and the harness keep their
+// `connection::…` paths; the model itself lives in `crate::sources`.
 pub use crate::sources::{
     build_rows, build_rows_from, ConnState, ConnectionRow, RowFacts, RowInput,
 };
@@ -29,27 +24,19 @@ pub use crate::sources::{
 /// WHAT is live for one row — a TYPED split, because the two source classes have
 /// nothing to count in common. An `Agent` source's liveness is its `AgentSlot`s; a
 /// `Daemon`'s is its entries in `SceneState::daemons`, and it never creates a slot
-/// at all. Counting slots for both made every running OpenClaw gateway render
-/// `idle` — the panel could not distinguish "no gateway" from "four gateways, one
-/// mid-run" — so the absent capability is typed here rather than stubbed with a
-/// zero (the `SourceKind` discipline, `pixtuoid-core/src/source/registry.rs`).
+/// at all — so the absent capability is typed here rather than stubbed with a zero.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum LiveFacet {
-    /// An `Agent` source: live slots + the freshest event age across them.
     Agents {
         agents: usize,
         last_event_age: Option<Duration>,
     },
     /// A `Daemon` source: its running instances, or `None` when none is present
-    /// (nothing observed — the panel's `no gateway seen` cell).
+    /// (the panel's `no gateway seen` cell).
     ///
-    /// ATOMIC on purpose. A separate `instances: usize` + `state: Option<_>` pair
+    /// ATOMIC on purpose: a separate `instances: usize` + `state: Option<_>` pair
     /// admitted `{0, Some(_)}` and `{N, None}`, neither of which `live_for` can
-    /// produce (the count and the rollup come from ONE filter, and
-    /// `board::gateway_rollup` returns `None` iff its iterator is empty) — and the
-    /// painter had to paper the hole over by inventing a state
-    /// (`state.unwrap_or(Idle)`). That is the same stubbed-zero this enum was
-    /// introduced to remove, one level down.
+    /// produce, and forced the painter to invent a state (`state.unwrap_or(Idle)`).
     Daemon(Option<DaemonRollup>),
 }
 
@@ -59,11 +46,9 @@ pub enum LiveFacet {
 /// `no gateway seen` case is `Daemon(None)`, so a zero count is unrepresentable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DaemonRollup {
-    /// How many instances (gateways) of this source are present.
     pub instances: std::num::NonZeroUsize,
     /// Their worst-of state via the shared `board::gateway_rollup` — the same
-    /// worst-of the footer's `⬢gw` chip and the wall board read, so the three
-    /// can't disagree.
+    /// worst-of the footer's `⬢gw` chip and the wall board read.
     pub state: pixtuoid_core::state::DaemonState,
 }
 
@@ -80,24 +65,17 @@ impl Default for LiveFacet {
 /// index to `ConnectionUi.rows`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LiveInfo {
-    /// What is live, by source class — see [`LiveFacet`].
     pub facet: LiveFacet,
-    /// The source's transport exited (only ever true for sources with a `Source`
-    /// impl that can die — hook-only sources AND the daemon ride the `HookRouter`'s
-    /// shared socket, whose own death is attributed in the FOOTER under the
-    /// infrastructure name `hook-router`, deliberately not on any row: one router
-    /// death covers eight CLIs, so propagating it here would falsely mark every
-    /// healthy transcript watcher dead).
+    /// The source's transport exited. The `HookRouter`'s shared-socket death is
+    /// attributed in the FOOTER under `hook-router`, deliberately not on any row:
+    /// one router death would otherwise falsely mark every healthy transcript
+    /// watcher dead.
     pub dead: bool,
 }
 
 /// The per-tick Sources-panel render frame the event loop hands the renderer via
-/// `set_connection_frame` — one snapshot the painter reads. The event loop builds
-/// the cached HOOK facet (`rows`) + the per-frame LIVE facet (`live`) then hands
-/// both over together, so they ride as one struct rather than seven parallel
-/// `connection_*` fields/params through `TuiRenderer` → `DrawCtx` → `paint_overlays`.
-/// (The two-facet BUILD lifecycle is unchanged — this bundles only the snapshot the
-/// renderer mirrors.) Mirrors `OnboardingFrame`.
+/// `set_connection_frame` — one snapshot the painter reads. Mirrors
+/// `OnboardingFrame`.
 #[derive(Debug, Clone, Default)]
 pub struct ConnectionFrame {
     pub open: bool,
@@ -109,27 +87,25 @@ pub struct ConnectionFrame {
     pub socket_line: String,
 }
 
-/// Session-persistent Connection UI state, owned by the event loop. Only `open`
-/// flips on close, so the cached rows + selection survive close/reopen.
+/// Only `open` flips on close, so the cached rows + selection survive
+/// close/reopen.
 #[derive(Debug, Default)]
 pub struct ConnectionUi {
     pub open: bool,
-    /// Index into the registry-stable `rows` (fixed order, rebuilt in place on
-    /// open/action) — a plain `usize` is sound precisely because the row set
-    /// doesn't churn frame-to-frame (unlike the dashboard, which is AgentId-keyed).
+    /// Index into the registry-stable `rows` — a plain `usize` is sound precisely
+    /// because the row set doesn't churn frame-to-frame (unlike the dashboard,
+    /// which is AgentId-keyed).
     pub selected: usize,
-    /// Cached CONNECTION facet — rebuilt on open + after each toggle (filesystem
-    /// reads + a connected-set read), NEVER per frame. The LIVE facet is
-    /// recomputed per frame instead.
+    /// Cached CONNECTION facet — rebuilt on open + after each toggle, NEVER per
+    /// frame. The LIVE facet is recomputed per frame instead.
     pub rows: Vec<ConnectionRow>,
     /// `Some(row_idx)` ⇒ a disconnect is armed on that row, awaiting y/n.
     pub confirm: Option<usize>,
     pub last_result: Option<String>,
 }
 
-/// The live facet for one source, derived purely from the scene snapshot +
-/// health list. `now` is the frame's clock (not `SystemTime::now()`) so the age
-/// is deterministic + honors the paused-clock path.
+/// `now` is the frame's clock (not `SystemTime::now()`) so the age is
+/// deterministic and honors the paused-clock path.
 pub fn live_for(
     now: SystemTime,
     source_id: &str,
@@ -137,14 +113,12 @@ pub fn live_for(
     health: &[SourceDeath],
 ) -> LiveInfo {
     let dead = health.iter().any(|d| d.source == source_id);
-    // A DAEMON's liveness is its instance roster, not slots it never creates.
-    // Registry-driven (`is_daemon`), so a second daemon source inherits this the
-    // day its row lands — no name match here.
+    // Registry-driven, so a second daemon source inherits this the day its row
+    // lands — no name match here.
     let is_daemon =
         pixtuoid_core::source::registry::descriptor_for(source_id).is_some_and(|d| d.is_daemon());
     if is_daemon {
-        // ONE walk, so the count and the rollup cannot disagree — and `zip` makes
-        // the pair atomic: either both halves exist or the facet is `None`.
+        // ONE walk, so the count and the rollup cannot disagree.
         let mine: Vec<_> = scene
             .daemons()
             .filter(|(s, _, _)| *s == source_id)
@@ -177,7 +151,6 @@ pub fn live_for(
     }
 }
 
-/// The per-frame parallel `LiveInfo` vec aligned to `rows`.
 pub fn live_view(
     now: SystemTime,
     rows: &[ConnectionRow],
@@ -189,7 +162,6 @@ pub fn live_view(
         .collect()
 }
 
-/// Move the selection one row up (`-1`) or down (`+1`), clamped at the ends.
 pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
     if rows.is_empty() {
         return 0;
@@ -197,7 +169,6 @@ pub fn move_selection(rows: &[ConnectionRow], sel: usize, delta: i32) -> usize {
     (sel as i32 + delta).clamp(0, rows.len() as i32 - 1) as usize
 }
 
-/// Detail-line hint when the toggle lands on a row that can't be acted on.
 pub fn no_action_hint(row: &ConnectionRow) -> String {
     match row.state {
         ConnState::NoCli { .. } => format!("{} not detected on this machine", row.display_name),
@@ -205,7 +176,6 @@ pub fn no_action_hint(row: &ConnectionRow) -> String {
     }
 }
 
-/// Render an `InstallReport` into the panel's one-line "connected" result.
 pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     let mut s = match r.outcome {
         InstallOutcome::AlreadyUpToDate | InstallOutcome::Installed => {
@@ -220,8 +190,7 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     }
     // Connecting is not always the last step: OpenClaw's `plugins.load` is
     // `kind: "restart"` upstream, so a RUNNING gateway keeps serving without our
-    // plugin and no lobster appears until it restarts. Saying "connected" and
-    // stopping there is technically true and practically misleading.
+    // plugin until it restarts.
     if let Some(hint) = r.post_install_hint {
         s.push_str(" \u{00b7} ");
         s.push_str(hint);
@@ -229,7 +198,6 @@ pub fn format_connect_result(r: &InstallReport, display_name: &str) -> String {
     s
 }
 
-/// Render an `UninstallReport` into the panel's one-line "disconnected" result.
 pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> String {
     let mut s = match r.outcome {
         UninstallOutcome::NothingToRemove | UninstallOutcome::Removed => {
@@ -240,6 +208,34 @@ pub fn format_disconnect_result(r: &UninstallReport, display_name: &str) -> Stri
         s.push_str(" \u{00b7} backup cleared");
     }
     s
+}
+
+/// WHICH bind/unbind step a panel failure line reports. `HookRemoval` is not a
+/// failed disconnect: the flag IS persisted false and only the hook removal
+/// didn't land, so it words the residual rather than the operation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FailedOp {
+    /// A connect that left the source disconnected (the core rolled the flag back).
+    Connect,
+    /// A disconnect that wrote nothing (the persist itself aborted).
+    Disconnect,
+    /// A disconnect that persisted, with the hooks left behind.
+    HookRemoval,
+}
+
+/// THE Sources-panel failure line, `{display_name}: {what failed} — {reason}`.
+///
+/// Every site that words a failed bind/unbind rides this — the panel's own `t`
+/// toggle and the onboarding apply's surfacing, which routes its failures onto
+/// this very panel — so a retry on the row reads the sentence the failure first
+/// gave.
+pub fn format_failure(op: FailedOp, display_name: &str, reason: &str) -> String {
+    let what = match op {
+        FailedOp::Connect => "connect failed",
+        FailedOp::Disconnect => "disconnect failed",
+        FailedOp::HookRemoval => crate::sources::HOOK_REMOVAL_FAILED_PHRASE,
+    };
+    format!("{display_name}: {what} \u{2014} {reason}")
 }
 
 #[cfg(test)]

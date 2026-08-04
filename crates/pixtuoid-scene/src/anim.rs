@@ -1,12 +1,8 @@
 //! Stateless easing curves for animations.
 //!
-//! `Easing::apply` maps a normalized `t ∈ [0.0, 1.0]` through a chosen curve.
-//! `eased_progress` (added in Task 2) is the convenience wrapper that takes a
-//! wall-clock `started_at` + `duration_ms` and returns the eased progress.
-//!
-//! SystemTime: matches existing animation state (FloorTransition,
-//! LightingState, PoseHistory) — serializable, no out-of-process consumer
-//! today. See CLAUDE.md "Known sharp edges".
+//! Wall-clock `SystemTime`, not `Instant`: matches the rest of the animation
+//! state (FloorTransition, LightingState, PoseHistory) — serializable, no
+//! out-of-process consumer today. See CLAUDE.md "Known sharp edges".
 
 use std::time::{Duration, SystemTime};
 
@@ -20,7 +16,6 @@ pub enum Easing {
 
 impl Easing {
     /// Apply the easing curve to a normalized `t ∈ [0.0, 1.0]`.
-    /// Inputs outside that range are clamped.
     pub fn apply(self, t: f32) -> f32 {
         let t = t.clamp(0.0, 1.0);
         match self {
@@ -39,13 +34,8 @@ impl Easing {
 }
 
 /// Milliseconds elapsed from `since` to `now`, saturating to `0` on a backward
-/// clock (`now < since`). The scene-wide replacement for the hand-rolled
-/// `now.duration_since(since).unwrap_or(Duration::ZERO).as_millis() as u64`
-/// chain — byte-identical to it (a backward clock yields `0` either way).
-///
-/// NB: this is the SATURATE-to-0 semantics. The `.ok()?`/`.ok()` sites that
-/// deliberately SKIP or return `None` on a backward clock (different meaning)
-/// keep their own form — don't migrate those here.
+/// clock (`now < since`). Sites that deliberately SKIP or return `None` on a
+/// backward clock mean something different — don't migrate those here.
 pub(crate) fn elapsed_ms(now: SystemTime, since: SystemTime) -> u64 {
     now.duration_since(since)
         .unwrap_or(Duration::ZERO)
@@ -54,9 +44,6 @@ pub(crate) fn elapsed_ms(now: SystemTime, since: SystemTime) -> u64 {
 
 /// Compute the eased progress of an animation `[0.0, 1.0]` given its
 /// `started_at` wall-clock time, total `duration_ms`, and `easing` curve.
-///
-/// Clamps to `0.0` if `now` is before `started_at`, and to `1.0` if
-/// `duration_ms` has fully elapsed.
 pub fn eased_progress(
     started_at: SystemTime,
     duration_ms: u32,
@@ -92,7 +79,6 @@ mod tests {
     fn ease_out_cubic_endpoints() {
         assert!(approx_eq(Easing::EaseOutCubic.apply(0.0), 0.0));
         assert!(approx_eq(Easing::EaseOutCubic.apply(1.0), 1.0));
-        // Should overshoot midpoint (fast start, slow end)
         assert!(Easing::EaseOutCubic.apply(0.5) > 0.5);
     }
 
@@ -169,8 +155,6 @@ mod tests {
 
     #[test]
     fn eased_progress_zero_duration_is_complete() {
-        // A zero-length animation reads as instantly complete (raw = 1.0),
-        // never divides by zero — covers the `duration_ms == 0` guard.
         let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         assert!(approx_eq(
             eased_progress(start, 0, Easing::Linear, start),
@@ -185,11 +169,8 @@ mod tests {
     #[test]
     fn elapsed_ms_counts_forward_and_saturates_backward() {
         let since = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-        // Forward: plain ms difference.
         assert_eq!(elapsed_ms(since + Duration::from_millis(250), since), 250);
-        // Same instant: zero.
         assert_eq!(elapsed_ms(since, since), 0);
-        // Backward clock (now < since): saturates to 0, never panics/underflows.
         assert_eq!(elapsed_ms(since - Duration::from_secs(5), since), 0);
     }
 

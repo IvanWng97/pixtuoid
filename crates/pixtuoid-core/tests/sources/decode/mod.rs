@@ -11,18 +11,12 @@ fn load(name: &str) -> serde_json::Value {
     serde_json::from_str(&s).unwrap()
 }
 
-/// Decode a hook payload expected to yield exactly ONE event (lifecycle arms —
-/// SessionStart / UserPromptSubmit / Stop / SessionEnd / Subagent*).
 fn decode_single(v: serde_json::Value) -> AgentEvent {
     let mut evs = decode_hook_payload(v).expect("decodes");
     assert_eq!(evs.len(), 1, "expected exactly one event, got {evs:?}");
     evs.pop().expect("one event")
 }
 
-/// Decode a tool/permission hook payload and return its ACTIVITY event. Those
-/// arms prepend an `Identity` (#221) — assert the pair shape and that the two
-/// events coalesce on one AgentId, then hand back the activity event so each
-/// test keeps asserting what it always did.
 fn decode_activity(v: serde_json::Value) -> AgentEvent {
     let mut evs = decode_hook_payload(v).expect("decodes");
     assert_eq!(evs.len(), 2, "expected Identity + activity, got {evs:?}");
@@ -48,8 +42,6 @@ fn load_jsonl(name: &str) -> serde_json::Value {
 #[test]
 fn decode_session_start() {
     let ev = decode_single(load("session_start"));
-    // CC keys on the session UUID (IdKey::SessionId), which == the transcript
-    // filename stem the watcher/per-line decode derive (`cc_id_from_path`).
     let expected_id = AgentId::from_parts("claude-code", "ses-abc");
     match ev {
         AgentEvent::SessionStart {
@@ -108,9 +100,6 @@ fn decode_notification_is_waiting() {
 #[test]
 fn decode_session_end() {
     let ev = decode_single(load("session_end"));
-    // The shared session-keyed SessionEnd arm ends the SESSION ITSELF, never
-    // a child — as_child stays false so the reducer's child ledger
-    // (#244/#246) is written only by the SubagentStop decoders.
     assert!(matches!(
         ev,
         AgentEvent::SessionEnd {
@@ -127,8 +116,6 @@ fn decode_unknown_event_returns_err() {
     assert!(decode_hook_payload(bad).is_err());
 }
 
-// An empty session_id passes `as_str` but (for Codex, keyed on session_id) would
-// mint a phantom agent that never coalesces — reject it as malformed.
 #[test]
 fn empty_session_id_is_rejected() {
     assert!(
@@ -143,8 +130,6 @@ fn empty_session_id_is_rejected() {
     );
 }
 
-// An empty attributionAgent must NOT emit a Rename — that would blank a good
-// hook-derived label with no recovery until the next Rename.
 #[test]
 fn cc_empty_attribution_agent_emits_no_rename() {
     let events = decode_cc_line(
@@ -161,9 +146,6 @@ fn cc_empty_attribution_agent_emits_no_rename() {
     );
 }
 
-// A TRAILING-colon attributionAgent ("ns:") splits to an EMPTY segment after the
-// last colon — it must NOT emit a label-blanking Rename either. The pre-split
-// emptiness guard doesn't catch it; the post-split check in decode_cc_line does.
 #[test]
 fn cc_trailing_colon_attribution_agent_emits_no_rename() {
     let events = decode_cc_line(
@@ -180,14 +162,6 @@ fn cc_trailing_colon_attribution_agent_emits_no_rename() {
     );
 }
 
-// Codex subagents (`spawn_agent`) signal their lifecycle ONLY via the
-// SubagentStart/SubagentStop hooks: the subagent's own rollout renders the
-// sprite but is keyed flat (no `/subagents/` path), so it can't learn its
-// parent. The hooks carry a distinct `agent_id` (the subagent, == its
-// rollout-filename UUID) plus the parent `session_id`. SubagentStart keys the
-// CHILD on `agent_id` and links it to the parent — wiring it into the scope
-// tree. Captured live (Codex 0.135, gpt-5.5): the payload carries
-// agent_id/agent_type/turn_id beside the common session_id/cwd/transcript_path.
 #[test]
 fn codex_subagent_start_links_child_to_parent() {
     let ev = decode_single(json!({
@@ -251,13 +225,9 @@ fn codex_subagent_stop_ends_child_not_parent() {
     }
 }
 
-// A Subagent hook with an absent OR empty agent_id must be rejected (Err →
-// logged + skipped by the listener), never default to "" and key a phantom
-// child that would never coalesce with the real rollout.
 #[test]
 fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
     for event in ["SubagentStart", "SubagentStop"] {
-        // absent
         assert!(
             decode_hook_payload(json!({
                 "hook_event_name": event,
@@ -267,7 +237,6 @@ fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
             .is_err(),
             "{event} without agent_id must Err"
         );
-        // present-but-empty
         assert!(
             decode_hook_payload(json!({
                 "hook_event_name": event,
@@ -281,21 +250,6 @@ fn codex_subagent_hooks_reject_missing_or_empty_agent_id() {
     }
 }
 
-// ---- CC SubagentStart/SubagentStop (#241) ---------------------------------
-//
-// CC Workflow-tool fleets spawn subagents with NO per-agent `Agent` tool_use in
-// the parent transcript (b1 Task-drain structurally can't fire) and their
-// transcripts carry no end marker — the SubagentStart/Stop HOOKS are the only
-// instant lifecycle signal. Wire facts (captured live, CC v2.1.170):
-// SubagentStart carries the parent's session_id/transcript_path/cwd plus
-// `agent_id` (BARE hex — NO "agent-" prefix) and `agent_type`
-// ("general-purpose" | "workflow-subagent"); SubagentStop adds
-// `agent_transcript_path` (the subagent's own transcript, incl. the deeper
-// `subagents/workflows/wf_*/` nesting) and noise fields we don't consume.
-
-// The bare wire agent_id must key the child as `agent-<id>` — the transcript
-// filename stem (`cc_id_from_path`), i.e. the JSONL watcher's id space — and
-// link it to the parent session. Both captured agent_types decode identically.
 #[test]
 fn cc_subagent_start_keys_prefixed_child_and_links_parent() {
     for agent_type in ["general-purpose", "workflow-subagent"] {
@@ -337,9 +291,6 @@ fn cc_subagent_start_keys_prefixed_child_and_links_parent() {
     }
 }
 
-// SubagentStop keys its SessionEnd on `cc_id_from_path(agent_transcript_path)`
-// — EXACT parity with the JSONL watcher's id space (the authoritative key) —
-// including the deeper `subagents/workflows/wf_*/` nesting of Workflow fleets.
 #[test]
 fn cc_subagent_stop_keys_on_agent_transcript_path_stem() {
     for nested_path in [
@@ -376,8 +327,6 @@ fn cc_subagent_stop_keys_on_agent_transcript_path_stem() {
     }
 }
 
-// A Stop without `agent_transcript_path` (absent, null, or empty) falls back to
-// the prefixed wire agent_id — the same key SubagentStart minted.
 #[test]
 fn cc_subagent_stop_without_transcript_path_falls_back_to_prefixed_agent_id() {
     for payload in [
@@ -417,9 +366,6 @@ fn cc_subagent_stop_without_transcript_path_falls_back_to_prefixed_agent_id() {
     }
 }
 
-// The keying-parity pin: a Start (prefix-keyed from the bare wire id) and its
-// Stop (path-keyed via cc_id_from_path) MUST resolve to one AgentId, or the
-// start registers a sprite the stop can never end.
 #[test]
 fn cc_subagent_start_and_stop_coalesce_on_one_child_id() {
     let start = decode_single(json!({
@@ -444,9 +390,6 @@ fn cc_subagent_start_and_stop_coalesce_on_one_child_id() {
     );
 }
 
-// Defensive: the CC docs' SubagentStart example shows an ALREADY-prefixed
-// `"agent_id": "agent-abc123"` while the live wire sends bare hex — both
-// forms must key identically (no `agent-agent-` double prefix).
 #[test]
 fn cc_subagent_start_does_not_double_prefix_an_already_prefixed_agent_id() {
     for wire_id in ["abc123", "agent-abc123"] {
@@ -465,9 +408,6 @@ fn cc_subagent_start_does_not_double_prefix_an_already_prefixed_agent_id() {
     }
 }
 
-// Claim-fully contract (mirrors the codex twin): a malformed CC Subagent
-// payload must Err (logged + skipped by the listener), never fall through to
-// the shared session-keyed arms or mint a phantom child.
 #[test]
 fn cc_subagent_hooks_reject_missing_or_empty_agent_id() {
     for event in ["SubagentStart", "SubagentStop"] {
@@ -484,14 +424,8 @@ fn cc_subagent_hooks_reject_missing_or_empty_agent_id() {
     }
 }
 
-// Codex coalesces hook↔rollout on the session/agent UUID (NOT a path string), so
-// it's separator-agnostic by construction — but the watcher still has to extract
-// that UUID from a real backslash Windows rollout path. Pin that the child's hook
-// AgentId (keyed on agent_id) equals the watcher's id derived from the on-disk
-// Windows rollout filename. Windows-only: codex_id_from_path's file_stem split
-// needs `\` to act as a separator (on Unix `\` is an ordinary filename byte).
-// The Codex analogue of CC's mixed_separator_and_case_forms_coalesce_on_windows;
-// runs on the windows-test job only.
+// Windows-only: `codex_id_from_path`'s file_stem split needs `\` to act as a
+// separator (on Unix `\` is an ordinary filename byte).
 #[cfg(windows)]
 #[test]
 fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
@@ -500,7 +434,6 @@ fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
     let rollout =
         format!(r"C:\Users\Me\.codex\sessions\2026\06\08\rollout-2026-06-08T22-36-52-{uuid}.jsonl");
 
-    // Hook side: SubagentStart keys the CHILD on agent_id (== the rollout UUID).
     let child = decode_single(json!({
         "hook_event_name": "SubagentStart",
         "session_id": "parent-sess",
@@ -511,7 +444,6 @@ fn codex_subagent_hook_coalesces_with_its_windows_rollout_path() {
     }))
     .agent_id();
 
-    // Watcher side: the id derived from the on-disk Windows rollout path.
     let watcher = AgentId::from_parts("codex", &codex_id_from_path(std::path::Path::new(&rollout)));
 
     assert_eq!(
@@ -600,16 +532,6 @@ fn decode_pre_tool_use_carries_tool_use_id_from_payload() {
     }
 }
 
-// Real CC (verified across ~/.claude/projects: 26K messages, "Agent" 47× and
-// "Task" 0×) dispatches subagents via a tool named "Agent" — NOT "Task". Its
-// input carries {description, prompt, subagent_type}. Task-detection must
-// recognise it, else `active_tasks` subagent-leak suppression and b1 Task-drain
-// completion never fire for real subagents (the parent shows the subagent's
-// tools — observed live). Since 0.12.0 only "Agent" is a KNOWN name; the
-// legacy pre-v2.1.63 "Task" dispatch here rides purely the SEMANTIC
-// `subagent_type` detection (this test pins that an old CC's real dispatch —
-// which always carries the field — is still caught after the name arm's
-// removal).
 #[test]
 fn decode_pre_tool_use_agent_tool_is_task() {
     for tool in ["Agent", "Task"] {
@@ -632,9 +554,6 @@ fn decode_pre_tool_use_agent_tool_is_task() {
     }
 }
 
-// Resilience: detect a dispatch by its `subagent_type` input, so the NEXT
-// rename (Task→Agent→…?) doesn't silently break suppression/completion. A tool
-// under a name we've never seen, but carrying subagent_type, is still a Task.
 #[test]
 fn subagent_dispatch_detected_by_subagent_type_under_novel_name() {
     let payload = serde_json::json!({
@@ -746,13 +665,6 @@ fn cc_jsonl_plain_user_message_yields_no_events() {
     assert!(events.is_empty());
 }
 
-// Session lifecycle never reads chat content. The old content-based /exit
-// matcher had ZERO true positives across a 135-transcript corpus (modern CC
-// persists no /exit user line — slash commands are `type:"system",
-// subtype:"local_command"` lines) and false-positived on any user message
-// QUOTING the wrapper. Every slash-command-shaped user line — terminating or
-// not — must decode to nothing; live /exit reaping is the SessionEnd HOOK's
-// job, with the idle sweep as the dropped-hook fallback.
 #[test]
 fn cc_jsonl_slash_command_user_lines_yield_no_events() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
@@ -769,9 +681,6 @@ fn cc_jsonl_slash_command_user_lines_yield_no_events() {
     }
 }
 
-// Regression for the false-positive class: a user message quoting the wrapper
-// text mid-prose (common when a session discusses CC internals) must not end
-// the session.
 #[test]
 fn cc_jsonl_quoted_exit_wrapper_mid_prose_yields_no_events() {
     let transcript = "/Users/me/.claude/projects/x/ses-abc.jsonl";
@@ -866,7 +775,6 @@ fn ag_uses_source_namespaced_agent_id() {
 fn ag_ask_permission_and_question_emits_waiting() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
 
-    // ask_permission tool call
     let v_perm = serde_json::json!({
         "step_index": 4,
         "type": "PLANNER_RESPONSE",
@@ -883,7 +791,6 @@ fn ag_ask_permission_and_question_emits_waiting() {
         other => panic!("expected Waiting, got {other:?}"),
     }
 
-    // ask_question tool call
     let v_quest = serde_json::json!({
         "step_index": 5,
         "type": "PLANNER_RESPONSE",
@@ -932,9 +839,6 @@ fn cc_session_ended_ignores_string_content_containing_session_end() {
     );
 }
 
-// The tail scan is STRUCTURAL-only: user-message content (including a
-// slash-command wrapper, exact or quoted mid-prose) is user-controllable and
-// must never read as a session end.
 #[test]
 fn cc_session_ended_ignores_slash_command_content() {
     use pixtuoid_core::source::claude_code::cc_session_ended;
@@ -955,8 +859,6 @@ fn cc_session_ended_ignores_slash_command_content() {
     );
 }
 
-// A resume after a structural end (new session_start tail-appended) resets the
-// end state — last marker wins.
 #[test]
 fn cc_session_ended_end_then_session_start_is_not_ended() {
     use pixtuoid_core::source::claude_code::cc_session_ended;
@@ -984,16 +886,9 @@ fn decode_hook_payload_missing_session_id_returns_err() {
 
 #[test]
 fn decode_cc_hook_keys_on_session_id_ignoring_transcript_path() {
-    // CC keys on the session UUID (IdKey::SessionId) regardless of any
-    // transcript_path the hook carries — keying on the cwd-derived path would
-    // rebuild the wrong parent after a git-worktree split. Pin that a present
-    // transcript_path whose stem DIFFERS from session_id is ignored: the
-    // AgentId must still be the session-id key (which == the watcher's
-    // cc_id_from_path of `<session_id>.jsonl`, so the two transports coalesce).
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
         "session_id": "ses-abc",
-        // A transcript_path whose stem ("OTHER-stem") is NOT the session_id.
         "transcript_path": "/Users/me/.claude/projects/-Worktree-B/OTHER-stem.jsonl",
         "cwd": "/repo",
         "tool_name": "Bash",
@@ -1014,12 +909,9 @@ fn decode_cc_hook_keys_on_session_id_ignoring_transcript_path() {
     );
 }
 
-// `describe_tool_target` truncates a tool target longer than 40 chars and
-// appends an ellipsis. The existing multibyte test uses a 39-char command, so
-// the `> 40` branch was never exercised.
 #[test]
 fn decode_pre_tool_use_long_command_is_ellipsis_truncated() {
-    let long_cmd = "echo ".to_string() + &"a".repeat(60); // > 40 chars
+    let long_cmd = "echo ".to_string() + &"a".repeat(60);
     let payload = serde_json::json!({
         "hook_event_name": "PreToolUse",
         "session_id": "ses-trunc",
@@ -1041,9 +933,6 @@ fn decode_pre_tool_use_long_command_is_ellipsis_truncated() {
     }
 }
 
-// `describe_tool_target` early-returns an empty string when the keyed input
-// field is absent. A Bash tool with an empty `tool_input` (no `command`) yields
-// a display of just the tool name — no `": <target>"` suffix.
 #[test]
 fn decode_pre_tool_use_missing_target_field_has_no_suffix() {
     let payload = serde_json::json!({
@@ -1067,18 +956,14 @@ fn decode_pre_tool_use_missing_target_field_has_no_suffix() {
     }
 }
 
-// `decode_ag_line` early edge branches: a non-object line and an object with no
-// `step_index` both decode to zero events.
 #[test]
 fn ag_non_object_and_missing_step_index_emit_nothing() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
-    // Non-object value (bare string).
     assert!(
         antigravity::decode_ag_line(transcript, "antigravity", json!("x"))
             .unwrap()
             .is_empty()
     );
-    // Object without `step_index`.
     assert!(
         antigravity::decode_ag_line(transcript, "antigravity", json!({ "foo": 1 }))
             .unwrap()
@@ -1086,8 +971,6 @@ fn ag_non_object_and_missing_step_index_emit_nothing() {
     );
 }
 
-// A non-integer `step_index` must fail safe-and-visible: skip the line rather
-// than coerce to 0 (which would corrupt the ag-{step}-{i} tool_use_id pairing).
 #[test]
 fn ag_non_integer_step_index_is_skipped() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
@@ -1104,10 +987,6 @@ fn ag_non_integer_step_index_is_skipped() {
     );
 }
 
-// A `tool_calls` entry that isn't an object is skipped (`continue`). The
-// display text (tool name + `: target` via ag_tool_target →
-// generic_tool_display) is pinned by antigravity.rs's own unit tests; here
-// assert the event shape + the load-bearing tool_use_id.
 #[test]
 fn ag_skips_non_object_tool_call_and_keys_run_command() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
@@ -1120,8 +999,6 @@ fn ag_skips_non_object_tool_call_and_keys_run_command() {
         ]
     });
     let events = antigravity::decode_ag_line(transcript, "antigravity", v).unwrap();
-    // The integer entry (index 0) is skipped; only the run_command start emits,
-    // and it carries the index-1 id (not index-0 — the skip does not renumber).
     assert_eq!(
         events.len(),
         1,
@@ -1135,8 +1012,6 @@ fn ag_skips_non_object_tool_call_and_keys_run_command() {
     }
 }
 
-// A PLANNER_RESPONSE with no `tool_calls` key (the `if let Some(Value::Array)`
-// fails to match) decodes to zero events — distinct from an empty array.
 #[test]
 fn ag_planner_response_without_tool_calls_emits_nothing() {
     let transcript = "/Users/me/.gemini/antigravity-cli/brain/sess/transcript.jsonl";
@@ -1186,17 +1061,9 @@ fn decode_hook_payload_missing_tool_name_still_succeeds() {
     }
 }
 
-// The cross-platform LOCKSTEP guard: the hook side (IdKey::SessionId →
-// `session_id`) and the watcher side (`cc_id_from_path` of a transcript named
-// `<session_id>.jsonl`) must hash to ONE AgentId or every CC session renders as
-// two sprites (hook-wins dedup and permission-Waiting silently die). Pinned via
-// the REAL seams on both sides (no inline re-simulation): the watcher uses the
-// SAME `.with_id_deriver(cc_id_from_path)` that ClaudeCodeSource::run wires.
 #[tokio::test]
 async fn hook_and_watcher_keys_coalesce_for_one_file() {
-    use pixtuoid_core::source::claude_code::{
-        cc_derive_label, cc_id_from_path, cc_session_ended, decode_cc_line,
-    };
+    use pixtuoid_core::source::claude_code::{cc_derive_label, cc_session_ended, decode_cc_line};
     use pixtuoid_core::source::jsonl::{force_polling_backend_for_tests, JsonlWatcher};
     use pixtuoid_core::source::Transport;
     use std::time::Duration;
@@ -1210,12 +1077,8 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
     let projects_root = dir.path().to_path_buf();
     let project_dir = projects_root.join("proj-coalesce");
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
-    // Filename stem == session_id, so the UUID-keyed hook and the stem-keyed
-    // watcher coalesce.
     let transcript = project_dir.join("ses-coalesce.jsonl");
 
-    // Hook side: decode a SessionStart payload for the same session. The
-    // transcript_path is present but IGNORED (CC keys on session_id).
     let transcript_str = transcript.to_string_lossy().to_string();
     let hook_payload = serde_json::json!({
         "hook_event_name": "SessionStart",
@@ -1225,8 +1088,6 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
     });
     let hook_id = decode_single(hook_payload).agent_id();
 
-    // Watcher side: run a real JsonlWatcher over projects_root, write a
-    // session_start line, and capture the SessionStart AgentId.
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = JsonlWatcher::new(
         projects_root.clone(),
@@ -1234,7 +1095,6 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
         decode_cc_line,
         cc_session_ended,
     )
-    .with_id_deriver(cc_id_from_path)
     .with_label_deriver(cc_derive_label);
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
@@ -1280,12 +1140,6 @@ async fn hook_and_watcher_keys_coalesce_for_one_file() {
     );
 }
 
-// The walker's first-sight head scan dispatches to the SCANNED source's own
-// cwd extractor (a registry-row fn — invariant #3). Pin each transcript-
-// bearing source's extractor against its REAL fixture head bytes, so a wire-
-// shape drift (or a row pointing at the wrong extractor) fails here with the
-// source's name. Antigravity's lines carry no cwd at all — its row uses the
-// shared top-level shape, which must find nothing.
 #[test]
 fn registry_cwd_extractor_matches_each_sources_real_head_shape() {
     use std::path::{Path, PathBuf};
@@ -1325,10 +1179,6 @@ fn registry_cwd_extractor_matches_each_sources_real_head_shape() {
     }
 }
 
-// The mixed-separator/case path-fold (Windows) — retargeted to Antigravity,
-// the remaining path-keyed source (IdKey::TranscriptPathThenSessionId). CC no
-// longer path-folds (it keys on session_id), so this guards the surviving
-// transcript-path key class via `normalize_path_key`.
 #[cfg(windows)]
 #[test]
 fn mixed_separator_and_case_forms_coalesce_on_windows() {

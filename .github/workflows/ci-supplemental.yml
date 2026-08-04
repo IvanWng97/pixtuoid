@@ -4,9 +4,8 @@ on:
   workflow_call:
 
 jobs:
-  # Advisory by contract: findings are annotations and never enter ci-gate.
-  # Keeping the whole job supplemental also prevents checkout/npm/network
-  # failures from becoming a new protected requirement.
+  # Advisory by contract: findings are annotations and never enter ci-gate, so
+  # checkout/npm/network failures can't become a new protected requirement.
   comment-lint:
     name: comment-lint (advisory)
     runs-on: ubuntu-latest
@@ -19,6 +18,10 @@ jobs:
       - name: Install ast-grep
         run: npm install -g @ast-grep/cli@0.44.1 # zizmor: ignore[adhoc-packages] upstream's pinned CLI install; advisory job has no write token
       - uses: extractions/setup-just@v4
+      # Runs BEFORE the advisory below: a rule whose fires/does-not-fire
+      # contract broke makes that run silently meaningless.
+      - run: just ast-grep-test
+      - run: just comment-lint-selftest
       - run: |
           git fetch --quiet origin main
           just comment-lint origin/main --github

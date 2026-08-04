@@ -1,19 +1,16 @@
-# Flags a run of 3+ CONSECUTIVE plain `//` comments inside a function body —
-# the repo's "fn-body comments <=2 lines" convention (pr-review.prompt.md's
-# comment-value factor). A longer WHY belongs on the DECLARATION it explains
-# (a const/fn/module doc carries a ~25-word rationale) or a CLAUDE.md sharp
-# edge; a present-tense code-state assertion belongs in a test.
-#
-# Deliberately narrow to avoid false positives on the repo's dense, LEGITIMATE
-# rationale culture: `///`/`//!` DOC comments are excluded (the regex), only
-# runs INSIDE a `function_item` count (module/declaration docs are fine), and
-# the comments must be immediately consecutive (`stopBy: neighbor`). ADVISORY
-# only — run diff-scoped on new code (`just comment-lint`), never a merge gate;
-# the ~5k pre-existing hits are grandfathered legitimate WHY.
+# Flags a run of 3+ CONSECUTIVE plain `//` comments inside a function body — the
+# repo's "fn-body comments <=2 lines" convention. A longer WHY belongs on the
+# DECLARATION it explains or a CLAUDE.md sharp edge.
+# Deliberately narrow: `///`/`//!` docs are excluded by the regex, only runs inside
+# a `function_item` count, and the comments must be immediately consecutive.
+# ADVISORY only — run diff-scoped (`just comment-lint`), never a merge gate; the
+# pre-existing hits are grandfathered legitimate WHY.
+# Twin: no-comment-slop-py.yml (same convention, `#` comments). ast-grep takes ONE
+# language per rule, so threshold and message are duplicated — change both together.
 id: no-comment-slop
 language: Rust
 severity: warning
-message: "3+ consecutive line comments in a function body — trim to a WHY (≤2 lines), or move the rationale to the declaration doc / a CLAUDE.md sharp edge."
+message: "3+ consecutive line comments in a function body — trim to a WHY (≤2 lines), or move the rationale to the declaration doc / a CLAUDE.md sharp edge. A fact a test could pin belongs in the test."
 rule:
   kind: line_comment
   regex: '^//($|[^/!])'

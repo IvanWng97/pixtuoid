@@ -34,7 +34,7 @@
     "badge": "ag·",
     "badge_color": "#2e9e4a",
     "name": "Antigravity CLI",
-    "url": "https://github.com/antiGravity-AI/antigravity-cli",
+    "url": "https://github.com/google-antigravity/antigravity-cli",
     "status": "supported",
     "featured": false,
     "transport": "session transcripts",
@@ -97,7 +97,7 @@
     "url": "https://github.com/anomalyco/opencode",
     "status": "supported",
     "featured": false,
-    "transport": "hooks (TS plugin → ~/.config/opencode/plugin/, session-id-keyed)",
+    "transport": "hooks (TS plugin → ~/.config/opencode/plugins/, session-id-keyed)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
@@ -157,7 +157,7 @@
     "url": "https://github.com/openclaw/openclaw",
     "status": "supported",
     "featured": false,
-    "transport": "hooks (TS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
+    "transport": "hooks (JS plugin → openclaw gateway; a wandering gateway mascot, not a desk agent)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",

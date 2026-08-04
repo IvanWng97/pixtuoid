@@ -73,7 +73,6 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::id::AgentId
 pub mod pixtuoid_core::platform
 pub fn pixtuoid_core::platform::home_first_dir() -> core::option::Option<std::path::PathBuf>
 pub fn pixtuoid_core::platform::resolve_user_config_dir(&str, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>, &std::path::Path) -> std::path::PathBuf
-pub fn pixtuoid_core::platform::resolve_user_home_opt(bool, core::option::Option<alloc::string::String>, core::option::Option<alloc::string::String>) -> core::option::Option<alloc::string::String>
 pub fn pixtuoid_core::platform::user_home_opt() -> core::option::Option<alloc::string::String>
 pub mod pixtuoid_core::source
 pub mod pixtuoid_core::source::antigravity
@@ -111,9 +110,11 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::claude_code::ClaudeCod
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::claude_code::ClaudeCodeSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::claude_code::ClaudeCodeSource
 pub const pixtuoid_core::source::claude_code::SOURCE_NAME: &str
+pub fn pixtuoid_core::source::claude_code::cc_activity_recency(&[u8]) -> pixtuoid_core::source::decoder::TailActivity
 pub fn pixtuoid_core::source::claude_code::cc_derive_label(&std::path::Path, &str, &std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::claude_code::cc_session_ended(&[u8]) -> bool
+pub fn pixtuoid_core::source::claude_code::cc_watcher(std::path::PathBuf) -> pixtuoid_core::source::jsonl::JsonlWatcher
 pub fn pixtuoid_core::source::claude_code::decode_cc_line(&str, &str, serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::claude_code::live_cc_session_ids(&std::path::Path) -> core::option::Option<pixtuoid_core::source::jsonl::ProbeSnapshot>
 pub mod pixtuoid_core::source::codewhale
@@ -296,9 +297,31 @@ pub fn pixtuoid_core::source::daemon::spawn_presence_exit_watch(pixtuoid_core::s
 pub fn pixtuoid_core::source::daemon::sweep_presence_ttl(&mut pixtuoid_core::state::SceneState, &str, pixtuoid_core::source::daemon::PresenceTtl, std::time::SystemTime)
 pub type pixtuoid_core::source::daemon::PresenceSender = tokio::sync::mpsc::unbounded::UnboundedSender<pixtuoid_core::source::daemon::PresenceMsg>
 pub mod pixtuoid_core::source::decoder
+#[non_exhaustive] pub enum pixtuoid_core::source::decoder::TailActivity
+pub pixtuoid_core::source::decoder::TailActivity::At(u64)
+pub pixtuoid_core::source::decoder::TailActivity::SidecarOnly
+pub pixtuoid_core::source::decoder::TailActivity::Unknown
+impl core::clone::Clone for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::clone(&self) -> pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::Eq for pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::PartialEq for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::eq(&self, &pixtuoid_core::source::decoder::TailActivity) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Freeze for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Send for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Sync for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Unpin for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::decoder::TailActivity
 pub fn pixtuoid_core::source::decoder::decode_hook_payload(serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub type pixtuoid_core::source::decoder::CwdExtractor = fn(&serde_json::value::Value) -> core::option::Option<std::path::PathBuf>
+pub type pixtuoid_core::source::decoder::IdDeriver = fn(&std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::decoder::LineDecoder = fn(&str, &str, serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
+pub type pixtuoid_core::source::decoder::PathFilter = fn(&std::path::Path) -> bool
 pub mod pixtuoid_core::source::drift
 pub const pixtuoid_core::source::drift::TARGET: &str
 pub fn pixtuoid_core::source::drift::missing_field(&str, &str, &str)
@@ -376,6 +399,26 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::hook::SocketBusy
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::hook::SocketBusy
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::hook::SocketBusy
 pub mod pixtuoid_core::source::jsonl
+#[non_exhaustive] pub enum pixtuoid_core::source::jsonl::TailActivity
+pub pixtuoid_core::source::jsonl::TailActivity::At(u64)
+pub pixtuoid_core::source::jsonl::TailActivity::SidecarOnly
+pub pixtuoid_core::source::jsonl::TailActivity::Unknown
+impl core::clone::Clone for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::clone(&self) -> pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::Eq for pixtuoid_core::source::decoder::TailActivity
+impl core::cmp::PartialEq for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::eq(&self, &pixtuoid_core::source::decoder::TailActivity) -> bool
+impl core::fmt::Debug for pixtuoid_core::source::decoder::TailActivity
+pub fn pixtuoid_core::source::decoder::TailActivity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::StructuralPartialEq for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Freeze for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Send for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Sync for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::Unpin for pixtuoid_core::source::decoder::TailActivity
+impl core::marker::UnsafeUnpin for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::decoder::TailActivity
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::decoder::TailActivity
 pub struct pixtuoid_core::source::jsonl::ChildEndUnclaims
 impl pixtuoid_core::source::jsonl::ChildEndUnclaims
 pub fn pixtuoid_core::source::jsonl::ChildEndUnclaims::new() -> Self
@@ -396,12 +439,13 @@ pub struct pixtuoid_core::source::jsonl::JsonlWatcher
 impl pixtuoid_core::source::jsonl::JsonlWatcher
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::new(std::path::PathBuf, alloc::string::String, pixtuoid_core::source::decoder::LineDecoder, pixtuoid_core::source::jsonl::SessionEndChecker) -> Self
 pub async fn pixtuoid_core::source::jsonl::JsonlWatcher::run(self, pixtuoid_core::TaggedSender) -> anyhow::Result<()>
+pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_activity_recency(self, pixtuoid_core::source::jsonl::ActivityRecency) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_cwd_deriver(self, pixtuoid_core::source::jsonl::CwdDeriver) -> Self
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_id_deriver(self, pixtuoid_core::source::jsonl::IdDeriver) -> Self
+pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_id_deriver(self, pixtuoid_core::source::decoder::IdDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_initial_window(self, core::time::Duration) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_label_deriver(self, pixtuoid_core::source::jsonl::LabelDeriver) -> Self
 pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_liveness_probe(self, pixtuoid_core::source::jsonl::LivenessProbe) -> Self
-pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_path_filter(self, pixtuoid_core::source::jsonl::PathFilter) -> Self
+pub fn pixtuoid_core::source::jsonl::JsonlWatcher::with_path_filter(self, pixtuoid_core::source::decoder::PathFilter) -> Self
 impl core::marker::Freeze for pixtuoid_core::source::jsonl::JsonlWatcher
 impl core::marker::Send for pixtuoid_core::source::jsonl::JsonlWatcher
 impl core::marker::Sync for pixtuoid_core::source::jsonl::JsonlWatcher
@@ -428,6 +472,7 @@ impl core::marker::Unpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::jsonl::ProbeSnapshot
+pub type pixtuoid_core::source::jsonl::ActivityRecency = fn(&[u8]) -> pixtuoid_core::source::decoder::TailActivity
 pub type pixtuoid_core::source::jsonl::CwdDeriver = fn(&std::path::Path) -> core::option::Option<std::path::PathBuf>
 pub type pixtuoid_core::source::jsonl::IdDeriver = fn(&std::path::Path) -> alloc::string::String
 pub type pixtuoid_core::source::jsonl::LabelDeriver = fn(&std::path::Path, &str, &std::path::Path) -> alloc::string::String
@@ -946,31 +991,6 @@ impl core::marker::Unpin for pixtuoid_core::state::DaemonState
 impl core::marker::UnsafeUnpin for pixtuoid_core::state::DaemonState
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::DaemonState
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::DaemonState
-pub enum pixtuoid_core::state::LabelProvenance
-pub pixtuoid_core::state::LabelProvenance::CwdDerived
-pub pixtuoid_core::state::LabelProvenance::OrdinalGhost
-pub pixtuoid_core::state::LabelProvenance::PrefixFallback
-pub pixtuoid_core::state::LabelProvenance::Renamed
-impl core::clone::Clone for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::clone(&self) -> pixtuoid_core::state::LabelProvenance
-impl core::cmp::Eq for pixtuoid_core::state::LabelProvenance
-impl core::cmp::PartialEq for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::eq(&self, &pixtuoid_core::state::LabelProvenance) -> bool
-impl core::fmt::Debug for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_core::state::LabelProvenance
-impl core::marker::StructuralPartialEq for pixtuoid_core::state::LabelProvenance
-impl serde_core::ser::Serialize for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for pixtuoid_core::state::LabelProvenance
-impl core::marker::Send for pixtuoid_core::state::LabelProvenance
-impl core::marker::Sync for pixtuoid_core::state::LabelProvenance
-impl core::marker::Unpin for pixtuoid_core::state::LabelProvenance
-impl core::marker::UnsafeUnpin for pixtuoid_core::state::LabelProvenance
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::LabelProvenance
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::LabelProvenance
 pub enum pixtuoid_core::state::ToolKind
 pub pixtuoid_core::state::ToolKind::Bash
 pub pixtuoid_core::state::ToolKind::Edit
@@ -1207,13 +1227,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::SceneStat
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::SceneState
 pub struct pixtuoid_core::state::SlotLabel
 impl pixtuoid_core::state::SlotLabel
-pub fn pixtuoid_core::state::SlotLabel::cwd_derived(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::is_upgradable(&self) -> bool
-pub fn pixtuoid_core::state::SlotLabel::new(impl core::convert::Into<alloc::sync::Arc<str>>, pixtuoid_core::state::LabelProvenance) -> Self
-pub fn pixtuoid_core::state::SlotLabel::ordinal_ghost(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::prefix_fallback(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::provenance(&self) -> pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::SlotLabel::renamed(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
 pub fn pixtuoid_core::state::SlotLabel::text(&self) -> alloc::sync::Arc<str>
 impl core::clone::Clone for pixtuoid_core::state::SlotLabel
 pub fn pixtuoid_core::state::SlotLabel::clone(&self) -> pixtuoid_core::state::SlotLabel
@@ -1377,31 +1390,6 @@ impl core::marker::Unpin for pixtuoid_core::source::AgentEvent
 impl core::marker::UnsafeUnpin for pixtuoid_core::source::AgentEvent
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::AgentEvent
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::AgentEvent
-pub enum pixtuoid_core::LabelProvenance
-pub pixtuoid_core::LabelProvenance::CwdDerived
-pub pixtuoid_core::LabelProvenance::OrdinalGhost
-pub pixtuoid_core::LabelProvenance::PrefixFallback
-pub pixtuoid_core::LabelProvenance::Renamed
-impl core::clone::Clone for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::clone(&self) -> pixtuoid_core::state::LabelProvenance
-impl core::cmp::Eq for pixtuoid_core::state::LabelProvenance
-impl core::cmp::PartialEq for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::eq(&self, &pixtuoid_core::state::LabelProvenance) -> bool
-impl core::fmt::Debug for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for pixtuoid_core::state::LabelProvenance
-impl core::marker::StructuralPartialEq for pixtuoid_core::state::LabelProvenance
-impl serde_core::ser::Serialize for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
-impl<'de> serde_core::de::Deserialize<'de> for pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::LabelProvenance::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
-impl core::marker::Freeze for pixtuoid_core::state::LabelProvenance
-impl core::marker::Send for pixtuoid_core::state::LabelProvenance
-impl core::marker::Sync for pixtuoid_core::state::LabelProvenance
-impl core::marker::Unpin for pixtuoid_core::state::LabelProvenance
-impl core::marker::UnsafeUnpin for pixtuoid_core::state::LabelProvenance
-impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::LabelProvenance
-impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::LabelProvenance
 #[non_exhaustive] pub enum pixtuoid_core::ToolDetail
 pub pixtuoid_core::ToolDetail::Generic
 pub pixtuoid_core::ToolDetail::Generic::display: alloc::string::String
@@ -1798,13 +1786,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::SceneStat
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::SceneState
 pub struct pixtuoid_core::SlotLabel
 impl pixtuoid_core::state::SlotLabel
-pub fn pixtuoid_core::state::SlotLabel::cwd_derived(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::is_upgradable(&self) -> bool
-pub fn pixtuoid_core::state::SlotLabel::new(impl core::convert::Into<alloc::sync::Arc<str>>, pixtuoid_core::state::LabelProvenance) -> Self
-pub fn pixtuoid_core::state::SlotLabel::ordinal_ghost(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::prefix_fallback(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
-pub fn pixtuoid_core::state::SlotLabel::provenance(&self) -> pixtuoid_core::state::LabelProvenance
-pub fn pixtuoid_core::state::SlotLabel::renamed(impl core::convert::Into<alloc::sync::Arc<str>>) -> Self
 pub fn pixtuoid_core::state::SlotLabel::text(&self) -> alloc::sync::Arc<str>
 impl core::clone::Clone for pixtuoid_core::state::SlotLabel
 pub fn pixtuoid_core::state::SlotLabel::clone(&self) -> pixtuoid_core::state::SlotLabel

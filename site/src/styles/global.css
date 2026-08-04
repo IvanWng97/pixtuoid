@@ -44,20 +44,27 @@
   --led: #8de069;
   --led-glow: rgba(141, 224, 105, 0.55);
   --led-off: #6f675a; /* an unlit LED (also the statusline idle dot) */
+  /* The LED hue for the one place it is NOT on --screen: the 5F studio dial,
+     whose active channel number + "live" tag sit BARE over the office. --led is
+     tuned for the always-dark hardware ground, so day's light office composite
+     dropped it to 1.13:1 (measured, worst office pixel + dimmer). This is the
+     --office-ink move applied to the LED: dark for day, unchanged where the
+     office is already dark. Day's #33601e measures 5.12:1 worst-case against the
+     real dial composite (#3f6b28 only reached 4.33). */
+  --led-ink: #33601e;
   /* opaque-theme --bg at 95% (day) / 94% (night, dracula) — plain rgba() on
      purpose: the scrim is load-bearing legibility, so it must not depend on
      color-mix() support (see the @supports fallback note below). Mirrors
      --bg per theme. Near-opaque (not the old 90%/72%) so the office pixels
      underneath stop showing through as mud — the crisp terminal-panel idiom
      (`.text-scrim` below) reads as an intentional card, not a translucent
-     smudge. Worst case (scrimmed --fg-muted subcopy over the hero's darkest
-     office pixel, dimmer capped at data-lit-max 0.74), measured via computed
-     styles in a real render, not estimated: day 4.88:1 (was ~4.76:1 at the
-     old 90%, the pinned e2e's floor is 4.5:1), night 7.50:1 (~unchanged —
-     already far past the floor), dracula 4.74:1 (was ~4.85:1 at the old
-     72% — a denser scrim leans slightly on the underlying --screen pixel
-     less, which happens to cost dracula's light-on-dark pairing a hair of
-     margin; still clears AA with the same headroom day's old 90% had). */
+     smudge. Worst case (the scrimmed --fg-muted `.install__note`, over the
+     office pixel + this section's dimmer), measured via computed styles in a
+     real render, not estimated: day 5.18:1, night 7.35:1, dracula 7.23:1 —
+     floor 4.5:1. Which office pixel is the worst one FLIPS with the theme: for
+     day's dark-on-light pairing it is the DARKEST underlying pixel, for
+     night/dracula's light-on-dark pairing the BRIGHTEST, so both extremes get
+     measured rather than assuming day's. */
   --scrim: rgba(244, 238, 226, 0.95);
 
   /* Semantic tokens — DAY (warm cream) */
@@ -66,7 +73,10 @@
   --surface: #fdf9ef;
   --surface-2: #ece1cd;
   --fg: var(--ink);
-  --fg-muted: #6f6453;
+  /* Tuned against --surface-2, the TIGHTEST opaque plate muted text lands on
+     (the terminal chrome bar) — not --bg: the old #6f6453 cleared the page at
+     5.02:1 but only reached 4.476:1 on the bar. */
+  --fg-muted: #6c614f;
   --border: color-mix(in srgb, var(--ink) 12%, transparent);
   --border-strong: color-mix(in srgb, var(--ink) 20%, transparent);
   --shadow: 0 1px 2px rgba(36, 28, 20, 0.05), 0 8px 24px rgba(36, 28, 20, 0.09);
@@ -104,6 +114,14 @@
   --chip-line: #3a332a;
   --chip-bg: color-mix(in srgb, var(--screen) 82%, transparent);
   --chrome-halo: none;
+  /* The chip family's ACCENT ink — one branded hue for a chip-borne CTA (the
+     footer's ☕ link). Theme-independent and a LITERAL for the same reason
+     --focus-ring is: on the dark chip, day's --coral measures 3.70:1 and
+     night's 4.26:1, and a gallery retint can move --coral anywhere, so an
+     accent that inherits the theme token cannot hold the 4.5:1 floor. 5.53:1
+     on --chip-bg — the same lightened coral a dark ground wants, which is why
+     it is night's --coral-deep value rather than a fourth invented orange. */
+  --chip-accent: #f0a07f;
 
   /* Bare-over-office ink (no plate/scrim behind it) — the hero subcopy/eyebrow/
      platform-line and the 4F intro paragraph read directly against the live
@@ -152,6 +170,9 @@
      neutral warm gray. */
   --office-ink: var(--chip-ink);
   --office-ink-accent: #f5c9a0;
+  /* the office composite is already dark here, so the raw LED is the legible
+     one (9.34:1 measured) — day's darkening would invert the problem. */
+  --led-ink: var(--led);
 }
 
 /* color-mix() landed in Safari 16.2 (Dec 2022). On an older engine an invalid
@@ -813,7 +834,14 @@ code {
   --surface: #343746;
   --surface-2: #44475a;
   --fg: #f8f8f2;
-  --fg-muted: #8b92bd;
+  /* Dracula's own palette steps much further from --bg (#282a36) to --surface-2
+     (#44475a, upstream "Current Line") than day/night do, so the muted ink has
+     to climb to match: the old #8b92bd measured 3.03:1 on the terminal bar and
+     3.90:1 on --surface (the OSD chips, the stage caption, the sky ticks, the
+     docs pager). Lightening the INK, not darkening the plate — no ink clears
+     4.5:1 on #44475a from below #8b92bd's luminance, and the plate hexes are
+     upstream Dracula. */
+  --fg-muted: #b2b9e0;
   --border: color-mix(in srgb, #f8f8f2 13%, transparent);
   --border-strong: color-mix(in srgb, #f8f8f2 24%, transparent);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -826,6 +854,8 @@ code {
      own existing --coral-deep rather than day's dark accent. */
   --office-ink: var(--chip-ink);
   --office-ink-accent: var(--coral-deep);
+  /* dark office composite, same as night — raw LED stays legible (7.52:1). */
+  --led-ink: var(--led);
 }
 
 /* ---------- boot intro overlay ---------- */
@@ -923,6 +953,16 @@ code {
 :root[data-theme='night'] .prose a,
 :root[data-theme='dracula'] .prose a {
   color: var(--coral);
+}
+/* An inline code chip inside a prose LINK wears the link's accent hue on the
+   chip's --surface-2 plate. Dracula's accent is upstream Dracula Purple
+   (#bd93f9) and its --surface-2 is upstream Current Line (#44475a) — a pairing
+   that measures 3.79:1, and both hexes are palette fidelity, not ours to
+   retune. Dropping this one chip to the calmer --surface plate buys 4.89:1.
+   Day (4.65:1) and night (5.30:1) already clear the floor on --surface-2, so
+   they keep the shared chip shade. */
+:root[data-theme='dracula'] .prose a > code {
+  background: var(--surface);
 }
 .prose ul {
   padding-left: 1.3rem;

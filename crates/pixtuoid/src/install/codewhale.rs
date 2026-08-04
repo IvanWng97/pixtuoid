@@ -1,41 +1,20 @@
 //! CodeWhale hook install target.
 //!
-//! Writes the GLOBAL CodeWhale config (`~/.codewhale/config.toml`, or the
-//! legacy `~/.deepseek/config.toml` when that is the file CodeWhale actually
-//! reads, or a `CODEWHALE_HOME`/`*_CONFIG_PATH` override — mirroring its own
-//! `resolve_config_path` + `default_config_path` resolution; see
-//! `default_config_path` below). The
-//! `[hooks]` table holds a single `hooks` ARRAY of `{event, command}` entries
-//! (NOT Codex's per-event group keys, NOT Claude's nested `{matcher, hooks}`):
+//! The `[hooks]` table holds a single `hooks` ARRAY of `{event, command}`
+//! entries — NOT Codex's per-event group keys, NOT Claude's nested
+//! `{matcher, hooks}`.
 //!
-//! ```toml
-//! [hooks]
-//! enabled = true
-//!
-//! [[hooks.hooks]]
-//! event = "tool_call_before"
-//! command = "PIXTUOID_SOURCE=codewhale '/abs/pixtuoid-hook' --event tool_call_before"
-//! _pixtuoid = true
-//! ```
-//!
-//! Load-bearing details:
-//! - **Per-event command.** Unlike Codex/Reasonix (one command for all events),
-//!   CodeWhale sets no event env var, so the event name is BAKED into each
-//!   entry's command as ` --event <name>`. The shim's env-mode reads it (see
-//!   `pixtuoid-hook` + `source/codewhale.rs`). `hook_command` returns the BASE
-//!   command; `merge_install` appends the per-event suffix.
+//! - **Per-event command.** CodeWhale sets no event env var, so the event name
+//!   is BAKED into each entry's command as ` --event <name>`; `hook_command`
+//!   returns the BASE command and `merge_install` appends the suffix.
 //! - **`enabled = true`.** CodeWhale gates ALL hooks on `[hooks].enabled`
-//!   (default true, `hooks.rs::default_enabled`). We set it explicitly so a
-//!   user who had previously disabled hooks still gets the visualizer —
-//!   connecting CodeWhale is an explicit opt-in (the silent-non-fire trap is worse
-//!   than re-enabling; cf. Reasonix's project-scope trust gate).
+//!   (absent defaults true).
 //! - **`_pixtuoid` sentinel.** CodeWhale's `Hook` serde has no
-//!   `deny_unknown_fields` (verified @0.8.59), so the marker is ignored by
-//!   CodeWhale and round-trips; managed-entry detection keys on it (the
-//!   per-event command's last token is the event name, not the binary, so a
-//!   Codex-style command-basename fallback wouldn't apply).
+//!   `deny_unknown_fields`, so the marker round-trips; managed-entry detection
+//!   keys on it (the per-event command's last token is the event name, not the
+//!   binary, so a Codex-style command-basename fallback wouldn't apply).
 //! - Comments/ordering are lost on the `toml::Value` round-trip (a backup is
-//!   taken) — same caveat as Codex.
+//!   taken).
 
 use std::path::{Path, PathBuf};
 
@@ -46,18 +25,14 @@ use crate::install::io;
 use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
 
-/// Events we register == events we decode (`source/codewhale.rs`), enforced by
-/// `every_registered_codewhale_event_decodes` below. The `bool` is `env_mode`:
-/// `true` events carry identity via `DEEPSEEK_*` env vars, so their command bakes
-/// `--event <name>` and the shim builds the envelope from env; `false` events
-/// (the subagent observer hooks) are forwarded RAW on stdin — CodeWhale pipes a
-/// complete JSON payload (with the child `agent_id`), so the command is the plain
-/// stdin-forward form (no `--event`), exactly like the CC/Codex hooks.
+/// Events we register == events we decode (`source/codewhale.rs`). The `bool` is
+/// `env_mode`: `true` events carry identity via `DEEPSEEK_*` env vars, so their
+/// command bakes `--event <name>` and the shim builds the envelope from env;
+/// `false` events (the subagent observer hooks) are forwarded RAW on stdin.
 ///
 /// turn_end / mode_change / on_error / shell_env are deliberately absent
 /// (per-turn noise / no lifecycle meaning). CodeWhale has NO approval hook in the
-/// TUI path (`ApprovalRequired` shows UI + writes the audit log, fires no hook),
-/// so there is no Waiting event to register — not a scope cut, no signal exists.
+/// TUI path, so there is no Waiting event to register — no signal exists.
 const CODEWHALE_EVENTS: &[(&str, bool)] = &[
     ("session_start", true),
     ("message_submit", true),
@@ -68,36 +43,24 @@ const CODEWHALE_EVENTS: &[(&str, bool)] = &[
     ("subagent_complete", false),
 ];
 
-/// The config CodeWhale actually reads, mirroring its own
-/// `config::resolve_config_path` + `default_config_path` + `codewhale_home`:
-/// 1. the `CODEWHALE_CONFIG_PATH` / `DEEPSEEK_CONFIG_PATH` env overrides (each a
-///    FULL config-file path) win, in that order;
-/// 2. else the home base is `CODEWHALE_HOME` (CodeWhale's `codewhale_home` honors
-///    it FIRST, before its OS home), else [`pixtuoid_core::platform::home_first_dir`];
-/// 3. under that home, prefer `<home>/.codewhale/config.toml`, the legacy
-///    `<home>/.deepseek/config.toml` when only that exists, else the modern path
-///    for a fresh install (writing a fresh `.codewhale/config.toml` when the real
-///    config is `.deepseek/config.toml` would make CodeWhale PREFER our near-empty
-///    file and drop the user's provider/key config).
+/// The config CodeWhale actually reads: the `CODEWHALE_CONFIG_PATH` /
+/// `DEEPSEEK_CONFIG_PATH` overrides (each a FULL file path), else
+/// `<CODEWHALE_HOME | OS home>/.codewhale/config.toml`, else the legacy
+/// `<OS home>/.deepseek/config.toml` when only that exists — writing a fresh
+/// `.codewhale/config.toml` would make CodeWhale PREFER our near-empty file and
+/// drop the user's provider/key config.
 ///
-/// The OS home comes from `home_first_dir` — `HOME`-FIRST, then `USERPROFILE` on
-/// Windows — NOT pixtuoid's generic `USERPROFILE`-first `io::home_relative_checked`:
-/// CodeWhale's own `effective_home_dir` is `$HOME ?? dirs::home_dir()`, so a
-/// Windows user who exports `HOME` (Git Bash / MSYS2 / Cygwin) has CodeWhale read
-/// `%HOME%\.codewhale\config.toml`; writing to `%USERPROFILE%\.codewhale\` would
-/// leave the hooks in a file CodeWhale never loads (installed, but no sprite). See
-/// the `home_first_dir` doc for the WHY (OpenClaw shares that resolver).
+/// The OS home comes from `home_first_dir` (`HOME` FIRST), NOT pixtuoid's generic
+/// `USERPROFILE`-first resolver: CodeWhale reads `$HOME ?? dirs::home_dir()`, so a
+/// Windows user who exports `HOME` (Git Bash / MSYS2 / Cygwin) would otherwise get
+/// the hooks written to a file CodeWhale never loads (installed, but no sprite).
 ///
-/// SCOPE: the `*_CONFIG_PATH` overrides are honored verbatim and ASSUMED ABSOLUTE
-/// (the documented contract). A RELATIVE override is deliberately NOT made to
-/// agree with CodeWhale's `normalize_config_file_path` (which resolves it against
-/// `current_dir`): the installer and CodeWhale run in DIFFERENT working dirs, so a
-/// cwd-relative value can't be reconciled between the two processes — only an
-/// absolute override is well-defined. (Upstream additionally rejects `..`; we keep
-/// the value verbatim — a user-set env override is trusted input.)
+/// The `*_CONFIG_PATH` overrides are honored verbatim and ASSUMED ABSOLUTE. A
+/// relative one is deliberately NOT reconciled with CodeWhale's
+/// `normalize_config_file_path`: it resolves against `current_dir`, and the
+/// installer and CodeWhale run in DIFFERENT working dirs.
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    // CodeWhale only TRIMS its overrides (`val.trim()` / `normalize_config_file_path`)
-    // — it does NOT `~`-expand — so pass `home: None` (trim-only, #342).
+    // CodeWhale only TRIMS its overrides — it does NOT `~`-expand — so `home: None`.
     resolve_config_path(
         io::nonempty_env("CODEWHALE_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
         io::nonempty_env("DEEPSEEK_CONFIG_PATH").map(|v| io::expand_tilde(&v, None)),
@@ -109,11 +72,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 
 /// Pure core for [`default_config_path`] — env overrides, the resolved OS home,
 /// and the existence check are all injected so every arm unit-tests without
-/// env/FS mutation. Faithful to CodeWhale's `codewhale_home` + `default_config_path`:
-/// `codewhale_home_env` (= `CODEWHALE_HOME`) is the `.codewhale`-equivalent app dir
-/// VERBATIM (no `.codewhale` join — that's how CodeWhale uses it), while the legacy
-/// `.deepseek` dir lives under the OS home REGARDLESS of `CODEWHALE_HOME`
-/// (`legacy_deepseek_home` ignores it).
+/// env/FS mutation. `codewhale_home_env` is the `.codewhale`-EQUIVALENT app dir
+/// verbatim (no `.codewhale` join — that's how CodeWhale uses it).
 fn resolve_config_path(
     codewhale_config_env: Option<PathBuf>,
     deepseek_config_env: Option<PathBuf>,
@@ -127,7 +87,6 @@ fn resolve_config_path(
     if let Some(p) = deepseek_config_env {
         return Ok(p);
     }
-    // Modern app dir: CODEWHALE_HOME verbatim, else <os_home>/.codewhale.
     let modern_dir = match (codewhale_home_env, &os_home) {
         (Some(h), _) => h,
         (None, Some(home)) => home.join(".codewhale"),
@@ -142,9 +101,8 @@ fn resolve_config_path(
     if exists(&modern) {
         return Ok(modern);
     }
-    // Legacy .deepseek is anchored to the OS home only (CodeWhale's
-    // legacy_deepseek_home ignores CODEWHALE_HOME), so check it only when the OS
-    // home resolves; never shadow a real .deepseek config with a fresh .codewhale.
+    // Legacy .deepseek is anchored to the OS home only — CodeWhale's
+    // `legacy_deepseek_home` ignores CODEWHALE_HOME.
     if let Some(home) = &os_home {
         let legacy = home.join(".deepseek").join("config.toml");
         if exists(&legacy) {
@@ -154,14 +112,10 @@ fn resolve_config_path(
     Ok(modern)
 }
 
-/// Presence probe for auto-detection. CodeWhale's config FILE may be absent on
-/// a fresh install while the product-state dir exists, and the legacy
-/// `~/.deepseek` layout puts config elsewhere — so probe the state dirs
-/// (created by CodeWhale on first launch) rather than the file we write.
-/// Resolves the dirs the SAME way CodeWhale does: the modern app dir is
-/// `CODEWHALE_HOME` (verbatim) else `<HOME-first home>/.codewhale`, and the legacy
-/// `.deepseek` lives under that OS home — so a `HOME`-exporting (or `CODEWHALE_HOME`)
-/// Windows shell probes the dirs CodeWhale actually uses.
+/// Presence probe for auto-detection. CodeWhale's config FILE may be absent on a
+/// fresh install while the product-state dir exists, and the legacy `~/.deepseek`
+/// layout puts config elsewhere — so probe the state dirs (created by CodeWhale on
+/// first launch) rather than the file we write.
 pub(crate) fn detect_installed() -> bool {
     let os_home = pixtuoid_core::platform::home_first_dir();
     let modern = match io::nonempty_env("CODEWHALE_HOME").map(|v| io::expand_tilde(&v, None)) {
@@ -172,15 +126,7 @@ pub(crate) fn detect_installed() -> bool {
     modern.is_some_and(|d| d.exists()) || legacy.is_some_and(|d| d.exists())
 }
 
-/// The BASE hook command (no `--event` — `merge_install` appends the per-event
-/// suffix). CodeWhale runs the `command` under a shell — `sh -c` on Unix,
-/// `cmd /C` on Windows (verified `hooks.rs::build_shell_command` @0.8.59), the
-/// same contract as Codex/Reasonix, so the OS forms mirror them exactly:
-/// - **Unix**: env-prefix `PIXTUOID_SOURCE=codewhale '<abs-path>'`.
-/// - **Windows**: BARE `<abs-path> --source codewhale` (the source rides the
-///   `--source` flag; 8.3 short-name substitution for cmd-unsafe paths via the
-///   shared `hook_cmd::windows`). Err on non-UTF-8 (prevents the
-///   to_string_lossy dead-hook).
+/// The BASE hook command — no `--event`, which `merge_install` appends per event.
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — CodeWhale always
     // embeds the absolute path, so the flag changes nothing here.
@@ -203,9 +149,8 @@ fn is_managed_entry(entry: &toml::Value) -> bool {
 fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     let mut entry = Table::new();
     entry.insert("event".into(), toml::Value::String(event.into()));
-    // env-mode events bake `--event <name>` (the shim reads DEEPSEEK_* env);
-    // the subagent observer events forward the raw stdin JSON, so the command is
-    // the plain base form (no `--event`) — the shim reads stdin like CC/Codex.
+    // env-mode events bake `--event <name>` (the shim reads DEEPSEEK_* env); the
+    // subagent observer events forward the raw stdin JSON, so no `--event`.
     let command = if env_mode {
         format!("{base_cmd}{}{event}", crate::install::hook_cmd::EVENT_FLAG)
     } else {
@@ -216,11 +161,10 @@ fn managed_entry(event: &str, env_mode: bool, base_cmd: &str) -> toml::Value {
     toml::Value::Table(entry)
 }
 
-/// Install-schema verification (#309): every CODEWHALE_EVENTS event still has a
-/// sentinel-tagged `{event, command}` entry, AND `[hooks].enabled == true` (it
-/// gates ALL hooks — `enabled = false` with entries present is a true
-/// silent-dead the other checks miss). Shim command is shell-form (with a
-/// per-entry ` --event <name>` tail that `shell_shim_ref` strips).
+/// Install-schema verification: every CODEWHALE_EVENTS event still has a
+/// sentinel-tagged `{event, command}` entry, AND `[hooks].enabled != false` — it
+/// gates ALL hooks, so entries present under `enabled = false` is a silent-dead
+/// the other checks miss.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{assemble, shell_shim_ref, SchemaParse, ShimRef};
     let Ok(doc) = toml::from_str::<toml::Value>(content) else {
@@ -273,16 +217,10 @@ fn toml_merge_install(doc: toml::Value, base_cmd: &str) -> toml::Value {
         *hooks = toml::Value::Table(Table::new());
     }
     if let Some(hooks) = hooks.as_table_mut() {
-        // Hooks are gated on this flag (default true). Set it ONLY when the user
-        // has made no explicit choice — an explicit `enabled = false` is the
-        // user's own global "all CodeWhale hooks off" switch, so we must NOT flip
-        // it: we couldn't faithfully restore it on disconnect (no per-source
-        // install state since 0.12.0), and silently re-enabling a user's own
-        // hooks is a config mutation. Our hooks then won't fire, but the
-        // verify/`doctor` `[hooks].enabled = false — none fire` note surfaces
-        // exactly that, so it isn't a silent no-sprite. An ABSENT key defaults
-        // true upstream, so writing it here only affects the fresh-install case
-        // (the [hooks] table we just created).
+        // Set the gate ONLY when the user made no explicit choice: an explicit
+        // `enabled = false` is their own "all CodeWhale hooks off" switch, and we
+        // could not faithfully restore it on disconnect. Ours then won't fire, but
+        // `verify_schema` surfaces exactly that, so it isn't a silent no-sprite.
         hooks
             .entry("enabled".to_string())
             .or_insert_with(|| toml::Value::Boolean(true));
@@ -312,7 +250,6 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     if let Some(arr) = hooks.get_mut("hooks").and_then(|h| h.as_array_mut()) {
         arr.retain(|e| !is_managed_entry(e));
     }
-    // Drop the hooks array once it holds no entries (ours were the only ones).
     if hooks
         .get("hooks")
         .and_then(|h| h.as_array())
@@ -320,13 +257,9 @@ fn toml_merge_uninstall(mut doc: toml::Value) -> toml::Value {
     {
         hooks.remove("hooks");
     }
-    // If the [hooks] table is now empty or holds ONLY the `enabled = true` flag
-    // we add on a fresh install, it was ours — drop it so an uninstall fully
-    // reverses a pixtuoid-only install. A user's own hooks / extra keys keep it
-    // alive. Install only ever WRITES `enabled = true` (and only when the key was
-    // absent), so a surviving `enabled = false` is the user's OWN global switch —
-    // keep it (and its table) so a connect→disconnect round never removes a
-    // setting we didn't create.
+    // A [hooks] table that is empty, or holds only the `enabled = true` a fresh
+    // install writes, was ours — drop it. Install never writes `enabled = false`,
+    // so a surviving one is the user's OWN switch and keeps its table alive.
     let ours_only = hooks.is_empty()
         || (hooks.keys().all(|k| k == "enabled")
             && hooks.get("enabled").and_then(|v| v.as_bool()) != Some(false));
@@ -348,8 +281,6 @@ mod tests {
 
     #[test]
     fn config_path_honors_codewhale_then_deepseek_env_overrides() {
-        // CODEWHALE_CONFIG_PATH wins outright (a full file path) — `exists` and
-        // home are never consulted, mirroring CodeWhale's `resolve_config_path`.
         let p = resolve_config_path(
             Some("/custom/cw.toml".into()),
             Some("/custom/ds.toml".into()),
@@ -359,7 +290,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p, PathBuf::from("/custom/cw.toml"));
-        // DEEPSEEK_CONFIG_PATH is the second-priority override.
         let p = resolve_config_path(None, Some("/custom/ds.toml".into()), None, None, |_| {
             panic!("exists() must not be consulted when an env override is set")
         })
@@ -369,14 +299,10 @@ mod tests {
 
     #[test]
     fn config_path_codewhale_home_is_the_app_dir_verbatim() {
-        // CODEWHALE_HOME is the .codewhale-EQUIVALENT dir (no .codewhale join), and
-        // it does NOT move the legacy .deepseek (which stays under the OS home —
-        // CodeWhale's legacy_deepseek_home ignores CODEWHALE_HOME).
         let cw_home = "/custom/cwhome";
         let os_home = PathBuf::from("/home/u");
         let modern = PathBuf::from(cw_home).join("config.toml");
         let legacy = os_home.join(".deepseek").join("config.toml");
-        // modern (CODEWHALE_HOME/config.toml) exists → modern, NOT cwhome/.codewhale.
         let p = resolve_config_path(
             None,
             None,
@@ -386,8 +312,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p, modern);
-        // modern absent, OS-home .deepseek present → legacy (anchored to OS home,
-        // unaffected by CODEWHALE_HOME) — never shadow a real .deepseek config.
         let p = resolve_config_path(
             None,
             None,
@@ -397,7 +321,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(p, legacy);
-        // CODEWHALE_HOME set but no OS home → modern only (legacy uncheckable).
         let p = resolve_config_path(None, None, Some(cw_home.into()), None, |_| false).unwrap();
         assert_eq!(p, modern);
     }
@@ -407,13 +330,10 @@ mod tests {
         let home = PathBuf::from("/home/u");
         let modern = home.join(".codewhale").join("config.toml");
         let legacy = home.join(".deepseek").join("config.toml");
-        // modern exists → modern.
         let p = resolve_config_path(None, None, None, Some(home.clone()), |q| q == modern).unwrap();
         assert_eq!(p, modern);
-        // only legacy exists → legacy (don't shadow the user's real config).
         let p = resolve_config_path(None, None, None, Some(home.clone()), |q| q == legacy).unwrap();
         assert_eq!(p, legacy);
-        // neither exists → modern (a fresh install creates it there).
         let p = resolve_config_path(None, None, None, Some(home), |_| false).unwrap();
         assert_eq!(p, modern);
     }
@@ -431,10 +351,6 @@ mod tests {
     fn install_creates_one_entry_per_event_with_baked_event_and_sentinel() {
         let out = merge_install("", BASE).unwrap();
         assert!(out.changed);
-        // Round-trip MUST survive: enabled (a scalar) sits beside the hooks
-        // array-of-tables in the same [hooks] table — pin that toml serializes
-        // the scalar before the array headers (else `enabled` would bind to the
-        // last entry and corrupt it).
         let v = parse(&out.content);
         assert_eq!(
             v["hooks"]["enabled"].as_bool(),
@@ -446,10 +362,8 @@ mod tests {
         for (entry, (ev, env_mode)) in arr.iter().zip(CODEWHALE_EVENTS) {
             assert_eq!(entry["event"].as_str().unwrap(), *ev);
             let expected = if *env_mode {
-                // env-mode events bake `--event <name>`.
                 format!("{BASE} --event {ev}")
             } else {
-                // subagent observer events forward raw stdin — plain command.
                 BASE.to_string()
             };
             assert_eq!(
@@ -466,7 +380,6 @@ mod tests {
         let a = merge_install("", BASE).unwrap();
         let b = merge_install(&a.content, BASE).unwrap();
         assert!(!b.changed, "same-command re-install is a semantic no-op");
-        // A path change replaces (does not duplicate) the managed entries.
         let c = merge_install(
             &a.content,
             "PIXTUOID_SOURCE=codewhale '/usr/local/bin/pixtuoid-hook'",
@@ -482,12 +395,6 @@ mod tests {
 
     #[test]
     fn install_respects_an_explicit_enabled_false_but_defaults_a_fresh_install_to_true() {
-        // Option B (respect the user's global switch): an explicit `enabled = false`
-        // is the user's own "all CodeWhale hooks off" — connect must NOT flip it
-        // (we can't restore it on disconnect, and re-enabling their hooks mutates
-        // their config; the verify/doctor "none fire" note surfaces that ours
-        // won't fire). A fresh install with no `enabled` key still defaults it to
-        // true so the visualizer fires out of the box.
         let disabled = merge_install("[hooks]\nenabled = false\n", BASE).unwrap();
         assert_eq!(
             parse(&disabled.content)["hooks"]["enabled"].as_bool(),
@@ -524,7 +431,6 @@ command = "echo hi"
             "unrelated keys survive"
         );
         let arr = v["hooks"]["hooks"].as_array().unwrap();
-        // user's 1 + every managed CodeWhale event
         assert_eq!(arr.len(), 1 + CODEWHALE_EVENTS.len());
         assert!(
             arr.iter().any(|e| e["command"].as_str() == Some("echo hi")),
@@ -534,10 +440,6 @@ command = "echo hi"
 
     #[test]
     fn connect_respects_an_explicit_enabled_false_and_disconnect_preserves_it() {
-        // A user who globally disabled CodeWhale hooks (enabled = false) AND has
-        // their own hook entries: connect must NOT flip their switch, and
-        // disconnect must leave both the switch and their own hooks intact — we
-        // only ever write enabled = true, and only when the key was absent.
         let user = "[hooks]\nenabled = false\n\n[[hooks.hooks]]\nevent = \"session_start\"\ncommand = \"my-own-hook\"\n";
         let installed = merge_install(user, BASE).unwrap();
         let v = parse(&installed.content);
@@ -610,8 +512,6 @@ command = "echo hi"
 
     #[test]
     fn merge_install_rejects_invalid_toml() {
-        // A malformed config must NOT be overwritten (it'd wipe the user's
-        // provider/key/hooks); refuse instead.
         assert!(merge_install("not = valid = toml", BASE).is_err());
     }
 
@@ -626,8 +526,6 @@ command = "echo hi"
         );
     }
 
-    // Unix POSIX-form pin. Unix-only: on Windows hook_command emits the bare
-    // form and this spaced path would be REJECTED (8.3 unavailable on CI).
     #[cfg(unix)]
     #[test]
     fn hook_command_is_the_base_env_prefix_form_without_event() {
@@ -657,9 +555,6 @@ command = "echo hi"
     #[test]
     fn verify_schema_reports_broken_on_unparseable_toml() {
         use crate::install::verify::ShimRef;
-        // verify_schema parses with `toml::from_str` DIRECTLY (a separate path
-        // from merge_install's parse_toml_or_empty), so a malformed config must
-        // hit the early-return broken arm.
         let res = verify_schema("not = = toml");
         assert_eq!(res.shim, ShimRef::Unknown);
         assert!(
@@ -674,8 +569,6 @@ command = "echo hi"
     #[test]
     fn verify_schema_flags_partial_install_missing_events() {
         use crate::install::verify::ShimRef;
-        // A managed entry for ONE event but not the rest → the None arm pushes the
-        // absent events and assemble renders a "missing hook entries for: …" issue.
         let cfg = "[hooks]\nenabled = true\n\n[[hooks.hooks]]\nevent = \"session_start\"\ncommand = \"x\"\n_pixtuoid = true\n";
         let res = verify_schema(cfg);
         let joined = res.issues.join(" | ");
@@ -689,20 +582,16 @@ command = "echo hi"
             "tool_call_before is a registered-but-absent event and must be listed, got {:?}",
             res.issues
         );
-        // One managed entry WAS present → not the "no managed entries" verdict.
         assert!(
             !joined.contains("_pixtuoid` sentinel is absent"),
             "a present sentinel entry must NOT trip the no-managed-entries issue"
         );
-        // The present entry's command is a bare scalar → shim resolves off it,
-        // not Unknown (proves the Some arm extracted the shim).
         assert_ne!(res.shim, ShimRef::Unknown);
     }
 
     #[test]
     fn verify_schema_flags_enabled_false_and_passes_full_install() {
         use crate::install::verify::ShimRef;
-        // (1) A complete managed install must verify clean: no issues, a real shim.
         let full = merge_install("", BASE).unwrap().content;
         let sound = verify_schema(&full);
         assert!(
@@ -716,9 +605,6 @@ command = "echo hi"
             "a full install must resolve a shim ref from its managed commands"
         );
 
-        // (2) Flip [hooks].enabled to false on that same complete install — every
-        // event is still present (no `missing` issue), but the enabled=false gate
-        // is the silent-dead the other checks miss.
         let disabled = full.replacen("enabled = true", "enabled = false", 1);
         assert!(
             disabled.contains("enabled = false"),
@@ -736,7 +622,6 @@ command = "echo hi"
             "the enabled=false issue must explain that no hooks fire, got {:?}",
             res.issues
         );
-        // The events are all still present, so the missing-events issue must NOT appear.
         assert!(
             !joined.contains("missing hook entries for"),
             "a complete-but-disabled install reports the gate, not missing events"
@@ -745,10 +630,6 @@ command = "echo hi"
 
     #[test]
     fn install_coerces_inner_non_array_hooks_key() {
-        // [hooks] is a real TABLE but its nested `hooks` key is a scalar string —
-        // hits the INNER coercion (line 295), distinct from the OUTER coercion the
-        // `hooks = "garbage"` test exercises. Without the coercion the as_array_mut
-        // guard is skipped and zero entries are written.
         let out = merge_install("[hooks]\nhooks = \"garbage\"\n", BASE).unwrap();
         let v = parse(&out.content);
         assert!(v["hooks"].is_table());
@@ -763,9 +644,6 @@ command = "echo hi"
         );
     }
 
-    // Internal-consistency guard (mirror of the CC/Codex/Reasonix ones): every
-    // hook event we REGISTER with CodeWhale must have a decoder arm, else it
-    // arrives at the shared socket and the decoder bails — silently dropped.
     #[test]
     fn every_registered_codewhale_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;

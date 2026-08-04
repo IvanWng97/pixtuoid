@@ -1,7 +1,6 @@
 //! Renders the TUI off-screen via ratatui's TestBackend, then converts every
 //! cell into an 8x16-px tile in a PNG so we can verify the visual output
-//! without needing a real terminal. Used to validate the TUI after code-review
-//! fixes — see `cargo run --example snapshot --release`.
+//! without needing a real terminal.
 
 mod encode;
 mod proof;
@@ -54,8 +53,6 @@ struct SnapshotArgs {
 
     /// After rendering the scene normally, overlay every non-walkable
     /// pixel in semi-transparent red so the restricted zones are visible.
-    /// Use this to verify that all open areas are connected (no isolated
-    /// pockets that would cause an A* fallback / character teleport).
     #[arg(long)]
     debug_walkable: bool,
 
@@ -63,32 +60,24 @@ struct SnapshotArgs {
     #[arg(long)]
     pack_dir: Option<std::path::PathBuf>,
 
-    /// Override the snapshot terminal width (cells). Default 192.
+    /// Override the snapshot terminal width (cells).
     #[arg(long)]
     cols: Option<u16>,
 
-    /// Override the snapshot terminal height (cells). Default 64.
+    /// Override the snapshot terminal height (cells).
     #[arg(long)]
     rows: Option<u16>,
 
     /// Cap on home desks per floor for the sample scene. Agents past
-    /// this count overflow to additional floors (up to MAX_FLOORS=10).
-    /// Pair with `--agents` >16 and `--max-desks 16` to capture a
-    /// full floor-1 + populated floor-2 multi-floor gif.
+    /// this count overflow to additional floors.
     #[arg(long, default_value_t = 12)]
     max_desks: usize,
 
-    /// Number of agents in the sample scene (default 12). With more agents
-    /// than --max-desks, the extras overflow to additional floors — pair
-    /// more than 16 agents with --max-desks 16 for an honest full-floor +
-    /// floor-2 multi-floor capture.
+    /// Number of agents in the sample scene.
     #[arg(long, default_value_t = 12)]
     agents: usize,
 
-    /// Output an animated GIF instead of a static PNG. Renders
-    /// `--gif-duration` seconds at `--gif-fps` frames per second,
-    /// advancing the clock each frame so animations (typing bob,
-    /// walking, wander cycles) play out.
+    /// Output an animated GIF instead of a static PNG.
     #[arg(long)]
     gif: bool,
 
@@ -96,8 +85,7 @@ struct SnapshotArgs {
     #[arg(long, default_value_t = 5)]
     gif_duration: u64,
 
-    /// GIF frame rate (only with --gif). 10 fps is a good balance of
-    /// smoothness vs file size (~2-5 MB for a 5s clip).
+    /// GIF frame rate (only with --gif).
     #[arg(long, default_value_t = 10)]
     gif_fps: u64,
 
@@ -110,10 +98,7 @@ struct SnapshotArgs {
     floor_seed: u64,
 
     /// Schedule floor navigations inside a --gif capture: repeatable
-    /// `--navigate-at <sec>:<floor>` (0-based floor). Renders through the
-    /// real TuiRenderer — slide transition, footer floor chip and all —
-    /// instead of the single-floor draw_scene path. Pair with --max-desks
-    /// so overflow agents populate the extra floors. Navigations less than
+    /// `--navigate-at <sec>:<floor>` (0-based floor). Navigations less than
     /// ~1s apart are dropped (a slide in flight ignores navigate_floor).
     #[arg(
         long = "navigate-at",
@@ -123,42 +108,32 @@ struct SnapshotArgs {
     )]
     navigate_at: Vec<String>,
 
-    /// Render an empty office (no agents) — useful for capturing the
-    /// dimmed empty-floor look.
+    /// Render an empty office (no agents).
     #[arg(long)]
     empty: bool,
 
     /// Inject an OpenClaw gateway presence (the wandering lobster mascot) in the
-    /// given state (idle | busy | down) for the beautify visual loop. Off by
-    /// default so the gen-media baselines are unaffected.
+    /// given state (idle | busy | down).
     #[arg(long)]
     openclaw: Option<String>,
 
     /// Gateway PORTS to stage for `--openclaw`, comma-separated (default: one, the
     /// upstream default port). The multi-instance render is the one thing no gate
-    /// can check — clips are presence-only in `gen-check` and the harness asserts
-    /// cell-set inequality, not "reads as N creatures" — so N gateways must be
-    /// renderable to a PNG a human can look at. `--openclaw-ports 18901,18902,18903,18904`
-    /// is what `just openclaw-multi-e2e` runs.
+    /// can check, so N gateways must be renderable to a PNG a human can look at.
     #[arg(long, value_delimiter = ',')]
     openclaw_ports: Vec<String>,
 
     /// Override local hour-of-day (0–23) used by time-of-day effects
-    /// (sun spot, dust motes, lighting). Useful for capturing screenshots
-    /// of daylight effects from a machine running at night.
+    /// (sun spot, dust motes, lighting).
     #[arg(long)]
     now_hour: Option<u32>,
 
-    /// Override local day-of-January-2026 used by time-of-day. Combined
-    /// with --now-hour, lets us walk through enough 10-minute weather
-    /// slots to hit rare variants.
+    /// Override local day-of-January-2026 used by time-of-day.
     #[arg(long, default_value_t = 1)]
     now_day: u32,
 
     /// Force a specific weather, bypassing the clock-based 10-minute cycle.
     /// One of: clear | rain | storm | snow | fog | overcast | windy | smog.
-    /// Drives the weather gallery (`just gen-media`); pair with --now-hour
-    /// to pick a flattering time of day per weather.
     #[arg(long)]
     weather: Option<String>,
 
@@ -166,12 +141,12 @@ struct SnapshotArgs {
     #[arg(long)]
     help_open: bool,
 
-    /// Force the source-death footer warning (#157) with the given source
+    /// Force the source-death footer warning with the given source
     /// name (for screenshots), e.g. --source-warning claude-code.
     #[arg(long)]
     source_warning: Option<String>,
 
-    /// Force the decode-drift footer nudge (#308) for the given comma-separated
+    /// Force the decode-drift footer nudge for the given comma-separated
     /// source label-prefixes (for screenshots), e.g. --drift-warning cc,cx.
     /// Lower priority than --source-warning (source-death preempts it).
     #[arg(long)]
@@ -191,58 +166,44 @@ struct SnapshotArgs {
     hover: Option<String>,
 
     /// Add a wandering office pet to a renderer-driven --gif capture
-    /// (cat | dog). Routes the capture through the real TuiRenderer,
-    /// which owns pet motion -- the pet roams desks/pantry/sofas and
-    /// naps near idle agents.
+    /// (cat | dog).
     #[arg(long, value_name = "KIND", requires = "gif", conflicts_with = "anim")]
     pets: Option<String>,
 
     /// Render with the agent-dashboard popup open over a representative mixed
-    /// cc/cx/rx scene (a cc parent with 2 subagents + a cx root + an rx root,
-    /// varied activity states). Drives the dashboard demo image + visual checks.
+    /// cc/cx/rx scene.
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets"])]
     dashboard: bool,
 
     /// Render with the Sources panel open over a representative mixed fixture
-    /// (per-CLI hook state + live connection). Drives the connection demo image +
-    /// borderless visual checks.
+    /// (per-CLI hook state + live connection).
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard"])]
     connection: bool,
 
     /// Render with the first-run onboarding "move-in" overlay open (fully revealed)
-    /// over a representative roster. Drives the onboarding demo image + the
-    /// borderless/typewriter visual check.
+    /// over a representative roster.
     #[arg(long, conflicts_with_all = ["anim", "gif", "live", "empty", "pets", "dashboard", "connection"])]
     onboarding: bool,
 
     /// Animation-verification mode: render ONE agent walking to + settling at a
-    /// chosen furniture, so the approach→settle reads correctly (no pop, no
-    /// teleport) BEFORE human verify. One of: couch | sofa | chair | pantry |
+    /// chosen furniture. One of: couch | sofa | chair | pantry |
     /// printer | vending | island | snackshelf | desk. Forces `--gif`; the
-    /// agent is back-dated so its walk-out starts at frame 0. Pair with
-    /// `--gif-duration`/`--gif-fps`. The target furniture's buffer position
-    /// is printed so you can crop to it.
+    /// agent is back-dated so its walk-out starts at frame 0.
     #[arg(long)]
     anim: Option<String>,
 
     /// Override the `--anim` pre-roll skip (ms). The default skips to the
     /// walk-out (settle/sit follow); set a LARGER value to start the capture at
     /// a later phase — e.g. desk_dwell + walk + sit_dwell to capture the LEAVE
-    /// (walk-back). Lets the harness verify the full walk→settle→sit→leave cycle
-    /// in short clips instead of one huge GIF.
+    /// (walk-back).
     #[arg(long)]
     anim_skip_ms: Option<u64>,
 
     /// Stage N agents (2–3) converging on ONE meeting room in a `--gif`
-    /// capture: each agent's wander state is back-dated onto a cycle whose
-    /// deterministic destination is a distinct meeting-room slot, with their
-    /// desk dwells aligned (≤3s spread) so they rise near-together, walk over,
-    /// and chitchat fires within seconds of the second arrival. Composes with
-    /// `--agents`: the staged agents take desk indices 0..N and the normal
-    /// sample archetypes fill desks N..--agents so the floor stays alive.
-    /// Auto-computes a pre-roll (min staged desk-dwell − 1.5s) so the encoded
-    /// clip starts just before the first agent rises; `--warmup-secs`
-    /// overrides it. Drives the MEETINGS clip in scripts/media.json.
+    /// capture. Composes with `--agents`: the staged agents take desk indices
+    /// 0..N and the normal sample archetypes fill desks N..--agents so the floor
+    /// stays alive. Auto-computes a pre-roll so the encoded clip starts just
+    /// before the first agent rises; `--warmup-secs` overrides it.
     #[arg(
         long,
         value_name = "N",
@@ -256,9 +217,7 @@ struct SnapshotArgs {
     /// real per-frame render (motion state advances) WITHOUT encoding frames
     /// for the first N seconds, so the clip starts mid-action. Overrides the
     /// `--meeting` auto-computed warmup. (`--anim` has its own pre-roll knob,
-    /// `--anim-skip-ms`; `--pets`/`--navigate-at` render through
-    /// save_renderer_gif, which has no skip seam — conflict rather than
-    /// silently no-op.)
+    /// `--anim-skip-ms`.)
     #[arg(
         long,
         value_name = "SECS",
@@ -269,48 +228,40 @@ struct SnapshotArgs {
 
     /// Restrict `--anim sofa`/`couch`/`chair` to a seat with a given SEATED
     /// facing: `north` (back-view, `back_couch` sprite — sofa occludes the lower
-    /// body) or `south` (front-view, `seated` sprite). Lets a single meeting room
-    /// be captured from BOTH its sofas (north-of-table faces south, south-of-table
-    /// faces north). Ignored for non-seat targets.
+    /// body) or `south` (front-view, `seated` sprite). Ignored for non-seat targets.
     #[arg(long)]
     anim_facing: Option<String>,
 
     /// Crop the generated PNG (and text preview) to a 40x24-cell window
-    /// centered on the agent with this label — e.g. for sprite-iteration
-    /// close-ups without quadrant guessing. Static-PNG path only: the
+    /// centered on the agent with this label. Static-PNG path only: the
     /// --gif/--anim paths return before the crop is computed, so clap
     /// rejects the combination instead of silently ignoring the flag.
     #[arg(long, conflicts_with_all = ["crop_furniture", "gif", "anim"])]
     crop_agent: Option<String>,
 
     /// Crop the generated PNG (and text preview) to a 40x24-cell window
-    /// centered on a furniture piece. Static-PNG path only (see --crop-agent).
+    /// centered on a furniture piece. Static-PNG path only.
     /// One of: pantry | couch | vending | printer | meeting | sofa | chair |
     /// island | snackshelf | desk.
     #[arg(long, conflicts_with_all = ["gif", "anim"])]
     crop_furniture: Option<String>,
 
     /// Give the agent with this label a Top burn tier (claude-fable-5 at
-    /// fresh ultra effort → ember hair + flame crown) — the visual-iteration
-    /// knob for the burn feature. NOT used by any gen-media job, so the
-    /// committed baselines stay flame-free.
+    /// fresh ultra effort → ember hair + flame crown).
     #[arg(long)]
     flame: Option<String>,
 
-    /// Crop the generated PNG to a window centered on the gateway lobster mascot
-    /// — its position is time-derived, so this reads it back from the renderer
-    /// AFTER the draw (unlike --crop-agent/--crop-furniture, which precompute).
-    /// Needs a VISIBLE mascot: pass --openclaw <state> (and not `down` past the
-    /// leave window, which renders none) — enforced at runtime, not by clap, since
-    /// "visible" isn't expressible as a static flag dependency. Static-PNG path only.
+    /// Crop the generated PNG to a window centered on the gateway lobster mascot.
+    /// Needs a VISIBLE mascot: pass --openclaw <state> — enforced at runtime, not
+    /// by clap, since "visible" isn't expressible as a static flag dependency.
+    /// Static-PNG path only.
     #[arg(long, conflicts_with_all = ["crop_agent", "crop_furniture", "gif", "anim"])]
     crop_mascot: bool,
 
     /// Render the §3 split-screen proof replay from a captured CC session
     /// fixture: left = typed transcript, right = the real reducer+renderer
     /// replaying the same decoded events; annotations burned in. Emits PNG
-    /// frame sequences to --frames-dir/{wide,tall}/ (both compositions from
-    /// ONE render pass); scripts/gen-media.py (kind:"proof") encodes them.
+    /// frame sequences to --frames-dir/{wide,tall}/.
     #[arg(long, value_name = "FIXTURE", value_hint = clap::ValueHint::FilePath,
           conflicts_with_all = ["gif", "anim", "meeting", "pets", "navigate_at",
           "dashboard", "connection", "onboarding", "empty", "live",
@@ -331,8 +282,8 @@ struct SnapshotArgs {
 }
 
 fn default_projects_root() -> String {
-    // Honor CLAUDE_CONFIG_DIR (#168) via the same resolver the runtime uses,
-    // rather than re-hardcoding the ~/.claude shape (a third drift site).
+    // Honor CLAUDE_CONFIG_DIR via the same resolver the runtime uses, rather
+    // than re-hardcoding the ~/.claude shape.
     pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths()
         .projects_root
         .to_string_lossy()
@@ -361,9 +312,8 @@ fn parse_navigations(specs: &[String]) -> Result<Vec<(u64, usize)>> {
 fn main() -> Result<()> {
     let args = SnapshotArgs::parse();
 
-    // Force-weather override (screenshot/gallery only) — set once; the
-    // thread-local it sets is honored by every weather derivation on this
-    // thread, including each frame of the GIF path.
+    // Sets a thread-local honored by every weather derivation on this thread,
+    // including each frame of the GIF path.
     if let Err(valid) = pixtuoid_scene::pixel_painter::force_weather(args.weather.as_deref()) {
         anyhow::bail!(
             "unknown --weather {:?}; valid: {}",
@@ -430,9 +380,6 @@ fn main() -> Result<()> {
         eprintln!("WARMUP pre-roll = {skip_ms}ms (explicit --warmup-secs)");
     }
     let mut scene = scene;
-    // --flame applies to WHATEVER scene the mode above produced (sample, anim,
-    // meeting, dashboard, live capture) — the burn-tier visual-iteration knob
-    // shouldn't silently vanish in the pose-preview modes.
     if let Some(label) = &args.flame {
         let hit = scene
             .agents
@@ -459,11 +406,9 @@ fn main() -> Result<()> {
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
     let pack = load_sprite_pack(args.pack_dir.clone())?;
-    // The per-floor sim/paint stores, grouped (cache/router/overlay/history/
-    // light/motion): DrawCtx + save_as_gif now take them as ONE FloorCtx.
     let mut store = pixtuoid_scene::floor::FloorCtx::new();
-    // Fail loudly like --weather above — a typo'd theme silently rendering
-    // NORMAL would put wrong-palette art into the docs/site screenshot pipelines.
+    // A typo'd theme silently rendering NORMAL would put wrong-palette art into
+    // the docs/site screenshot pipelines.
     let theme = pixtuoid_scene::theme::theme_by_name(&args.theme).ok_or_else(|| {
         let valid: Vec<&str> = pixtuoid_scene::theme::ALL_THEMES
             .iter()
@@ -562,9 +507,7 @@ fn main() -> Result<()> {
     }
 
     // Reuse the REAL formatters so the screenshot wording can't drift from
-    // production. The drift nudge and the source-death warning share the footer
-    // channel; `footer_warning` merges them with death > drift priority — the
-    // same merge `run_tui` performs live.
+    // production.
     let death_text = args.source_warning.as_deref().and_then(|src| {
         pixtuoid::tui::widgets::source_warning_message(&[
             pixtuoid_core::source::manager::SourceDeath::new(src, "forced for screenshot"),
@@ -597,8 +540,8 @@ fn main() -> Result<()> {
         (Vec::new(), None)
     };
 
-    // Representative Connection-panel fixture (deterministic — no FS probes), so the
-    // demo image is reproducible across machines.
+    // Deterministic — no FS probes — so the demo image is reproducible across
+    // machines.
     let (connection_rows, connection_live, connection_socket_line) = if args.connection {
         use pixtuoid::tui::connection::{
             ConnState, ConnectionRow, DaemonRollup, LiveFacet, LiveInfo,
@@ -657,9 +600,8 @@ fn main() -> Result<()> {
                 ConnState::Connected,
                 None,
             ),
-            // A DAEMON row, so the captured panel shows the daemon LIVE cell (N
-            // gateways + their rolled-up state) next to the agent rows' N-agents
-            // form — the two shapes are what `LiveFacet` exists to keep apart.
+            // A DAEMON row, so the captured panel shows the daemon LIVE cell next
+            // to the agent rows' N-agents form.
             mk(
                 "openclaw",
                 "ok",
@@ -685,7 +627,6 @@ fn main() -> Result<()> {
             },
             LiveInfo::default(),
             agents(1, 12),
-            // Two live gateways, one mid-run → `2 gateways · busy`.
             LiveInfo {
                 facet: LiveFacet::Daemon(Some(DaemonRollup {
                     instances: std::num::NonZeroUsize::new(2).expect("two gateways"),
@@ -746,22 +687,14 @@ fn main() -> Result<()> {
             let (x, y) = s.split_once(',')?;
             Some((x.trim().parse().ok()?, y.trim().parse().ok()?))
         }),
-        // `--debug-walkable` drives BOTH the live `w` pixel overlay (mask +
-        // approach-point/seat markers + A* routes, painted into the RgbBuffer
-        // here) AND the cell-level red wash + BFS connectivity report below.
         debug_walkable: args.debug_walkable,
         theme,
         theme_picker: args.theme_picker,
         floor_info: None,
-        // Single-floor still: empty office-wide tallies (no cross-floor cue). The
-        // footer's counts come from `scene_stats(scene)`.
+        // Single-floor still: empty office-wide tallies (no cross-floor cue).
         per_floor: Default::default(),
-        // DERIVED from the scene, exactly as the runtime does — not hardcoded `None`.
-        // A hardcoded suppression made the `--openclaw <state>` scenes, whose whole
-        // job is demoing the gateway, render their lobster while the `⬢gw` chip that
-        // reports its state was OFF on both the wall board and the footer. Scenes
-        // with no daemon are unaffected: `gateway_rollup` returns `None` for an empty
-        // roster, which is the same suppression, now earned rather than asserted.
+        // DERIVED from the scene, exactly as the runtime does — a hardcoded `None`
+        // here renders the `--openclaw` lobster with its `⬢gw` chip off.
         gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
         audio_audible: false,
         volume_flash: None,
@@ -789,14 +722,13 @@ fn main() -> Result<()> {
     draw_scene(&mut term, &scene, &pack, now, &mut draw_ctx)?;
 
     if args.debug_walkable {
-        debug_paint_walkable_overlay(&mut term)?;
+        debug_paint_walkable_overlay(&mut term, args.floor_seed)?;
     }
 
     let crop_rect = if args.crop_mascot {
         // The mascot wanders to a time-derived cell, so we crop on the position
-        // the renderer actually resolved (written back to last_mascots), not
-        // a precomputed layout point. pos is the logical half-block buffer (1px
-        // per cell across, 2px down — same convention as compute_crop_rect).
+        // the renderer actually resolved, not a precomputed layout point. `pos`
+        // is the logical half-block buffer (1px per cell across, 2px down).
         let m = draw_ctx.last_mascots.first().ok_or_else(|| {
             anyhow::anyhow!("--crop-mascot needs a visible mascot; pass --openclaw <state>")
         })?;
@@ -824,9 +756,7 @@ fn main() -> Result<()> {
 }
 
 /// Floors whose scheduled navigation comes due at `elapsed_ms`, firing each
-/// schedule entry exactly once (marks `fired`). Pure so the timing contract
-/// is unit-testable — an off-by-one here silently shifts a slide out of the
-/// capture window.
+/// schedule entry exactly once (marks `fired`).
 fn due_navigations(
     navigations: &[(u64, usize)],
     fired: &mut [bool],
@@ -856,7 +786,6 @@ mod tests {
 
     #[test]
     fn parse_navigations_truncates_fractional_ms() {
-        // (0.9999 * 1000.0) as u64 == 999 — pin the truncation so it's explicit
         assert_eq!(
             parse_navigations(&["0.9999:0".to_string()]).unwrap(),
             vec![(999, 0)]
@@ -875,7 +804,6 @@ mod tests {
 
     #[test]
     fn due_navigations_fires_each_exactly_once_in_schedule_order() {
-        // unordered schedule; frame clock at 15fps exact math: i * 1000 / 15
         let navs = vec![(7000u64, 0usize), (3000, 1)];
         let mut fired = vec![false; navs.len()];
         let mut hits: Vec<(u64, usize)> = Vec::new();
@@ -885,16 +813,13 @@ mod tests {
                 hits.push((i, floor));
             }
         }
-        // 3000ms: first frame with i*1000/15 >= 3000 is i=45 (exactly 3000)
-        // 7000ms: first frame with i*1000/15 >= 7000 is i=105 (exactly 7000)
         assert_eq!(hits, vec![(45, 1), (105, 0)]);
     }
 
     #[test]
     fn due_navigations_late_schedule_still_fires_within_capture() {
-        // regression pin for the exact elapsed math: with truncating per-frame
-        // accumulation (i * 66ms) a 9.9s navigation never fired in a 10s/15fps
-        // capture; exact math reaches 9933ms at i=149.
+        // With truncating per-frame accumulation (i * 66ms) a 9.9s navigation
+        // never fired in a 10s/15fps capture.
         let navs = vec![(9900u64, 1usize)];
         let mut fired = vec![false; 1];
         let mut hit = None;
@@ -975,7 +900,6 @@ mod tests {
     fn meeting_flag_parses_caps_and_conflicts() {
         let ok = ["snapshot", "out.gif", "--gif", "--meeting", "3"];
         assert!(SnapshotArgs::try_parse_from(ok).is_ok());
-        // 2..=3 cap; requires --gif; conflicts with the other scene modes.
         for bad in [
             vec!["snapshot", "--gif", "--meeting", "1"],
             vec!["snapshot", "--gif", "--meeting", "4"],

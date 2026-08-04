@@ -21,15 +21,10 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.16.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.16.0" }
-# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces: the
-# floating window's name badges + wall board (src/aa_text.rs) AND the --proof
-# example panel. On Linux it's already resolved transitively via sctk-adwaita
-# (winit's Wayland CSD titlebar text — see Cargo.lock), so the direct entry adds
-# no new crate/license there; on mac/Windows it's a small pure-Rust link-time
-# dep. Its per-pixel coverage callback (`OutlinedGlyph::draw`) suits our
-# callback-based `aa_text::draw_text_at` better than fontdue's raw-bitmap API.
-# pixtuoid-scene (the wasm-compiled engine) never sees this dep — binary-only, so
-# the wasm hero renders text as a crisp DOM overlay, not baked pixels.
+# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces. Its
+# per-pixel coverage callback (`OutlinedGlyph::draw`) suits our callback-based
+# `aa_text::draw_text_at` better than fontdue's raw-bitmap API. Binary-only: the
+# wasm-compiled engine never sees it, and renders text as a DOM overlay instead.
 ab_glyph = "0.2"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
@@ -45,21 +40,17 @@ crossterm          = { workspace = true }
 unicode-width      = { workspace = true }
 clap               = { workspace = true }
 serde              = { workspace = true }
-# `preserve_order` is enabled HERE, not workspace-wide: config merges
-# (claude/cursor/reasonix settings.json, openclaw.json) are a READ→MERGE→WRITE
-# round-trip, and serde_json's default BTreeMap-backed `Map` re-emits every object
-# ALPHABETICALLY — silently reordering the user's own hand-authored file on a
-# `connect`. IndexMap-backed order keeps their key order (and ours) stable, so a
-# merge only ever adds our block. Scoped to this crate because it is the only one
-# that WRITES a user's config, and because `pixtuoid-web` (which does not depend on
-# it) must not pay indexmap's code size in the committed wasm artifact.
+# `preserve_order` is enabled HERE, not workspace-wide: config merges are a
+# READ→MERGE→WRITE round-trip and serde_json's default BTreeMap-backed `Map`
+# re-emits every object ALPHABETICALLY, silently reordering the user's own
+# hand-authored file on a `connect`. Scoped to this crate so `pixtuoid-web` need
+# not pay indexmap's code size in the committed wasm artifact.
 serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
-# YAML parse+emit for the Hermes install target (config.yaml hooks merge). saphyr
-# is the maintained yaml-rust successor (serde_yaml/serde_yml are both abandoned);
-# it data-preserves a user's other config keys on merge but does NOT round-trip
-# comments (a YAML-ecosystem limitation — see install/hermes.rs). Binary-only.
+# YAML parse+emit for the Hermes install target. The maintained yaml-rust
+# successor (serde_yaml/serde_yml are both abandoned); it data-preserves a user's
+# other config keys on merge but does NOT round-trip comments.
 saphyr             = "0.0.11"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
@@ -68,24 +59,20 @@ which              = "8"
 # clock feature gives us Local::now() w/ system timezone for the wall clock.
 chrono             = { version = "0.4", default-features = false, features = ["clock"] }
 open               = "5"
-# The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays window-free,
-# invariant #1). winit = the frameless always-on-top window + main-thread event loop;
-# softbuffer = CPU blit of the office RgbBuffer into it (no GPU). Both rust-windowing,
-# share raw-window-handle 0.6, MSRV ≤ 1.89.
+# The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
+# window-free): winit is the frameless always-on-top window + main-thread event
+# loop, softbuffer the CPU blit of the office RgbBuffer into it (no GPU).
 winit              = "0.30"
 softbuffer         = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
 
-# Ambient office audio (#633): rodio's playback half only (cpal underneath) —
-# no decoder features, every sound is synthesized into raw sample buffers at
-# startup (src/audio/synth.rs). Optional behind the default-on `audio`
-# feature: `--no-default-features` builds a silent binary (and skips cpal's
+# Ambient office audio: rodio's playback half only (cpal underneath) — no decoder
+# features, every sound is synthesized into raw sample buffers at startup.
+# Optional so `--no-default-features` builds a silent binary (and skips cpal's
 # Linux ALSA system-header requirement). `tracing` routes rodio's OWN diagnostics
-# (mid-session stream errors, the device-list-enumeration failure, the drop log)
 # to `tracing::error!/debug!` instead of its default `eprintln!` — a raw stderr
-# write mid-altscreen corrupts the TUI (lowfi's first-ever bug). See
-# `sink::rodio_sink::RodioSink::open`.
+# write mid-altscreen corrupts the TUI.
 rodio = { version = "0.22.2", default-features = false, features = ["playback", "tracing"], optional = true }
 
 [features]
@@ -93,32 +80,31 @@ default = ["audio"]
 # Ambient sound (config-OFF at runtime regardless; this gates the DEPENDENCY).
 audio = ["dep:rodio"]
 
-# termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs):
-# raw-mode the controlling tty + timed read of the reply. Unix-only — Windows
-# hard-gates VT separately. Same 0.2 as pixtuoid-core/hook — no second build.
+# termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs).
+# Same 0.2 as pixtuoid-core/hook — no second build.
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# Focus-jump activation (focus/macos.rs): NSRunningApplication activate — plain
-# Cocoa, zero TCC. Pinned to the SAME objc2 stack winit already pulls (0.2.x on
-# objc2 0.5.2 per Cargo.lock) so the bindings don't double-compile — the same
-# discipline pixtuoid-hook's windows-sys comment enshrines. This MUST track
-# winit's objc2-app-kit major, not float ahead: a lone bump to 0.3.x drags in a
-# whole SECOND objc2 stack (0.6 core + 0.3 app-kit/foundation/quartz) beside
-# winit's, regressing exactly that no-double-compile invariant AND breaking the
-# activate API — so dependabot is told to ignore it (.github/dependabot.yml)
-# until winit itself moves.
+# Focus-jump activation (focus/macos.rs). Pinned to the SAME objc2 stack winit
+# already pulls so the bindings don't double-compile. This MUST track winit's
+# objc2-app-kit major, never float ahead: a lone bump to 0.3.x drags in a whole
+# SECOND objc2 stack beside winit's AND breaks the activate API — so dependabot is
+# told to ignore it (.github/dependabot.yml) until winit itself moves.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2-app-kit = { version = "0.2.2", features = ["NSRunningApplication", "libc"] }
 
-# Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol
-# needs an X11 client; x11rb is already in-tree transitively via winit.
+# Focus-jump on Linux (focus/linux.rs): the EWMH _NET_ACTIVE_WINDOW protocol needs
+# an X11 client, and x11rb is already in-tree transitively via winit — so this MUST
+# track the version winit AND softbuffer resolve to, exactly like the objc2-app-kit
+# stanza above. A grouped dependabot bump to "0.14" silently built a SECOND x11rb +
+# x11rb-protocol on every Linux build, and `cargo deny`'s [bans] is only "warn" so
+# nothing caught it; dependabot holds this at 0.13.x until winit itself moves.
 [target.'cfg(target_os = "linux")'.dependencies]
-x11rb = "0.14"
+x11rb = "0.13"
 
-# GetShortPathNameW for the Codex/Reasonix Windows hook path: resolve a
-# space/metacharacter-bearing install path to its DOS 8.3 short form so cmd.exe /C
-# can invoke it (#195). Same 0.61 major as pixtuoid-core — no second build.
+# GetShortPathNameW for the Codex/Reasonix Windows hook path: a
+# space/metacharacter-bearing install path resolves to its DOS 8.3 short form so
+# cmd.exe /C can invoke it. Same 0.61 major as pixtuoid-core — no second build.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Storage_FileSystem",
@@ -128,21 +114,21 @@ windows-sys = { version = "0.61", features = [
 ] }
 
 [dev-dependencies]
+# `tests/wire_to_pixels.rs` drives real fixture bytes through the shared
+# `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.16.0", features = ["harness"] }
 tempfile = "3"
-# End-to-end CLI golden for `sources --json` (the Raycast contract): runs the real
-# binary in an isolated empty HOME and pins its stdout JSON order-insensitively.
-# Goldens update with SNAPSHOTS=overwrite. See tests/cli_json.rs.
+# End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
+# Goldens update with SNAPSHOTS=overwrite.
 snapbox  = { version = "1", features = ["json"] }
-# Emits the SourceStatus JSON Schema (the Raycast --json contract) — test/gen
-# only, so the `JsonSchema` derive is `cfg_attr(test)` and this stays a dev-dep
-# (no production-binary impact). See sources.rs + `just gen-contract`.
+# Emits the SourceStatus JSON Schema — test/gen only, so the `JsonSchema` derive
+# is `cfg_attr(test)` and this stays a dev-dep. See sources.rs + `just gen-contract`.
 schemars = "1"
 # test-util: paused-clock signal-arm tests in runtime/driver.rs (headless_loop).
 tokio    = { workspace = true, features = ["test-util"] }
 image    = { version = "0.25", default-features = false, features = ["png", "gif"] }
 insta    = "1"
-# Integration tests parse the `--json` CLI output back (the delivery-contract
-# e2e in cli_json.rs). Already a normal dep, so no new lockfile entry.
+# Integration tests parse the `--json` CLI output back (cli_json.rs).
 serde_json = { workspace = true }
 
 [[example]]

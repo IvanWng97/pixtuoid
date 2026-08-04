@@ -1,12 +1,8 @@
 //! `--proof`: the §3 split-screen causal-proof renderer. ONE committed CC session
-//! fixture drives BOTH sides of every frame: the left panel types the session
-//! (terminal chrome, an anti-aliased Monaspace Neon face — see `fonts/`), the
-//! right side is the REAL draw_scene pass replaying the SAME decoded AgentEvent
-//! stream through the real Reducer — the two sides structurally cannot desync.
-//! The coral office annotations + connector dot render in the SAME AA face as
-//! the panel (the 8x8 pixel-font split was retired with the bitmap font — the
-//! user reversed it: "no 8x8 stand-in at all"); the burned coda strip likewise.
-//! scripts/gen-media.py (kind:"proof") encodes the frames.
+//! fixture drives BOTH sides of every frame: the left panel types the session,
+//! the right side is the REAL draw_scene pass replaying the SAME decoded
+//! AgentEvent stream through the real Reducer — the two sides structurally cannot
+//! desync. scripts/gen-media.py (kind:"proof") encodes the frames.
 
 use anyhow::{anyhow, Context as _, Result};
 use image::{Rgba, RgbaImage};
@@ -27,55 +23,46 @@ use std::time::{Duration, SystemTime};
 use crate::encode::cells_to_rgba;
 use crate::{CELL_H, CELL_W};
 
-// ── geometry (px); every canvas dim is even so yuv420p never crops ──
-// PANEL_W targets a ~44/56 typed-panel/office split (the pinned mock aesthetic)
-// against the reference render this feature ships at (--cols 120 --rows 52 ->
-// office_w = 960px): 760 / (760 + 960) ≈ 0.44.
+// Geometry (px); every canvas dim must stay even so yuv420p never crops.
+// PANEL_W targets the pinned mock's ~44/56 typed-panel/office split against the
+// reference render (--cols 120 --rows 52 -> office_w = 960px).
 const PANEL_W: u32 = 760;
-const TALL_PANEL_H: u32 = 400; // terminal panel height (tall layout)
-const HEADER_H: u32 = 32; // chrome strip: "captured..." / "pixtuoid"
+const TALL_PANEL_H: u32 = 400;
+const HEADER_H: u32 = 32;
 const PAD: u32 = 16;
 const LINE_H: u32 = 28;
-const ANNOT_FONT_PX: f32 = 16.0; // coral annotation callouts — same AA face as the panel
-const TYPE_CPS: u64 = 30; // typewriter reveal, chars/sec
+const ANNOT_FONT_PX: f32 = 16.0;
+const TYPE_CPS: u64 = 30;
 const PREAMBLE_MS: u64 = 6000; // "$ claude" + session start precede the first fixture line
 
-// Every callout holds at most this long from its OWN at_ms, independent of
-// when the next annotated line appears. Without a ceiling, "a sprite walks
-// in" held for the full 8.2s gap to the NEXT annotation — front-loaded by
-// PREAMBLE_MS, since that annotation's at_ms=800 predates the preamble that
-// pads every later beat. 4200ms is the verified upper edge of the other four
-// transitions' natural gaps (3500/3900/4200ms, `dbg_print_annotation_gaps`
-// against the committed fixture) — high enough that none of them are
-// affected, low enough to meaningfully shorten the one outlier.
+// Every callout holds at most this long from its OWN at_ms, independent of when
+// the next annotated line appears — without a ceiling, the first one held for the
+// whole gap to the next annotation (it predates the preamble that pads every
+// later beat). Tuned to sit just above the other transitions' natural gaps, so
+// only the outlier is shortened.
 const ANNOTATION_MAX_HOLD_MS: u64 = 4200;
 
-// the PANEL's own text (Font C, user-picked): anti-aliased Monaspace Neon
-// (OFL 1.1, `fonts/`) — the title, the typed body lines, and the coda strip.
-// Sizes target the retired 8×8 font's 16px line metrics so LINE_H/wrap math
-// stays proportioned; a pure-Rust rasterizer (ab_glyph) composites its
-// grayscale coverage onto the panel's dark ground.
+// The PANEL's own text: anti-aliased Monaspace Neon (OFL 1.1, `fonts/`), sized to
+// 16px line metrics so LINE_H/wrap math stays proportioned.
 const PROOF_FONT_PX: f32 = 16.0;
 const CODA_FONT_PX: f32 = 12.0;
 
-// the burned coda strip — a full-width caption, theme-independent like the panel
 const CODA_LINE_H: u32 = 18;
 const CODA_PAD: u32 = 10;
-// The "captured"/"happened in a terminal" framing (here + the `~ captured
-// claude code session` panel title below) is DELIBERATE: the timeline is
-// authored — the statusline-ticker disjointness pin REQUIRES authored strings
-// — and the load-bearing half of the claim is engine truth (the right pane
-// replays through the real decode_cc_line → Reducer → renderer).
+// The "captured"/"happened in a terminal" framing (here + the panel title below)
+// is DELIBERATE: the timeline is authored — the statusline-ticker disjointness pin
+// REQUIRES authored strings — and the load-bearing half of the claim is engine
+// truth (the right pane replays through the real decode_cc_line → Reducer).
 const CODA_TEXT: &str = "the left pane happened in a terminal. the right pane is the same \
 event stream, drawn by the same engine -- nothing is mocked.";
 
-// burned panel palette — theme-independent (the office side carries the theme)
+// Burned panel palette — theme-independent (the office side carries the theme).
 const PANEL_BG: Rgba<u8> = Rgba([13, 15, 19, 255]);
 const CHROME_BG: Rgba<u8> = Rgba([24, 27, 33, 255]);
 const EDGE: Rgba<u8> = Rgba([70, 74, 84, 255]);
 const INK: Rgba<u8> = Rgba([214, 214, 208, 255]);
 const PROMPT: Rgba<u8> = Rgba([139, 196, 138, 255]);
-// coral — the pinned connector/annotation color (sampled from the approved mock).
+// coral — the pinned connector/annotation color, sampled from the approved mock.
 const ANNOT: Rgba<u8> = Rgba([224, 122, 85, 255]);
 const CODA_BG: Rgba<u8> = Rgba([10, 9, 8, 255]);
 const CODA_INK: Rgba<u8> = Rgba([150, 145, 135, 255]);
@@ -96,16 +83,14 @@ pub(crate) struct PanelLine {
 pub(crate) struct ProofScript {
     pub(crate) events: Vec<(u64, AgentEvent)>,
     pub(crate) lines: Vec<PanelLine>,
-    /// The fixture's own capture date (from its first timestamp) — the left
-    /// panel titles itself as a past-tense archive, not the live ticker.
+    /// From the fixture's first timestamp — the panel titles itself as a
+    /// past-tense archive, not the live ticker.
     pub(crate) capture_date: String,
 }
 
-/// Greedy word-wrap of `text` to fit within `max_width` px, measuring each
-/// candidate line via the caller-supplied `width_fn` (the AA font's
-/// metric-derived advance at the caller's own size). A single over-long word is
-/// kept whole (never split mid-word) rather than looping forever; never returns
-/// an empty vec.
+/// Greedy word-wrap of `text` to fit within `max_width` px, measured via
+/// `width_fn`. A single over-long word is kept whole rather than looping forever;
+/// never returns an empty vec.
 fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<String> {
     let mut lines = Vec::new();
     let mut cur = String::new();
@@ -131,19 +116,16 @@ fn wrap_text(text: &str, max_width: i32, width_fn: impl Fn(&str) -> i32) -> Vec<
     lines
 }
 
-/// Sum of the AA font's per-glyph pixel-scaled advances — `wrap_text`'s width
-/// function for the panel/coda (both AA now). Monaspace Neon is monospace, but
-/// summing real advances (rather than `chars * one_advance`) stays correct
-/// even for a future proportional face.
+/// Sum of the AA font's per-glyph pixel-scaled advances. Summing real advances
+/// (rather than `chars * one_advance`) stays correct even for a future
+/// proportional face.
 fn aa_text_width_at(s: &str, px: f32) -> i32 {
     pixtuoid::aa_text::text_width(s, px)
 }
 
-/// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`
-/// (matching the office-side `text()`/`text_at()` call convention), alpha-
-/// composited onto the existing pixels via `blend_px`. Returns the total
-/// advance width, so callers needing it (the typing-cursor block) don't
-/// recompute via a second `aa_text_width_at` call.
+/// Draws `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
+/// alpha-composited onto the existing pixels. Returns the total advance width so
+/// the typing-cursor block needn't recompute it.
 fn aa_draw_text_at(
     img: &mut RgbaImage,
     s: &str,
@@ -157,16 +139,14 @@ fn aa_draw_text_at(
     })
 }
 
-/// Alpha-composite `color` onto the existing pixel at `coverage` (the AA
-/// rasterizer's per-pixel grayscale strength) — the panel's text sits on the
-/// dark `PANEL_BG`/`CODA_BG` ground, never a transparent surface, so a
-/// straight linear blend (no separate alpha channel to preserve) is correct.
+/// Alpha-composite `color` onto the existing pixel at `coverage`. The panel's
+/// text always sits on an opaque dark ground, never a transparent surface, so a
+/// straight linear blend with no alpha channel to preserve is correct.
 fn blend_px(img: &mut RgbaImage, x: i32, y: i32, color: Rgba<u8>, coverage: f32) {
     if x < 0 || y < 0 || (x as u32) >= img.width() || (y as u32) >= img.height() {
         return;
     }
     let bg = *img.get_pixel(x as u32, y as u32);
-    // the ONE blend curve — see aa_text::blend_channel
     let mix = |fg: u8, bg: u8| pixtuoid::aa_text::blend_channel(bg, fg, coverage);
     img.put_pixel(
         x as u32,
@@ -186,8 +166,6 @@ fn coda_lines(canvas_w: u32) -> Vec<String> {
     wrap_text(CODA_TEXT, max_w, |s| aa_text_width_at(s, CODA_FONT_PX))
 }
 
-/// Pixel height of the coda strip for a canvas of width `canvas_w` — a pure
-/// function of the (fixed) caption + width, so `canvas_dims` can stay pure too.
 fn coda_height(canvas_w: u32) -> u32 {
     let n = coda_lines(canvas_w).len() as u32;
     2 * CODA_PAD + n * CODA_LINE_H
@@ -213,18 +191,12 @@ pub(crate) fn revealed_chars(at_ms: u64, elapsed_ms: u64, len: usize) -> usize {
     (((elapsed_ms - at_ms) * TYPE_CPS) / 1000).min(len as u64) as usize
 }
 
-/// The newest annotated line already on screen — its connector + callout are
-/// lit for at most `ANNOTATION_MAX_HOLD_MS` past its OWN `at_ms`, UNLESS it's
-/// the last annotated line in the script, which holds indefinitely. The cap
-/// exists to stop a callout over-holding while it waits on a FUTURE beat
-/// (that's the bug: "a sprite walks in" front-loaded by PREAMBLE_MS, so its
-/// next beat was 8.2s out); the final beat has no next beat to wait on, so
-/// capping it too would just go quiet for the clip's idle tail instead of
-/// riding out to the coda, an unrelated regression the fixture's f0300 caught
-/// (last annotation at_ms=20600, cap would expire it at 24800 — 1.1s before
-/// the 26s clip ends). Once a non-final annotation's cap expires, this
-/// returns `None` rather than falling back to an OLDER annotated line — an
-/// expired callout goes quiet, it doesn't resurrect the previous one.
+/// The newest annotated line already on screen — its connector + callout are lit
+/// for at most `ANNOTATION_MAX_HOLD_MS` past its OWN `at_ms`, UNLESS it's the last
+/// annotated line in the script, which holds indefinitely: the cap exists to stop
+/// a callout over-holding while it waits on a FUTURE beat, and the final beat has
+/// none, so capping it would just go quiet through the clip's idle tail. An
+/// expired callout returns `None` rather than resurrecting an OLDER one.
 pub(crate) fn active_annotation(lines: &[PanelLine], elapsed_ms: u64) -> Option<usize> {
     let (i, line) = lines
         .iter()
@@ -245,8 +217,7 @@ fn ts_ms(v: &serde_json::Value) -> Result<i64> {
         .timestamp_millis())
 }
 
-/// The fixture's capture date (`YYYY-MM-DD`), from its first line's timestamp —
-/// the panel title's "past-tense archive" date.
+/// The fixture's capture date (`YYYY-MM-DD`), from its first line's timestamp.
 fn capture_date_str(v: &serde_json::Value) -> Result<String> {
     let ts = v
         .get("timestamp")
@@ -310,8 +281,8 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
         prompt: false,
         annotation: Some("a sprite walks in"),
     });
-    // Registration is the WATCHER's job in production, not the decoder's — the
-    // render synthesizes it once, exactly like sample_scene fabricates its roster.
+    // Registration is the WATCHER's job in production, not the decoder's, so the
+    // render synthesizes it once.
     events.push((
         800,
         AgentEvent::SessionStart {
@@ -369,8 +340,6 @@ pub(crate) fn build_script(fixture: &Path) -> Result<ProofScript> {
                 }
             }
         }
-        // BOTH tool_use and tool_result lines decode through the REAL decoder —
-        // the right side replays exactly what production would have seen.
         for ev in decode_cc_line(&path_str, SOURCE_NAME, v.clone())? {
             events.push((rel, ev));
         }
@@ -407,17 +376,14 @@ fn text(img: &mut RgbaImage, s: &str, x: i32, y: i32, c: Rgba<u8>) {
     aa_draw_text_at(img, s, x, y, ANNOT_FONT_PX, c);
 }
 
-/// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the
-/// AA face's `●` rather than a bespoke circle rasterizer. `px` picks the size:
-/// the window-chrome traffic lights run small (8px), the connector anchor runs
-/// at the annotation size.
+/// A small filled disc, centered on `(cx, cy)` by its own metrics — reuses the AA
+/// face's `●` rather than a bespoke circle rasterizer.
 fn dot(img: &mut RgbaImage, cx: i32, cy: i32, px: f32, c: Rgba<u8>) {
     let w = aa_text_width_at("\u{25CF}", px);
     let h = pixtuoid::aa_text::line_height(px);
     aa_draw_text_at(img, "\u{25CF}", cx - w / 2, cy - h / 2, px, c);
 }
 
-/// 2px-thick dashed horizontal connector (4-on/4-off), the burned "wire".
 fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
     for x in x0..x1 {
         if (x - x0) / 4 % 2 == 0 {
@@ -427,18 +393,17 @@ fn dashed_h(img: &mut RgbaImage, x0: i32, x1: i32, y: i32, c: Rgba<u8>) {
     }
 }
 
-// Mac-style traffic-light dots — the pinned mock's terminal chrome carries
-// them so the left panel reads as a window, not a bare text box.
+// Mac-style traffic-light dots — the pinned mock's terminal chrome carries them
+// so the left panel reads as a window, not a bare text box.
 const DOT_RED: Rgba<u8> = Rgba([255, 95, 86, 255]);
 const DOT_YELLOW: Rgba<u8> = Rgba([255, 189, 46, 255]);
 const DOT_GREEN: Rgba<u8> = Rgba([39, 201, 63, 255]);
-const CHROME_DOT_PX: f32 = 8.0; // traffic-light diameter (the ● glyph at this size)
+const CHROME_DOT_PX: f32 = 8.0;
 const DOT_PITCH: i32 = CHROME_DOT_PX as i32 + 1; // dot advance + a 1px gap
-const DOT_GAP_AFTER: i32 = 6; // clearance between the 3rd dot and the title
+const DOT_GAP_AFTER: i32 = 6;
 
-/// `is_panel` gates the traffic-light dots + the title size — only the left
-/// "captured..." panel is a typed terminal window; the "pixtuoid" office chrome
-/// renders the SAME AA face at the annotation size, without the dots.
+/// `is_panel` gates the traffic-light dots + the title size — only the left panel
+/// is a typed terminal window.
 fn chrome(img: &mut RgbaImage, x: u32, y: u32, w: u32, title: &str, is_panel: bool) {
     fill(img, x, y, w, HEADER_H, CHROME_BG);
     fill(img, x, y + HEADER_H - 1, w, 1, EDGE);
@@ -474,9 +439,8 @@ fn panel_body(
             continue;
         }
         // Wrapped purely at render time: the typewriter reveal walks the FLAT
-        // string's character stream (build_script/reveal timing untouched); a
-        // long line simply pushes later lines down as more of it becomes
-        // visible, like a real terminal.
+        // string's character stream, so a long line pushes later lines down as
+        // more of it becomes visible, like a real terminal.
         let wrapped = wrap_text(&line.text, max_w, |s| aa_text_width_at(s, PROOF_FONT_PX));
         let color = if line.prompt { PROMPT } else { INK };
         let mut remaining = shown;
@@ -543,27 +507,23 @@ pub(crate) fn compose_frame(
         office_origin.0 as i64,
         office_origin.1 as i64,
     );
-    // divider between the halves (the coda strip, drawn last, trims its own
-    // bottom slice back off)
+    // Divider between the halves; the coda strip, drawn last, trims its own bottom
+    // slice back off.
     match layout {
         ProofLayout::Wide => fill(&mut img, PANEL_W - 1, 0, 2, HEADER_H + oh, EDGE),
         ProofLayout::Tall => fill(&mut img, 0, HEADER_H + TALL_PANEL_H, w, 1, EDGE),
     }
 
-    // burned connector + callout for the newest annotated line, anchored to the
-    // ACTUAL working sprite's desk (no hand-placed coordinates)
+    // Anchored to the ACTUAL working sprite's desk — no hand-placed coordinates.
     if let Some(i) = active_annotation(&script.lines, elapsed_ms) {
         if let Some(label) = script.lines[i].annotation {
             let desk = (
                 (office_origin.0 + desk_px.0) as i32,
                 (office_origin.1 + desk_px.1) as i32,
             );
-            // Sits above the desk, clear of the ceiling halo `paint_ceiling_halos`
-            // (pixtuoid_scene::pixel_painter::ambient) burns over a lit monitor: a
-            // 2-buffer-row band starting one row above the desk, i.e. up to 16px
-            // above desk.1 in PNG space (buffer row -> 8px here, same halving the
-            // desk_px conversion above uses). GLOW_CLEARANCE clears its top edge
-            // with an 8px margin so the connector/dot never sits inside the glow.
+            // Clears the top edge of the ceiling halo `paint_ceiling_halos` burns
+            // over a lit monitor (up to 16px above desk.1 in PNG space) with an
+            // 8px margin, so the connector/dot never sits inside the glow.
             const GLOW_CLEARANCE: i32 = 24;
             let anchor_y = desk.1 - GLOW_CLEARANCE;
             match layout {
@@ -588,9 +548,8 @@ pub(crate) fn compose_frame(
                     dot(&mut img, desk.0 - 6, anchor_y, ANNOT_FONT_PX, ANNOT);
                 }
                 ProofLayout::Tall => {
-                    // no cross-panel connector line (the panel sits above, not
-                    // beside) — just the callout well clear of the sprite's
-                    // head/name-tag, plus a dot marking the desk itself.
+                    // No cross-panel connector line — the panel sits above, not
+                    // beside.
                     let text_w = aa_text_width_at(label, ANNOT_FONT_PX);
                     let label_x = (desk.0 - text_w - 16).max(PAD as i32);
                     let label_y = anchor_y - 22;
@@ -602,7 +561,6 @@ pub(crate) fn compose_frame(
         }
     }
 
-    // the burned coda strip — a full-width caption below everything
     let ch = coda_height(w);
     let coda_y0 = h - ch;
     fill(&mut img, 0, coda_y0, w, ch, CODA_BG);
@@ -633,9 +591,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
     let script = build_script(job.fixture)?;
     let mut pending: VecDeque<(u64, AgentEvent)> = script.events.iter().cloned().collect();
 
-    // The first agent takes desk 0 — anchor the burned callout to home_desks[0]
-    // in the SAME layout draw_scene computes (buf = cols x (rows-1)*2, the footer
-    // row excluded — the compute_crop_rect convention, encode.rs:190-198).
+    // Anchor the burned callout to home_desks[0] in the SAME layout draw_scene
+    // computes: buf = cols x (rows-1)*2, the footer row excluded.
     let buf_h = job.rows.saturating_sub(1).saturating_mul(2);
     let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
         job.cols,
@@ -678,10 +635,8 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             }
         }
         // `apply` only runs its debounce/expiry pass as a side effect of an
-        // incoming event — once the fixture's events are drained, nothing
-        // would ever settle Active -> Idle for the rest of the idle tail
-        // without this (see `Reducer::tick`'s own doc comment). The real
-        // runtime calls this every render tick independent of new events.
+        // incoming event, so without this nothing would ever settle Active ->
+        // Idle once the fixture's events are drained.
         reducer.tick(&mut scene, now);
         let mut draw_ctx = DrawCtx {
             buf: &mut buf,
@@ -692,10 +647,9 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
             theme_picker: None,
             floor_info: None,
             per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does. All THREE DrawCtx sites in
-            // this example must agree: a hardcoded `None` here is what kept the `⬢gw`
-            // chip off the very CLIP whose job is demoing the gateway, and clips are
-            // NOT pixel-gated by `gen-check` (presence-only), so nothing would catch it.
+            // DERIVED from the scene, as the runtime does — a hardcoded `None`
+            // here keeps the `⬢gw` chip off the very clip demoing the gateway,
+            // and clips are NOT pixel-gated by `gen-check`, so nothing catches it.
             gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
@@ -754,7 +708,6 @@ mod tests {
     #[test]
     fn build_script_pins_the_fixture_beats() {
         let s = build_script(&fixture_path()).unwrap();
-        // 1 SessionStart + 1 Rename + 3 ActivityStart + 3 ActivityEnd
         assert_eq!(s.events.len(), 8);
         assert!(matches!(s.events[0].1, AgentEvent::SessionStart { .. }));
         assert!(matches!(s.events[1].1, AgentEvent::Rename { .. }));
@@ -769,16 +722,12 @@ mod tests {
             .filter(|(_, e)| matches!(e, AgentEvent::ActivityEnd { .. }))
             .count();
         assert_eq!((starts, ends), (3, 3));
-        // at_ms is monotonic — the replay drains a front-ordered queue
         assert!(s.events.windows(2).all(|w| w[0].0 <= w[1].0));
-        // panel: $ claude, session started, prompt, 3 tool lines, done = 7
         assert_eq!(s.lines.len(), 7);
         assert_eq!(s.lines[0].text, "$ claude");
         assert!(s.lines[2].prompt, "the user prompt renders as a prompt row");
         assert!(s.lines[6].text.contains("done"));
-        // the first fixture line lands PREAMBLE_MS in
         assert_eq!(s.lines[2].at_ms, PREAMBLE_MS);
-        // the fixture's own capture date — the panel title's past-tense archive
         assert_eq!(s.capture_date, "2026-06-30");
     }
 
@@ -786,8 +735,8 @@ mod tests {
     fn reveal_and_annotation_math() {
         assert_eq!(revealed_chars(1000, 999, 10), 0);
         assert_eq!(revealed_chars(1000, 1000, 10), 0);
-        assert_eq!(revealed_chars(1000, 1100, 10), 3); // 30 cps → 3 chars in 100ms
-        assert_eq!(revealed_chars(1000, 9000, 10), 10); // clamped to len
+        assert_eq!(revealed_chars(1000, 1100, 10), 3);
+        assert_eq!(revealed_chars(1000, 9000, 10), 10);
         let lines = vec![
             PanelLine {
                 at_ms: 0,
@@ -817,9 +766,6 @@ mod tests {
         assert_eq!(active_annotation(&lines, 100), Some(0));
         assert_eq!(active_annotation(&lines, 899), Some(0));
         assert_eq!(active_annotation(&lines, 900), Some(2));
-        // the max-hold ceiling on a MIDDLE annotation ("y" — "z" is still to
-        // come): right at the edge it's still lit, one ms past it goes quiet
-        // — and does NOT fall back to the older annotation (0).
         assert_eq!(
             active_annotation(&lines, 900 + ANNOTATION_MAX_HOLD_MS),
             Some(2)
@@ -828,8 +774,6 @@ mod tests {
             active_annotation(&lines, 900 + ANNOTATION_MAX_HOLD_MS + 1),
             None
         );
-        // "z" is the LAST annotated line — exempt from the cap, it holds
-        // indefinitely (there's no future beat it could be over-holding for).
         let z_at = 900 + ANNOTATION_MAX_HOLD_MS + 50_000;
         assert_eq!(active_annotation(&lines, z_at), Some(3));
         assert_eq!(
@@ -862,9 +806,7 @@ mod tests {
 
     #[test]
     fn coda_fits_one_line_at_both_reference_canvas_widths() {
-        // The AA font's narrower per-char advance (vs font8x8) means the
-        // caption now fits on one line at BOTH the wide (1720px) and tall
-        // (960px, cols=120) reference canvases.
+        // 1720px = the wide reference canvas, 960px = tall at cols=120.
         for w in [1720, 960] {
             let lines = coda_lines(w);
             assert_eq!(lines.len(), 1, "canvas_w={w}");
@@ -887,6 +829,6 @@ mod tests {
     fn wrap_text_never_produces_an_empty_line_list() {
         let unit_width = |s: &str| s.chars().count() as i32;
         assert_eq!(wrap_text("", 100, unit_width), vec![String::new()]);
-        assert_eq!(wrap_text("hi", 1, unit_width), vec!["hi".to_string()]); // single word, never split
+        assert_eq!(wrap_text("hi", 1, unit_width), vec!["hi".to_string()]);
     }
 }

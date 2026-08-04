@@ -1,17 +1,13 @@
-//! Layout geometry golden snapshots.
-//!
-//! Snapshots the key fields of `SceneLayout` at fixed buffer sizes so any
-//! refactor to `compute` / `compute_with_seed` that accidentally shifts desk
-//! positions, room bounds, or waypoint coords will fail immediately.
+//! Layout geometry golden snapshots: the key fields of `SceneLayout` at fixed
+//! buffer sizes, so any refactor to `compute` / `compute_with_seed` that
+//! accidentally shifts desk positions, room bounds, or waypoint coords fails
+//! immediately.
 //!
 //! Regenerating after an INTENTIONAL layout change: run the suite to produce
-//! `*.snap.new`, eyeball the diff, then `cargo insta accept` (or
-//! `INSTA_UPDATE=always cargo test -p pixtuoid --test layout_golden`). The same
-//! applies to `walkable_golden.rs`.
+//! `*.snap.new`, eyeball the diff, then `cargo insta accept`. The same applies
+//! to `walkable_golden.rs`.
 
 use pixtuoid_scene::layout::SceneLayout;
-
-// ── Standard 96×72, seed 0 ──────────────────────────────────────────
 
 #[test]
 fn layout_standard_96x72_desks() {
@@ -45,8 +41,6 @@ fn layout_standard_96x72_zones() {
     insta::assert_debug_snapshot!("pantry_96x72", l.pantry.map(|p| p.bounds));
 }
 
-// ── Larger terminal 192×160, 8 desks, seed 0 ────────────────────────
-
 #[test]
 fn layout_standard_192x160_desks() {
     let l = SceneLayout::compute(192, 160, Some(8)).unwrap();
@@ -71,8 +65,7 @@ fn layout_standard_192x160_room_walls() {
     insta::assert_debug_snapshot!("room_walls_192x160", l.room_walls);
 }
 
-// ── Open plan: seed 2 (no meeting room, open pantry) ────────────────
-// Seed 2 hashes to floor_variant=1 after the Fibonacci decorrelation.
+// Open plan: seed 2 hashes to floor_variant=1 (no meeting room, open pantry).
 
 #[test]
 fn layout_open_plan_seed2_desks() {
@@ -98,8 +91,8 @@ fn layout_open_plan_seed2_room_walls() {
     insta::assert_debug_snapshot!("room_walls_open_plan_seed2", l.room_walls);
 }
 
-// ── Dense layout: seed 6 (dual meeting rooms if tall enough) ────────
-// Seed 6 hashes to floor_variant=2 after the Fibonacci decorrelation.
+// Dense layout: seed 6 hashes to floor_variant=2 (dual meeting rooms if tall
+// enough).
 
 #[test]
 fn layout_dense_seed6_desks() {
@@ -125,10 +118,7 @@ fn layout_dense_seed6_room_walls() {
     insta::assert_debug_snapshot!("room_walls_dense_seed6", l.room_walls);
 }
 
-// ── Floor variant uniqueness ────────────────────────────────────────
-// The 5 standard floor seeds (floor_idx × FLOOR_SEED_MULTIPLIER, for
-// floor_idx in 0..5) must each map to a distinct layout variant.
-// Collisions cause adjacent floors to look identical — see PR #42.
+// A seed collision here makes adjacent floors look identical.
 
 #[test]
 fn floor_variant_hash_gives_unique_layouts_per_floor() {

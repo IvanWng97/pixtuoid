@@ -15,14 +15,9 @@ coverage:
         threshold: 5%
         informational: true
 
-# Per-crate coverage VIEWS over the merged unit, Windows, and macOS workspace
-# uploads (a virtual path split - no per-crate CI jobs or uploads). Turns the
-# blended % into the DAG's topology (pixtuoid-core <- pixtuoid-scene <- pixtuoid
-# + the standalone hook), so a regression in one crate can't hide behind the
-# binary's untestable TTY paths the `ignore` list already drops. Non-blocking
-# (`informational`) to match the top-level statuses - these are a lens, not a
-# gate. The global `ignore` above still applies, so the `pixtuoid` view counts
-# only its headless-testable files.
+# Per-crate coverage VIEWS over the merged workspace uploads (a virtual path
+# split - no per-crate CI jobs), so a regression in one crate can't hide behind
+# the binary's untestable TTY paths. `informational`: a lens, not a gate.
 component_management:
   default_rules:
     statuses:
@@ -59,20 +54,20 @@ ignore:
   - "docs/"
   - "*.md"
   # Not coverable headlessly - exercising these needs a real TTY / OS / display.
-  # `.cargo/mutants.toml` also excludes the painter/glue files below (no headless
-  # test kills their mutants) but NOT crash/logging/sources_cli (pure helpers are
-  # unit-tested), and it additionally excludes some pixtuoid-core probe files not
-  # ignored here - so the two lists OVERLAP, neither is a subset. Keep the shared
-  # painter/glue entries in sync.
+  # `.cargo/mutants.toml` holds an overlapping but different list (neither is a
+  # subset): it still MUTATES the unit-tested decision layers inside tui/mod.rs +
+  # runtime/driver.rs, which stay WHOLLY ignored here. Keep the shared entries in
+  # sync. When a decision appears in one of these files, move it out rather than
+  # widening this list.
   - "crates/pixtuoid/src/main.rs"               # binary entry: arg-parse + dispatch + terminal preflights
-  - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (was main.rs; its pure helpers stay unit-tested)
-  - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; was main.rs; pure helpers unit-tested)
-  - "crates/pixtuoid/src/sources_cli.rs"        # println presenters over the real config path (was main.rs; covered by the cli_json e2e binary run)
+  - "crates/pixtuoid/src/crash.rs"              # panic hook: terminal restore + crash.log (pure helpers stay unit-tested)
+  - "crates/pixtuoid/src/logging.rs"            # global tracing-subscriber init (once per process; pure helpers unit-tested)
+  - "crates/pixtuoid/src/sources_cli.rs"        # println presenters over the real config path (covered by the cli_json e2e binary run)
   - "crates/pixtuoid/src/tui/mod.rs"            # crossterm event loop + terminal lifecycle: reads/writes the real TTY
   - "crates/pixtuoid/src/runtime/driver.rs"     # async glue: tokio runtime + block_on + ctrl_c + socket bind (#103)
-  - "crates/pixtuoid/src/runtime/pipeline.rs"   # the shared source-to-reducer spine (#714): same channel/spawn glue class as driver.rs
+  - "crates/pixtuoid/src/runtime/pipeline.rs"   # the shared source-to-reducer spine: same channel/spawn glue class as driver.rs
   - "crates/pixtuoid/src/floating/mod.rs"       # floating run(): tokio runtime + winit EventLoop glue (the floating twin of driver.rs)
   - "crates/pixtuoid/src/floating/window.rs"    # winit ApplicationHandler: creates the real OS window + softbuffer surface
-  # The testable floating logic IS counted: offscreen.rs (render seam) + geometry.rs (window/monitor rect math) + input.rs (the pure audio key-map).
-  # Keeps the % honest: "of the code we CAN test headlessly, X% is tested",
-  # rather than dragging the number down with paths no test can reach.
+  # The testable floating logic IS counted: offscreen.rs, geometry.rs, input.rs,
+  # cadence.rs. Keeps the % honest: "of the code we CAN test headlessly, X% is
+  # tested", rather than dragging it down with paths no test can reach.

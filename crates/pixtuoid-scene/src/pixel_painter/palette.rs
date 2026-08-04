@@ -1,43 +1,26 @@
 //! Per-agent palette (shirt / hair / skin) + frame recolor + color math
 //! primitives (blend / lerp / mix_lab).
-//!
-//! `agent_palette` picks the **outfit (shirt + pants) from the agent's normalized cwd**
-//! (same working directory → same outfit, for glanceable team/org-chart grouping), while
-//! **hair/skin stay per-agent** (`agent_id`-seeded). When `cwd` is unknown or empty, the outfit
-//! falls back to the `agent_id` seed. `recolor_frame` rewrites a frame's pixels by RGB-equality
-//! against the base pack palette. The color-math helpers live here too because the palette tint
-//! code uses them directly and they're widely shared with background/effects.
 
-// The render layer deliberately shares the decode layer's ONE identity-key
-// normalization (Team Palette groups outfits by the same cwd key the sources
-// key sessions on) — `id` is the neutral identity-keying home both depend on.
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
-/// A complete shirt + pants combo. Outfits are **keyed by the agent's normalized
-/// working directory** (same cwd → same outfit, so the office reads as a color-coded org-chart),
-/// not by per-agent hash. We pick *complete outfits* rather than independent shirt and pants
-/// colors so the result is always a harmonious pairing (designed together by someone who knows
-/// color) instead of a random clash. Hair/skin stay per-agent for individual distinctness.
-/// Sources: Wes Anderson stills, Studio Ghibli character art, modern office capsule-wardrobe palettes.
+/// A complete shirt + pants combo, keyed by the agent's normalized working
+/// directory (same cwd → same outfit, so the office reads as a color-coded
+/// org-chart). Whole outfits rather than independent shirt and pants colors, so
+/// the pairing is always harmonious instead of a random clash.
 #[derive(Clone, Copy)]
 struct Outfit {
     shirt: Rgb,
     pants: Rgb,
 }
 
-/// The 16 shirt+pants outfits — a curated pool indexed directly by the cwd seed
-/// (Team Palette). The first 8 are a WARM aesthetic grouping (earthy reds,
-/// ochres, terracottas over deep neutrals), the last 8 a COOL one (sages, slates,
-/// indigos over deeper neutrals): real palette curation, NOT a personality axis.
-/// (The old warm=extroverted / cool=homebody split was an `agent_id` artifact,
-/// dropped when outfits re-keyed on `cwd`; every agent now draws the full pool.)
-/// Order is load-bearing — the cwd seed indexes this array modulo its length, so
-/// keep warm `[0..8)` then cool `[8..16)`.
+/// The curated outfit pool, indexed by the cwd seed modulo its length (Team
+/// Palette): warm `[0..8)` then cool `[8..16)` — an aesthetic grouping, NOT a
+/// personality axis.
 const OUTFITS: &[Outfit; 16] = &[
-    // ── Warm ────────────────────────────────────────────────────────────
+    // Warm
     // Wes Anderson — Grand Budapest concierge (cream + plum)
     Outfit {
         shirt: Rgb {
@@ -142,7 +125,7 @@ const OUTFITS: &[Outfit; 16] = &[
             b: 0x2e,
         },
     },
-    // ── Cool ────────────────────────────────────────────────────────────
+    // Cool
     // Modern minimal — sage + charcoal
     Outfit {
         shirt: Rgb {
@@ -249,8 +232,6 @@ const OUTFITS: &[Outfit; 16] = &[
     },
 ];
 
-/// 8 hair colors: silver/grey for older-coded agents, ginger /
-/// strawberry blonde / jet black for silhouette variety.
 const HAIR_PRESETS: &[Rgb] = &[
     Rgb {
         r: 0x14,
@@ -321,11 +302,9 @@ const SKIN_PRESETS: &[Rgb] = &[
     }, // warm tan
 ];
 
-/// Deterministic seed from a normalized cwd string: byte-fold (the ×131 fold is
-/// also open-coded by `creatures::mascot_seed` — the two need not agree on output,
-/// so they stay separate; this note is the pairing) then the splitmix64 finalizer
-/// used across the scene (`ambient.rs`, `core::id`). No `DefaultHasher` (its
-/// per-process randomization would flicker colors across runs), no new dep.
+/// Deterministic seed from a normalized cwd string: byte-fold, then the
+/// splitmix64 finalizer. NOT `DefaultHasher` — its per-process randomization
+/// would flicker colors across runs.
 fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
@@ -335,49 +314,29 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     z ^ (z >> 31)
 }
 
-/// The outfit-determining seed for `agent` — the ONE input `agent_palette`
-/// keys the shirt+pants (Team Palette) on. Extracted so the frame cache can
-/// watch it for the mid-lifetime cwd backfill (`FrameCache::note_outfit_seed`)
-/// with the EXACT fallback logic the palette uses — a second copy of the
-/// unknown-cwd rule would silently drift.
+/// The outfit-determining seed for `agent`. Extracted so
+/// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
+/// the EXACT unknown-cwd fallback the palette uses; a second copy would drift.
 pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
-        // No usable cwd (hook-only / pre-cwd) => fall back to the per-agent seed
-        // so cwd-less agents still get a stable, individually-varied outfit.
         agent.agent_id.raw()
     } else {
         cwd_outfit_seed(&normalize_path_key(&agent.cwd.to_string_lossy()))
     }
 }
 
-/// Burn-tier ember hair (`BurnTier::Premium`+) — THE flame gradient's deep
-/// base (one shared const, so a gradient tweak can't desync hair from
-/// crown), deliberately saturated past every natural `HAIR_PRESETS` entry so
-/// a premium head never reads as "just auburn".
+/// Burn-tier ember hair — aliases the flame gradient's deep base so a gradient
+/// tweak can't desync the hair from the crown.
 const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
 
-/// Build the per-agent palette. `glow_tint` carries the monitor-glow
-/// color when the agent is seated at a lit screen (SeatedTyping). The
-/// skin blends 18% toward that tint so the eye reads "the monitor is
-/// lighting them up." `None` means no glow — skin stays natural.
-///
-/// The color varies by tool type so scanning a row of typing agents
-/// gives an at-a-glance read of what they're working on:
-///   green  = generic / default
-///   blue   = Edit / Write
-///   cyan   = Read
-///   orange = Bash
-///   purple = Agent / Task
+/// Build the per-agent palette. `Some(glow_tint)` blends the skin toward the
+/// monitor glow so a seated agent reads as lit by their screen.
 pub(super) fn agent_palette(
     base: &Palette,
     agent: &AgentSlot,
     glow_tint: Option<Rgb>,
     burn: crate::burn::BurnTier,
 ) -> Palette {
-    // Hair/skin stay per-individual (agent_id); only the OUTFIT re-keys on cwd
-    // so same-repo agents share a shirt (Team Palette). The old WARM/COOL split
-    // was personality-derived (an agent_id artifact cwd-keying breaks anyway);
-    // the outfit now spans the full 16-preset pool indexed by the cwd seed.
     let id_seed = agent.agent_id.raw() as usize;
     let outfit_seed = outfit_seed_for(agent);
     let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
@@ -398,13 +357,9 @@ pub(super) fn agent_palette(
         .with_override('P', Some(outfit.pants))
 }
 
-/// The monitor glow color for a specific tool kind — the exhaustive
-/// `ToolKind → hue` map. THE shared seam: the office monitor glow
-/// (`tool_glow_tint`) AND, cross-crate, the binary's footer tool-segment tint
-/// read it, so the footer's tool colour matches the sprite's screen glow
-/// exactly (re-exported as `pixel_painter::tool_glow_for_kind`). The match is
-/// exhaustive on purpose: a new `ToolKind` variant must consciously pick a
-/// color here.
+/// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND, via
+/// re-export, by the binary's footer tool-segment tint, so the footer's colour
+/// matches the sprite's screen glow exactly.
 pub fn tool_glow_for_kind(
     kind: pixtuoid_core::state::ToolKind,
     glow: &crate::theme::ToolGlowColors,
@@ -420,11 +375,8 @@ pub fn tool_glow_for_kind(
     }
 }
 
-/// Map an agent's active tool kind to a monitor glow color.
-/// Returns `None` for non-Active states (no glow). Matches the typed
-/// `ToolKind` carried in the slot (derived once at slot entry by the
-/// reducer) — no per-frame re-parse of the human-facing `detail` string.
-/// Delegates the kind→hue map to [`tool_glow_for_kind`].
+/// The monitor glow color for an agent's active tool, or `None` when the agent
+/// is not Active.
 pub(super) fn tool_glow_tint(
     agent: &AgentSlot,
     glow: &crate::theme::ToolGlowColors,
@@ -437,11 +389,10 @@ pub(super) fn tool_glow_tint(
 }
 
 pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) -> Frame {
-    // The base->agent color swap per recolor key, resolved ONCE (not per pixel).
     // Keyed off `RECOLOR_KEYS` (core's single source of truth, the same set
     // `validate_recolor_palette` guards for RGB-uniqueness) so the substitution
     // and the load-time guard can't drift. A `None` base never equals a `Some`
-    // pixel, so a transparent/absent key naturally substitutes nothing.
+    // pixel, so an absent key naturally substitutes nothing.
     let swaps: Vec<(Pixel, Pixel)> = RECOLOR_KEYS
         .iter()
         .map(|&k| (base_pal.get(k).flatten(), pal.get(k).flatten()))
@@ -460,13 +411,10 @@ pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) ->
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-/// Map one mascot pixel to its "degraded" look (#317): a gateway that is UP but
-/// whose model backend is failing every run reads as UNWELL — drain saturation
-/// toward grey, bias toward a dull blood-red, then dim. Transparent stays
-/// transparent (handled by `degraded_frame`).
+/// Map one mascot pixel to its "degraded" look: a gateway that is UP but whose
+/// model backend fails every run must read as UNWELL.
 pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
-    // Fraction of saturation drained toward grey — enough to read as UNWELL
-    // without going fully monochrome (the dull-red bias below still shows).
+    // By eye: unwell, but not so grey that the dull-red bias below stops showing.
     const SATURATION_DRAIN: f32 = 0.55;
     let lum = ((c.r as f32) * 0.30 + (c.g as f32) * 0.59 + (c.b as f32) * 0.11) as u8;
     let gray = Rgb {
@@ -480,17 +428,16 @@ pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
         g: 40,
         b: 40,
     };
-    let tinted = blend_rgb(desat, sick, 0.45); // bias toward a dull red
+    let tinted = blend_rgb(desat, sick, 0.45);
     blend_rgb(
         tinted,
         Rgb { r: 0, g: 0, b: 0 },
-        0.18, // dim ~18% — the lobster looks drained
+        0.18, // dim: the mascot looks drained
     )
 }
 
-/// A degraded copy of a mascot frame (#317): every opaque pixel runs through
-/// [`degraded_pixel`]; transparency is preserved. Mirrors `recolor_frame`'s
-/// pixel-map shape.
+/// A degraded copy of a mascot frame — every opaque pixel through
+/// [`degraded_pixel`], transparency preserved.
 pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     let pixels = frame
         .as_slice()
@@ -500,8 +447,6 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-// --- Color math primitives -----------------------------------------------
-
 /// Per-channel sRGB lerp. Cheap; used for low-strength tints where
 /// perceptual error doesn't matter (e.g. agent skin glow).
 pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
@@ -510,9 +455,7 @@ pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
-/// Per-channel sRGB blend toward `b` by `t` — the `Rgb { r, g, b }` triple
-/// (`blend` on each channel, one shared `t`) written once. Cheap; use `mix_lab`
-/// where the perceptual difference is visible.
+/// [`blend`] on each channel of an `Rgb` triple, with one shared `t`.
 pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     Rgb {
         r: blend(a.r, b.r, t),
@@ -521,18 +464,16 @@ pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     }
 }
 
-/// Composite `tint` over the existing buffer pixel at `(x, y)` by `t`. The
-/// frosted-glass / haze / overlay primitive (was the wall module's private `glass_over`).
+/// Composite `tint` over the existing buffer pixel at `(x, y)` by `t` — the
+/// frosted-glass / haze / overlay primitive.
 pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {
     blend_rgb(buf.get(x, y), tint, t)
 }
 
-/// Composite `tint` over the buffer pixel at `(x, y)` by `t` AND write it back —
-/// the clip-then-read-blend-write primitive the procedural painters open-coded
-/// ~a-dozen times as `if in_bounds { let c = blend_rgb(get, tint, t); put(c) }`.
+/// Composite `tint` over the buffer pixel at `(x, y)` by `t` AND write it back.
 /// Clips like [`RgbBuffer::put_checked`]: a no-op outside the buffer. Use
-/// [`blend_over`] when you need the blended color WITHOUT writing (to feed a
-/// further composite); use this when the blend lands straight back on the buffer.
+/// [`blend_over`] instead when the blended color feeds a further composite
+/// rather than landing straight back on the buffer.
 pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) {
     if x < buf.width() && y < buf.height() {
         let blended = blend_over(buf, x, y, tint, t);
@@ -540,10 +481,9 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
     }
 }
 
-/// Perceptually-correct Lab-space mix between two sRGB colors. Twilight
-/// (orange → navy) and dim overlays travel cleanly through Lab without the
-/// muddy desaturated midpoint that naive sRGB lerp produces. Slower than
-/// `blend()` but only used where the perceptual difference is visible.
+/// Perceptually-correct Lab-space mix between two sRGB colors — twilight
+/// (orange → navy) and dim overlays travel through Lab without the muddy
+/// desaturated midpoint naive sRGB lerp produces. Slower than [`blend`].
 pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
     use palette::{FromColor, IntoColor, Lab, Mix, Srgb};
     let sa = Srgb::new(a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0);
@@ -571,11 +511,9 @@ mod tests {
         };
         let tint = Rgb { r: 0, g: 0, b: 0 };
         let mut buf = RgbBuffer::filled(2, 2, base);
-        // In bounds: byte-identical to the old `put(blend_rgb(get, tint, t))` idiom.
         blend_pixel(&mut buf, 1, 1, tint, 0.5);
         assert_eq!(buf.get(1, 1), blend_rgb(base, tint, 0.5));
         assert_eq!(buf.get(0, 0), base, "neighbor untouched");
-        // Out of bounds on either axis: silent no-op, no panic (the clip contract).
         blend_pixel(&mut buf, 2, 0, tint, 0.5);
         blend_pixel(&mut buf, 0, 2, tint, 0.5);
         assert_eq!(buf.get(0, 0), base);

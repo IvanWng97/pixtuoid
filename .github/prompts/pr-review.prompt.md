@@ -150,7 +150,7 @@ given change/tree, say so, don't skip it.
   rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
   can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any present-tense
   code-state assertion moved into a test — the comment keeps only `pinned by
-  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); manifest-bridge (a
+  <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); and comment-vs-ITSELF — apply CLAUDE.md's comment test #2 and report `N sentences, M ideas` with the cut; manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
 - **(D) Quality + tooling** — test-coverage gaps (changed/existing code with no
   exercising test); mutation-teeth (assertions that survive the mutation — and a
@@ -173,9 +173,12 @@ given change/tree, say so, don't skip it.
   the group set, whereupon the membership rule instructed the maintainer to
   REMOVE a group from the ONLY required status check protecting main — a
   confident wrong instruction carrying a gate's authority, worse than silence.
-  Mutation testing proves only the first direction; `deny_coverage_test.sh`
-  mechanically enforces that a deny message is asserted somewhere, and the
-  legitimate-variant half stays this factor's job; **the message is half the
+  Mutation testing proves only the first direction; the policy layer's
+  `opa test --coverage` ratchet (inside `just ci-observability`) is an
+  AGGREGATE line-coverage floor, not a per-rule assertion requirement — it is
+  what surfaced the Conftest `deny` heads whose bodies had never once been true
+  (#789), but a brand-new untested rule barely moves the number and still
+  passes, so BOTH directions stay this factor's job; **the message is half the
   rule** — a deny/error/panic string is the ONLY part of a check a future
   maintainer reads, so it must name the actual requirement and the remedy, not a
   plausible-sounding neighbour: #788's OIDC rule denied with "only the tests call
@@ -390,19 +393,27 @@ history:
 - **Diff adds or reshapes a substantial block of comments / doc comments**
   (a new multi-line `//` WHY, a large `///` docstring, a comment-heavy refactor,
   a mass doc pass) → add a comment lens that reads each NEW/changed comment
-  AGAINST the code it describes (not the diff in isolation), on the four
+  AGAINST the code it describes (not the diff in isolation), on five
   Family-C axes: **accuracy** (does it match what the code actually does?),
   **value** (a non-obvious WHY, never narration of the WHAT — the comment-value
   factor), **comment-rot** (now FALSE about the code), and the **vestigial**
   class (a comment describing code the SAME diff deleted — "code gone, comment
-  remains"). This is a SEMANTIC judgment the mechanical gate can't make: the
+  remains"), plus **REDUNDANCY-WITHIN** (below). This is a SEMANTIC judgment the mechanical gate can't make: the
   diff-scoped `just comment-lint` advisory finds structural CANDIDATES (runs of
-  3+ consecutive `//` in a fn body, on the diff's new lines only — the ~5k
+  3+ consecutive line comments in a fn body — `//` in Rust, `#` in Python — on
+  the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
+  **Redundancy-within is the axis this lens kept missing**: the other four
+  compare the comment to the CODE, and a restatement repeats no code, so
+  nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do
+  not paraphrase it here — an earlier copy drifted into the opposite procedure. The finding
+  is REPETITION, not length: "too long" sends the author to trim a legitimate
+  WHY instead of the duplicates.
+
   Anti-slop caveat: this repo's dense WHY-comment density is DELIBERATE — flag
-  only genuine slop (restated WHAT, stale, vestigial), never a legitimate WHY
-  that happens to run long. (Claude Code: the `comment-analyzer` agent is the
+  only genuine slop (restated WHAT, stale, vestigial, restated-ITSELF), never a
+  legitimate WHY that happens to run long. (Claude Code: the `comment-analyzer` agent is the
   ready implementation.)
 - **Interactive TUI flow changed** (onboarding, panel actions, popup gating,
   keybind dispatch) → add a UX / user-journey lens that WALKS each user path
@@ -516,7 +527,10 @@ gates and watch the NEW head's CI — and gate the merge on the online bot
 review's LATEST COMMENT verdict (`Findings: N`) plus `mergeStateStatus`,
 never the check table: the claude-review JOB is green even when it posts
 findings (#448 merged past a fresh MEDIUM; #449 onward reads the comment
-verdict).
+verdict). A run that produced NO verdict now says so in its own comment,
+carrying an `<!-- absent-<marker>:<sha> -->` marker — that is an unreviewed
+head, not a clean one, and it is not a `Findings: 0`. It is keyed to the head,
+so a notice for an older sha is not a verdict on this one.
 
 ---
 

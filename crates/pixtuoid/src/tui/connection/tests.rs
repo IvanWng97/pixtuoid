@@ -9,8 +9,6 @@ use pixtuoid_core::source::manager::SourceDeath;
 use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex};
 use pixtuoid_core::AgentId;
 
-// `Target` moved with the status model to `crate::sources`; import it directly
-// (these row tests exercise the re-exported `build_rows`/`build_rows_from`).
 use crate::install::target::Target;
 
 fn claude_target() -> &'static Target {
@@ -87,9 +85,6 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     ]);
     assert_eq!(rows[0].state, ConnState::Connected);
     assert_eq!(rows[1].state, ConnState::Disconnected);
-    // The absent-CLI arm now CARRIES the persisted-intent bit in the variant: a
-    // stale flag says connected, so `NoCli { connected: true }` (rows[2]) — while a
-    // never-connected absent CLI would be `NoCli { connected: false }`.
     assert_eq!(rows[2].state, ConnState::NoCli { connected: true });
     assert_eq!(rows[3].state, ConnState::Connected);
     assert_eq!(rows[4].state, ConnState::Disconnected);
@@ -98,11 +93,9 @@ fn build_rows_from_state_follows_connected_set_with_nocli_override() {
     assert_eq!(rows[3].display_name, "Antigravity");
     assert!(rows[3].target.is_none());
     assert!(rows[3].config_path.is_none());
-    // The connected bit is derived from `state` (`ConnState::connected`), so the
-    // toggle can still disconnect a connected-but-absent CLI (rows[2]) — its hooks
-    // live in the config, not the missing binary. Without the carried bit, a
-    // connected-but-absent NoCli would be indistinguishable from a never-connected
-    // one and thus un-disconnectable via the panel.
+    // Without the carried bit a connected-but-absent NoCli would be
+    // indistinguishable from a never-connected one, and un-disconnectable via
+    // the panel — its hooks live in the config, not the missing binary.
     assert!(
         rows[2].state.connected(),
         "a connected-but-absent NoCli must keep its connected bit"
@@ -143,7 +136,6 @@ fn live_for_counts_groups_and_ages() {
     );
     assert!(!cc.dead);
 
-    // An empty source → idle (0 agents, no age) — both sides of the count.
     let empty = live_for(now, "reasonix", &scene, none);
     assert_eq!(
         empty.facet,
@@ -153,7 +145,6 @@ fn live_for_counts_groups_and_ages() {
         }
     );
 
-    // `dead` from a matching SourceDeath (keyed on the same name string).
     let health = [SourceDeath::new("codex", "boom")];
     let cx = live_for(now, "codex", &scene, &health);
     assert_eq!(
@@ -168,16 +159,13 @@ fn live_for_counts_groups_and_ages() {
 
 #[test]
 fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
-    // A DAEMON source (openclaw) creates NO AgentSlot — its liveness is the
-    // instance roster. Counting slots made the panel render `idle` for a host with
-    // four gateways running and one mid-run: the column could not distinguish a
-    // stopped gateway from a busy one. Registry-driven (`is_daemon`), so this is
-    // about the source CLASS, not the name openclaw.
+    // A DAEMON source creates NO AgentSlot — its liveness is the instance
+    // roster. Registry-driven (`is_daemon`), so this is about the source CLASS,
+    // not the name openclaw.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(100);
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let none: &[SourceDeath] = &[];
 
-    // No gateway running → NOT the agents facet, and distinguishable from idle.
     let mut scene = SceneState::uniform(8);
     assert_eq!(
         live_for(now, src, &scene, none).facet,
@@ -185,16 +173,14 @@ fn live_for_reports_a_daemons_instances_not_the_agent_slots_it_never_creates() {
         "a daemon with no instance must not report an agent count"
     );
 
-    // An AgentSlot that (impossibly) claimed the daemon's name must NOT be counted
-    // as its liveness — the class decides the facet, not the data lying around.
+    // A slot that (impossibly) claimed the daemon's name must NOT be counted as
+    // its liveness — the class decides the facet, not the data lying around.
     let ghost = AgentId::from_transcript_path("/p/ghost.jsonl");
     scene.agents.insert(
         ghost,
         mk_slot(ghost, src, SystemTime::UNIX_EPOCH + Duration::from_secs(99)),
     );
 
-    // Two gateways: one idle, one BUSY → the roster is counted and rolled up
-    // worst-of, the same `gateway_rollup` the footer chip and wall board read.
     let mut add = |port: &str, runs: &[&str]| {
         scene.insert_daemon(
             src,
@@ -251,17 +237,15 @@ fn move_selection_clamps_at_both_ends() {
             health: None,
         },
     ]);
-    assert_eq!(move_selection(&rows, 0, -1), 0); // clamp at the low end
+    assert_eq!(move_selection(&rows, 0, -1), 0);
     assert_eq!(move_selection(&rows, 0, 1), 1);
-    assert_eq!(move_selection(&rows, 1, 1), 1); // clamp at the high end
-    assert_eq!(move_selection(&[], 0, 1), 0); // empty → 0
+    assert_eq!(move_selection(&rows, 1, 1), 1);
+    assert_eq!(move_selection(&[], 0, 1), 0);
 }
 
 #[test]
 fn build_rows_covers_every_registry_source_with_aligned_live_view() {
-    // The real registry-backed builder produces one row per source, and
-    // live_view returns a parallel vec of the same length (the painter relies on
-    // the index alignment).
+    // The painter relies on `live_view` being index-aligned with `rows`.
     let rows = build_rows(&HashSet::new(), "");
     assert!(rows.len() >= 5, "expected the 5 install targets + sources");
     assert!(
@@ -276,14 +260,11 @@ fn build_rows_covers_every_registry_source_with_aligned_live_view() {
 
 #[test]
 fn build_rows_honors_the_connected_set() {
-    // A source named in the connected-set renders Connected (unless its CLI is
-    // absent → NoCli); one omitted renders Disconnected/NoCli — never Connected.
     let mut set = HashSet::new();
     set.insert("antigravity".to_string()); // no-target → flag alone drives it
     let rows = build_rows(&set, "");
     let ag = rows.iter().find(|r| r.source_id == "antigravity").unwrap();
     assert_eq!(ag.state, ConnState::Connected);
-    // A source NOT in the set is never Connected.
     for r in &rows {
         if r.source_id != "antigravity" {
             assert_ne!(
@@ -296,11 +277,8 @@ fn build_rows_honors_the_connected_set() {
     }
 }
 
-// Regression guard for the claude-code-vs-claude join (review CRITICAL): the
-// REAL build_rows() must produce an actionable (target-bearing) row for EVERY
-// registry source that has an install target — Antigravity is the only
-// JSONL/no-target source. A namespace drift between `SourceDescriptor.name` and
-// `Target.core_source` would make a flagship row non-actionable, and this fails.
+// A namespace drift between `SourceDescriptor.name` and `Target.core_source`
+// would silently make a flagship row non-actionable.
 #[test]
 fn build_rows_makes_every_source_with_a_target_actionable() {
     use pixtuoid_core::source::registry::REGISTRY;
@@ -311,8 +289,8 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
             .find(|r| r.source_id == d.name)
             .unwrap_or_else(|| panic!("no Connection row for registered source {:?}", d.name));
         let has_target = crate::install::target::by_source(d.name).is_some();
-        // `target.is_some()` IS actionability — the connection state (Connected/
-        // Disconnected/NoCli) depends on FS presence, which is environment-specific.
+        // `target.is_some()` IS actionability — the connection state itself
+        // depends on FS presence, which is environment-specific.
         assert_eq!(
             row.target.is_some(),
             has_target,
@@ -321,7 +299,6 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
             row.target.map(|t| t.name),
         );
     }
-    // The flagship specifically: claude-code → a "Claude Code" actionable row.
     let claude = rows.iter().find(|r| r.source_id == "claude-code").unwrap();
     assert!(
         claude.target.is_some(),
@@ -332,12 +309,10 @@ fn build_rows_makes_every_source_with_a_target_actionable() {
 
 #[test]
 fn every_no_target_row_has_an_explicit_display_name_not_the_raw_id() {
-    // A NO-TARGET source's display name comes from `display_name_for`, which must
-    // have an explicit arm — its `other => other` fallthrough leaks the lowercase
-    // registry id into the panel name column + prompts.
-    // Target-bearing rows are exempt: they use `Target.display_name`, which may be
-    // a deliberate lowercase brand (e.g. "opencode"). Mechanized so the next
-    // no-target source fails loudly.
+    // A NO-TARGET source's name comes from `display_name_for`, whose
+    // `other => other` fallthrough leaks the lowercase registry id into the
+    // panel. Target-bearing rows are exempt: they use `Target.display_name`,
+    // which may be a deliberate lowercase brand (e.g. "opencode").
     for row in build_rows(&HashSet::new(), "") {
         if row.target.is_none() {
             assert_ne!(
@@ -369,7 +344,6 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
         ),
         "\u{2713} Claude Code connected"
     );
-    // Backup + PATH notes append.
     let noted = format_connect_result(
         &base(
             InstallOutcome::Installed,
@@ -382,9 +356,6 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
     assert!(noted.contains("backup saved"), "{noted}");
     assert!(noted.contains("PATH"), "{noted}");
 
-    // A target whose install is NOT the last step says so on the same line —
-    // "connected" alone is technically true and practically misleading when the
-    // running gateway will not load the plugin until it restarts.
     let hinted = format_connect_result(
         &InstallReport {
             outcome: InstallOutcome::Installed,
@@ -406,11 +377,9 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
 
 #[test]
 fn only_openclaw_declares_a_post_install_step_and_it_names_the_restart() {
-    // The hint is per-TARGET data, not a string in a presenter: OpenClaw is the only
-    // target whose write does not take effect on the CLI's next run, because
-    // upstream's own reload plan marks `plugins.load` as `kind: "restart"` (verified
-    // in the shipped 2026.7.1 bundle). If a future target gains a post-install step
-    // it sets this field and both presenters surface it for free.
+    // OpenClaw is the only target whose write does not take effect on the CLI's
+    // next run: upstream's own reload plan marks `plugins.load` as
+    // `kind: "restart"`.
     let mut with_hint = Vec::new();
     for t in crate::install::TARGETS {
         if let Some(h) = t.post_install_hint {
@@ -441,7 +410,6 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
     assert!(s.contains("disconnected"), "{s}");
     assert!(s.contains("backup cleared"), "{s}");
 
-    // NothingToRemove still reads as disconnected, no backup line.
     let nothing = UninstallReport {
         outcome: UninstallOutcome::NothingToRemove,
         config_path: PathBuf::from("/c"),
@@ -450,6 +418,30 @@ fn format_disconnect_result_renders_disconnected_plus_backup_note() {
     let s2 = format_disconnect_result(&nothing, "Codex");
     assert!(s2.contains("disconnected"), "{s2}");
     assert!(!s2.contains("backup"), "{s2}");
+}
+
+#[test]
+fn the_panel_words_every_failure_through_one_formatter() {
+    let connect = format_failure(FailedOp::Connect, "Cursor", "boom");
+    let disconnect = format_failure(FailedOp::Disconnect, "Cursor", "boom");
+    let folded = format_failure(FailedOp::HookRemoval, "OpenClaw", "JSON5, not strict JSON");
+
+    assert_eq!(connect, "Cursor: connect failed \u{2014} boom");
+    // Exact, not `contains`: "disconnect failed" CONTAINS "connect failed", so a
+    // loose check passes for the opposite operation.
+    assert_eq!(disconnect, "Cursor: disconnect failed \u{2014} boom");
+    assert_eq!(
+        folded,
+        format!(
+            "OpenClaw: {} \u{2014} JSON5, not strict JSON",
+            crate::sources::HOOK_REMOVAL_FAILED_PHRASE
+        ),
+        "the fold's phrase is the one `main`'s `disconnect` arm prints too"
+    );
+    assert!(
+        !folded.contains("disconnect failed"),
+        "the disconnect SUCCEEDED — only the hook removal didn't: {folded}"
+    );
 }
 
 #[test]
@@ -485,8 +477,7 @@ fn no_action_hint_distinguishes_nocli_from_actionable() {
         "NoCli hint: {}",
         no_action_hint(&rows[0])
     );
-    // The actionable fallback arm (not normally surfaced — the painter routes
-    // Disconnected to the action line — but the toggle effect calls it).
+    // The fallback arm the painter never routes to, but the toggle effect calls.
     assert!(
         no_action_hint(&rows[1]).contains("nothing to do"),
         "fallback hint: {}",

@@ -23,24 +23,29 @@ above don't apply there):
 
 There is a THIRD consumer with no guide in this tree, because it lives in
 someone else's repo: **homebrew-core**'s `pixtuoid` formula. Its `test do`
-block parses `connect claude-code --json` and asserts the exact row
-`{"id" => "claude-code", "outcome" => "connected"}`, plus that `--version`
-prints the version, the literal `OK: pack "skeleton"` line, and that
-`.claude/settings.json` gains `pixtuoid-hook`. Their **`install`** block adds
-two more, and those are worse — they break core's BUILD, not its test:
-`pixtuoid man` must emit roff and `pixtuoid completions <shell>` a script,
-both on clean stdout. The asymmetry is the dangerous part: Raycast and the site
-fail in OUR CI where we see it; homebrew-core fails in THEIRS, on an
-`autobump: true` version bump we neither trigger nor get notified about, and
-our suite stays green because it asserts those same strings as its own
-goldens. The contract is marked at each source site (`validate.rs`,
-`sources_cli.rs`, `claude_code.rs`); the release-side consequences —
-default-feature Linux builds, new `depends_on`, the tag-is-a-publish rule —
-are in [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
+block asserts exact CLI output, and its `install` block requires `pixtuoid man`
+and `pixtuoid completions <shell>` on clean stdout — those break core's BUILD.
+The asymmetry is the dangerous part: Raycast and the site fail in OUR CI where
+we see it; homebrew-core fails in THEIRS, on an `autobump: true` bump we
+neither trigger nor get notified about, and our suite stays green because it
+asserts those same strings as its own goldens. The contract is marked at each
+source site — the exact asserted rows live in the "homebrew-core contract"
+comments at `validate.rs`, `sources_cli.rs` and `claude_code.rs`, and the
+release-side consequences (default-feature Linux builds, new `depends_on`, the
+tag-is-a-publish rule) are in
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 **Read the nested guide for the crate you're editing.** Many things that look
 like a bug are documented, load-bearing design — the "Known sharp edges"
 section in each nested file (indexed below) explains why.
+
+**Two things about how these files load.** Each nested guide keeps its
+"how does X work?" answers in a sibling `WHERE-TO-LOOK.md`, indexed by question
+in the guide itself — so a session pays for the one answer it needs instead of
+every answer the crate has. And a nested `CLAUDE.md` is re-read only when you
+next touch a file in its tree: unlike this root file, it is **not** re-injected
+after a `/compact`, so on a long arc re-open one file from the crate before
+trusting your memory of its sharp edges.
 
 ## What this is
 
@@ -53,71 +58,30 @@ an ASCII office. Rust workspace of five crates. User-facing overview:
 ## Layout (workspace)
 
 ```
-crates/                 DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web} (+ standalone pixtuoid-hook)
-├── pixtuoid-core/   headless lib — no terminal deps (ratatui/crossterm forbidden)
-│                    source/ state/ sprite/ render/ grid.rs walkable.rs (walkable STAYS here:
-│                    its ops are an inherent `impl Grid<bool>`, orphan-rule-pinned to Grid's crate)
-│                    `native` (default) feature gates the async source runtime (tokio/notify,
-│                    hook/jsonl/manager/probes, the Source-trait seam source/native.rs + each
-│                    source's runtime half source/<cli>/native.rs — MODULE-level gates with
-│                    parent re-exports, not item-level cfg scatter) — `default-features = false`
-│                    leaves the pure decode/reducer core, which compiles to wasm32
-├── pixtuoid-scene/  backend-agnostic render+sim ENGINE crate — terminal AND window-free BY CRATE
-│                    BOUNDARY (no ratatui/crossterm/winit/softbuffer in its Cargo.toml; just arch enforces)
-│                    pixel_painter/ (render_to_rgb_buffer) layout/ physics.rs pose/ (pure + routed,
-│                    file-level split) motion/ pathfind/ floor/ theme/ pet.rs creatures.rs chitchat.rs
-│                    frame_cache.rs anim.rs overlay.rs board.rs burn.rs embedded_pack.rs (default pack at
-│                    sprites/default/, own build.rs); depends on pixtuoid-core (forwards `native`)
-├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap; depends on pixtuoid-scene
-│                    cli.rs config/ runtime/ install/ focus/ (click-to-focus: pid→ancestor→activate) tui/ floating/ (two thin painters over the
-│                    pixtuoid-scene crate; neither depends on the other) sprites/ (skeleton embedded via
-│                    include_str!, robot --pack-dir-loadable)
-├── pixtuoid-web/    the THIRD painter — wasm-bindgen `<canvas>` painter over pixtuoid-scene
-│                    (default-features off → no tokio anywhere), publish = false: a SITE BUILD
-│                    INPUT (`just gen-wasm` → committed site/public/wasm/), not a crates.io
-│                    artifact. `Office` handle: new(seed) / step(now_ms,w,h) / frame_ptr/len;
-│                    a looped scripted timeline (src/script.rs) drives the REAL Reducer (+ the OpenClaw
-│                    lobster via the real apply_presence lane, and a visitor-facing Office.hire()
-│                    — the install Copy click walks a capped extra coworker in, #434), so the
-│                    hero's lifecycle/motion/render behave exactly like the app (the EVENT STREAM
-│                    is authored; the state machine + pixel pass are the app's). Time is a
-│                    PARAMETER — the engine never reads the clock on wasm.
-└── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named
-                     pipe (transport.rs), 200ms send bound
-scripts/             gen-media.py + media.json (the ONE manifest-driven driver for ALL
-                     docs/images + site demos + CI visual baselines → `just gen-media`),
-                     crop-snapshot.py (visual verify), gen-readme.mjs (README sections
-                     from site/src/*.json), compare-screenshots.py (`just gen-check`),
-                     replay-fixture.sh (replay a captured rollout headlessly),
-                     openclaw-live-e2e.sh (zero-cost HERMETIC daemon live-e2e: drives the real
-                     shim with crafted OpenClaw envelopes on an isolated socket → asserts the lobster's
-                     idle/busy/degraded/down via the headless `daemons=[openclaw@<port>:<state>]` line,
-                     incl. #317 degraded, #318 mid-attach pid-adopt→kill→down, and TWO gateways
-                     (two ports, two owned pids) coexisting where killing one downs only its own),
-                     openclaw-multi-gateway-e2e.sh (N REAL `openclaw gateway run` processes, each in
-                     its own throwaway OPENCLAW_HOME on its own port, feeding ONE headless pixtuoid →
-                     asserts one `openclaw@<port>` row per gateway + instance-local death, AND that
-                     OpenClaw's OWN `plugins list` reports our plugin `enabled` (the keys we write are
-                     the keys it reads). Zero model calls / zero account footprint — the middle rung
-                     between the hermetic script above and the billed one below; needs a real
-                     `openclaw` on PATH, so NOT a CI test),
-                     openclaw-cc-backend-e2e.sh (NON-hermetic: starts a REAL `openclaw gateway run`
-                     + one `openclaw agent` turn on the claude-cli backend → proves the gateway
-                     the lobster AND its backend `cc·<workspace>` coding sprite coexist live; real
-                     account/gateway footprint, NOT a CI test),
-                     check_upstream_drift.py (weekly wire-format watch),
-policy/              repository policy-as-code: `ci-observability/` combines
-                     Conftest/OPA structural contracts with yq-extracted
-                     action/workflow behavior tests
-site/                Astro landing page → GitHub Pages; self-contained Node project,
-                     own CI; `just site-{setup,dev,dev-bg,dev-stop,check,fmt,e2e}` → see site/README.md
-integrations/raycast/  Raycast extension (TypeScript, self-contained Node project; NOT Rust):
-                     `Manage Sources` (connect/disconnect over `pixtuoid sources|connect|disconnect
-                     --json`) + `Start Floating` commands. A thin shell over the CLI `--json`
-                     contract — does NOT bundle the binary; resolves it via login-shell PATH +
-                     a binary-path preference. Own CI (.github/workflows/raycast.yml: tsc + eslint;
-                     `ray build`/`ray lint` need the macOS app, run before store publish). See its README.
+crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+ standalone pixtuoid-hook)
+├── pixtuoid-core/   headless lib — no terminal deps. Sources/decoders, reducer/state, sprites,
+│                    grid + walkable. The `native` (default) feature gates the async source
+│                    runtime; `default-features = false` leaves a wasm32-clean decode/reduce core.
+├── pixtuoid-scene/  backend-agnostic render+sim ENGINE — terminal AND window-free BY CRATE
+│                    BOUNDARY (ratatui/crossterm/winit/softbuffer are not in its Cargo.toml, so
+│                    reaching for one won't compile; `just arch` covers it too). Pixel painter,
+│                    layout, pose/motion/pathfind, theme MODEL, pets, chitchat, audio.
+├── pixtuoid/        binary — ratatui + crossterm + winit + tokio + clap. TWO thin painters over
+│                    pixtuoid-scene: `tui/` and `floating/`, and neither depends on the other.
+├── pixtuoid-web/    the THIRD painter — wasm `<canvas>`, `publish = false`. A SITE BUILD INPUT
+│                    (`just gen-wasm` → committed site/public/wasm/), not a crates.io artifact.
+│                    Time is a PARAMETER — the engine never reads the clock on wasm.
+└── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named pipe.
+scripts/             gen-media.py + media.json (the ONE driver for all committed art), the three
+                     OpenClaw e2e tiers (see Build & test), check_upstream_drift.py, risk-radar.py.
+policy/              policy-as-code: Conftest/OPA structural contracts + yq-extracted
+                     action/workflow behavior tests (`policy/ci-observability/`).
+site/                Astro landing page → GitHub Pages. Self-contained Node project, own CI.
+integrations/raycast/  Raycast TS extension over the CLI `--json` contract. Own CI.
 ```
+
+Per-crate module detail lives in that crate's nested guide — it is deliberately
+NOT duplicated here.
 
 ## Build & test
 
@@ -136,22 +100,28 @@ iterating, scope to one crate (seconds vs a full-workspace run).
 > caches and recompile the workspace twice. Run `just preflight` (lint →
 > clippy → hack → test, the exact CI order) or one check at a time.
 
-**Test organization (three tiers):** unit tests next to the code (large
-modules use a sibling `#[cfg(test)] mod tests;` file — keeps `use super::*`
-without API widening); integration tests in `crates/<crate>/tests/` —
-pixtuoid-core's suite is 9 binaries (five capability-grouped + four
-flat, three of them deliberately publish-excluded) with `#[cfg(windows)]` parity twins, all mapped in
-[`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md);
-the headless render harness (`tui_renderer/harness`) drives the real
-`TuiRenderer` through ratatui `TestBackend` — see the tui guide. Coverage:
-`just coverage`. Decoder never-panic fuzz vs a real session corpus:
-`just fuzz <source> <jsonl-dir>` (on-demand, not in CI). Mutation testing (do the
-assertions have teeth?): `just mutants` — diff-scoped (`cargo-mutants
---in-diff` vs origin/main), config in `.cargo/mutants.toml`; in CI it is its own
-**on-demand** workflow (`mutants.yml`, `workflow_dispatch` from the Actions tab),
-NOT per-PR — run it there or locally on reducer/decoder/layout changes (a
-surviving mutant is a hint, not a gate). Property-based invariants use
-`proptest` (e.g. `walkable.rs`).
+**Touched the `--json` / `SourceStatus` / `OutcomeRow` shape, or the source
+roster?** Run `just gen-contract` — it regenerates BOTH committed schemas and
+the Raycast types; skip it and the Raycast `gen:contract` diff + `tsc` go red.
+
+**Test tiers:** unit tests beside the code · integration tests in
+`crates/<crate>/tests/` · the headless render harness driving the real
+`TuiRenderer` through ratatui `TestBackend`. The 9-binary layout and the
+add-a-CLI test steps are in
+[`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md).
+
+**Real wire bytes ride ONE pipeline.** Everything that feeds captured or live
+transcript/hook bytes through the production path drives
+`pixtuoid_core::harness::Drive` (core's dev-only `harness` feature, so it never
+enters the published crate). **A driver that keys the first-sight seed any way
+other than the source's registry row registers NOTHING** — a JSONL event for an
+unknown id is a documented no-op. The four shells and the two on-demand tools
+(`just fuzz`, the `corpus_check` census) are mapped in the tests guide; neither
+tool runs in CI.
+
+Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
+on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a
+gate). Coverage: `just coverage`. Property invariants use `proptest`.
 
 ### Visual verification
 
@@ -164,151 +134,109 @@ just build --release --example snapshot
 A PR that **intentionally** changes the office's look must run `just gen`
 and commit the regenerated `docs/images/` (incl. the `reference-*.png` CI
 baselines) plus `site/public/demos/` in the same change, or the smoke job's
-`just gen-check` pixel-diff goes red. Full iteration loop + sprite pitfalls:
-`.claude/skills/beautify-decoration/SKILL.md`.
+`just gen-check` pixel-diff goes red. **`just gen` is `gen-icons gen-media
+gen-readme` — it deliberately does NOT include `gen-wasm`** (that one needs
+rustup's wasm32 std + `wasm-bindgen-cli` + `wasm-opt`, which `gen`'s Python/Node
+tools don't), so a `pixtuoid-scene` or `pixtuoid-web` change must ALSO run `just
+gen-wasm` and commit all of `site/public/wasm/`. Nothing catches a skip:
+`gen-wasm-check` verifies only that the committed files match their own
+`manifest.sha256` (a stale set is perfectly self-consistent), and the poster the
+site crossfades OUT of — `site/public/demos/hero-wide.png`, a `wasm-still` job —
+is built NATIVELY from source by `gen-media`, so it tracks the change while the
+committed wasm the live hero actually runs does not. Full iteration loop + sprite
+pitfalls: `.claude/skills/beautify-decoration/SKILL.md`.
 
 ### Preflight, hooks, release
 
-The `justfile` is the single source of truth for every check — CI and the
-git hooks call the same recipes (no local-vs-CI drift). `just setup-tools`
-installs the needed cargo tools once per clone (including the `rust-analyzer`
-component — `rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it the
-editor / AI-agent LSP silently degrades to grep).
+The `justfile` is the single source of truth for every check — CI and the git
+hooks call the same recipes (no local-vs-CI drift). `just setup-tools` installs
+the needed cargo tools once per clone (including the `rust-analyzer` component —
+`rust-toolchain.toml` pins only `rustfmt`+`clippy`, so without it the editor /
+AI-agent LSP silently degrades to grep).
 
 ```
-just preflight    # full pre-push gate: lint (fmt+machete+deny+arch+shfmt+shellcheck+actionlint+actionlint-composites+zizmor+ci-observability+json-schemas+links) → clippy → hack → test
+just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
 just fmt          # auto-format
 git config core.hooksPath .githooks   # activate hooks once per clone
 ```
 
-Never pipe `preflight` through `tail`/`head` — the exit code becomes the
-pipe's and a real failure reads as green; redirect to a file and `echo $?`.
-CI-only gates: semver (pixtuoid-core + pixtuoid-scene — the binary's lib target is not a
-semver surface), api-surface (`just api-surface-check` — a committed `cargo
-public-api` golden per published crate at `api/<crate>.txt`; the reviewable-diff
-twin of the semver gate: semver says "major/minor?", the golden says *what*
-changed — regenerate with `just api-surface` + commit when the public surface
-shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
-`[workspace.lints.rustdoc]` broken/private-intra-doc-link deny + the doctests
-`cargo nextest` skips), coverage/smoke, gen-check, gen-readme-check, npm-check,
-check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
-fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
-Cross-file report/upload semantics that actionlint cannot express are pinned by
-the yq + Conftest/OPA policy and real action/workflow behavior tests under
-`policy/ci-observability/`; `just ci-observability` runs them inside both
-`just lint` and the CI hygiene job.
-`just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
-the repository deliberately requires a symbolic ref or SHA (not SHA-only),
-every checkout drops persisted credentials, and accepted analyzer findings use
-exact inline suppressions with their reason instead of disabled audit classes.
-Dependabot applies a seven-day update cooldown across every configured
-ecosystem.
-The two automatic Claude reviewers are thin trigger policies over
-`claude-readonly-review.yml`: the model job checks out only the trusted default
-branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
-and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
-head before writing the review comment. Anthropic WIF is preferred when its
-repository variables are configured, with the existing OAuth secret as a
-compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
-(fork PRs remain Codecov's tokenless path), never a repository upload token.
-That gate also pins the advanced CodeQL workflow: all four repository
-languages stay explicit, Rust stays on its only supported `none` build mode,
-and the no-build extractor receives `rust-src` plus the proc-macro server from
-the workspace's declared MSRV (not the runner's rolling stable toolchain).
-After analysis, CodeQL's own SARIF metrics fail the Rust job if extraction
-diagnostics affect at least as many files as were extracted cleanly, and the
-quantified counts are written to the job summary. This is why CodeQL lives in
-[`.github/workflows/codeql.yml`](.github/workflows/codeql.yml) instead of GitHub
-default setup — default setup cannot prepare these semantic inputs or enforce
-database health.
+Never pipe `preflight` through `tail`/`head` — the exit code becomes the pipe's
+and a real failure reads as green; redirect to a file and `echo $?`.
 
-**Release:** `just bump X.Y.Z` rewrites every version number, drafts
-`release_notes()`, runs preflight, and commits on a release branch — it
-stops before the tag; pushing the tag is the irreversible publish (crates.io +
-npm, and it auto-triggers a homebrew-core bump)
-and stays a human step. All tags enter one lossless, non-cancelling release
-queue so different versions cannot interleave publication. See
+**CI-only gates** (these do NOT run in `preflight`): semver · api-surface ·
+doc-check · coverage/smoke · gen-check · gen-readme-check · npm-check ·
+check-windows · snapshots (`cargo insta` — fails on a pending OR orphan
+`.snap`, the rot plain `cargo test` can't see). What each enforces, and the
+workflow-security posture that `policy/ci-observability/` pins (zizmor,
+Dependabot directories, the Claude reviewers' fail-visible arm, CodeQL's
+semantic inputs), is in [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#ci-gates).
+
+**Release:** `just bump X.Y.Z` rewrites every version number, drafts the notes,
+runs preflight, and commits on a release branch — it stops before the tag.
+Pushing the tag is the irreversible publish (crates.io + npm, and it
+auto-triggers a homebrew-core bump) and stays a human step. See
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## Development workflow (the arc loop)
 
-Non-trivial work runs as an **arc**: design → build → gate → wrap. This is
-the ONE portable description of the loop — follow it whatever tool or machine
-you're on, because the richer aids below (skills, memory) are NOT
-repo-committed and won't exist on a fresh checkout or in a non-Claude tool.
+Non-trivial work runs as an **arc**: design → build → gate → wrap. This is the
+portable description — follow it whatever tool or machine you're on, because
+the richer aids (loop skills, personal memory) are NOT repo-committed and won't
+exist on a fresh checkout or in a non-Claude tool.
 
 1. **Pick** — an issue (GitHub is the tracker; `gh issue list`) or backlog item.
 2. **Grill the design** — decide the open questions ONE at a time, each with a
-   recommended answer, before writing code. (A big arc introducing new
-   seams/vocabulary grills against the domain docs first.)
-3. **Design gate (before build; NOT the step-8 merge review)** — the grilled
-   approach clears three design-time lenses so slop dies in design, not review:
-   **best-practice search** (confirm the *idiomatic* way against real
-   docs/source online — never memory: the dep's own API/features, the standard
-   pattern); **adversarial design review** (red-team the design itself — simplest
-   shape? failure mode? — BEFORE code exists); **deepening lens** (the deletion
-   test — would deleting this concentrate complexity or just move it? — plus the
-   deep-vs-shallow check: does the change *deepen* a module or add another
-   shallow one = AI-slop?). Cut slop in small, verified steps; a big-radius
-   refactor is fine when the deepening earns it. (`codebase-design` /
-   `improve-codebase-architecture` drive the deepening lens; this repo keeps its
-   domain record + decisions-not-to-relitigate in nested `CLAUDE.md` + "Known
-   sharp edges", NOT a `CONTEXT.md`/`docs/adr/` — map onto those, don't scaffold
-   competing docs.)
-4. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
-   (LOCAL, git-ignored — the working design record, not the tracker). Also
-   plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md).
-5. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
-   code (the `beautify-decoration` skill's "The visual-iteration loop").
-6. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
+   recommended answer, before writing code.
+3. **Design gate** (before build; NOT the step-8 merge review) — three lenses so
+   slop dies in design: **best-practice search** (confirm the idiomatic way
+   against real docs/source online, never memory) · **adversarial design
+   review** (red-team the design itself, before code exists) · **deepening
+   lens** (would deleting this concentrate complexity or just move it?).
+4. **Spec** — synthesize into `docs/superpowers/specs/` (LOCAL, git-ignored) and
+   plan against [`impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md).
+5. **Mock gate** (taste/visual work only) — ratify the AFTER visual BEFORE code.
+6. **Build** — TDD: failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + the online review bot's `Findings: 0` at
-   HEAD, checked atomically. (If the bot errors or posts no findings comment at
-   HEAD — it can fail on a very large diff — the gate is unsatisfiable as
-   written; the `two-lens-review` skill's step 6 owns the fallback.)
-   See "Things NOT to do" and the running order under "Where to look". **A human
-   merges.**
+   HEAD, checked atomically. **A human merges.**
 9. **Wrap** — retro; record durable lessons.
 
-**Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
-so they travel with the repo). On symlink-capable checkouts,
-[`.agents/skills/`](.agents/skills/) aliases the same directories for Codex.
-The skills are `two-lens-review` (the merge gate),
-`beautify-decoration` (the visual mock loop), `add-source` / `add-theme`
-(scaffold + test-teeth for a new CLI / palette), `procedural-lofi` (synthesize
-a new ambient sound — the reference-fingerprint → freeze pipeline). Claude Code
-auto-surfaces them by description; Codex does the same through the aliases.
-Other tools read this file (`AGENTS.md`) and run the loop above as prose.
+Per-step detail, the fallback when the review bot can't post at HEAD, and the
+bootstrap notes for a fresh machine or a non-Claude tool are in
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-arc-loop).
 
-**Bootstrap on a fresh machine / other tool.** `git clone` gives you the repo
-skills + all `just` gates immediately. The day-to-day *loop* skills
-(`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`, plus
-`research`/`grill-with-docs` and `improve-codebase-architecture`/`codebase-design`
-for the step-3 design gate) are a
-PERSONAL, non-committed layer — install [mattpocock/skills](https://github.com/mattpocock/skills)
-if you want the Claude Code implementations; otherwise this section IS the loop.
-Do NOT run its `setup-matt-pocock-skills` here — it scaffolds a `CONTEXT.md` +
-`docs/adr/` doc convention that would compete with our richer nested `CLAUDE.md`
-+ sharp-edges system (neither exists in this repo, and we don't want a second,
-rotting one), plus a fixed triage-label vocabulary separate from our existing
-issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verify`).
+**Skills.** Repo skills live in [`.claude/skills/`](.claude/skills/) (committed,
+so they travel with the repo); [`.agents/skills/`](.agents/skills/) aliases them
+for Codex on symlink-capable checkouts. They are `two-lens-review` (the merge
+gate), `beautify-decoration` (the visual mock loop), `add-source` / `add-theme`,
+and `procedural-lofi`.
 
 ## Conventions
 
 - **TDD first.** Failing test → minimal impl → commit. Don't add code without a test that exercises it. Non-trivial changes (new feature/config key/seam, sharp edge, or spanning ≥3 files) plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) first — it front-loads the review's failure classes, and its answers fill the review's change-specific slots.
 - **DRY, YAGNI.** No features beyond what v1 specifies; v2 items are deferred.
-- **No comments unless WHY.** Comment only what a future reader can't tell from the code (a workaround, a non-obvious constraint, a surprising invariant).
+- **No comments unless WHY.** Comment only what a future reader can't tell from the code (a workaround, a non-obvious constraint, a surprising invariant). Three tests, in order — 1 and 3 are the known art; 2 is the one this repo kept failing:
+  1. **A different abstraction level than the code.** If the reader could deduce it from the line below, delete it (Ousterhout, *A Philosophy of Software Design* ch. 13).
+  2. **Every sentence carries information the earlier ones don't.** Rule 1 compares the comment to the CODE; this compares it to ITSELF. **The check: delete each sentence after the first, ONE AT A TIME. If nothing is lost — neither an action nor the ability to tell when the constraint stops applying — cut it.** The survivors are its *ideas*; report `N sentences, M ideas`.
+  3. **First sentence is the whole answer.** A reader who stops there is not misled.
+
+  All three cut; none demands brevity. A comment that passes all three stays at
+  whatever length it earned — this repo's dense WHY is deliberate, and trimming a
+  legitimate one is the worse error.
+
+  Evidence, not decoration: in a code comment, a measurement or before/after count belongs in the COMMIT MESSAGE — an inline number nobody re-measures is the first thing to rot. An issue number STAYS when it names the failure mode the comment exists to prevent (`#793` in `check_upstream_drift.py`), and is not provenance.
+
 - **No magic numbers — reuse an authoritative source, else ONE named `const` (single source of truth).** A numeric (or sentinel-string) literal whose value *carries domain meaning* (timeout, size cap, threshold, ratio/factor, pixel offset, protocol constant) must never be an anonymous inline literal. Handle it in this priority order:
   1. **Reuse an existing authority.** If the stdlib or a third-party crate already exposes the value or a type that carries it, USE that — don't re-hardcode what a dependency owns (it silently drifts when they bump it): `libc::FD_SETSIZE` not `1024`, a crate's provided default/`Duration` constant, an enum's `::default()`, `std::mem::size_of`, etc. Likewise if OUR code already defines the value (a `Theme` field, a layout/registry const, a `SourceDescriptor` row), read it from there — never copy it.
   2. **Else name it ONCE** — the single source of truth. For a lone value, a `const NAME: T = …;` (SCREAMING_SNAKE_CASE) at the narrowest scope that covers all its use-sites — **fn-local** when only one function reads it, module-level otherwise — with a WHY comment. For a *set* of related discrete values, or a value guarding an invariant, prefer a **type over loose consts** — a Rust `enum` or a newtype (as this repo already does with the desk-index / `Grid` newtypes) makes illegal values unrepresentable, not merely named. Either way, every other site *references or derives from* the one definition, never a second copy of the literal: the version-popup click-rect derives its offsets from the SAME `PANEL_PAD_*` the painter insets by; a test computes `200.0 * SHADOW_FACTOR` instead of hardcoding `84`. **Two copies of the same magic value is a latent drift bug**, so when the value genuinely can't be centralized (it crosses a crate/config/wire boundary), still pin the copies together with a test or a `debug_assert!` that they match, and comment the pairing.
   3. **Exceptions stay inline** — don't over-constify readable code into a wall of one-use consts: self-evident `0`/`1`/`2` (incl. `* 2` for half-block sub-pixels), array indices, local loop bounds tied to a nearby collection, log/trace/error string literals, and test fixtures.
 
-  **No lint enforces any of this** — the Rust team declined a general magic-number lint as too noisy (rust-clippy #1539 / #2342); clippy's `unreadable_literal` only enforces digit grouping (`1_000_000`), not naming. So it's a review-practice, not a gate — e.g. the truecolor read loop (`term.rs`) shipped inline `1024`/`64` and had to be lifted to `MAX_DECRQSS_RESPONSE_BYTES`/`DECRQSS_READ_CHUNK` after the fact.
+  **No lint enforces any of this** (clippy's `unreadable_literal` only enforces digit grouping, not naming), so it is a review practice — e.g. the truecolor read loop (`term.rs`) shipped inline `1024`/`64` and had to be lifted to `MAX_DECRQSS_RESPONSE_BYTES`/`DECRQSS_READ_CHUNK` after the fact.
 - **Errors propagate via `anyhow::Result` in app code, `thiserror` in core** if a typed error becomes load-bearing. The hook listener and JSONL watcher log + continue on malformed input — they never panic.
 - **No `unwrap()` in non-test code.** Tests can unwrap freely.
-- **Layer-internal items stay `pub(crate)`, not `pub`.** `unreachable_pub` is `warn` in `[workspace.lints.rust]` and CI's `just clippy` (`-D warnings`) makes it a hard gate — a `pub` item in a private module tree fails the build. Reserve bare `pub` for genuinely cross-crate API (and in `pixtuoid-core`, only those reach the semver surface). The lint is the mechanical enforcement of "the install/uninstall entry points are `pub(crate)`, `crate::sources` is the only caller" and every other inter-layer seam.
-- **Every `pub` item in a PUBLISHED crate carries a doc comment.** `missing_docs` is `warn` via `#![warn(missing_docs)]` in `pixtuoid-core` + `pixtuoid-scene`'s `lib.rs` — NOT `[workspace.lints]`, because it's a public-API gate and the public API is exactly those two crates (the binary lib target isn't a semver surface), so it's scoped identically to the semver-checks + api-surface gates. `just clippy` (`-D warnings`) promotes it to a hard gate: a new `pub` item (or `pub` field/variant) in those two crates with no `///` fails the build. The corollary of the bullet above — once you've decided something is genuinely `pub`, document *what it is* (unit / provenance / invariant), not filler. A `#[doc(hidden)] pub` item (a workspace-internal seam that isn't stable API — the `overlay`/`board`/`footer` pattern in `pixtuoid-scene`) is exempt, which is the intended escape hatch for "public for mechanism, not contract".
+- **Layer-internal items stay `pub(crate)`, not `pub`.** `unreachable_pub` is `warn` in `[workspace.lints.rust]`, and `just clippy` (`-D warnings`) makes it a hard gate — a `pub` item in a private module tree fails the build. Reserve bare `pub` for genuinely cross-crate API; in `pixtuoid-core` only those reach the semver surface.
+- **Every `pub` item in a PUBLISHED crate carries a doc comment.** `missing_docs` is `warn` via `#![warn(missing_docs)]` in `pixtuoid-core` + `pixtuoid-scene`'s `lib.rs` (NOT `[workspace.lints]` — it's a public-API gate, scoped identically to the semver-checks + api-surface gates), and `just clippy` promotes it to a hard gate. Document *what it is* (unit / provenance / invariant), not filler. A `#[doc(hidden)] pub` item — the workspace-internal `overlay`/`board`/`footer` seam pattern — is exempt: that's the escape hatch for "public for mechanism, not contract".
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` + `shfmt` any `.sh` you touch — run `just shfmt-fix` to format (both gated by `just lint` + the CI `hygiene` job). **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
@@ -337,7 +265,7 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 **`pixtuoid-core`** ([full entries](crates/pixtuoid-core/CLAUDE.md)):
 - CC hook payloads DO include `tool_use_id` (hook-wins dedup fires).
 - CC hook `transcript_path` points at the PARENT transcript; subagent-leak is suppressed via `active_tasks`, and liveness flows UP (`refresh_lineage`). CC's `SubagentStart`/`SubagentStop` hooks decode (`decode_cc_hook_custom`).
-- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path: liveness probe first (CC pid registry / Codex open-rollout FDs), `should_seed_at_eof` fallback. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
+- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path (`should_seed_at_eof`), and "recent" is the source's own ACTIVITY clock where it has one (CC only), not the file mtime — the same verdict guards the revive-on-append path; a liveness vouch (CC pid registry / Codex+omp open FDs / grok registry) exempts the RECENCY half only — a structural end marker still gates, and `revouch_gated_files` re-checks it. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
 - A hook event for an unknown session id registers it (hooks are proof of life), normally with real `Identity`; JSONL events never synthesize.
 - Abrupt exits have no `SessionEnd` → stale-sweep cascade, guarded by the liveness-vs-readiness exemptions.
 - Subagent display names come from `attributionAgent`; the dispatch tool is **`Agent`** (the one known name — the legacy `Task` name arm was dropped in 0.12.0; a pre-rename dispatch still carries `subagent_type`, THE semantic detection signal); `Workflow` is deliberately NOT mapped.
@@ -371,10 +299,10 @@ full WHY lives in the nested `CLAUDE.md` for the owning crate.
 
 ## Where to look
 
-- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in the `pixtuoid-scene` crate; the terminal flush in `pixtuoid`'s `tui`.
-- Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific entries (layout, sources, install, themes, motion, weather, pets, …) are in the nested guides.
-- "How do I ship one change that spans the Rust lib + the site + the Raycast extension in parallel?" → [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md) (the contract-first → fan-out → join model; the `--json` shape is the contract, the per-area `CLAUDE.md`/`AGENTS.md` scope each worker/agent). How lessons persist across agent runs so the next change is cheaper: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
-- "Working an agent-driven change — what do I run, and when?" (each gate is detailed above; this is the running order) → **before code**, if non-trivial (new seam / ≥3 files), plan against [`.github/prompts/impl-plan.prompt.md`](.github/prompts/impl-plan.prompt.md) → **touched the `--json` / `SourceStatus` / `OutcomeRow` shape?** `just gen-contract` (regenerates BOTH committed schemas + the Raycast types) (else the Raycast `gen:contract` diff + `tsc` go red) → **before push** `just preflight` (lint → clippy → hack → test; never pipe through `tail`/`head` — it eats the exit code; the CI-only gates under "Build & test" — semver, gen-check — still run separately) → **before merge** the two-lens review (2+ agents, differentiated lenses; see "Things NOT to do") → **dogfood a source/lifecycle change** with `pixtuoid run --headless --projects-root ~/.claude/projects` vs live CC, or replay hermetically via `scripts/replay-fixture.sh` / `just openclaw-e2e`. **Touched OpenClaw?** every one of its three e2e tiers now has a justfile recipe, deliberately — the cc-backend script shipped BROKEN for a whole release because nothing invoked it, so a summary-format change rotted it unseen: `just openclaw-e2e` (hermetic, free) → `just openclaw-multi-e2e` (N REAL gateways, free, needs `openclaw` on PATH — the tier that catches multi-instance render/crowding) → `just openclaw-backend-e2e` (real gateway AND one BILLED model turn; run deliberately, not casually). Their `expect_line` pollers are DELIBERATELY not hoisted into a shared `scripts/lib` — adjudicated three times now (two review lenses + the online bot), so do not re-raise it without new evidence. The bodies look alike but their retry bounds await different EVENT CLASSES: the hermetic tier's 40x0.2s bounds an in-process shim -> HookRouter -> reducer -> summary hop, while the multi-gateway tier's 120x0.3s bounds N real `openclaw gateway run` node cold boots — and cc-backend's 120x0.25s for ONE real gateway PREDATES the multi-gateway work, so "a real gateway appears" is an established ~30s class and "a hermetic transition lands" an 8s one. There is no single correct shared value, so a shared helper would take the timing as parameters and hide ~12 lines behind a 4-argument interface (the shallow-module trade). The drift that actually bit — a `daemons=` format change rotting a script unseen — is mitigated by the recipes ABOVE, not by sharing the poller. The in-FILE duplication WAS collapsed: live-e2e's single-state `expect` delegates to its own `expect_line`. Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py` (wire-format drift); the `risk radar` PR workflow (`scripts/risk-radar.py` / `just risk-radar`) — deterministic path matching that posts the documented blast-radius escalations (shim never-panic audit, motion render-and-watch, reducer interaction-graph trace, …) as a sticky PR comment so prose-only escalation can't be silently skipped (#198); and `just comment-lint` (`scripts/comment-lint.py` over the ast-grep rule in `.ast-grep/rules/`) — flags NEW runs of 3+ consecutive `//` comments inside a fn body on a PR's changed lines (the "fn-body comments ≤2 lines" comment-value factor), diff-scoped so the ~5k pre-existing legitimate WHY comments are grandfathered; the CI `comment-lint` job emits inline `::warning::` annotations, never blocks.
+- "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid-scene`; the flush in `pixtuoid`'s `tui`.
+- Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific answers (layout, sources, install, themes, motion, pets, …) live in each crate's `WHERE-TO-LOOK.md`, indexed by question in its `CLAUDE.md`.
+- One change spanning the Rust lib + the site + the Raycast extension: [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md). How lessons persist across agent runs: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
+- **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, the three OpenClaw e2e tiers, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
 
 ## When refactoring
 
@@ -385,17 +313,10 @@ new `AgentEvent` variant also needs an `agent_id()` arm.
 
 **Adding a new agent CLI**: source module + one `SourceDescriptor` row in
 `source/registry.rs` (its `name` field IS the roster — `registered_source_names()`
-projects `REGISTRY`) + runtime wiring in
-`runtime/driver.rs::run_async` (transcript-bearing CLIs only; hook-only CLIs
-ship a `hook.custom` decoder + an `install/` target instead) + a row in
-`site/src/sources.json` (bridge-tested against `registered_source_names()`). Full
-steps: `crates/pixtuoid-core/CLAUDE.md` "multi-source decoding" + the tests
-guide — or invoke the `add-source` skill (which foregrounds the test-teeth steps
-a diff-scoped edit misses). A new theme has an analogous `add-theme` skill.
-
-**Adding a new ambient sound** (another lofi mood, a new one-shot cue, a
-weather bed): the `procedural-lofi` skill is the reusable recipe — the
-reference-fingerprint → shape-to-curve → freeze-a-take → synthesize-at-launch
-pipeline the whole `#633` audio line was built on, with the parameter tables
-(`LOFI-BIBLE.md`) + the numpy fingerprint/synth/freeze scripts bundled. The
-in-tree synth home is `pixtuoid-scene/src/audio/` (see that crate's guide).
+projects `REGISTRY`) + runtime wiring in `runtime/driver.rs::run_async`
+(transcript-bearing CLIs only; hook-only CLIs ship a `hook.custom` decoder + an
+`install/` target instead) + a row in `site/src/sources.json` (bridge-tested
+against `registered_source_names()`). The full 11-step checklist — which steps
+are test-forced and which are on you — is in
+[`CONTRIBUTING.md`](docs/CONTRIBUTING.md#adding-a-new-agent-cli). A new theme
+and a new ambient sound have analogous `add-theme` / `procedural-lofi` skills.

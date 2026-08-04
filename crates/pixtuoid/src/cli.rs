@@ -20,9 +20,21 @@ pub struct Cli {
     #[arg(long, global = true, value_enum, default_value = "info")]
     pub log_level: LogLevel,
 
-    /// Color theme: normal, cyberpunk, dracula, tokyo-night, catppuccin, gruvbox.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help = theme_help())]
     pub theme: Option<String>,
+}
+
+/// `--theme`'s help text, DERIVED from the `ALL_THEMES` registry rather than
+/// hand-copied: this clap tree is what `--help`, the generated shell completions
+/// AND the packaged man page all render from. The flag stays an untyped
+/// `Option<String>` on purpose — `config::resolve_theme` is the ONE place a theme
+/// name is validated.
+fn theme_help() -> String {
+    let names: Vec<&str> = pixtuoid_scene::theme::ALL_THEMES
+        .iter()
+        .map(|t| t.name)
+        .collect();
+    format!("Color theme: {}.", names.join(", "))
 }
 
 /// The source-input flags shared VERBATIM by `run` and `floating` (the two
@@ -128,19 +140,20 @@ pub enum Cmd {
     /// `pixtuoid completions zsh > ~/.zfunc/_pixtuoid`. Package managers install
     /// these automatically; this command lets `cargo install` / `npm` users do it
     /// themselves for any shell.
-    ///
-    /// homebrew-core contract: their `install` block calls
-    /// `generate_completions_from_executable(bin/"pixtuoid", "completions")`, so
-    /// renaming this subcommand breaks their BUILD (not just a test) on the next
-    /// autobump. Same for `Man` below.
+    // Maintainer note stays a `//`: a `///` here would be SHIPPED PRODUCT COPY
+    // (clap renders it as this subcommand's long help). homebrew-core's `install`
+    // block calls `generate_completions_from_executable(bin/"pixtuoid",
+    // "completions")`, so renaming this subcommand breaks their BUILD. Same for
+    // `Man`.
     Completions {
         /// Target shell.
         shell: clap_complete::Shell,
     },
     /// Print the roff man page to stdout (`pixtuoid man > pixtuoid.1`). A
     /// packaging interface — generated from the same clap definitions as `--help`.
-    /// homebrew-core's `install` captures this via `Utils.safe_popen_read` — see
-    /// the contract note on `Completions`.
+    // Also a `//`: `hide = true` drops this from the PARENT listing, not from
+    // `pixtuoid man --help`. homebrew-core's `install` captures it via
+    // `Utils.safe_popen_read` — see the contract note on `Completions`.
     #[command(hide = true)]
     Man,
 }
@@ -158,9 +171,7 @@ pub enum SourcesAction {
 
 /// `--log-level` values. A typed enum (not a free `String`) so a typo like
 /// `dbug` is a hard clap parse error instead of silently parsing as an
-/// `EnvFilter` TARGET directive (`dbug=trace`) that filters everything off —
-/// the #157 silent-diagnostics class. `$RUST_LOG` stays the escape hatch for
-/// full tracing directive syntax (targets, per-module levels).
+/// `EnvFilter` TARGET directive (`dbug=trace`) that filters everything off.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
 pub enum LogLevel {
     Error,
@@ -171,9 +182,7 @@ pub enum LogLevel {
 }
 
 impl LogLevel {
-    /// The tracing level token — exactly the strings the old free-form
-    /// `--log-level` accepted, so every `EnvFilter` built from it is
-    /// unchanged; the enum only moved typo rejection to the clap seam.
+    /// The tracing level token every `EnvFilter` is built from.
     pub fn as_str(self) -> &'static str {
         match self {
             LogLevel::Error => "error",
@@ -217,8 +226,6 @@ mod tests {
 
     #[test]
     fn empty_socket_is_a_hard_parse_error() {
-        // An explicit override deserves a loud answer: bind("") would die
-        // late with an opaque error and strand a relative `.lock` in the CWD.
         for v in ["", "   "] {
             let err = Cli::try_parse_from(["pixtuoid", "run", "--socket", v]).unwrap_err();
             assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
@@ -227,27 +234,18 @@ mod tests {
 
     #[test]
     fn log_level_typo_is_a_hard_parse_error() {
-        // A free String silently parsed a typo like `dbug` as an EnvFilter
-        // TARGET directive (everything filtered off — the #157 class); the
-        // ValueEnum makes it a loud clap error at the seam.
         let err = Cli::try_parse_from(["pixtuoid", "--log-level", "dbug"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
     }
 
     #[test]
     fn max_desks_zero_is_a_hard_parse_error() {
-        // 0 would permanently zero every floor's capacity (the per-frame
-        // re-seed guards `> 0`, so the atomics never grow) — every agent
-        // silently dropped. Rejected at the clap seam.
         let err = Cli::try_parse_from(["pixtuoid", "run", "--max-desks", "0"]).unwrap_err();
         assert_eq!(err.kind(), clap::error::ErrorKind::ValueValidation);
     }
 
     #[test]
     fn log_level_valid_values_map_to_the_same_filter_tokens_as_before() {
-        // The enum's as_str must be exactly the strings the old free-form
-        // --log-level accepted, and each must build a valid EnvFilter — the
-        // typed seam may not change any accepted filter.
         for (raw, lvl) in [
             ("error", LogLevel::Error),
             ("warn", LogLevel::Warn),
@@ -329,7 +327,6 @@ mod tests {
 
     #[test]
     fn floating_subcommand_rejects_empty_socket() {
-        // The shared `parse_nonempty_path` guard applies to floating's --socket too.
         assert!(Cli::try_parse_from(["pixtuoid", "floating", "--socket", "  "]).is_err());
     }
 
@@ -359,8 +356,6 @@ mod tests {
 
     #[test]
     fn sources_json_is_global_across_the_set_subcommand() {
-        // --json must bind the same flag whether it precedes OR follows `set`
-        // (the natural Raycast/script form) — the global-arg fix.
         for args in [
             ["pixtuoid", "sources", "--json", "set", "codex"],
             ["pixtuoid", "sources", "set", "codex", "--json"],
@@ -381,7 +376,6 @@ mod tests {
 
     #[test]
     fn connect_requires_at_least_one_id() {
-        // `required = true` on the ids vec — a bare `connect` is a parse error.
         assert!(Cli::try_parse_from(["pixtuoid", "connect"]).is_err());
     }
 
@@ -410,13 +404,53 @@ mod tests {
                 shell: clap_complete::Shell::Zsh
             })
         ));
-        // A bogus shell is a hard parse error (typed ValueEnum), not a runtime bail.
         assert!(Cli::try_parse_from(["pixtuoid", "completions", "nonsense"]).is_err());
     }
 
-    /// The packaging guard (ripgrep's zsh-coverage check analogue): a clap-derive
-    /// change can't silently ship a binary whose generated completions/man are
-    /// empty or miss a subcommand. Cheap — generate into a buffer in-process.
+    #[test]
+    fn theme_help_names_every_registered_theme() {
+        use clap::CommandFactory;
+        let cmd = Cli::command();
+        let help = cmd
+            .get_arguments()
+            .find(|a| a.get_id() == "theme")
+            .and_then(|a| a.get_help())
+            .map(ToString::to_string)
+            .expect("--theme carries help text");
+        for t in pixtuoid_scene::theme::ALL_THEMES {
+            assert!(
+                help.contains(t.name),
+                "--theme help omits the registered theme {:?} — it must read the \
+                 ALL_THEMES authority, not a copy",
+                t.name
+            );
+        }
+    }
+
+    #[test]
+    fn packaging_subcommand_help_carries_no_maintainer_only_prose() {
+        use clap::CommandFactory;
+        let mut cmd = Cli::command();
+        for name in ["completions", "man"] {
+            let help = cmd
+                .find_subcommand_mut(name)
+                .expect("subcommand exists")
+                .render_long_help()
+                .to_string()
+                .to_lowercase();
+            for marker in [
+                "homebrew",
+                "autobump",
+                "generate_completions_from_executable",
+            ] {
+                assert!(
+                    !help.contains(marker),
+                    "`pixtuoid {name} --help` leaks the maintainer note {marker:?} to end users"
+                );
+            }
+        }
+    }
+
     #[test]
     fn completions_and_man_generate_non_empty_and_cover_subcommands() {
         use clap::CommandFactory;
@@ -430,8 +464,6 @@ mod tests {
             clap_complete::generate(shell, &mut Cli::command(), "pixtuoid", &mut buf);
             let script = String::from_utf8(buf).expect("completion script is utf-8");
             assert!(!script.is_empty(), "{shell:?} completion script is empty");
-            // A representative subcommand from across the tree must be present, so a
-            // dropped/renamed subcommand trips this rather than shipping silently.
             assert!(
                 script.contains("floating") && script.contains("doctor"),
                 "{shell:?} completion script is missing a known subcommand"
@@ -444,9 +476,6 @@ mod tests {
             .expect("man render");
         let man = String::from_utf8(man).expect("man page is utf-8");
         assert!(man.contains("pixtuoid"), "man page missing program name");
-        // Same dropped-subcommand teeth as the completions loop: clap_mangen
-        // renders a SUBCOMMANDS section, so a removed/renamed subcommand trips this
-        // rather than shipping a man page that silently lost it.
         assert!(
             man.contains("doctor"),
             "man page SUBCOMMANDS section is missing a known subcommand"

@@ -11,13 +11,8 @@ use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Transport;
 use pixtuoid_core::AgentId;
 
-use crate::{cc_watcher, fast_watch, vouch_snapshot};
+use crate::{cc_watcher, fast_watch, vouch_snapshot, write_lines};
 
-/// On startup, the watcher must NOT emit SessionStart for every historical
-/// .jsonl on disk. With small `max_desks` this would saturate desks with
-/// long-dead sessions and starve the user's currently-active session.
-/// Files older than the initial-window are seeded with cursor=file_len and
-/// left out of the SessionStart stream until they next get written to.
 #[tokio::test]
 async fn watcher_skips_session_start_for_stale_files_on_startup() {
     let dir = TempDir::new().unwrap();
@@ -25,7 +20,6 @@ async fn watcher_skips_session_start_for_stale_files_on_startup() {
     let project_dir = projects_root.join("proj-stale");
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
 
-    // Pre-existing stale transcript (mtime backdated 1 hour).
     let stale = project_dir.join("old.jsonl");
     let line = serde_json::json!({
         "type": "assistant",
@@ -47,7 +41,6 @@ async fn watcher_skips_session_start_for_stale_files_on_startup() {
     let watcher = cc_watcher(projects_root.clone()).with_initial_window(Duration::from_secs(60));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
-    // Give the initial scan a moment to run.
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let mut events = Vec::new();
@@ -61,10 +54,6 @@ async fn watcher_skips_session_start_for_stale_files_on_startup() {
     handle.abort();
 }
 
-/// T4: a stale-mtime transcript whose session id the first-party liveness
-/// probe vouches for (CC's `~/.claude/sessions/<pid>.json` registry) must
-/// register on startup — mtime is only a liveness proxy; a long-idle or
-/// delegating session writes nothing for hours while its process is alive.
 #[tokio::test]
 async fn watcher_registers_stale_file_when_probe_says_live() {
     let dir = TempDir::new().unwrap();
@@ -109,21 +98,13 @@ async fn watcher_registers_stale_file_when_probe_says_live() {
     handle.abort();
 }
 
-/// Codex twin of T4: the Codex liveness probe (`live_codex_rollout_ids`)
-/// returns ids in `codex_id_from_path` space — the rollout-filename UUID —
-/// so a stale rollout the probe vouches for must register through the same
-/// `with_liveness_probe` seam. A FAKE probe closure stands in for the real
-/// open-FD enumeration (that half is unit-tested in `source::fd_probe` /
-/// `source::codex`); this pins the id-space JOIN: probe ids and the watcher's
-/// `IdDeriver` agree, or every vouched rollout would stay gated.
 #[tokio::test]
 async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
-    // Real rollout layout: YYYY/MM/DD below the sessions root.
     let day_dir = root.join("2026").join("06").join("10");
     tokio::fs::create_dir_all(&day_dir).await.unwrap();
     let uuid = "019e7762-9ded-7e33-be41-946ecf105bf4";
@@ -142,7 +123,6 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
     })
-    .with_id_deriver(codex_id_from_path)
     .with_initial_window(Duration::from_secs(60))
     .with_liveness_probe(std::sync::Arc::new(move || vouch_snapshot(&[uuid])));
     let handle = tokio::spawn(async move { watcher.run(tx).await });
@@ -166,17 +146,10 @@ async fn codex_watcher_registers_stale_rollout_when_probe_says_live() {
     handle.abort();
 }
 
-/// First-sight `SessionStart.session_id` must come from the source's
-/// `IdDeriver`, NOT the raw file stem: a Codex stem is the full
-/// `rollout-<ts>-<uuid>` string while the hook transport carries the bare
-/// UUID, so a JSONL-created slot would disagree with its hook-created twin
-/// (and `backfill_identity` never heals a non-empty session_id) — the
-/// tooltip's same-cwd disambiguator then suffixes the constant `roll` for
-/// every JSONL-created Codex slot.
 #[tokio::test]
 async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -195,8 +168,7 @@ async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
-    })
-    .with_id_deriver(codex_id_from_path);
+    });
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     let mut got = None;
@@ -224,9 +196,6 @@ async fn codex_first_sight_session_start_carries_bare_uuid_session_id() {
     handle.abort();
 }
 
-/// Conversely, a transcript whose mtime is *within* the initial-window is
-/// treated as live: its SessionStart and any historical content replays so
-/// in-flight Task / tool state survives a pixtuoid restart.
 #[tokio::test]
 async fn watcher_emits_session_start_for_recent_files_on_startup() {
     let dir = TempDir::new().unwrap();
@@ -248,11 +217,9 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
         }
     });
     std::fs::write(&fresh, format!("{line}\n")).unwrap();
-    // fsync the parent directory so the directory entry is guaranteed visible
-    // to read_dir — without this, APFS metadata propagation can race with
-    // the watcher's initial seed walk under heavy concurrent I/O. Unix-only:
-    // Windows can't open a directory as a plain file (and the APFS race
-    // doesn't exist there).
+    // fsync the parent dir: APFS metadata propagation can otherwise race with
+    // the watcher's initial seed walk. Unix-only — Windows can't open a
+    // directory as a plain file.
     #[cfg(unix)]
     std::fs::File::open(&project_dir)
         .unwrap()
@@ -264,9 +231,8 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
     let fresh_path = fresh.clone();
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
-    // Give the watcher task a chance to complete the initial seed scan, then
-    // append a no-op newline to trigger a watcher notification as a fallback
-    // path in case the initial seed missed the file under heavy I/O contention.
+    // A no-op append as a fallback notification, in case the initial seed
+    // missed the file under I/O contention.
     tokio::time::sleep(Duration::from_millis(500)).await;
     tokio::fs::OpenOptions::new()
         .append(true)
@@ -295,9 +261,6 @@ async fn watcher_emits_session_start_for_recent_files_on_startup() {
     handle.abort();
 }
 
-/// First-sight cwd extraction must scan past unparsable prefix lines.
-/// `extract_cwd` previously short-circuited via `?` on the first non-JSON
-/// (or non-UTF8) line, even if a later line carried the `cwd` field.
 #[tokio::test]
 async fn first_sight_extracts_cwd_past_non_json_prefix() {
     let dir = TempDir::new().unwrap();
@@ -312,17 +275,10 @@ async fn first_sight_extracts_cwd_past_non_json_prefix() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // First line: garbage. Second line: a system line carrying cwd. Watcher
-    // should still derive cwd = /real-repo on the SessionStart for first-sight.
-    //
-    // The watcher emits SessionStart exactly ONCE per file, with cwd taken from
-    // whatever bytes are present at first read. Writing the lines incrementally
-    // (or even create-then-write) leaves a window where the 250ms poll observes
-    // a partial/empty file, latches cwd="" permanently, and fails this test
-    // (flaky under load / coverage instrumentation). Stage the complete content
-    // in a sibling `.partial` file — excluded by the watcher's `.jsonl`
-    // extension filter — then atomically rename it into place so first sight
-    // always reads the full content.
+    // SessionStart fires exactly ONCE per file, with cwd taken from whatever
+    // bytes are present at first read — an incremental write leaves a window
+    // where the poll sees a partial file and latches cwd="" permanently. Stage
+    // in a `.partial` sibling (excluded by the `.jsonl` filter), then rename.
     let sys_line = serde_json::json!({
         "type": "system",
         "subtype": "session_start",
@@ -354,13 +310,6 @@ async fn first_sight_extracts_cwd_past_non_json_prefix() {
     handle.abort();
 }
 
-/// The first-sight head scan dispatches by the SCANNED source (design-debt
-/// #5): a codex-shaped `payload.cwd` line inside a CC transcript must NOT
-/// label the CC session with the foreign cwd — before the registry-dispatched
-/// extractors, the shared if-chain tried every source's shape against every
-/// transcript, so this SessionStart registered with cwd = `/foreign/repo`.
-/// With no CC-shaped cwd anywhere in the head, the registration falls back to
-/// an EMPTY cwd (→ the project-dir label fallback), never the foreign one.
 #[tokio::test]
 async fn first_sight_cwd_ignores_foreign_source_shapes() {
     let dir = TempDir::new().unwrap();
@@ -375,9 +324,7 @@ async fn first_sight_cwd_ignores_foreign_source_shapes() {
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Codex-shaped head line + a cwd-less CC line. Staged + renamed like
-    // `first_sight_extracts_cwd_past_non_json_prefix` so first sight always
-    // reads the full content.
+    // Staged + renamed so first sight always reads the full content.
     let codex_shaped = serde_json::json!({
         "type": "session_meta",
         "payload": { "id": "ses-foreign", "cwd": "/foreign/repo" }
@@ -412,8 +359,6 @@ async fn first_sight_cwd_ignores_foreign_source_shapes() {
     handle.abort();
 }
 
-/// Stale files become live as soon as CC writes to them — the next notify
-/// event must produce a SessionStart, since the file is now active.
 #[tokio::test]
 async fn stale_file_emits_session_start_when_written_to() {
     let dir = TempDir::new().unwrap();
@@ -434,13 +379,11 @@ async fn stale_file_emits_session_start_when_written_to() {
     let handle = tokio::spawn(async move { watcher.run(tx).await });
     tokio::time::sleep(Duration::from_millis(150)).await;
 
-    // No SessionStart yet (stale + skipped).
     while tokio::time::timeout(Duration::from_millis(20), rx.recv())
         .await
         .is_ok()
     {}
 
-    // Append a real assistant tool_use line — file is now live.
     let line = serde_json::json!({
         "type": "assistant",
         "sessionId": "revive",
@@ -476,9 +419,6 @@ async fn stale_file_emits_session_start_when_written_to() {
     handle.abort();
 }
 
-/// A recent file (within the initial window) that has a session_end marker
-/// at its tail must NOT produce a SessionStart on startup — the watcher
-/// must detect the ended session and seed the cursor at EOF.
 #[tokio::test]
 async fn watcher_skips_recent_file_with_session_end_marker() {
     let dir = TempDir::new().unwrap();
@@ -492,7 +432,6 @@ async fn watcher_skips_recent_file_with_session_end_marker() {
 {"type":"system","subtype":"session_end","sessionId":"ended"}
 "#;
     tokio::fs::write(&ended, content).await.unwrap();
-    // mtime is "now" — well within the initial window.
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
     let watcher = cc_watcher(projects_root.clone()).with_initial_window(Duration::from_secs(3600));
@@ -581,7 +520,7 @@ async fn watcher_custom_label_deriver() {
 #[tokio::test]
 async fn codex_rollout_yields_uuid_keyed_session_start() {
     fast_watch();
-    use pixtuoid_core::source::codex::{codex_id_from_path, decode_codex_line};
+    use pixtuoid_core::source::codex::decode_codex_line;
 
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -589,10 +528,11 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
     let transcript = root.join(format!("rollout-2026-05-29T22-36-52-{uuid}.jsonl"));
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    // NO `.with_id_deriver`: the `codex` registry row IS the derivation. Wiring
+    // it here would pass even if the row and the watcher default diverged.
     let watcher = JsonlWatcher::new(root.clone(), "codex".to_string(), decode_codex_line, |_t| {
         false
-    })
-    .with_id_deriver(codex_id_from_path);
+    });
     let handle = tokio::spawn(async move { watcher.run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -620,10 +560,8 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
 
     let expected = AgentId::from_parts("codex", uuid);
     let mut saw_session_start = false;
-    // This watcher has NO `.with_label_deriver` override, so it exercises the
-    // DEFAULT LabelDeriver wired in `JsonlWatcher::new` (#5) — assert the
-    // derived Rename label too, the only watcher-level cover that the default
-    // path is live (every OTHER label assertion rides CC's/custom override).
+    // NO `.with_label_deriver` override: the only watcher-level cover that the
+    // default LabelDeriver wired in `JsonlWatcher::new` is live.
     let mut default_label = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline {
@@ -651,10 +589,8 @@ async fn codex_rollout_yields_uuid_keyed_session_start() {
 
 #[tokio::test]
 async fn default_id_deriver_stays_path_keyed() {
-    // Pin the IdDeriver DEFAULT: a watcher built WITHOUT `.with_id_deriver`
-    // (e.g. Antigravity) must key on the file path. CC + Codex override it
-    // (`.with_id_deriver`) to key on the session UUID; this guards the
-    // un-overridden default so the path-keyed sources keep coalescing.
+    // `antigravity`'s registry row carries the `default_id_from_path` deriver,
+    // where CC/Codex/copilot/grok/omp rows carry their own session-key fn.
     fast_watch();
     let dir = TempDir::new().unwrap();
     let root = dir.path().to_path_buf();
@@ -663,7 +599,6 @@ async fn default_id_deriver_stays_path_keyed() {
     let transcript = project_dir.join("abc.jsonl");
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    // No `.with_id_deriver` → the default path-keyed deriver is exercised.
     let watcher = JsonlWatcher::new(
         root.clone(),
         "antigravity".to_string(),
@@ -693,16 +628,9 @@ async fn default_id_deriver_stays_path_keyed() {
     f.flush().await.unwrap();
     drop(f);
 
-    // A bare watcher (no `.with_id_deriver`) uses the DEFAULT deriver, which
-    // keys on the file PATH (`default_id_from_path` = `normalize_path_key(path)`),
-    // NOT a UUID/stem — the keying Antigravity relies on; the real
-    // ClaudeCodeSource overrides it with `cc_id_from_path`. Assert the emitted id
-    // is NOT the stem-keyed id (the regression a stem-keyed default deriver would
-    // introduce); this holds on every platform since the path string is never
-    // "abc". The EXACT value (`from_parts(source, normalize_path_key(path))`) is
-    // platform-dependent, so it's pinned at the UNIT level instead —
-    // `jsonl/tests.rs::default_id_from_path_returns_normalized_path_key` + `id.rs`'s
-    // `normalize_path_key` tests — not re-derived in this integration test.
+    // The EXACT id (`from_parts(source, normalize_path_key(path))`) is
+    // platform-dependent, so assert only that it is NOT the stem-keyed one; the
+    // value itself is pinned at the unit level in `jsonl/tests.rs` + `id.rs`.
     let stem_keyed = AgentId::from_parts("antigravity", "abc");
     let mut ok = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
@@ -724,10 +652,6 @@ async fn default_id_deriver_stays_path_keyed() {
     handle.abort();
 }
 
-// Cursor-safety guard: a > 1 MiB first-sight pending tail with no newline (no
-// recoverable cwd in its head) must skip its BACKLOG to EOF (not buffer it),
-// yet still REGISTER the agent (#204) — a SessionStart + a project-dir-fallback
-// Rename — and a later newline-terminated valid line still decodes.
 #[tokio::test]
 async fn watcher_skips_oversized_pending_tail() {
     let dir = TempDir::new().unwrap();
@@ -741,9 +665,6 @@ async fn watcher_skips_oversized_pending_tail() {
     let handle = tokio::spawn(async move { watcher.run(tx).await });
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Write > 1 MiB of junk with NO newline — file_len - cursor exceeds
-    // MAX_PENDING_BYTES, so the watcher seeks the cursor to EOF (skipping the
-    // backlog) but still registers the agent on first-sight.
     let junk = vec![b'x'; (1 << 20) + 1024];
     let mut f = tokio::fs::OpenOptions::new()
         .create(true)
@@ -755,10 +676,6 @@ async fn watcher_skips_oversized_pending_tail() {
     f.flush().await.unwrap();
     drop(f);
 
-    // Give the watcher a scan; collect the first-sight registration. The junk
-    // head has no complete line → no cwd → empty-cwd SessionStart, and the
-    // Rename falls back to the project-dir basename. No ActivityStart: a
-    // no-newline blob has no decodable line, and the backlog isn't replayed.
     let mut got_start = false;
     let mut got_rename = None;
     let mut activity_before = 0usize;
@@ -797,8 +714,6 @@ async fn watcher_skips_oversized_pending_tail() {
         "the oversized backlog must not be replayed (got {activity_before} ActivityStart)"
     );
 
-    // Append a newline (closing the junk line) plus a valid line. The junk line
-    // is past the EOF-seeked cursor, so only the valid line decodes.
     let valid = serde_json::json!({
         "type": "assistant",
         "sessionId": "big",
@@ -840,11 +755,6 @@ async fn watcher_skips_oversized_pending_tail() {
     handle.abort();
 }
 
-// #204: a RECENT, valid, multi-line transcript larger than MAX_PENDING_BYTES
-// (e.g. a 7.4 MB main session) must REGISTER its agent on first-sight — a
-// SessionStart + Rename derived from a bounded head read — instead of being
-// silently skipped to EOF and staying invisible until its next small append.
-// The giant backlog is still NOT replayed (no flood of historical events).
 #[tokio::test]
 async fn watcher_registers_large_transcript_on_first_sight() {
     let dir = TempDir::new().unwrap();
@@ -853,10 +763,6 @@ async fn watcher_registers_large_transcript_on_first_sight() {
     tokio::fs::create_dir_all(&project_dir).await.unwrap();
     let transcript = project_dir.join("big-session.jsonl");
 
-    // Build a valid, newline-terminated transcript that exceeds 1 MiB. The
-    // FIRST line carries `cwd` (CC always writes it on the first line), so a
-    // bounded head read recovers it without touching the whole file. The rest
-    // are valid tool_use lines — the backlog that must NOT be replayed.
     let first = serde_json::json!({
         "type": "system",
         "subtype": "session_start",
@@ -884,13 +790,11 @@ async fn watcher_registers_large_transcript_on_first_sight() {
         "test transcript must exceed MAX_PENDING_BYTES"
     );
 
-    // Write the whole file BEFORE the watcher first sees it, so the entire body
-    // is one oversized first-sight pending tail (cursor 0 → file_len > 1 MiB).
+    // Write the whole file BEFORE the watcher first sees it, so the body is one
+    // oversized first-sight pending tail.
     tokio::fs::write(&transcript, contents.as_bytes())
         .await
         .unwrap();
-    // Keep it inside the recency window (write() above already set a fresh
-    // mtime; assert it isn't gated as historical by should_seed_at_eof).
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(256);
     let watcher = cc_watcher(projects_root.clone());
@@ -916,11 +820,7 @@ async fn watcher_registers_large_transcript_on_first_sight() {
             Ok(Some(_)) => {}
             Ok(None) | Err(_) => {}
         }
-        // Once we have the registration pair, drain briefly to confirm the
-        // backlog isn't pouring in, then stop.
         if start_id.is_some() && label.is_some() {
-            // Short settle: if the backlog were replayed we'd accumulate
-            // hundreds of ActivityStart here.
             tokio::time::sleep(Duration::from_millis(200)).await;
             while let Ok(Some((_, ev))) =
                 tokio::time::timeout(Duration::from_millis(20), rx.recv()).await
@@ -945,9 +845,6 @@ async fn watcher_registers_large_transcript_on_first_sight() {
         label, "cc·bigrepo",
         "label must derive from the head-read cwd basename"
     );
-    // The backlog is skipped to EOF: registration fires, but the thousands of
-    // historical tool_use lines are NOT replayed. Allow a small margin (0) but
-    // assert it's nowhere near the backlog count (hundreds of lines).
     assert!(
         activity_count < 5,
         "the giant backlog must not be replayed wholesale (got {activity_count} ActivityStart)"
@@ -955,9 +852,6 @@ async fn watcher_registers_large_transcript_on_first_sight() {
     handle.abort();
 }
 
-// Drives detect_parent_id through the REAL watcher recursion: a subagent
-// transcript at <root>/proj/parent/subagents/agent-1.jsonl must emit a
-// SessionStart whose parent_id derives the parent from the grandparent dir.
 #[tokio::test]
 async fn watcher_derives_parent_id_for_subagent_path() {
     let dir = TempDir::new().unwrap();
@@ -993,9 +887,6 @@ async fn watcher_derives_parent_id_for_subagent_path() {
     f.flush().await.unwrap();
     drop(f);
 
-    // The parent link keys on the `<parent-uuid>` dir component ("parent"),
-    // which is cwd-independent — so there is no raw-vs-canonical ambiguity here
-    // (the project-dir prefix is intentionally not part of the key).
     let expected = AgentId::from_parts("claude-code", "parent");
 
     let mut found_parent = None;
@@ -1021,25 +912,15 @@ async fn watcher_derives_parent_id_for_subagent_path() {
     handle.abort();
 }
 
-// THE cwd-split bug: a git-worktree splits the parent transcript and the
-// subagent transcript into DIFFERENT `~/.claude/projects/<project-dir>/` trees
-// (project-dir is a pure function of cwd). The link must still resolve because
-// the `<parent-uuid>` component is cwd-independent and equals the parent's own
-// session UUID. Drives the REAL watcher: the subagent's emitted parent_id must
-// equal the parent's emitted SessionStart agent_id even though they live under
-// different project dirs.
 #[tokio::test]
 async fn watcher_links_subagent_across_project_dirs() {
     let dir = TempDir::new().unwrap();
     let projects_root = dir.path().to_path_buf();
 
     let parent_uuid = "abc123def456";
-    // Parent transcript under project-dir A.
     let project_a = projects_root.join("-Users-me-PROJECT-A");
     tokio::fs::create_dir_all(&project_a).await.unwrap();
     let parent_transcript = project_a.join(format!("{parent_uuid}.jsonl"));
-    // Subagent transcript under a DIFFERENT project-dir B, sharing the same
-    // `<parent-uuid>/subagents/` component.
     let subagent_dir = projects_root
         .join("-Users-me-PROJECT-B")
         .join(parent_uuid)
@@ -1094,8 +975,6 @@ async fn watcher_links_subagent_across_project_dirs() {
     sf.flush().await.unwrap();
     drop(sf);
 
-    // Collect the parent's SessionStart agent_id (no parent_id) and the
-    // subagent's SessionStart parent_id; they must be equal.
     let mut parent_agent_id: Option<AgentId> = None;
     let mut sub_parent_id: Option<AgentId> = None;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
@@ -1126,4 +1005,74 @@ async fn watcher_links_subagent_across_project_dirs() {
         "subagent parent_id must equal the parent's agent_id across a cwd-split (different project dirs)"
     );
     handle.abort();
+}
+
+#[tokio::test]
+async fn the_registry_row_filters_the_workflow_journal_and_the_builder_overrides_it() {
+    fn admit_every_jsonl(_p: &std::path::Path) -> bool {
+        true
+    }
+
+    async fn first_sight_starts(root: std::path::PathBuf, admit_all: bool) -> usize {
+        let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+        let mut watcher = JsonlWatcher::new(
+            root,
+            "claude-code".to_string(),
+            decode_cc_line,
+            cc_session_ended,
+        );
+        if admit_all {
+            watcher = watcher.with_path_filter(admit_every_jsonl);
+        }
+        let handle = tokio::spawn(async move { watcher.run(tx).await });
+
+        let mut starts = 0;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(4);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some((_, AgentEvent::SessionStart { .. }))) =
+                tokio::time::timeout(Duration::from_millis(200), rx.recv()).await
+            {
+                starts += 1;
+            }
+        }
+        handle.abort();
+        starts
+    }
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let wf = dir
+        .path()
+        .join("proj")
+        .join("01000000-0000-7000-8000-0000000000cc")
+        .join("subagents")
+        .join("workflows")
+        .join("wf_1");
+    tokio::fs::create_dir_all(&wf).await.unwrap();
+    write_lines(
+        &wf.join("journal.jsonl"),
+        &[serde_json::json!({"type": "started", "name": "wf"})],
+    )
+    .await;
+    write_lines(
+        &wf.join("agent-xyz.jsonl"),
+        &[serde_json::json!({
+            "type": "assistant",
+            "cwd": "/repo",
+            "message": {"content": [{"type": "text", "text": "hi"}]}
+        })],
+    )
+    .await;
+
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), false).await,
+        1,
+        "the claude-code row's path_filter must exclude journal.jsonl — only the \
+         real subagent transcript first-sights"
+    );
+    assert_eq!(
+        first_sight_starts(dir.path().to_path_buf(), true).await,
+        2,
+        "an explicit with_path_filter must OVERRIDE the row (both files first-sight)"
+    );
 }

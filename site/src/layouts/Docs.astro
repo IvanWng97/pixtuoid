@@ -9,14 +9,10 @@ import { REPO, asset, DOCS, FLOORS, type DocId } from '../consts';
 interface Props {
   title: string;
   description: string;
-  /** from `await render(entry)` — drives the build-time mini-TOC */
   headings: MarkdownHeading[];
-  /** which doc this page is (sidebar highlight + prev/next) — derived from the
-   * one DOCS manifest so it can't fall out of sync with the sidebar/pager */
   current: DocId;
-  /** repo-relative path for the "Source of truth" footer link, e.g. docs/CONFIGURATION.md */
+  /** repo-relative, e.g. docs/CONFIGURATION.md */
   sourcePath: string;
-  /** suffix after the source link (architecture mentions its Mermaid diagram) */
   sourceNote?: string;
 }
 
@@ -29,17 +25,14 @@ const {
   sourceNote = 'this page renders it verbatim.',
 } = Astro.props;
 
-// Reading order / sidebar / pager all come from the one DOCS manifest (consts.ts).
 const idx = DOCS.findIndex((d) => d.id === current);
 const prev = idx > 0 ? DOCS[idx - 1] : undefined;
 const next = idx >= 0 && idx < DOCS.length - 1 ? DOCS[idx + 1] : undefined;
 
-// The statusline's left path segment — same DOCS manifest the sidebar uses.
 const routeSlug = idx >= 0 ? DOCS[idx].route : current;
 
-// Mini-TOC: h2 sections; when a doc has few of them, fold in the h3s too.
-// Trailing parentheticals are stripped for the rail — "System-managed (don't
-// edit — pixtuoid writes these for you)" wraps to three lines at 13rem.
+// h2 sections, folding in h3s when a doc has few. Trailing parentheticals are
+// stripped so a long heading doesn't wrap to three lines in the 13rem rail.
 const h2s = headings.filter((h) => h.depth === 2);
 const raw = h2s.length < 3 ? headings.filter((h) => h.depth === 2 || h.depth === 3) : h2s;
 const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '') }));
@@ -145,9 +138,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
 </Base>
 
 <script is:inline>
-  // Scrollspy: light the TOC entry whose heading crosses the upper reading
-  // band (#257) — the same IntersectionObserver pattern the landing elevator
-  // uses, with a narrower band tuned for headings rather than whole floors.
+  // Scrollspy: light the TOC entry whose heading crosses the upper reading band.
   (function () {
     const links = document.querySelectorAll('[data-toc-link]');
     if (!links.length || !('IntersectionObserver' in window)) return;
@@ -173,9 +164,8 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
       const h = document.getElementById(slug);
       if (h) io.observe(h);
     });
-    // An INSTANT jump (reduced-motion click, deep-linked #anchor load) parks
-    // the heading at the viewport top — above the band, so no entry fires;
-    // sync explicitly on click and on arrival-by-hash.
+    // An INSTANT jump (reduced-motion click, deep-linked #anchor load) parks the
+    // heading above the band, so no entry fires — sync explicitly instead.
     links.forEach(function (a) {
       a.addEventListener('click', function () {
         setActive(a.dataset.tocLink);
@@ -198,9 +188,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     justify-content: center;
     align-items: start;
   }
-  /* rails: sticky below the --nav-h sticky nav (+ 1.5rem breath) */
-  /* anchored headings clear the sticky nav (same offset the rails use) —
-     also parks clicked headings nearer the scrollspy band */
+  /* anchored headings clear the sticky nav, and park nearer the scrollspy band */
   .docs :global(.prose h2),
   .docs :global(.prose h3) {
     scroll-margin-top: calc(var(--nav-h) + 1.5rem);
@@ -239,9 +227,8 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     color: var(--fg);
     background: color-mix(in srgb, var(--fg) 5%, transparent);
   }
-  /* elevator panel (§6): the sidebar is HARDWARE — dark screen, sharp corners,
-     1px light edge (.hw-panel, wb-1). Ink switches to the chip palette; the
-     current doc reads as the lit LED, not the paper-coral current-page tint. */
+  /* the sidebar is HARDWARE (.hw-panel): chip-palette ink, and the current doc
+     reads as a lit LED rather than the paper-coral current-page tint */
   .docs__sidebar {
     padding: 0.8rem 0.55rem;
     color: var(--chip-ink);
@@ -263,8 +250,6 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     gap: 0.55rem;
     color: var(--chip-ink);
   }
-  /* --hw-hover: the statusline's floor-button hover ground —
-     the same hardware-hover tone on the same --screen ground */
   .docs__sidebar a:hover {
     color: var(--chip-bright);
     background: var(--hw-hover);
@@ -286,8 +271,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
   .docs__sidebar a[aria-current='page'] .docs__fl {
     color: inherit;
   }
-  /* callout chrome (§6, emitted by config/rehype-callouts.mjs): rendered
-     markdown carries no astro scope hash → :global, same as .prose h2 above */
+  /* rendered markdown carries no astro scope hash, hence :global throughout */
   .docs :global(.callout) {
     margin: 1.4rem 0;
     background: var(--screen);
@@ -309,6 +293,16 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     border: 0;
     color: var(--chip-ink);
   }
+  /* global.css's `.prose p, .prose li` matches these DIRECTLY, which beats the
+     --chip-ink their .callout__body ancestor hands down — dark ink on the dark
+     --screen. Astro compiles `.docs :global(…)` to (0,3,1), which beats
+     `.prose p` (0,1,1) by WEIGHT. CAVEAT: a THEME-prefixed global rule
+     (`:root[data-theme='night'] .prose a`) is ALSO (0,3,1), an exact tie the
+     twins below win only on source order — see the `a > code` rule. */
+  .docs :global(.callout__body p),
+  .docs :global(.callout__body li) {
+    color: inherit;
+  }
   .docs :global(.callout__body a) {
     color: var(--chip-bright);
   }
@@ -316,8 +310,14 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     color: var(--chip-bright);
     background: var(--hw-hover);
   }
-  /* scrollspy state (#257) — same affordance family as the sidebar's current
-     page (--coral-deep is theme-retuned, so no per-theme override needed) */
+  /* Twin for global.css's `.prose a > code` plate swap, which at (0,3,2)
+     OUTWEIGHS the rule above — a link-wrapped chip in a callout wore --surface
+     next to its --hw-hover siblings. The extra `.callout` takes this to (0,4,2)
+     so it wins on WEIGHT: a plain twin would only tie. */
+  .docs :global(.callout .callout__body a > code) {
+    background: var(--hw-hover);
+  }
+  /* --coral-deep is theme-retuned, so this needs no per-theme override */
   .docs__toc a[aria-current='location'] {
     color: var(--coral-deep);
     border-left-color: var(--coral-deep);
@@ -370,7 +370,7 @@ const toc = raw.map((h) => ({ ...h, text: h.text.replace(/\s*\([^)]*\)\s*$/, '')
     font-size: 0.84rem;
     color: var(--fg-muted);
   }
-  /* single column: content first, rails hidden (Nav's Docs dropdown covers them) */
+  /* rails hidden — Nav's Docs dropdown covers them */
   @media (max-width: 1000px) {
     .docs {
       display: block;

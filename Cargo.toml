@@ -20,27 +20,18 @@ homepage     = "https://github.com/IvanWng97/pixtuoid"
 keywords     = ["terminal", "tui", "pixel-art", "ai-agents", "claude"]
 categories   = ["command-line-utilities", "visualization"]
 
-# Workspace-wide lints, inherited by every crate via `[lints] workspace = true`.
 # `unreachable_pub` forces every `pub` in a private module tree down to
-# `pub(crate)` — so a layer-internal item can't silently leak as crate API. It's
-# warn here; CI's `cargo clippy -- -D warnings` (just clippy) makes it a hard
-# gate. Semver-neutral: cargo-semver-checks never sees an unreachable item.
+# `pub(crate)`, so a layer-internal item can't silently leak as crate API. Warn
+# here; CI's `cargo clippy -- -D warnings` makes it a hard gate.
 #
-# `missing_docs` is NOT here on purpose: it is a PUBLIC-API gate, and the public
-# API is exactly the two PUBLISHED crates (the binary lib target is not a semver
-# surface). So it's enabled per-crate via `#![warn(missing_docs)]` in
-# pixtuoid-core/pixtuoid-scene `lib.rs` — scoped identically to the semver-checks
-# + api-surface gates, not fanned out over the binary crates' non-API internals.
+# `missing_docs` is NOT here on purpose: it is a PUBLIC-API gate, so it lives
+# per-crate as `#![warn(missing_docs)]` in the two PUBLISHED crates' `lib.rs`,
+# scoped identically to the semver-checks + api-surface gates.
 [workspace.lints.rust]
 unreachable_pub = "warn"
 
-# Doc-rendering hygiene. Unlike `missing_docs` (a public-API contract, scoped to
-# the published crates), a broken or private-target intra-doc link is a DEAD LINK
-# in the rendered docs for ANY crate — a plain correctness bug — so this gate is
-# workspace-wide. Rustdoc lints only fire during a doc build (`cargo doc` /
-# `cargo test --doc`), so they're invisible to `cargo build`/`clippy`; the CI
-# `docs` job (`just doc-check`) runs `cargo doc` to execute them. `deny` here +
-# `-D warnings` in that recipe together keep the rendered docs pristine.
+# Rustdoc lints only fire during a doc build, so they're invisible to
+# `cargo build`/`clippy`; CI's `docs` job runs `cargo doc` to execute them.
 [workspace.lints.rustdoc]
 broken_intra_doc_links = "deny"
 private_intra_doc_links = "deny"
@@ -52,17 +43,24 @@ strip         = "debuginfo"
 panic         = "abort"
 
 [profile.dev]
-# Keep file:line in backtraces (line-tables-only) but drop the heavier
-# variable/type debuginfo — faster local incremental builds + smaller cached
-# target dirs. Independent of release above (which strips debuginfo entirely).
+# Keep file:line in backtraces but drop the heavier variable/type debuginfo.
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 # Dependencies never need debuginfo for our own backtraces.
 debug = false
 
-# Opt-in full debuginfo for an actual debugger session (the third stanza of the
-# official Cargo build-performance recipe): `cargo build --profile debugging`.
+[profile.dev.package.pixtuoid-scene]
+# The audio DSP is the one genuinely compute-bound thing in the workspace and
+# `test` inherits `dev`, so the synth fingerprint tests were paying for
+# unoptimized butterflies and sin loops. Debug assertions stay ON. This cannot
+# perturb the ratified spectral pins because none of them asserts bit equality —
+# they compare centroid and band-energy shares within tolerances orders of
+# magnitude wider than any codegen-level float difference.
+opt-level = 2
+
+# Opt-in full debuginfo for an actual debugger session:
+# `cargo build --profile debugging`.
 [profile.debugging]
 inherits = "dev"
 debug = true
@@ -72,8 +70,8 @@ tokio              = { version = "1", default-features = false }
 serde              = { version = "1", features = ["derive"] }
 serde_json         = "1"
 toml               = "1"
-# Format-preserving TOML editing for config.toml saves (comments + unknown keys
-# survive). The toml crate's own sibling (same toml-rs maintainers).
+# Format-preserving TOML editing for config.toml saves: comments + unknown keys
+# survive a round-trip.
 toml_edit          = "0.25"
 anyhow             = "1"
 tracing            = "0.1"
@@ -81,7 +79,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 notify             = "8"
 ratatui            = "0.30"
 crossterm          = "0.29"
-# Terminal display-column width (the authority ratatui itself uses). ONE measure
-# for footer right-flush / truncation so wide glyphs don't miscount.
+# Terminal display-column width — the authority ratatui itself uses, so wide
+# glyphs don't miscount against its layout.
 unicode-width      = "0.2"
 clap               = { version = "4", features = ["derive"] }

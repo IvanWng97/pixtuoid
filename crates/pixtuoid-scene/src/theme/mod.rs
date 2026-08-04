@@ -131,12 +131,11 @@ pub struct LightingColors {
     pub floor_lamp_halo: Rgb,
     /// Night-time interior darkening tint.
     pub night_tint: Rgb,
-    /// The sun disc's core color (window-wall celestial body, `pixel_painter::background::celestial::compute_disc`).
-    /// The soft halo ring reuses this SAME hue at lower alpha (no separate glow color) — must read
-    /// warm (see `sun_and_moon_read_warm_and_cool_for_every_theme`).
+    /// The sun disc's core color — the halo ring reuses this SAME hue at lower
+    /// alpha, and it must read warm.
     pub sun_core: Rgb,
-    /// The moon disc's core color (lit side; the dark limb is the fixed `MOON_SHADOW` in
-    /// `background/celestial.rs`, not per-theme). Must read cool.
+    /// The moon disc's core color (lit side; the dark limb is the fixed
+    /// `MOON_SHADOW`, not per-theme). Must read cool.
     pub moon_core: Rgb,
 }
 
@@ -173,8 +172,7 @@ pub struct FurnitureColors {
     pub tank_fish_alt: Rgb,
     /// Aquarium plant.
     pub tank_plant: Rgb,
-    /// Token-meter paper tower (#632): the sheet face + the every-other-row
-    /// ream shading that makes the block read as STACKED PAPER, not a slab.
+    /// Token-meter paper tower: the sheet face.
     pub paper: Rgb,
     /// Token-meter paper ream-shading (the every-other-row band).
     pub paper_shade: Rgb,
@@ -237,10 +235,8 @@ pub struct UiColors {
     pub neon_star: Rgb,
 }
 
-/// Corridor appliance colors (vending machine, printer, coat rack). These were
-/// hardcoded RGB literals in `pixel_painter/drawable.rs`, so the appliances
-/// rendered with the NORMAL theme's palette on every theme — clashing on the
-/// dark/neon/pastel ones. Each theme now supplies its own harmonized set.
+/// Corridor appliance colors (vending machine, printer, coat rack) — each
+/// theme supplies its own harmonized set.
 #[derive(Debug, Clone)]
 pub struct ApplianceColors {
     /// Vending machine chassis (the dark box body).
@@ -267,13 +263,9 @@ pub struct ApplianceColors {
     pub coats: [Rgb; 3],
 }
 
-/// Per-source badge hues. One color per registered source — the 12 agent CLIs +
-/// the OpenClaw daemon (`all()` returns `[Rgb; 13]`, count-pinned to
-/// the source registry by `source_colors_cover_every_registered_source`) — drawn
-/// as a leading `[xx]` badge in the agent-dashboard popup (agents only) and the
-/// Sources panel (all sources, incl. the daemon). Each theme supplies its own so
-/// the badge harmonizes with the palette and stays legible on `tooltip_bg`
-/// (guarded by `source_badges_legible_for_every_theme`).
+/// Per-source badge hues — one color per registered source, drawn as a leading
+/// `[xx]` badge in the agent-dashboard popup and the Sources panel. Each theme
+/// supplies its own so the badge stays legible on `tooltip_bg`.
 #[derive(Debug, Clone)]
 pub struct SourceColors {
     /// Claude Code badge hue.
@@ -305,10 +297,9 @@ pub struct SourceColors {
 }
 
 impl SourceColors {
-    /// All badge hues in declaration order. The ONE enumeration the legibility
-    /// guard and the count-pin test share, so adding a source forces a new field
-    /// HERE (caught by `source_colors_cover_every_registered_source`) instead of
-    /// silently escaping the per-theme distinctness check.
+    /// All badge hues in declaration order — the ONE enumeration the legibility
+    /// guard and the count-pin test share, so a new source can't silently escape
+    /// the per-theme distinctness check.
     pub fn all(&self) -> [Rgb; 13] {
         [
             self.claude_code,
@@ -327,12 +318,9 @@ impl SourceColors {
         ]
     }
 
-    /// Badge hue for a source's 2-char label prefix (`SourceDescriptor::label_prefix`
-    /// in `pixtuoid_core::source::registry`), or `None` for an unknown prefix. The
-    /// painters (dashboard / connection) resolve a badge color from the prefix
-    /// without name-matching each source inline. The accepted prefixes are the
-    /// registry's authoritative `SourceDescriptor::label_prefix` values — one arm
-    /// per registered source (kept in lockstep by the badge-coverage guards).
+    /// Badge hue for a source's 2-char label prefix, or `None` for an unknown
+    /// one. The arms are a hand-kept copy of the registry's authoritative
+    /// `SourceDescriptor::label_prefix` values.
     pub fn by_prefix(&self, prefix: &str) -> Option<Rgb> {
         Some(match prefix {
             "cc" => self.claude_code,
@@ -390,11 +378,9 @@ mod tests {
 
     #[test]
     fn theme_gallery_manifest_matches_all_themes() {
-        // site/src/themes.json drives the site's theme switcher + the gen-media
-        // render loop; ALL_THEMES drives what `--theme` actually accepts. Site CI
-        // never runs the binary, so this test is the bridge (same pattern as
-        // `weather_gallery_manifest_matches_the_weather_enum`). Set equality, not
-        // order: the manifest's order is a site presentation choice (`featured`).
+        // Site CI never runs the binary, so this test is the only bridge between
+        // themes.json and ALL_THEMES. Set equality, not order: the manifest's
+        // order is a site presentation choice.
         let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../site/src/themes.json");
         let json = match std::fs::read_to_string(path) {
             Ok(s) => s,
@@ -434,9 +420,6 @@ mod tests {
         assert_eq!(NORMAL.kind, ThemeKind::Light);
     }
 
-    // The window-wall celestial disc (Task 7) must read as a WARM sun and a
-    // COOL moon on every theme, or the day/night disc stops selling its
-    // identity regardless of how well it otherwise matches the palette.
     #[test]
     fn sun_and_moon_read_warm_and_cool_for_every_theme() {
         for t in ALL_THEMES {
@@ -456,16 +439,8 @@ mod tests {
         }
     }
 
-    // Every theme's appliance palette must keep the appliances LEGIBLE — the
-    // bug was a hardcoded normal-theme set on all themes, so this guards both
-    // that each theme supplies its own AND that the supplied set reads right.
     #[test]
     fn token_paper_is_legible_on_the_desk_for_every_theme() {
-        // #632: the paper tower sits on the desk's wood wing — it must read
-        // bright against the wood AND its two ream tones must differ (the
-        // banding is what makes the block read as stacked paper). No code
-        // invariant guarded this before; the media baselines held only by
-        // hand-tuning (film-critic catch).
         fn lum(c: Rgb) -> u32 {
             c.r as u32 + c.g as u32 + c.b as u32
         }
@@ -487,6 +462,58 @@ mod tests {
         }
     }
 
+    // Per-channel sum-of-abs-diff, deliberately not a luminance test: two hues
+    // can share a luminance yet read as different colors, so mutual
+    // distinguishability is a Manhattan-distance question, not a brightness one.
+    fn manhattan(a: Rgb, b: Rgb) -> u32 {
+        (a.r as u32).abs_diff(b.r as u32)
+            + (a.g as u32).abs_diff(b.g as u32)
+            + (a.b as u32).abs_diff(b.b as u32)
+    }
+
+    // Two glow roles sharing an RGB is a CORRECTNESS bug, not taste:
+    // `recolor_frame` substitutes by RGB equality, and `CharacterGlow::Thinking`
+    // also resolves to `default`, so an aliased `default` makes a thinking agent
+    // and an editing agent glow identically.
+    #[test]
+    fn tool_glow_hues_are_distinct_for_every_theme() {
+        /// Deliberately looser than `MIN_SOURCE_HUE_DIST`: six glow roles share
+        /// ONE palette's accent range, so the legitimate pairs run tight.
+        const MIN_TOOL_GLOW_DIST: u32 = 30;
+        for t in ALL_THEMES {
+            // Destructured with NO `..`: a seventh glow role must join the guard
+            // or this stops compiling.
+            let ToolGlowColors {
+                edit,
+                read,
+                bash,
+                agent,
+                grep,
+                default,
+            } = t.tool_glow;
+            let hues = [
+                ("edit", edit),
+                ("read", read),
+                ("bash", bash),
+                ("agent", agent),
+                ("grep", grep),
+                ("default", default),
+            ];
+            for i in 0..hues.len() {
+                for j in (i + 1)..hues.len() {
+                    let d = manhattan(hues[i].1, hues[j].1);
+                    assert!(
+                        d >= MIN_TOOL_GLOW_DIST,
+                        "{}: tool glow {} and {} too close ({d} < {MIN_TOOL_GLOW_DIST})",
+                        t.name,
+                        hues[i].0,
+                        hues[j].0
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn appliance_palette_is_legible_for_every_theme() {
         fn lum(c: Rgb) -> u32 {
@@ -494,16 +521,12 @@ mod tests {
         }
         for t in ALL_THEMES {
             let a = &t.appliance;
-            // Printer: paper is the lightest, the lid/top the darkest — so the
-            // scanner + paper read against the chassis in every theme.
             assert!(
                 lum(a.printer_paper) > lum(a.printer_body)
                     && lum(a.printer_body) > lum(a.printer_top),
                 "{}: printer must layer paper > body > top by luminance",
                 t.name
             );
-            // Vending: the accent panel + each drink must be visible against the
-            // dark chassis (not collapse into it).
             assert_ne!(
                 a.vending_panel, a.vending_body,
                 "{}: vending panel invisible",
@@ -544,8 +567,6 @@ mod tests {
                     t.name
                 );
             }
-            // The chassis is darker than its brightest drink (the box reads as a
-            // box, the bottles pop).
             let brightest_drink = a.vending_drinks.iter().map(|c| lum(*c)).max().unwrap();
             assert!(
                 lum(a.vending_body) < brightest_drink,
@@ -555,35 +576,19 @@ mod tests {
         }
     }
 
-    // Every theme's per-CLI badge palette must read on the popup bg (tooltip_bg)
-    // and be mutually distinguishable, so a glance tells cc from cx from rx.
     #[test]
     fn source_badges_legible_for_every_theme() {
         fn lum(c: Rgb) -> u32 {
             c.r as u32 + c.g as u32 + c.b as u32
         }
-        // Per-channel sum-of-abs-diff. Distinct from `lum` on purpose: two hues
-        // can share a luminance yet read as different colors (catppuccin's sky
-        // and teal were lum 592 vs 587 — a lum-only floor would miss them), so
-        // mutual distinguishability is a Manhattan-distance question, not a
-        // brightness one.
-        fn manhattan(a: Rgb, b: Rgb) -> u32 {
-            (a.r as u32).abs_diff(b.r as u32)
-                + (a.g as u32).abs_diff(b.g as u32)
-                + (a.b as u32).abs_diff(b.b as u32)
-        }
         // Floor at which two source badges read as different colors at the 2-char
-        // badge scale. The tightest legitimate pair across the bundled themes is
-        // 82 (normal codex-vs-codewhale: blue vs teal), so 60 leaves margin while
-        // still failing loudly on a near-collision (a 39-distance regression once
-        // shipped on catppuccin). New themes/sources must clear this, not merely
-        // differ by one bit.
+        // badge scale — new themes/sources must clear it, not merely differ by
+        // one bit.
         const MIN_SOURCE_HUE_DIST: u32 = 60;
         for t in ALL_THEMES {
             let s = &t.source;
             let bg = t.ui.tooltip_bg;
             let hues = s.all();
-            // Each hue must contrast the popup bg (lum-sum delta >= 80).
             for (i, h) in hues.iter().enumerate() {
                 assert!(
                     lum(*h).abs_diff(lum(bg)) >= 80,
@@ -591,7 +596,6 @@ mod tests {
                     t.name
                 );
             }
-            // Every pair must be mutually distinguishable, not merely unequal.
             for i in 0..hues.len() {
                 for j in (i + 1)..hues.len() {
                     let d = manhattan(hues[i], hues[j]);
@@ -605,10 +609,8 @@ mod tests {
         }
     }
 
-    // A newly registered source must get a SourceColors field (→ a hue in every
-    // theme + an entry in `all()`), or its badge escapes the distinctness guard
-    // above. Pinned by count so the omission fails loudly HERE rather than
-    // shipping an unchecked badge color.
+    // Without this count pin, a newly registered source with no SourceColors
+    // field escapes the distinctness guard above entirely.
     #[test]
     fn source_colors_cover_every_registered_source() {
         use pixtuoid_core::source::registry;
@@ -620,14 +622,9 @@ mod tests {
         );
     }
 
-    // `by_prefix`'s match arms are a hand-kept copy of the registry's
-    // authoritative `SourceDescriptor::label_prefix` strings. The count guard
-    // above and the distinctness guard pin the HUES, not the prefix STRINGS —
-    // those were only pinned transitively, via the site-manifest chain and only
-    // for `status == "supported"` rows. A registry prefix RENAME that misses the
-    // matching `by_prefix` arm silently drops that source's badge to the idle
-    // fallback (`by_prefix(tag).unwrap_or(ui.label_idle)` in the painters). Pin
-    // the string mapping directly to the registry so the rename fails loudly HERE.
+    // The guards above pin the HUES, not the prefix STRINGS: a registry prefix
+    // RENAME that misses the matching `by_prefix` arm silently drops that
+    // source's badge to the idle fallback.
     #[test]
     fn by_prefix_accepts_every_registered_label_prefix() {
         for d in pixtuoid_core::source::registry::REGISTRY {

@@ -105,13 +105,12 @@ jobs:
             echo "Head: $HEAD_SHA"
           } > .claude-review/review-context.md
 
-      # The schema lives in a committed .json so every tool can read it — the
-      # inline literal was invisible to actionlint and zizmor, and an unbalanced
-      # brace in it took both review bots down for 31h. `check-jsonschema
+      # The schema lives in a committed .json so every tool can read it: an
+      # inline literal is invisible to actionlint and zizmor, and an unbalanced
+      # brace in one took both review bots down. `check-jsonschema
       # --check-metaschema` gates the file in `just lint`. The CLI has no
       # --json-schema-file and rejects a path, so it must round-trip through a
-      # step output; shlex.quote does the shell quoting, which (unlike a
-      # hand-written '...' wrapper) survives a payload containing an apostrophe.
+      # step output; shlex.quote survives a payload containing an apostrophe.
       - name: Load the review schema
         if: steps.pr.outputs.reviewable == 'true'
         id: schema
@@ -163,6 +162,62 @@ jobs:
             and (.summary | type == "string" and length > 0)
             and (.findings | type == "array" and length <= 5)
           ' <<< "$REVIEW_JSON" > /dev/null
+
+  # Absence renders as a pass: publish skips, nothing comments, and `ci-gate`
+  # being the only required check leaves the PR merely UNSTABLE. The merge gate
+  # is "Findings: 0 at HEAD", so an absent verdict has to say it is absent. Two
+  # shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
+  # (`reviewable=false` exits 0, so that arm has no red job at all).
+  # `!cancelled()` is load-bearing: without a status function an implicit
+  # `success()` skips this job in exactly the situation it exists for.
+  report_absence:
+    name: Report a missing review
+    needs: analyze
+    if: >
+      !cancelled() &&
+      (needs.analyze.result == 'failure' || needs.analyze.outputs.reviewable == 'false')
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Say the second lens did not run
+        env:
+          ANALYZE_RESULT: ${{ needs.analyze.result }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REPOSITORY: ${{ github.repository }}
+          REVIEW_MARKER: ${{ inputs.review_marker }}
+          REVIEW_TITLE: ${{ inputs.review_title }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [[ "$REVIEW_MARKER" =~ ^[a-z0-9-]+$ ]]
+          head_sha="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          note="$RUNNER_TEMP/claude-review-absent.md"
+          {
+            # `absent-<marker>`, not `<marker>-absent`: the review's own marker is
+            # `<marker>:<sha>`, so a prefix matcher would read the latter as a review.
+            echo "<!-- absent-${REVIEW_MARKER}:${head_sha} -->"
+            echo "## $REVIEW_TITLE — did not run"
+            echo
+            echo "Head: \`$head_sha\`"
+            echo
+            echo "**The automated second lens is ABSENT, not clean.** No findings were"
+            echo "produced, so none being shown means nothing. [Run log]($RUN_URL)."
+            echo
+            if [[ "$ANALYZE_RESULT" == "failure" ]]; then
+              # The action blames the JSON schema whatever the cause, so name the
+              # field that actually separates a spent quota from a real fault.
+              echo "In the run log, \`total_cost_usd\` of 0 in the \`result\` object"
+              echo "means the request never reached inference — a spent quota, not a"
+              echo "broken contract."
+            else
+              echo "This pull request is out of scope for the reviewer: a fork head,"
+              echo "a base other than the default branch, or already closed."
+            fi
+          } > "$note"
+          gh pr comment "$PR_NUMBER" --repo "$REPOSITORY" --body-file "$note"
 
   publish:
     name: Publish review

@@ -1,19 +1,13 @@
 //! Integration coverage for the `completions` / `man` packaging dispatch in
-//! `main.rs`. The clap_complete / clap_mangen GENERATION is unit-tested in
-//! `cli.rs`; these spawn the REAL binary and assert the dispatch itself — that
-//! the SHELL arg reaches clap_complete and that stdout stays the clean artifact
-//! channel (tracing → stderr) — which the codecov-excluded `main.rs` arms (#398)
-//! have no unit-test tooth for. This is the homebrew-core contract our
-//! packaging-build CI job parses, promoted to a real number over EVERY supported
-//! shell (the #747 "generated-doc surface" hardening).
+//! `main.rs`: the generation itself is unit-tested in `cli.rs`, so these spawn the
+//! REAL binary and assert the dispatch — that the SHELL arg reaches clap_complete
+//! and that stdout stays the clean artifact channel homebrew-core captures.
 
 use clap::ValueEnum;
 
-/// Spawn the built binary with a HERMETIC env: strip `$RUST_LOG` / `$PIXTUOID_LOG`
-/// so an inherited dev/CI verbosity can't raise the tracing floor and leak onto
-/// the channels these assertions check. Per the #172 RUST_LOG policy the binary
-/// HONORS a non-empty `$RUST_LOG`, so a test asserting a clean channel must clear
-/// it rather than assume it's unset.
+/// Spawn the built binary with a HERMETIC env: the binary HONORS a non-empty
+/// `$RUST_LOG`, so a test asserting a clean channel must clear it rather than
+/// assume an inherited dev/CI verbosity is unset.
 fn run(args: &[&str]) -> std::process::Output {
     std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
         .args(args)
@@ -23,17 +17,13 @@ fn run(args: &[&str]) -> std::process::Output {
         .expect("run pixtuoid")
 }
 
-/// Every shell clap_complete supports must emit exactly one clean script: a
-/// non-empty artifact naming the binary on stdout, nothing on stderr, exit 0 —
-/// and the scripts must be pairwise-distinct (proof the SHELL arg is honored, not
-/// a hardcoded generator). Iterating `Shell::value_variants()` (not a hardcoded
-/// subset) means a shell clap_complete adds later is covered automatically, the
-/// way `registered_source_names()` auto-covers a new source.
+/// Iterating `Shell::value_variants()` rather than a hardcoded subset means a
+/// shell clap_complete adds later is covered automatically.
 #[test]
 fn completions_emit_a_clean_script_for_every_supported_shell() {
     let shells = clap_complete::Shell::value_variants();
     // Negative control: with 0 or 1 shell the per-shell loop AND the pairwise
-    // distinctness tooth below would pass vacuously (clap_complete ships 5).
+    // distinctness tooth below would pass vacuously.
     assert!(
         shells.len() >= 2,
         "clap_complete exposes < 2 shells ({}) — the per-shell + distinctness coverage below is vacuous",
@@ -69,8 +59,7 @@ fn completions_emit_a_clean_script_for_every_supported_shell() {
     }
 }
 
-/// `man` emits a real roff man page on the clean stdout channel — the homebrew
-/// `Utils.safe_popen_read` capture greps `^.TH`.
+/// The homebrew `Utils.safe_popen_read` capture greps `^.TH`.
 #[test]
 fn man_emits_clean_roff_to_stdout() {
     let out = run(&["man"]);

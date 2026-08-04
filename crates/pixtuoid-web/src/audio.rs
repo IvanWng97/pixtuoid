@@ -1,23 +1,10 @@
-//! The THIRD audio painter (#633 web-audio): a `WebAudioDriver` that runs the
-//! SAME `pixtuoid_scene::audio` mixer / schedulers / [`TrackSwitch`] the native
-//! rodio thread runs, but instead of writing to a device it RECORDS the sink
-//! commands each tick for the site's WebAudio glue to flush — the audio twin of
-//! `Office::overlay_json` (all feel logic stays in Rust; JS is dumb glue).
+//! A `WebAudioDriver` that runs the SAME `pixtuoid_scene::audio` mixer the
+//! native rodio thread runs, but instead of writing to a device it RECORDS the
+//! sink commands each tick for the site's WebAudio glue to flush.
 //!
-//! Time is a PARAMETER (`now_ms` from JS), like the render `step`: the driver
-//! never reads a clock. dt is derived from the passed timestamps and CLAMPED,
-//! and the scheduler clock advances by that clamped dt — so a backgrounded tab
-//! whose `now_ms` jumps seconds neither ramp-snaps the crossfade nor replays a
-//! keystroke backlog (the stall-clock class, web-side).
-//!
-//! SYNTHESIS PATHS (#705): the primary path is a Web Worker — at page idle it
-//! runs [`crate::SynthTake`] in its OWN wasm instance and the buffers are
-//! adopted here ([`Adoption`]) so the ♩ click is upload-only, near-instant.
-//! The chunked `warmup_step` pump (one bed per step, off `setTimeout(0)`)
-//! remains the click-time FALLBACK (dead worker / no module workers /
-//! reduced-motion). A mid-visit track switch rebuilds the 5 beds one per
-//! tick under the ramped-to-silence hold ([`PendingBuild`]) — inaudible, so
-//! it deliberately stays on the main thread rather than the worker.
+//! Time is a PARAMETER (`now_ms` from JS): the driver never reads a clock, and
+//! dt is CLAMPED — a backgrounded tab whose `now_ms` jumps seconds neither
+//! ramp-snaps the crossfade nor replays a keystroke backlog.
 
 use std::sync::Arc;
 
@@ -29,43 +16,24 @@ use pixtuoid_scene::audio::{
     synth, AudioEngine, AudioFrame, OneShotPool, TickCommands, TrackId, BUILD_SEED, MAX_DT_S,
 };
 
-/// The web audio engine. Native-constructible + unit-testable (the rlib target);
-/// the wasm-bindgen surface in `lib.rs` wraps it for JS.
 pub(crate) struct WebAudioDriver {
-    // --- built during warmup (in the native rng draw order) ---
     rng: NoiseStream,
     bank: Option<AssetBank>,
     rain: Option<Arc<Vec<f32>>>,
     beds: Option<TrackBeds>,
-    /// 0=bank, 1=rain, 2..=6=one track bed each, 7=ready — the initial
-    /// warmup cursor (see [`WARMUP_STAGES`]).
     stage: u8,
-    /// The warmup's per-lane staging (#705) — the shared [`LaneBuild`]
-    /// machine, drained into `beds` on the last lane.
     warm: Option<LaneBuild>,
-    /// An in-flight CHUNKED rebuild (one bed per tick): a committed swap
-    /// no longer synthesizes all five beds in one rAF tick — at the
-    /// 10-minute song cadence that hitched the page every switch. While
-    /// pending, the incoming frame's track stems are silenced (the
-    /// caller-hold pattern), and JS learns of the swap only when the
-    /// last bed lands.
+    /// An in-flight CHUNKED rebuild, one bed per tick: synthesizing all five
+    /// beds in one rAF tick hitched the page at every switch.
     pending: Option<PendingBuild>,
-    /// The track the CURRENT `beds` were built for (also the warmup target).
     track: TrackId,
 
-    // --- runtime ---
-    /// The shared per-tick engine (mixer, schedulers, switch machine) — the
-    /// SAME `pixtuoid_scene::audio::AudioEngine` the native gateway runs, so the
-    /// two soundtracks can't drift. dt is clamped to `MAX_DT_S` before it here.
     engine: AudioEngine,
-    /// Last JS timestamp (ms); the clamped delta feeds the engine's clock.
     last_ms: Option<f64>,
 }
 
 impl WebAudioDriver {
-    /// A driver primed to warm up `initial_track` (day/night at the hero's
-    /// boot clock). Master is fixed 1.0 (the ratified trimmed bus, via
-    /// `mixer::master_amp`); the web has no volume UI — mute = JS suspends the
+    /// Master is fixed 1.0: the web has no volume UI — mute = JS suspending the
     /// AudioContext, so the mixer always runs unmuted.
     pub(crate) fn new(initial_track: TrackId) -> Self {
         Self {
@@ -82,12 +50,10 @@ impl WebAudioDriver {
         }
     }
 
-    /// A driver assembled from worker-synthesized pieces (#705) — ready
-    /// immediately, state-identical to a locally-warmed one, so the upload /
-    /// tick / swap paths downstream never know the difference. The rng starts
-    /// at position 0 where a locally-warmed driver sits post-warmup: only
-    /// FUTURE swap-bed noise textures differ (the score itself is
-    /// seed-deterministic), and nothing compares those bytes cross-path.
+    /// A driver assembled from worker-synthesized pieces, ready immediately.
+    /// The rng starts at position 0 where a locally-warmed driver sits
+    /// post-warmup: only FUTURE swap-bed noise textures differ (the score
+    /// itself is seed-deterministic), and nothing compares those cross-path.
     pub(crate) fn adopted(
         track: TrackId,
         bank: AssetBank,
@@ -111,9 +77,8 @@ impl WebAudioDriver {
     }
 
     /// Build ONE synthesis piece (bank → rain → beds, the native rng order),
-    /// returning pieces REMAINING. JS pumps this off `setTimeout(0)` after the
-    /// ♩ click so the main thread never blocks on the multi-second synthesis.
-    /// A no-op (returns 0) once ready.
+    /// returning the pieces REMAINING. JS pumps this off `setTimeout(0)` so the
+    /// main thread never blocks on the multi-second synthesis.
     pub(crate) fn warmup_step(&mut self) -> u32 {
         match self.stage {
             0 => {
@@ -124,12 +89,8 @@ impl WebAudioDriver {
                 self.rain = Some(Arc::new(synth::rain_bed(&mut self.rng)));
                 self.stage = 2;
             }
-            // one bed per step (#705): the old build-all-five stage was
-            // the longest single main-thread block of the whole warmup.
-            // The range derives from WARMUP_STAGES (review finding: a
-            // hardcoded 2..=6 would silently strand is_ready() if
-            // TRACK_STEMS ever resized), and the per-lane machine is the
-            // SAME LaneBuild the swap rebuild runs.
+            // The range derives from WARMUP_STAGES: a hardcoded 2..=6 would
+            // silently strand is_ready() if TRACK_STEMS ever resized.
             s if (2..WARMUP_STAGES).contains(&s) => {
                 let build = self.warm.get_or_insert_with(|| LaneBuild::new(self.track));
                 if let Some(beds) = build.step(&mut self.rng) {
@@ -148,11 +109,8 @@ impl WebAudioDriver {
         self.stage >= WARMUP_STAGES
     }
 
-    /// Advance one tick and record the JS commands. `frame` is built office-side
-    /// (the SAME `stem_levels` / cue tracker / `select_track` the desktop
-    /// painters use). `now_ms` is the site's pause-shifted clock (so pause
-    /// freezes the sound coherently). A no-op-ish empty command set before the
-    /// beds are ready.
+    /// `now_ms` is the site's PAUSE-SHIFTED clock, so pause freezes the sound
+    /// coherently.
     pub(crate) fn tick(&mut self, now_ms: f64, frame: AudioFrame) -> TickCommands {
         let dt = match self.last_ms {
             Some(prev) => (((now_ms - prev) / 1000.0) as f32).clamp(0.0, MAX_DT_S),
@@ -160,29 +118,21 @@ impl WebAudioDriver {
         };
         self.last_ms = Some(now_ms);
 
-        // While a chunked rebuild is in flight, keep the track stems
-        // silent at the SOURCE (the caller-hold pattern the pre-fold
-        // players used): the engine's mixer then ramps toward zero
-        // targets and ramps back smoothly when the swap lands — no
-        // output clamping, no pop.
+        // Silence at the SOURCE while a rebuild is in flight: the mixer then
+        // ramps to zero and back when the swap lands — no clamping, no pop.
         let mut frame = frame;
         if self.pending.is_some() {
             frame.stems.silence_track_stems();
         }
         let mut cmds = self.engine.tick(dt, Some(frame));
 
-        // The BUILD stays caller-side (the engine's sharp edge), but NOT
-        // in one tick: a committed swap stages a per-lane build (the
-        // 10-minute cadence made the one-tick five-bed synthesis a
-        // recurring main-thread hitch). A newer swap mid-build restarts
-        // the stage (latest wins).
+        // A newer swap mid-build restarts the stage (latest wins).
         if let Some(to) = cmds.swap.take() {
             self.pending = Some(PendingBuild {
                 to,
                 build: LaneBuild::new(to),
             });
         }
-        // advance ONE lane per tick; on the last lane, hot-swap and tell JS
         let finished = match self.pending.as_mut() {
             Some(p) => p.build.step(&mut self.rng),
             None => None,
@@ -197,10 +147,8 @@ impl WebAudioDriver {
         cmds
     }
 
-    /// The looping bed samples for `LoopStem::ALL[idx]` (0=Pad … 5=Rain) — JS
-    /// reads this (zero-copy) to (re)build its looping source. Empty until the
-    /// beds are ready; re-read every time `swapped` is set (memory.grow / a
-    /// track swap moves the data).
+    /// JS reads this zero-copy, so it must re-read every time `swapped` is set:
+    /// memory.grow / a track swap moves the data.
     pub(crate) fn loop_buffer(&self, idx: usize) -> &[f32] {
         match LoopStem::ALL.get(idx) {
             Some(LoopStem::Rain) => self.rain.as_deref().map(Vec::as_slice).unwrap_or(&[]),
@@ -212,12 +160,9 @@ impl WebAudioDriver {
         }
     }
 
-    /// The `(pool, index)` one-shot samples JS pre-uploads once after warmup.
-    /// Pool sizes: keystroke = `bank::KEYSTROKE_POOL`, drop = `bank::DROP_POOL`,
-    /// the three appliance cues = 1 each. Empty until warmup builds the bank,
-    /// AND empty for any `index` PAST the pool's end — the single-sample pools
-    /// return their buffer ONLY at index 0 (the JS discovery loop grows until
-    /// the first empty slot, so an unbounded non-empty would spin forever).
+    /// MUST return empty for any `index` past the pool's end: the JS discovery
+    /// loop grows until the first empty slot, so an unbounded non-empty would
+    /// spin the browser's main thread forever.
     pub(crate) fn oneshot_buffer(&self, pool: OneShotPool, index: usize) -> &[f32] {
         let Some(bank) = &self.bank else {
             return &[];
@@ -225,9 +170,6 @@ impl WebAudioDriver {
         match pool {
             OneShotPool::Keystroke => bank.keystrokes.get(index).map(|a| a.as_slice()),
             OneShotPool::Drop => bank.drops.get(index).map(|a| a.as_slice()),
-            // single-sample pools: buffer at index 0 ONLY, else empty (the JS
-            // discovery loop reads until the first empty slot — an unbounded
-            // non-empty would spin forever)
             OneShotPool::DoorChime => (index == 0).then(|| bank.door_chime.as_slice()),
             OneShotPool::PrinterWhir => (index == 0).then(|| bank.printer_whir.as_slice()),
             OneShotPool::VendingDrop => (index == 0).then(|| bank.vending_drop.as_slice()),
@@ -236,17 +178,8 @@ impl WebAudioDriver {
     }
 }
 
-/// Serialize a tick's commands as the compact JSON the site's WebAudio glue
-/// parses: `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
-/// Hand-built (no serde in the wasm artifact — the `overlay_json` precedent).
-/// Warmup piece count: bank + rain + one step per track bed (#705 —
-/// keeps every main-thread block to a single bed).
 const WARMUP_STAGES: u8 = 2 + TRACK_STEMS.len() as u8;
 
-/// The ONE per-lane build state machine (review finding: warmup and the
-/// swap rebuild had two hand-copies of it): compose once, then each
-/// [`LaneBuild::step`] renders the next lane; the final step hands back
-/// the assembled bed array.
 struct LaneBuild {
     score: GeneratedScore,
     beds: Vec<Arc<Vec<f32>>>,
@@ -260,7 +193,6 @@ impl LaneBuild {
         }
     }
 
-    /// Render ONE more lane; `Some(beds)` on the last.
     fn step(&mut self, rng: &mut NoiseStream) -> Option<[Arc<Vec<f32>>; TRACK_STEMS.len()]> {
         let lane = self.beds.len();
         self.beds
@@ -273,18 +205,15 @@ impl LaneBuild {
     }
 }
 
-/// One chunked track rebuild in flight (the mid-visit swap path).
 struct PendingBuild {
     to: TrackId,
     build: LaneBuild,
 }
 
-/// The worker-prewarm handoff (#705): buffers synthesized in a Web Worker's
-/// OWN wasm instance are copied here piece-by-piece (a postMessage transfer
-/// can't cross wasm memories), then [`Adoption::finish`] assembles a fully
-/// ready driver. Every push validates order/bounds and `finish` validates
-/// completeness against the bank consts, so a torn handoff (worker died
-/// mid-stream) yields `None` and the click-time warmup runs instead.
+/// The worker-prewarm handoff: buffers synthesized in a Web Worker's OWN wasm
+/// instance are copied here piece-by-piece, because a postMessage transfer
+/// can't cross wasm memories. A torn handoff (worker died mid-stream) yields
+/// `None` so the click-time warmup runs instead.
 pub(crate) struct Adoption {
     track: TrackId,
     keystrokes: Vec<Arc<Vec<f32>>>,
@@ -310,7 +239,6 @@ impl Adoption {
         }
     }
 
-    /// Append one one-shot buffer (the worker's pool-discovery order).
     /// `false` — overflow, duplicate, or empty — aborts the handoff.
     pub(crate) fn push_oneshot(&mut self, pool: OneShotPool, samples: &[f32]) -> bool {
         if samples.is_empty() {
@@ -345,8 +273,8 @@ impl Adoption {
         }
     }
 
-    /// Loop stem `idx` in `LoopStem::ALL` order: the track beds (sequential —
-    /// out-of-order aborts) then rain last.
+    /// Loop stem `idx` in `LoopStem::ALL` order: the track beds sequentially
+    /// (out-of-order aborts), then rain last.
     pub(crate) fn push_loop(&mut self, idx: usize, samples: &[f32]) -> bool {
         if samples.is_empty() {
             return false;
@@ -366,7 +294,6 @@ impl Adoption {
         }
     }
 
-    /// A COMPLETE handoff becomes a ready driver; anything torn → `None`.
     pub(crate) fn finish(self) -> Option<WebAudioDriver> {
         if self.keystrokes.len() != KEYSTROKE_POOL || self.drops.len() != DROP_POOL {
             return None;
@@ -407,9 +334,8 @@ pub(crate) fn commands_json(cmd: &TickCommands) -> String {
     out
 }
 
-/// Compact finite-float formatting for the JSON payload (JS `JSON.parse` reads
-/// it). Non-finite is impossible here (gains are bounded ramps) but map to 0
-/// defensively so a bad frame degrades to silence, never invalid JSON.
+/// Non-finite is impossible here (gains are bounded ramps) but maps to 0
+/// defensively, so a bad frame degrades to silence rather than invalid JSON.
 fn fmt_f32(v: f32) -> String {
     if v.is_finite() {
         format!("{v:.5}")
@@ -425,10 +351,6 @@ mod tests {
 
     #[test]
     fn every_oneshot_pool_has_a_finite_end_the_js_discovery_loop_can_find() {
-        // The site reads oneshot_buffer(pool, j) for j=0,1,… until len==0 to
-        // discover the pool size; a pool that returns non-empty for EVERY index
-        // would spin the browser's main thread forever (the review HIGH). Pin
-        // that every pool terminates, at its true size.
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let pools = [
@@ -478,8 +400,6 @@ mod tests {
         assert_eq!(v["plays"][0][1], 7, "keystroke index");
         assert_eq!(v["plays"][1][0], 3, "printer wire = 3");
         assert_eq!(v["swapped"], true);
-        // every pool wire decodes back to itself — driven off ALL, so a new
-        // pool is covered automatically (the bijection now lives in scene::bank)
         for p in OneShotPool::ALL {
             assert_eq!(OneShotPool::from_wire(p.wire()), Some(p));
         }
@@ -488,17 +408,15 @@ mod tests {
 
     #[test]
     fn warmup_builds_bank_rain_then_one_bed_per_step_then_is_ready() {
-        // #705: the bed stage is per-lane so no single warmup step blocks
-        // longer than one bed — bank, rain, then exactly five bed steps
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         assert!(!d.is_ready());
-        assert_eq!(d.warmup_step(), 6); // bank built
+        assert_eq!(d.warmup_step(), 6);
         assert!(!d.oneshot_buffer(OneShotPool::DoorChime, 0).is_empty());
-        assert_eq!(d.warmup_step(), 5); // rain built
+        assert_eq!(d.warmup_step(), 5);
         assert!(!d.loop_buffer(5).is_empty(), "rain bed (stem 5) ready");
         for remaining in (0..5).rev() {
             assert!(!d.is_ready(), "not ready before the last bed");
-            assert_eq!(d.warmup_step(), remaining); // one track bed each
+            assert_eq!(d.warmup_step(), remaining);
         }
         assert!(d.is_ready());
         assert_eq!(d.warmup_step(), 0, "warmup is idempotent once ready");
@@ -514,7 +432,6 @@ mod tests {
     fn tick_ramps_loop_gains_and_fires_scheduled_typing() {
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
-        // a busy office: typing level high, all music stems up
         let busy = pixtuoid_scene::audio::stem_levels(
             &pixtuoid_scene::board::StateCounts {
                 active: 3,
@@ -530,9 +447,8 @@ mod tests {
             events: Vec::new(),
             track: TrackId::GenDay(0),
         };
-        // 200 ticks × 50ms = 10s: the crossfade climbs from 0 in the first ~2s,
-        // and the typing scheduler's first burst gap (~2-3s at this rate) fires
-        // well inside the window.
+        // 200 ticks × 50ms = 10s, so the typing scheduler's first burst gap
+        // (~2-3s at this rate) fires well inside the window.
         let mut now = 0.0;
         let mut typed = 0;
         let mut last_pad = 0.0;
@@ -555,8 +471,6 @@ mod tests {
 
     #[test]
     fn a_big_time_gap_does_not_snap_the_ramp_or_burst_typing() {
-        // the stall-clock class, web-side: a backgrounded tab whose now_ms
-        // jumps must clamp dt (no ramp snap) and not replay a keystroke backlog.
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let busy = pixtuoid_scene::audio::stem_levels(
@@ -574,8 +488,7 @@ mod tests {
             events: Vec::new(),
             track: TrackId::GenDay(0),
         };
-        d.tick(0.0, frame.clone()); // establish last_ms
-                                    // jump 30 SECONDS forward in one tick
+        d.tick(0.0, frame.clone());
         let cmd = d.tick(30_000.0, frame.clone());
         assert!(
             cmd.gains[0] <= pixtuoid_scene::audio::mixer::RAMP_PER_S * MAX_DT_S + 1e-4,
@@ -609,13 +522,11 @@ mod tests {
             events: Vec::new(),
             track: TrackId::GenDay(0),
         };
-        // settle the day mix up
         let mut now = 0.0;
         for _ in 0..40 {
             now += 50.0;
             d.tick(now, day.clone());
         }
-        // request night: the stems must ramp DOWN to silence, then swap once
         let mut night = day.clone();
         night.track = TrackId::GenNight(0);
         let mut swapped_seen = false;
@@ -624,7 +535,6 @@ mod tests {
             let cmd = d.tick(now, night.clone());
             if cmd.swap.is_some() {
                 swapped_seen = true;
-                // at the swap tick the track stems were silent
                 for g in &cmd.gains[0..5] {
                     assert!(*g <= 1e-4, "track stems held silent through the swap");
                 }
@@ -632,7 +542,6 @@ mod tests {
             }
         }
         assert!(swapped_seen, "the night switch completed a swap");
-        // after the swap, the mix ramps back up
         let mut pad_after = 0.0;
         for _ in 0..40 {
             now += 50.0;
@@ -644,8 +553,6 @@ mod tests {
         );
     }
 
-    /// Feed every piece of a warmed `src` through an [`Adoption`] — the
-    /// worker-handoff round trip, minus the JS/postMessage hop.
     fn adopt_all_of(src: &WebAudioDriver, track: TrackId) -> Adoption {
         let mut ad = Adoption::new(track);
         for i in 0..LoopStem::ALL.len() {
@@ -695,8 +602,6 @@ mod tests {
 
     #[test]
     fn an_adopted_driver_ticks_and_swaps_like_a_warmed_one() {
-        // downstream must never know the difference: gains ramp, and a track
-        // change still walks the driver's OWN chunked LaneBuild swap
         let track = TrackId::GenDay(0);
         let mut src = WebAudioDriver::new(track);
         while src.warmup_step() > 0 {}
@@ -739,11 +644,9 @@ mod tests {
         let track = TrackId::GenDay(1);
         let mut src = WebAudioDriver::new(track);
         while src.warmup_step() > 0 {}
-        // missing rain → torn
         let mut ad = adopt_all_of(&src, track);
         ad.rain = None;
         assert!(ad.finish().is_none(), "missing rain is a torn handoff");
-        // out-of-order bed / empty buffer / pool overflow / duplicate cue
         let mut ad = Adoption::new(track);
         assert!(!ad.push_loop(1, src.loop_buffer(1)), "beds are sequential");
         assert!(!ad.push_loop(0, &[]), "empty buffers are refused");
@@ -762,7 +665,6 @@ mod tests {
             ),
             "duplicate cue refused"
         );
-        // a short keystroke pool → torn
         let mut ad = Adoption::new(track);
         for i in 0..LoopStem::ALL.len() {
             ad.push_loop(i, src.loop_buffer(i));
@@ -772,10 +674,6 @@ mod tests {
 
     #[test]
     fn a_swap_builds_one_bed_per_tick_and_signals_js_only_when_done() {
-        // the chunked-rebuild contract (the 10-min cadence fix): the tick
-        // that COMMITS the swap must not hand JS `swapped` yet — the five
-        // beds land one per tick, stems stay silent throughout, and JS
-        // learns of the swap exactly once, when the last bed is in
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         while d.warmup_step() > 0 {}
         let mk = |track| AudioFrame {
@@ -797,7 +695,6 @@ mod tests {
             now += 50.0;
             d.tick(now, mk(TrackId::GenDay(0)));
         }
-        // drive the switch until the engine commits (stems reach silence)
         let mut ticks_after_commit = None;
         let mut swap_tick = None;
         for i in 0..200 {
@@ -816,8 +713,8 @@ mod tests {
             ticks_after_commit.expect("a rebuild staged"),
             swap_tick.expect("the swap eventually signalled"),
         );
-        // one lane per tick: commit tick builds lane 0, the swap lands on
-        // the tick that builds lane 4 — exactly TRACK_STEMS.len() ticks
+        // the commit tick builds lane 0, so the swap lands on the tick that
+        // builds the LAST lane
         assert_eq!(
             swap - commit,
             TRACK_STEMS.len() - 1,

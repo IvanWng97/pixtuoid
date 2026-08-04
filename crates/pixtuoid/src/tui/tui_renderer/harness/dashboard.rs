@@ -1,7 +1,5 @@
 use super::*;
 
-// --- agent dashboard overlay -------------------------------------------------
-
 use crate::tui::dashboard::{build_dashboard_rows, DashboardFolds};
 
 #[test]
@@ -87,12 +85,10 @@ fn connection_panel_renders_both_facets_borderless() {
     assert!(text.contains("[ag]"), "ag badge missing:\n{text}");
     assert!(text.contains("2 agents"), "live count missing:\n{text}");
     assert!(text.contains("socket"), "socket line missing:\n{text}");
-    // Selected row (cc) is Connected → the detail line shows where it's installed.
     assert!(
         text.contains("installed at"),
         "connected detail (install path) missing:\n{text}"
     );
-    // Borderless: the popup (the tooltip_bg-filled region) carries no box glyphs.
     let popup = dash_popup(r.frame_buffer());
     for g in [
         '\u{256d}', '\u{256e}', '\u{2570}', '\u{256f}', '\u{2502}', '\u{2500}',
@@ -104,11 +100,8 @@ fn connection_panel_renders_both_facets_borderless() {
     }
 }
 
-// #309 / health-consolidation: a connected row whose cached health summary is
-// set (a) shows a per-row ⚠ FLAG (scannable in the list), and (b) shows the full
-// reason in the detail line, PREEMPTING the benign "installed at" hint. The
-// health string here is glyph-FREE so the only ⚠ in the buffer is the per-row
-// flag the painter adds — proving the flag specifically.
+// The health string here is glyph-FREE, so the only ⚠ in the buffer is the
+// per-row flag the painter adds — proving the flag specifically.
 #[test]
 fn connection_panel_health_flag_and_detail_preempt_the_install_path() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -180,8 +173,6 @@ fn connection_panel_armed_shows_confirm_prompt() {
     assert!(text.contains("Codex"), "armed target name missing:\n{text}");
 }
 
-// Selected row is Disconnected (no health/confirm/result) → the detail line
-// surfaces the connect ACTION, not a (meaningless-until-bound) install path.
 #[test]
 fn connection_panel_disconnected_selected_shows_connect_hint() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -217,8 +208,6 @@ fn connection_panel_disconnected_selected_shows_connect_hint() {
     );
 }
 
-// Selected row is NoCli → the detail line is `no_action_hint` = "<name> not
-// detected on this machine" (explains why it can't be bound).
 #[test]
 fn connection_panel_no_cli_selected_shows_not_detected_hint() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -254,9 +243,6 @@ fn connection_panel_no_cli_selected_shows_not_detected_hint() {
     );
 }
 
-// Selected Connected row WITHOUT a known config_path → detail is the bare
-// "connected" fallback, NOT the "installed at: <path>" arm. Distinguishes the
-// `None` config_path branch from the `Some(p)` branch (covered elsewhere).
 #[test]
 fn connection_panel_connected_without_config_path_shows_connected() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -292,9 +278,6 @@ fn connection_panel_connected_without_config_path_shows_connected() {
     );
 }
 
-// `last_result` (a post-action result string) preempts the per-state install
-// hint: even with a Connected row whose config_path WOULD render "installed
-// at:", the result string wins (it's higher precedence than the per-state arm).
 #[test]
 fn connection_panel_last_result_overrides_per_state_detail() {
     use crate::tui::connection::{ConnState, ConnectionRow, LiveInfo};
@@ -330,9 +313,6 @@ fn connection_panel_last_result_overrides_per_state_detail() {
     );
 }
 
-// Empty rows (selected index out of range), no confirm/result → the detail
-// `else` branch yields an empty string. The panel still paints its title /
-// socket / footer; no stale per-state hint leaks in.
 #[test]
 fn connection_panel_empty_rows_renders_panel_with_blank_detail() {
     use crate::tui::connection::LiveInfo;
@@ -392,10 +372,9 @@ fn dashboard_collapsed_big_tree_shows_badge_and_hides_children() {
         text.contains("(6)"),
         "collapsed hidden-count badge missing:\n{text}"
     );
-    // The popup's own count proves only the root is listed (children hidden);
-    // a global `!contains("explorer0")` would false-fail on the office sprite
-    // label behind the popup. Child-hiding in the model is covered by
-    // `dashboard::tests::root_over_threshold_auto_collapses_and_hides_its_subtree`.
+    // The popup's own count proves only the root is listed: a global
+    // `!contains("explorer0")` would false-fail on the office sprite label
+    // painted behind the popup.
     assert!(
         text.contains("Agents (1)"),
         "collapsed tree must list exactly one row:\n{text}"
@@ -416,12 +395,11 @@ fn dashboard_closed_paints_no_popup() {
     );
 }
 
-/// The popup's box-bordered content lines (those containing the vertical rule),
-/// so substring assertions don't false-match the office sprite labels behind it.
+/// The popup's content lines, so substring assertions don't false-match the
+/// office sprite labels behind it. The popup is borderless (no `│` to key on)
+/// but is the only region painted with the UI `tooltip_bg` fill, so isolate it
+/// by background color — the pixel office never produces that exact chrome RGB.
 fn dash_popup(buf: &ratatui::buffer::Buffer) -> String {
-    // The popup is borderless (no `│` to key on) but is the only region painted
-    // with the UI `tooltip_bg` fill, so isolate it by background color. (The
-    // pixel office never produces this exact chrome RGB.)
     let tb = pixtuoid_scene::theme::NORMAL.ui.tooltip_bg;
     let bg = ratatui::style::Color::Rgb(tb.r, tb.g, tb.b);
     let area = buf.area;
@@ -479,10 +457,8 @@ fn dashboard_renders_waiting_reason_and_active_without_detail() {
 
 #[test]
 fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
-    // 20 roots (> DASHBOARD_VIEWPORT_ROWS = 16) spread across floors so the
-    // office only labels a couple — the popup lists all 20. Selecting row 18
-    // must scroll the window down (painter re-clamps via clamp_scroll), so the
-    // popup shows row 18 and NOT row 00.
+    // More roots than the viewport holds, spread across floors so the office
+    // only labels a couple while the popup lists all 20.
     let mut agents = Vec::new();
     for i in 0..20 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
@@ -500,7 +476,6 @@ fn dashboard_scrolls_to_keep_a_deep_selection_visible() {
     let buf = r.frame_buffer();
     let text = frame_text(buf);
     let popup = dash_popup(buf);
-    // The title sits on the top border (┌…┐), not a │ row — assert it on the full frame.
     assert!(text.contains("Agents (20)"), "all 20 rows counted:\n{text}");
     assert!(
         popup.contains("row18"),
@@ -524,15 +499,61 @@ fn dashboard_empty_scene_shows_placeholder() {
     );
 }
 
-// NOTE: a dedicated short-terminal clamp test isn't possible via the harness —
-// draw_scene footer-onlys (skips the popup) when the office layout can't fit
-// (terminal shorter than ~the office min height), and a 16-row popup (max 18
-// tall) always fits whenever the office DOES render. So the painter's
-// real-window re-clamp (clamp_scroll on visible = popup-inner-height) can only
-// fire with visible == DASHBOARD_VIEWPORT_ROWS in practice — exercised by
-// dashboard_scrolls_to_keep_a_deep_selection_visible above (scroll 0 → 3). The
-// visible < viewport arithmetic is covered directly by
-// dashboard::tests::clamp_scroll_* with small viewports.
+/// A terminal too short for the popup's own `DASHBOARD_VIEWPORT_ROWS` cap gets
+/// clamped by `PanelGeometry::compute` to `bounds.height - FOOTER_ROWS`, so
+/// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
+/// selection has to stay inside it. Reachable ONLY on the footer-only draw path:
+/// the office needs 32×31, and at those heights `full_h` saturates so the
+/// viewport stays at the cap.
+#[test]
+fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
+    let mut agents = Vec::new();
+    for i in 0..20 {
+        let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
+        s.label = format!("row{i:02}").into();
+        agents.push(s);
+    }
+    let scene = scene_with(agents, 32);
+    let model = build_dashboard_rows(&scene, &DashboardFolds::default());
+    let deep = model[18].agent_id;
+
+    let painted = |rows: u16| -> (usize, String) {
+        let mut r = build(80, rows, vec![]);
+        r.set_dashboard_frame_parts(
+            true,
+            build_dashboard_rows(&scene, &DashboardFolds::default()),
+            Some(deep),
+            0,
+        );
+        r.render(&scene, &pack(), t0()).unwrap();
+        // `dash_popup`, NOT `frame_text`: at a roomy height the OFFICE also renders
+        // and paints agent name badges, which a whole-frame scan counts as rows.
+        let text = dash_popup(r.frame_buffer());
+        let n = (0..20)
+            .filter(|i| text.contains(&format!("row{i:02}")))
+            .count();
+        (n, text)
+    };
+
+    let (roomy_n, roomy) = painted(44);
+    let (tight_n, tight) = painted(18);
+    assert!(
+        tight_n < roomy_n,
+        "the band must track the CLAMPED inner height, not the {}-row cap: \
+         {tight_n} rows at 80×18 vs {roomy_n} at 80×44",
+        crate::tui::dashboard::DASHBOARD_VIEWPORT_ROWS,
+    );
+    for (label, text) in [("80×44", &roomy), ("80×18", &tight)] {
+        assert!(
+            text.contains("row18"),
+            "the selected row must stay in the window at {label}:\n{text}"
+        );
+        assert!(
+            text.contains('\u{22ee}'),
+            "20 rows overflow both viewports, so the cue must show at {label}:\n{text}"
+        );
+    }
+}
 
 #[test]
 fn dashboard_badge_text_present_for_cc_and_cx() {
@@ -556,7 +577,7 @@ fn dashboard_badge_text_present_for_cc_and_cx() {
 
 #[test]
 fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
-    // 20 root slots, scroll=0 → visible ≤ DASHBOARD_VIEWPORT_ROWS=16 → hidden_below > 0.
+    // More roots than DASHBOARD_VIEWPORT_ROWS, at scroll=0 → rows hidden below.
     let mut agents = Vec::new();
     for i in 0..20 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i % 16, t0());
@@ -579,7 +600,7 @@ fn dashboard_overflow_cue_appears_below_when_more_than_viewport() {
 
 #[test]
 fn dashboard_overflow_cue_absent_when_all_visible() {
-    // 8 root slots ≤ DASHBOARD_VIEWPORT_ROWS=16 → no hidden rows → no cue.
+    // Fewer roots than DASHBOARD_VIEWPORT_ROWS → nothing hidden → no cue.
     let mut agents = Vec::new();
     for i in 0..8 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
@@ -601,8 +622,7 @@ fn dashboard_overflow_cue_absent_when_all_visible() {
 
 #[test]
 fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
-    // 25 rows; select row20 — clamp_scroll parks it at the window's bottom with
-    // several rows still below. The cue must NOT displace the selected row.
+    // row20 of 25 parks at the window's bottom with several rows still below.
     let mut agents = Vec::new();
     for i in 0..25 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
@@ -629,9 +649,8 @@ fn dashboard_overflow_cue_keeps_a_bottom_navigated_selection_visible() {
 
 #[test]
 fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
-    // 17 rows (> DASHBOARD_VIEWPORT_ROWS=16) → overflow. Selecting the LAST row
-    // scrolls to the very end where nothing is below: no cue is needed, so the
-    // popup must fill all 16 visible lines (NOT reserve a now-empty cue line).
+    // One row past the viewport, with the LAST row selected: scrolled to the very
+    // end, nothing is below, so no cue line may be reserved.
     let mut agents = Vec::new();
     for i in 0..17 {
         let mut s = idle(&format!("/h/r{i}.jsonl"), i, t0());
@@ -650,8 +669,8 @@ fn dashboard_overflow_no_blank_line_when_selection_is_last_row() {
         popup.contains("row16"),
         "selected last row visible:\n{popup}"
     );
-    // The fix renders 16 rows (rows 1..16); the blank-line bug renders only 15
-    // (rows 2..16, plus a blank reserved line), so `row01` present distinguishes.
+    // The blank-line bug drops the topmost visible row for a reserved cue line,
+    // so `row01` present is what distinguishes the two.
     assert!(
         popup.contains("row01"),
         "all 16 visible lines must be filled — no blank reserved cue line:\n{popup}"

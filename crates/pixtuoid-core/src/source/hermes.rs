@@ -1,57 +1,20 @@
-//! Hermes Agent source — HOOK-ONLY (no transcript watcher).
+//! Hermes Agent (Nous Research) source — HOOK-ONLY: pixtuoid never spawns the user's
+//! agent and Hermes's on-disk sessions are not tailable JSONL, so the shell hooks in
+//! `~/.hermes/config.yaml` (or `$HERMES_HOME/config.yaml`) are the only seam a
+//! passive observer can reach.
 //!
-//! Hermes Agent (Nous Research) is a standalone autonomous coding agent. A user
-//! may run SEVERAL instances at once — multiple terminals/projects, or concurrent
-//! sessions in ONE project — so the identity must distinguish concurrent sessions,
-//! not merge them by workspace. Three candidate seams, only one reachable by a
-//! passive observer:
+//! Keyed on `session_id`, not the workspace: a user may run several Hermes sessions
+//! in ONE project and cwd-keying would merge them (the Cursor lesson).
 //!
-//! - The agent's own stdout/transcript is per-invocation and pixtuoid never
-//!   spawns the user's agent — structurally unreachable.
-//! - Sessions on disk are not a tailable append-only JSONL.
-//! - **Hermes shell hooks** (`~/.hermes/config.yaml`, or `$HERMES_HOME/config.yaml`)
-//!   — shell commands fired on lifecycle/tool events, JSON on stdin. THIS is the
-//!   seam: connecting Hermes in the Connection panel (`s`) registers the shim under
-//!   the `hooks:` block. Wire shape verified against a real capture:
+//! The envelope reuses CC's `hook_event_name` field NAME but with snake_case VALUES
+//! alien to the shared CC-shaped arms, so per the `HookDecoding::custom` contract the
+//! decoder claims EVERY event (`.map(Some)`, never `Ok(None)`).
 //!
-//! ```json
-//! {"hook_event_name":"pre_tool_call","tool_name":"terminal",
-//!  "tool_input":{"command":"echo hi"},"session_id":"…","cwd":"/repo",
-//!  "extra":{"task_id":"…","tool_call_id":"…"}}
-//! ```
-//!
-//! Keyed on **`session_id`** (present on every event in the capture), so two
-//! Hermes sessions in one repo stay distinct AND all of a session's events
-//! coalesce — cwd-keying would wrongly merge concurrent sessions (the Cursor
-//! lesson). Unlike Cursor, the top-level `cwd` IS populated, so it is the label /
-//! SessionStart cwd directly (with a cwd fallback for the key if a future event
-//! ever omits `session_id`).
-//!
-//! Hook payloads arrive on the shared hook socket stamped
-//! `_pixtuoid_source: "hermes"`. The envelope reuses CC's `hook_event_name` field
-//! NAME but with **snake_case values** (`on_session_start` / `pre_tool_call` /
-//! `post_tool_call` / `on_session_end`) alien to the shared CC-shaped arms, so per
-//! the `HookDecoding::custom` contract the custom decoder claims EVERY event
-//! (`.map(Some)`, never `Ok(None)`).
-//!
-//! Deliberate scope: `tool_use_id` is always `None` (single-transport, no
-//! hook-wins dedup needed); sessions render FLAT. The SHELL-hook set pixtuoid
-//! consumes (`_DEFAULT_PAYLOADS` in `hermes_cli/hooks.py` — the `hermes hooks
-//! test`/doctor fixtures, and our drift-watch's source-of-truth) has a stop-only
-//! `subagent_stop` carrying `parent_session_id` + `child_summary`/`child_status`
-//! but NO child session/agent id, and no `subagent_start`. (Hermes's Python
-//! PLUGIN API in `hooks.md` DOES define a `subagent_start` with a
-//! `child_subagent_id`, but plugin hooks are in-process callbacks that never
-//! reach a shell command's stdin — pixtuoid, a passive SHELL-hook observer,
-//! can't see them; don't "fix" this by trying to model them.) With no observable
-//! child key, a decoded `subagent_stop` would be a `SessionEnd` for a child that
-//! was never `SessionStart`ed (a reducer no-op), so it is left out of
-//! `HERMES_EVENTS` (the shim never delivers it) and, should one ever arrive,
-//! bails via the `unknown_event` drift arm (pinned by `unknown_event_bails_loudly`)
-//! — the same deliberate-omit treatment as Reasonix's stop-only `SubagentStop`
-//! (`REASONIX_KNOWN_OMITTED`).
-//! `on_session_end` FIRES on clean completion → `has_exit_signal: true`; abrupt
-//! exits fall to the stale-sweep (no PID exposed in the payload).
+//! `subagent_stop` is deliberately absent from `HERMES_EVENTS`: the SHELL-hook payload
+//! carries a parent id but NO child session/agent id, so a decode could only end a
+//! child that was never started. Hermes's Python PLUGIN API does define a
+//! `subagent_start` with a child id, but plugin hooks are in-process callbacks that
+//! never reach a shell command's stdin — don't "fix" this by modelling them.
 
 use std::path::PathBuf;
 
@@ -64,13 +27,9 @@ use crate::AgentId;
 /// The Hermes CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "hermes";
 
-/// The Hermes home dir, mirroring Hermes's OWN resolution (verified via
-/// `hermes config path`): `HERMES_HOME` VERBATIM when set to a non-empty value —
-/// Hermes uses it even when the dir does not yet exist, UNLIKE Codex's
-/// exists-check (`hermes config path` reported a non-existent `HERMES_HOME`
-/// verbatim) — else `<user_home>/.hermes`. `config.yaml` lives directly in it.
-/// Consumed by the installer's `default_config_path`; `None` when neither
-/// `HERMES_HOME` nor a home dir resolves (installer surfaces "pass --config").
+/// The Hermes home dir (`config.yaml` lives directly in it), mirroring Hermes's own
+/// resolution: a non-empty `HERMES_HOME` is taken VERBATIM even when the dir does not
+/// exist — unlike Codex's exists-check — else `<user_home>/.hermes`.
 pub fn hermes_home() -> Option<PathBuf> {
     resolve_hermes_home(
         std::env::var("HERMES_HOME").ok(),
@@ -78,8 +37,6 @@ pub fn hermes_home() -> Option<PathBuf> {
     )
 }
 
-/// Pure precedence core for [`hermes_home`] — env + home injected so every arm
-/// unit-tests on any host without mutating process env.
 fn resolve_hermes_home(
     hermes_home_env: Option<String>,
     user_home: Option<String>,
@@ -91,19 +48,12 @@ fn resolve_hermes_home(
 }
 
 /// Decode one Hermes hook payload (already identified by
-/// `_pixtuoid_source == "hermes"`). Envelope per `~/.hermes/config.yaml` hooks.
+/// `_pixtuoid_source == "hermes"`); an unregistered event bails so
+/// registered-vs-decoded drift is loud.
 ///
-/// Event mapping (snake_case `hook_event_name` values), all keyed on `session_id`:
-/// - `on_session_start` → `SessionStart`
-/// - `pre_tool_call`    → `Identity` + `ActivityStart`
-/// - `post_tool_call`   → `Identity` + `ActivityEnd`
-/// - `on_session_end`   → `SessionEnd`
-/// - anything else      → bail (registered-vs-decoded drift must be loud)
-///
-/// The activity arms prepend an [`AgentEvent::Identity`] (#221) because Hermes is
-/// HOOK-ONLY: a slot the reducer synthesizes mid-turn has no transcript back-fill
-/// path, so without the attached identity it would stay a blank `#N` ghost. The
-/// Identity's `session_id` mirrors the `SessionStart` arm's key exactly.
+/// The activity arms prepend an [`AgentEvent::Identity`] because Hermes is HOOK-ONLY:
+/// a slot the reducer synthesizes mid-turn has no transcript back-fill path, so
+/// without the attached identity it would stay a blank `#N` ghost.
 pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -112,15 +62,12 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("hook_event_name")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("hermes payload missing hook_event_name"))?;
-    // The workspace path — Hermes populates the top-level `cwd` (unlike Cursor).
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty());
-    // Key on `session_id` — present + consistent across a session's events, so it
-    // distinguishes concurrent sessions in one project AND coalesces a session.
-    // Fall back to the workspace only if a future event ever omits it (keeps
-    // coalescing best-effort instead of dropping the event).
+    // The cwd fallback is only for a future event that omits `session_id` — it keeps
+    // coalescing best-effort instead of dropping the event.
     let key = obj
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -177,15 +124,14 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported hermes hook event: {other}")
+            bail!(
+                "unsupported hermes hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }
 
-/// Hermes tool detail: `"name: target"` using Hermes's argument vocabulary,
-/// looked up `command` > `file_path` > `path` > `pattern` > `url` (`terminal`
-/// carries `command`; file/search tools carry the rest). Both the tool NAME and
-/// the `: target` are capped at the decode boundary via `generic_tool_display`.
 fn hermes_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
@@ -200,15 +146,12 @@ mod tests {
         decode_hermes_hook_payload(&v).expect("decodes")
     }
 
-    /// The payload's MAIN event — the last decoded event (activity arms prepend
-    /// an `Identity`).
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
     }
 
     #[test]
     fn session_start_keys_on_session_id_with_real_cwd() {
-        // Real capture shape: session_id present, top-level cwd populated.
         let ev = decode(json!({
             "hook_event_name": "on_session_start",
             "tool_name": null, "tool_input": null,
@@ -234,8 +177,6 @@ mod tests {
 
     #[test]
     fn session_id_distinguishes_two_sessions_in_one_workspace() {
-        // The multi-instance point: cwd-keying would merge these; session_id keeps
-        // two concurrent Hermes sessions in one repo distinct.
         let a = decode(
             json!({"hook_event_name": "on_session_start", "session_id": "A", "cwd": "/repo"}),
         );
@@ -260,7 +201,6 @@ mod tests {
 
     #[test]
     fn pre_tool_call_is_activity_start_with_no_tool_id() {
-        // Real capture tool shape: tool_name "terminal", tool_input.command.
         let ev = decode(json!({
             "hook_event_name": "pre_tool_call",
             "session_id": "s", "cwd": "/repo",
@@ -373,10 +313,6 @@ mod tests {
 
     #[test]
     fn unknown_event_bails_loudly() {
-        // `subagent_stop` is a REAL upstream event (hermes_cli/hooks.py
-        // _DEFAULT_PAYLOADS) deliberately left out of HERMES_EVENTS — it is
-        // stop-only with no child key to model (see the module doc). It must bail
-        // like any unregistered event, not decode silently.
         for ev in ["subagent_stop", "pre_message", "on_error", "Bogus"] {
             assert!(
                 decode_hermes_hook_payload(&json!({"hook_event_name": ev, "cwd": "/r"})).is_err(),
@@ -389,19 +325,15 @@ mod tests {
     fn malformed_payloads_are_errors() {
         assert!(decode_hermes_hook_payload(&json!("just a string")).is_err());
         assert!(decode_hermes_hook_payload(&json!(42)).is_err());
-        // Nothing to key on.
         assert!(decode_hermes_hook_payload(&json!({"hook_event_name": "on_session_end"})).is_err());
     }
 
     #[test]
     fn hermes_home_prefers_verbatim_env_then_dot_hermes() {
-        // HERMES_HOME wins VERBATIM (even a not-yet-existing dir — mirrors Hermes,
-        // unlike Codex's exists-check); home/`.hermes` never consulted.
         assert_eq!(
             resolve_hermes_home(Some("/custom/hm".into()), Some("/home/u".into())),
             Some(PathBuf::from("/custom/hm"))
         );
-        // Unset (or whitespace-only) → <home>/.hermes.
         assert_eq!(
             resolve_hermes_home(None, Some("/home/u".into())),
             Some(PathBuf::from("/home/u").join(".hermes"))
@@ -410,7 +342,6 @@ mod tests {
             resolve_hermes_home(Some("   ".into()), Some("/home/u".into())),
             Some(PathBuf::from("/home/u").join(".hermes"))
         );
-        // No home + no override → None (installer surfaces "pass --config").
         assert_eq!(resolve_hermes_home(None, None), None);
     }
 }

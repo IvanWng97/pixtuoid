@@ -17,19 +17,15 @@ use pixtuoid_scene::pixel_painter::tool_glow_for_kind;
 use pixtuoid_scene::pose;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
-/// text. The `Clear` + solid `tooltip_bg` fill + drop shadow come from the shared
-/// `super::paint_card_backing`, which the caller paints UNDER this — so every
-/// borderless card's backing (tooltip and modal `panel::borderless_panel` alike)
-/// has ONE definition and can't drift. The 1-cell uniform padding stands in for
+/// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
+/// `tooltip_bg` fill + drop shadow), and the 1-cell uniform padding stands in for
 /// the old border, keeping the `+2` width/height math unchanged.
 pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
     Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
 }
 
-/// Horizontal anchor for a tooltip of width `tip_w`: place it just right of the
-/// cursor, but flip to the left side if that would overflow the scene's right
-/// edge. Shared by the hover and simple tooltips (their Y logic diverges and
-/// stays inline).
+/// Horizontal anchor for a tooltip of width `tip_w`: just right of the cursor,
+/// flipped to the left if that would overflow the scene's right edge.
 fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     let tx = mx.saturating_add(2);
     if tx.saturating_add(tip_w) > scene_rect.x + scene_rect.width {
@@ -39,12 +35,6 @@ fn flip_x_anchor(mx: u16, tip_w: u16, scene_rect: Rect) -> u16 {
     }
 }
 
-/// Labels above each character — uses `character_anchor` to follow the
-/// agent along its current path, color-codes by activity, falls back to
-/// disambiguating session-id suffix only when multiple agents share a label.
-///
-/// `hovered` highlights one agent's label: bright white + bold + leading
-/// ▸ marker so the focused character is easy to pick out of a crowd.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_label_widgets(
     f: &mut ratatui::Frame<'_>,
@@ -62,8 +52,6 @@ pub(crate) fn paint_label_widgets(
         let label_color = if el.hovered {
             Color::White
         } else {
-            // Tone→role map is single-sourced in `scene::overlay`; this painter
-            // only converts the resolved `Rgb` to ratatui `Color`.
             to_color(pixtuoid_scene::overlay::label_tone_rgb(el.tone, theme))
         };
         let mut style = Style::default().fg(label_color);
@@ -71,14 +59,9 @@ pub(crate) fn paint_label_widgets(
             style = style.add_modifier(ratatui::style::Modifier::BOLD);
         }
         let marker = if el.hovered { "▸" } else { "●" };
-        // The CLI-identity split (#657, owner-ratified): the ● marker is the
-        // STATUS dot (activity tone — the Slack-presence idiom) and the whole
-        // name text carries the source's badge hue via the SAME
-        // SourceColors::by_prefix the dashboard/Sources/tooltip badges ride.
-        // Status stays redundantly visible (dot + the ? bubble + monitor
-        // glow); identity stays constant. An unregistered prefix keeps the
-        // whole label tone-colored; hover stays all-white BOLD (focus
-        // overrides identity).
+        // The CLI-identity split: the ● marker is the STATUS dot (activity tone)
+        // while the name text carries the source's badge hue, so status stays
+        // redundantly visible and identity stays constant.
         let badge = (!el.hovered)
             .then(|| pixtuoid_scene::overlay::badge_hue(&el.text, theme))
             .flatten();
@@ -104,9 +87,13 @@ pub(crate) fn paint_label_widgets(
     }
 }
 
-/// A char-safe, ~30-column short form of a cwd path for the tooltip: the TAIL
-/// (most informative — project dir) with a leading `…` when truncated. Char-
-/// sliced, never a byte slice, so a multibyte path can't panic.
+/// The dossier's detail-column budget — the ONE quantity BOTH detail sources are
+/// clipped to (Active's tool args and Waiting's reason feed the same `detail_line`
+/// slot), so widening the card can't leave one row ragged against the other.
+const DETAIL_CHARS: usize = 34;
+
+/// A short form of a cwd path: the TAIL (most informative — project dir) with a
+/// leading `…`. Char-sliced, never a byte slice, so a multibyte path can't panic.
 fn short_cwd(cwd: &std::path::Path) -> String {
     const MAX: usize = 30;
     let s = cwd.to_string_lossy();
@@ -122,15 +109,9 @@ fn short_cwd(cwd: &std::path::Path) -> String {
 }
 
 /// Floating "dossier" panel painted near the cursor when an agent is hovered or
-/// pinned. One coherent card: `[xx]` source badge + label + `·id4` (L1), a dim
-/// separator, the `{glyph} {Word}` state line (+ the current tool in its glow
-/// hue), the detail / waiting-reason, the `↳ under {parent}` lineage (subagents
-/// only), the cwd, the `★ {model} · {effort}` burn row (when the wire told
-/// us; effort only while fresh), and the `◷` stats (with the active-% meter
-/// folded in). Uses
-/// the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`) so it can't
-/// drift from the footer/board/dashboard. Dim rows use `tooltip_dim`, NOT the
-/// live `label_exiting` (C6). Positioned to avoid the cursor + screen edges.
+/// pinned. Uses the SHARED vocabulary (`StateKind`) + badge (`source_badge_span`)
+/// so it can't drift from the footer/board/dashboard; dim rows use `tooltip_dim`,
+/// NOT the live `label_exiting`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_hover_tooltip(
     f: &mut ratatui::Frame<'_>,
@@ -146,7 +127,6 @@ pub(crate) fn paint_hover_tooltip(
         return;
     };
 
-    // State vocabulary: an exiting agent reads Exiting regardless of last state.
     let kind = if agent.exiting_at.is_some() {
         StateKind::Exiting
     } else {
@@ -160,17 +140,15 @@ pub(crate) fn paint_hover_tooltip(
     let dim = Style::default().fg(to_color(theme.ui.tooltip_dim));
     let text_style = Style::default().fg(to_color(theme.ui.tooltip_text));
 
-    // The state line: `{glyph} {Word}`, plus the current tool (raw name, glow
-    // hue from the TYPED kind — C7) when Active. The detail/reason goes below.
+    // The tool's glow hue comes from the TYPED kind, never a re-parse of the
+    // displayed name.
     let mut state_spans = vec![Span::styled(
         format!("{} {}", kind.glyph(), kind.word()),
         Style::default().fg(state_color(kind, theme)),
     )];
-    // An EXITING agent shows none of the live tool/reason affordances — the card
-    // already reads `◌ Exiting`, so the walking-out slot's retained Active/Waiting
-    // payload (mark_exiting doesn't reset `state`) must not leak a tool span, a
-    // `?reason`, or (below) an active-% meter. Gate the whole detail block on the
-    // exiting-first `kind`, not the raw `agent.state`.
+    // An EXITING agent must show none of the live tool/reason affordances — the
+    // walking-out slot retains its Active/Waiting payload (`mark_exiting` doesn't
+    // reset `state`), so gate on the exiting-first `kind`, not the raw `agent.state`.
     let mut detail_line: Option<String> = None;
     if !matches!(kind, StateKind::Exiting) {
         if let ActivityState::Active {
@@ -190,24 +168,22 @@ pub(crate) fn paint_hover_tooltip(
                     ));
                 }
                 if !rest.is_empty() {
-                    detail_line = Some(rest.chars().take(34).collect());
+                    detail_line = Some(rest.chars().take(DETAIL_CHARS).collect());
                 }
             }
         } else if let ActivityState::Waiting { reason } = &agent.state {
-            // WHY leads for a blocked agent: the reason IS the detail, `?`-flagged.
-            let r: String = reason.chars().take(34).collect();
+            let r: String = reason.chars().take(DETAIL_CHARS).collect();
             detail_line = Some(format!("?{r}"));
         }
     }
 
-    // Body lines (everything below the separator) — built first so the L1 `·id4`
-    // right-flush + the separator can size to the widest of them.
+    // Built before L1 so the `·id4` right-flush + the separator can size to the
+    // widest body line.
     let mut body: Vec<Line> = Vec::new();
     body.push(Line::from(state_spans));
     if let Some(d) = detail_line {
         body.push(Line::from(Span::styled(format!("  {d}"), text_style)));
     }
-    // Lineage: subagents only (a resolved parent still in the scene).
     if let Some(parent) = agent.parent_id.and_then(|p| scene.agents.get(&p)) {
         body.push(Line::from(Span::styled(
             format!("\u{21b3} under {}", parent.label),
@@ -218,10 +194,8 @@ pub(crate) fn paint_hover_tooltip(
         format!("\u{25a4} {}", short_cwd(&agent.cwd)),
         dim,
     )));
-    // The LLM brain, when the wire told us (CC/Codex/copilot/opencode/omp) — RAW
-    // model string, with the effort suffixed only while FRESH (the same
-    // burn-TTL the flame reads, so the text can't outlive the fire). Sources
-    // without a model channel simply skip the row.
+    // The effort is suffixed only while FRESH — the same burn-TTL the flame reads,
+    // so the text can't outlive the fire.
     if let Some(model) = agent.model.as_deref() {
         let mut row = format!("\u{2605} {model}");
         if let Some(effort) = pixtuoid_scene::burn::fresh_effort(agent, now) {
@@ -239,18 +213,14 @@ pub(crate) fn paint_hover_tooltip(
         compact_hms(session_secs),
         agent.tool_call_count
     );
-    // Token-meter row fold (#632): the session's cumulative FRESH spend —
-    // the exact number the desk's paper tower tiers on. Skipped at zero so
-    // sources with no usage wire keep their old dossier byte-for-byte.
+    // Skipped at zero so sources with no usage wire keep their dossier unchanged.
     if agent.tokens_used > 0 {
         stats.push_str(&format!(
             " \u{b7} \u{3a3} {} tok",
             pixtuoid_scene::token_meter::compact_tokens(agent.tokens_used)
         ));
     }
-    // Active-% meter folded into the stats line (height budget). Fresh agents show no
-    // meter (the % is noise before ~5s of accounting); an exiting agent shows none
-    // either (keyed off the exiting-first `kind`, matching the tool suppression).
+    // Fresh agents show no active-% meter — the % is noise before ~5s of accounting.
     if matches!(kind, StateKind::Active) && session_secs >= 5 {
         let pct = (agent.active_ms / 1000)
             .checked_mul(100)
@@ -263,7 +233,6 @@ pub(crate) fn paint_hover_tooltip(
     }
     body.push(Line::from(Span::styled(stats, dim)));
 
-    // L1: `[xx] {label}` … right-flushed `·{id4}`. Width = widest body line.
     let badge_tag = descriptor_for(agent.source.as_ref()).map_or("??", |d| d.label_prefix);
     let l1_head_w = 4 + 1 + display_width(&agent.label); // "[xx]" + space + label
     let id4 = format!("\u{b7}{}", disambig_suffix(&agent.session_id));
@@ -290,7 +259,7 @@ pub(crate) fn paint_hover_tooltip(
 
     let content_h = lines.len() as u16;
     let content_w = lines.iter().map(|l| l.width() as u16).max().unwrap_or(20);
-    // +2 cols / +2 rows accounts for the rounded Block border on all sides.
+    // +2 cols / +2 rows for the frame's 1-cell padding on all sides.
     let tip_w = (content_w + 2).min(scene_rect.width).max(20);
     let tip_h = (content_h + 2).min(scene_rect.height);
 
@@ -327,17 +296,15 @@ fn paint_simple_tooltip(
             .fg(to_color(theme.ui.tooltip_title))
             .add_modifier(ratatui::style::Modifier::BOLD),
     ));
-    // +2 cols / +2 rows wrap the single content line in the rounded border.
-    // Size by DISPLAY width, not char count: wide glyphs (e.g. the coffee
-    // ☕, 2 cells) would otherwise undersize the box by a column and clip
-    // the trailing content. Matches paint_hover_tooltip's `l.width()`.
+    // Size by DISPLAY width, not char count: wide glyphs (e.g. the coffee ☕, 2
+    // cells) would otherwise undersize the box by a column and clip the content.
     let tip_w = (line.width() as u16 + 2).min(scene_rect.width);
     let tip_h = 3u16.min(scene_rect.height);
     let tx = flip_x_anchor(mx, tip_w, scene_rect);
-    // Float above the cursor; flip below if there isn't room for the framed
-    // tooltip above. Guard on geometry (cursor within tip_h of the top) rather
-    // than the post-saturation `ty`, which can't detect overflow when
-    // scene_rect.y == 0 (saturating_sub floors at 0, never < 0).
+    // Float above the cursor, flipping below when there is no room. Guard on
+    // geometry (cursor within tip_h of the top) rather than the post-saturation
+    // `ty`, which can't detect overflow when scene_rect.y == 0 (saturating_sub
+    // floors at 0, never < 0).
     let mut ty = my.saturating_sub(tip_h);
     if my < scene_rect.y + tip_h {
         ty = my.saturating_add(1);
@@ -378,8 +345,6 @@ pub(crate) fn paint_furniture_tooltip(
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
 }
 
-/// Pet tooltip — state-dependent text rendered near the cursor.
-/// Same visual style as furniture tooltips (dark bg, light text).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_pet_tooltip(
     f: &mut ratatui::Frame<'_>,
@@ -392,9 +357,6 @@ pub(crate) fn paint_pet_tooltip(
     scene_rect: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    // The state strings (cooldown reaction / sleeping / pet-me) are NOT user-
-    // configurable; only the idle/walk label is the pet's NAME, which the caller
-    // resolves (custom from the `[[pets]]` stanza, else `PetKind::default_name`).
     let idle = format!(" {display_name} ");
     let text: &str = if is_on_cooldown {
         match kind {
@@ -411,12 +373,6 @@ pub(crate) fn paint_pet_tooltip(
     paint_simple_tooltip(f, text, mx, my, scene_rect, theme);
 }
 
-/// Hover tooltip for the gateway lobster mascot — which gateway it represents
-/// and whether an agent run is in flight (`busy`). The verb keys on the run
-/// state, not the session count (a single-user gateway holds one persistent
-/// session even at rest); the session count rides along only as a >1 garnish
-/// (the multi-tenant power-user case). Plain text (no emoji) to keep
-/// `paint_simple_tooltip`'s width math exact.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn paint_mascot_tooltip(
     f: &mut ratatui::Frame<'_>,
@@ -434,11 +390,10 @@ pub(crate) fn paint_mascot_tooltip(
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
 }
 
-/// The mascot tooltip's text (pure, unit-tested separately from the ratatui
-/// paint). Verb keys on the run state; `degraded` (#317: gateway up but its
-/// model backend failing every run) takes precedence over busy/idle so a
-/// sickly-red lobster reads "model error". The `>1` session count is a power-user
-/// garnish only. Plain text (no emoji) to keep the width math exact.
+/// The mascot tooltip's text. The verb keys on the RUN state, not the session
+/// count (a single-user gateway holds one persistent session even at rest), and
+/// `degraded` — gateway up but its model backend failing every run — outranks
+/// busy/idle. Plain text (no emoji) to keep the caller's width math exact.
 fn mascot_tooltip_text(
     name: &str,
     instance: Option<&str>,
@@ -446,8 +401,8 @@ fn mascot_tooltip_text(
     degraded: bool,
     active_sessions: u32,
 ) -> String {
-    // `OpenClaw:19789` — only when there IS a sibling to tell apart (the painter
-    // sets `instance` only then), so the single-gateway tooltip is byte-unchanged.
+    // `OpenClaw:19789` — the painter sets `instance` only when there IS a sibling to
+    // tell apart, so the single-gateway tooltip stays byte-unchanged.
     let name = match instance {
         Some(i) => format!("{name}:{i}"),
         None => name.to_string(),
@@ -466,9 +421,6 @@ fn mascot_tooltip_text(
     }
 }
 
-/// Paint chitchat speech bubbles above agents who are chatting at a
-/// social waypoint. Each bubble is a small Paragraph with the speaker's
-/// line of text, positioned above the agent's sprite head.
 pub fn paint_chitchat_bubbles(
     f: &mut ratatui::Frame<'_>,
     bubbles: &[pixtuoid_scene::chitchat::ChitchatBubble],
@@ -477,9 +429,8 @@ pub fn paint_chitchat_bubbles(
 ) {
     for bubble in bubbles {
         let text = format!(" {} ", bubble.text);
-        // Size by DISPLAY width, not byte length: a wide-glyph quip (the line
-        // pool can grow) would otherwise over-size + mis-center the bubble.
-        // Matches the rest of this file (paint_simple_tooltip uses `.width()`).
+        // Size by DISPLAY width, not byte length: a wide-glyph quip would otherwise
+        // over-size and mis-center the bubble.
         let line = Line::from(text.clone());
         let tip_w = line.width() as u16;
         let tip_h = 1u16;
@@ -515,8 +466,8 @@ mod tests {
     use ratatui::layout::Rect;
     use ratatui::Terminal;
 
-    /// Join the whole TestBackend buffer into one string (newline-free) so a
-    /// `.contains` probe finds text regardless of which cell the box landed in.
+    /// Join the whole buffer into one newline-free string, so a `.contains` probe
+    /// finds text regardless of which cell the box landed in.
     fn buffer_text(term: &Terminal<TestBackend>) -> String {
         let buf = term.backend().buffer();
         let area = buf.area;
@@ -529,7 +480,6 @@ mod tests {
         out
     }
 
-    /// Row index (y) of the first row whose joined text contains `needle`, if any.
     fn row_of(term: &Terminal<TestBackend>, needle: &str) -> Option<u16> {
         let buf = term.backend().buffer();
         let area = buf.area;
@@ -544,8 +494,6 @@ mod tests {
 
     #[test]
     fn mascot_tooltip_paints_gateway_verb_into_buffer() {
-        // The pure text fn is unit-tested above; this pins the ratatui paint glue
-        // — the right name + verb actually reach the buffer, and `degraded` wins.
         let mut term = Terminal::new(TestBackend::new(60, 8)).unwrap();
         term.draw(|f| {
             super::paint_mascot_tooltip(
@@ -602,8 +550,6 @@ mod tests {
 
     #[test]
     fn pet_tooltip_shows_pet_me_on_sit_anim() {
-        // The sit arm (not on cooldown, sitting) is the only branch the render
-        // harness never exercises (it covers cooldown purr/woof + sleep).
         use pixtuoid_scene::pet::PetKind;
         let kind = PetKind::Dog;
         let sit = kind.sit_anim();
@@ -629,12 +575,6 @@ mod tests {
 
     #[test]
     fn hover_tooltip_idle_shows_no_meter_and_casts_a_drop_shadow() {
-        // An Idle agent's dossier carries NO active-% meter (the meter is folded
-        // into the stats line for Active≥5s only). This is also the ONLY coverage for
-        // `paint_hover_tooltip`'s backing: it routes through the shared
-        // `paint_card_backing`, so a pre-filled bright office must come back
-        // dimmed in the drop-shadow band (the other backing caller,
-        // `paint_simple_tooltip`, is pinned by the coffee test).
         use std::path::Path;
         use std::sync::Arc;
         use std::time::{Duration, SystemTime};
@@ -694,16 +634,13 @@ mod tests {
             !text.contains('%'),
             "an idle agent's dossier carries no active-% meter, got: {text:?}"
         );
-        // The state line reads the shared vocabulary word.
         assert!(text.contains("Idle"), "idle state word, got: {text:?}");
-        // The hover path routes through the shared `paint_card_backing`: a bright
-        // equal-channel office cell can only turn into a dimmer equal-channel gray
-        // via the drop-shadow dim (the card's `tooltip_bg` is a distinct hue).
+        // A bright equal-channel office cell can only turn into a DIMMER
+        // equal-channel gray via the drop-shadow dim — the card's `tooltip_bg` is a
+        // distinct hue — so its presence proves the shadow ran.
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                // The 200-fill dimmed by the exact SHADOW_FACTOR (derived, not a loose
-                // range — so a darkness tweak can't silently pass a near-invisible shadow).
                 matches!(buf[(x, y)].bg, ratatui::style::Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
             })
         });
@@ -714,9 +651,78 @@ mod tests {
     }
 
     #[test]
+    fn both_detail_sources_clip_at_the_one_card_budget() {
+        use std::path::Path;
+        use std::sync::Arc;
+        use std::time::{Duration, SystemTime};
+
+        use pixtuoid_core::state::{ActivityState, AgentSlot, GlobalDeskIndex, ToolKind};
+        use pixtuoid_core::{AgentId, SceneState};
+
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
+        let id = AgentId::from_transcript_path("/budget/0.jsonl");
+        // Long enough that DETAIL_CHARS + 1 chars still exist to over-render.
+        let payload: String = ('a'..='z').chain('A'..='Z').collect();
+        let render = |state: ActivityState| {
+            let slot = AgentSlot {
+                agent_id: id,
+                source: Arc::from("claude-code"),
+                session_id: Arc::from("s"),
+                cwd: Arc::from(Path::new("/repo")),
+                label: "budget".into(),
+                state,
+                state_started_at: now,
+                created_at: now - Duration::from_secs(2),
+                last_event_at: now,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: GlobalDeskIndex(0),
+                floor_idx: 0,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
+                tokens_used: 0,
+                last_usage: None,
+            };
+            let mut scene = SceneState::uniform(12);
+            scene.agents.insert(id, slot);
+            let mut term = Terminal::new(TestBackend::new(90, 30)).unwrap();
+            term.draw(|f| {
+                super::paint_hover_tooltip(f, &scene, id, 20, 12, f.area(), now, &theme::NORMAL);
+            })
+            .unwrap();
+            buffer_text(&term)
+        };
+
+        let budget = super::DETAIL_CHARS;
+        let fits: String = payload.chars().take(budget).collect();
+        let overruns: String = payload.chars().take(budget + 1).collect();
+
+        let active = render(ActivityState::Active {
+            detail: Some(Arc::from(format!("Read {payload}").as_str())),
+            kind: ToolKind::Read,
+            tool_use_id: None,
+        });
+        assert!(
+            active.contains(&fits) && !active.contains(&overruns),
+            "the Active tool-detail row must clip at exactly {budget} chars, got: {active:?}"
+        );
+
+        let waiting = render(ActivityState::Waiting {
+            reason: Arc::from(payload.as_str()),
+        });
+        assert!(
+            waiting.contains(&fits) && !waiting.contains(&overruns),
+            "the Waiting reason row must clip at the SAME {budget} chars, got: {waiting:?}"
+        );
+    }
+
+    #[test]
     fn simple_tooltip_flips_below_when_cursor_near_top() {
-        // Near the top edge (my < tip_h) the box must float BELOW the cursor; well
-        // below the top it floats ABOVE. The probe substring tags its row.
         let scene = Rect {
             x: 0,
             y: 0,
@@ -724,10 +730,8 @@ mod tests {
             height: 24,
         };
 
-        // Box height is 3 (1 content line wrapped in `Padding::uniform(1)`), so
-        // the content row = box-top + 1.
-        // my=0, flip-below: box-top = my+1 = 1 → content at row 2 (NOT row 1,
-        // which is where it lands if the flip-below branch is removed).
+        // Box height is 3 (1 content line wrapped in `Padding::uniform(1)`), so the
+        // content row = box-top + 1.
         let mut top = Terminal::new(TestBackend::new(40, 24)).unwrap();
         top.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 0, scene, &theme::NORMAL))
             .unwrap();
@@ -737,8 +741,6 @@ mod tests {
             "cursor at the top edge → box flips below (top=my+1=1, content row 2)"
         );
 
-        // my=20, no flip: box-top = my - tip_h = 17 → content at row 18 (above
-        // the cursor). Falsifiable against the flip-below path firing here too.
         let mut low = Terminal::new(TestBackend::new(40, 24)).unwrap();
         low.draw(|f| super::paint_simple_tooltip(f, " PROBE ", 5, 20, scene, &theme::NORMAL))
             .unwrap();
@@ -751,8 +753,6 @@ mod tests {
 
     #[test]
     fn mascot_tooltip_verb_keys_on_run_state_not_session_count() {
-        // idle vs working keys on `busy`; the session count only shows as a >1
-        // garnish (one persistent session is the single-user norm, not "1 session").
         assert_eq!(
             mascot_tooltip_text("OpenClaw", None, false, false, 0),
             " OpenClaw gateway · idle "
@@ -773,10 +773,6 @@ mod tests {
 
     #[test]
     fn mascot_tooltip_names_the_instance_only_when_there_is_a_sibling() {
-        // With two concurrent gateways both lobsters would otherwise hover
-        // identically — the port is what tells the user which one they're pointing
-        // at. With ONE gateway the painter passes `None` and the text is unchanged
-        // (the port would be noise), so this pins both halves.
         assert_eq!(
             mascot_tooltip_text("OpenClaw", Some("19789"), true, false, 0),
             " OpenClaw:19789 gateway · working "
@@ -794,9 +790,6 @@ mod tests {
 
     #[test]
     fn mascot_tooltip_degraded_overrides_busy_and_idle() {
-        // #317: gateway up but every model call failing → "model error", and it
-        // wins over both busy and idle (a degraded gateway is degraded whether or
-        // not a run is in flight). The session garnish still rides along.
         assert_eq!(
             mascot_tooltip_text("OpenClaw", None, false, true, 0),
             " OpenClaw gateway · model error "
@@ -811,13 +804,9 @@ mod tests {
         );
     }
 
-    /// The tooltip render path (`paint_coffee_tooltip` → `paint_simple_tooltip` →
-    /// the shared `super::paint_card_backing`) casts the drop shadow. Pins that a
-    /// future edit dropping the backing call would be caught — the modal path is
-    /// covered separately by `panel::borderless_panel_casts_a_flat_offset_shadow`.
-    /// Pre-fills the buffer with a bright equal-channel gray; only a shadowed
-    /// office cell ends up an equal-channel gray darker than that (the card's
-    /// `tooltip_bg` is a distinct hue), so its presence proves the shadow ran.
+    /// Pre-fills the buffer with a bright equal-channel gray; only a SHADOWED office
+    /// cell ends up an equal-channel gray darker than that (the card's `tooltip_bg`
+    /// is a distinct hue), so its presence proves the shadow ran.
     #[test]
     fn coffee_tooltip_casts_a_drop_shadow_via_the_shared_backing() {
         use ratatui::style::Color;
@@ -840,8 +829,6 @@ mod tests {
         let buf = term.backend().buffer();
         let shadowed = (0..buf.area.height).any(|y| {
             (0..buf.area.width).any(|x| {
-                // The 200-fill dimmed by the exact SHADOW_FACTOR (derived, not a loose
-                // range — so a darkness tweak can't silently pass a near-invisible shadow).
                 matches!(buf[(x, y)].bg, Color::Rgb(r, g, b) if r == g && g == b && r == (200.0 * crate::tui::widgets::SHADOW_FACTOR) as u8)
             })
         });

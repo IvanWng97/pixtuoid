@@ -16,9 +16,8 @@ import { asset, REPO, CRATES, floorById, floorName, SITE_ORIGIN } from '../const
 
 const amenities = floorById('amenities');
 
-// Homepage structured data: a free cross-platform developer tool. Search
-// engines use this for a rich result; the version is the latest release TAG
-// (Cargo.toml is the tag-less fallback), same __PIXTUOID_VERSION__ define as everywhere else.
+// Homepage structured data for the search-engine rich result. The version is
+// the latest release TAG, with Cargo.toml as the tag-less fallback.
 const SITE = Astro.site ?? new URL(SITE_ORIGIN);
 const softwareJsonLd = {
   '@context': 'https://schema.org',
@@ -52,9 +51,8 @@ const softwareJsonLd = {
     </div>
     <Showcase />
     {
-      /* 4F — amenities: the section ROOT is wb-3's (the elevator needs six
-        stops); its content is mounted by siblings — wb-4's <ProofSplit /> and
-        wb-5's <PantryFaq /> render INSIDE this section, in that order. */
+      /* 4F — amenities: this section is only a ROOT (the elevator needs six
+        stops); its content is mounted by the siblings rendered inside it. */
     }
     <section
       id={amenities.id}
@@ -75,9 +73,8 @@ const softwareJsonLd = {
     <SupportedTools />
     <Install />
     {
-      /* observation gap 3 — the closing hold: the page's LAST install line,
-        purely decorative like gaps 1 and 2 (the install one-liner already
-        lives one section up, in Install itself — no second copy control). */
+      /* observation gap 3 — purely decorative: the install one-liner already
+        lives one section up, in Install itself. No second copy control. */
     }
     <div class="office-gap office-gap--closer">
       <p class="gap-caption" aria-hidden="true">— your office is waiting.</p>

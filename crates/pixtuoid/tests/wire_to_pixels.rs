@@ -2,39 +2,18 @@
 //! `Reducer` → a `SceneState` → the REAL `TuiRenderer` (ratatui `TestBackend`)
 //! → an actual pixel buffer, asserting a sprite was PAINTED.
 //!
-//! The `tui_renderer.rs` integration test starts from a hand-built `AgentSlot`
-//! — it proves the renderer paints, but skips the decode+reduce half. These
-//! tests close that gap for EVERY supported source: they start from the SAME
-//! real fixture bytes the conformance harness decodes (a captured transcript
-//! line, a captured hook envelope, a captured daemon-presence envelope), run
-//! them through the SAME production decoder (`registry::line_decoder()` for a
-//! transcript source, `decode_hook_payload` for a hook source, the openclaw
-//! presence decoder for the daemon), fold the resulting `AgentEvent`s through a
-//! real `Reducer` (or `apply_presence` for the daemon), and render the scene to
-//! pixels — proving real bytes become a visible character (or lobster), not
-//! just a slot.
-//!
 //! Three transport classes are covered:
-//!   - JSONL transcript  → `Transport::Jsonl` (claude-code, codex, antigravity, copilot)
-//!   - agent hook         → `Transport::Hook`  (reasonix, codewhale, opencode, cursor)
+//!   - JSONL transcript  → `Transport::Jsonl` (every transcript-bearing registered source)
+//!   - agent hook         → `Transport::Hook`  (every hook-only registered source)
 //!   - daemon presence    → the sibling channel (`apply_presence`) (openclaw)
-//!
-//! The agent assertion is a pixel-diff FLOOR: an occupied frame must repaint
-//! materially more subpixels than the same office with no agent, both rendered
-//! through the IDENTICAL settle sequence so their (time-of-day) skies cancel —
-//! what remains is the agent's own paint (recolored sprite, shadow, name label,
-//! monitor glow). (A raw distinct-COLOR count was a timezone lottery: the sky palette, keyed off
-//! `chrono::Local`, swamped the sprite's few colors at bright hours.) The
-//! daemon assertion counts the lobster's exclusive carapace-red pixels (its
-//! sprite is not recolored, so its authored RGBs render exactly).
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use pixtuoid_core::harness::{Drive, Reach, DRIVEN_DESKS};
 use pixtuoid_core::source::daemon::apply_presence;
-use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::{registry, AgentEvent};
-use pixtuoid_core::{AgentId, Reducer, SceneState, Transport};
+use pixtuoid_core::source::registry;
+use pixtuoid_core::SceneState;
 use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use pixtuoid_scene::theme::NORMAL;
 use ratatui::backend::TestBackend;
@@ -47,9 +26,8 @@ fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800)
 }
 
-/// The shared core-crate fixtures tree (a sibling crate). Reused so these
-/// tests decode the SAME captured wire bytes the conformance harness pins,
-/// never a hand-rolled re-encoding of the format.
+/// The shared core-crate fixtures tree, so these tests decode the SAME captured
+/// wire bytes the conformance harness pins, never a hand-rolled re-encoding.
 fn core_fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
@@ -73,22 +51,16 @@ fn new_renderer(cols: u16, rows: u16) -> TuiRenderer<TestBackend> {
     TuiRenderer::new(terminal, &NORMAL, vec![])
 }
 
-/// Render `scene` through the real renderer for a fixed settle window (so an
-/// agent's entry walk finishes and the sprite is firmly at its desk, not
-/// mid-doorway) and return the final frame's subpixels. The empty baseline and
-/// the occupied frame go through the IDENTICAL sequence, so their (time-of-day)
-/// skies are byte-for-byte equal — a later pixel-diff cancels the background and
-/// isolates the agent's footprint. The sky reads the wall clock via
-/// `chrono::Local` (timezone-dependent), which is precisely why the diff, not a
-/// raw color count, is the metric.
+/// Render `scene` through the real renderer for a fixed settle window and return
+/// the final frame's subpixels. The empty baseline and the occupied frame go
+/// through the IDENTICAL sequence, so a later pixel-diff cancels the
+/// (timezone-dependent) sky and isolates the agent's footprint.
 fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> Vec<(u8, u8, u8)> {
-    // ~30 frames at a ~30fps step ≈ 1s — bounded on BOTH sides. Lower bound:
-    // long enough for the entry walk to finish. Upper bound (load-bearing for
-    // the pixel-diff cancelling the sky): SHORTER than LightingState's 5s
-    // EMPTY_DEBOUNCE_MS — past that, the empty office's occupancy-driven floor
-    // dim would start easing while the occupied office holds its lights, so the
-    // two backgrounds would stop being byte-identical and the diff would no
-    // longer be purely the agent's paint. Don't raise this past ~150 frames.
+    // Bounded on BOTH sides: long enough for the entry walk to finish, and
+    // SHORTER than LightingState's 5s EMPTY_DEBOUNCE_MS — past that the empty
+    // office's floor dim would start easing while the occupied office holds its
+    // lights, so the two backgrounds would stop being byte-identical and the diff
+    // would no longer be purely the agent's paint. Don't raise past ~150 frames.
     const SETTLE_FRAMES: usize = 30;
     const FRAME_STEP: Duration = Duration::from_millis(33);
     let pack = load_sprite_pack(None).expect("pack");
@@ -105,77 +77,28 @@ fn settled_pixels(scene: &SceneState, cols: u16, rows: u16, now: SystemTime) -> 
         .collect()
 }
 
-/// The empty→occupied pixel-diff floor. A settled, recolored character (body +
-/// shadow + name label) repaints ~160 subpixels of the frame; the empty office
-/// rendered through the identical sequence differs from itself by 0 (the render
-/// is deterministic). 40 sits well above that noise floor and comfortably below
-/// the real footprint, tolerant of sprite-art tweaks. This is IMMUNE to the
-/// time-of-day sky because the diff cancels the (identical) background — the old
-/// distinct-color metric was not, and broke as a timezone lottery once the
-/// day/night lighting contrast sharpened (a rich daytime/dawn sky could even net
-/// NEGATIVE new colors as the sprite covered unique gradient pixels).
+/// The empty→occupied pixel-diff floor: well above the deterministic render's
+/// zero-diff noise floor, and comfortably below a settled character's real
+/// footprint so sprite-art tweaks don't trip it. IMMUNE to the time-of-day sky
+/// because the diff cancels the (identical) background.
 const MIN_SPRITE_PIXELS: usize = 40;
 
-// =====================================================================
-// Part A — every AGENT source renders a sprite from real wire bytes
-// =====================================================================
-
-/// How a source's wire bytes reach `AgentEvent`s.
-enum DecodeKind {
-    /// A transcript / JSONL line decoder (from the source registry — the SAME
-    /// `LineDecoder` the conformance harness runs). Folded on `Transport::Jsonl`.
-    Transcript,
-    /// A hook envelope through `decode_hook_payload` (the registry dispatcher).
-    /// Folded on `Transport::Hook`.
-    Hook,
-}
-
-/// Whether the fixture's own decoded stream registers a slot, or a synthetic
-/// `SessionStart` must seed one first (JSONL events for an unknown id are a
-/// no-op in the reducer — a transcript that carries only tool activity, like
-/// claude-code's and antigravity's, never registers itself).
-enum SeedStart {
-    /// The fixture's decoded events include a `SessionStart` (copilot) OR the
-    /// hook path synthesizes the slot from an unknown id (every hook source).
-    /// (Codex is NOT here — its line decoder emits only activity, so it uses
-    /// `CodexUuid` below.)
-    None,
-    /// Seed a `SessionStart` keyed `AgentId::from_parts(source, <logical-path>)`
-    /// — antigravity's decoder keys exactly this way.
-    FromParts,
-    /// Seed a `SessionStart` keyed the claude-code way (`cc_id_from_path`, the
-    /// transcript filename stem == the session UUID).
-    CcStem,
-    /// Seed a `SessionStart` keyed the codex way (`codex_id_from_path`, the
-    /// rollout filename UUID). Codex's LINE decoder emits only activity — the
-    /// watcher's first-sight (or the UserPromptSubmit hook) supplies the
-    /// SessionStart in production; this seed stands in for that registration so
-    /// the transcript path is exercised in isolation.
-    CodexUuid,
-    /// Seed a `SessionStart` keyed the grok way (`grok_id_from_path`, the
-    /// transcript's parent-DIR name). Grok's line decoder emits only activity
-    /// for the root session (subagent lines register children) — the watcher's
-    /// first-sight (or any hook) registers the root in production.
-    GrokDir,
-}
-
-/// The `ActivityState` classes a fixture's wire legitimately drives the slot
-/// THROUGH during the fold — asserted as reached-at-some-point, NOT as the
-/// terminal state. Terminal-state would be wrong: `mark_exiting` sets only
-/// `exiting_at` and never resets `slot.state` (`fsm.rs`), so a fixture whose
-/// last activity its own wire never resolves legitimately ends non-Idle
-/// (opencode ends Waiting, cursor ends Delegating). `Delegating` is `Active`
-/// with `kind == ToolKind::Task` — `ActivityState` has no separate variant.
-///
-/// A CLASS pin on purpose, not a ToolKind pin: `from_display` is case-sensitive,
-/// so a lowercase wire tool name (`"bash"`) renders `Active(Other)` while
-/// `"Bash"` renders `Active(Bash)` — a cosmetic glow-tint difference across
-/// sources that must not be frozen into a lifecycle assertion.
-#[derive(Clone, Copy, PartialEq, Debug)]
-enum Reach {
-    Active,
-    Waiting,
-    Delegating,
+/// WHICH of a source's two wires this case drives — and, for a transcript,
+/// whether the driver stands in for the watcher's first-sight registration.
+enum Wire {
+    /// The fixture is a transcript, driven through the source's registry
+    /// `LineDecoder` on `Transport::Jsonl`.
+    Transcript {
+        /// Seed the `SessionStart` the watcher's first-sight would emit. Needed
+        /// for a transcript that carries only activity: a JSONL event for an
+        /// unknown id is a documented no-op, so without it the wire drives
+        /// nothing. False where the fixture's own head line registers the session.
+        seeded: bool,
+    },
+    /// The fixture is a `hook-payloads.jsonl`, driven through the shared
+    /// `decode_hook_payload` on `Transport::Hook`. Never seeded: a hook event
+    /// for an unknown session id REGISTERS it (hooks are proof of life).
+    Hooks,
 }
 
 struct WireCase {
@@ -183,160 +106,59 @@ struct WireCase {
     source: &'static str,
     /// Path to the fixture file, relative to `core_fixtures_root()`.
     fixture: &'static str,
-    decode: DecodeKind,
-    transport: Transport,
-    seed: SeedStart,
+    wire: Wire,
     /// The state classes this fixture's committed wire must drive the slot
-    /// through. Derived from a measurement pass judged per-source against each
-    /// decoder's documented semantics (not guessed): the eight `&[Active]` rows
-    /// carry no permission/dispatch event, so they reach only Active — seven for
-    /// lack of such an event in the fixture, plus codewhale which is
-    /// architecturally no-Waiting (its `ApprovalRequired` fires no hook, core
-    /// CLAUDE.md). The four richer rows carry a real permission (`Waiting`) or
-    /// Task dispatch (`Delegating`). Registration alone was the only prior pin —
-    /// this proves the wire drives the reducer to the RIGHT lifecycle state, not
-    /// merely a slot.
+    /// through — judged per-source against each decoder's documented semantics,
+    /// so the wire is proven to reach the RIGHT lifecycle state, not merely a slot.
     must_reach: &'static [Reach],
 }
 
-/// Build the synthetic `SessionStart` a transcript-only source needs (its slot
-/// is otherwise never registered). The agent id is keyed exactly as the
-/// source's own decoder keys, so the seed and the decoded activity coalesce to
-/// one agent — exactly as production keys them.
-fn seed_session_start(seed: &SeedStart, source: &str, logical: &str) -> Option<AgentEvent> {
-    let agent_id = match seed {
-        SeedStart::None => return None,
-        SeedStart::FromParts => AgentId::from_parts(source, logical),
-        SeedStart::CcStem => {
-            use pixtuoid_core::source::claude_code::cc_id_from_path;
-            AgentId::from_parts(source, &cc_id_from_path(Path::new(logical)))
-        }
-        SeedStart::CodexUuid => {
-            use pixtuoid_core::source::codex::codex_id_from_path;
-            AgentId::from_parts(source, &codex_id_from_path(Path::new(logical)))
-        }
-        SeedStart::GrokDir => {
-            use pixtuoid_core::source::grok::grok_id_from_path;
-            AgentId::from_parts(source, &grok_id_from_path(Path::new(logical)))
-        }
-    };
-    Some(AgentEvent::SessionStart {
-        agent_id,
-        source: source.to_string(),
-        session_id: "wire-to-pixels-seed".to_string(),
-        cwd: PathBuf::from("/home/user/demo-project"),
-        parent_id: None,
-    })
-}
-
-/// THE shared proof: real fixture bytes → the production decoder its conformance
-/// test uses → a real `Reducer` on the correct `Transport` → ≥1 registered slot
-/// → the real `TuiRenderer` (settled ~30 frames) → more distinct colors than the
-/// empty-office baseline (a character was painted, not merely slotted).
 fn assert_renders_a_sprite(case: &WireCase) {
     let path = core_fixtures_root().join(case.fixture);
-    // The decoder's logical key — the transcript path for a JSONL source (its
-    // `AgentId` is a hash of it). For a hook source the per-line envelope keys
-    // itself, so the value is unused; pass the path for symmetry.
-    let logical = path.to_string_lossy().into_owned();
+    let lines = read_nonblank_lines(&path);
 
-    let mut events = Vec::new();
-    if let Some(start) = seed_session_start(&case.seed, case.source, &logical) {
-        events.push(start);
-    }
-
-    for line in read_nonblank_lines(&path) {
-        let v: serde_json::Value =
-            serde_json::from_str(&line).unwrap_or_else(|e| panic!("{}: bad json: {e}", case.name));
-        let decoded = match case.decode {
-            DecodeKind::Transcript => {
-                let decode = registry::descriptor_for(case.source)
-                    .and_then(|d| d.line_decoder())
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "{}: source {:?} has no line_decoder",
-                            case.name, case.source
-                        )
-                    });
-                decode(&logical, case.source, v)
-                    .unwrap_or_else(|e| panic!("{}: decode_line: {e}", case.name))
-            }
-            DecodeKind::Hook => decode_hook_payload(v)
-                .unwrap_or_else(|e| panic!("{}: decode_hook_payload: {e}", case.name)),
-        };
-        events.extend(decoded);
-    }
-    assert!(
-        events.len() >= 2,
-        "{}: fixture should decode to a registration + activity, got {events:?}",
-        case.name
-    );
-
-    // Fold through a real reducer into a real SceneState, on the SAME transport
-    // production tags this source's events with. Capture the state class reached
-    // after each event, since `must_reach` pins reached-during-fold, not the
-    // terminal state (a slot exits via `exiting_at` without its `state` reset).
-    use pixtuoid_core::state::{ActivityState, ToolKind};
-    let mut scene = SceneState::uniform(8);
-    let mut reducer = Reducer::new();
-    let mut reached: Vec<Reach> = Vec::new();
-    let mut note = |slot: &pixtuoid_core::state::AgentSlot| {
-        let r = match &slot.state {
-            ActivityState::Active {
-                kind: ToolKind::Task,
-                ..
-            } => Some(Reach::Delegating),
-            ActivityState::Active { .. } => Some(Reach::Active),
-            ActivityState::Waiting { .. } => Some(Reach::Waiting),
-            ActivityState::Idle => None,
-        };
-        if let Some(r) = r {
-            if !reached.contains(&r) {
-                reached.push(r);
-            }
+    let driven = match case.wire {
+        Wire::Transcript { seeded } => {
+            let drive = Drive::transcript_at(case.source, &path).unwrap_or_else(|| {
+                panic!(
+                    "{}: source {:?} has no line_decoder",
+                    case.name, case.source
+                )
+            });
+            let drive = if seeded { drive.seeded() } else { drive };
+            drive.at(t0()).lines(lines)
         }
+        Wire::Hooks => Drive::hooks().at(t0()).lines(lines),
     };
-    for ev in events {
-        reducer.apply(&mut scene, ev, t0(), case.transport);
-        // A settle tick mirrors production (pending-idle arms on ActivityEnd),
-        // but the class is captured PRE-tick too so a transient Active/Waiting
-        // that a later event resolves is still counted as reached.
-        if let Some(slot) = scene.agents.values().next() {
-            note(slot);
-        }
-        reducer.tick(&mut scene, t0() + Duration::from_secs(3));
-        if let Some(slot) = scene.agents.values().next() {
-            note(slot);
-        }
-    }
+
+    driven.assert_clean(case.name);
     assert!(
-        !scene.agents.is_empty(),
+        driven.events.len() >= 2,
+        "{}: fixture should decode to a registration + activity, got {:?}",
+        case.name,
+        driven.events
+    );
+    assert!(
+        !driven.scene.agents.is_empty(),
         "{}: the wire bytes must register at least one agent slot (got 0)",
         case.name
     );
-    // Lifecycle pin: the wire must drive the reducer THROUGH each documented
-    // state class, not merely register a slot. A decoder that degraded to
-    // emitting only a bare SessionStart would still pass the registration and
-    // paint checks; this is what catches it.
     for want in case.must_reach {
         assert!(
-            reached.contains(want),
-            "{}: the wire must drive the slot through {want:?}; reached only {reached:?}",
-            case.name
+            driven.reached.contains(want),
+            "{}: the wire must drive the slot through {want:?}; reached only {:?}",
+            case.name,
+            driven.reached
         );
     }
 
-    // Render the EMPTY office and the OCCUPIED office through the identical
-    // settle sequence, then count the subpixels the agent changed. Both skies
-    // are byte-identical (the agent touches neither weather nor stars), so the
-    // diff is exactly the character's footprint — proof a sprite was PAINTED,
-    // not merely slotted. Sky-INDEPENDENT by construction: the earlier
-    // distinct-color count was a timezone lottery (the sky's palette, keyed off
-    // `chrono::Local`, dwarfed and collided with the sprite's few colors at
-    // bright hours, and a rich dawn even netted a NEGATIVE delta).
+    // Both skies are byte-identical (the agent touches neither weather nor
+    // stars), so the diff is exactly the character's footprint.
     let (cols, rows) = (120, 44);
-    let empty = settled_pixels(&SceneState::uniform(8), cols, rows, t0());
-    let occupied = settled_pixels(&scene, cols, rows, t0());
+    // The empty baseline must be shaped like the driven scene (same desk
+    // capacity), or the diff would carry a layout difference as well as the agent.
+    let empty = settled_pixels(&SceneState::uniform(DRIVEN_DESKS), cols, rows, t0());
+    let occupied = settled_pixels(&driven.scene, cols, rows, t0());
     let changed = empty.iter().zip(&occupied).filter(|(a, b)| a != b).count();
     assert!(
         changed >= MIN_SPRITE_PIXELS,
@@ -349,140 +171,99 @@ fn assert_renders_a_sprite(case: &WireCase) {
 }
 
 /// The wire→pixels matrix: every supported AGENT source, transcript and hook
-/// classes both. (The openclaw DAEMON is the 3rd class — its own test below.)
+/// classes both.
 fn agent_cases() -> Vec<WireCase> {
     vec![
-        // ---- transcript / JSONL sources (line decoder, Jsonl transport) ----
         WireCase {
             name: "claude_code",
             source: "claude-code",
             fixture: "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // CC's transcript carries only tool activity → seed a SessionStart
-            // keyed the cc_id_from_path (filename-stem) way.
-            seed: SeedStart::CcStem,
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "codex",
             source: "codex",
             fixture: "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // Codex's line decoder emits only activity — the watcher first-sight
-            // (or the UserPromptSubmit hook) registers the slot in production;
-            // seed a SessionStart keyed the codex_id_from_path (rollout-UUID) way.
-            seed: SeedStart::CodexUuid,
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "antigravity",
             source: "antigravity",
             fixture: "antigravity/tool-run/transcript.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // Antigravity's decoder emits only activity → seed keyed from_parts.
-            seed: SeedStart::FromParts,
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "copilot",
             source: "copilot",
             fixture: "copilot/tool-run/events.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // The events.jsonl carries a session.start → its own SessionStart.
-            seed: SeedStart::None,
+            wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "omp",
             source: "omp",
             fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // The session header line carries its own SessionStart.
-            seed: SeedStart::None,
+            wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "grok",
             source: "grok",
             fixture: "grok/tool-run/updates.jsonl",
-            decode: DecodeKind::Transcript,
-            transport: Transport::Jsonl,
-            // updates.jsonl carries only activity for the root (the watcher
-            // first-sight or any hook registers it in production) → seed keyed
-            // the grok_id_from_path (parent-dir) way.
-            seed: SeedStart::GrokDir,
+            wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
-        // ---- hook-only sources (decode_hook_payload, Hook transport) ----
-        // A hook event for an unknown session id REGISTERS it (hooks are proof
-        // of life), so no seed is needed — the SessionStart envelope (or the
-        // first activity hook) synthesizes the slot in the reducer.
         WireCase {
             name: "reasonix",
             source: "reasonix",
             fixture: "reasonix/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "codewhale",
             source: "codewhale",
             fixture: "codewhale/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "opencode",
             source: "opencode",
             fixture: "opencode/session-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
         },
         WireCase {
             name: "cursor",
             source: "cursor",
             fixture: "cursor/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "hermes",
             source: "hermes",
             fixture: "hermes/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "kimi",
             source: "kimi",
             fixture: "kimi/tool-run/hook-payloads.jsonl",
-            decode: DecodeKind::Hook,
-            transport: Transport::Hook,
-            seed: SeedStart::None,
+            wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting],
         },
     ]
 }
 
-/// Look up one matrix case by its registered source name. The per-source tests
-/// key on this STABLE id — never a positional index into `agent_cases()`, where
-/// an insertion/reorder would silently shift every downstream case onto the
-/// wrong fixture.
+/// Look up one matrix case by its registered source name — never a positional
+/// index into `agent_cases()`, where an insertion would silently shift every
+/// downstream case onto the wrong fixture.
 fn agent_case(source: &str) -> WireCase {
     agent_cases()
         .into_iter()
@@ -490,12 +271,8 @@ fn agent_case(source: &str) -> WireCase {
         .unwrap_or_else(|| panic!("no wire-to-pixels case for source {source:?}"))
 }
 
-/// The matrix is truth-complete: every registered source is
-/// exercised by this suite — the agent matrix covers every AGENT source, and
-/// each DAEMON source has its own presence test (the openclaw lobster below).
-/// A newly registered source with no wire case FAILS here instead of silently
-/// shipping untested (the same "registration is not coverage" pin
-/// `supported_sources_manifest.rs` gives `site/src/sources.json`).
+/// The matrix is truth-complete: a newly registered source with no wire case
+/// FAILS here instead of silently shipping untested.
 #[test]
 fn wire_matrix_covers_every_registered_source() {
     use std::collections::BTreeSet;
@@ -515,8 +292,7 @@ fn wire_matrix_covers_every_registered_source() {
         );
     }
 
-    // The daemon class is covered by its own presence→lobster test below; a
-    // 2nd daemon must gain a presence test AND a row here.
+    // A 2nd daemon must gain a presence test AND a row here.
     let daemons_covered = [pixtuoid_core::source::openclaw::SOURCE_NAME];
     for source in daemons_covered {
         let d = registry::descriptor_for(source)
@@ -538,9 +314,6 @@ fn wire_matrix_covers_every_registered_source() {
     );
 }
 
-/// Drive the whole matrix in one test so a per-source failure names the source
-/// (the `case.name` is woven into every assertion message). Each case is the
-/// full wire→pixels chain for its source.
 #[test]
 fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
     for case in agent_cases() {
@@ -548,8 +321,8 @@ fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
     }
 }
 
-// Per-source tests too, so a single source can be run in isolation
-// (`-E 'test(claude_code)'`) and a regression localizes to its own `#[test]`.
+// Per-source tests too, so a single source can be run in isolation and a
+// regression localizes to its own `#[test]`.
 
 #[test]
 fn claude_code_transcript_line_renders_a_painted_sprite() {
@@ -611,13 +384,8 @@ fn kimi_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("kimi"));
 }
 
-// =====================================================================
-// Part B — OpenClaw DAEMON presence → a painted lobster (3rd class)
-// =====================================================================
-
-/// The lobster's exclusive carapace reds (the mascot sprite is NOT recolored,
-/// so its authored RGBs render exactly — mirrors `harness.rs::lobster_px`). An
-/// empty-agents scene means no recolored agent shirt can collide with these.
+/// The lobster's exclusive carapace reds — the mascot sprite is NOT recolored,
+/// so its authored RGBs render exactly, and no recolored agent shirt collides.
 fn lobster_px(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
     use pixtuoid_core::sprite::Rgb;
     let reds = [
@@ -653,38 +421,27 @@ fn lobster_px(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
     n
 }
 
-/// TEST — OpenClaw (DAEMON / presence source): the captured gateway-lifecycle
-/// hook envelopes → the production presence decoder
-/// (`openclaw::decode_openclaw_hook_payload`) → `apply_presence` (the SAME
-/// sibling-channel seam `runtime/driver.rs` uses — NEVER `Reducer::apply`,
-/// which is `AgentId`-pure) → `SceneState.daemons[openclaw]` populated UP →
-/// `TuiRenderer` pixels. Asserts the LOBSTER is painted, proving the
-/// daemon-presence wire→pixels chain (distinct from the agent JSONL + agent
-/// hook classes above).
+/// The daemon/presence class: `apply_presence` is the sibling-channel seam
+/// `runtime/driver.rs` uses — NEVER `Reducer::apply`, which is `AgentId`-pure.
 #[test]
 fn openclaw_presence_envelope_renders_a_lobster() {
     let hooks = core_fixtures_root().join("openclaw/gateway_lifecycle/hook-payloads.jsonl");
 
-    // The fixture's last two envelopes are session_end → gateway_stop, which
-    // would leave the daemon Down (and the lobster walking out / gone). We want
-    // the daemon UP, so apply only through the in-session run (gateway_start ..
-    // agent_end) — exactly the live "gateway is serving" state. Each remaining
-    // envelope is decoded via the production presence decoder.
+    // The fixture's last two envelopes are session_end → gateway_stop, which would
+    // leave the daemon Down; stop before them so the asserted scene is a LIVE
+    // gateway.
     let lines = read_nonblank_lines(&hooks);
     let mut scene = SceneState::uniform(16);
     let now = t0();
     let mut applied = 0;
     for line in &lines {
         let v: serde_json::Value = serde_json::from_str(line).expect("openclaw hook json");
-        // Stop at session teardown so the asserted scene is a LIVE gateway.
         let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
         if ty == "session_end" || ty == "gateway_stop" {
             break;
         }
         let decoded = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
             .expect("decode_openclaw_hook_payload");
-        // The captured wire carries its own gateway identity — the key is DECODED
-        // here, never assumed, so a fixture with two ports would render two mascots.
         let key = pixtuoid_core::source::daemon::DaemonInstanceKey::new(
             pixtuoid_core::source::openclaw::SOURCE_NAME,
             decoded.instance.clone(),
@@ -699,8 +456,6 @@ fn openclaw_presence_envelope_renders_a_lobster() {
         "the openclaw fixture must decode to presence deltas (got 0)"
     );
 
-    // The presence must have populated the daemon map UP (not Down) — the live
-    // gateway whose lobster scuttles the floor.
     let (_, _, presence) = scene
         .daemons()
         .find(|(source, _, _)| *source == pixtuoid_core::source::openclaw::SOURCE_NAME)
@@ -711,9 +466,8 @@ fn openclaw_presence_envelope_renders_a_lobster() {
         "the in-session presence stream must leave the gateway UP"
     );
 
-    // Render the scene. `entered_at` == `now` means the lobster is mid walk-in;
-    // settle a few frames at a LATER wall-clock so it's scuttling the floor
-    // (well past the elevator), then assert the carapace reds are painted.
+    // `entered_at` == `now` means the lobster is mid walk-in; settle at a LATER
+    // wall-clock so it's scuttling the floor, well past the elevator.
     let pack = load_sprite_pack(None).expect("pack");
     let mut r = new_renderer(160, 80);
     let mut t = now + Duration::from_secs(20);

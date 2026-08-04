@@ -2,7 +2,6 @@
 import { getCollection, render } from 'astro:content';
 import Docs from '../layouts/Docs.astro';
 
-// Rendered from docs/ARCHITECTURE.md (the single source) — there's one entry.
 const [entry] = await getCollection('architecture');
 if (!entry) {
   throw new Error(

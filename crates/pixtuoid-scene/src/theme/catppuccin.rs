@@ -4,12 +4,6 @@ use super::*;
 
 /// Catppuccin Mocha — warm pastels on dark chocolate.
 /// Based on <https://github.com/catppuccin/catppuccin>
-/// Base: #1e1e2e, Surface0: #313244, Overlay0: #6c7086
-/// Rosewater: #f5e0dc, Flamingo: #f2cdcd, Pink: #f5c2e7
-/// Mauve: #cba6f7, Red: #f38ba8, Maroon: #eba0ac
-/// Peach: #fab387, Yellow: #f9e2af, Green: #a6e3a1
-/// Teal: #94e2d5, Sky: #89dceb, Sapphire: #74c7ec
-/// Blue: #89b4fa, Lavender: #b4befe
 pub static CATPPUCCIN: Theme = Theme {
     name: "catppuccin",
     kind: ThemeKind::Dark,
@@ -531,7 +525,7 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 0x96,
             g: 0xa2,
             b: 0xbe,
-        }, // cursor slate-blue (monochrome brand; distinct from all 7)
+        }, // cursor slate-blue (monochrome brand)
         openclaw: Rgb {
             r: 0xff,
             g: 0xaa,
@@ -541,7 +535,7 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 0x68,
             g: 0x58,
             b: 0xe0,
-        }, // Hermes/Nous indigo (brand-constant like openclaw marigold; clears reasonix-violet + cursor-slate + codex-blue on every theme, min Manhattan >=92)
+        }, // Hermes/Nous indigo (brand-constant; clears reasonix-violet + cursor-slate + codex-blue on every theme)
         omp: Rgb {
             r: 0x8a,
             g: 0xc8,
@@ -551,11 +545,11 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; nearest neighbor codewhale-teal at Manhattan 78 ≥ the 60 floor, and the SITE's chip transforms clear WCAG AA in both themes: ×0.55-on-day-chip 5.3:1, ×0.8+white-on-night-chip 11.6:1 — the silver e6e6e6 failed the day chip at 3.83:1, caught by the site e2e badge sweep)
+        }, // grok cyan (brand-constant; clears the Manhattan floor vs codewhale-teal, and the SITE's chip transforms clear WCAG AA in both themes — a lighter silver failed the day chip)
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
-        }, // kimi electric violet (brand-constant like hermes/omp/grok; Kimi/Moonshot's purple, min Manhattan >=88 vs every source on every theme)
+        }, // kimi electric violet (brand-constant; clears every other source on every theme)
     },
 };

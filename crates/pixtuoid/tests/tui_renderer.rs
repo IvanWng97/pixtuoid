@@ -1,6 +1,5 @@
-//! Smoke test that `TuiRenderer::render` (the production flush entry point, an
-//! inherent method) drives a
-//! real half-block frame end to end, not just an in-memory `SceneState` capture.
+//! Smoke test that `TuiRenderer::render` drives a real half-block frame end to end, not
+//! just an in-memory `SceneState` capture.
 
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
@@ -12,9 +11,8 @@ use pixtuoid_scene::embedded_pack::load_sprite_pack;
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
-/// Build an `AgentSlot` for these render tests — fills the boilerplate fields
-/// (source `claude-code`, cwd `/demo`, created/last-event `now - 60s`, zeroed
-/// counters, no parent/exit) so each call site only varies what it cares about.
+/// Build an `AgentSlot` for these render tests — fills the boilerplate fields so each
+/// call site only varies what it cares about.
 fn agent_slot(
     id: AgentId,
     session: &str,
@@ -86,15 +84,12 @@ fn tui_renderer_render_paints_a_full_frame() {
 
     renderer.render(&scene, &pack, now).expect("render");
 
-    // The TUI impl owns the pixel buffer — after render, it should be sized
-    // for the 96×(36-1) scene area (one row reserved for footer), doubled
-    // vertically via half-block: 96 cells wide, 70 pixels tall.
+    // The 96×(36-1) scene area (one row reserved for the footer), doubled vertically
+    // via half-block ⇒ 96 × 70.
     let buf = renderer.buf();
     assert_eq!(buf.width(), 96);
     assert_eq!(buf.height(), 70);
 
-    // And it should contain something (non-trivial color diversity), proving
-    // the trait method actually triggered the paint pipeline.
     let mut colors = std::collections::HashSet::new();
     for px in buf.as_slice() {
         colors.insert((px.r, px.g, px.b));
@@ -106,18 +101,12 @@ fn tui_renderer_render_paints_a_full_frame() {
     );
 }
 
-/// Regression guard for the floor-transition rendering pipeline.
-///
-/// Previously the transition path hardcoded `active_pet: None`,
-/// `floor_pet_kind: None`, and empty coffee state, so pets/cups/steam
-/// vanished during the slide. This test verifies that triggering a
-/// transition still paints a non-trivial buffer with pet state active —
-/// catching a regression that re-introduces `None` for these fields.
+/// The transition path must not hardcode `active_pet: None`, `floor_pet_kind: None` or
+/// empty coffee state — pets, cups and steam vanish during the slide if it does.
 #[test]
 fn tui_renderer_transition_paints_pets_and_coffee() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);
 
-    // Two-floor scene with one agent per floor.
     let mut caps = [0usize; pixtuoid_core::state::MAX_FLOORS];
     caps[0] = 8;
     caps[1] = 8;
@@ -153,7 +142,6 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
     // Initial render so the renderer grows its per-floor state to nf=2.
     renderer.render(&scene, &pack, now).expect("initial render");
 
-    // Set an active pet on floor 0 (carried through the transition).
     renderer.set_active_pet(Some(pixtuoid::tui::renderer::PetState {
         petted_at: now,
         pet_pos: pixtuoid_scene::layout::Point { x: 20, y: 20 },
@@ -161,32 +149,22 @@ fn tui_renderer_transition_paints_pets_and_coffee() {
         floor_idx: 0,
     }));
 
-    // Trigger a transition from floor 0 to floor 1.
     renderer.navigate_floor(1, now);
     assert!(
         renderer.transition().is_some(),
         "navigate_floor should arm a transition"
     );
 
-    // Render mid-transition (a few ms in so the slide is partway through).
     let mid = now + Duration::from_millis(100);
     renderer
         .render(&scene, &pack, mid)
         .expect("transition render");
 
-    // The transition should still be in progress — verifies we actually
-    // exercised the transition draw path (not the post-transition normal
-    // path) on the previous render.
     assert!(
         renderer.transition().is_some(),
         "transition should not have completed yet (was the path skipped?)"
     );
 
-    // Both floor buffers should be populated with a non-trivial pixel mix.
-    // If pets/coffee/decor get stubbed back to None or empty, the buffers
-    // still get *some* paint (floor, walls) but the color diversity drops.
-    // We just assert non-emptiness here; richer assertions belong in
-    // dedicated pet/coffee tests.
     let buf = renderer.buf();
     let nonzero = buf
         .as_slice()
@@ -300,11 +278,6 @@ fn version_popup_animation_starts_small_then_grows() {
     );
 }
 
-/// Regression guard for Fix #5: dismissing mid-entrance must not snap the
-/// popup back to full scale before fading. Before the fix, `set_version_popup`
-/// overwrote `version_popup_started_at = Some(now)` without saving the current
-/// scale, so the dismissal formula evaluated to `1.0 - 0 ≈ 1.0` on the next
-/// frame — a visible flash to full size before fading.
 #[test]
 fn dismiss_mid_entrance_does_not_snap_to_full() {
     let backend = TestBackend::new(96, 36);
@@ -319,7 +292,7 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
     );
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
-    // Enter mid-entrance at 100ms (EaseOutCubic(0.5) ≈ 0.875)
+    // 100ms is mid-entrance: EaseOutCubic(0.5) ≈ 0.875.
     renderer.set_version_popup(true, t0);
     let mid_entrance = t0 + Duration::from_millis(100);
     let scale_at_mid = renderer.version_popup_scale(mid_entrance);
@@ -328,10 +301,8 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
         "expected mid-entrance scale 0.7..1.0; got {scale_at_mid}"
     );
 
-    // Dismiss at the same moment
     renderer.set_version_popup(false, mid_entrance);
 
-    // Immediately after the dismiss edge, scale should be ~scale_at_mid (no snap)
     let just_after = mid_entrance + Duration::from_millis(1);
     let scale_after = renderer.version_popup_scale(just_after);
     assert!(
@@ -340,9 +311,8 @@ fn dismiss_mid_entrance_does_not_snap_to_full() {
     );
 }
 
-/// Regression: a resize mid-slide previously left `current_floor` at
-/// `from_floor`, silently reverting a user-initiated navigation with no UI
-/// signal. `cancel_transition` must now land the user on `to_floor`.
+/// `cancel_transition` must land the user on `to_floor` — leaving it at `from_floor`
+/// silently reverts a user-initiated navigation with no UI signal.
 #[test]
 fn cancel_transition_lands_on_destination_floor() {
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800);

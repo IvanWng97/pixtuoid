@@ -10,7 +10,10 @@ tests/
 ├── sources/main.rs           the source/decode layer (1 binary)
 │   ├── decode/mod.rs         cross-CLI decoder unit tests
 │   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (single-owner; NOT scanned)
-│   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta)
+│   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta) — a
+│   │                         `harness::Drive` shell (one drive per transport); ALSO pins that a
+│   │                         first-sight SEED keyed by the registry row coalesces with each
+│   │                         transcript's own decoder keying
 │   ├── manager.rs            SourceManager spawn/health
 │   ├── claude/mod.rs         CC subagent lifecycle
 │   │   └── fixtures/hook-payloads.jsonl   CC's OWN data (single-owner; NOT scanned)
@@ -55,13 +58,27 @@ tests/
   by one test module lives *with that module* at `sources/<module>/fixtures/`;
   fixtures the conformance harness iterates live in `sources/fixtures/<source>/`.
 
+## The one pipeline
+
+Everything that feeds real wire bytes through the production path rides
+`pixtuoid_core::harness::Drive` (core's dev-only `harness` feature): this
+suite's `conformance.rs`, `pixtuoid/tests/wire_to_pixels.rs`, and the two
+on-demand tools (`examples/decoder_fuzz.rs`,
+`pixtuoid-scene/examples/corpus_check.rs`). A shell supplies bytes and asserts
+or reports; it does NOT re-roll decode → reduce, and in particular it does not
+re-derive the first-sight seed's `AgentId` (that comes from the source's
+registry row — see the core guide).
+
 ## Adding a new agent CLI — the test steps
 
 1. **Always:** add `tests/sources/fixtures/<registered-source>/<scenario>/` — at
    minimum a `SessionStart` conformance scenario. `conformance.rs` auto-discovers
    it; `supported_sources_manifest` forces the manifest row; `cargo insta review`
    to accept the new snapshot. The dir name MUST equal the registered source
-   name (`registered_source_names()`: `claude-code`, not `claude`).
+   name (`registered_source_names()`: `claude-code`, not `claude`). A
+   transcript-bearing source's fixture is additionally driven WITH the
+   first-sight seed, so a registry row wired to the wrong `id_from_path` fails
+   there rather than shipping as two sprites for one session.
 2. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
    `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
    register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,

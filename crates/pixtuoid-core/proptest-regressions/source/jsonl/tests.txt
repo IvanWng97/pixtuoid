@@ -1,0 +1,16 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+#
+# PROVENANCE: these two seeds did NOT come from a real defect. They were
+# produced by deliberately deleting `self.unbind(id)` from `ProbeLadder::fold`'s
+# rebind-migration arm — the negative control that proved the new ladder
+# properties CAN fail before anyone trusted them passing. They are kept because
+# they are the MINIMAL rebind interleavings (an id moving between pids, then
+# both pids dying), so a future regression of that arm reds instantly instead of
+# waiting for random generation to rediscover it.
+cc 8ec8d77e89ba7e00f2a7709f0dae202c61a69ca357a7d41cf3c2879ed6763f4f # shrinks to ops = [Fold { live: [(1, 1)], advance_ms: 0 }, Fold { live: [(1, 0)], advance_ms: 0 }]
+cc 6325ad5d9a833d4cb895a81337955aeb03b0ee3c29c8a865aff8e293acdf90dd # shrinks to ops = [Fold { live: [(2, 2)], advance_ms: 0 }, Fold { live: [(2, 1)], advance_ms: 0 }, PidDied(2), PidDied(1)]

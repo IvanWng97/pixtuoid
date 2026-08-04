@@ -1034,7 +1034,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::motion::WanderP
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::motion::WanderPhase
 pub struct pixtuoid_scene::motion::MotionState
 pub pixtuoid_scene::motion::MotionState::agent_id: pixtuoid_core::id::AgentId
-pub pixtuoid_scene::motion::MotionState::entry: core::option::Option<(std::time::SystemTime, pixtuoid_scene::physics::WalkProfile)>
+pub pixtuoid_scene::motion::MotionState::entry: core::option::Option<pixtuoid_scene::motion::WalkLeg>
 pub pixtuoid_scene::motion::MotionState::exit: core::option::Option<pixtuoid_scene::motion::WalkLeg>
 pub pixtuoid_scene::motion::MotionState::snap_back: core::option::Option<pixtuoid_scene::motion::WalkLeg>
 pub pixtuoid_scene::motion::MotionState::walk_path: core::option::Option<pixtuoid_scene::motion::WalkPathSnapshot>

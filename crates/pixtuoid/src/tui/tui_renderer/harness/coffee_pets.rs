@@ -1,19 +1,16 @@
 use super::*;
 
-// ===================================================================
-// Coffee state
-// ===================================================================
-
 #[test]
 fn coffee_state_evicted_when_agent_leaves_scene() {
     let id = AgentId::from_transcript_path("/cof/leave.jsonl");
     let scene = scene_with(vec![slot(id, 0, 0, t0())], 16);
     let mut r = build(100, 40, vec![]);
     r.inject_coffee(id, t0());
+    r.evict_missing(&scene);
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(r.coffee_contains(id));
-    // Agent gone from the scene ⇒ next render evicts its coffee state.
     let empty = SceneState::uniform(16);
+    r.evict_missing(&empty);
     r.render(&empty, &pack(), t0() + Duration::from_millis(33))
         .unwrap();
     assert!(
@@ -23,19 +20,39 @@ fn coffee_state_evicted_when_agent_leaves_scene() {
 }
 
 #[test]
+fn coffee_state_is_evicted_during_a_floor_transition() {
+    let cap = 16;
+    let a = AgentId::from_transcript_path("/cof/slide0.jsonl");
+    let b = AgentId::from_transcript_path("/cof/slide1.jsonl");
+    let scene = scene_with(vec![slot(a, 0, 0, t0()), slot(b, 1, cap, t0())], cap);
+    let mut r = build(100, 40, vec![]);
+    r.inject_coffee(a, t0());
+    let mut now = t0();
+    r.evict_missing(&scene);
+    r.render(&scene, &pack(), now).expect("render");
+    assert!(r.coffee_contains(a), "cup staged");
+
+    now += Duration::from_millis(33);
+    r.navigate_floor(1, now);
+    let gone = scene_with(vec![slot(b, 1, cap, t0())], cap);
+    now += Duration::from_millis(33);
+    r.evict_missing(&gone);
+    r.render(&gone, &pack(), now).expect("render");
+    assert!(r.transition().is_some(), "still mid-slide");
+    assert!(
+        !r.coffee_contains(a),
+        "the office half must be evicted on the transition path too"
+    );
+}
+
+#[test]
 fn coffee_persists_through_floor_transition() {
-    // Regression: the old render_transition_floor discarded its
-    // render_to_rgb_buffer result (`let _ =`), so a coffee carrier first
-    // DETECTED during a floor slide was never persisted → the cup never
-    // landed. The transition path now records carriers inside the shared
-    // `floor::render_floor` seam (the normal path persists via
-    // DrawCtx.new_coffee_carriers).
     let p = pack();
     let step = Duration::from_millis(500);
     let cap = 16;
-    // Several floor-0 wanderers (the pantry is 1 of ~10 waypoints, so one
-    // agent reaches it far sooner than any single one would) + a floor-1
-    // occupant so navigate_floor(1) has a destination.
+    // The pantry is 1 of ~10 wander waypoints, so many floor-0 agents reach it far
+    // sooner than any single one would; the floor-1 occupant gives navigate_floor(1)
+    // a destination.
     let n_f0 = 10usize;
     let mut agents: Vec<_> = (0..n_f0)
         .map(|i| {
@@ -57,8 +74,8 @@ fn coffee_persists_through_floor_transition() {
         .map(|i| AgentId::from_transcript_path(&format!("/cof/f0_{i}.jsonl")))
         .collect();
 
-    // Pass 1 (scratch): find the first frame where the NORMAL render path
-    // detects ANY floor-0 wanderer walking back from the pantry, and which one.
+    // Pass 1 (scratch): find the first frame where the NORMAL render path detects a
+    // floor-0 wanderer walking back from the pantry.
     let mut scratch = build(100, 40, vec![]);
     let mut now = t0();
     scratch.render(&scene, &p, now).unwrap();
@@ -75,10 +92,10 @@ fn coffee_persists_through_floor_transition() {
     }
     let (agent, detect_at) = hit.expect("a floor-0 wanderer should fetch coffee while wandering");
 
-    // Pass 2 (real): advance to one step BEFORE detection (no coffee yet),
-    // begin a transition, then render AT detect_at — so the carrier is first
-    // detected DURING the slide (gap ≤ step < the 900ms transition window, and
-    // < the wander stale-resume trigger, so the timeline matches the scratch).
+    // Pass 2 (real): stop one step BEFORE detection, begin a transition, then render
+    // AT detect_at, so the carrier is first detected DURING the slide. The gap must
+    // stay ≤ step < the 900ms transition window and < the wander stale-resume trigger,
+    // else this timeline diverges from the scratch pass.
     let mut r = build(100, 40, vec![]);
     let mut t = t0();
     r.render(&scene, &p, t).unwrap();
@@ -102,9 +119,8 @@ fn coffee_persists_through_floor_transition() {
 
 #[test]
 fn injected_coffee_changes_desk_render() {
-    // Compare two renders that differ ONLY by coffee state (same scene,
-    // same final timestamp) so the diff is attributable to the coffee cup +
-    // steam, not elapsed-time animation.
+    // The two renders share a scene and a final timestamp so the diff is attributable
+    // to the cup + steam, not to elapsed-time animation.
     let id = AgentId::from_transcript_path("/cof/steam.jsonl");
     let scene = scene_with(
         vec![idle("/cof/steam.jsonl", 0, t0() - Duration::from_secs(30))],
@@ -137,14 +153,10 @@ fn injected_coffee_changes_desk_render() {
     );
 }
 
-// ===================================================================
-// Pets
-// ===================================================================
-
 #[test]
 fn no_pet_when_pets_disabled() {
     let scene = scene_with(vec![active("/pet/0.jsonl", 0, "Edit", t0())], 16);
-    let mut r = build(100, 40, vec![]); // no pets
+    let mut r = build(100, 40, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
     assert!(r.cached_pet_pos().is_none(), "no pet when none enabled");
 }
@@ -196,9 +208,6 @@ fn petting_freezes_pet_position() {
 
 #[test]
 fn pet_walk_is_frame_stable() {
-    // Same `now` rendered by two independent renderers must yield the same pet
-    // position — proves A* on (static mask + empty overlay) is deterministic
-    // (no per-frame flash).
     let scene = scene_with(vec![active("/pstab/0.jsonl", 0, "Edit", t0())], 16);
     let now = t0() + Duration::from_millis(5_000); // mid walk-phase of cycle 0
     let mut r1 = build(160, 80, vec![PetKind::Cat]);
@@ -214,8 +223,6 @@ fn pet_walk_is_frame_stable() {
 
 #[test]
 fn pet_walk_never_clips_through_furniture() {
-    // Across 4 cycles (many prev/dest pairs) × the whole 35% walk phase, every
-    // walking frame must land on a walkable cell — i.e. routed around furniture.
     let scene = scene_with(vec![active("/pwalk/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0()).unwrap();
@@ -226,11 +233,9 @@ fn pet_walk_never_clips_through_furniture() {
             r.render(&scene, &pack(), now).unwrap();
             if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
                 if anim == PetKind::Cat.walk_anim() {
-                    // Coarse-cell walkable = the predicate A* itself guarantees
-                    // (same grid every agent sprite rides). Per-pixel is_walkable
-                    // is stricter than the router delivers (pad band / diagonal
-                    // corner-graze) and would hold the pet to a higher bar than
-                    // the agents.
+                    // Coarse-cell walkable is the predicate A* itself guarantees;
+                    // per-pixel `is_walkable` is stricter than the router delivers
+                    // and would hold the pet to a higher bar than the agents.
                     assert!(
                         pixtuoid_scene::pathfind::point_in_walkable_cell(&layout.walkable, pos),
                         "walking pet at ({},{}) is in a blocked routing cell (cycle={cycle} step={step})",
@@ -255,8 +260,8 @@ fn pet_rest_pos_is_walkable() {
             r.render(&scene, &pack(), now).unwrap();
             if let Some(PetFrame { pos, anim, .. }) = r.cached_pet_pos() {
                 if anim != PetKind::Cat.walk_anim() {
-                    // Rest pose is a snapped cell center, so it should satisfy the
-                    // stronger per-pixel check — assert that directly.
+                    // Rest pose is a snapped cell center, so the stronger per-pixel
+                    // check applies here (unlike the walk phase above).
                     assert!(
                         layout.walkable.is_walkable(pos.x, pos.y),
                         "resting pet at ({},{}) is on a blocked cell (cycle={cycle} step={step})",
@@ -271,8 +276,8 @@ fn pet_rest_pos_is_walkable() {
 
 #[test]
 fn pet_leg_boundary_no_pop() {
-    // The snapped rest anchor == the next leg's snapped walk-start anchor, so
-    // the pet must not teleport across the 40s leg boundary.
+    // The two timestamps straddle the 40s leg boundary, where the snapped rest anchor
+    // is also the next leg's snapped walk-start anchor.
     let scene = scene_with(vec![active("/pbnd/0.jsonl", 0, "Edit", t0())], 16);
     let mut r = build(160, 80, vec![PetKind::Cat]);
     r.render(&scene, &pack(), t0() + Duration::from_millis(39_600))
@@ -290,10 +295,6 @@ fn pet_leg_boundary_no_pop() {
     }
 }
 
-// ===================================================================
-// Pet tooltip: cooldown (purr/woof per kind) + sleeping arms (CG5)
-// ===================================================================
-
 #[test]
 fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
     for (kind, word) in [(PetKind::Cat, "purr"), (PetKind::Dog, "woof")] {
@@ -301,7 +302,6 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
         let mut r = build(140, 48, vec![kind]);
         r.render(&scene, &pack(), t0()).unwrap();
         let PetFrame { pos, .. } = r.cached_pet_pos().expect("pet placed");
-        // Activate the petting cooldown so the tooltip shows purr/woof.
         r.set_active_pet(Some(PetState {
             petted_at: t0(),
             pet_pos: pos,
@@ -321,14 +321,12 @@ fn pet_tooltip_shows_cooldown_reaction_for_cat_and_dog() {
 
 #[test]
 fn pet_tooltip_shows_sleeping_when_all_idle() {
-    // With every agent idle the cat sleeps (sleeps_near_idle); hovering it shows
-    // the sleeping line. Use a long-idle scene so the pet settles to sleep.
+    // A long-idle scene is required: the cat only sleeps near idle agents.
     let scene = scene_with(
         vec![idle("/slp/0.jsonl", 0, t0() - Duration::from_secs(300))],
         16,
     );
     let mut r = build(160, 64, vec![PetKind::Cat]);
-    // Scan the pet cycle for a sleeping frame, then hover it.
     let mut hit = None;
     for i in 0..40u64 {
         let now = t0() + Duration::from_secs(i);
@@ -350,15 +348,12 @@ fn pet_tooltip_shows_sleeping_when_all_idle() {
     );
 }
 
-// Hover a furniture item near the TOP edge so paint_simple_tooltip flips the
-// box BELOW the cursor (the my < scene_rect.y + tip_h branch).
 #[test]
 fn furniture_tooltip_flips_below_near_top_edge() {
     let scene = scene_with(vec![idle("/flip/0.jsonl", 0, t0())], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
-    // Find a furniture hit at the smallest cell-y (closest to the top edge).
     let mut top_hit = None;
     'scan: for my in 0..6u16 {
         for mx in 0..140u16 {
@@ -374,14 +369,10 @@ fn furniture_tooltip_flips_below_near_top_edge() {
         .expect("top-edge furniture hover must flip the tooltip below without panic");
 }
 
-// Hover an AGENT near the BOTTOM edge so paint_hover_tooltip flips the panel UP
-// (the ty overflow branch). Pin it to force the centered/hover panel path.
 #[test]
 fn agent_tooltip_flips_up_near_bottom_edge() {
-    // Seat the agent at the BOTTOM-most home desk so its hover hit-cells sit
-    // near the scene's bottom edge — the dossier then can't fit below the
-    // cursor and must flip up. (The pinned-anchor variant died with
-    // click-to-pin; hover anchors at the real hit cell now.)
+    // The agent must sit at the BOTTOM-most home desk, else the dossier fits below the
+    // cursor and never takes the flip-up branch.
     let probe = SceneState::uniform(16);
     let mut r = build(120, 44, vec![]);
     r.render(&probe, &pack(), t0()).unwrap();
@@ -406,5 +397,4 @@ fn agent_tooltip_flips_up_near_bottom_edge() {
     super::hover_agent(&mut r, &scene, id, 120, 44);
     r.render(&scene, &pack(), t0())
         .expect("bottom-edge hover must not panic");
-    // Reaching here (no panic, tooltip flipped within bounds) is the assertion.
 }

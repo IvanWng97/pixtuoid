@@ -1,6 +1,4 @@
 #![cfg(windows)]
-//! Windows twins of tests/shim.rs — the invariant-#5 contract against a real
-//! named pipe, plus the watchdog's own pin (stalled daemon → exit 0 ~200ms).
 
 use std::io::Write;
 use std::process::{Command, Stdio};
@@ -70,8 +68,8 @@ async fn delivers_one_json_line_to_pipe_listener_and_exits_zero() {
 
 #[tokio::test]
 async fn argv_source_flag_stamps_source_over_pipe_without_env() {
-    // Windows install form: `pixtuoid-hook --source codex` over the named pipe,
-    // NO PIXTUOID_SOURCE env (cmd.exe /C can't express the env-prefix form).
+    // The Windows install form carries no PIXTUOID_SOURCE env — cmd.exe /C can't
+    // express the env-prefix form.
     let name = format!(r"\\.\pipe\pixtuoid-test-argvsrc-{}", std::process::id());
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
@@ -103,14 +101,9 @@ async fn argv_source_flag_stamps_source_over_pipe_without_env() {
 
 #[tokio::test]
 async fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
-    // Windows twin of tests/shim.rs: CodeWhale env-mode (`--event <name>`)
-    // synthesizes the envelope from DEEPSEEK_* env and must NOT read stdin. The
-    // installer writes the bare `<exe> --source codewhale --event <name>` form
-    // on Windows (cmd.exe can't express the env-prefix). Like the Unix twin we
-    // HOLD the child's stdin open (never write, never close → no EOF) so a
-    // re-added blind stdin read would BLOCK (the shim never connects to the
-    // pipe), tripping the connect timeout below — not just an EOF-able pipe a
-    // blind read would drain instantly.
+    // The child's stdin is HELD open (never written, never closed → no EOF) so a
+    // re-added blind stdin read would BLOCK and trip the connect timeout below —
+    // an EOF-able pipe would instead be drained instantly and prove nothing.
     let name = format!(r"\\.\pipe\pixtuoid-test-cwevent-{}", std::process::id());
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
@@ -132,17 +125,15 @@ async fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
             .stderr(Stdio::null())
             .spawn()
             .expect("spawn shim");
-        // Hold stdin open for the child's lifetime (no write, no close → no EOF).
+        // Dropped only after wait(), so stdin stays open for the child's lifetime.
         let stdin = child.stdin.take().expect("stdin");
         let status = child.wait().expect("wait shim");
         drop(stdin);
         status
     });
 
-    // Bound the connect: a correct env-mode shim connects+writes promptly; a
-    // regression that blocks on the never-EOF stdin never connects. (Bare
-    // statement, not a `let` binding — `connect()` yields `()`, and binding a
-    // unit value trips clippy::let_unit_value under check-windows' -D warnings.)
+    // Keep this a bare statement, not a `let` binding — `connect()` yields `()`,
+    // and binding a unit value trips clippy::let_unit_value under -D warnings.
     tokio::time::timeout(Duration::from_secs(3), server.connect())
         .await
         .expect("env-mode shim must connect within 3s — it must NOT block reading stdin")
@@ -167,14 +158,10 @@ async fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
 
 #[tokio::test]
 async fn codex_cmd_c_invocation_of_hook_command_stamps_source() {
-    // Faithfully reproduce codex's Windows hook spawn (codex-rs
-    // command_runner.rs): `Command::new("cmd.exe").arg("/C").arg(<command>)`,
-    // where <command> is the BARE exec form pixtuoid's installer writes for Codex
-    // (`<exe> --source codex` — mirrors install::codex::hook_command's windows
-    // arm). This is the layer that defeats a QUOTED path (codex's Command::arg
-    // escapes inner quotes → cmd.exe mangles the path), so it pins that the bare
-    // form actually survives cmd.exe /C and the shim still stamps source=codex.
-    // CARGO_BIN_EXE_pixtuoid-hook has no spaces on CI, the form's working case.
+    // Reproduces codex's Windows hook spawn, which is the layer that defeats a
+    // QUOTED path: codex's Command::arg escapes inner quotes and cmd.exe then
+    // mangles it, so the installer must emit the BARE exec form. CARGO_BIN_EXE has
+    // no spaces on CI, i.e. this pins the bare form's working case only.
     let name = format!(r"\\.\pipe\pixtuoid-test-cmdc-{}", std::process::id());
     let mut server = ServerOptions::new()
         .first_pipe_instance(true)
@@ -223,27 +210,24 @@ async fn codex_cmd_c_invocation_of_hook_command_stamps_source() {
 fn missing_pipe_exits_zero_without_blocking() {
     let (status, elapsed) = run_shim(r"\\.\pipe\pixtuoid-test-nonexistent", "{}");
     assert!(status.success(), "exit 0 on missing daemon");
-    // NotFound is the fast path — generous CI margin, but well under any hang.
+    // NotFound is the fast path; 2s is generous CI margin but well under any hang.
     assert!(elapsed < Duration::from_secs(2), "took {elapsed:?}");
 }
 
 #[tokio::test]
 async fn stalled_daemon_shim_exits_zero_within_watchdog_bound() {
-    // A pipe whose single instance is already taken by another client: the
-    // shim's open() gets ERROR_PIPE_BUSY → busy-retry → the 200ms watchdog
-    // fires and exits 0. Pins invariant #5's whole-phase bound.
     let name = format!(r"\\.\pipe\pixtuoid-test-stall-{}", std::process::id());
     let _server = ServerOptions::new()
         .first_pipe_instance(true)
         .pipe_mode(PipeMode::Byte)
         .create(&name)
         .expect("create pipe");
-    // Occupy the lone instance so the shim's open() stays BUSY.
+    // Occupy the lone instance so the shim's open() keeps getting ERROR_PIPE_BUSY.
     let _client = ClientOptions::new().open(&name).expect("occupy instance");
 
     let (status, elapsed) = run_shim(&name, r#"{"hook_event_name":"Stop","session_id":"s2"}"#);
     assert!(status.success(), "watchdog exits 0");
-    // Watchdog bound is 200ms; generous runner-jitter headroom while still
-    // proving "never blocks CC".
+    // The watchdog bound is 200ms; 1500 leaves runner-jitter headroom while still
+    // proving "never blocks the calling CLI".
     assert!(elapsed < Duration::from_millis(1500), "took {elapsed:?}");
 }

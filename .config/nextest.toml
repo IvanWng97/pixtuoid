@@ -1,57 +1,34 @@
 [profile.default]
-# Cap a hung test at 3×60s so a deadlock fails THAT test (named) and the rest
-# still run, instead of the job-level timeout killing the whole run blind. Far
-# above every real test (incl. the 200ms shim watchdog tests). NOT a retry —
-# #161's no-retries stance is preserved (retries stays unset = 0). `ci` inherits.
+# Cap a hung test so a deadlock fails THAT test (named) and the rest still run,
+# instead of the job-level timeout killing the whole run blind. NOT a retry —
+# the no-retries stance is preserved (retries stays unset = 0).
 slow-timeout = { period = "60s", terminate-after = 3 }
 
-# Full failure set per CI run: don't stop at the first failing test — a red CI
-# run should report every failure at once (one round-trip, not fix-push-refail).
-# Local `just test` keeps the default fail-fast for fast iteration. Active on
-# every CI test job: `--profile ci` on coverage, `NEXTEST_PROFILE=ci` on
-# windows-test + macos-test (all three upload target/nextest/ci/junit.xml).
+# A red CI run should report every failure at once, not fix-push-refail. Local
+# `just test` keeps the default fail-fast for fast iteration.
 [profile.ci]
 fail-fast = false
 
 [profile.ci.junit]
 path = "junit.xml"
 
-# The shim latency tests assert wall-clock bounds on a CHILD PROCESS's
-# spawn+exit; under the fully-parallel suite on a loaded machine, exec/dyld
-# scheduling jitter alone can blow the bound (#161 — flaked at 1051/1052
-# during a `just bump` preflight, passed 3/3 in isolation). Give them the
-# machine to themselves; profiles inherit from default, so `ci` gets this
-# too. Covers the Unix test and its two Windows twins (shim_pipe.rs).
-# (Plain `cargo test` runs test binaries sequentially — never affected.)
+# These assert wall-clock bounds on a CHILD PROCESS's spawn+exit; under the
+# fully-parallel suite on a loaded machine, exec/dyld scheduling jitter alone
+# blows the bound, so give them the machine to themselves.
 [[profile.default.overrides]]
 filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
 threads-required = "num-cpus"
 
-# The connection-gate pair spawns a real `run --headless` and polls a wall-clock
-# BUDGET for it to reach a state (a sprite rendered, or the gate's drop line).
-# Same load-sensitivity class as the shim bounds above, one level up: the budget
-# is generous and both arms normally break out inside a second, but under a
-# saturated machine the child is starved and the budget expires — observed, both
-# arms red at 20s while a quiet run finishes in 0.98s. Exclusivity is nearly free
-# here precisely BECAUSE they exit on a positive signal rather than waiting out a
-# fixed timeout; raising the budget instead would only lengthen the failure path.
+# Same load-sensitivity as the shim bounds above: this pair spawns a real
+# `run --headless` and polls a wall-clock budget for it to reach a state, and a
+# saturated machine starves the child until the budget expires. Raising the
+# budget instead would only lengthen the failure path — they exit on a positive
+# signal, so exclusivity is nearly free.
 [[profile.default.overrides]]
 filter = 'test(connected_codex_rollout_becomes_a_sprite) | test(disconnected_codex_rollout_is_dropped_by_the_gate)'
 threads-required = "num-cpus"
 
-# `generated_beds_…` composes + synthesizes 4 full arrangements (2 moods × 2
-# seeds) — ~100s of IRREDUCIBLE unique work, and the ONE synth test that actually
-# tripped the 180s cap under contention (#736). It has no redundancy to cut (the
-# other two synth tests DID — they re-synthesized shared take-stems, now
-# de-duplicated), and its seed count is the author's stated minimum smoke ("a
-# couple suffice"; the musical invariants are the compose seed-sweep's job). So
-# NOT `threads-required` (giving a ~100s test the whole machine serialises it and
-# taxes every CI job's wall-clock) — instead raise only the hard KILL. Keep the
-# 60s SLOW marker so its growth stays VISIBLE every run; lift terminate to 5×60=300s
-# so coverage instrumentation (~2×) + CI contention can't false-red it while a real
-# ≥1.5× synthesis regression still trips it. REVISIT if CI shows this past ~250s:
-# the headroom is gone — dedup further, split the smoke, or reduce the seed sweep
-# rather than lifting the cap again (the SLOW marker is only a soft signal).
-[[profile.default.overrides]]
-filter = 'test(generated_beds_are_finite_phase_locked_and_in_the_sound_world)'
-slow-timeout = { period = "60s", terminate-after = 5 }
+# The synth tests deliberately have NO override. Their slowness was the `test`
+# profile inheriting `dev`'s opt-level 0, not irreducible work, and is fixed by
+# `[profile.dev.package.pixtuoid-scene] opt-level = 2` in the workspace
+# Cargo.toml. Don't re-raise their cap: headroom only hides the next regression.

@@ -4,13 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-  workflow_dispatch: # manual re-run of the full matrix (mutants has its own workflow)
+  workflow_dispatch:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Cancel superseded PR runs (push-over-push), but NEVER cancel an in-flight
-  # main run — back-to-back merges would otherwise abort each other's CI
-  # verdict + Codecov upload. Main runs are cheap and rare; let them finish.
+  # NEVER cancel an in-flight main run — back-to-back merges would abort each
+  # other's CI verdict + Codecov upload.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:

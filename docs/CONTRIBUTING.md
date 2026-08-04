@@ -19,7 +19,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest) → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```
@@ -45,6 +45,73 @@ git config core.hooksPath .githooks
 
 `pre-commit` runs `just fmt-check` (sub-second); `pre-push` runs `just preflight`.
 Run `just preflight` locally first to avoid the push → CI-red → fix round-trip.
+
+## CI gates
+
+`just preflight` is the local gate; these run only in CI, so a green preflight
+does not mean a green PR.
+
+**semver** (pixtuoid-core + pixtuoid-scene — the binary's lib target is not a
+semver surface), api-surface (`just api-surface-check` — a committed `cargo
+public-api` golden per published crate at `api/<crate>.txt`; the reviewable-diff
+twin of the semver gate: semver says "major/minor?", the golden says *what*
+changed — regenerate with `just api-surface` + commit when the public surface
+shifts), docs (`just doc-check` — `cargo doc` with `-D warnings` over the
+`[workspace.lints.rustdoc]` broken/private-intra-doc-link deny + the doctests
+`cargo nextest` skips), coverage/smoke, gen-check, gen-readme-check, npm-check,
+check-windows (cross-lint for msvc on every PR), snapshots (`cargo insta` —
+fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
+Cross-file report/upload semantics that actionlint cannot express are pinned by
+the yq + Conftest/OPA policy and real action/workflow behavior tests under
+`policy/ci-observability/`; `just ci-observability` runs them inside both
+`just lint` and the CI hygiene job.
+`just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
+the repository deliberately requires a symbolic ref or SHA (not SHA-only),
+every checkout drops persisted credentials, and accepted analyzer findings use
+exact inline suppressions with their reason instead of disabled audit classes.
+Dependabot applies a seven-day update cooldown across every configured
+ecosystem, and its `github-actions` entry lists `/.github/actions/*` beside `/`
+— `directory: /` searches only `.github/workflows` plus a root `action.yml`, so
+a third-party pin extracted into a composite would leave update coverage
+entirely; the policy denies a composite pin no declared directory covers.
+The two automatic Claude reviewers are thin trigger policies over
+`claude-readonly-review.yml`: the model job checks out only the trusted default
+branch, receives the exact PR diff as inert data, has read-only GitHub/tools,
+and emits schema-bound JSON; a separate no-checkout publisher revalidates the PR
+head before writing the review comment. A third job comments when the model job
+FAILS, because absence otherwise renders as a pass — the publisher skips, no
+`Findings:` comment lands, and the PR reads merely `UNSTABLE`, which is how #809
+and #815–#818 merged with only a red job to say so. It covers both shapes — the
+failure and the decline (`reviewable=false` exits 0, so that arm has no red job
+at all). Rare, so it stays thin: one comment, and one rule pinning that the job
+exists with both arms and a status function, without which an implicit
+`success()` would skip it exactly when it is needed (#819). The human-triggered `@claude` workflow
+(`claude.yml`, the only `contents: write` Claude job) checks out without a ref,
+so its two `pull_request_review*` arms — the events whose `GITHUB_REF` is the PR
+merge ref — additionally require the head to live in this repository, and the
+policy keys that requirement off the workflow's `on:` triggers rather than its
+surviving `if:` arms (a condition that never names an event SKIPS the job; a
+missing condition gates nothing). The `issues`/`issue_comment` arms carry no
+`pull_request` object, so the same guard is not expressible there — and
+claude-code-action stages the fork tree itself (tag mode's `setupBranch` checks
+the PR head out for every open PR), so `issue_comment` needs a job STEP instead:
+`Refuse fork pull requests` resolves the PR and exits first, and the policy pins
+its existence, that it is scoped to `issue_comment`, and that it precedes the
+action, keyed on the API field it reads rather than its name (#799). `issues` is unaffected — the action hardcodes
+`isPR` false there. Anthropic WIF is preferred when its
+repository variables are configured, with the existing OAuth secret as a
+compatibility fallback. Codecov uploads likewise use job-scoped GitHub OIDC
+(fork PRs remain Codecov's tokenless path), never a repository upload token.
+That gate also pins the advanced CodeQL workflow: all four repository
+languages stay explicit, Rust stays on its only supported `none` build mode,
+and the no-build extractor receives `rust-src` plus the proc-macro server from
+the workspace's declared MSRV (not the runner's rolling stable toolchain).
+After analysis, CodeQL's own SARIF metrics fail the Rust job if extraction
+diagnostics affect at least as many files as were extracted cleanly, and the
+quantified counts are written to the job summary. This is why CodeQL lives in
+[`.github/workflows/codeql.yml`](../.github/workflows/codeql.yml) instead of GitHub
+default setup — default setup cannot prepare these semantic inputs or enforce
+database health.
 
 ## Releasing
 
@@ -113,6 +180,74 @@ standing registry tokens. The per-crate (crates.io) and per-package (npm)
 Trusted Publishers, scoped to the `release.yml` workflow, must already be
 configured before the tag is pushed, or that target's publish step fails. See
 [#216](https://github.com/IvanWng97/pixtuoid/issues/216).
+
+## The arc loop
+
+Non-trivial work runs as an **arc**: design → build → gate → wrap. The root
+[`CLAUDE.md`](../CLAUDE.md) carries the nine-step summary every agent session
+loads; this is the per-step detail.
+
+1. **Pick** — an issue (GitHub is the tracker; `gh issue list`) or backlog item.
+2. **Grill the design** — decide the open questions ONE at a time, each with a
+   recommended answer, before writing code. (A big arc introducing new
+   seams/vocabulary grills against the domain docs first.)
+3. **Design gate (before build; NOT the step-8 merge review)** — the grilled
+   approach clears three design-time lenses so slop dies in design, not review:
+   **best-practice search** (confirm the *idiomatic* way against real
+   docs/source online — never memory: the dep's own API/features, the standard
+   pattern); **adversarial design review** (red-team the design itself — simplest
+   shape? failure mode? — BEFORE code exists); **deepening lens** (the deletion
+   test — would deleting this concentrate complexity or just move it? — plus the
+   deep-vs-shallow check: does the change *deepen* a module or add another
+   shallow one = AI-slop?). Cut slop in small, verified steps; a big-radius
+   refactor is fine when the deepening earns it. (`codebase-design` /
+   `improve-codebase-architecture` drive the deepening lens; this repo keeps its
+   domain record + decisions-not-to-relitigate in nested `CLAUDE.md` + "Known
+   sharp edges", NOT a `CONTEXT.md`/`docs/adr/` — map onto those, don't scaffold
+   competing docs.)
+4. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
+   (LOCAL, git-ignored — the working design record, not the tracker). Also
+   plan against [`.github/prompts/impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md).
+5. **Mock gate (taste/visual work only)** — ratify the AFTER visual BEFORE any
+   code (the `beautify-decoration` skill's "The visual-iteration loop").
+6. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
+7. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
+8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
+   lenses on the diff) + green CI + the online review bot's `Findings: 0` at
+   HEAD, checked atomically. (If the bot errors or posts no findings comment at
+   HEAD — it can fail on a very large diff — the gate is unsatisfiable as
+   written; the `two-lens-review` skill's step 6 owns the fallback.)
+   See [Pull requests](#pull-requests) and [the running
+   order](#the-running-order). **A human merges.**
+9. **Wrap** — retro; record durable lessons.
+
+**Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
+(committed, so they travel with the repo). On symlink-capable checkouts,
+[`.agents/skills/`](../.agents/skills/) aliases the same directories for Codex.
+The skills are `two-lens-review` (the merge gate), `beautify-decoration` (the
+visual mock loop), `add-source` / `add-theme` (scaffold + test-teeth for a new
+CLI / palette), `procedural-lofi` (synthesize a new ambient sound). Claude Code
+auto-surfaces them by description; Codex does the same through the aliases.
+Other tools read `AGENTS.md` and run the loop above as prose.
+
+**Bootstrap on a fresh machine / other tool.** `git clone` gives you the repo
+skills + all `just` gates immediately. The day-to-day *loop* skills
+(`grilling`, `to-spec`, `tdd`, `code-review`, `diagnosing-bugs`, plus
+`research`/`grill-with-docs` and `improve-codebase-architecture`/`codebase-design`
+for the step-3 design gate) are a
+PERSONAL, non-committed layer — install [mattpocock/skills](https://github.com/mattpocock/skills)
+if you want the Claude Code implementations; otherwise this section IS the loop.
+Do NOT run its `setup-matt-pocock-skills` here — it scaffolds a `CONTEXT.md` +
+`docs/adr/` doc convention that would compete with our richer nested `CLAUDE.md`
++ sharp-edges system (neither exists in this repo, and we don't want a second,
+rotting one), plus a fixed triage-label vocabulary separate from our existing
+issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verify`).
+
+### The running order
+
+What to run and when, for an agent-driven change:
+
+- **before code**, if non-trivial (new seam / ≥3 files), plan against [`.github/prompts/impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) → **touched the `--json` / `SourceStatus` / `OutcomeRow` shape?** `just gen-contract` (regenerates BOTH committed schemas + the Raycast types) (else the Raycast `gen:contract` diff + `tsc` go red) → **before push** `just preflight` (lint → clippy → hack → test; never pipe through `tail`/`head` — it eats the exit code; the [CI-only gates](#ci-gates) — semver, gen-check — still run separately) → **before merge** the two-lens review (2+ agents, differentiated lenses; see [Pull requests](#pull-requests)) → **dogfood a source/lifecycle change** with `pixtuoid run --headless --projects-root ~/.claude/projects` vs live CC, or replay hermetically via `scripts/replay-fixture.sh` / `just openclaw-e2e`. **Touched OpenClaw?** every one of its three e2e tiers now has a justfile recipe, deliberately — the cc-backend script shipped BROKEN for a whole release because nothing invoked it, so a summary-format change rotted it unseen: `just openclaw-e2e` (hermetic, free) → `just openclaw-multi-e2e` (N REAL gateways, free, needs `openclaw` on PATH — the tier that catches multi-instance render/crowding) → `just openclaw-backend-e2e` (real gateway AND one BILLED model turn; run deliberately, not casually). Their `expect_line` pollers are DELIBERATELY not hoisted into a shared `scripts/lib` — adjudicated three times now (two review lenses + the online bot), so do not re-raise it without new evidence. The bodies look alike but their retry bounds await different EVENT CLASSES: the hermetic tier's 40x0.2s bounds an in-process shim -> HookRouter -> reducer -> summary hop, while the multi-gateway tier's 120x0.3s bounds N real `openclaw gateway run` node cold boots — and cc-backend's 120x0.25s for ONE real gateway PREDATES the multi-gateway work, so "a real gateway appears" is an established ~30s class and "a hermetic transition lands" an 8s one. There is no single correct shared value, so a shared helper would take the timing as parameters and hide ~12 lines behind a 4-argument interface (the shallow-module trade). The drift that actually bit — a `daemons=` format change rotting a script unseen — is mitigated by the recipes ABOVE, not by sharing the poller. The in-FILE duplication WAS collapsed: live-e2e's single-state `expect` delegates to its own `expect_line`. Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py` (wire-format drift); the `risk radar` PR workflow (`scripts/risk-radar.py` / `just risk-radar`) — deterministic path matching that posts the documented blast-radius escalations (shim never-panic audit, motion render-and-watch, reducer interaction-graph trace, …) as a sticky PR comment so prose-only escalation can't be silently skipped (#198); and `just comment-lint` (`scripts/comment-lint.py` over the ast-grep rule in `.ast-grep/rules/`) — flags NEW runs of 3+ consecutive comment lines inside a fn body on a PR's changed lines, in Rust (`//`) AND Python (`#`) (the "fn-body comments ≤2 lines" comment-value factor), diff-scoped so the ~5k pre-existing legitimate WHY comments are grandfathered; the CI `comment-lint` job emits inline `::warning::` annotations, never blocks.
 
 ## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 

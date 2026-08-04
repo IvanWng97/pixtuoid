@@ -1,14 +1,11 @@
-//! Decor vocabulary used by `SceneLayout` — the enums describing every
-//! piece of furniture and waypoint kind in the office. Kept separate from
-//! geometry so adding a new sprite kind doesn't churn the layout math.
+//! Decor vocabulary used by `SceneLayout` — the enums describing every piece of
+//! furniture and waypoint kind in the office, plus THE table giving each its
+//! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
 use super::{Anchor, Point, Size, CHARACTER_SPRITE_W, DESK_FOOT_H, DESK_H, DESK_W};
 
-/// Wander destinations the Idle state machine can pick. Each kind controls
-/// the pose + sprite an arriving agent takes. Plants/lamps are decor, not
-/// waypoints. Coffee folded into Pantry — the pantry sprite already has
-/// a coffee machine on its counter, so visiting the pantry covers both
-/// "kitchen" and "coffee break".
+/// Wander destinations the Idle state machine can pick — each kind controls the
+/// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WaypointKind {
     /// Top-of-cubicle viewing couch facing the city windows.
@@ -17,25 +14,19 @@ pub enum WaypointKind {
     Pantry,
     /// Aisle phone booth — agent stands at the door (private call).
     PhoneBooth,
-    /// Aisle standing desk — agent stands at the desk (alternate
-    /// workstation). Random which exact StandingDesk slot is used.
+    /// Aisle standing desk (alternate workstation).
     StandingDesk,
     /// Corridor vending machine — agent stands in front to grab a drink.
     VendingMachine,
     /// Corridor printer — agent stands in front while "printing."
     Printer,
-    /// Meeting-room sofa seat — agent sits, facing the table. Multiple
-    /// seats per sofa; a group conversation runs when ≥2 share the room.
+    /// Meeting-room sofa seat, facing the table. Multiple seats per sofa.
     MeetingSofa,
-    /// Meeting-room standing spot beside the table — agent stands, facing
-    /// the table. Part of the same room conversation venue as MeetingSofa.
+    /// Meeting-room spot beside the table, facing it.
     MeetingChair,
-    /// Kitchen-island standing spot — agent stands at the island edge
-    /// (coffee-and-chat). All of one island's stands share ONE chitchat
-    /// venue, couch-style.
+    /// Kitchen-island spot at the island edge (coffee-and-chat).
     Island,
-    /// Snack shelf — agent stands in front browsing the shelves (short
-    /// dwell, vending-machine-like).
+    /// Snack shelf — agent stands in front browsing the shelves.
     SnackShelf,
 }
 
@@ -50,8 +41,7 @@ pub struct DwellWindow {
     pub range_ms: u64,
 }
 impl DwellWindow {
-    /// The decor sentinel — scenery, not a wander destination
-    /// (`base_ms == range_ms == 0`).
+    /// The decor sentinel — scenery, not a wander destination.
     pub const DECOR: DwellWindow = DwellWindow {
         base_ms: 0,
         range_ms: 0,
@@ -59,20 +49,15 @@ impl DwellWindow {
 }
 
 /// Plant GROUND footprint — the one geometry VALUE shared by the ficus + tall
-/// plant rows in [`furniture_def`]: a shallow 6×3 POT strip the mask
-/// south-anchors to the sprite's base. The 7-10px leafy canopy overhangs it
-/// (top-down rule, invariant #6) and a walker parking north of the pot is
-/// occluded by that canopy's own y-sort — no synthetic cap. Read only THROUGH
-/// the table (`furniture_def(_).footprint`), never directly.
+/// plant rows in [`furniture_def`]: a shallow POT strip the mask south-anchors to
+/// the sprite's base, with the leafy canopy overhanging it (invariant #6). Read
+/// only THROUGH the table (`furniture_def(_).footprint`), never directly.
 pub(crate) const PLANT_FOOTPRINT: Size = Size { w: 6, h: 3 };
 
 /// Which sides an agent may approach a piece of furniture from, in the
 /// CANONICAL frame (furniture facing South, toward the viewer). [`Self::allows`]
 /// rotates this to the live `facing`, so one stored set works for
-/// variable-facing furniture (a sofa's "front + sides, no back" rotates to the
-/// correct absolute sides whether it faces north or south). **To add/remove an
-/// entry side, flip one bool** — single place, greppable. `n`/`s`/`e`/`w` are
-/// the canonical absolute sides (north = −y).
+/// variable-facing furniture. **To add/remove an entry side, flip one bool.**
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ApproachSides {
     /// Approachable from the north (−y) in the canonical frame?
@@ -94,9 +79,7 @@ impl ApproachSides {
         w: true,
     };
 
-    /// This canonical (facing-South) set rotated to the live `facing`. South is
-    /// the canonical front, so e.g. a "no back" set (front+sides) rotates to
-    /// exclude whichever absolute side is now the back.
+    /// This canonical (facing-South) set rotated to the live `facing`.
     pub fn rotated(self, facing: Facing) -> Self {
         let s = self;
         match facing {
@@ -136,10 +119,8 @@ impl ApproachSides {
     }
 }
 
-/// Approach sides for the home desk (the assigned workstation — NOT a
-/// `furniture_def` row). Canonical: exclude the south front (the monitor faces
-/// the viewer; the agent sits behind it), so reachable from N/E/W. Editing one
-/// bool here changes the home-desk entry sides (e.g. drop east → `e: false`).
+/// Approach sides for the home desk. Canonical: exclude the south front (the
+/// monitor faces the viewer; the agent sits behind it), so reachable from N/E/W.
 pub const DESK_APPROACH: ApproachSides = ApproachSides {
     n: true,
     s: false,
@@ -147,109 +128,71 @@ pub const DESK_APPROACH: ApproachSides = ApproachSides {
     w: true,
 };
 
-/// Definition record for a waypoint-addressable furniture kind — the single
-/// source of truth for its ground shape, occupancy semantics, and dwell.
-/// Reshaping a piece of furniture is editing ONE row of [`furniture_def`];
-/// the walkable mask, stand-point, hit-test hitbox, and the render depth
-/// baseline all DERIVE from these fields, so they cannot drift. Render-only
-/// choices (sprite name) deliberately stay in the binary's `tui` painter —
-/// `pixtuoid-scene` has no terminal deps.
+/// Definition record for a furniture kind — the single source of truth for its
+/// ground shape, occupancy semantics, and dwell. Reshaping a piece of furniture is
+/// editing ONE row of [`furniture_def`]; the walkable mask, stand-point, hit-test
+/// hitbox and render depth baseline all DERIVE from these fields.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FurnitureDef {
-    /// Ground footprint `(w, h)` the walkable mask stamps (top-down z=0
-    /// rect), or `None` for slots that add no obstacle of their own
-    /// (MeetingSofa/MeetingChair sit on sofa/table furniture stamped
-    /// elsewhere). NB: `Pantry` is also `None` here because its footprint is
-    /// runtime-sized (`pantry_counter_size`); `obstacle_footprint`
-    /// special-cases it — the one kind whose shape isn't a static literal.
+    /// Ground footprint `(w, h)` the walkable mask stamps (top-down z=0 rect), or
+    /// `None` for slots that add no obstacle of their own (MeetingSofa/MeetingChair
+    /// sit on furniture stamped elsewhere). NB: `Pantry` is also `None` because its
+    /// footprint is runtime-sized — `obstacle_footprint` special-cases it, the one
+    /// kind whose shape isn't a static literal.
     pub footprint: Option<Size>,
-    /// Visual sprite size `(w, h)` in buffer px — the SECOND geometry axis,
-    /// kept distinct from `footprint` (the top-down ground rule, invariant #6):
-    /// a sprite legitimately overhangs its ground base (a tall plant's leaves, a
-    /// floor lamp's shade). Render centering + the z-sort south row derive from
-    /// this; the mask derives from `footprint`. Conflating the two is exactly the
-    /// canopy-over-aisle bug this split prevents. For furniture rendered
-    /// procedurally with its own anchors (couch / pantry counter / meeting sofa)
-    /// this is unused — set to the footprint or `(0, 0)`.
+    /// Visual sprite size `(w, h)` in buffer px — the SECOND geometry axis, kept
+    /// distinct from `footprint` (the top-down ground rule, invariant #6): a sprite
+    /// legitimately overhangs its ground base, and conflating the two is the
+    /// canopy-over-aisle bug this split prevents. Render centering + the z-sort
+    /// south row derive from this; the mask derives from `footprint`.
     pub visual: Size,
-    /// The agent occupies `pos` DIRECTLY (sprite renders ON the furniture),
-    /// so `stand_point` passes `pos` through unchanged instead of resolving a
-    /// walkable cell beside the furniture (A* then snaps the walk adjacent).
-    /// NOT "a human can sit here": `MeetingChair` is *standing* yet sets this
-    /// true (the agent still occupies its `pos`). Opposite case (Pantry/
-    /// vending/printer/phone-booth/standing-desk): `pos` = blocked obstacle
-    /// CENTER, approached from a side. True set: {Couch, MeetingSofa,
-    /// MeetingChair, IslandStand, Desk} — the set `seated_foot_cell` switches
-    /// on (its `unreachable!` arm is the compile-adjacent tooth keeping the two
-    /// in step).
-    ///
-    /// This is a RENDER/APPROACH fact (sprite ON `pos`, has a `seated_foot_cell`)
-    /// — NOT the single-occupancy fact: a phone booth renders stand-beside
-    /// (`occupies_pos: false`) yet holds exactly one caller, so capacity lives on
-    /// the separate [`exclusive`](Self::exclusive) field. `occupies_pos ⇒
-    /// exclusive` (every seat is single-occupancy), but not the reverse.
+    /// The agent occupies `pos` DIRECTLY (sprite renders ON the furniture), so
+    /// `stand_point` passes `pos` through unchanged instead of resolving a walkable
+    /// cell beside the furniture. NOT "a human can sit here", and NOT capacity: a
+    /// phone booth renders stand-beside yet holds exactly one caller, so capacity
+    /// lives on the separate [`exclusive`](Self::exclusive) field. This is the set
+    /// `seated_foot_cell` switches on (its `unreachable!` arm keeps the two in step).
     pub occupies_pos: bool,
     /// A single-occupancy DESTINATION: at most one agent is assigned here at a
-    /// time. SUPERSET of `occupies_pos` — every seat is exclusive (a chair
-    /// can't be shared), PLUS the enclosed stand-beside singles (`PhoneBooth`,
-    /// `StandingDesk`) that render at a SIDE cell yet still hold exactly one
-    /// person. Read by `pose::SpotClaims` / `motion::spot_claims` (claim it at
-    /// wander-SELECTION so a second agent probes onward) and
-    /// `waypoint_rank_offset_x` (an exclusive spot never steps a second arrival
-    /// aside). DISTINCT from `occupies_pos` on purpose: that is a render/approach
-    /// fact (sprite ON `pos`, has a `seated_foot_cell`), this is a CAPACITY fact
-    /// — a phone booth is exclusive but stand-beside, so one flag can't carry
-    /// both (the wrong-abstraction split). Queue spots (pantry / vending /
+    /// time. SUPERSET of `occupies_pos` — every seat, PLUS the enclosed
+    /// stand-beside singles (`PhoneBooth`, `StandingDesk`) that render at a SIDE
+    /// cell yet still hold exactly one person. Queue spots (pantry / vending /
     /// printer / snack shelf) are NOT exclusive — agents share and step aside.
-    /// Invariant `occupies_pos ⇒ exclusive`, pinned by
-    /// `furniture_def_invariants_hold_for_every_row`.
     pub exclusive: bool,
-    /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a
-    /// kind that is NOT a wander destination and is never fed to
-    /// `pose::dwell_ms`; `range_ms > 0` marks a destination.
-    /// `dwell_ms` guards with `% range_ms.max(1)`, so a zero range is safe — it
-    /// IS the decor sentinel, not a bug. Do not "fix" a decor row to a non-zero
-    /// range (that silently turns it into a wander destination).
+    /// Per-spot idle dwell window. `range_ms == 0` (the `DECOR` rows) marks a kind
+    /// that is NOT a wander destination; `dwell_ms` guards with
+    /// `% range_ms.max(1)`, so a zero range is safe. Do not "fix" a decor row to a
+    /// non-zero range — that silently turns it into a wander destination.
     pub dwell: DwellWindow,
     /// Canonical (facing-South) sides an agent may approach from. Obstacle
-    /// furniture against walls keeps `ALL` (walls already constrain the open
-    /// side); seats use "front + sides, no back" so a walker never paths in
-    /// through the sofa back. Edit one bool to change an entry side.
+    /// furniture against walls keeps `ALL` (walls already constrain the open side);
+    /// seats use "front + sides, no back" so a walker never paths in through the
+    /// sofa back.
     pub approach: ApproachSides,
-    /// Where `footprint` sits inside the VISUAL box horizontally — the mask's
-    /// per-row anchoring authority (was PER-SITE lore: `mask.rs` inferred it
-    /// from `visual.h > footprint.h` and three kinds bypassed the helper).
-    /// Every current row is `Center` (footprint centered under the sprite);
-    /// the field exists so a future sideways-overhanging piece declares
+    /// Where `footprint` sits inside the VISUAL box horizontally. Every current row
+    /// is `Center`; the field exists so a future sideways-overhanging piece declares
     /// `Start`/`End` instead of needing a new stamp path.
     pub ground_x: GroundAlign,
     /// Where `footprint` sits inside the VISUAL box vertically: `End` for the
     /// overhang canopy/panel/column pieces AND the desk (invariant #6, the
-    /// walk-behind shape — the tall sprite overhangs the shallow south strip
-    /// and occludes a walker/approaching agent parked behind it), `Center` for
-    /// the meeting sofa body + floor lamp. `Start` (top-anchored) is currently
-    /// unused — no piece contacts the floor at its sprite TOP — but stays as
-    /// the third align. Resolves to a pixel offset from `visual − footprint`
-    /// at stamp time (drift-free).
+    /// walk-behind shape), `Center` for the meeting sofa body + floor lamp.
+    /// Resolves to a pixel offset from `visual − footprint` at stamp time.
     pub ground_y: GroundAlign,
 }
 
 impl FurnitureDef {
-    /// The blocked ground rect for an EXPLICIT footprint, placed with THIS
-    /// def's visual box + ground aligns. The runtime-footprint path (a
-    /// waypoint's `approach::obstacle_footprint`, which is NOT `self.footprint`)
-    /// shares the def's alignment with the table path — so no call site
-    /// re-threads `visual`/`ground_x`/`ground_y`. Delegates to the ONE
-    /// geometry formula (`mask::ground_rect`), never a second copy.
+    /// The blocked ground rect for an EXPLICIT footprint, placed with THIS def's
+    /// visual box + ground aligns — so the runtime-footprint path (a waypoint's
+    /// `approach::obstacle_footprint`) shares the def's alignment with the table
+    /// path and no call site re-threads `visual`/`ground_x`/`ground_y`.
     pub(super) fn ground_rect_of(&self, anchor: Anchor, pos: Point, fp: Size) -> (Point, Size) {
         super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
-    /// The blocked ground rect from this def's OWN table footprint, or `None`
-    /// when the piece has no ground footprint (wall-hung decor, runtime-sized
-    /// pantry counter). THE concentrator the mask stamp / collision checks /
-    /// placement sweep all read, so `visual`/`ground_x`/`ground_y` are threaded
-    /// in exactly one place.
+    /// The blocked ground rect from this def's OWN table footprint, or `None` when
+    /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
+    /// counter). THE concentrator the mask stamp / collision checks / placement
+    /// sweep all read.
     pub(super) fn ground_rect(&self, anchor: Anchor, pos: Point) -> Option<(Point, Size)> {
         self.footprint
             .map(|fp| self.ground_rect_of(anchor, pos, fp))
@@ -266,11 +209,9 @@ const SEAT_APPROACH: ApproachSides = ApproachSides {
 };
 
 /// Canonical bar-slot approach: behind + sides, never across the FRONT — the
-/// mirror of [`SEAT_APPROACH`]. A bartender slot sits INSIDE the island body,
-/// so a front (south, canonical) approach would glide visibly THROUGH the
-/// counter's face; behind + lateral glides stay behind the countertop for the
-/// whole settle (the glide z is pinned to the feet row). Rotated, the E/W
-/// flank stands likewise never approach across the island they face.
+/// mirror of [`SEAT_APPROACH`]. A bartender slot sits INSIDE the island body, so a
+/// front (south, canonical) approach would glide visibly THROUGH the counter's
+/// face; behind + lateral glides stay behind the countertop for the whole settle.
 const BAR_APPROACH: ApproachSides = ApproachSides {
     n: true,
     s: false,
@@ -279,8 +220,7 @@ const BAR_APPROACH: ApproachSides = ApproachSides {
 };
 
 impl WaypointKind {
-    /// Every variant, for exhaustive invariant tests (mirrors
-    /// [`PodDecor::ALL`]). Iteration-only — order is not load-bearing.
+    /// Every variant, for exhaustive invariant tests. Order is not load-bearing.
     pub const ALL: &'static [WaypointKind] = &[
         WaypointKind::Couch,
         WaypointKind::Pantry,
@@ -295,8 +235,7 @@ impl WaypointKind {
     ];
 
     /// This waypoint's geometry kind in the unified [`Furniture`] table. The
-    /// waypoint enum carries ROLE (a wander destination); geometry lives in the
-    /// one table so it can't drift from the decor/render side.
+    /// waypoint enum carries only ROLE — a wander destination.
     pub const fn furniture(self) -> Furniture {
         match self {
             WaypointKind::Couch => Furniture::Couch,
@@ -313,13 +252,10 @@ impl WaypointKind {
     }
 }
 
-/// Every geometry-bearing furniture/decor KIND. This is the unification axis:
-/// the role enums ([`WaypointKind`] = wander destination, [`PodDecor`] = aisle
-/// filler, [`PlantKind`], [`WallDecor`]) each `.furniture()`-map onto these, so
-/// overlapping items collapse to ONE row — a phone booth, a rolling whiteboard,
-/// or a tall plant has its shape defined exactly once no matter how many roles
-/// reference it. (The home desk is per-agent, not a fixed kind, so it keeps the
-/// [`desk_furniture_def`] accessor.)
+/// Every geometry-bearing furniture/decor KIND. This is the unification axis: the
+/// role enums ([`WaypointKind`] = wander destination, [`PodDecor`] = aisle filler,
+/// [`PlantKind`], [`WallDecor`]) each `.furniture()`-map onto these, so an item's
+/// shape is defined exactly once no matter how many roles reference it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Furniture {
     /// The lounge / cubicle-top viewing couch (3 seats).
@@ -336,7 +272,7 @@ pub enum Furniture {
     Printer,
     /// A meeting-room sofa SEAT (its body is [`Furniture::MeetingSofaBody`]).
     MeetingSofa,
-    /// A meeting-room standing spot beside the table.
+    /// A meeting-room spot beside the table.
     MeetingChair,
     /// A potted ficus (6px pot, overhanging canopy).
     PlantFicus,
@@ -358,11 +294,6 @@ pub enum Furniture {
     ExitSign,
     /// A meeting-room presentation screen.
     MeetingScreen,
-    // Singleton / per-room furniture (not keyed by a role enum — placed
-    // directly in the layout). The meeting sofa/table BODIES are distinct from
-    // the `MeetingSofa`/`MeetingChair` SEAT rows above (3 seats sit on 1 body):
-    // the seat rows carry `None` footprint, these carry the obstacle the mask
-    // stamps once per room.
     /// The meeting-sofa BODY — the obstacle the mask stamps once per room
     /// (its seats are the [`Furniture::MeetingSofa`] rows).
     MeetingSofaBody,
@@ -373,31 +304,28 @@ pub enum Furniture {
     /// The lounge side table (wood surface + magazine).
     LoungeSideTable,
     /// Kitchen-island BODY (the big center counter) — the obstacle the mask
-    /// stamps once; the `IslandStand` rows are the stand slots around it
-    /// (same body/seat split as MeetingSofaBody/MeetingSofa).
+    /// stamps once; the `IslandStand` rows are the stand slots around it.
     KitchenIsland,
     /// A standing slot at the kitchen island's edge (no obstacle of its own).
     IslandStand,
     /// Snack shelf against the pantry's west wall — an approachable obstacle
     /// (vending-machine class): tall shelf sprite, shallow walk-behind base.
     SnackShelf,
-    /// The agent's OWNED home workstation. Not a [`WaypointKind`] (N per-agent
-    /// desks, forced-seat when Active, never a wander destination) — but a
-    /// first-class geometry row so desk and couch share ONE table and the same
-    /// `seated_foot_cell` + approach/settle path. Replaces the old standalone
-    /// `desk_furniture_def` literal (now a shim over this row).
+    /// The agent's OWNED home workstation. Not a [`WaypointKind`] (per-agent,
+    /// forced-seat when Active, never a wander destination) but a first-class
+    /// geometry row, so desk and couch share ONE table and the same
+    /// `seated_foot_cell` + approach/settle path.
     Desk,
-    /// Aquarium on a low cabinet, east of the lounge lamp against the north
-    /// wall band (decor arc). Pure decor: glass tank overhangs a shallow
-    /// cabinet base, idle fish animate in the paint pass.
+    /// Aquarium on a low cabinet against the north wall band. Pure decor: the
+    /// glass tank overhangs a shallow cabinet base, idle fish animate in the
+    /// paint pass.
     FishTank,
 }
 
 impl Furniture {
-    /// Every variant — the iteration handle for the exhaustive row-invariant
-    /// test. Adding a variant is a compile error in [`furniture_def`]'s match
-    /// AND fails the `ALL.len()` count assert until listed here, so no row can
-    /// slip in unverified (the singleton/decor rows have no other guard).
+    /// Every variant — the iteration handle for the exhaustive row-invariant test.
+    /// A new variant fails the `ALL.len()` count assert until it is listed here,
+    /// so no row can slip in unverified.
     pub const ALL: &'static [Furniture] = &[
         Furniture::Couch,
         Furniture::Pantry,
@@ -431,22 +359,13 @@ impl Furniture {
 
 /// Whether a scatter plant must keep clearance from this furniture kind when it
 /// appears as a NON-waypoint singleton — the plant-obstacle census's per-kind
-/// authority (`plant_obstacle_rects` filters every singleton by it). Was curated
-/// by OMISSION inline in `compute_with_seed`, which let the fish tank (then the
-/// meeting-trio bodies) ship with no repulsion → plants interpenetrated them. An
-/// EXHAUSTIVE match, no `_`: a new [`Furniture`] kind can't compile until it
-/// declares a stance — the KIND axis. (Threading a new non-waypoint SINGLETON
-/// into `plant_obstacle_rects`'s arg list is NOT compiler-forced; `pieces()`'s
-/// no-`..` sweep is the backstop that surfaces the new field so the author wires
-/// it in. Waypoint furniture repels plants via `first_blocking_waypoint`, so its
-/// stance here is moot and `false`.)
+/// authority (`plant_obstacle_rects` filters every singleton by it). An EXHAUSTIVE
+/// match, no `_`: a new [`Furniture`] kind can't compile until it declares a
+/// stance, because curating this set by OMISSION let bodies ship with no
+/// repulsion and plants grew through them.
 pub(crate) const fn repels_plants(kind: Furniture) -> bool {
     match kind {
         // Solid non-waypoint singleton BODIES a scatter plant routes around.
-        // The kitchen island is one by nature even though the pantry is
-        // deliberately plant-free today (compute.rs): declaring it honestly
-        // means "if a plant ever reaches the pantry, it avoids the island" is
-        // one flag, already correct.
         Furniture::FishTank
         | Furniture::MeetingSofaBody
         | Furniture::MeetingTable
@@ -455,9 +374,8 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         // owner-ratified mock has the lounge Ficus hug them (1px) — deliberately
         // NOT repelled.
         Furniture::FloorLamp | Furniture::LoungeSideTable => false,
-        // Everything else is never a non-waypoint singleton in the plant census:
-        // waypoint furniture (repelled via `first_blocking_waypoint`), the plants
-        // themselves, wall/pod decor, and the footprint-less seat/stand slots.
+        // Never a non-waypoint singleton in the plant census — waypoint furniture
+        // is repelled via `first_blocking_waypoint` instead.
         Furniture::Couch
         | Furniture::Pantry
         | Furniture::PhoneBooth
@@ -482,23 +400,17 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
     }
 }
 
-/// THE furniture table — one row per [`Furniture`] kind, the **single** source
-/// of truth for ground shape (`footprint`) AND sprite size (`visual`) plus
-/// occupancy / dwell / approach. Every geometric dependent (walkable mask,
-/// stand-point half-extents, hit-test box, render centering + depth baseline)
-/// derives from this row; do not re-type these numbers anywhere else. `dwell`
-/// with `range == 0` marks a kind that is NOT a wander destination (pure decor).
+/// THE furniture table — one row per [`Furniture`] kind, the **single** source of
+/// truth for ground shape (`footprint`) AND sprite size (`visual`) plus occupancy /
+/// dwell / approach. Every geometric dependent (walkable mask, stand-point
+/// half-extents, hit-test box, render centering + depth baseline) derives from this
+/// row; do not re-type these numbers anywhere else.
 pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
-    // Decor that isn't a wander destination: no dwell, approachable from
-    // anywhere (unused — decor never runs stand_point). Spelled once.
-    // ground_y default `End`: the decor rows that spread `..DECOR` are the
-    // overhang canopy/panel/column pieces (plants, whiteboard, TV, bookshelf,
-    // meeting screen), whose ground strip pins to the sprite base. The flat
-    // singletons that also spread it (meeting tables, side table)
-    // resolve `End` to offset 0 anyway (footprint == visual), so they stay
-    // byte-identical; the two CENTERED exceptions (meeting sofa body, floor
-    // lamp) override `ground_y` explicitly below. `ground_x`: see the field
-    // doc (Center everywhere, test-pinned).
+    // Decor that isn't a wander destination: no dwell, approachable from anywhere
+    // (unused — decor never runs stand_point). `ground_y: End` because the rows
+    // that spread `..DECOR` are the overhang pieces, whose ground strip pins to the
+    // sprite base; the flat singletons resolve `End` to offset 0 anyway, and the
+    // two CENTERED exceptions override `ground_y` explicitly below.
     const DECOR: FurnitureDef = FurnitureDef {
         footprint: None,
         visual: Size { w: 0, h: 0 },
@@ -519,15 +431,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
                 base_ms: 20_000,
                 range_ms: 20_000,
             },
-            // SEAT_APPROACH rotated by the SEATED facing (North = looks at the
-            // window → back_couch sprite) resolves to {N, E, W} — the natural
-            // sides, EXCLUDING the south backrest. The agent comes from whichever
-            // of those is reachable + nearest its (always-south) desk. A couch
-            // seat walled in on ALL of N/E/W is un-sittable — approach_point
-            // returns the `pos` sentinel and the wander SKIPS it (no fallback,
-            // never the backrest). Near the window the N side is normally open,
-            // so the couch is reachable; that N approach is the FAR side in
-            // 2.5D, so the walk-in passes behind the couch until it settles.
+            // Rotated by the SEATED facing (North, looking at the window) this
+            // resolves to {N, E, W}, EXCLUDING the south backrest. A couch seat
+            // walled in on ALL of N/E/W is un-sittable: `approach_point` returns
+            // the `pos` sentinel and the wander SKIPS it — never the backrest.
             approach: SEAT_APPROACH,
             ground_x: GroundAlign::Center,
             ground_y: GroundAlign::Center,
@@ -546,10 +453,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::PhoneBooth => FurnitureDef {
-            // Ground contact = the door/base (the bottom ~3 rows); the 12px booth
-            // column overhangs north (invariant #6). A walker behind it is hidden
-            // by the booth's own y-sorted sprite — no cap. stand_point parks the
-            // USER clear of the full `visual`, not this shallow strip.
+            // Ground contact = the door/base; the booth column overhangs north
+            // (invariant #6) and hides a walker behind it by its own y-sort.
+            // `stand_point` parks the USER clear of the full `visual`.
             footprint: Some(Size { w: 6, h: 3 }),
             visual: Size { w: 6, h: 12 },
             occupies_pos: false,
@@ -563,8 +469,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::End,
         },
         Furniture::StandingDesk => FurnitureDef {
-            // Ground contact = the legs/base (bottom ~3 rows); the desktop
-            // overhangs north and occludes a walker behind it (its own y-sort).
+            // Ground contact = the legs/base; the desktop overhangs north and
+            // occludes a walker behind it by its own y-sort.
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 8 },
             occupies_pos: false,
@@ -617,11 +523,10 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_y: GroundAlign::Center,
         },
         Furniture::MeetingChair => FurnitureDef {
-            // No footprint DELIBERATELY: the chair has no furniture body to
-            // sit inside (unlike the island's in-body slots) — its cell stays
-            // walkable exactly as the old stand's did, and blocking it would
-            // ripple mask/approach for a 7x7 body walkers can at worst
-            // visually clip. Sharp edge in the scene CLAUDE.md decor entry.
+            // No footprint DELIBERATELY: the chair has no furniture body to sit
+            // inside (unlike the island's in-body slots), so its cell stays
+            // walkable; blocking it would ripple mask/approach for a 7x7 body
+            // walkers can at worst visually clip.
             footprint: None,
             visual: Size { w: 7, h: 7 },
             occupies_pos: true,
@@ -634,7 +539,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_x: GroundAlign::Center,
             ground_y: GroundAlign::Center,
         },
-        // Plants: all share the tight PLANT_FOOTPRINT ground (leaves overhang,
+        // Ficus + tall share the tight PLANT_FOOTPRINT ground (leaves overhang,
         // invariant #6) but each has a distinct sprite height.
         Furniture::PlantFicus => FurnitureDef {
             footprint: Some(PLANT_FOOTPRINT),
@@ -646,57 +551,44 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 6, h: 10 },
             ..DECOR
         },
-        // De-shared: a 2px terracotta pot at the sprite's south; the bloom
-        // overhangs it. The mask south-anchors this shallow pot strip (invariant
-        // #6); the bloom's own y-sort occludes a walker behind it.
+        // De-shared: a 2px terracotta pot at the sprite's south, the bloom
+        // overhanging it (invariant #6).
         Furniture::PlantFlower => FurnitureDef {
             footprint: Some(Size { w: 2, h: 2 }),
             visual: Size { w: 6, h: 6 },
             ..DECOR
         },
-        // 3px pot at the sprite's south; the leaf cluster overhangs it. The mask
-        // south-anchors this shallow pot strip (invariant #6).
+        // 3px pot at the sprite's south, the leaf cluster overhanging it.
         Furniture::PlantSucculent => FurnitureDef {
             footprint: Some(Size { w: 3, h: 2 }),
             visual: Size { w: 5, h: 4 },
             ..DECOR
         },
-        // The rolling whiteboard is an ELEVATED obstacle: only its wheels/stand
-        // (the bottom 3 sprite rows — legs at rows 8-9, wheels at row 10) touch
-        // the floor; the 8-px board panel above them overhangs (invariant #6, the
-        // canopy rule). GROUND footprint = the 10-px wheel span × the 3-px base
-        // ONLY. `mask.rs` SOUTH-anchors this strip to the sprite's base (the
-        // `Center`/`TopLeft` stamp would otherwise center the short strip on the
-        // panel, lifting the block off the wheels), so a walker can pass BEHIND
-        // the panel and is occluded by it — the 8-px panel overhang paints over
-        // them via its own y-sort, no cap. Stamped via PodDecor (aisle) or
-        // WallDecor (the free-standing board in the room).
+        // An ELEVATED obstacle: only the wheels/stand touch the floor, the board
+        // panel above them overhangs (invariant #6), and the mask SOUTH-anchors
+        // the ground strip — a centered stamp lifts the block off the wheels.
         Furniture::Whiteboard => FurnitureDef {
             footprint: Some(Size { w: 10, h: 3 }),
             visual: Size { w: 14, h: 11 },
             ..DECOR
         },
         Furniture::Tv => FurnitureDef {
-            // Ground contact = the wide base (bottom 2 rows); the monitor + mount
-            // column overhang north and occlude a walker behind the stand.
+            // Ground contact = the wide base; the monitor + mount column overhang
+            // north and occlude a walker behind the stand.
             footprint: Some(Size { w: 6, h: 2 }),
             visual: Size { w: 10, h: 10 },
             ..DECOR
         },
-        // Bookshelf stands ON the floor against the back wall (its base dips
-        // below the window band into the room). It needs a ground footprint or
-        // a walker clips through its base. The shelves above overhang that base
-        // (invariant #6), so the mask south-anchors the shallow 3px base strip
-        // to the sprite bottom (`ground_y: End` via `stamp_ground`, the
-        // wall-decor loop) — the upper shelves sit in the already-blocked
-        // window band.
+        // Its base dips below the window band into the room, so it needs a ground
+        // footprint or a walker clips through it. The shelves above overhang that
+        // base (invariant #6) and sit in the already-blocked band.
         Furniture::Bookshelf => FurnitureDef {
             footprint: Some(Size { w: 8, h: 3 }),
             visual: Size { w: 8, h: 12 },
             ..DECOR
         },
-        // Truly wall-HUNG decor — flush against the wall up in the band, no part
-        // touches the floor, so footprint stays None and only `.visual` matters.
+        // Truly wall-HUNG decor: no part touches the floor, so footprint stays
+        // None and only `.visual` matters.
         Furniture::BulletinBoard => FurnitureDef {
             visual: Size { w: 10, h: 6 },
             ..DECOR
@@ -705,61 +597,44 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 5, h: 3 },
             ..DECOR
         },
-        // The big meeting "TV"/presentation screen stands on a soundbar base on
-        // the floor (same as the bookshelf — its base dips below the window band
-        // into the room). Block the 3px floor base (south-anchored to the sprite
-        // bottom); the monitor panel above overhangs it and sits in the blocked
-        // window band.
+        // Stands on a soundbar base on the floor (bookshelf-class): block the
+        // floor base only; the monitor panel above overhangs it and sits in the
+        // already-blocked window band.
         Furniture::MeetingScreen => FurnitureDef {
             footprint: Some(Size { w: 14, h: 3 }),
             visual: Size { w: 14, h: 12 },
             ..DECOR
         },
-        // Singleton / per-room furniture (rendered procedurally, so `visual` is
-        // mostly informational; the mask stamps `footprint`). Both axes are
-        // sized so `footprint + 2·OBSTACLE_PAD` lands exactly on the 20×7 sprite:
-        // width `16 + 4 = 20`, height `3 + 4 = 7`. The width is 16 (not 20) ON
-        // PURPOSE — a literal 20-wide footprint becomes 24 with pad and
-        // disconnects the narrowest meeting room (caught by the connectivity
-        // test). The height was 7 (→ 11 blocked with pad), over-blocking 2px of
-        // walkable floor off the sofa's front and back; 3 tightens the blocked
-        // rect to the sprite so the red debug footprint hugs the sofa.
+        // Both axes are sized so `footprint + 2·OBSTACLE_PAD` lands exactly on the
+        // sprite. The width is narrower than the sprite ON PURPOSE — a full-width
+        // footprint plus pad disconnects the narrowest meeting room.
         Furniture::MeetingSofaBody => FurnitureDef {
             footprint: Some(Size { w: 16, h: 3 }),
-            visual: Size { w: 20, h: 7 }, // == the real meeting_sofa.sprite (20w × 7 data rows)
-            // CENTERED (not south): the 16×3 strip sits on the sofa pos — seat
-            // settle clearance + narrowest-room connectivity are tuned to it.
+            visual: Size { w: 20, h: 7 }, // == the real meeting_sofa.sprite
+            // CENTERED (not south): seat settle clearance + narrowest-room
+            // connectivity are tuned to the strip sitting on the sofa pos.
             ground_y: GroundAlign::Center,
             ..DECOR
         },
-        // 11×5 = the real meeting-table sprite (paint_meeting_table). footprint ==
-        // visual so the mask blocks exactly what's drawn; the MeetingChair west
-        // offset (compute.rs, t.x-9) still clears (padded west edge = cx-7).
+        // footprint == visual so the mask blocks exactly what's drawn.
         Furniture::MeetingTable => FurnitureDef {
             footprint: Some(Size { w: 11, h: 5 }),
             visual: Size { w: 11, h: 5 },
             ..DECOR
         },
-        // Island body: the sprite's top two rows are countertop surface that
-        // OVERHANGS the south-anchored base (invariant #6 — footprint.h =
-        // visual.h − 2). The bartender slots stand ON the body's center row —
-        // blocked cells, reached via BAR_APPROACH + the settle glide (the
-        // couch-seat pattern), with the body's south-row z-key occluding
-        // their legs: true behind-the-counter occlusion.
-        // Sized as the room's dominant piece (owner call: it replaced BOTH
-        // bistro pieces, so it must read bigger than their old joint span).
+        // The sprite's top rows are countertop that OVERHANGS the south-anchored
+        // base (invariant #6). The bartender slots stand ON the body's center row
+        // — blocked cells reached via BAR_APPROACH + the settle glide, with the
+        // body's south-row z-key occluding their legs.
         Furniture::KitchenIsland => FurnitureDef {
             footprint: Some(Size { w: 20, h: 5 }),
             visual: Size { w: 20, h: 7 },
             ..DECOR
         },
-        // Island stand slot — two shapes share this row: the E/W FLANKS,
-        // pre-positioned CLEAR of the body's padded footprint by compute.rs
-        // (the MeetingChair pattern), and the BARTENDER pair, whose `pos` is
-        // INSIDE the island body (the couch-seat pattern: a blocked pos is
-        // fine for `occupies_pos` — A* routes to a BAR_APPROACH cell and the
-        // settle glide bridges on; the island's south-row z-key then occludes
-        // the stander's legs, the walk-behind read).
+        // Two shapes share this row: the E/W FLANKS, pre-positioned CLEAR of the
+        // body's padded footprint, and the BARTENDER pair, whose `pos` is INSIDE
+        // the island body. A blocked pos is fine for `occupies_pos` — A* routes to
+        // a BAR_APPROACH cell and the settle glide bridges on.
         Furniture::IslandStand => FurnitureDef {
             footprint: None,
             visual: Size { w: 0, h: 0 },
@@ -773,10 +648,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_x: GroundAlign::Center,
             ground_y: GroundAlign::Center,
         },
-        // Snack shelf: tall shelf sprite, shallow 2-row walk-behind base
-        // (bookshelf-class overhang). Approachable obstacle like the vending
-        // machine — stand_point delegates to approach_point, which finds the
-        // open (east, on the west wall) side via reachability.
+        // Tall shelf sprite, shallow walk-behind base (bookshelf-class overhang).
+        // Approachable obstacle like the vending machine — `stand_point` delegates
+        // to `approach_point`, which finds the open side via reachability.
         Furniture::SnackShelf => FurnitureDef {
             footprint: Some(Size { w: 7, h: 2 }),
             visual: Size { w: 7, h: 10 },
@@ -790,15 +664,13 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ground_x: GroundAlign::Center,
             ground_y: GroundAlign::End,
         },
-        // Width 2 = the 2px base disc (was 4, over-blocking the 1px pole + empty
-        // margins). Height 7 is deliberate, NOT the disc's 1px: the disc sits at
-        // the sprite SOUTH, so the centered stamp + pad must REACH down to
-        // lamp.y+4 — a height shrink would lift the block off the disc entirely.
+        // Width 2 = the base disc only, not the pole and its empty margins.
         Furniture::FloorLamp => FurnitureDef {
             footprint: Some(Size { w: 2, h: 7 }),
             visual: Size { w: 4, h: 10 },
-            // CENTERED (not south): the tall 2×7 footprint reaches the disc at
-            // the sprite south from a centered stamp; End would lift it off.
+            // CENTERED, and far taller than the 1px disc on purpose: from a
+            // centered stamp the tall footprint is what REACHES down to the disc
+            // at the sprite south. `End`, or a shorter one, lifts the block off it.
             ground_y: GroundAlign::Center,
             ..DECOR
         },
@@ -808,31 +680,19 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             ..DECOR
         },
         Furniture::FishTank => FurnitureDef {
-            // Ground rule (invariant #6): only the cabinet base blocks; the
-            // glass tank above it is visual overhang (ground_y End pins the
-            // 3-row strip to the sprite base).
+            // Ground rule (invariant #6): only the cabinet base blocks; the glass
+            // tank above it is visual overhang.
             footprint: Some(Size { w: 14, h: 3 }),
             visual: Size { w: 14, h: 11 },
             ..DECOR
         },
-        // The home desk — the agent's OWNED workstation, now a first-class row
-        // (was the standalone `desk_furniture_def` literal). `occupies_pos` = the
-        // agent renders ON it (`seated_anchor`); its seat cell is
-        // [`desk_walk_anchor`] (= `seated_foot_cell(Desk)`). `footprint =
-        // (DESK_W+4) × DESK_FOOT_H` — the shallow south strip of the 14px sprite,
-        // `ground_y: End` (walk-behind: the monitor + surface overhang NORTH,
-        // invariant #6) — is stamped TOP-LEFT in `mask.rs`, not centered. `dwell`
-        // is the SEATED window (`pose::seated_dwell_ms`).
-        // `approach = DESK_APPROACH` (no south front — sit behind the monitor).
-        // Not a `WaypointKind`, so `stand_point` never runs on it; entry/wander/
-        // exit reach its seat via `approach_point(Furniture::Desk)` (the N/E/W
-        // `desk_approach_cell`) + the unified `seated_foot_cell` settle.
+        // The desk's footprint is stamped TOP-LEFT in `mask.rs`, not centered, and
+        // its `dwell` is the SEATED window (`pose::seated_dwell_ms`).
         Furniture::Desk => FurnitureDef {
-            // Ground = the full 14-px sprite width (side cabinets touch the
-            // floor) × the shallow DESK_FOOT_H front-contact depth. `End`
-            // south-anchors it so the surface + monitor OVERHANG north; a
-            // walker passes behind the monitor, occluded by the desk's own
-            // y-sort (invariant #6 — the plant-canopy pattern, owner-picked).
+            // Ground = the full sprite width (the side cabinets touch the floor) ×
+            // the shallow front-contact depth. `End` south-anchors it so the
+            // surface + monitor OVERHANG north; a walker passes behind the monitor,
+            // occluded by the desk's own y-sort (invariant #6).
             footprint: Some(Size {
                 w: DESK_W + 4,
                 h: DESK_FOOT_H,
@@ -854,33 +714,23 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     }
 }
 
-/// Where a footprint sits inside its VISUAL box on ONE axis — the general
-/// top-down collision-box model (a rect declared relative to the sprite, the
-/// standard shape in tile-world engines). Each variant declares INTENT and
-/// resolves its pixel offset from `visual − footprint` at stamp time, so it
-/// can NEVER drift when a sprite is resized (a raw stored offset would —
-/// that is the whole point of this type over a `dx: u16` field). Three
-/// variants cover every furniture row today; add an `Inset(u16)` escape
-/// hatch here IF a piece ever needs a footprint pinned to an interior band
-/// (none does — walk-behind is just `End`, the overhang shape).
+/// Where a footprint sits inside its VISUAL box on ONE axis. Each variant declares
+/// INTENT and resolves its pixel offset from `visual − footprint` at stamp time, so
+/// it can NEVER drift when a sprite is resized — which is the whole point of this
+/// type over a stored `dx: u16`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GroundAlign {
     /// Flush to the box's LOW edge — North (y) / West (x): offset 0.
     Start,
-    /// Centered ON the sprite center (== the placement `pos` for a Center
-    /// anchor): offset `visual/2 − footprint/2`. This is `floor(v/2) −
-    /// floor(f/2)`, NOT `floor((v−f)/2)` — the two differ by 1px when the
-    /// visual and footprint heights have opposite parity (the floor lamp:
-    /// visual 10, footprint 7), and the legacy `stamp_anchored` centered the
-    /// footprint on `pos` (the former). Getting this wrong lifts the lamp's
-    /// block off its disc by 1px — caught by the walkable golden.
+    /// Centered ON the sprite center (== the placement `pos` for a Center anchor):
+    /// `floor(v/2) − floor(f/2)`, NOT `floor((v−f)/2)` — the two differ by 1px when
+    /// visual and footprint have opposite parity, which lifts the floor lamp's
+    /// block off its disc.
     Center,
     /// Flush to the box's HIGH edge — South (y) / East (x): offset
-    /// `visual − footprint`. The canopy/panel/column shape (invariant #6):
-    /// a walker parks deep behind the overhang and the sprite's own y-sort
-    /// occludes them. This IS the walk-behind shape every overhang piece —
-    /// plant canopy, board panels, AND the desk (its shallow `DESK_FOOT_H`
-    /// front strip) — uses; no special case needed.
+    /// `visual − footprint`. THE walk-behind shape (invariant #6) every overhang
+    /// piece uses: a walker parks deep behind the overhang and the sprite's own
+    /// y-sort occludes them.
     End,
 }
 
@@ -891,7 +741,6 @@ impl GroundAlign {
     pub(crate) const fn offset(self, visual: u16, footprint: u16) -> u16 {
         match self {
             GroundAlign::Start => 0,
-            // center-on-pos, NOT center-in-box: see the `Center` doc.
             GroundAlign::Center => (visual / 2).saturating_sub(footprint / 2),
             GroundAlign::End => visual.saturating_sub(footprint),
         }
@@ -900,10 +749,9 @@ impl GroundAlign {
 
 /// The desk's blocked-GROUND width — the full sprite width (side cabinets
 /// included), read from the ONE table row so the pod-grid's band-EDGE clamps
-/// (`compute.rs`) price the honest ground, not the `DESK_W` SLOT width. The
-/// two diverge by 4 px (the side-cabinet overhang that rides the aisle); the
-/// clamp using `DESK_W` let a desk's ground poke past the buffer edge by 2 px
-/// (#549 drift), so the edge sites read THIS.
+/// (`compute.rs`) price the honest ground, not the `DESK_W` SLOT width. The two
+/// diverge by the side-cabinet overhang that rides the aisle, and a clamp on
+/// `DESK_W` lets a desk's ground poke past the buffer edge.
 pub(crate) const DESK_GROUND_W: u16 = match desk_furniture_def().footprint {
     Some(s) => s.w,
     None => panic!("Desk must carry a static footprint"),
@@ -912,12 +760,9 @@ pub(crate) const DESK_GROUND_W: u16 = match desk_furniture_def().footprint {
 /// The desk's blocked-GROUND SOUTH edge, measured from its NW corner (the desk
 /// `Point`) — the Y twin of [`DESK_GROUND_W`], but deliberately NOT the footprint
 /// HEIGHT: the desk is `ground_y: End` (walk-behind), so its shallow `DESK_FOOT_H`
-/// strip is anchored to the sprite BASE — its south edge sits `ground_y.offset +
-/// footprint.h` = the full VISUAL height below the corner, not `DESK_FOOT_H`.
-/// `compute.rs`'s `desk_y_max` clamps on THIS so a bottom-row desk's ground can't
-/// spill south into the cubicle aisle; the walk-behind `Start → End` move staled
-/// the old `DESK_H` (slot-height) clamp — the X twin got `DESK_GROUND_W`, Y didn't.
-/// Derived from the ONE table row (footprint + visual + ground_y), never hardcoded.
+/// strip anchors to the sprite BASE and its south edge sits the full VISUAL height
+/// below the corner. `compute.rs`'s `desk_y_max` clamps on THIS so a bottom-row
+/// desk's ground can't spill south into the cubicle aisle.
 pub(crate) const DESK_GROUND_H: u16 = match desk_furniture_def().footprint {
     Some(fp) => {
         let def = desk_furniture_def();
@@ -926,38 +771,30 @@ pub(crate) const DESK_GROUND_H: u16 = match desk_furniture_def().footprint {
     None => panic!("Desk must carry a static footprint"),
 };
 
-/// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row
-/// (kept because the desk is per-agent, not a `WaypointKind`, and ~10 call sites
-/// read it). The geometry now lives in ONE place: `furniture_def(Furniture::Desk)`.
+/// The **home desk** descriptor — sugar over the [`Furniture::Desk`] table row,
+/// kept because the desk is per-agent rather than a `WaypointKind`.
 pub const fn desk_furniture_def() -> FurnitureDef {
     furniture_def(Furniture::Desk)
 }
 
 /// Vertical offset baked into the walking / waypoint sprite anchor
-/// (`p.y - WALKING_Y_OFF`) — the 12-px standing/walking sprite height. Owned
-/// here in `pixtuoid-scene` (not duplicated as a painter literal) so
-/// `seated_foot_cell` and the anchor reference ONE value: the "invert the render
-/// anchor to the settle cell" identity then holds by construction, not by two
-/// modules keeping a literal in sync. See [`seated_foot_cell`].
+/// (`p.y - WALKING_Y_OFF`) — the standing/walking sprite height. Owned here rather
+/// than duplicated as a painter literal, so [`seated_foot_cell`] and the anchor
+/// invert each other by construction instead of by two modules staying in sync.
 pub const WALKING_Y_OFF: u16 = 12;
 /// Vertical offset of the back-view seat sprite anchor (`pos.y - SEAT_RENDER_Y_OFF`).
-/// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF = 5` px south of
-/// `pos` (where `walking_anchor` lands exactly on `back_couch_anchor`).
+/// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF` px south of `pos`,
+/// where `walking_anchor` lands exactly on `back_couch_anchor`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
-/// Offsets from a home desk's top-left to the agent's WALK anchor (the cell the
-/// agent walks to/from for its desk). Chosen so the `walking_anchor` of this
-/// point equals the `seated_anchor` of the desk — the agent settles exactly
-/// onto its north seat with no arrival pop, just clear of the desk obstacle.
-/// The `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` identity is
-/// locked by a `pixel_painter` test; if `DESK_W` or those anchors change they move
-/// together (X tracks `DESK_W`; the sprite width is `CHARACTER_SPRITE_W`).
+/// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
+/// `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` — the agent settles
+/// exactly onto its north seat with no arrival pop, just clear of the desk
+/// obstacle. That identity is locked by a `pixel_painter` test.
 pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
-/// The cell an agent walks to/from for its home `desk` (top-left Point). The
-/// single source for what were ~10 scattered `desk + (6, 4)` literals across the
-/// entry / exit / wander / snap-back walks.
+/// The cell an agent walks to/from for its home `desk` (top-left Point).
 pub fn desk_walk_anchor(desk: Point) -> Point {
     Point {
         x: desk.x + DESK_WALK_X_OFF,
@@ -965,51 +802,38 @@ pub fn desk_walk_anchor(desk: Point) -> Point {
     }
 }
 
-/// The cell where a seated agent's WALK visually ends so the seated sprite
-/// renders with no arrival jump — the inverse of the render anchor under
+/// The cell where a seated agent's WALK visually ends so the seated sprite renders
+/// with no arrival jump — the inverse of the render anchor under
 /// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`.
 ///
-/// `Some` for every `occupies_pos` furniture (desk + the seat kinds — the agent
-/// sits/stands ON `pos`); `None` for obstacles, whose sprite renders AT the
-/// approach cell, not at a fixed seat. Keyed on [`Furniture`] so the home desk
-/// flows through the SAME fn as the couch (the desk's `S` is [`desk_walk_anchor`],
-/// its render `seated_anchor`). The post-A\* settle walks `approach_point → S`;
-/// when `S` is blocked (meeting sofa, desk) that final segment is the "sit down"
-/// motion, not pathfinding.
+/// `Some` for every `occupies_pos` furniture; `None` for obstacles, whose sprite
+/// renders AT the approach cell rather than a fixed seat. The post-A\* settle walks
+/// `approach_point → S`; when `S` is blocked (meeting sofa, desk) that final
+/// segment is the "sit down" motion, not pathfinding.
 pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
     if !furniture_def(kind).occupies_pos {
         return None;
     }
     Some(match kind {
-        // Seat render (`pos.y − SEAT_RENDER_Y_OFF`): S is
-        // `WALKING_Y_OFF − SEAT_RENDER_Y_OFF` px south of `pos`, the one cell
-        // where `walking_anchor` lands exactly on `back_couch_anchor`. The
-        // meeting chair joined this branch when its occupant went from
-        // standing to SEATED — the old waypoint pairing left the seated
-        // sprite hovering 5 rows above its chair body.
+        // Seat render (`pos.y − SEAT_RENDER_Y_OFF`): S is the one cell where
+        // `walking_anchor` lands exactly on `back_couch_anchor`.
         Furniture::Couch | Furniture::MeetingSofa | Furniture::MeetingChair => Point {
             x: pos.x,
             y: pos.y + (WALKING_Y_OFF - SEAT_RENDER_Y_OFF),
         },
         // waypoint render (`== walking_anchor`): S == pos.
         Furniture::IslandStand => pos,
-        // desk render is `seated_anchor`; its inverse is the bespoke
-        // `desk_walk_anchor` (pinned by DESK_WALK_X/Y_OFF). ONE source.
+        // desk render is `seated_anchor`; its inverse is `desk_walk_anchor`.
         Furniture::Desk => desk_walk_anchor(pos),
-        // `occupies_pos` is exactly {Couch, MeetingSofa, MeetingChair,
-        // IslandStand, Desk}
-        // (guarded by `furniture_def_invariants_hold_for_every_row`); the early
-        // return handled every obstacle kind. A FUTURE occupies_pos seat that
-        // forgets its arm here must fail loud, not silently settle the occupant
-        // on the blocked furniture centre (the walk-through-desk class of bug).
+        // The early return handled every obstacle kind. A FUTURE occupies_pos seat
+        // that forgets its arm here must fail loud, not silently settle the
+        // occupant on the blocked furniture centre (walk-through-desk bugs).
         _ => unreachable!("{kind:?} sets occupies_pos but lacks a seated_foot_cell arm"),
     })
 }
 
-/// Which way a waypoint occupant faces. Drives sprite choice (back vs
-/// front view) and horizontal mirroring at render time. Most waypoints
-/// are `South` (facing the viewer / facing-neutral); meeting-room slots
-/// face the table at the room centre.
+/// Which way a waypoint occupant faces. Drives sprite choice (back vs front view)
+/// and horizontal mirroring at render time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Facing {
     /// Facing north (−y, toward the far wall) — a back view.
@@ -1022,9 +846,9 @@ pub enum Facing {
     West,
 }
 
-/// Wall-mounted / wall-leaning furniture, painted as decor in the top wall
-/// area. Not a wander destination — agents can't walk through their own
-/// cubicle row to reach the back wall.
+/// Wall-mounted / wall-leaning furniture, painted as decor in the top wall area.
+/// Not a wander destination — agents can't walk through their own cubicle row to
+/// reach the back wall.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum WallDecor {
     /// A bookshelf against the back wall.
@@ -1035,14 +859,13 @@ pub enum WallDecor {
     BulletinBoard,
     /// An exit sign.
     ExitSign,
-    /// Wall-mounted meeting-room display — paints above the meeting
-    /// room interior so participants can pretend they're presenting.
+    /// Wall-mounted meeting-room display.
     MeetingScreen,
 }
 
 impl WallDecor {
-    /// Geometry kind in the unified [`Furniture`] table (sprite size via
-    /// `furniture_def(self.furniture()).visual`; wall decor isn't mask-stamped).
+    /// Geometry kind in the unified [`Furniture`] table. Wall decor isn't
+    /// mask-stamped, so only `.visual` is read from the row.
     pub const fn furniture(self) -> Furniture {
         match self {
             WallDecor::Whiteboard => Furniture::Whiteboard,
@@ -1055,9 +878,8 @@ impl WallDecor {
 
     /// Pack-animation key for this decor's sprite. The blit lives in
     /// `pixel_painter::drawable`; the NAME lives on the enum so a new variant is a
-    /// compile error HERE, not a forgotten call-site match arm (same data-in-`pixtuoid-scene` pattern
-    /// as `footprint`/`visual`). Every value is in `OPTIONAL_FURNITURE_ANIMATIONS`,
-    /// pinned by `role_enum_sprite_names_resolve_in_the_animation_registry`.
+    /// compile error HERE, not a forgotten call-site match arm. Every value must be
+    /// in `OPTIONAL_FURNITURE_ANIMATIONS`.
     pub const fn sprite_name(self) -> &'static str {
         match self {
             WallDecor::Bookshelf => "bookshelf",
@@ -1069,8 +891,8 @@ impl WallDecor {
     }
 }
 
-/// Variety of potted plants — each renders a different sprite. Spread
-/// these around the lounge so it doesn't feel like one ficus repeated.
+/// Variety of potted plants — each renders a different sprite, so the lounge
+/// doesn't read as one ficus repeated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlantKind {
     /// A leafy ficus in a 6px pot.
@@ -1084,9 +906,7 @@ pub enum PlantKind {
 }
 
 impl PlantKind {
-    /// Geometry kind in the unified [`Furniture`] table. Sprite size via
-    /// `furniture_def(self.furniture()).visual`; all plants share the tight
-    /// `PLANT_FOOTPRINT` ground (leaves overhang it, invariant #6).
+    /// Geometry kind in the unified [`Furniture`] table.
     pub const fn furniture(self) -> Furniture {
         match self {
             PlantKind::Ficus => Furniture::PlantFicus,
@@ -1107,9 +927,9 @@ impl PlantKind {
     }
 }
 
-/// Decor placed in the aisles BETWEEN 2×2 desk pods. Picked at random
-/// (deterministic hash of pod index) so each office layout is varied
-/// but stable across renders. Each variant maps to a distinct sprite.
+/// Decor placed in the aisles BETWEEN 2×2 desk pods. Picked by a deterministic
+/// hash of the pod index, so each office layout is varied but stable across
+/// renders.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PodDecor {
     /// A tall plant filling the aisle.
@@ -1125,10 +945,9 @@ pub enum PodDecor {
 }
 
 impl PodDecor {
-    /// The randomly-picked pool. Whiteboard's 10-px GROUND footprint
-    /// (the 14-px board panel overhangs it) fits the 20-px aisle with
-    /// ~4 px clearance each side after the 1-px obstacle pad — same
-    /// rolling-whiteboard sprite as the wall mount, just in an aisle slot.
+    /// The randomly-picked pool. Every member's GROUND footprint has to fit the
+    /// aisle width once the obstacle pad is added — the whiteboard, whose board
+    /// panel overhangs its wheelbase, is the tight one.
     pub const ALL: &'static [PodDecor] = &[
         PodDecor::PlantTall,
         PodDecor::Whiteboard,
@@ -1137,12 +956,9 @@ impl PodDecor {
         PodDecor::StandingDesk,
     ];
 
-    /// Geometry kind in the unified [`Furniture`] table — the single source for
-    /// this decor's ground footprint (mask) AND sprite size (render). PlantTall
-    /// resolves to the SAME row as the free-standing `PlantKind::Tall`, and
-    /// PhoneBooth/StandingDesk to the same rows as their `WaypointKind` twins, so
-    /// nothing drifts. (PlantTall's mask footprint is the tight 6×6 ground while
-    /// its sprite is 6×10 — the fix that motivated this fold.)
+    /// Geometry kind in the unified [`Furniture`] table. PlantTall resolves to the
+    /// SAME row as the free-standing `PlantKind::Tall`, and PhoneBooth/StandingDesk
+    /// to the same rows as their `WaypointKind` twins, so nothing drifts.
     pub const fn furniture(self) -> Furniture {
         match self {
             PodDecor::PlantTall => Furniture::PlantTall,
@@ -1176,9 +992,6 @@ mod tests {
 
     #[test]
     fn repels_plants_is_exactly_the_solid_non_waypoint_bodies() {
-        // The plant census's per-kind policy. Pin the WHOLE set off Furniture::ALL
-        // so a new kind wrongly set `true` is caught (the exhaustive match already
-        // catches a new kind left undeclared).
         for k in [
             Furniture::FishTank,
             Furniture::MeetingSofaBody,
@@ -1190,9 +1003,6 @@ mod tests {
                 "{k:?} is a solid body — must repel plants"
             );
         }
-        // The owner-ratified 1px Ficus hug: the lounge lamp + side table are
-        // non-waypoint singletons too, but must NEVER repel (a silent flip to
-        // `true` would shove the lounge Ficus off its authored spot).
         assert!(
             !repels_plants(Furniture::FloorLamp),
             "lamp keeps the Ficus hug"
@@ -1224,21 +1034,17 @@ mod tests {
 
     #[test]
     fn seat_facing_south_allows_front_and_sides_not_back() {
-        // Sofa facing south (front toward viewer): approach S + E + W, not N.
         assert_eq!(allowed(SEAT_APPROACH, Facing::South), vec![S, E, W]);
     }
 
     #[test]
     fn seat_facing_north_rotates_to_exclude_the_south_back() {
-        // Sofa facing north (back toward viewer/south): approach N + E + W, not S.
         assert_eq!(allowed(SEAT_APPROACH, Facing::North), vec![N, E, W]);
     }
 
     #[test]
     fn desk_excludes_its_south_front() {
-        // Home desk faces south (monitor toward viewer): reachable N/E/W only.
         assert_eq!(allowed(DESK_APPROACH, Facing::South), vec![N, E, W]);
-        // And "remove east" would be a one-bool edit:
         let no_east = ApproachSides {
             e: false,
             ..DESK_APPROACH
@@ -1248,8 +1054,6 @@ mod tests {
 
     #[test]
     fn rotation_is_a_bijection_on_sides() {
-        // A single-side set must map to exactly one side under any facing
-        // (no side lost or duplicated by the rotation).
         for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
             for one in [N, S, E, W] {
                 let sides = ApproachSides {
@@ -1269,19 +1073,12 @@ mod tests {
 
     #[test]
     fn desk_is_a_furniture_def_with_desk_geometry() {
-        // The home desk is now a first-class Furniture::Desk row; this accessor
-        // is sugar over furniture_def(Furniture::Desk). occupies_pos=true — the
-        // agent renders ON it (seated_anchor); its seat cell is desk_walk_anchor
-        // = seated_foot_cell(Furniture::Desk), reached by the unified settle.
         let d = desk_furniture_def();
         assert_eq!(
             d,
             furniture_def(Furniture::Desk),
             "desk_furniture_def must be sugar over the Furniture::Desk row"
         );
-        // Footprint = full 14px sprite width (DESK_W+4) × the shallow
-        // DESK_FOOT_H front-contact depth (walk-behind: surface+monitor
-        // overhang north via ground_y: End); never exceeds the visual.
         assert_eq!(
             d.footprint,
             Some(Size {
@@ -1313,20 +1110,10 @@ mod tests {
 
     #[test]
     fn ground_align_stays_inside_the_visual_and_follows_the_declared_intent() {
-        // Every row's resolved footprint offset must keep the blocked rect
-        // INSIDE its visual box (a rect poking past the sprite would block
-        // ground the renderer never draws — invisible walls), and the
-        // declared `ground_y` must match the intent class: End (south strip)
-        // for the overhang rows incl. the walk-behind desk, Center for
-        // MeetingSofaBody/FloorLamp. A new overhanging kind that forgets to classify
-        // itself (leaving DECOR's End default is correct for overhang; a
-        // wrong Center/Start on an overhang row) is caught HERE, not as a
-        // silent wrong-mask at runtime. Flat boxes (footprint == visual) only
-        // get the in-box check.
         for &kind in Furniture::ALL {
             let def = furniture_def(kind);
             let Some(fp) = def.footprint else {
-                continue; // no static ground — ground_x/y unused
+                continue; // no static ground
             };
             let dx = def.ground_x.offset(def.visual.w, fp.w);
             let dy = def.ground_y.offset(def.visual.h, fp.h);
@@ -1334,9 +1121,6 @@ mod tests {
                 dx + fp.w <= def.visual.w.max(fp.w) && dy + fp.h <= def.visual.h.max(fp.h),
                 "{kind:?}: blocked rect must not poke past the visual box"
             );
-            // Vertical intent guard for the overhang rows (visual taller than
-            // footprint). The two documented Center exceptions are exempt;
-            // flat boxes aren't overhang so they're skipped.
             let center_exception =
                 matches!(kind, Furniture::MeetingSofaBody | Furniture::FloorLamp);
             if def.visual.h > fp.h && !center_exception {
@@ -1346,8 +1130,6 @@ mod tests {
                     "{kind:?}: an overhang row must south-anchor (End) unless documented"
                 );
             }
-            // Pins the "ground_x is Center for every row" claim the field doc
-            // makes — a first Start/End row updates that doc alongside this.
             assert_eq!(
                 def.ground_x,
                 GroundAlign::Center,
@@ -1358,10 +1140,6 @@ mod tests {
 
     #[test]
     fn furniture_def_invariants_hold_for_every_row() {
-        // The singleton/decor rows have no other test (unlike WaypointKind::ALL),
-        // so a typo in any row — wrong dwell sentinel, an accidental
-        // occupies_pos, a wrong plant footprint — is caught HERE rather than as a
-        // silent wrong-mask/wrong-render at runtime.
         assert_eq!(
             Furniture::ALL.len(),
             27,
@@ -1369,15 +1147,11 @@ mod tests {
         );
         for &f in Furniture::ALL {
             let d = furniture_def(f);
-            // dwell is either the decor sentinel (range_ms 0) or a real window
-            // (range>0); never half-broken like (n, 0) — see FurnitureDef::dwell.
             assert!(
                 d.dwell == DwellWindow::DECOR || d.dwell.range_ms > 0,
                 "{f:?}: half-broken dwell {:?}",
                 d.dwell
             );
-            // occupies_pos is EXACTLY the on-furniture seat/stand kinds (incl.
-            // the home Desk — agent renders ON it via seated_anchor).
             let expect_occupies = matches!(
                 f,
                 Furniture::Couch
@@ -1387,20 +1161,13 @@ mod tests {
                     | Furniture::Desk
             );
             assert_eq!(d.occupies_pos, expect_occupies, "{f:?}: occupies_pos");
-            // exclusive = single-occupancy: every seat PLUS the stand-beside
-            // singles (phone booth, standing desk). The two claim consumers
-            // (`spot_claims`, `waypoint_rank_offset_x`) gate on THIS, so the row
-            // set is pinned here.
             let expect_exclusive =
                 expect_occupies || matches!(f, Furniture::PhoneBooth | Furniture::StandingDesk);
             assert_eq!(d.exclusive, expect_exclusive, "{f:?}: exclusive");
-            // The load-bearing law: a seat can never be shareable.
             assert!(
                 !d.occupies_pos || d.exclusive,
                 "{f:?}: occupies_pos implies exclusive"
             );
-            // SEAT/STAND rows add no obstacle (they sit/stand ON a separately
-            // stamped body: meeting sofa/table, kitchen island).
             if matches!(
                 f,
                 Furniture::MeetingSofa | Furniture::MeetingChair | Furniture::IslandStand
@@ -1410,9 +1177,6 @@ mod tests {
                     "{f:?}: seat row must carry no footprint"
                 );
             }
-            // Ficus + Tall share the 6px PLANT_FOOTPRINT (their pots are 6px
-            // wide). Flower/Succulent are de-shared: their pots are narrower than
-            // the canopy, so they carry their own width-only ground footprint.
             if matches!(f, Furniture::PlantFicus | Furniture::PlantTall) {
                 assert_eq!(
                     d.footprint,
@@ -1426,10 +1190,6 @@ mod tests {
                     "{f:?}: de-shared plant must be narrower than PLANT_FOOTPRINT"
                 );
             }
-            // Footprint never exceeds the sprite — the mask blocks only the
-            // ground projection, never more than is drawn (invariant #6). The
-            // succulent inversion (6×6 footprint under a 5×4 sprite) is the bug
-            // this guards against recurring.
             if let Some(Size { w: fw, h: fh }) = d.footprint {
                 assert!(
                     fw <= d.visual.w && fh <= d.visual.h,
@@ -1438,13 +1198,9 @@ mod tests {
                     d.visual
                 );
             }
-            // Occlusion is emergent now (no `occludes_behind` field): an
-            // overhanging obstacle is south-anchored by the mask so its own sprite
-            // y-sorts over a walker behind it. The plants (incl. the de-shared
-            // flower/succulent NOT in `PodDecor::ALL`, so `every_pod_occludes_via_
-            // overhang` misses them) must STRICTLY overhang their pot — visual
-            // taller than the shallow footprint — else a walker behind them isn't
-            // hidden. `≤` above isn't enough for these; assert strict `<`.
+            // The de-shared flower/succulent are NOT in `PodDecor::ALL`, so
+            // `every_pod_occludes_via_overhang` never sees them: the `≤` above is
+            // the only other height check they get, and it is too weak.
             if matches!(
                 f,
                 Furniture::PlantFicus
@@ -1464,10 +1220,6 @@ mod tests {
 
     #[test]
     fn role_enum_sprite_names_resolve_in_the_animation_registry() {
-        // The role enums own their pack-animation key via `sprite_name()` (the
-        // blit lives in tui `drawable.rs`). Adding a variant without a name is a
-        // compile error (exhaustive match); a TYPO'd name would draw nothing —
-        // this catches it by checking every value is a real registered animation.
         use pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
         let names: Vec<&str> = [
             WallDecor::Bookshelf.sprite_name(),

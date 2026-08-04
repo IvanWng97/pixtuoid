@@ -1,13 +1,10 @@
 #[test]
 fn audio_resolve_clamps_and_defaults() {
-    // absent table → MUTED, full volume: the office starts silent and
-    // `m` is the one opt-in
     let cfg = AppConfig::default();
     let a = resolve_audio(&cfg);
     assert!(a.muted, "audio starts muted (strictly opt-in via m)");
     assert_eq!(a.volume, 1.0);
 
-    // explicit unmute + out-of-range volumes clamp BOTH sides
     let mut cfg = AppConfig {
         audio: Some(AudioConfigRaw {
             muted: Some(false),
@@ -23,7 +20,6 @@ fn audio_resolve_clamps_and_defaults() {
         volume: Some(1.5),
     });
     assert_eq!(resolve_audio(&cfg).volume, 1.0, "over-1 clamps down");
-    // partial table: muted without volume keeps the default
     cfg.audio = Some(AudioConfigRaw {
         muted: Some(false),
         volume: None,
@@ -39,8 +35,6 @@ fn audio_table_round_trips_through_toml() {
     assert!(!a.muted);
     assert!((a.volume - 0.4).abs() < 1e-6);
 
-    // the retired (never-released) `enabled` key is an unknown key:
-    // ignored like any other, and it does NOT unmute
     let toml = "[audio]\nenabled = true\n";
     let cfg: AppConfig = toml::from_str(toml).expect("unknown keys tolerated");
     assert!(
@@ -65,7 +59,6 @@ fn save_audio_muted_persists_and_preserves_the_rest() {
     assert!(s.contains("volume = 0.4"), "sibling keys survive");
     let cfg: AppConfig = toml::from_str(&s).unwrap();
     assert!(!resolve_audio(&cfg).muted);
-    // flip back
     save_audio_muted(&path, true).unwrap();
     let cfg: AppConfig = toml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert!(resolve_audio(&cfg).muted);
@@ -91,9 +84,6 @@ fn load_missing_returns_defaults() {
     assert!(cfg.theme.is_none());
 }
 
-// Exercises update_config's write path (now an OpenOptions write + fsync
-// before the atomic rename): content must round-trip and leave no tmp
-// sidecar behind.
 #[test]
 fn save_then_load_roundtrips_and_leaves_no_tmp_sidecar() {
     let dir = tempfile::tempdir().unwrap();
@@ -106,9 +96,6 @@ fn save_then_load_roundtrips_and_leaves_no_tmp_sidecar() {
         "the tmp sidecar must be consumed by the atomic rename"
     );
 }
-
-// --- collected warnings (#87): the resolvers stay layer-clean and the
-// caller (main) picks the sink, so the COLLECTION is the contract. -----
 
 #[test]
 fn load_missing_collects_no_warning() {
@@ -129,6 +116,87 @@ fn load_malformed_collects_reset_warning() {
         w[0].contains("malformed config") && w[0].contains("ALL settings reset"),
         "the all-settings-reset case is the highest-stakes warning: {w:?}"
     );
+}
+
+/// The injected bytes every config-warning egress test crafts: a live OSC
+/// title-set (`ESC ] 0 ; … BEL`) plus a Trojan-Source RLO (CVE-2021-42574).
+const HOSTILE_BYTES: [char; 3] = ['\u{1b}', '\u{7}', '\u{202e}'];
+
+#[test]
+fn config_warnings_are_control_char_stripped_on_both_sinks() {
+    // `toml::de::Error`'s Display embeds the RAW offending source line, and BOTH of
+    // a warning's sinks are real terminals: the Vec (`main`'s pre-altscreen
+    // `eprintln!`, the `doctor` report) AND `tracing`, which writes to raw stderr in
+    // every non-TUI mode.
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("config.toml");
+    std::fs::write(
+        &p,
+        "theme = \"normal\"\nbad\u{1b}]0;PWNED\u{7}\u{202e}key =\n",
+    )
+    .unwrap();
+    let mut w = Vec::new();
+    let logged = crate::test_capture::capture(|| {
+        load(&p, &mut w);
+    });
+    assert_eq!(w.len(), 1);
+    for sink in [&w[0], &logged] {
+        assert!(
+            !sink.contains(HOSTILE_BYTES),
+            "a warning that interpolates config content must carry no ANSI/OSC or \
+             Trojan-Source bidi bytes: {sink:?}"
+        );
+    }
+    assert!(
+        w[0].contains("malformed config") && w[0].contains("ALL settings reset"),
+        "got: {w:?}"
+    );
+    assert!(
+        logged.contains("malformed config") && logged.contains("ALL settings reset"),
+        "the log must still carry the warning, not just drop it: {logged:?}"
+    );
+}
+
+#[test]
+fn every_config_resolver_warning_reaches_tracing_stripped() {
+    let hostile: String = HOSTILE_BYTES.iter().collect();
+    let cases: Vec<(&str, AppConfig)> = vec![
+        (
+            "unknown theme",
+            AppConfig {
+                theme: Some(format!("no{hostile}pe")),
+                ..Default::default()
+            },
+        ),
+        (
+            "unknown pet `kind`",
+            AppConfig {
+                pets: Some(vec![PetEntry {
+                    kind: Some(format!("no{hostile}pe")),
+                    name: None,
+                }]),
+                ..Default::default()
+            },
+        ),
+    ];
+    for (fragment, cfg) in cases {
+        let mut w = Vec::new();
+        let logged = crate::test_capture::capture(|| {
+            let _ = resolve_theme(&cfg, None, &mut w);
+            let _ = resolve_pets(&cfg, &mut w);
+        });
+        assert!(!w.is_empty(), "{fragment}: expected a collected warning");
+        for sink in w.iter().chain(std::iter::once(&logged)) {
+            assert!(
+                !sink.contains(HOSTILE_BYTES),
+                "{fragment}: hostile bytes reached a terminal sink: {sink:?}"
+            );
+        }
+        assert!(
+            logged.contains(fragment),
+            "{fragment}: the log must still carry the warning: {logged:?}"
+        );
+    }
 }
 
 #[test]
@@ -172,11 +240,9 @@ fn resolve_pets_collects_unknown_kind_warnings() {
     assert!(w[2].contains("no pets will appear"), "got: {w:?}");
 }
 
-// config_path reads process-global env, so save+restore both vars and drive
-// the three branches in one test. The TEST_ENV_LOCK serializes against the
-// binary's OTHER env-mutating tests (the install/* HOME/USERPROFILE tests) so
-// they can't race under plain `cargo test`. (The embedded_pack XDG test that
-// used to share this lock moved to the pixtuoid-scene crate, which has its own.)
+// config_path reads process-global env, so save+restore both vars and drive every
+// branch in ONE test; TEST_ENV_LOCK serializes against the binary's other
+// env-mutating tests so they can't race under plain `cargo test`.
 #[test]
 fn config_path_xdg_home_and_relative_branches() {
     let _env = crate::TEST_ENV_LOCK
@@ -186,13 +252,12 @@ fn config_path_xdg_home_and_relative_branches() {
     let saved_home = std::env::var_os("HOME");
     let saved_userprofile = std::env::var_os("USERPROFILE");
 
-    // Clear USERPROFILE for the whole test: on Windows it outranks HOME
-    // in user_home(), so both the HOME arm and the relative-fallback arm
-    // need it absent to assert their branches.
+    // Clear USERPROFILE for the whole test: on Windows it outranks HOME in
+    // user_home(), so both the HOME arm and the relative-fallback arm need it
+    // absent to reach their branches.
     std::env::remove_var("USERPROFILE");
 
-    // XDG_CONFIG_HOME wins when set to an ABSOLUTE path — platform-specific,
-    // since a leading-slash path is not absolute on Windows (no drive prefix).
+    // A leading-slash path is not absolute on Windows (no drive prefix).
     let abs_xdg = if cfg!(windows) {
         "C:/xdg/base"
     } else {
@@ -205,8 +270,6 @@ fn config_path_xdg_home_and_relative_branches() {
         PathBuf::from(abs_xdg).join("pixtuoid").join("config.toml")
     );
 
-    // Empty/whitespace/relative XDG is invalid (XDG spec) → falls to
-    // $HOME/.config, never the CWD-relative `pixtuoid/config.toml`.
     for invalid in ["", "   ", "rel/xdg"] {
         std::env::set_var("XDG_CONFIG_HOME", invalid);
         assert_eq!(
@@ -216,18 +279,15 @@ fn config_path_xdg_home_and_relative_branches() {
         );
     }
 
-    // No XDG → fall back to $HOME/.config.
     std::env::remove_var("XDG_CONFIG_HOME");
     assert_eq!(
         config_path(),
         PathBuf::from("/home/u/.config/pixtuoid/config.toml")
     );
 
-    // Neither → relative fallback.
     std::env::remove_var("HOME");
     assert_eq!(config_path(), PathBuf::from(".config/pixtuoid/config.toml"));
 
-    // Restore.
     match saved_xdg {
         Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
         None => std::env::remove_var("XDG_CONFIG_HOME"),
@@ -242,12 +302,10 @@ fn config_path_xdg_home_and_relative_branches() {
     }
 }
 
-// load()'s non-NotFound read-error arm: pointing at a DIRECTORY makes
-// read_to_string error (IsADirectory) → warn + return defaults (never crash).
 #[test]
 fn load_unreadable_path_returns_defaults() {
     let dir = tempfile::tempdir().unwrap();
-    // The directory itself is an existing, non-NotFound, unreadable "file".
+    // A directory is an existing, non-NotFound, unreadable "file".
     let cfg = load(dir.path(), &mut Vec::new());
     assert!(cfg.theme.is_none());
 }
@@ -352,8 +410,6 @@ fn resolve_valid_cli_wins_even_when_config_theme_invalid() {
 
 #[test]
 fn resolve_invalid_cli_theme_errors_even_with_valid_config() {
-    // A CLI typo must NOT silently fall back to the config theme — explicit
-    // user intent on the command line fails loudly.
     let cfg = AppConfig {
         theme: Some("gruvbox".into()),
         ..AppConfig::default()
@@ -380,8 +436,6 @@ fn full_config_flow_cli_overrides_file() {
     let theme = resolve_theme(&cfg, Some("dracula"), &mut Vec::new()).unwrap();
     assert_eq!(theme.name, "dracula");
 }
-
-// --- max-desks cap flow -----------------------------------------------
 
 #[test]
 fn max_desks_config_set_no_cli() {
@@ -426,9 +480,8 @@ fn max_desks_no_config_file() {
 #[test]
 fn max_desks_zero_in_config_is_ignored_with_warning() {
     // 0 would permanently zero every floor (the per-frame re-seed guards
-    // `capacity > 0`, so the boot atomics never grow) — every agent
-    // silently dropped. The config seam must degrade to auto capacity
-    // and say so on the #87 warning channel.
+    // `capacity > 0`, so the boot atomics never grow), silently dropping every
+    // agent.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "max-desks = 0\n").unwrap();
@@ -453,8 +506,6 @@ fn save_preserves_max_desks() {
     assert_eq!(cfg.theme.as_deref(), Some("cyberpunk"));
     assert_eq!(cfg.max_desks, Some(8));
 }
-
-// --- pack-dir resolution -----------------------------------------------
 
 #[test]
 fn pack_dir_cli_wins_over_config() {
@@ -490,9 +541,8 @@ fn pack_dir_config_expands_tilde() {
         ..AppConfig::default()
     };
     let result = resolve_pack_dir(&cfg, None);
-    // Build the expectation with the SAME `.join()` the impl uses
-    // (install::io::expand_tilde) so the comparison is STRUCTURAL — a
-    // hardcoded `/` would drift from `\` under the Windows runner's Git Bash.
+    // Build the expectation with the SAME `.join()` the impl uses — a hardcoded `/`
+    // would drift from `\` under the Windows runner's Git Bash.
     match pixtuoid_core::platform::user_home_opt() {
         Some(home) => {
             assert_eq!(result, Some(PathBuf::from(home).join("my-pack")));
@@ -509,8 +559,6 @@ fn pack_dir_loaded_from_toml() {
     let cfg = load(&path, &mut Vec::new());
     assert_eq!(cfg.pack_dir.as_deref(), Some("/custom/sprites"));
 }
-
-// --- [[pets]] config ----------------------------------------------------
 
 #[test]
 fn pets_absent_returns_all_with_default_names() {
@@ -613,7 +661,7 @@ fn pets_entry_name_trimmed_empty_falls_back() {
             },
             PetEntry {
                 kind: Some("dog".into()),
-                name: Some("   ".into()), // whitespace-only → default
+                name: Some("   ".into()),
             },
         ]),
         ..AppConfig::default()
@@ -691,8 +739,7 @@ fn pets_empty_vec_serializes_as_inline_empty_array() {
 
 #[test]
 fn pets_section_is_last_in_serialized_toml() {
-    // The AoT must serialize after the scalar keys (the must-be-last
-    // convention); a scalar after `[[pets]]` would be invalid TOML.
+    // A scalar emitted after the `[[pets]]` array-of-tables would be invalid TOML.
     let cfg = AppConfig {
         theme: Some("normal".into()),
         pets: Some(vec![PetEntry {
@@ -709,9 +756,6 @@ fn pets_section_is_last_in_serialized_toml() {
 
 #[test]
 fn pets_missing_kind_is_non_fatal() {
-    // A `[[pets]]` stanza with no `kind` (user typo) must NOT trip load()'s
-    // all-or-nothing malformed arm — the rest of the config survives and the
-    // bad stanza is warn-skipped. Regression for the `kind: String` footgun.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(
@@ -734,14 +778,10 @@ fn pets_missing_kind_is_non_fatal() {
     assert_eq!(pets[0].kind, pixtuoid_scene::pet::PetKind::Cat);
 }
 
-// --- data safety: malformed-config refusal + one-time backup (#3) ---------
-
 #[test]
 fn update_config_refuses_a_type_invalid_config() {
-    // Valid TOML syntax but a type-invalid value: the typed `load` fails
-    // (resetting to defaults in memory each boot), so persisting over it
-    // would make this save "succeed" while never taking effect. Refuse
-    // with the same fix-or-delete contract as the syntax-level gate.
+    // Valid TOML syntax but a type-invalid value: the typed `load` fails, so
+    // persisting over it would make this save "succeed" while never taking effect.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     let original = "theme = \"normal\"\nmax-desks = \"oops\"\n";
@@ -756,8 +796,8 @@ fn update_config_refuses_a_type_invalid_config() {
 
 #[test]
 fn update_config_still_accepts_unknown_keys() {
-    // Forward-compat must survive the typed gate: a key written by a
-    // newer binary is unknown here but NOT type-invalid.
+    // Unknown ≠ type-invalid: a key written by a newer binary must survive the
+    // typed gate.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     std::fs::write(&p, "future-key = 1\n").unwrap();
@@ -788,8 +828,6 @@ fn update_config_refuses_to_overwrite_a_malformed_config() {
 
 #[test]
 fn save_version_refuses_to_overwrite_a_malformed_config() {
-    // The boot save_version path (tui/mod.rs) is the automatic trigger that
-    // used to wipe a hand-written config on the first boot after a typo.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     let original = "theme = \"cyberpunk\"\nmax-desks = oops\n";
@@ -834,8 +872,6 @@ fn save_on_a_missing_config_creates_it_without_a_backup() {
     );
 }
 
-// --- format preservation: unknown keys + comments survive a save (#15) ----
-
 #[test]
 fn save_preserves_comments_and_unknown_keys_byte_for_byte() {
     let dir = tempfile::tempdir().unwrap();
@@ -855,8 +891,8 @@ fn save_preserves_comments_and_unknown_keys_byte_for_byte() {
 
 #[test]
 fn save_version_inserts_new_key_before_pets_section() {
-    // A NEW scalar key must land with the other scalars, never after the
-    // [[pets]] array-of-tables (which would re-parent it into the pet).
+    // A new scalar landing after the `[[pets]]` array-of-tables would re-parent
+    // into the pet.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     std::fs::write(&p, "theme = \"normal\"\n\n[[pets]]\nkind = \"cat\"\n").unwrap();
@@ -878,8 +914,6 @@ fn save_version_inserts_new_key_before_pets_section() {
     );
 }
 
-// --- sources / connection flags -------------------------------------------
-
 #[test]
 fn sources_table_roundtrips_and_empty_is_omitted() {
     let cfg: AppConfig =
@@ -888,7 +922,6 @@ fn sources_table_roundtrips_and_empty_is_omitted() {
     assert_eq!(cfg.sources.get("claude-code"), Some(&false));
     assert_eq!(cfg.sources.get("codex"), Some(&true));
     assert_eq!(cfg.sources.get("antigravity"), None);
-    // An empty map is omitted on serialize (skip_serializing_if).
     let c = AppConfig {
         theme: Some("normal".into()),
         ..Default::default()
@@ -898,7 +931,6 @@ fn sources_table_roundtrips_and_empty_is_omitted() {
 
 #[test]
 fn floating_config_defaults_and_explicit_roundtrip() {
-    // Absent [floating] → defaults, OS-placed (x/y None), opaque.
     let cfg: AppConfig = toml::from_str("theme = \"normal\"\n").unwrap();
     let f = resolve_floating(&cfg);
     assert_eq!(
@@ -907,7 +939,6 @@ fn floating_config_defaults_and_explicit_roundtrip() {
     );
     assert_eq!((f.x, f.y), (None, None));
     assert!((f.opacity - 1.0).abs() < f32::EPSILON);
-    // Explicit values parse through.
     let cfg: AppConfig =
         toml::from_str("[floating]\nwidth = 480\nheight = 300\nx = 10\ny = 20\nopacity = 0.8\n")
             .unwrap();
@@ -917,7 +948,6 @@ fn floating_config_defaults_and_explicit_roundtrip() {
         (480, 300, Some(10), Some(20))
     );
     assert!((f.opacity - 0.8).abs() < 1e-6);
-    // An absent [floating] is omitted on serialize (skip_serializing_if + None).
     assert!(!toml::to_string(&AppConfig::default())
         .unwrap()
         .contains("[floating]"));
@@ -935,37 +965,32 @@ fn save_floating_roundtrips_geometry_and_preserves_other_settings() {
         (f.width, f.height, f.x, f.y),
         (480, 320, Some(12), Some(34))
     );
-    // toml_edit preserves the user's other settings (not an all-or-nothing rewrite).
     assert_eq!(cfg.theme.as_deref(), Some("normal"));
 }
 
 #[test]
 fn save_floating_clears_stale_position_when_os_cannot_report_it() {
-    // A `None` x/y (outer_position() Err — always on Wayland) must DROP the prior coords,
-    // not leave them: a new size + stale position would restore an offscreen window.
+    // A `None` x/y models an `outer_position()` Err — always the case on Wayland.
+    // A new size plus a stale position would restore an offscreen window.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
     std::fs::write(&path, "theme = \"normal\"\n").unwrap();
     save_floating(&path, 480, 320, Some(12), Some(34)).unwrap();
-    // A later save where the OS can't report position: size updates, x/y are cleared.
     save_floating(&path, 500, 360, None, None).unwrap();
     let cfg = load(&path, &mut Vec::new());
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height), (500, 360));
     assert_eq!((f.x, f.y), (None, None), "stale position keys were dropped");
-    // Unrelated settings still survive the rewrite.
     assert_eq!(cfg.theme.as_deref(), Some("normal"));
 }
 
 #[test]
 fn floating_size_clamps_to_legible_min_and_opacity_is_bounded() {
-    // Below-min size clamps UP so the office stays legible; over-opacity clamps to 1.0.
     let cfg: AppConfig =
         toml::from_str("[floating]\nwidth = 1\nheight = 1\nopacity = 9.0\n").unwrap();
     let f = resolve_floating(&cfg);
     assert_eq!((f.width, f.height), (FLOATING_MIN_W, FLOATING_MIN_H));
     assert!((f.opacity - 1.0).abs() < f32::EPSILON);
-    // Opacity floors at 0.2 (a fully-transparent window is useless).
     let cfg: AppConfig = toml::from_str("[floating]\nopacity = 0.0\n").unwrap();
     assert!((resolve_floating(&cfg).opacity - 0.2).abs() < 1e-6);
 }
@@ -984,10 +1009,6 @@ fn resolve_connected_only_explicit_true_connects() {
     );
 }
 
-// The 0.12.0 removal of the v0.4–0.7 migrate inference: an absent/empty
-// [sources] means NOTHING connected — an upgrader's old config (exists,
-// no [sources], not degraded) reads as a first run, so the onboarding
-// wizard replays and they re-connect there (that IS the connect flow).
 #[test]
 fn resolve_connected_absent_sources_table_connects_nothing() {
     let cfg = AppConfig::default(); // no [sources]
@@ -997,11 +1018,6 @@ fn resolve_connected_absent_sources_table_connects_nothing() {
     );
 }
 
-// A newly-added source must self-gate on first boot: resolve_connected
-// iterates the registry, so every registered source is decided
-// (here, all explicitly connected). A source added to the registry without
-// a config flag can't silently fall through — and a flag for an
-// UNREGISTERED id never leaks into the set.
 #[test]
 fn resolve_connected_covers_every_registered_source() {
     let mut cfg = AppConfig::default();
@@ -1046,7 +1062,6 @@ fn save_source_connected_roundtrips_and_preserves_other_keys() {
     assert!(after.contains("# hand-tuned"), "comment survives");
     assert!(after.contains("future-key = 1"), "unknown key survives");
 
-    // A second flip updates the same key in place.
     save_source_connected(&p, "claude-code", true).unwrap();
     assert_eq!(
         load(&p, &mut Vec::new()).sources.get("claude-code"),
@@ -1068,10 +1083,8 @@ fn remove_source_connected_drops_the_key_and_an_emptied_table() {
     assert_eq!(cfg.sources.get("codex"), Some(&true), "sibling survives");
     assert_eq!(cfg.theme.as_deref(), Some("normal"), "other keys survive");
 
-    // Removing the last key drops the now-empty [sources] table entirely,
-    // so a rolled-back first connect leaves no `[sources]` residue (the
-    // is_first_run signal reads table emptiness, but an empty table header
-    // in the file is still pointless noise).
+    // The `is_first_run` signal reads table emptiness, so a rolled-back first
+    // connect must leave no `[sources]` residue.
     remove_source_connected(&p, "codex").unwrap();
     let after = std::fs::read_to_string(&p).unwrap();
     assert!(
@@ -1082,13 +1095,11 @@ fn remove_source_connected_drops_the_key_and_an_emptied_table() {
     remove_source_connected(&p, "codex").unwrap();
 }
 
-// --- write seam parity with install/io.rs (#16) ----------------------------
-
 #[test]
 fn save_leaves_the_lock_file_in_place() {
-    // Parity with io.rs::write_config_atomic, which deliberately never
-    // unlinks its lock file (unlock-then-unlink lets two later writers both
-    // "hold" the lock on different inodes).
+    // Parity with io.rs::write_config_atomic, which deliberately never unlinks its
+    // lock file — unlock-then-unlink lets two later writers both "hold" the lock on
+    // different inodes.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");
     save(&p, "cyberpunk").unwrap();
@@ -1097,8 +1108,6 @@ fn save_leaves_the_lock_file_in_place() {
         "the lock file must stay in place"
     );
 }
-
-// --- save_version ---------------------------------------------------------
 
 #[test]
 fn save_version_persists() {

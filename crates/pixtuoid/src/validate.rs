@@ -5,16 +5,14 @@ use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations};
 
 use crate::strip_control_chars;
 
-/// The `OK:` line. **homebrew-core contract**: their `test do` asserts this
-/// output matches `OK: pack "skeleton"` after `init-pack`, so the literal
-/// prefix + quoting is a public packaging surface — rewording it breaks
-/// Homebrew's CI on the next autobump, not ours. Coordinate a core PR.
+/// The `OK:` line. **homebrew-core contract**: their `test do` asserts this output
+/// matches `OK: pack "skeleton"` after `init-pack`, so the literal prefix + quoting
+/// is a public packaging surface — rewording it breaks Homebrew's CI on the next
+/// autobump, not ours. Coordinate a core PR.
 ///
-/// `pack.name`/`pack.version` are untrusted TOML string fields —
-/// a crafted pack can encode ESC/OSC bytes (TOML `\u` escapes) that would inject
-/// a terminal escape when a user runs `validate-pack` to inspect a downloaded
-/// pack, so sanitize at the boundary (the sibling egresses — headless summary,
-/// doctor — all route through `strip_control_chars`).
+/// `pack.name`/`pack.version` are untrusted TOML string fields: a crafted pack can
+/// encode ESC/OSC bytes that would inject a terminal escape when a user runs
+/// `validate-pack` on a downloaded pack, so sanitize at the boundary.
 fn ok_line(name: &str, version: &str) -> String {
     format!(
         "OK: pack \"{}\" v{} loaded",
@@ -23,8 +21,8 @@ fn ok_line(name: &str, version: &str) -> String {
     )
 }
 
-/// The `INFO:` line for an unknown animation. The name is a raw pack table key
-/// (untrusted) — sanitize it for the same reason as `ok_line`.
+/// The `INFO:` line for an unknown animation — the name is a raw pack table key,
+/// so sanitize it for the same reason as [`ok_line`].
 fn unknown_line(name: &str) -> String {
     format!(
         "INFO:  unknown animation \"{}\" (unused by renderer)",
@@ -39,12 +37,11 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     let report = validate_pack_animations(&pack);
 
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
-    // parseable channel (the OK line, WARN/INFO advisories) even when a caller
-    // redirects stdout — errors also drive a non-zero exit via the bail! below.
-    // `missing_required`/`missing_optional` are REGISTRY constants, but the
-    // insufficient-frames and mismatched-density names can be DENSITY VARIANTS,
-    // which the validator finds by walking the pack's own table — so those are
-    // pack input and get the same sanitising as the unknown keys.
+    // parseable channel even when a caller redirects it. `missing_required`/
+    // `missing_optional` are registry constants, but insufficient-frames and
+    // mismatched-density names can be DENSITY VARIANTS, which the validator
+    // finds by walking the pack's own table — so those are pack input too, and
+    // get the same sanitising as the unknown keys.
     for name in &report.missing_required {
         eprintln!("ERROR: missing required animation \"{name}\"");
     }
@@ -89,10 +86,9 @@ mod tests {
 
     #[test]
     fn ok_line_strips_control_chars_from_untrusted_pack_fields() {
-        // A crafted pack name/version carrying ESC/BEL must not reach the terminal
-        // as a live escape; the printable text survives. (Only the control BYTE is
-        // removed — a full `\x1b[31m` SGR would leave the printable `[31m` behind,
-        // which is harmless, so the input puts the control char between letters.)
+        // Only the control BYTE is removed — a full `\x1b[31m` SGR would leave the
+        // printable `[31m` behind — so the input puts the control char between
+        // letters.
         let line = ok_line("ev\u{1b}il", "1.0\u{7}");
         assert!(!line.contains('\u{1b}') && !line.contains('\u{7}'));
         assert!(line.contains("evil") && line.contains("1.0"));

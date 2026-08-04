@@ -1,0 +1,19 @@
+# Extends the fn-body comment convention (no-comment-slop.yml) to `.py`, which
+# the Rust-only lint left unenforced. ADVISORY, diff-scoped; pre-existing runs
+# are grandfathered. No docstring exclusion is needed — a docstring is a string
+# EXPRESSION, not a comment. YAML remains uncovered by any rule here.
+id: no-comment-slop-py
+language: Python
+severity: warning
+message: "3+ consecutive comment lines in a function body — trim to a WHY (≤2 lines), or move the rationale to the docstring / a CLAUDE.md sharp edge. A fact a test could pin belongs in the test."
+rule:
+  kind: comment
+  inside:
+    kind: function_definition
+    stopBy: end
+  follows:
+    kind: comment
+    stopBy: neighbor
+    follows:
+      kind: comment
+      stopBy: neighbor

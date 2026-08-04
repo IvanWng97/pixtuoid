@@ -9,13 +9,10 @@ use std::time::Duration;
 fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
     let mut ctx = FloorCtx::new();
     let fresh = crate::layout::Layout::compute_with_seed(192, 156, None, 0).unwrap();
-    // First call (miss) and second call (memo hit) must both equal a fresh
-    // compute — the memo is a pure cache, never a source of divergence.
     let a = ctx.frame_layout(192, 156, 0).unwrap();
     let b = ctx.frame_layout(192, 156, 0).unwrap();
-    // The memo HIT must hand out the SAME Arc (a refcount bump), not a fresh
-    // deep clone — pointer identity is the whole point of the change, and the
-    // value-equality below would still pass a reverted `Arc::new((**l).clone())`.
+    // Pointer identity first: the value-equality below would still pass a reverted
+    // `Arc::new((**l).clone())`.
     assert!(
         std::sync::Arc::ptr_eq(&a, &b),
         "a memo hit must share the memoized Arc, not deep-clone it"
@@ -25,7 +22,6 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
         assert_eq!(l.reachable, fresh.reachable);
         assert_eq!(l.home_desks.len(), fresh.home_desks.len());
     }
-    // A resize / different seed is a different key: recompute, not a stale hit.
     let resized = ctx.frame_layout(120, 100, 0).unwrap();
     let fresh_resized = crate::layout::Layout::compute_with_seed(120, 100, None, 0).unwrap();
     assert_eq!(resized.walkable, fresh_resized.walkable);
@@ -35,20 +31,12 @@ fn frame_layout_memo_matches_fresh_compute_across_hits_resizes_and_none() {
         ctx.frame_layout(192, 156, 0).unwrap().walkable,
         fresh.walkable
     );
-    // (The corridor re-point half of the prologue runs on every call — hit or
-    // miss — inside frame_layout; the router keeps no public getter to assert
-    // on, and set_preferred_zone's behavior is pinned by the pathfind tests.)
 }
 
 #[test]
 fn daemons_projects_onto_the_ground_floor_only() {
-    // The gateway mascot is global, not per-floor — the projection carries
-    // daemons onto floor 0 ONLY, so a multi-floor office renders the lobster
-    // exactly once (a regression dropping the gate / flipping the index would
-    // duplicate him on every floor).
     use pixtuoid_core::state::{DaemonInstanceId, DaemonLiveness, DaemonPresence};
     let mut scene = SceneState::uniform(16);
-    // A second floor exists.
     scene.floor_capacities[1] = 16;
     // TWO gateways of one source, so the projection is also pinned to carry the
     // WHOLE roster (an `Option`-shaped projection would drop the second lobster).
@@ -86,27 +74,26 @@ fn door_anim_excludes_arrived_entry_profiles() {
     let mut fctx = FloorCtx::new();
     let mut ms = MotionState::new(id);
     // Entry walk: duration 2000ms + pause 300ms → walk_arrived at 2300ms.
-    ms.entry = Some((
-        t0,
-        WalkProfile {
+    ms.entry = Some(crate::motion::WalkLeg {
+        started_at: t0,
+        profile: WalkProfile {
             duration_ms: 2000,
             pause_ms: 300,
             path_len_octile: 500,
             v_cruise: 0.36,
             accel: 6.5e-4,
         },
-    ));
+        from: crate::layout::Point { x: 0, y: 0 },
+    });
     fctx.motion.insert(id, ms);
 
-    // Mid-walk → profile is in-flight → it sets the door window.
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(1000));
     assert_eq!(
         fctx.door_anim_max_ms, 2300,
         "in-flight entry walk should drive the door cosmetic window"
     );
 
-    // Past arrival (>= duration + pause) → excluded so the door closes,
-    // even though MotionState.entry is never cleared for this agent.
+    // Past arrival, even though MotionState.entry is never cleared for this agent.
     fctx.recompute_door_anim_max_ms(t0 + Duration::from_millis(3000));
     assert_eq!(
         fctx.door_anim_max_ms, 0,
@@ -116,8 +103,6 @@ fn door_anim_excludes_arrived_entry_profiles() {
 
 #[test]
 fn floor_ctx_default_equals_new() {
-    // Both Default impls delegate to new(); pin the equivalence so a future
-    // field addition can't make `default()` diverge silently.
     let d = FloorCtx::default();
     assert_eq!(
         d.door_anim_max_ms, 0,
@@ -131,7 +116,6 @@ fn floor_ctx_default_equals_new() {
 
 #[test]
 fn lighting_state_default_equals_new() {
-    // LightingState::default() delegates to new() — both start fully lit.
     assert_eq!(
         LightingState::default().level(),
         LightingState::new().level(),
@@ -246,10 +230,8 @@ fn build_floor_scene_filters_and_remaps() {
     let mut indices: Vec<usize> = floor1.iter().map(|p| p.desk.0).collect();
     indices.sort();
     assert_eq!(indices, vec![0, 1, 2, 3]);
-    // The pair keeps the currency honest (#13): the LOCAL desk lives in
-    // the typed FloorLocalDeskIndex, while the slot's GLOBAL desk_index
-    // is untouched — floor 1's agents keep their real allocation (16..20)
-    // until project_floor_scene's documented re-host.
+    // The slot's GLOBAL desk_index is untouched: floor 1's agents keep their real
+    // allocation until project_floor_scene's documented re-host.
     let mut globals: Vec<usize> = floor1.iter().map(|p| p.slot.desk_index.0).collect();
     globals.sort();
     assert_eq!(globals, vec![16, 17, 18, 19]);
@@ -257,12 +239,8 @@ fn build_floor_scene_filters_and_remaps() {
 
 #[test]
 fn build_floor_scene_remap_is_local_global_coincident() {
-    // The doc-comment-backed property on `build_floor_scene`: within a
-    // projected `uniform(cap)` scene the global desk space coincides with
-    // its (only) floor's local space, so the remapped `GlobalDeskIndex`
-    // is simultaneously a valid global index for the smaller scene AND —
-    // through the typed bridge — the floor-local index the render path
-    // needs. This is what makes `single_floor_local` an identity there.
+    // Within a projected `uniform(cap)` scene the global desk space coincides with
+    // its only floor's local space — what makes `single_floor_local` an identity.
     let scene = make_scene(20, 16);
     for floor_idx in 0..num_floors(&scene) {
         let projected = project_floor_scene(&scene, floor_idx);
@@ -284,9 +262,8 @@ fn build_floor_scene_remap_is_local_global_coincident() {
 
 #[test]
 fn build_floor_scene_skips_agent_below_grown_offset() {
-    // Agent assigned desk 5 on floor 1 when floor 0 had capacity 4.
-    // Floor 0 later grows to capacity 8. floor_range(1).start = 8,
-    // so desk 5 < 8 and the agent should be invisible on floor 1.
+    // Desk 5 is assigned on floor 1 while floor 0 has capacity 4; floor 0 then
+    // grows to 8, so `floor_range(1).start` passes the agent's own desk.
     let mut s = SceneState::new([4, 4, 0, 0, 0, 0, 0, 0, 0, 0]);
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let id = AgentId::from_transcript_path("/p/stale.jsonl");
@@ -317,7 +294,6 @@ fn build_floor_scene_skips_agent_below_grown_offset() {
             last_usage: None,
         },
     );
-    // Simulate floor 0 capacity growth
     s.floor_capacities = [8, 4, 0, 0, 0, 0, 0, 0, 0, 0];
     let floor1 = build_floor_scene(&s, 1);
     assert!(
@@ -395,8 +371,6 @@ fn transition_t_clamps_past_duration() {
     assert!(tr.is_done(past));
 }
 
-// ---- LightingState ----------------------------------------------------
-
 fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000)
 }
@@ -405,8 +379,6 @@ fn t0() -> SystemTime {
 fn light_steady_state_populated() {
     let mut light = LightingState::new();
     let start = t0();
-    // Many frames over multiple seconds with `empty=false` should not
-    // move the level away from 1.0.
     for ms in (0..3_000).step_by(33) {
         let level = light.tick(false, start + Duration::from_millis(ms));
         assert!(
@@ -421,8 +393,7 @@ fn light_holds_during_debounce_window() {
     let mut light = LightingState::new();
     let start = t0();
     light.tick(true, start);
-    // 4 s after going empty (< 5 s debounce) — target should still be
-    // 1.0 so level holds.
+    // 4 s after going empty, inside the 5 s debounce.
     let level = light.tick(true, start + Duration::from_millis(4_000));
     assert!(
         (level - 1.0).abs() < 1e-6,
@@ -435,7 +406,7 @@ fn light_eases_toward_min_after_debounce() {
     let mut light = LightingState::new();
     let start = t0();
     light.tick(true, start);
-    // Sample at 6 s (debounce expired 1 s ago, ~1.25 tau of fade).
+    // 6 s: the debounce expired 1 s ago, ~1.25 tau of fade.
     let level = light.tick(true, start + Duration::from_millis(6_000));
     assert!(level < 0.95, "no fade started after debounce: {level}");
     assert!(level > LightingState::MIN_LEVEL, "overshot floor: {level}");
@@ -445,8 +416,7 @@ fn light_eases_toward_min_after_debounce() {
 fn light_converges_to_min_when_empty_long_enough() {
     let mut light = LightingState::new();
     let start = t0();
-    // Step the tick at a realistic frame cadence for 30 s so the
-    // exponential ease has fully landed.
+    // A realistic frame cadence for 30 s, so the exponential ease has fully landed.
     for ms in (0..30_000).step_by(33) {
         light.tick(true, start + Duration::from_millis(ms));
     }
@@ -461,12 +431,10 @@ fn light_converges_to_min_when_empty_long_enough() {
 fn light_rises_back_when_repopulated() {
     let mut light = LightingState::new();
     let start = t0();
-    // Drive level all the way down.
     for ms in (0..20_000).step_by(33) {
         light.tick(true, start + Duration::from_millis(ms));
     }
     assert!(light.level() < 0.2);
-    // Populated → target snaps to 1.0; verify the ease climbs back.
     let later = start + Duration::from_millis(20_000);
     for ms in (0..3_000).step_by(33) {
         light.tick(false, later + Duration::from_millis(ms));
@@ -479,13 +447,11 @@ fn light_rises_back_when_repopulated() {
 fn light_resets_empty_since_when_repopulated() {
     let mut light = LightingState::new();
     let start = t0();
-    // Empty for 3 s (within debounce).
     light.tick(true, start);
     light.tick(true, start + Duration::from_millis(3_000));
-    // Briefly populated — should clear the debounce timer.
     light.tick(false, start + Duration::from_millis(3_500));
-    // Empty again — debounce timer must restart from this moment, so
-    // 4 s later we should STILL be holding at 1.0, not faded.
+    // Empty again: the debounce must restart here, so the 7.5 s sample is only
+    // 3.9 s into the new window and must still hold at 1.0.
     light.tick(true, start + Duration::from_millis(3_600));
     let level = light.tick(true, start + Duration::from_millis(7_500));
     assert!(
@@ -499,9 +465,6 @@ fn light_large_dt_does_not_overshoot_or_nan() {
     let mut light = LightingState::new();
     let start = t0();
     light.tick(true, start);
-    // Huge dt (1 day) past the debounce. exp(-dt/tau) underflows to 0
-    // so alpha = 1.0; level should land exactly at target (MIN_LEVEL),
-    // not overshoot or produce NaN.
     let later = start + Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS + 1_000);
     let level = light.tick(true, later);
     assert!(level.is_finite(), "level went non-finite: {level}");
@@ -515,11 +478,10 @@ fn light_large_dt_does_not_overshoot_or_nan() {
 fn light_backward_clock_jump_does_not_move_level() {
     let mut light = LightingState::new();
     let start = t0();
-    // Bring level to a known mid value via a real tick.
     light.tick(false, start);
     let before = light.level();
-    // A backward "now" makes duration_since() error; the impl uses
-    // `.ok()` so dt collapses to 0 and the level should not change.
+    // A backward "now" makes duration_since() error; the impl's `.ok()` collapses
+    // dt to 0.
     let backward = start - Duration::from_millis(500);
     let level = light.tick(true, backward);
     assert!(
@@ -543,14 +505,12 @@ fn coffee_record_stamps_only_new_carriers_and_evict_follows_the_scene() {
     let mut coffee = CoffeeState::new();
     coffee.record([id], t0);
     assert_eq!(coffee.map().get(&id), Some(&t0), "a new carrier is stamped");
-    // Re-recording an existing carrier must NOT restart its steam window.
     coffee.record([id], t1);
     assert_eq!(
         coffee.map().get(&id),
         Some(&t0),
         "an already-recorded carrier keeps its original fetch stamp"
     );
-    // The agent leaving the scene evicts the cup + stamp (one entry).
     let empty = SceneState::new([8; MAX_FLOORS]);
     coffee.evict_missing(&empty);
     assert!(coffee.map().is_empty());
@@ -562,7 +522,6 @@ fn coffee_second_trip_after_steam_window_restamps() {
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut coffee = CoffeeState::new();
     coffee.record([id], t0);
-    // Within the window: per-frame walk-back re-reports keep the stamp.
     let within = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS - 1);
     coffee.record([id], within);
     assert_eq!(
@@ -570,9 +529,6 @@ fn coffee_second_trip_after_steam_window_restamps() {
         Some(&t0),
         "a re-report within the steam window keeps the original stamp"
     );
-    // A report past the window is a genuinely NEW pantry fetch (the old
-    // cup's steam long expired) — the stamp must refresh so the fresh cup
-    // steams again instead of landing permanently steam-less.
     let refetch = t0 + Duration::from_secs(CoffeeState::STEAM_WINDOW_SECS * 3);
     coffee.record([id], refetch);
     assert_eq!(
@@ -584,11 +540,9 @@ fn coffee_second_trip_after_steam_window_restamps() {
 
 #[test]
 fn coffee_record_keeps_stamp_on_a_backward_clock_step() {
-    // Backward clock (now < stored → duration_since errs): `is_ok_and` yields
-    // false → not-expired → the old stamp is KEPT, not rewound. Guards against a
-    // treat-clock-error-as-expired regression that would restart the steam
-    // window (and rewind the stamp) on an NTP/suspend step. The two forward
-    // tests can't catch it — their `duration_since` never errs.
+    // An NTP/suspend step makes `duration_since` err, which must read as
+    // not-expired: the two forward tests can't catch a treat-error-as-expired
+    // regression because their `duration_since` never errs.
     let id = AgentId::from_parts("claude-code", "coffee-backclock");
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let mut coffee = CoffeeState::new();
@@ -603,11 +557,6 @@ fn coffee_record_keeps_stamp_on_a_backward_clock_step() {
 
 #[test]
 fn floor_capacity_clamps_to_zero_on_a_too_small_buffer() {
-    // A buffer too small for even one cubicle → compute_with_seed None → the
-    // `unwrap_or(0)` clamp. Mutating it to `unwrap()` panics boot-seeding;
-    // `unwrap_or(1)` seeds a phantom desk. A normal buffer fits ≥ 1 desk (the
-    // `> 0` guards an always-None / constant-0 mutant); the exact count is left
-    // to the layout tests — re-deriving it here would just re-run the impl.
     assert_eq!(floor_capacity(3, 3, 0), 0);
     assert!(floor_capacity(192, 160, 0) > 0);
 }
@@ -616,18 +565,14 @@ fn floor_capacity_clamps_to_zero_on_a_too_small_buffer() {
 fn transition_escapes_a_backward_clock_step() {
     let start = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
     let tr = FloorTransition::new(0, 1, start);
-    // A small backward wobble (within one transition duration) is clock
-    // jitter: hold at t = 0 and let the clock catch up.
     let wobble = start - Duration::from_millis(100);
     assert!(
         !tr.is_done(wobble),
         "a small wobble must not abort the slide"
     );
     assert!((tr.t(wobble) - 0.0).abs() < f32::EPSILON);
-    // A step to before started_at by MORE than the transition's own
-    // duration can't be render-loop jitter — without an escape the
-    // renderer stays wedged in the transition composite (no labels,
-    // tooltips, or hit-testing) until the wall clock re-passes started_at.
+    // Without the escape the renderer stays wedged in the transition composite —
+    // no labels, tooltips or hit-testing — until the clock re-passes started_at.
     let stepped = start - Duration::from_millis(tr.duration_ms * 2);
     assert!(
         tr.is_done(stepped),
@@ -637,10 +582,8 @@ fn transition_escapes_a_backward_clock_step() {
 
 #[test]
 fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
-    // The PIPELINE-level burn pin: a fable+ultra slot must come out of the
-    // full render_floor pass with ember hair + flame pixels — a projection
-    // or sim/paint hop silently dropping slot.model/effort fails HERE even
-    // while the unit-level paint_character_at test stays green.
+    // Driven through the FULL pass: a projection or sim/paint hop dropping
+    // slot.model/effort fails here while the unit-level paint test stays green.
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
@@ -674,7 +617,6 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         },
     )
     .expect("layout");
-    // The painter's own constants — not re-hardcoded copies.
     let ember = crate::pixel_painter::FLAME_DEEP;
     let tip = crate::pixel_painter::FLAME_TIP;
     let count = |c| {
@@ -698,8 +640,6 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
     let mut coffee = CoffeeState::new();
     let mut chitchat = HashMap::new();
 
-    // A too-small buffer: no layout, `None`, no panic — the buffer is
-    // resized+cleared but unpainted.
     let none = render_floor(
         &mut fctx,
         &mut buf,
@@ -725,8 +665,6 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
         "the buffer was still sized"
     );
 
-    // A real size: the layout comes back and the pass painted content
-    // beyond the cleared background fill.
     let layout = render_floor(
         &mut fctx,
         &mut buf,
@@ -755,14 +693,8 @@ fn render_floor_paints_records_coffee_state_and_survives_a_tiny_buffer() {
     );
 }
 
-// ---- FloorSession -----------------------------------------------------
-
 #[test]
 fn floor_session_render_owns_the_dual_eviction() {
-    // FloorSession::render runs BOTH halves of the dual eviction itself —
-    // the render caches (motion/pose/frame) and the coffee cup — so a
-    // painter can't skip one and leak per-agent state or teleport a
-    // recurring agent.
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -775,7 +707,6 @@ fn floor_session_render_owns_the_dual_eviction() {
         .insert(gone, MotionState::new(gone));
     session.office.coffee.insert(gone, now);
 
-    // `gone` is not in the scene → one render() must drop both entries.
     let scene = SceneState::new([8; MAX_FLOORS]);
     let layout = session.render(FrameInputs {
         scene: &scene,
@@ -802,11 +733,8 @@ fn floor_session_render_owns_the_dual_eviction() {
 
 #[test]
 fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
-    // The appliance-cue feed (#633): render() must record the sim's occupancy
-    // observation in `last_occupied` — the set the shared `AudioObserver` reads
-    // (via `FloorSession::audio_frame`) — so a windowed painter never re-runs the
-    // sim. (`last_occupied` is a private field; this test is a child module of
-    // `floor`, so it reads it directly.)
+    // `last_occupied` is the set the shared `AudioObserver` reads, so recording it
+    // here is what lets a windowed painter avoid re-running the sim.
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
     let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
@@ -818,13 +746,8 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
     }
     let mut session = FloorSession::new();
     assert!(session.last_occupied.is_empty(), "empty before any render");
-    // Frame-ACCURACY, not just "ever nonempty": walk the whole sim and
-    // record the occupancy-set size each frame. The set must (a) go
-    // nonempty (the agent reaches a waypoint, indices valid) AND (b) fall
-    // back to empty on a LATER layoutable frame (the agent wanders off).
-    // A sticky/accumulating `last_occupied` (the `.extend` mutant) is
-    // monotone non-decreasing, so it can never produce the fall — this is
-    // the anti-stick tooth the "ever nonempty" check lacked.
+    // Requiring the FALL back to empty is the anti-stick tooth: an accumulating
+    // `last_occupied` is monotone non-decreasing and can never produce it.
     let mut occupied_ever = false;
     let mut fell_back_empty = false;
     for step in 0..600u64 {
@@ -866,8 +789,6 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
         fell_back_empty,
         "occupancy never fell back to empty — last_occupied accumulates instead of tracking the frame"
     );
-    // An unlayoutable size clears the stale set — a painter reading it
-    // after a shrink must not replay the last big frame's occupancy.
     let none = session.render(FrameInputs {
         scene: &scene,
         pack: &pack,
@@ -889,11 +810,6 @@ fn floor_session_render_surfaces_the_sims_occupied_waypoints() {
 
 #[test]
 fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
-    // The headless observation seam the sim/paint split (#450) prepared:
-    // eviction + layout prologue + sim_step + the coffee/door epilogue,
-    // with NO pixel buffer touched. A fresh agent's entry walk must
-    // populate motion and the door-anim clamp, and the frame must carry
-    // its pose.
     let pack = crate::embedded_pack::test_default_pack();
     let scene = make_scene(1, 8);
     let id = AgentId::from_transcript_path("/p/0.jsonl");
@@ -921,7 +837,6 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
         "no pixel buffer was bought"
     );
 
-    // Too small for any layout: None, never a panic.
     assert!(
         session
             .observe(&scene, &pack, 8, 8, FloorMeta::ground(), t)
@@ -932,8 +847,6 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
 #[test]
 fn session_types_default_equals_new() {
-    // Same convention pin as FloorCtx/LightingState above: Default and
-    // new() must not diverge on a future field addition.
     assert_eq!(PerFloor::default().ctx.door_anim_max_ms, 0);
     assert_eq!(
         (
@@ -955,8 +868,8 @@ fn reset_frame_cache_clears_cached_sprites() {
     use pixtuoid_core::{sprite::Frame, AgentId};
 
     let mut s = FloorSession::new();
-    // Prime the cache with one entry, so the assertion below distinguishes a
-    // real reset from a no-op (a fresh session's cache is already empty).
+    // Prime the cache, so the assertion below distinguishes a real reset from a
+    // no-op on an already-empty cache.
     s.floor.ctx.cache.get_or_make(
         FrameKey {
             agent_id: AgentId::from_parts("test", "agent"),
@@ -984,9 +897,6 @@ fn reset_frame_cache_clears_cached_sprites() {
 
 #[test]
 fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
-    // Wiring-oracle: the AudioFrame the observer returns must equal the pure model
-    // (stem_levels / select_track) applied to the SAME inputs the painters used to
-    // assemble by hand — so the consolidation can't drift the composition.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16);
     let occupied = std::collections::HashSet::new();
@@ -1011,20 +921,16 @@ fn audio_observer_frame_composes_stems_and_track_from_the_scene() {
 
 #[test]
 fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
-    // Switching the VIEWED floor must reprime the cue tracker: the switch frame
-    // primes silently (no volley for agents/appliances already there), then normal
-    // edges resume. `primed_floor` tracks the latch.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let scene = make_scene(4, 16); // agents live on floor 0
     let printer = |i: usize| (i == 0 || i == 1).then_some(crate::layout::WaypointKind::Printer);
     let mut obs = AudioObserver::new();
 
-    // Prime floor 0.
     let _ = obs.frame(&scene, &std::collections::HashSet::new(), printer, 0, now);
     assert_eq!(obs.primed_floor(), Some(0));
 
-    // Switch to floor 1 with an appliance ALREADY occupied: the reprime makes the
-    // switch frame silent (this would fire PrinterWhir without the reprime).
+    // Switch to floor 1 with an appliance ALREADY occupied — this would fire
+    // PrinterWhir without the reprime.
     let occ0: std::collections::HashSet<usize> = [0usize].into_iter().collect();
     let switch = obs.frame(&scene, &occ0, printer, 1, now);
     assert_eq!(obs.primed_floor(), Some(1));
@@ -1033,7 +939,6 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
         "a floor switch reprimes silently — no cue volley for the new floor"
     );
 
-    // Post-reprime the tracker still works: a NEWLY occupied printer fires.
     let occ01: std::collections::HashSet<usize> = [0usize, 1usize].into_iter().collect();
     let next = obs.frame(&scene, &occ01, printer, 1, now);
     assert!(
@@ -1044,24 +949,20 @@ fn audio_observer_reprimes_on_floor_switch_so_the_new_floor_is_silent() {
 
 #[test]
 fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
-    // B (mute-gating): the painter calls frame() EVERY world-frame and gates only
-    // DELIVERY. An agent arriving during a muted stretch is consumed by the still-
-    // running observer, so when delivery resumes it must NOT re-fire a chime.
+    // Mute-gating: the painter calls frame() EVERY world-frame and gates only
+    // DELIVERY, so an arrival during a muted stretch is still consumed here.
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let empty = make_scene(0, 16);
     let one = make_scene(1, 16);
     let occ = std::collections::HashSet::new();
     let mut obs = AudioObserver::new();
 
-    let _ = obs.frame(&empty, &occ, |_| None, 0, now); // prime (empty office)
-                                                       // "muted" frame: the agent arrives; the painter still calls frame(), then
-                                                       // DROPS the result. The chime fires here (and is discarded by the caller).
+    let _ = obs.frame(&empty, &occ, |_| None, 0, now);
     let arrival = obs.frame(&one, &occ, |_| None, 0, now);
     assert!(
         arrival.events.contains(&crate::audio::OneShot::DoorChime),
         "an arrival chimes on the frame it happens"
     );
-    // Delivery resumes: the SAME agent is still present → no new chime.
     let resumed = obs.frame(&one, &occ, |_| None, 0, now);
     assert!(
         !resumed.events.contains(&crate::audio::OneShot::DoorChime),

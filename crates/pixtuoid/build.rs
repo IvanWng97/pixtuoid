@@ -1,14 +1,9 @@
 //! Tell cargo to rebuild whenever the embedded SKELETON template changes.
 //!
-//! `include_str!` in `src/init_pack.rs` bakes the skeleton pack (the
-//! `init-pack` template) into the binary at compile time, but cargo doesn't
-//! track those paths as source dependencies on its own — editing a `.sprite`
-//! file or `pack.toml` would otherwise leave the binary stale until the .rs
-//! changes. (The DEFAULT pack lives in `pixtuoid-scene`, which has its own
-//! build.rs; the binary only embeds the skeleton.)
-//!
-//! This script walks `sprites/skeleton/` and emits one `rerun-if-changed`
-//! line per file plus one for the directory itself (catches new files).
+//! `include_str!` in `src/init_pack.rs` bakes the skeleton pack into the binary,
+//! but cargo doesn't track those paths as source dependencies on its own —
+//! editing a `.sprite` file or `pack.toml` would otherwise leave the binary stale
+//! until a `.rs` changes.
 
 use std::path::Path;
 
@@ -30,6 +25,5 @@ fn main() {
         }
     }
 
-    // Always rerun if THIS script changes.
     println!("cargo:rerun-if-changed=build.rs");
 }

@@ -1,15 +1,16 @@
 [advisories]
-# Each ignore is Linux-only build-graph exposure with no untrusted input;
-# issue #440 owns removal when upstream releases (full dependency-path
-# traces there; the winit-0.31 route is #441).
+# Otherwise a stale `ignore` entry only warns, so a shipped upstream fix would rot
+# behind a green run. Needs cargo-deny 0.20.2 (what cargo-deny-action@v2.1.1 pins);
+# an older cargo-deny rejects the whole file over this key.
+unused-ignored-advisory = "deny"
+# #440 tracks dropping this ignore, but there is no upstream release to wait for:
+# RUSTSEC-2026-0192 is `informational = "unmaintained"` with `patched = []`. It
+# clears only when ab_glyph moves off ttf-parser, or when we drop ab_glyph.
 ignore = [
-    # quick-xml 0.39 pair, reachable only via wayland-scanner (build-time
-    # codegen over vendored Wayland protocol XML — never attacker input).
-    # Fix needs wayland-rs to release against quick-xml >=0.41.
-    "RUSTSEC-2026-0194",
-    "RUSTSEC-2026-0195",
-    # ttf-parser declared unmaintained; only via sctk-adwaita (Linux Wayland
-    # CSD titlebar text, local system fonts). Upstream is migrating to skrifa.
+    # ttf-parser (unmaintained) enters by TWO routes — our own `ab_glyph` dep in
+    # src/aa_text.rs, and `sctk-adwaita <- winit` for the Wayland CSD titlebar —
+    # so winit moving off ab_glyph would NOT clear this row. Neither route takes
+    # attacker input: both parse a compiled-in or local system font.
     "RUSTSEC-2026-0192",
 ]
 

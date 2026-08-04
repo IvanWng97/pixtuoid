@@ -2,10 +2,8 @@
 import { REPO, SPONSOR, asset, DOCS } from '../consts';
 // Absolute home so the section anchors work from any page (e.g. /config).
 const home = asset('');
-// `floating` = the OPEN FLOOR index treatment (corner chrome over the live
-// office, scrolls away — the statusline is that page's persistent chrome).
-// The default is the sticky bar: Docs/404 have no backdrop and no statusline,
-// so they keep persistent nav, the --nav-h layout reservation, and section links.
+// `floating` = the index treatment: corner chrome over the live office that
+// scrolls away, because the statusline is that page's persistent chrome.
 const { floating = false } = Astro.props;
 ---
 
@@ -73,41 +71,33 @@ const { floating = false } = Astro.props;
     const btn = document.getElementById('theme-toggle');
     const icon = btn && btn.querySelector('.nav__toggle-icon');
     function sync() {
-      // dracula is a DARK theme too — treat anything but day as "dark" so the
-      // toggle shows ☀️/"Switch to day" while in dracula (not 🌙/"Switch to night")
+      // dracula is a DARK theme too — treat anything but day as "dark".
       const night = document.documentElement.dataset.theme !== 'day';
       if (icon) icon.textContent = night ? '☀️' : '🌙';
       if (btn) btn.setAttribute('aria-label', night ? 'Switch to day' : 'Switch to night');
     }
     sync();
-    // re-sync the icon/aria when the theme is changed elsewhere (the dracula egg
-    // or Escape in Base.astro dispatch this) so the toggle never goes stale
     document.addEventListener('pix:theme', sync);
     if (btn)
       btn.addEventListener('click', function () {
         const root = document.documentElement;
-        // clear any per-theme retint a gallery chip applied, so the toggle shows
-        // the clean day/night palette (inline vars would otherwise win the cascade)
+        // clear any per-theme retint a gallery chip applied — those inline vars
+        // would otherwise win the cascade over the clean day/night palette
         root.style.removeProperty('--coral');
         root.style.removeProperty('--coral-deep');
         root.style.removeProperty('--amber');
-        // day → night; any dark theme (night OR dracula) → day, matching the
-        // "Switch to day" label so dracula has a one-click path back to day
+        // any dark theme (night OR dracula) → day, matching the "Switch to day"
+        // label so dracula has a one-click path back
         const next = root.dataset.theme === 'day' ? 'night' : 'day';
         root.dataset.theme = next;
         try {
           localStorage.setItem(window.__pixTheme.KEY, next);
         } catch (e) {}
-        // notify listeners (Nav icon sync, gallery chip reset, theme-color meta)
-        // — the same event the dracula egg / Escape dispatch from Base.astro
         document.dispatchEvent(new CustomEvent('pix:theme'));
       });
 
-    // One disclosure wiring for both the burger menu and the Docs dropdown (the
-    // 5-part toggle/close/Escape-focus-return pattern was duplicated). `icon*`
-    // flips the burger glyph; `focusFirst` moves focus into the revealed panel
-    // so a menu that renders BELOW its trigger still follows it in tab order
-    // (WCAG 2.4.3) — the Escape branch returns focus to the trigger either way.
+    // `focusFirst` moves focus into the revealed panel so a menu that renders
+    // BELOW its trigger still follows it in tab order (WCAG 2.4.3).
     function wireDisclosure(trigger, panel, opts) {
       opts = opts || {};
       const isOpen = function () {
@@ -133,8 +123,8 @@ const { floating = false } = Astro.props;
       });
       document.addEventListener('keydown', function (e) {
         if (e.key !== 'Escape' || !isOpen()) return;
-        // if focus was inside the panel, return it to the trigger so closing the
-        // panel (display:none) doesn't drop focus to <body> (WCAG 2.4.3)
+        // closing the panel is display:none, which would drop focus to <body>
+        // if it were inside (WCAG 2.4.3)
         const inside = panel.contains(document.activeElement);
         set(false);
         if (inside) trigger.focus();
@@ -144,8 +134,6 @@ const { floating = false } = Astro.props;
       });
     }
 
-    // mobile hamburger → the nav-links dropdown; desktop "Docs" dropdown (on
-    // mobile the Docs items render flat inside the burger panel)
     const burger = document.getElementById('nav-burger');
     const links = document.getElementById('nav-links');
     if (burger && links)
@@ -162,8 +150,8 @@ const { floating = false } = Astro.props;
 </script>
 
 <style>
-  /* Default: the sticky bar (docs + 404 pages). The blur is safe here — these
-     pages have no 30fps canvas underneath. */
+  /* Default: the sticky bar (docs + 404). The blur is safe here — these pages
+     have no 30fps canvas underneath. */
   .nav {
     position: sticky;
     top: 0;
@@ -173,9 +161,7 @@ const { floating = false } = Astro.props;
     background: color-mix(in srgb, var(--bg) 80%, transparent);
     border-bottom: 1px solid var(--border);
   }
-  /* Corner chrome (index): the nav floats over the live office at the top of
-     the page and scrolls away (the statusline is the persistent chrome). No
-     bar, no border — and critically NO backdrop-filter: a live blur over the
+  /* Corner chrome (index). Critically NO backdrop-filter: a live blur over the
      30fps canvas is the documented compositor-flicker class. */
   .nav--floating {
     position: absolute;
@@ -189,7 +175,10 @@ const { floating = false } = Astro.props;
   .nav__version {
     font-family: var(--font-mono);
     font-size: 0.75rem;
-    color: var(--chip-dim);
+    /* --chip-ink, not --chip-dim: the dim tone is tuned for an OPAQUE --screen
+       and this chip is only 72% of it, so the ground shows through and drops it
+       under AA. De-emphasis comes from the 0.75rem size instead. */
+    color: var(--chip-ink);
     background: color-mix(in srgb, var(--screen) 72%, transparent);
     padding: 0.15rem 0.45rem;
     margin-left: -0.4rem;
@@ -218,18 +207,14 @@ const { floating = false } = Astro.props;
     color: var(--fg);
     text-decoration: none;
   }
-  /* the logo mark IS the tab favicon (same asset, day/night swapped by the Base
-     theme sync) — one brand source, no drift. Shown at the favicon's native 32px
-     (1:1), so the pixel bust is device-exact on 1× and a clean 2× double on
-     retina (image-rendering:pixelated keeps that double hard-edged). Size only to
-     32 or an integer fraction of it (the footer uses 16) — an arbitrary fraction
-     like the old 24px resamples the bust softer. */
+  /* The logo mark IS the tab favicon, shown at its native 32px so the pixel bust
+     is device-exact on 1× and a clean double on retina. Size only to 32 or an
+     integer fraction of it — an arbitrary fraction resamples the bust softer. */
   .nav__mark {
     height: 32px;
     width: 32px;
     image-rendering: pixelated;
   }
-  /* mobile: a dropdown panel toggled by the burger; desktop: an inline row */
   .nav__links {
     display: none;
     position: absolute;
@@ -253,28 +238,21 @@ const { floating = false } = Astro.props;
     text-decoration: none;
     padding: 0.55rem 0.2rem;
     border-radius: var(--radius-sm);
-    /* ease the hover like the button/chip family does — the text-link row was
-       the only interactive surface that hard-snapped its color on hover. */
     transition: color 0.18s ease;
   }
   .nav__links a:hover {
     color: var(--fg);
   }
-  /* support CTA — coral so it reads as an action, not just another nav link.
-     --coral-deep stays contrast-safe on both day (cream bar) and night (dark bar)
-     and is exempt from the gallery retint. */
+  /* --coral-deep, not --coral: contrast-safe on both the cream day bar and the
+     dark night bar, and exempt from the gallery retint. */
   .nav__links a.nav__coffee {
     color: var(--coral-deep);
     white-space: nowrap;
   }
   .nav__links a.nav__coffee:hover {
-    /* brighten to --coral on hover — the SAME muted→full nudge every sibling nav
-       link uses (`.nav__links a:hover`), so the row shares one hover mechanism
-       instead of the coffee link alone underlining. --coral dips below AA on the
-       cream day bar, but ONLY in this transient hover state — the resting
-       --coral-deep is AA-safe by design (global.css: ~5:1 on --paper, and light
-       on the night bar). Deliberate trade-off (was #678's A3 underline); don't
-       "re-fix" it back without reading that history. */
+    /* --coral dips below AA on the cream day bar, but ONLY in this transient
+       hover state, so the row can share one hover mechanism instead of the
+       coffee link alone underlining. Deliberate — don't "re-fix" it. */
     color: var(--coral);
   }
   .nav__burger {
@@ -291,8 +269,8 @@ const { floating = false } = Astro.props;
     font-size: 1.1rem;
     line-height: 1;
   }
-  /* "Docs" group: a dropdown on desktop; on mobile its items render flat inside
-     the burger panel (the button hides; the menu's links join the column). */
+  /* display:contents so that on mobile the Docs items render flat inside the
+     burger panel; the desktop media query re-establishes the dropdown. */
   .nav__docs,
   .nav__menu {
     display: contents;
@@ -386,8 +364,7 @@ const { floating = false } = Astro.props;
   .nav__toggle:hover {
     transform: translateY(-1px);
   }
-  /* touch devices: raise the icon buttons to the 44px comfortable thumb target
-     (the 40px desktop size is a mis-tap risk on a phone). */
+  /* 44px is the comfortable thumb target; the 40px desktop size mis-taps. */
   @media (pointer: coarse) {
     .nav__burger,
     .nav__toggle {

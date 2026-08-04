@@ -2,15 +2,17 @@
 //! clock, corridor runner, entry mat, time-of-day overlays, ceiling
 //! light pools, lamp halo, floor shadows, and weather effects.
 //!
-//! Everything here paints BEFORE the y-sorted entity pass. Helpers are
-//! `pub(super)` so the orchestrator (`pixel_painter/mod.rs`) can call
-//! them in the order it wants.
+//! Everything here paints BEFORE the y-sorted entity pass, in the order the
+//! orchestrator (`pixel_painter/mod.rs`) calls it.
 
 mod celestial;
 mod lighting;
 mod sky;
 
-// Re-export everything the parent pixel_painter/mod.rs imports.
+use celestial::{
+    compute_disc, golden_hour_blaze, night_star_strength, star_exists, star_twinkle, Disc,
+    GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, STAR_MIN, STAR_SKY_BAND_FRAC,
+};
 pub(super) use lighting::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
     paint_neon_panel, paint_radial_falloff, paint_shadow, Ellipse, RadialFalloff,
@@ -18,17 +20,6 @@ pub(super) use lighting::{
 pub(super) use sky::{
     beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
     sun_on_wall, time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
-};
-// The celestial disc + night-star helpers (#469) are INTERNAL to this module —
-// the sky branch of `paint_floor_to_ceiling_window` (and its tests) consume
-// them. Unlike sky/lighting they are NOT re-exported up to `pixel_painter` (no
-// other pass reads them), so this is a plain `use`, listed explicitly to keep
-// the celestial→mod surface auditable. celestial's placement-internal consts
-// (DISC_RADIUS_PX/FIRST_WINDOW_X/HORIZON_FRAC/ARC_RISE_FRAC/MIN_DISC_VIS/
-// STAR_SPARSITY/STAR_TWINKLE_*) stay private to celestial.rs.
-use celestial::{
-    compute_disc, golden_hour_blaze, night_star_strength, star_exists, star_twinkle, Disc,
-    GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, STAR_MIN, STAR_SKY_BAND_FRAC,
 };
 
 use std::time::SystemTime;
@@ -39,11 +30,9 @@ use super::ambient::SunbeamColumn;
 use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, mix_lab};
 
-/// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`, decoded
-/// via chrono. The ambient/sky clock-decode funnel: the day-ramp / sunset /
-/// window-look timers and `sun_on_wall` (via `emitter`) all route through here.
-/// (`paint_clock`'s analog hands keep their own decode — they need raw
-/// `hour % 12` / `minute`, not this fractional value.)
+/// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`. The
+/// ambient/sky clock-decode funnel; `paint_clock`'s analog hands keep their own
+/// decode because they need raw `hour % 12` / `minute`, not this value.
 pub(in crate::pixel_painter) fn local_hour_frac(now: std::time::SystemTime) -> f32 {
     use chrono::Timelike;
     let unix_now = now
@@ -61,30 +50,24 @@ use crate::theme::Theme;
 /// the floor pass ride, so the pane x-positions can't drift between them.
 const WINDOW_W: u16 = 22;
 const WINDOW_GAP: u16 = 3;
-/// Left edge of the first window — the ONE start [`window_columns`] begins at.
-/// `celestial::FIRST_WINDOW_X` (the disc-span left edge) derives its f32 form
-/// from this, so the tiling start lives in exactly one place.
+/// Left edge of the first window — the ONE start [`window_columns`] begins at,
+/// and the source `celestial::FIRST_WINDOW_X` derives its f32 form from.
 const FIRST_WINDOW_X: u16 = 3;
 /// The tiling stops when the next pane wouldn't leave this many px before the
-/// right buffer edge (`x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w`). Folded (with
-/// `FIRST_WINDOW_X`) into what used to be a bare `- 5.0` in `compute_disc`.
+/// right buffer edge (`x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w`).
 const WINDOW_EDGE_MARGIN: u16 = 2;
-/// Vertical depth of the warm spill band below each window. Mirrors the
-/// `DEPTH` constant inside `paint_window_light_spill`.
+/// Vertical depth of the warm spill band below each window.
 const SPILL_DEPTH: u16 = 12;
 
 /// Lightning strike cadence (Storm only): a flash fires on average every
-/// `LIGHTNING_PERIOD_MS` (~15 s; a much faster cadence would read as a
-/// hyperactive storm), lasting `LIGHTNING_FLASH_MS`. The flash shape is a two-pulse flicker
-/// (`lightning_envelope`) shared by the bright on-glass bolt
-/// (`paint_floor_to_ceiling_window`) and the softer room-wide ambient bounce
-/// (`paint_lightning_flash`), so both stay in lockstep.
+/// `LIGHTNING_PERIOD_MS` — a much faster cadence reads as a hyperactive storm —
+/// lasting `LIGHTNING_FLASH_MS`.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
 const LIGHTNING_FLASH_MS: u64 = 90;
 
 /// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began. Primary strike → brief dim → after-flash, so the strike reads as a
-/// real flicker rather than a single on/off blink. Returns 0 outside the flash.
+/// began: primary strike → brief dim → after-flash, so it reads as a real
+/// flicker rather than a single on/off blink. Returns 0 outside the flash.
 fn lightning_envelope(since_strike_ms: u64) -> f32 {
     match since_strike_ms {
         0..=24 => 1.0,   // primary strike
@@ -96,17 +79,11 @@ fn lightning_envelope(since_strike_ms: u64) -> f32 {
 
 /// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
 /// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
-/// offset in `[0, PERIOD - FLASH)` (keeping the whole flash inside the bucket),
-/// so inter-strike gaps wander over ~0..2·PERIOD while averaging one PERIOD.
-/// splitmix64 (same mixer as `weather_state`) for a well-distributed offset.
+/// offset in `[0, PERIOD - FLASH)`, keeping the whole flash inside the bucket.
 //
-// The two-multiply-xor finalizer is `pixtuoid_core::id::splitmix64`, open-coded
-// here (and in `sky::weather_state` + `ambient::dust_mote_positions`) by
-// DELIBERATE choice: each is an independent noise source over a disjoint input
-// domain (no two sites need equal output — see the scene CLAUDE.md sharp edge).
-// The canonical fn is `#[doc(hidden)] pub` (off the semver surface but shared
-// cross-crate — `physics`/`pose` already call it), so the open-coding is for
-// domain-independence, not a visibility barrier.
+// splitmix64 is open-coded here (and in `sky::weather_state` +
+// `ambient::dust_mote_positions`) by DELIBERATE choice: each is an independent
+// noise source over a disjoint input domain, so no two sites need equal output.
 fn strike_offset(bucket: u64) -> u64 {
     let mut h = bucket.wrapping_add(0x9e37_79b9_7f4a_7c15);
     h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -116,8 +93,7 @@ fn strike_offset(bucket: u64) -> u64 {
 }
 
 /// `lightning_envelope` for the current clock, or 0 when not mid-strike.
-/// Shared by the window bolt and the room bounce so they fire together, and
-/// jittered per `strike_offset` so the cadence reads organic, not clockwork.
+/// Shared by the window bolt and the room bounce so they fire together.
 fn lightning_flash_level(now: SystemTime) -> f32 {
     let elapsed_ms = epoch_ms(now);
     let bucket = elapsed_ms / LIGHTNING_PERIOD_MS;
@@ -130,9 +106,7 @@ fn lightning_flash_level(now: SystemTime) -> f32 {
 
 /// Room-wide ambient bounce from a Storm lightning strike. Painted LAST in the
 /// pixel pass (after floor/walls/furniture/characters) so the whole interior
-/// briefly flares — the on-glass bolt alone (`paint_floor_to_ceiling_window`)
-/// lit only the window strip, which barely registered. Subtler than the bolt
-/// (this is bounced fill light, not the source). No-op unless mid-strike.
+/// briefly flares; the on-glass bolt alone lit only the window strip.
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weather: Weather) {
     if weather != Weather::Storm {
         return;
@@ -163,8 +137,7 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
 }
 
 /// Multiplicative-ish tint applied to floor cells after the base palette,
-/// driven by current outdoor weather. Subtle (~15% blend); each variant
-/// shifts the indoor mood without overpowering the theme palette.
+/// driven by current outdoor weather.
 pub(super) fn weather_floor_tint(w: Weather) -> Rgb {
     match w {
         Weather::Clear => Rgb {
@@ -188,7 +161,7 @@ pub(super) fn weather_floor_tint(w: Weather) -> Rgb {
             b: 250,
         },
         // Fog is a luminous white-out — its floor tint must be brighter than
-        // overcast's, not darker (the old 200,200,205 read as dark mist).
+        // overcast's, not darker, or it reads as dark mist.
         Weather::Fog => Rgb {
             r: 228,
             g: 229,
@@ -213,10 +186,7 @@ pub(super) fn weather_floor_tint(w: Weather) -> Rgb {
 }
 
 /// Haze that obscures the city skyline behind the glass, by weather. Returns
-/// `(haze_color, blend_alpha)` or `None` when the skyline is crisp. Fog is a
-/// near-total white-out; storm/rain murk it; smog adds a brown-grey pall.
-/// Applied to the glass interior before the rain/snow/lightning effects so
-/// those still read on top of the murk.
+/// `(haze_color, blend_alpha)` or `None` when the skyline is crisp.
 fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
     match w {
         Weather::Fog => Some((
@@ -263,6 +233,23 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
     }
 }
 
+/// How much of a weather VEIL's own colour the frame's sky brings up (0..1) —
+/// its floor is the city-light scatter that keeps fog reading as fog after dark.
+///
+/// The day term is the emitter's OWN luminance, deliberately NOT
+/// `atmo`/`look.darkness`: those already carry the weather (the veil colour does
+/// too), and folding them in would darken a stormy noon twice.
+const NIGHT_VEIL_FLOOR: f32 = 0.35;
+
+fn veil_lum(sky: &sky::SkyState) -> f32 {
+    NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * sky.emitter_lum.clamp(0.0, 1.0)
+}
+
+/// A veil colour at the frame's daylight — hue preserved, luminance tracked.
+fn veil_lit(color: Rgb, lum: f32) -> Rgb {
+    blend_rgb(Rgb { r: 0, g: 0, b: 0 }, color, lum)
+}
+
 /// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
 /// its ABSOLUTE position `idx` (counted across the whole wall — door-skipped
 /// panes still advance it, so a pane after the elevator keeps its true index).
@@ -278,9 +265,6 @@ pub(super) struct WindowColumn {
 /// [`WINDOW_EDGE_MARGIN`] before `buf_w`. Yields only panes whose x-range does
 /// NOT overlap `skip` (the elevator-door range `(dx0, dx1)`) — but `idx` still
 /// counts the skipped ones, so the floor pass's per-window index is stable.
-/// The spill pass, the floor pass, AND `compute_disc`'s span all ride this, so
-/// the `x=3, stride, edge-margin` geometry lives in exactly one place (it was
-/// open-coded in two loops plus a `- 5.0` floor-division re-derivation).
 pub(super) fn window_columns(
     buf_w: u16,
     skip: Option<(u16, u16)>,
@@ -305,10 +289,8 @@ pub(super) fn window_columns(
 }
 
 /// Returns one `SunbeamColumn` per PAINTED floor-to-ceiling window, centred on
-/// the window and starting at the floor row (just below the wall band).
-/// Elevator-door windows are excluded (the [`window_columns`] skip). Used by
-/// `paint_dust_motes` so the motes drift through the same warm spill the floor
-/// pass paints — same tiling, so the columns can't diverge.
+/// the window and starting at the floor row. Rides [`window_columns`] so the
+/// motes drift through the same warm spill the floor pass paints.
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
     let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
@@ -343,55 +325,48 @@ pub(super) fn paint_floor_and_walls(
     let weather = weather_state(now);
     let tint = weather_floor_tint(weather);
 
-    for y in 0..buf_h {
+    // The noise picks one of THREE colours and the tint is fixed for the frame,
+    // so resolve the blend once, not per pixel.
+    let carpet = [
+        blend_rgb(carpet_light, tint, 0.15),
+        blend_rgb(carpet_dark, tint, 0.15),
+        blend_rgb(carpet_base, tint, 0.15),
+    ];
+    // Start BELOW the wall band: the loop right after overwrites it opaquely.
+    let band_h = top_wall_h.min(buf_h);
+    for y in band_h..buf_h {
         for x in 0..buf_w {
             let hash = (x as u32)
                 .wrapping_mul(73)
                 .wrapping_add((y as u32).wrapping_mul(151))
                 ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
             let color = match hash % 17 {
-                0 | 1 => carpet_light,
-                2 | 3 => carpet_dark,
-                _ => carpet_base,
+                0 | 1 => carpet[0],
+                2 | 3 => carpet[1],
+                _ => carpet[2],
             };
-            buf.put(x, y, blend_rgb(color, tint, 0.15));
+            buf.put(x, y, color);
         }
     }
-    for y in 0..top_wall_h.min(buf_h) {
+    for y in 0..band_h {
         for x in 0..buf_w {
             buf.put(x, y, wall);
         }
     }
 
-    // Floor-to-ceiling windows: height grows with the wall band so
-    // taller terminals get dramatic floor-to-ceiling glass. Width stays
-    // fixed (mullion every 22 px) so the skyline detail reads consistently.
-    // WINDOW_W / WINDOW_GAP are module constants — kept in sync with
-    // `window_spill_columns` so motes drift through the same x columns.
+    // Window HEIGHT grows with the wall band so taller terminals get dramatic
+    // glass; width stays fixed so the skyline detail reads consistently.
     let window_y: u16 = 1;
     let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
-    // Window-invariant glass colors: `lit_colors` / `building` / `sky_row`
-    // depend only on `look` + `theme` + the (fixed-across-the-loop) window
-    // height, NOT on the per-window x / window_idx / altitude — so they're
-    // identical for every window in this frame. Compute them ONCE here and pass
-    // by reference, instead of recomputing (3 + 1 + glass_h `mix_lab` calls and
-    // a Vec alloc) inside every window. (The per-window skyline-height math —
-    // alt_shrink/min_bh/max_bh — stays in the fn: it uses `altitude`.)
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
-    // Computed once per frame (not per window) and passed by value — see
-    // `compute_disc`'s doc comment for why `cx` is absolute across the wall.
     let disc = compute_disc(now, weather, buf_w, top_wall_h, theme);
     let star_strength = night_star_strength(now, look.darkness, weather);
     for w in window_columns(buf_w, skip_window_x_range) {
         let x = w.x_left;
-        // The disc paints ONLY in the window its centre currently sits over.
-        // Without this gate, a disc whose `cx` lands near an inter-window gap
-        // is wide enough (radius+glow) to reach the glass of BOTH neighbours,
-        // so the same sun/moon rendered in two panes at once — bleeding
-        // through the solid wall pillar (frame + WINDOW_GAP + frame) between
-        // them. Restricting to the containing window makes that pillar occlude
-        // the body correctly: it hides behind the pillar between panes and
-        // re-emerges in the next window, "one disc across the wall".
+        // The disc paints ONLY in the window its centre sits over. Ungated, a
+        // disc near an inter-window gap is wide enough (radius+glow) to reach
+        // BOTH neighbours' glass and render twice, bleeding through the solid
+        // wall pillar between them.
         let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
         paint_floor_to_ceiling_window(
             buf,
@@ -410,9 +385,8 @@ pub(super) fn paint_floor_and_walls(
             win_disc,
             star_strength,
         );
-        // look.spill_strength already includes atmospheric attenuation
-        // (time_of_day_look multiplies by atmo.intensity), so heavy
-        // weather automatically dims the spill below windows.
+        // look.spill_strength already includes atmospheric attenuation, so
+        // heavy weather automatically dims the spill below windows.
         if look.spill_strength > 0.0 {
             paint_window_light_spill(
                 buf,
@@ -426,7 +400,6 @@ pub(super) fn paint_floor_and_walls(
         }
     }
 
-    // Wall trim line at the bottom of the wall band.
     let trim_y = top_wall_h.saturating_sub(1);
     if trim_y < buf_h {
         for x in 0..buf_w {
@@ -435,24 +408,21 @@ pub(super) fn paint_floor_and_walls(
     }
 }
 
-/// Static "is this building window lit?" decision — independent of time.
-/// Deterministic hash of (window_idx, dx, dy) so each building's window
-/// pattern is stable across frames; only `city_dot_twinkle` animates
-/// on top. ~75% of grid slots are lit so the city reads as "alive at
-/// night" without every single window being on.
+/// Static "is this building window lit?" decision — a time-independent hash of
+/// (window_idx, dx, dy) so each building's pattern is stable across frames;
+/// only `city_dot_twinkle` animates on top.
 fn city_dot_lit(window_idx: u16, dx: u16, dy: u16) -> bool {
     let mut h = (window_idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
     h ^= (dx as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
     h ^= (dy as u64).wrapping_mul(0x1656_67b1_9e37_79b9);
     h ^= h >> 17;
-    // ~75% of the city-window grid is lit at night so the skyline reads as alive.
+    // Enough of the grid lit that the skyline reads as alive at night.
     const CITY_WINDOW_LIT_PERCENT: u64 = 75;
     (h % 100) < CITY_WINDOW_LIT_PERCENT
 }
 
-/// Per-dot twinkle: each city-window dot has its own ~600-1400ms cycle and
-/// each cycle rerolls on/off via a deterministic hash. Bias toward "on" so
-/// the skyline is mostly lit with the occasional dot blinking off.
+/// Per-dot twinkle: each city-window dot rerolls on/off on its own cycle,
+/// biased toward "on" so only the occasional dot blinks off.
 fn city_dot_twinkle(window_idx: u16, dx: u16, dy: u16, now: SystemTime) -> bool {
     let now_ms = epoch_ms(now);
     let dot_seed = (window_idx as u64).wrapping_mul(31)
@@ -466,13 +436,10 @@ fn city_dot_twinkle(window_idx: u16, dx: u16, dy: u16, now: SystemTime) -> bool 
     (hash % 10) < 7
 }
 
-/// Warm sunlight tint spilling onto the floor below a window. Trapezoid
-/// shape (widens by 1 px every 2 rows) blended with the existing floor so
-/// it reads as "light through window" not "yellow rectangle". `intensity`
-/// (0..1) scales with daylight — zero at night so no spill paints.
-/// `slant_per_row` shifts the spill horizontally per row going down —
-/// positive = rightward (morning sun in the east casts light right), negative
-/// = leftward (evening sun in the west casts light left).
+/// Warm sunlight tint spilling onto the floor below a window — a trapezoid
+/// blended with the existing floor so it reads as "light through window", not
+/// "yellow rectangle". `slant_per_row` is positive rightward (morning sun in
+/// the east), negative leftward (evening sun in the west).
 fn paint_window_light_spill(
     buf: &mut RgbBuffer,
     window_x: u16,
@@ -503,8 +470,7 @@ fn paint_window_light_spill(
 }
 
 /// One weather's falling particle on the glass. Rain/Storm/Windy are `Streak`s;
-/// Snow is a `Flake`. Every per-weather magic number lives in [`StreakSpec`] so
-/// the four hand-written loops collapse to one without changing a pixel.
+/// Snow is a `Flake`.
 #[derive(Clone, Copy)]
 enum Particle {
     /// A vertical streak `len_base + seed % len_mod` px long, alpha fading from
@@ -522,9 +488,7 @@ enum Particle {
     Flake,
 }
 
-/// Per-weather constants for the shared particle loop. Snow diverges the most
-/// (`seed_mult` 11 not 7, a different `sx_mult`, `Flake` shape) — all captured
-/// here so [`paint_streaks`] stays a single behavior-exact path.
+/// Per-weather constants for the shared particle loop.
 struct StreakSpec {
     count: u64,
     seed_mult: u64,
@@ -535,9 +499,8 @@ struct StreakSpec {
     particle: Particle,
 }
 
-/// The drawable glass interior of a window — the frame inset by 1px on each side
-/// (`x0 = x+1`, `w = window_w - 2`). Bundled so [`paint_streaks`] takes one rect
-/// instead of four loose coords.
+/// The drawable glass interior of a window — the frame inset by 1px on each
+/// side (`x0 = x+1`, `w = window_w - 2`).
 #[derive(Clone, Copy)]
 struct GlassRect {
     x0: u16,
@@ -548,9 +511,7 @@ struct GlassRect {
 
 /// Paint one weather's falling particles onto the glass interior. The seed→
 /// position math is shared across weathers; `spec` supplies the per-weather
-/// constants. This replaced four structurally-identical loops
-/// (Rain/Storm/Windy/Snow); the refactor is pixel-verified (#92): byte-identical
-/// `snapshot --weather <w>` before/after.
+/// constants.
 fn paint_streaks(
     buf: &mut RgbBuffer,
     spec: &StreakSpec,
@@ -604,11 +565,8 @@ fn paint_streaks(
 }
 
 /// Wash a flat translucent color over the glass INTERIOR — the inset rect
-/// `(x0+1 .. x0+w-1, y0+1 .. y0+h-1)`, one `blend_rgb(cur, color, alpha)` per
-/// in-bounds cell. The shared body of the Fog / Overcast / Smog weather arms,
-/// carrying their EXACT offset math (`1..h-1`/`1..w-1`, raw `x0+dx`/`y0+dy`, the
-/// `px < buf.width && py < buf.height` guard). NOT the streaks' `x+1/y+1` inset —
-/// keep it byte-identical to the hand-rolled fog/overcast/smog loops (#92-class).
+/// `(x0+1 .. x0+w-1, y0+1 .. y0+h-1)`. This is NOT the streaks' `x+1/y+1`
+/// inset: it takes the raw window rect and does its own offset math.
 fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb, alpha: f32) {
     for dy in 1..h.saturating_sub(1) {
         for dx in 1..w.saturating_sub(1) {
@@ -618,14 +576,9 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
 }
 
 /// Window-invariant glass colors, computed ONCE per frame in
-/// `paint_floor_and_walls` and shared by every window. `lit_colors` (city-dot
-/// hues) and `building` (silhouette fill) are functions of `look.darkness` plus
-/// the theme; `sky_row` (the per-row sky gradient) is a function of the window
-/// HEIGHT plus the `look` glass colors. All windows in a frame share the same
-/// height, `look`, and theme, so these are identical across the loop — hoisting
-/// them out of the per-window loop is byte-identical, just fewer redundant
-/// `mix_lab` calls. The per-window skyline-HEIGHT math is NOT here: it rides
-/// `altitude` and stays inside `paint_floor_to_ceiling_window`.
+/// `paint_floor_and_walls` and shared by every window: all panes in a frame have
+/// the same height, `look`, and theme. The per-window skyline-HEIGHT math is NOT
+/// here — it rides `altitude` and stays in `paint_floor_to_ceiling_window`.
 fn window_glass_invariants(
     h: u16,
     look: &TimeOfDayLook,
@@ -636,10 +589,9 @@ fn window_glass_invariants(
     let cw = theme.office.city_lit_windows;
     let dark_window = theme.office.city_dark_window;
 
-    // Floor at 0.12 (not 0.5): keeps a faint window structure visible by day
-    // but lets the city windows fade toward dark in full daylight and only glow
-    // toward dusk/night — tracking `darkness` like the rest of the light model
-    // (the old 0.5 floor kept buildings ~50% lit even at noon).
+    // A floor this LOW keeps only a faint window structure visible by day and
+    // lets the city windows glow toward dusk; a 0.5 floor left buildings ~50%
+    // lit at noon.
     let lit_strength = look.darkness.max(0.12).clamp(0.0, 1.0);
     let lit_colors: [Rgb; 3] = [
         mix_lab(dark_window, cw[0], lit_strength),
@@ -661,12 +613,8 @@ fn window_glass_invariants(
 }
 
 /// Floor-to-ceiling window with frame, mullion, and a procedural city view
-/// inside the glass. Sky gradient at top blends with time-of-day glass
-/// colors; the lower portion shows building silhouettes whose "windows"
-/// (1-pixel dots) light up at night and twinkle on a per-dot cycle so the
-/// skyline reads as alive instead of stamped. `lit_colors` / `building` /
-/// `sky_row` are window-invariant (see `window_glass_invariants`) and passed in
-/// by reference so they're computed once per frame, not once per window.
+/// inside the glass. `lit_colors` / `building` / `sky_row` are window-invariant
+/// (see `window_glass_invariants`) and passed in by reference.
 #[allow(clippy::too_many_arguments)]
 fn paint_floor_to_ceiling_window(
     buf: &mut RgbBuffer,
@@ -685,10 +633,8 @@ fn paint_floor_to_ceiling_window(
     disc: Option<Disc>,
     star_strength: f32,
 ) {
-    // Skyline silhouette as a 0..15 PATTERN; the actual pixel height is
-    // computed per-window so the skyline auto-scales with the glass
-    // height. On a 12-px-tall window the buildings are 3..7 px, on a
-    // 50-px-tall window they fill 12..24 px — same visual proportion.
+    // Skyline silhouette as a 0..PATTERN_MAX ratio, not pixels — the height is
+    // computed per-window so the skyline auto-scales with the glass.
     const SKYLINE_PATTERN: &[u8] = &[8, 14, 11, 15, 6, 13, 9, 12, 7, 15, 10, 13];
     const PATTERN_MAX: u16 = 15;
     let glass_h = h.saturating_sub(2);
@@ -721,12 +667,8 @@ fn paint_floor_to_ceiling_window(
 
             if in_building {
                 let bldg_y = glass_dy - (glass_h - building_h);
-                // Lit-window dots arranged on a 2-px grid (every other
-                // column + every other row of the building). Per-dot
-                // lit/unlit decision is hashed from (col, row, win_idx)
-                // so the same building always shows the same pattern;
-                // ~70 % of grid slots are lit at night. Twinkle animates
-                // the lit ones on independent cycles.
+                // Lit-window dots sit on a 2-px grid — every other column and
+                // every other row of the building.
                 let on_grid = glass_dx % 2 == 1 && bldg_y % 2 == 1;
                 let lit_base = on_grid && city_dot_lit(window_idx, glass_dx, bldg_y);
                 if lit_base && city_dot_twinkle(window_idx, glass_dx, bldg_y, now) {
@@ -755,9 +697,8 @@ fn paint_floor_to_ceiling_window(
                     let dy = py as f32 - d.cy;
                     let dist = (dx * dx + dy * dy).sqrt();
                     if dist <= d.r {
-                        // Sun (lit_frac == 1.0) skips the terminator entirely
-                        // (always lit); the moon darkens the un-illuminated
-                        // side via the classic elliptical terminator.
+                        // The sun is always lit; the moon darkens its
+                        // un-illuminated side via an elliptical terminator.
                         let target = if d.lit_frac >= 1.0 {
                             d.core
                         } else {
@@ -772,10 +713,8 @@ fn paint_floor_to_ceiling_window(
                         col = blend_rgb(col, target, d.vis);
                     } else if dist <= d.r + GLOW_PX {
                         let falloff = 1.0 - (dist - d.r) / GLOW_PX;
-                        // Scale by `lit_frac` so the glow tracks the illuminated
-                        // fraction: the sun (lit_frac=1.0) is unaffected, but a
-                        // new moon's near-dark core no longer casts a full-bright
-                        // halo — the ring dims in step with the phase.
+                        // Scaling by `lit_frac` keeps a new moon's near-dark
+                        // core from casting a full-bright halo.
                         col = blend_rgb(col, d.glow, d.vis * falloff * GLOW_ALPHA * d.lit_frac);
                     }
                 }
@@ -784,18 +723,19 @@ fn paint_floor_to_ceiling_window(
         }
     }
 
-    // Skyline haze: fog/rain/storm/smog obscure the city behind the glass.
-    // Blend the glass interior toward the weather haze BEFORE the streak/flash
-    // effects, so rain/snow/lightning still read on top of the murk.
+    let sky_now = sky::emitter(now);
+    let veil = veil_lum(&sky_now);
+
+    // The haze goes on BEFORE the streak/flash effects, so rain/snow/lightning
+    // still read on top of the murk.
     if let Some((haze, alpha)) = skyline_haze(weather) {
-        wash_glass(buf, x, y, w, h, haze, alpha);
+        wash_glass(buf, x, y, w, h, veil_lit(haze, veil), alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
 
     // The streak arms (Rain/Storm/Snow/Windy) all paint into the same glass-
-    // interior inset; build it ONCE (reusing `glass_h`) so the four rects can't
-    // drift apart.
+    // interior inset; build it ONCE so the four rects can't drift apart.
     let glass = GlassRect {
         x0: x + 1,
         y0: y + 1,
@@ -830,8 +770,6 @@ fn paint_floor_to_ceiling_window(
             elapsed_ms,
         ),
         Weather::Storm => {
-            // Storm keeps Rain's idiom but a distinct cool-blue target (b:245 vs
-            // 240), longer/darker streaks, and 6 of them — then the bolt.
             paint_streaks(
                 buf,
                 &StreakSpec {
@@ -857,13 +795,10 @@ fn paint_floor_to_ceiling_window(
                 glass,
                 elapsed_ms,
             );
-            // The bright on-glass bolt — the strike's source. Uses the shared,
-            // jittered flash level so it fires in lockstep with the room-wide
-            // bounce (paint_lightning_flash).
+            // The bright on-glass bolt — the strike's source. Rides the shared
+            // flash level so it fires in lockstep with `paint_lightning_flash`.
             let level = lightning_flash_level(now);
             if level > 0.0 {
-                // The on-glass bolt is the same glass-interior wash as fog/overcast,
-                // just white at the jittered flash level.
                 wash_glass(
                     buf,
                     x,
@@ -882,8 +817,6 @@ fn paint_floor_to_ceiling_window(
         Weather::Snow => paint_streaks(
             buf,
             &StreakSpec {
-                // Snow diverges: seed_mult 11 (not 7), a different sx_mult, and a
-                // flat single-pixel flake with a 0/1 wiggle (no falloff/length).
                 count: 3,
                 seed_mult: 11,
                 sx_mult: 0x517c_c1b7,
@@ -906,11 +839,14 @@ fn paint_floor_to_ceiling_window(
             y,
             w,
             h,
-            Rgb {
-                r: 160,
-                g: 165,
-                b: 175,
-            },
+            veil_lit(
+                Rgb {
+                    r: 160,
+                    g: 165,
+                    b: 175,
+                },
+                veil,
+            ),
             0.25,
         ),
         Weather::Overcast => wash_glass(
@@ -919,17 +855,19 @@ fn paint_floor_to_ceiling_window(
             y,
             w,
             h,
-            Rgb {
-                r: 100,
-                g: 105,
-                b: 110,
-            },
+            veil_lit(
+                Rgb {
+                    r: 100,
+                    g: 105,
+                    b: 110,
+                },
+                veil,
+            ),
             0.2,
         ),
         Weather::Windy => paint_streaks(
             buf,
             &StreakSpec {
-                // Rain's streak with a wind lean (drift) and one more streak.
                 count: 5,
                 seed_mult: 7,
                 sx_mult: 0x9e37_79b9,
@@ -952,28 +890,25 @@ fn paint_floor_to_ceiling_window(
             glass,
             elapsed_ms,
         ),
-        Weather::Smog => {
-            // Warm-yellow desaturated haze across the full glass. Heavier
-            // than Fog and noticeably warmer — pulls the city behind a
-            // sodium-lit veil.
-            wash_glass(
-                buf,
-                x,
-                y,
-                w,
-                h,
+        Weather::Smog => wash_glass(
+            buf,
+            x,
+            y,
+            w,
+            h,
+            veil_lit(
                 Rgb {
                     r: 180,
                     g: 160,
                     b: 110,
                 },
-                0.30,
-            )
-        }
+                veil,
+            ),
+            0.30,
+        ),
         Weather::Clear => {}
     }
 
-    let sky_now = sky::emitter(now);
     let a = sky::atmo(weather);
     let sunset = golden_hour_blaze(&sky_now, &a);
     if sunset > 0.05 {

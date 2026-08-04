@@ -1,14 +1,7 @@
-//! Terminal-coupled rendering: orchestrator (`draw_scene`), half-block
-//! flush, and label/tooltip/notice widget overlays.
-//!
-//! The pure-pixel pass (floor/walls/decor/characters -> `RgbBuffer`) lives
-//! in the `pixtuoid_scene::pixel_painter` engine crate. This file is the
-//! integrator that calls into
-//! that pipeline and then hands the buffer to ratatui. Terminal lifecycle
-//! (raw mode + alternate screen) lives with the event loop in `tui/mod.rs`.
-//!
-//! Widget paint functions live in `tui::widgets`; hit-test functions live
-//! in `tui::hit_test`. Both are re-exported here for backwards compat.
+//! Terminal-coupled rendering: the `draw_scene` orchestrator, the half-block
+//! flush, and the label/tooltip/notice widget overlays. The pure-pixel pass
+//! (floor/walls/decor/characters -> `RgbBuffer`) lives in the
+//! `pixtuoid_scene::pixel_painter` engine crate.
 
 use std::time::SystemTime;
 
@@ -27,7 +20,6 @@ use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
 
-// Re-exports so tui_renderer.rs and tui/mod.rs import from one place.
 pub(crate) use crate::tui::hit_test::hit_test_agent;
 pub use crate::tui::hit_test::{
     hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
@@ -42,106 +34,72 @@ pub(super) use crate::tui::widgets::{
 
 pub use pixtuoid_scene::pet::PetState;
 
-/// Multi-floor display state. Combines the navigation breadcrumb
-/// (current/total) with the global agent count so a renderer never sees
-/// one without the other.
+/// Multi-floor display state, bundled so a renderer never sees the navigation
+/// breadcrumb without the global agent count.
 #[derive(Debug, Clone, Copy)]
 pub struct FloorInfo {
-    /// 1-indexed current floor for display (e.g. "F2/3").
+    /// 1-indexed, for display (e.g. "F2/3").
     pub current: usize,
     pub total_floors: usize,
-    /// Total agents across all floors. Used for the footer's `n/total`.
     pub total_agents: usize,
 }
 
-/// Mutable per-frame render state, borrowed from `TuiRenderer`. Replaces
-/// the 14-parameter `draw_scene` signature with a single struct pass.
 pub struct DrawCtx<'a> {
     pub buf: &'a mut RgbBuffer,
-    /// The per-floor sim/paint STORES borrowed as ONE group — was seven flat
-    /// fields (`cache`/`router`/`overlay`/`history`/`motion`/`door_anim_max_ms`/
-    /// `light`), each a `FloorCtx` field. `draw_scene` forwards it straight into
-    /// `PixelCtx.store` and reads `store.router`/`store.overlay`/… for its
-    /// RouteCtx hit-tests + label overlay. `buf` stays a SEPARATE field: it is a
-    /// sibling of the `FloorCtx` on a `PerFloor`, borrowed disjointly.
+    /// `buf` is deliberately NOT part of this group: it is a sibling of the
+    /// `FloorCtx` on a `PerFloor`, borrowed disjointly.
     pub store: &'a mut pixtuoid_scene::floor::FloorCtx,
     pub mouse_pos: Option<(u16, u16)>,
-    /// Live walkable/approach/route debug layer toggle (`w`). Threaded into the
-    /// pixel pass; off by default, transient (not persisted to config).
+    /// Walkable/approach/route debug layer toggle (`w`) — transient, never
+    /// persisted to config.
     pub debug_walkable: bool,
     pub theme: &'a pixtuoid_scene::theme::Theme,
     pub theme_picker: Option<usize>,
-    /// Multi-floor display state. `Some` iff there's more than one floor.
-    /// Carries both the navigation breadcrumb (`current/total_floors`) and
-    /// the system-wide agent count so the footer can render `n/total` and
-    /// the elevator indicator can highlight the active floor.
+    /// `Some` iff there's more than one floor.
     pub floor_info: Option<FloorInfo>,
-    /// Office-wide per-floor state tally (bucketed from the FULL, un-projected
-    /// scene by `AgentSlot.floor_idx`) — feeds the footer's cross-floor `▲F{n}`
-    /// cue. ALWAYS present (C1): unlike `floor_info` it never vanishes for a
-    /// single-floor office, so the chip + cue render there too. Distinct from the
-    /// footer's per-state integers (`scene_stats` on the PROJECTED floor) — C8:
-    /// don't derive one from the other.
+    /// Office-wide per-floor state tally, bucketed from the FULL, un-projected
+    /// scene. ALWAYS present — unlike `floor_info` it never vanishes for a
+    /// single-floor office. Distinct from the footer's per-state integers
+    /// (`scene_stats` on the PROJECTED floor): don't derive one from the other.
     pub per_floor: [crate::tui::widgets::StateCounts; pixtuoid_core::state::MAX_FLOORS],
-    /// Worst-of daemon-liveness rollup (the OpenClaw gateway) for the footer +
-    /// board `⬢gw` chip. `None` = no daemon configured (chip suppressed). Computed
-    /// from the full scene, independent of `floor_info` (C1).
+    /// Worst-of daemon-liveness rollup; `None` = no daemon configured (chip
+    /// suppressed).
     pub gateway: Option<pixtuoid_core::state::DaemonState>,
     /// "You would hear sound right now" — drives the footer's ♩ glyph.
     pub audio_audible: bool,
-    /// Transient +/- volume readout (percent) — appended to ♩ for ~1s.
+    /// Transient volume readout, in percent.
     pub volume_flash: Option<u8>,
     pub floor: pixtuoid_scene::floor::FloorMeta,
     pub active_pet: Option<&'a PetState>,
     pub last_pet_pos: Option<PetFrame>,
-    /// Every gateway mascot's frame this render (for hover identity). Set from the
-    /// pixel pass; EMPTY when no gateway is present. A Vec because concurrent
-    /// gateways of one source each get their own hoverable lobster.
+    /// Every gateway mascot's frame this render, for hover identity.
     pub last_mascots: Vec<MascotFrame>,
-    /// The pet assigned to this floor — its kind AND resolved display name.
     /// `None` when no pets are configured or none maps to this floor seed.
-    /// Replaces the former `floor_pet_kind` + `pet_names` pair: the name rides
-    /// along, so the tooltip reads `floor_pet.name` directly (no lookup).
     pub floor_pet: Option<&'a pixtuoid_scene::pet::Pet>,
     pub chitchat_state: &'a mut std::collections::HashMap<
         pixtuoid_scene::chitchat::VenueKey,
         pixtuoid_scene::chitchat::ActiveChitchat,
     >,
     pub chitchat_bubbles: Vec<pixtuoid_scene::chitchat::ChitchatBubble>,
-    /// Carrier → fetch-time view of the renderer's `CoffeeState` (one map:
-    /// key present = has a desk cup, value = steam-window anchor).
+    /// Key present = has a desk cup; value = the steam-window anchor.
     pub coffee: &'a std::collections::HashMap<pixtuoid_core::AgentId, std::time::SystemTime>,
-    /// New coffee carriers detected this frame — caller records these into
-    /// the persistent `CoffeeState`.
+    /// Out-param: the caller records these into the persistent `CoffeeState`.
     pub new_coffee_carriers: Vec<pixtuoid_core::AgentId>,
-    /// Waypoint occupancy this frame (out-param like the carriers) — the
-    /// audio cue tracker's appliance feed (#633).
+    /// Out-param: the audio cue tracker's appliance feed.
     pub occupied_waypoints: std::collections::HashSet<usize>,
     /// Animated scale for the version popup (0.0 = hidden, 1.0 = fully shown).
-    /// Drives entrance (EaseOutCubic/200ms) and dismissal (EaseInQuad/120ms).
     pub popup_scale: f32,
     pub help_open: bool,
-    /// Footer warning when a source has died (#157); `None` while healthy.
+    /// Footer warning when a source has died; `None` while healthy.
     pub source_warning: Option<&'a str>,
-    /// Agent dashboard overlay frame (borrowed from `TuiRenderer`, disjoint from
-    /// the floor borrows). Modal, mutually exclusive with the theme picker by
-    /// dispatch precedence; painted last.
     pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
-    /// Sources panel overlay frame (borrowed from `TuiRenderer`): the cached
-    /// hook-facet rows + the per-frame live facet + selection / armed-confirm /
-    /// last-action result / socket line. Modal, mutually exclusive with the others.
     pub connection: &'a crate::tui::connection::ConnectionFrame,
-    /// First-run onboarding overlay frame (borrowed from `TuiRenderer`): the open
-    /// flag, roster snapshot, selection, and elapsed-ms clock. Modal and TOP of the
-    /// precedence chain — painted last (topmost).
     pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
 }
 
-/// Clip a widget rect to fit inside `bounds`. Returns `None` if the rect
-/// falls fully outside or has zero width/height after clipping -- callers
-/// use that to skip the render entirely. Prevents ratatui's
-/// "index outside of buffer" panic when label/notice widgets land near
-/// the right or bottom edge.
+/// Clip a widget rect to fit inside `bounds`; `None` when nothing survives.
+/// Prevents ratatui's "index outside of buffer" panic when label/notice widgets
+/// land near the right or bottom edge.
 pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
     if rect.x >= bounds.x + bounds.width || rect.y >= bounds.y + bounds.height {
         return None;
@@ -165,29 +123,43 @@ pub(crate) fn clip_widget_rect(rect: Rect, bounds: Rect) -> Option<Rect> {
 }
 
 /// Minimum drawable scene size (cells) below which the world render is skipped
-/// for a footer-only draw. Shared by `draw_scene` and the floor-transition path
-/// (`tui_renderer`) so the two "too small" gates can't drift apart.
+/// for a footer-only draw. Shared by both "too small" gates so they can't drift.
 pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
-/// The drawable scene rect: the full terminal area minus the 1-row footer.
-/// Single source of truth for the "everything but the footer" geometry that
-/// both `draw_scene` and the floor-transition path re-derive each frame.
+/// How many rows at the bottom of the terminal the status footer owns — THE
+/// authority for that count, not three copies of a bare `1`.
+pub(crate) const FOOTER_ROWS: u16 = 1;
+
 pub(crate) fn scene_rect(full: Rect) -> Rect {
     Rect {
         x: 0,
         y: 0,
         width: full.width,
-        height: full.height.saturating_sub(1),
+        height: full.height.saturating_sub(FOOTER_ROWS),
     }
 }
 
+pub(crate) struct OverlayFrame<'a> {
+    pub theme_picker: Option<usize>,
+    pub dashboard: &'a crate::tui::dashboard::DashboardFrame,
+    pub connection: &'a crate::tui::connection::ConnectionFrame,
+    pub popup_scale: f32,
+    pub help_open: bool,
+    pub onboarding: &'a crate::tui::welcome::OnboardingFrame,
+}
+
 /// Paint the footer-only frame shown when the terminal is too small to render the
-/// office — the SHARED body of BOTH too-small gates (`draw_scene`'s and the
-/// floor-transition path's `render_transition`), so the shared `MIN_SCENE_*`
-/// threshold implies shared BEHAVIOR (one clean footer-only frame) instead of two
-/// divergent on-hit paths (one painting a footer, the other painting nothing —
-/// which left a stale, clipped, footer-less frame frozen on screen).
+/// office — the SHARED body of BOTH too-small gates, so a hit paints one clean
+/// footer-only frame instead of leaving a stale, clipped, footer-less one frozen.
+///
+/// It paints the modal overlays too: every modal's key handler stays live at any
+/// size, so suppressing the overlay here made `?`/`s`/`Tab` toggle something
+/// invisible on any terminal below the office layout's minimum — and first run
+/// opens the onboarding modal there.
+// The footer half travels as one `FooterStats` and the modal half as one
+// `OverlayFrame`; what remains is irreducible.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
     scene: &SceneState,
@@ -195,26 +167,16 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     theme: &pixtuoid_scene::theme::Theme,
     floor_info: Option<FloorInfo>,
     source_warning: Option<&str>,
+    overlays: &OverlayFrame<'_>,
+    now: SystemTime,
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
         paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
+        paint_overlays(f, overlays, now, actual, theme);
     })?;
     Ok(())
 }
-
-// --- draw_scene ----------------------------------------------------------
-//
-// `draw_scene` is the orchestrator: get terminal geometry, compute the
-// layout, run the pure pixel pass, then flush to the terminal. The two
-// helpers below are deliberately split:
-//
-//   * `render_to_rgb_buffer` -- pure RGB output. No ratatui types, no
-//     terminal I/O. Can be called by any renderer (web canvas, PNG
-//     snapshot, GIF capture).
-//   * `draw_scene` -- ratatui half-block compression + label overlay
-//     + bulletin notice + footer. Terminal-specific, runs inside
-//     `term.draw`.
 
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     term: &mut Terminal<B>,
@@ -236,11 +198,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let source_warning = ctx.source_warning;
     let floor = ctx.floor;
 
-    // The footer's tallies, assembled ONCE (spine 1): per-state counts from the
-    // projected floor `scene`, office-wide `per_floor`/`gateway` copied out of
-    // `ctx` before the mutable buffer borrows below. `per_floor` is a small Copy
-    // array, so the local owns it and `FooterStats` can borrow it across the
-    // too-small early-returns and the main paint.
+    // `per_floor` is copied out of `ctx` before the mutable buffer borrows below,
+    // so `FooterStats` can borrow it across the early-returns and the main paint.
     let footer_per_floor = ctx.per_floor;
     let footer_stats = crate::tui::widgets::FooterStats {
         counts: crate::tui::widgets::scene_stats(scene),
@@ -248,6 +207,14 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         gateway: ctx.gateway,
         audio_audible: ctx.audio_audible,
         volume_flash: ctx.volume_flash,
+    };
+    let overlays = OverlayFrame {
+        theme_picker: ctx.theme_picker,
+        dashboard: ctx.dashboard,
+        connection: ctx.connection,
+        popup_scale: ctx.popup_scale,
+        help_open: ctx.help_open,
+        onboarding: ctx.onboarding,
     };
 
     if scene_rect.width < MIN_SCENE_WIDTH || scene_rect.height < MIN_SCENE_HEIGHT {
@@ -258,6 +225,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
             floor_info,
             source_warning,
+            &overlays,
+            now,
         )?;
         return Ok(None);
     }
@@ -265,10 +234,6 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
     let buf_w = scene_rect.width;
     let buf_h = scene_rect.height.saturating_mul(2);
     ctx.buf.resize_fill(buf_w, buf_h, theme.surface.bg_fallback);
-    // Always compute maximum layout capacity — floor overflow handles the rest.
-    // The shared memoized prologue (FloorCtx::frame_layout): compute + the router
-    // corridor re-point, cached on (w, h, seed) so a steady frame skips the
-    // mask-stamp + coarse BFS.
     let Some(layout) = ctx.store.frame_layout(buf_w, buf_h, floor.floor_seed) else {
         draw_footer_only_frame(
             term,
@@ -277,13 +242,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             theme,
             floor_info,
             source_warning,
+            &overlays,
+            now,
         )?;
         return Ok(None);
     };
 
     let pixel_result = render_to_rgb_buffer(&mut PixelCtx {
-        // Reborrow: `ctx.store`/`ctx.buf` are used again below (RouteCtx
-        // hit-tests, the dim, the flush).
         store: &mut *ctx.store,
         buf: &mut *ctx.buf,
         // The half-block flush is the classic profile: buffer pixels ARE
@@ -312,17 +277,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         hit_test_agent(scene, &layout, now, &mut ctx.store.route_ctx(), mx, my)
     });
 
-    // Modal backdrop: DIM the office by the loop-computed `onboarding.dim` (ramps
-    // in on open, back out on the close fade) — the room "lowers the lights" so the
-    // welcome card pops. The card (`onboarding.open`) is decoupled from the dim, so
-    // the office keeps fading back up for a beat AFTER the card is gone. The card
-    // itself paints opaque on top.
+    // The dim is decoupled from `onboarding.open`, so the office keeps fading back
+    // up for a beat AFTER the card is gone.
     if ctx.onboarding.dim < 0.999 {
         apply_dim(ctx.buf, ctx.onboarding.dim);
     }
 
     let buf = &ctx.buf;
-    let theme_picker = ctx.theme_picker;
     let chitchat_bubbles = &ctx.chitchat_bubbles;
     term.draw(|f| {
         // Re-derive rects from the actual frame buffer to guard against
@@ -369,10 +330,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if hovered.is_none() {
             if let Some((mx, my)) = mouse_pos {
-                // Priority chain: coffee machine > pet (cursor-over only) >
-                // gateway mascot > furniture. `.filter` keeps the pet/mascot
-                // arms single branches so a present-but-not-hit hover falls
-                // through to the next arm (no per-branch duplication).
+                // `.filter` keeps the pet arm a single branch, so a
+                // present-but-not-hit pet falls through to the next arm.
                 let pet_hit = ctx
                     .last_pet_pos
                     .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, mx, my));
@@ -380,10 +339,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                     paint_coffee_tooltip(f, mx, my, actual_scene, theme);
                 } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
                     let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
-                    // `last_pet_pos` is only Some on the normal render path,
-                    // where it was written from `floor_pet` — so their kinds
-                    // agree and `floor_pet.name` is the right label. The
-                    // `default_name` arm is defense-in-depth, not a live path.
+                    // `last_pet_pos` is only `Some` on the normal render path,
+                    // where it was written from `floor_pet` — so the kinds agree
+                    // and the `default_name` arm is not a live path.
                     let display_name = ctx
                         .floor_pet
                         .map(|p| p.name.as_str())
@@ -417,41 +375,29 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 }
             }
         }
-        paint_overlays(
-            f,
-            theme_picker,
-            ctx.dashboard,
-            ctx.connection,
-            ctx.popup_scale,
-            ctx.help_open,
-            ctx.onboarding,
-            now,
-            actual_full,
-            theme,
-        );
+        paint_overlays(f, &overlays, now, actual_full, theme);
     })?;
     Ok(Some(layout))
 }
 
-/// The modal-overlay dispatch shared by `draw_scene` (normal path) and
-/// `TuiRenderer::render_transition` (the floor-slide path): theme picker → dashboard →
-/// Sources panel → version popup → help, each gated by its own state and drawn
-/// at the same `bounds` (the full terminal area). Centralized so the two draw
-/// paths can't drift in ordering or args; behavior-identical to the inlined
-/// blocks it replaced.
-#[allow(clippy::too_many_arguments)]
+/// The modal-overlay dispatch, centralized so the three draw paths can't drift in
+/// ordering or args. `bounds` is the FULL terminal area — a modal is centered over
+/// the whole frame, and `PanelGeometry` keeps it off the footer row itself.
 pub(super) fn paint_overlays(
     f: &mut ratatui::Frame<'_>,
-    theme_picker: Option<usize>,
-    dashboard: &crate::tui::dashboard::DashboardFrame,
-    connection: &crate::tui::connection::ConnectionFrame,
-    popup_scale: f32,
-    help_open: bool,
-    onboarding: &crate::tui::welcome::OnboardingFrame,
+    ov: &OverlayFrame<'_>,
     now: SystemTime,
     bounds: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
+    let &OverlayFrame {
+        theme_picker,
+        dashboard,
+        connection,
+        popup_scale,
+        help_open,
+        onboarding,
+    } = ov;
     if let Some(idx) = theme_picker {
         paint_theme_picker(f, idx, bounds, theme);
     }
@@ -493,14 +439,8 @@ pub(super) fn paint_overlays(
         }
     }
     if help_open {
-        // Center in `bounds` (the full terminal area, not the scene rect) so the
-        // overlay sits at the same vertical center as the theme picker / version
-        // popup, which both use the full area.
         paint_help_overlay(f, bounds, theme);
     }
-    // Onboarding is the TOP of the precedence chain — painted last so it covers
-    // every other overlay (it's modal-exclusive by dispatch, so in practice no
-    // other overlay is open underneath, but topmost is the safe order).
     if onboarding.open {
         paint_welcome(f, onboarding, bounds, theme);
     }
@@ -546,12 +486,8 @@ fn flush_buffer_to_term(f: &mut ratatui::Frame<'_>, buf: &RgbBuffer, scene_rect:
     flush_buffer_to_term_at_offset(f, buf, scene_rect, 0);
 }
 
-/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim the
-/// onboarding overlay lowers the office to so the opaque welcome card pops.
-/// Shared by BOTH render paths: `draw_scene`'s single composited buffer and
-/// `render_transition`'s two sliding per-floor buffers (a floor change mid-open
-/// dims both halves), so the "lights lowered" look can't drift between them. The
-/// `factor >= 0.999` no-op short-circuit is the caller's (both gate on it).
+/// Multiply every pixel of `buf` down by `factor` — the modal-backdrop dim. The
+/// `factor >= 0.999` no-op short-circuit is the CALLER's; both gate on it.
 pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
     for px in buf.as_mut_slice() {
         px.r = (px.r as f32 * factor) as u8;
@@ -561,15 +497,10 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 }
 
 /// The mascot under the cursor that the user can actually SEE — the one painted on
-/// TOP, not merely the first in the roster.
-///
-/// `last_mascots` arrives in roster order (lexicographic instance, so port), while
-/// the painter y-sorts its drawables ascending
-/// (`pixel_painter`: `drawables.sort_by_key(|d| d.anchor_y)`) — so among overlapping
-/// mascots the greatest `pos.y` is drawn LAST and occludes the others. Picking the
-/// FIRST hit instead named the lower-numbered gateway whichever lobster was visible,
-/// breaking the promise `MascotFrame::instance` documents ("so a hover over one of
-/// two concurrent lobsters names the one under the cursor").
+/// TOP, not merely the first in the roster. The painter y-sorts its drawables
+/// ascending, so among overlapping mascots the greatest `pos.y` is drawn LAST and
+/// occludes the others; picking the FIRST hit named whichever gateway sorted
+/// earliest in the roster, regardless of which lobster was visible.
 fn topmost_mascot_at(
     mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
     mx: u16,
@@ -585,9 +516,6 @@ fn topmost_mascot_at(
 mod tests {
     use super::*;
 
-    /// Two gateways whose sprites overlap must hover as the one drawn ON TOP. The
-    /// roster order is lexicographic by port, so a first-hit pick silently reported
-    /// 18789 while the user was pointing at 19789's lobster.
     #[test]
     fn hovering_overlapping_mascots_names_the_one_painted_on_top() {
         use pixtuoid_scene::layout::Point;
@@ -602,11 +530,9 @@ mod tests {
             degraded: false,
             active_sessions: 0,
         };
-        // Roster order (lexicographic port) puts 18789 first; 19789 stands LOWER on
-        // screen, so the painter draws it last and it occludes its sibling.
-        // `hit_test_mascot` centres the 14x12 box on `pos` and doubles the cell y
-        // (half-block), so 18789 covers x[33,47) my[22,28) and 19789 x[37,51)
-        // my[25,31) — overlapping at x[37,47) my[25,28).
+        // `hit_test_mascot` centres the 14x12 box on `pos` and DOUBLES the cell y
+        // (half-block): 18789 covers x[33,47) my[22,28) and 19789 x[37,51) my[25,31)
+        // — overlapping at x[37,47) my[25,28), with 19789 lower and so painted last.
         let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
         let hit = |mx, my| {
             topmost_mascot_at(&mascots, mx, my)
@@ -614,15 +540,10 @@ mod tests {
                 .unwrap_or_else(|| "none".into())
         };
 
-        // Inside the overlap of both boxes ⇒ the lower (later-painted) one wins.
         assert_eq!(hit(40, 26), "19789", "the visible lobster must be named");
-        // Above/left of the overlap, only the upper sprite is under the cursor.
         assert_eq!(hit(34, 23), "18789");
-        // Below the upper sprite's box, only the lower one is.
         assert_eq!(hit(49, 29), "19789");
-        // Clear of both.
         assert_eq!(hit(5, 5), "none");
-        // Order in the slice must not matter — reversing the roster changes nothing.
         let reversed = vec![frame("19789", 44, 56), frame("18789", 40, 50)];
         assert_eq!(
             topmost_mascot_at(&reversed, 40, 26)
@@ -703,12 +624,9 @@ mod tests {
         assert_eq!(clip_widget_rect(r, b), None);
     }
 
-    // A zero-HEIGHT rect that sits STRICTLY inside both entry guards (its x/y are
-    // well inside `bounds`, and `rect.x + rect.width > bounds.x`,
-    // `rect.y + rect.height == rect.y > bounds.y`) clears lines 149/152 and is
-    // only rejected by the line-160 collapse guard (`bot <= y`). The existing
-    // zero-SIZE test uses a zero-WIDTH rect, which exits early at line 152, so it
-    // never reaches 160.
+    // A zero-HEIGHT rect sits STRICTLY inside both entry guards, so only the final
+    // collapse guard (`bot <= y`) can reject it — unlike the zero-WIDTH rect above,
+    // which exits early.
     #[test]
     fn clip_widget_rect_zero_height_inside_bounds_returns_none() {
         let zero_h = Rect {
@@ -725,11 +643,6 @@ mod tests {
         };
         assert_eq!(clip_widget_rect(zero_h, b), None);
 
-        // Mutation-killer: a non-degenerate rect at the SAME position still
-        // clips to itself. If the line-160 guard were deleted (so `zero_h`
-        // returned `Some` with height 0), this pair would still pass — so the
-        // first assert is what pins the guard, and this one pins that the guard
-        // doesn't over-reject a real rect.
         let inside = Rect {
             x: 2,
             y: 2,
@@ -743,12 +656,8 @@ mod tests {
         pixtuoid_core::sprite::Rgb { r, g, b }
     }
 
-    /// The cell symbol a flushed half-block carries (upper-half block).
     const HALF_BLOCK: &str = "\u{2580}";
 
-    // Lines 499-500: columns whose terminal x falls past the scene rect's right
-    // edge are skipped (a buffer wider than the rect). Deleting the `continue`
-    // would paint half-blocks past the rect onto the footer column band.
     #[test]
     fn flush_skips_columns_past_scene_right_edge() {
         let mut term =
@@ -764,7 +673,6 @@ mod tests {
         term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
             .expect("draw");
         let term_buf = term.backend().buffer();
-        // In-rect columns 0..4 carry the half-block.
         for x in 0..4u16 {
             assert_eq!(
                 term_buf.cell((x, 0)).unwrap().symbol(),
@@ -772,7 +680,6 @@ mod tests {
                 "column {x} is inside the rect and must be painted"
             );
         }
-        // Columns 4 and 5 (the buffer overhang) are left untouched.
         for x in 4..6u16 {
             assert_ne!(
                 term_buf.cell((x, 0)).unwrap().symbol(),
@@ -782,9 +689,6 @@ mod tests {
         }
     }
 
-    // Lines 502-503: cells whose x/y fall outside the actual terminal buffer are
-    // skipped (a scene rect larger than the frame, a resize race). Deleting the
-    // `continue` would index `term_buf[(x, y)]` out of bounds and panic.
     #[test]
     fn flush_skips_cells_past_terminal_bounds() {
         let mut term =
@@ -797,11 +701,9 @@ mod tests {
             width: 8,
             height: 6,
         };
-        // The draw must not panic despite the oversized rect.
         term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
             .expect("draw must not panic on an oversized rect");
         let term_buf = term.backend().buffer();
-        // Exactly the in-bounds intersection (0..4 × 0..3) is painted.
         for y in 0..3u16 {
             for x in 0..4u16 {
                 assert_eq!(

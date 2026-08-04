@@ -1,6 +1,3 @@
-// Unit tests for the CSP hash kernel — the edge cases the e2e watchdog can only
-// catch indirectly (and only on pages the smoke suite exercises). `node --test`
-// runs .mjs natively; wired into `npm run verify` (→ `just site-check`).
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
@@ -19,8 +16,8 @@ test('a > inside a quoted attribute value does not truncate the content', () => 
 });
 
 test('parser-error end tags a browser still honors match (js/bad-tag-filter)', () => {
-  // A browser ends the script at each of these; if our regex didn't, the
-  // trailing content would ship unhashed → prod-only CSP block.
+  // A browser ends the script at each of these; content the regex misses would
+  // ship unhashed → prod-only CSP block.
   assert.ok(inlineScriptHashes('<script>doWork()</script >').has(sha('doWork()')));
   assert.ok(inlineScriptHashes('<script>doWork()</script\n>').has(sha('doWork()')));
   assert.ok(inlineScriptHashes('<script>doWork()</script foo="bar">').has(sha('doWork()')));
@@ -42,9 +39,9 @@ test('data-src is not mistaken for src', () => {
 
 test('rewriteCspMeta injects script hashes and strips style hashes', () => {
   const html =
-    '<meta http-equiv="content-security-policy" content="script-src \'self\'; ' +
+    '<head><meta http-equiv="content-security-policy" content="script-src \'self\'; ' +
     "style-src 'self' 'unsafe-inline' 'sha256-OLD'\">" +
-    '<script>x()</script>';
+    '<script>x()</script></head>';
   const out = rewriteCspMeta(html);
   assert.ok(out.includes(sha('x()')), 'script-src gains the inline hash');
   assert.ok(!out.includes("'sha256-OLD'"), 'style-src hashes are dropped');
@@ -53,4 +50,37 @@ test('rewriteCspMeta injects script hashes and strips style hashes', () => {
 
 test('rewriteCspMeta returns null when no CSP meta is present', () => {
   assert.equal(rewriteCspMeta('<html></html>'), null);
+});
+
+test('the meta is hoisted above every script and style it governs', () => {
+  const html =
+    '<!DOCTYPE html><html><head><meta charset="utf-8"><style>a{}</style>' +
+    '<script>early()</script>' +
+    '<meta http-equiv="content-security-policy" content="script-src \'self\'">' +
+    '<script>late()</script></head></html>';
+  const out = rewriteCspMeta(html);
+  const meta = out.search(/<meta http-equiv="content-security-policy"/i);
+  for (const m of out.matchAll(/<(?:script|style)\b/gi)) {
+    assert.ok(m.index > meta, `${m[0]} at ${m.index} must follow the meta at ${meta}`);
+  }
+  assert.ok(out.includes(sha('early()')), 'a hoisted-over script is still hashed');
+});
+
+test('the hoisted meta lands after the charset declaration, not before it', () => {
+  const out = rewriteCspMeta(
+    '<head><meta charset="utf-8">' +
+      '<meta http-equiv="content-security-policy" content="script-src \'self\'"></head>'
+  );
+  assert.ok(
+    out.search(/<meta charset/i) < out.search(/<meta http-equiv/i),
+    'charset must stay in the first 1024 bytes the encoding sniffer reads'
+  );
+});
+
+test('rewriteCspMeta throws when the meta has no head to be hoisted into', () => {
+  assert.throws(
+    () =>
+      rewriteCspMeta('<meta http-equiv="content-security-policy" content="script-src \'self\'">'),
+    /hoist/i
+  );
 });

@@ -10,14 +10,10 @@ authors.workspace      = true
 homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
-# Workspace-only tests that read a sibling file absent from the published
-# tarball — shipping them would make `cargo test` fail on the .crate (publish
-# itself is unaffected: its verify step builds, not tests). socket_path_parity
-# #[path]-includes ../../pixtuoid-hook/src/paths.rs; supported_sources_manifest
-# reads ../../site/src/sources.json at runtime (runtime-read spares the publish
-# build-verify, NOT cargo test on an extracted crate — so it must be excluded too).
-# proof_fixture_disjointness reads ../../site/src/components/Statusline.astro
-# the same way.
+# Workspace-only tests that reach outside the crate for a sibling file absent
+# from the published tarball — shipping them would make `cargo test` fail on the
+# .crate. Runtime reads need excluding too: they spare the publish build-verify
+# but not `cargo test` on an extracted crate.
 exclude                = [
     "tests/socket_path_parity.rs",
     "tests/supported_sources_manifest.rs",
@@ -27,16 +23,19 @@ exclude                = [
 [lints]
 workspace = true
 
-# `native` (default) pulls the async runtime + filesystem-watcher layer — the
-# whole source/ transport+watcher+probe machinery (tokio, notify, the Unix/Windows
-# hook listeners, the JSONL watcher, the liveness probes). Building WITHOUT it
-# (`--no-default-features`) yields a pure core that compiles to
-# wasm32-unknown-unknown: the event vocabulary + reducer + state + the
-# sprite/render surface, no tokio/notify. That no-default
-# build is what pixtuoid-scene → the WebAssembly office hero compiles against.
+# `native` (default) pulls the whole source/ transport+watcher+probe machinery.
+# Without it (`--no-default-features`) the pure core compiles to
+# wasm32-unknown-unknown, which is what pixtuoid-scene's WebAssembly office hero
+# builds against.
+#
+# `harness` (NON-default) adds the offline decode→reduce driver the
+# fixture/corpus/fuzz/render call sites ride. Dev scaffolding: keeping it out of
+# a default build keeps it out of `cargo public-api` + `cargo semver-checks`, so
+# it never becomes a semver commitment.
 [features]
 default = ["native"]
 native  = ["dep:tokio", "dep:notify"]
+harness = []
 
 [dependencies]
 tokio       = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util"], optional = true }
@@ -50,12 +49,10 @@ notify      = { workspace = true, optional = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 # Safe wrappers for the liveness/exit-watch syscalls the `native` probe layer
-# makes: kqueue+kevent (macOS exit_watch), pidfd_open+poll+self-pipe (Linux
-# exit_watch), kill(0) (cc_probe). Retires the raw `libc::syscall(SYS_pidfd_open)`
-# and the hand-poked `libc::kevent`/`pollfd` structs. Already compiled in the
-# workspace (crossterm pulls it); unix-only like `libc`, so the wasm32 core build
-# (a NON-unix target) never sees it. libc STAYS for the macOS libproc calls rustix
-# doesn't wrap (proc_pidinfo start-time in cc_probe, the fd→path table in fd_probe).
+# makes: kqueue+kevent (macOS), pidfd_open+poll+self-pipe (Linux), kill(0).
+# Unix-only like `libc`, so the wasm32 core build never sees it. libc STAYS for
+# the macOS libproc calls rustix doesn't wrap (proc_pidinfo start-time in
+# cc_probe, the fd→path table in fd_probe).
 rustix = { version = "1", features = ["event", "process", "pipe"] }
 
 # 0.61 to match the major tokio already pulls (via mio) for this target —
@@ -64,12 +61,12 @@ rustix = { version = "1", features = ["event", "process", "pipe"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
 
 [dev-dependencies]
+# Depending on ourselves BY PATH is how a crate turns its own non-default
+# feature on for its dev targets — Cargo has no direct mechanism for it. The
+# workspace's `resolver = "2"` keeps dev-dependency features out of a normal
+# build (under v1 they would unify in and `harness` would ship).
+pixtuoid-core = { path = ".", features = ["harness"] }
 tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
-# Property-based testing of the pure-core algebraic invariants (the walkable-mask
-# geometry today — the rest of the sim-geometry prop modules moved to
-# pixtuoid-scene): generate thousands of inputs to falsify a property, shrinking
-# any failure to a minimal counterexample. Found failures persist under
-# `proptest-regressions/` so they re-run forever.
 proptest = "1"
 tempfile = "3"
 filetime = "0.2"

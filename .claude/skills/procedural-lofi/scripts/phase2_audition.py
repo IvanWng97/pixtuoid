@@ -1,25 +1,18 @@
 #!/usr/bin/env python3
 """Phase 2 (musical stems) audition renders — reuses the Phase 0 synth 1:1.
 
-What Phase 2 must prove BEFORE any engine code (the audio pin-before-coding):
-1. SOAK: a 13.33s stem loop tiled for ~2 min per tier — does it wear thin?
-2. TRANSITION: tier gains ramped at the mixer's real RAMP_PER_S while the
-   "office" goes empty -> moderate -> busy -> moderate — the runtime
-   "generative feel from mixing" claim, heard end to end.
-Stem solos re-render too (Phase 0's copies died with its scratchpad).
+Renders the stem solos, a ~2 min per-tier soak (does the loop wear thin?), and a
+tier-gain transition ramped at the mixer's real RAMP_PER_S.
 
-Tier gain tables are pinned COPIES of crates/pixtuoid-scene/src/audio.rs
-(PAD_GAIN/SPARKLE_GAIN/KEYS_GAIN/DRUMS_GAIN/TEXTURE_GAIN/TYPING_GAIN) — if
+Tier gain tables are pinned COPIES of crates/pixtuoid-scene/src/audio.rs — if
 those consts move, re-copy before re-auditioning.
 """
 
 import numpy as np
 import synth_audition as s0
 
-# v2 (owner: "感觉可以拉长一些"): 8-bar loops. The progression still cycles
-# every 4 bars (normal lofi); the SECOND half's variation comes from the
-# melodic foreground — sparkle/keys draw fresh events for bars 4-7. Pad
-# repeats its (chord-determined) rendering; drums keep the groove.
+# 8-bar loops, though the progression still cycles every 4 bars (normal lofi):
+# the second half's variation comes from sparkle/keys drawing fresh events.
 LOOP_BARS = 8
 s0.LOOP_BARS = LOOP_BARS  # stem_drums/texture read the module global
 s0.LOOP_S = s0.BAR * LOOP_BARS
@@ -28,7 +21,7 @@ SR = s0.SR
 LOOP_S = s0.LOOP_S
 BEAT = s0.BEAT
 BAR = s0.BAR
-RAMP_PER_S = 0.5  # mixer.rs RAMP_PER_S — the real runtime slew
+RAMP_PER_S = 0.5  # pinned copy of mixer.rs RAMP_PER_S
 
 
 def chords8():
@@ -36,7 +29,7 @@ def chords8():
 
 
 def stem_pad8():
-    # stem_pad's body over 8 bars (it iterates enumerate(CHORDS) = 4)
+    # stem_pad's body re-spelled over 8 bars (s0's iterates enumerate(CHORDS) = 4)
     buf = np.zeros(s0.n_samples(LOOP_S))
     for bar, chord in enumerate(chords8()):
         dur = BAR + 0.9
@@ -87,7 +80,7 @@ KEYS_GAIN = [0.0, 0.60, 0.70]
 DRUMS_GAIN = [0.0, 0.35, 0.60]
 TEXTURE_GAIN = [0.28, 0.30, 0.28]
 TYPING_GAIN = [0.0, 0.50, 0.80]
-TYPING_BURSTS_PER_MIN_AT_FULL = 28  # mixer.rs BURSTS_PER_MIN_AT_FULL
+TYPING_BURSTS_PER_MIN_AT_FULL = 28  # pinned copy of mixer.rs BURSTS_PER_MIN_AT_FULL
 
 
 def render_stems():
@@ -120,8 +113,8 @@ def soak(stems, tier, minutes=2.0):
 
 
 def transition(stems, schedule, total_s):
-    """schedule: [(at_s, tier)] — per-stem gains slew toward the active
-    tier's target at RAMP_PER_S, exactly like mixer.rs."""
+    """schedule: [(at_s, tier)] — per-stem gains slew toward the active tier's
+    target at RAMP_PER_S, exactly like mixer.rs."""
     n = s0.n_samples(total_s)
     dt = 1.0 / SR
     out_parts = {}
@@ -140,7 +133,7 @@ def transition(stems, schedule, total_s):
                 cur[k] += np.clip(d, -step, step)
                 gain_curves[k][idx] = cur[k]
     mixed = sum(out_parts[k] * gain_curves[k] for k in stems)
-    # typing joins per segment (burst scheduler; no slew — density is the knob)
+    # typing gets NO slew — density, not gain, is its knob
     r = np.random.default_rng(41)
     typing = np.zeros(n)
     for i, (at, tier) in enumerate(schedule):
@@ -159,7 +152,6 @@ def main():
         s0.write_wav(f"p2_stem_{k}.wav", v)
     for tier, name in [(0, "empty"), (1, "moderate"), (2, "busy")]:
         s0.write_wav(f"p2_soak_{name}.wav", soak(stems, tier))
-    # a 3-min office day: empty 30s -> moderate 60s -> busy 60s -> moderate
     sched = [(0.0, 0), (30.0, 1), (90.0, 2), (150.0, 1)]
     s0.write_wav("p2_transition_day.wav", transition(stems, sched, 180.0))
     print(f"done -> {s0.OUT}")

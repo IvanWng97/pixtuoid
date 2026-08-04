@@ -1,63 +1,36 @@
 //! Cursor CLI source — HOOK-ONLY (no JSONL watcher).
 //!
-//! Cursor ships a standalone agent CLI (`cursor-agent`, installed via
-//! `curl https://cursor.com/install`). Three candidate seams, only one
-//! reachable by a *passive observer* like pixtuoid:
+//! Only one of Cursor's three seams is reachable by a *passive observer*:
+//! `--output-format stream-json` NDJSON is stdout of an invocation we would have
+//! to launch ourselves, and on-disk sessions are SQLite
+//! (`~/.cursor/chats/.../store.db`, hex-encoded blobs). So **Cursor Hooks**
+//! (`~/.cursor/hooks.json`, registered by the Connection panel) is the seam.
 //!
-//! - `--output-format stream-json` NDJSON is **stdout of an invocation we'd
-//!   have to launch ourselves** — pixtuoid never spawns the user's agent, so it
-//!   is structurally unreachable.
-//! - On-disk sessions are **SQLite** (`~/.cursor/chats/.../store.db`,
-//!   hex-encoded blobs) — not a tailable JSONL (the opencode situation).
-//! - **Cursor Hooks** (`~/.cursor/hooks.json`) — shell commands fired on
-//!   lifecycle/tool events, JSON on stdin, staff-confirmed firing in the
-//!   standalone CLI. THIS is the seam: connecting Cursor in the Connection
-//!   panel (`s`) registers the shim in the GLOBAL `~/.cursor/hooks.json`.
+//! Payloads arrive on the shared hook socket stamped
+//! `_pixtuoid_source: "cursor"`. The envelope reuses CC's `hook_event_name`
+//! field NAME but with **camelCase values**; `tool_name` is PascalCase
+//! (`Shell`/`Grep`/`Read`) and `tool_input` carries
+//! `command`/`pattern`/`file_path`.
 //!
-//! Hook payloads arrive on the shared hook socket stamped
-//! `_pixtuoid_source: "cursor"`; `decoder::decode_hook_payload` dispatches them
-//! here (the custom decoder runs FIRST, before the shared CC-shaped field
-//! requirements). Cursor's envelope reuses CC's `hook_event_name` field NAME
-//! but with **camelCase values** — wire shape verified against a real
-//! `cursor-agent -p` capture shape:
-//!
-//! ```json
-//! {"hook_event_name":"preToolUse","session_id":"c7cef226-…","cwd":"",
-//!  "workspace_roots":["/repo"],"tool_name":"Shell",
-//!  "tool_input":{"command":"ls -la"}}
-//! ```
-//!
-//! Keyed on **`session_id`** (present + CONSISTENT across every CLI event in the
-//! capture; == `conversation_id` and the transcript filename stem), so concurrent
-//! sessions in one project stay distinct and all of a session's events coalesce.
-//! The TOP-LEVEL `cwd` is EMPTY/absent in CLI hooks — `workspace_roots[0]` is the
-//! real workspace, used for the label + the SessionStart cwd (a workspace
-//! fallback covers the degenerate session_id-less event). Deliberate:
+//! Keyed on **`session_id`** (present + CONSISTENT across every CLI event; ==
+//! `conversation_id` and the transcript filename stem), so concurrent sessions
+//! in one project stay distinct. The TOP-LEVEL `cwd` is EMPTY/absent in CLI
+//! hooks — `workspace_roots[0]` is the real workspace.
 //!
 //! - `tool_use_id` is always `None`: the reducer's per-call machinery
 //!   (hook-wins dedup, `active_tasks`) is bypassed — harmless on a single
-//!   transport. `tool_name` is PascalCase (`Shell`/`Grep`/`Read`); `tool_input`
-//!   carries `command`/`pattern`/`file_path`.
-//! - **Subagents: rendered FLAT, never nested (parent-link is genuinely
-//!   absent).** A parallel-subagent task dispatches via a `Task` tool
-//!   (`tool_name:"Task"` + `tool_input.subagent_type` — capture-verified, the
-//!   CC semantic) → the PARENT reads "Delegating" (`cursor_tool_detail`). But
-//!   each child runs as an INDEPENDENT session (own `session_id`, firing tool
-//!   events with NO `sessionStart`/`sessionEnd`), and NOTHING in the stream
-//!   links a child to its parent — `subagentStart`/`subagentStop` don't fire
-//!   (capture-verified: 0), the `Task` dispatch carries only the PARENT's id,
-//!   and child events carry no `parentId`. So children appear as sibling `cu·`
-//!   sprites (a "parallel agents" effect), NOT nested, and — getting no
-//!   `sessionEnd` — they age out via the idle stale-sweep. The missing link is a
-//!   proven upstream constraint (drift-watched for if/when the CLI lands the
-//!   subagent hooks).
-//! - Exit profile: `sessionEnd` FIRES on clean completion (capture-verified:
-//!   `reason:"completed"`) → `has_exit_signal: true` (best-effort, CC/Reasonix
-//!   class). `stop` is turn-end and did NOT fire under `-p` (kept mapped for
+//!   transport.
+//! - **Subagents render FLAT, never nested — the parent-link is genuinely
+//!   absent.** Each child runs as an INDEPENDENT session and NOTHING links it to
+//!   its parent: `subagentStart`/`subagentStop` don't fire (capture-verified:
+//!   0), the `Task` dispatch carries only the PARENT's id, and child events
+//!   carry no `parentId`. Getting no `sessionEnd`, children age out via the
+//!   idle stale-sweep.
+//! - Exit profile: `sessionEnd` FIRES on clean completion → `has_exit_signal:
+//!   true`. `stop` is turn-end and did NOT fire under `-p` (kept mapped for
 //!   interactive turns); abrupt exits (no PID exposed) fall to the stale-sweep.
 //! - A per-session JSONL transcript DOES exist
-//!   (`~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`,
-//!   `transcript_path` on the payload) — hook-only is complete today, but this is
+//!   (`~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`) —
 //!   the seam if a watcher is ever wanted (its stem == our `session_id` key).
 
 use anyhow::{anyhow, bail, Result};
@@ -70,25 +43,13 @@ use crate::AgentId;
 pub const SOURCE_NAME: &str = "cursor";
 
 /// Decode one Cursor hook payload (already identified by
-/// `_pixtuoid_source == "cursor"`). Envelope per `cursor.com/docs/hooks`.
-///
-/// Event mapping (camelCase `hook_event_name` values), all keyed on `session_id`:
-/// - `sessionStart`          → `SessionStart`
-/// - `preToolUse`            → `Identity` + `ActivityStart`
-/// - `postToolUse`           → `Identity` + `ActivityEnd`
-/// - `postToolUseFailure`    → `Identity` + `ActivityEnd` (a FAILED tool fires
-///   this INSTEAD OF `postToolUse`; closed the same way — identity-backed, since
-///   it carries cwd/tool_name — so the sprite doesn't linger Active under `-p`)
-/// - `stop`                  → `ActivityEnd` (turn end → idle debounce; NO
-///   Identity — an end for an unknown agent proves nothing worth registering)
-/// - `sessionEnd`            → `SessionEnd`
-/// - anything else           → bail (registered-vs-decoded drift must be loud)
+/// `_pixtuoid_source == "cursor"`). Envelope per `cursor.com/docs/hooks`; an
+/// unregistered event bails, so registered-vs-decoded drift is loud.
 ///
 /// The activity arms prepend an [`AgentEvent::Identity`] (#221) because Cursor
 /// is HOOK-ONLY: a slot the reducer's proof-of-life pre-pass synthesizes
 /// mid-turn has no JSONL back-fill path, so without the attached identity it
-/// would stay a blank `#N` ghost. The Identity's `session_id` mirrors the
-/// `SessionStart` arm's key exactly — coalescing holds.
+/// would stay a blank `#N` ghost.
 pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -97,9 +58,8 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("hook_event_name")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("cursor payload missing hook_event_name"))?;
-    // The workspace path: the top-level `cwd` is EMPTY/absent in CLI hook
-    // payloads (from a real capture) — `workspace_roots[0]` is the real
-    // one. Used for the label + the SessionStart/Identity cwd, NOT the AgentId key.
+    // The top-level `cwd` is EMPTY/absent in CLI hook payloads —
+    // `workspace_roots[0]` is the real one. Label/cwd only, NOT the AgentId key.
     let workspace = obj
         .get("cwd")
         .and_then(|s| s.as_str())
@@ -111,11 +71,10 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|s| s.as_str())
                 .filter(|s| !s.is_empty())
         });
-    // Key on `session_id` — present and CONSISTENT across every CLI hook event
-    // (capture-verified; == `conversation_id` and the transcript filename stem),
+    // Key on `session_id` — present and CONSISTENT across every CLI hook event,
     // so it distinguishes concurrent sessions in one project AND coalesces all of
     // a session's events. Fall back to the workspace path only if a future event
-    // ever omits it (keeps coalescing best-effort instead of dropping the event).
+    // ever omits it, rather than dropping it.
     let key = obj
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -159,12 +118,9 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 },
             ])
         }
-        // A FAILED tool fires `postToolUseFailure` (carrying
-        // error_message/failure_type) INSTEAD OF `postToolUse`. Close the
-        // activity identically — identity-backed, since it carries cwd/tool_name
-        // and is proof-of-life. Without this arm a failed tool's ActivityStart
-        // never ends under `-p` (where `stop` doesn't fire) and the sprite
-        // lingers Active until sessionEnd / the stale sweep.
+        // A FAILED tool fires `postToolUseFailure` INSTEAD OF `postToolUse`.
+        // Without this arm a failed tool's ActivityStart never ends under `-p`
+        // (where `stop` doesn't fire) and the sprite lingers Active.
         "postToolUse" | "postToolUseFailure" => Ok(vec![
             identity(),
             AgentEvent::ActivityEnd {
@@ -172,8 +128,8 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 tool_use_id: None,
             },
         ]),
-        // Turn end — deliberately Identity-LESS (the shared Stop arm makes the
-        // same call): an end doesn't prove a session worth registering.
+        // Turn end — deliberately Identity-LESS: an end doesn't prove a session
+        // worth registering.
         "stop" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
@@ -184,32 +140,23 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported cursor hook event: {other}")
+            bail!(
+                "unsupported cursor hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }
 
-/// Cursor tool detail: `"name: target"` using Cursor's argument vocabulary,
-/// looked up `command` > `file_path` > `path` > `pattern` > `url` (the keys its
-/// shell/read/edit/grep/web tool inputs carry). Both the tool NAME and the
-/// `: target` are capped at the decode boundary (pitfall 3), matching
-/// `make_tool_detail`/`rx_tool_detail`. No subagent-dispatch detection — Cursor
-/// renders session-only (no in-CLI delegation signal).
 fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
-    // Subagent dispatch: Cursor's `Task` tool carries a `subagent_type`
-    // (from a real capture, e.g. "code-explorer") — the SAME stable
-    // semantic signal CC's `make_tool_detail` keys on. Show "Delegating" on the
-    // parent while the children work. (The children run as INDEPENDENT sessions
-    // with no parent-link in the stream — see the module doc — so this is the
-    // only delegation signal pixtuoid can render; mirrors CC's `has_subagent_type
-    // || known_name`.)
+    // Cursor's `Task` tool carries a `subagent_type` (capture-verified) — the
+    // SAME stable semantic signal CC's `make_tool_detail` keys on. The children
+    // run as INDEPENDENT sessions with no parent-link in the stream (module
+    // doc), so this is the only delegation signal pixtuoid can render.
     let has_subagent_type = args.and_then(|a| a.get("subagent_type")).is_some();
     if tool == "Task" || has_subagent_type {
         return ToolDetail::Task;
     }
-    // Per-source target vocabulary; the shared scan lives in the decoder, the
-    // last-mile assembly (name + `: target` with the matching caps) in
-    // `generic_tool_display`.
     const KEYS: &[&str] = &["command", "file_path", "path", "pattern", "url"];
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
@@ -224,8 +171,7 @@ mod tests {
         decode_cursor_hook_payload(&v).expect("decodes")
     }
 
-    /// The payload's MAIN event — the last decoded event (activity arms prepend
-    /// an `Identity`).
+    /// The payload's MAIN event — the LAST one (activity arms prepend an Identity).
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
     }
@@ -233,7 +179,7 @@ mod tests {
     #[test]
     fn session_start_keys_on_session_id_label_from_workspace() {
         // Real CLI shape: session_id present, top-level cwd EMPTY, the workspace
-        // in workspace_roots[0]. Key = session_id; label cwd = workspace_roots[0].
+        // in workspace_roots[0].
         let ev = decode(json!({
             "hook_event_name": "sessionStart",
             "session_id": "c7cef226-sess",
@@ -265,8 +211,6 @@ mod tests {
 
     #[test]
     fn session_id_distinguishes_two_sessions_in_one_workspace() {
-        // The upgrade's whole point: cwd-keying would merge these into one sprite;
-        // session_id keeps them distinct.
         let a = decode(
             json!({"hook_event_name": "sessionStart", "session_id": "sess-A",
                               "workspace_roots": ["/repo"]}),
@@ -284,8 +228,6 @@ mod tests {
 
     #[test]
     fn key_falls_back_to_workspace_when_session_id_absent() {
-        // Defensive: a (hypothetical) event with no session_id still keys
-        // consistently on the workspace rather than dropping.
         let ev = decode(json!({
             "hook_event_name": "sessionStart",
             "workspace_roots": ["/Users/dev/proj", "/other"]
@@ -320,9 +262,6 @@ mod tests {
 
     #[test]
     fn task_dispatch_with_subagent_type_is_delegating() {
-        // Capture-verified: a parallel-subagent dispatch fires preToolUse with
-        // tool_name "Task" + tool_input.subagent_type — the parent must read
-        // Delegating (ToolDetail::Task), mirroring CC's semantic detection.
         let ev = decode(json!({
             "hook_event_name": "preToolUse",
             "session_id": "parent",
@@ -334,15 +273,11 @@ mod tests {
             matches!(&ev, AgentEvent::ActivityStart { detail: Some(d), .. } if d.is_task()),
             "Task + subagent_type must map to ToolDetail::Task, got {ev:?}"
         );
-        // An ordinary tool stays Generic.
         let read = decode(json!({
             "hook_event_name": "preToolUse", "session_id": "p", "workspace_roots": ["/r"],
             "tool_name": "Read", "tool_input": {"file_path": "/r/x.rs"}
         }));
         assert!(matches!(&read, AgentEvent::ActivityStart { detail: Some(d), .. } if !d.is_task()));
-        // EITHER signal alone suffices (the detection is `name OR semantic
-        // field`, mirroring CC): an input-less `Task` call, and a renamed
-        // dispatch that still carries `subagent_type`.
         let bare_task = decode(json!({
             "hook_event_name": "preToolUse", "session_id": "p", "workspace_roots": ["/r"],
             "tool_name": "Task"
@@ -363,7 +298,6 @@ mod tests {
 
     #[test]
     fn tool_target_uses_cursor_arg_vocabulary() {
-        // `command` wins the priority order.
         let shell = decode(json!({
             "hook_event_name": "preToolUse", "cwd": "/r",
             "tool_name": "shell", "tool_input": {"command": "cargo test"}
@@ -372,7 +306,6 @@ mod tests {
             matches!(shell, AgentEvent::ActivityStart { detail: Some(d), .. }
             if d.display() == "shell: cargo test")
         );
-        // `file_path` (edit/write tools) is recognized.
         let edit = decode(json!({
             "hook_event_name": "preToolUse", "cwd": "/r",
             "tool_name": "edit", "tool_input": {"file_path": "src/lib.rs"}
@@ -427,7 +360,6 @@ mod tests {
 
     #[test]
     fn post_tool_use_and_stop_are_activity_end() {
-        // postToolUseFailure (a failed tool) closes activity like postToolUse.
         for event in ["postToolUse", "postToolUseFailure", "stop"] {
             let ev = decode(json!({"hook_event_name": event, "cwd": "/r"}));
             assert!(
@@ -457,9 +389,6 @@ mod tests {
 
     #[test]
     fn all_events_for_one_session_share_one_agent_id() {
-        // The coalescing contract: every event of a session keys on the same
-        // session_id-derived AgentId — even though the top-level cwd is empty and
-        // only workspace_roots carries the path (the real CLI shape).
         let sid = "c7cef226-sess";
         let events = [
             json!({"hook_event_name": "sessionStart", "session_id": sid, "workspace_roots": ["/repo"]}),
@@ -483,8 +412,6 @@ mod tests {
             json!({"hook_event_name": "preToolUse", "session_id": "s", "cwd": "", "workspace_roots": ["/repo"],
                    "tool_name": "Shell", "tool_input": {"command": "ls"}}),
             json!({"hook_event_name": "postToolUse", "session_id": "s", "workspace_roots": ["/repo"], "tool_name": "Shell"}),
-            // A failed tool must ALSO back-fill identity (not be identity-less
-            // like `stop`) — it carries cwd/tool_name and is proof-of-life.
             json!({"hook_event_name": "postToolUseFailure", "session_id": "s", "workspace_roots": ["/repo"],
                    "tool_name": "Shell", "error_message": "command failed", "failure_type": "error", "is_interrupt": false}),
         ] {
@@ -532,13 +459,11 @@ mod tests {
 
     #[test]
     fn no_session_id_cwd_or_workspace_is_malformed_but_session_id_alone_is_ok() {
-        // Nothing to key on → Err.
         assert!(decode_cursor_hook_payload(&json!({"hook_event_name": "stop"})).is_err());
         assert!(decode_cursor_hook_payload(
             &json!({"hook_event_name": "stop", "cwd": "", "workspace_roots": []})
         )
         .is_err());
-        // session_id alone is enough — cwd/workspace are only for the label.
         assert!(
             decode_cursor_hook_payload(&json!({"hook_event_name": "stop", "session_id": "s"}))
                 .is_ok()
@@ -547,8 +472,7 @@ mod tests {
 
     #[test]
     fn unknown_event_bails_loudly() {
-        // Registered-vs-decoded drift must surface. subagentStart/Stop are
-        // deliberately unregistered (not firing in CLI / session-only).
+        // subagentStart/Stop are deliberately unregistered — they do not fire.
         for ev in [
             "subagentStart",
             "subagentStop",

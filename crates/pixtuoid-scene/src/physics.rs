@@ -6,8 +6,6 @@
 
 use pixtuoid_core::AgentId;
 
-// ── Intent ────────────────────────────────────────────────────────────────────
-
 /// Why is this walk happening? Determines which cruise speed is used.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalkIntent {
@@ -23,43 +21,22 @@ pub enum WalkIntent {
     SnapBack,
 }
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-/// Cruise speed for Entry / Exit walks (octile/ms). SnapBack has its own faster
-/// [`V_CRUISE_SNAPBACK`].
-///
-/// Calibrated against measured door→desk octile distances in the real office
-/// geometry (916–1436 octile on an 8-desk floor, 206–1436 on a 16-desk floor).
-/// Goal: keep the *effective average* walk pace ≈ the old flat 4 s baseline while
-/// making duration distance-proportional.  Resulting durations: near ≈ 3.1 s,
-/// avg ≈ 3.8 s, far ≈ 4.5 s (8-desk floor); ≈ 1.1 s for very-near desks on a
-/// busy floor → a 1.4–3.4 s staggered-arrival spread.
+/// Cruise speed for Entry / Exit walks (octile/ms), tuned to keep the effective
+/// average walk pace ≈ 4 s while making duration distance-proportional.
 pub const V_CRUISE_COMMUTE: f32 = 0.36;
-/// Cruise speed for WanderOut / WanderBack walks (octile/ms).
-///
-/// Ambling speed, slower than commute.  Calibrated in proportion to
-/// `V_CRUISE_COMMUTE` to preserve the commute-vs-wander pace contrast.
+/// Cruise speed for WanderOut / WanderBack walks (octile/ms) — ambling, tuned in
+/// proportion to [`V_CRUISE_COMMUTE`] to preserve the commute-vs-wander contrast.
 pub const V_CRUISE_WANDER: f32 = 0.25;
-/// Cruise speed for SnapBack walks (octile/ms) — faster than commute.
-///
-/// A snap-back is an URGENT return to the desk after an interruption (Idle→Active
-/// mid-wander): the agent visibly *hurries* back. Paired with the higher
-/// [`WALK_ACCEL_SNAPBACK`] so that BOTH short snap-backs (accel-limited) and far
-/// ones (cruise-limited) stay brisk under pure physics — replacing the old
-/// fixed-time compression (`eff_elapsed = elapsed · duration / SNAP_BACK_MS`).
-/// Net: near snap-backs ≈ 0.4 s, far ones ≈ 1.3 s (a real, fast walk — not a
-/// hard-compressed 900 ms dash).
+/// Cruise speed for SnapBack walks (octile/ms) — faster than commute, since the
+/// agent visibly *hurries* back. Paired with the higher [`WALK_ACCEL_SNAPBACK`]
+/// so short (accel-limited) and far (cruise-limited) snap-backs both stay brisk.
 pub const V_CRUISE_SNAPBACK: f32 = 0.65;
-/// Shared acceleration/deceleration constant (octile/ms²).
-///
-/// Gives a ~0.55 s accel ramp (`t_a = v/a`).  Critical lengths:
-/// `L_crit = v²/a ≈ 199` octile (commute), `≈ 96` octile (wander).
+/// Shared acceleration/deceleration constant (octile/ms²), tuned for a ~0.55 s
+/// accel ramp (`t_a = v/a`).
 pub const WALK_ACCEL: f32 = 6.5e-4;
-/// Acceleration for SnapBack walks (octile/ms²) — ~3× [`WALK_ACCEL`].
-///
-/// Short snap-backs are acceleration-limited (triangular: `T = 2·√(L/a)`,
-/// cruise-independent), so the urgent return *accelerates harder* to stay snappy.
-/// Paired with [`V_CRUISE_SNAPBACK`] for the far (cruise-limited) case.
+/// Acceleration for SnapBack walks (octile/ms²) — ~3× [`WALK_ACCEL`]. Short
+/// snap-backs are acceleration-limited (`T = 2·√(L/a)`, cruise-independent), so
+/// the urgent return has to *accelerate harder* to stay snappy.
 pub const WALK_ACCEL_SNAPBACK: f32 = 2.0e-3;
 
 /// Minimum per-agent speed multiplier.
@@ -72,8 +49,6 @@ pub const PAUSE_MS_MIN: u64 = 200;
 /// Maximum arrival settle pause (ms).
 pub const PAUSE_MS_MAX: u64 = 400;
 
-// ── Profile ───────────────────────────────────────────────────────────────────
-
 /// Frozen kinematic profile for one walk leg, computed once at walk-start.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WalkProfile {
@@ -85,59 +60,42 @@ pub struct WalkProfile {
     pub path_len_octile: u32,
     /// Effective cruise speed after `speed_mult` applied.
     pub v_cruise: f32,
-    /// Acceleration constant for this leg's intent (`WALK_ACCEL`, or
-    /// `WALK_ACCEL_SNAPBACK` for SnapBack); stored so `walk_progress`
+    /// Acceleration constant for this leg's intent; stored so `walk_progress`
     /// replays the same kinematics.
     pub accel: f32,
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
 /// Deterministic per-agent speed multiplier in [SPEED_MULT_MIN, SPEED_MULT_MAX].
 ///
-/// Uses bits 24..34 of the agent's hash (10 bits → 1024 buckets), mapping
-/// linearly to [0.85, 1.20]. Disjoint from `personality_for` (bits 0..14) and
-/// from the low-16 bits used by `stale_resume_gap_ms`.
+/// Uses bits 24..34 of the agent's hash — disjoint from `personality_for`
+/// (bits 0..14) and from the low-16 bits used by `stale_resume_gap_ms`.
 pub fn speed_mult(agent_id: AgentId) -> f32 {
     // Finalize with splitmix64 before slicing so distinct agents get distinct
-    // speeds (raw FNV-1a doesn't avalanche the high bits — see `splitmix64`).
+    // speeds (raw FNV-1a doesn't avalanche the high bits).
     let z = pixtuoid_core::id::splitmix64(agent_id.raw());
-    let bits = (z >> 24) & 0x3FF; // 0..=1023
-    let t = bits as f32 / 1023.0; // [0.0, 1.0]
+    let bits = (z >> 24) & 0x3FF;
+    let t = bits as f32 / 1023.0;
     SPEED_MULT_MIN + t * (SPEED_MULT_MAX - SPEED_MULT_MIN)
 }
 
 /// Deterministic per-agent arrival pause in [PAUSE_MS_MIN, PAUSE_MS_MAX].
 ///
-/// Uses bits 40..52 of the agent's hash (12 bits → 4096 buckets), mapping
-/// linearly to [200, 400]. Independent of `speed_mult` (bits 24..34).
+/// Uses bits 40..52 of the agent's hash — a disjoint window from `speed_mult`,
+/// so a fast walker is not always a brief pauser.
 pub fn pause_ms_for(agent_id: AgentId) -> u64 {
-    // Same splitmix64 finalize as speed_mult, but a disjoint bit window so
-    // pause is independent of speed (a fast walker is not always a brief pauser).
     let z = pixtuoid_core::id::splitmix64(agent_id.raw());
-    let bits = (z >> 40) & 0xFFF; // 0..=4095
-                                  // f64 (not f32 like speed_mult): the output is a u64 ms count, so f64 keeps
-                                  // the bits→[0,1]→ms integer round-trip exact across the full 200..=400 range.
+    let bits = (z >> 40) & 0xFFF;
+    // f64 (not f32 like speed_mult): the output is a u64 ms count, so f64 keeps
+    // the bits→[0,1]→ms integer round-trip exact across the full 200..=400 range.
     let t = bits as f64 / 4095.0;
     PAUSE_MS_MIN + (t * (PAUSE_MS_MAX - PAUSE_MS_MIN) as f64) as u64
 }
 
-/// Compute the frozen kinematic profile for a walk of `path_len_octile` units.
-///
-/// Kinematics (all in octile and ms units):
-///   L = path_len_octile, v = v_base(intent) * speed_mult(agent_id), a = WALK_ACCEL
-///   L_crit = v²/a  (path must be ≥ L_crit to reach cruise)
-///   Triangular  (L < L_crit): T = 2·sqrt(L/a)
-///   Trapezoidal (L ≥ L_crit): T = 2·(v/a) + (L - L_crit)/v   [= 2·t_a + t_c]
-///
-/// Zero-length paths: duration_ms = 0 so walk_progress returns 1000 immediately.
-/// The motion SHAPE of a walk leg: which regime the trapezoidal/triangular
-/// kinematics resolves to for `(length, cruise, accel)`, plus its phase
-/// boundaries. `walk_profile` sums it to a total duration; `walk_progress`
-/// evaluates the piecewise position against the SAME boundaries — so the regime
-/// selection (`l < l_crit`) and the accel/cruise times are computed ONCE and the
-/// two can't disagree (a disagreement renders as a sprite teleporting mid-leg,
-/// which is why `regime_boundary_lengths_keep_the_invariants` exists).
+/// The motion SHAPE of a walk leg: the regime the kinematics resolve to for
+/// `(length, cruise, accel)`, plus its phase boundaries. `walk_profile` sums it
+/// to a duration and `walk_progress` evaluates position against the SAME
+/// boundaries, so the two can't disagree — a disagreement renders as a sprite
+/// teleporting mid-leg.
 enum WalkKinematics {
     /// `L < L_crit`: accel-limited, never reaches cruise. `t_half` = ms to the
     /// peak (mid-leg); total = `2·t_half`.
@@ -164,7 +122,6 @@ impl WalkKinematics {
         }
     }
 
-    /// Total leg duration (ms) — `walk_profile`'s answer.
     fn total_ms(&self) -> f32 {
         match self {
             WalkKinematics::Triangular { t_half } => 2.0 * t_half,
@@ -173,9 +130,9 @@ impl WalkKinematics {
     }
 }
 
-/// Freeze a [`WalkProfile`] for one walk leg: trapezoidal/triangular kinematics
-/// over `path_len_octile`, with cruise speed picked by `intent` and per-agent
-/// speed/pause personality seeded from `agent_id`.
+/// Freeze a [`WalkProfile`] for one walk leg over `path_len_octile`, with cruise
+/// speed picked by `intent` and per-agent speed/pause personality seeded from
+/// `agent_id`.
 pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId) -> WalkProfile {
     let v_base = match intent {
         WalkIntent::SnapBack => V_CRUISE_SNAPBACK,
@@ -183,9 +140,6 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
         WalkIntent::WanderOut | WalkIntent::WanderBack => V_CRUISE_WANDER,
     };
     let v = v_base * speed_mult(agent_id);
-    // SnapBack rushes back (urgent return) — a higher accel + cruise keep BOTH
-    // short (accel-limited) and far (cruise-limited) snap-backs brisk under pure
-    // physics (no fixed-time compression).
     let a = match intent {
         WalkIntent::SnapBack => WALK_ACCEL_SNAPBACK,
         _ => WALK_ACCEL,
@@ -195,7 +149,7 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
     let duration_ms = if path_len_octile == 0 {
         0u64
     } else {
-        // Already in ms (a is octile/ms², so T = sqrt(octile / (octile/ms²)) = ms).
+        // Already in ms: a is octile/ms², so T = sqrt(octile / (octile/ms²)) = ms.
         WalkKinematics::resolve(l, v, a).total_ms().round() as u64
     };
 
@@ -225,9 +179,6 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     let l = p.path_len_octile as f32;
     let v = p.v_cruise;
     let a = p.accel;
-    // t in ms; a in octile/ms² → s in octile. Same regime + boundaries
-    // `walk_profile` summed to `duration_ms` (one `WalkKinematics::resolve`), so
-    // the position curve can't drift from the leg's own duration.
     let t = elapsed_ms as f32;
     let s = match WalkKinematics::resolve(l, v, a) {
         WalkKinematics::Triangular { t_half } => {
@@ -242,52 +193,40 @@ pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
             let t_cruise_end = t_a + t_c;
             let t_total = 2.0 * t_a + t_c;
             if t <= t_a {
-                // Accel phase.
                 0.5 * a * t * t
             } else if t <= t_cruise_end {
-                // Cruise phase: constant velocity.
                 let d_a = 0.5 * a * t_a * t_a;
                 d_a + v * (t - t_a)
             } else {
-                // Decel phase.
                 let dt = t_total - t;
                 l - 0.5 * a * dt * dt
             }
         }
     };
 
-    // INVARIANT: the `elapsed_ms >= duration_ms` guard above prevents reaching
-    // here at t ≥ t_total, but f32 rounding can still nudge s slightly outside
-    // [0, L] at phase boundaries — clamp defensively (two-layer defence).
+    // The early return above prevents reaching here at t ≥ t_total, but f32
+    // rounding can still nudge s slightly outside [0, L] at phase boundaries.
     let s_clamped = s.max(0.0).min(l);
     (PROGRESS_SCALE as f32 * s_clamped / l).round() as u16
 }
 
-/// Returns `true` when the full walk + pause has elapsed.
-///
-/// `elapsed_ms >= duration_ms + pause_ms` — the pose flip to seated/at-waypoint
-/// happens only after the arrival settle beat completes.
+/// Returns `true` when the full walk **and** its arrival pause have elapsed —
+/// the pose flips to seated/at-waypoint only after the settle beat completes.
 pub fn walk_arrived(p: &WalkProfile, elapsed_ms: u64) -> bool {
     elapsed_ms >= p.duration_ms + p.pause_ms
 }
-
-// ── Tests ─────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // ── Helper ids ──────────────────────────────────────────────────────────
-
     fn id(n: u8) -> AgentId {
         AgentId::from_parts("test", &format!("agent-{n}"))
     }
 
-    // ── Constant sanity ─────────────────────────────────────────────────────
-
     #[test]
     fn commute_faster_than_wander() {
-        // Use runtime variables to avoid the `assertions_on_constants` lint.
+        // Runtime variables avoid the `assertions_on_constants` lint.
         let commute = V_CRUISE_COMMUTE;
         let wander = V_CRUISE_WANDER;
         assert!(
@@ -295,8 +234,6 @@ mod tests {
             "commute speed ({commute}) must exceed wander speed ({wander})"
         );
     }
-
-    // ── speed_mult ──────────────────────────────────────────────────────────
 
     #[test]
     fn speed_mult_in_range() {
@@ -329,8 +266,6 @@ mod tests {
         );
     }
 
-    // ── pause_ms_for ────────────────────────────────────────────────────────
-
     #[test]
     fn pause_ms_in_range() {
         for n in 0..=50u8 {
@@ -344,14 +279,9 @@ mod tests {
 
     #[test]
     fn pause_ms_independent_of_speed_mult() {
-        // Verify at least some agents have different pause_ms while sharing
-        // the same broad speed bucket — i.e. the two values are not identical
-        // linear functions of each other.
         let pairs: Vec<(f32, u64)> = (0..50u8)
             .map(|n| (speed_mult(id(n)), pause_ms_for(id(n))))
             .collect();
-        // Correlation: count agents whose speed_mult is in the lower half of
-        // the range but whose pause_ms is in the upper half, and vice versa.
         let speed_mid = (SPEED_MULT_MIN + SPEED_MULT_MAX) / 2.0;
         let pause_mid = (PAUSE_MS_MIN + PAUSE_MS_MAX) / 2;
         let cross_a = pairs
@@ -368,8 +298,6 @@ mod tests {
         );
     }
 
-    // ── walk_profile: triangular regime ─────────────────────────────────────
-
     /// L_crit = v²/a. A path shorter than L_crit never reaches cruise.
     fn l_crit(v: f32) -> f32 {
         v * v / WALK_ACCEL
@@ -377,14 +305,6 @@ mod tests {
 
     #[test]
     fn triangular_duration_formula() {
-        // For L < L_crit: T = 2·sqrt(L/a). Use v_commute with speed_mult=1.0
-        // by choosing an agent whose speed_mult is exactly 1.0 … which we
-        // can't guarantee. Instead use a SHORT path and verify the formula
-        // relationship rather than an absolute value.
-        //
-        // Strategy: pick L = L_crit/4 (well into triangular regime for any
-        // agent speed in [0.85,1.20]·V_CRUISE_COMMUTE).
-        // T_expected = 2·sqrt(L/a); allow ±5ms for rounding.
         let v_min = V_CRUISE_COMMUTE * SPEED_MULT_MIN;
         let l_crit_min = l_crit(v_min);
         let l = (l_crit_min / 4.0) as u32; // guaranteed triangular for all agents
@@ -397,8 +317,6 @@ mod tests {
                 (l as f32) < l_crit_v,
                 "agent {n}: L={l} should be < L_crit={l_crit_v}"
             );
-            // T = 2·sqrt(L / a). Match walk_profile's `.round()` so the
-            // expected value uses identical rounding to the implementation.
             let t_expected_ms = (2.0 * ((l as f32) / WALK_ACCEL).sqrt()).round() as u64;
             let diff = profile.duration_ms.abs_diff(t_expected_ms);
             assert!(
@@ -411,9 +329,7 @@ mod tests {
 
     #[test]
     fn trapezoidal_duration_formula() {
-        // For L >= L_crit: T = v/a + (L - L_crit)/v.
-        // Use L = 1200 (≫ L_crit for all agents under commute speed).
-        let l: u32 = 1200;
+        let l: u32 = 1200; // ≫ L_crit for every agent at commute speed
 
         for n in 0..10u8 {
             let profile = walk_profile(l, WalkIntent::Entry, id(n));
@@ -424,7 +340,6 @@ mod tests {
                 l_f >= lc,
                 "agent {n}: L={l_f} should be >= L_crit={lc} for trapezoidal"
             );
-            // T = t_a + t_c + t_a = v/a + (L-L_crit)/v
             let t_a = v / WALK_ACCEL;
             let t_c = (l_f - lc) / v;
             let t_expected_ms = (2.0 * t_a + t_c) as u64;
@@ -437,9 +352,7 @@ mod tests {
         }
     }
 
-    // ── walk_progress: boundary values ──────────────────────────────────────
-
-    const EPS: u16 = 2; // tolerance on t_x1000
+    const EPS: u16 = 2;
 
     #[test]
     fn progress_at_zero_is_zero() {
@@ -457,7 +370,7 @@ mod tests {
 
     #[test]
     fn progress_at_half_duration_triangular_is_near_500() {
-        // In the triangular regime, s(T/2) = L/2 exactly (symmetry), so p=500.
+        // In the triangular regime, s(T/2) = L/2 exactly (symmetry).
         let v_min = V_CRUISE_COMMUTE * SPEED_MULT_MIN;
         let l_crit_min = l_crit(v_min);
         let l = (l_crit_min / 4.0) as u32;
@@ -472,26 +385,19 @@ mod tests {
 
     #[test]
     fn progress_in_triangular_decel_arm() {
-        // The triangular DECEL arm (s = L - 0.5·a·dt²) fires only when
-        // L < L_crit AND elapsed > t_half. Existing triangular tests probe
-        // t=0, t=t_half (claimed by the `t <= t_half` accel branch) or
-        // t>=duration (early return), so this arm is otherwise uncovered.
-        // SnapBack / short wander legs hit it live.
         let v_min = V_CRUISE_COMMUTE * SPEED_MULT_MIN;
         let l_crit_min = l_crit(v_min);
         let l = (l_crit_min / 4.0) as u32; // guaranteed triangular for all agents
         let profile = walk_profile(l, WalkIntent::Entry, id(0));
 
-        // Sample at ~0.75·T: well past t_half (= T/2) → in the decel arm.
+        // 0.75·T is well past t_half (= T/2), so it lands in the decel arm.
         let t75 = profile.duration_ms * 3 / 4;
         let p75 = walk_progress(&profile, t75);
-        // s(0.75T) = L - 0.125·L = 0.875·L → p ≈ 875, strictly in (500, 1000).
         assert!(
             (500..1000).contains(&p75),
             "triangular decel p(0.75T) should be in (500,1000), got {p75}"
         );
 
-        // Decel is still advancing: p(0.75T) > p(0.6T) (both in the decel arm).
         let t60 = profile.duration_ms * 3 / 5;
         let p60 = walk_progress(&profile, t60);
         assert!(
@@ -502,9 +408,6 @@ mod tests {
 
     #[test]
     fn progress_at_half_duration_trapezoidal() {
-        // In the trapezoidal regime, T/2 falls somewhere in the cruise band
-        // (for long paths). p should be > 400 and < 600 (symmetry; doesn't
-        // need to be exactly 500 because accel != decel fractions differ).
         let l: u32 = 1200;
         let profile = walk_profile(l, WalkIntent::Entry, id(0));
         let half = profile.duration_ms / 2;
@@ -515,21 +418,15 @@ mod tests {
         );
     }
 
-    // ── walk_progress: cruise plateau proves constant velocity ───────────────
-
     #[test]
     fn cruise_plateau_has_constant_delta() {
-        // During cruise, Δs per Δt is constant → equal Δ(t_x1000) for equal Δt.
-        // Use L=1200 (trapezoidal, clear cruise band).
-        let l: u32 = 1200;
+        let l: u32 = 1200; // trapezoidal, with a clear cruise band
         let profile = walk_profile(l, WalkIntent::Entry, id(3));
         let v = profile.v_cruise;
         let lc = l_crit(v);
-        // t_a = time to reach cruise (ms)
         let t_a_ms = (v / WALK_ACCEL) as u64;
-        // sample 5 points in the cruise band
         let cruise_start = t_a_ms + 50;
-        let cruise_end = profile.duration_ms - t_a_ms - 50; // symmetric decel
+        let cruise_end = profile.duration_ms - t_a_ms - 50;
         assert!(
             cruise_start < cruise_end,
             "need a cruise band: t_a={t_a_ms}ms, T={}ms, L={l}, Lc={lc}",
@@ -553,12 +450,9 @@ mod tests {
         }
     }
 
-    // ── walk_progress: saturation and monotonicity ───────────────────────────
-
     #[test]
     fn progress_saturates_at_1000() {
         let profile = walk_profile(500, WalkIntent::Entry, id(1));
-        // Well past duration
         let p = walk_progress(&profile, profile.duration_ms * 3);
         assert_eq!(p, 1000, "progress must saturate at 1000");
     }
@@ -579,8 +473,6 @@ mod tests {
         }
     }
 
-    // ── walk_arrived ─────────────────────────────────────────────────────────
-
     #[test]
     fn arrived_false_before_duration() {
         let profile = walk_profile(600, WalkIntent::Exit, id(4));
@@ -593,12 +485,10 @@ mod tests {
     #[test]
     fn arrived_false_during_pause() {
         let profile = walk_profile(600, WalkIntent::Exit, id(4));
-        // At exactly duration_ms we are in the pause window.
         assert!(
             !walk_arrived(&profile, profile.duration_ms),
             "must not arrive at duration_ms (still in pause)"
         );
-        // Midway through pause.
         let mid_pause = profile.duration_ms + profile.pause_ms / 2;
         assert!(
             !walk_arrived(&profile, mid_pause),
@@ -618,8 +508,6 @@ mod tests {
 
     #[test]
     fn progress_holds_1000_during_pause_window() {
-        // During [duration_ms, duration_ms+pause_ms), t_x1000 should be 1000
-        // (agent is standing at the destination in the walk sprite).
         let profile = walk_profile(700, WalkIntent::WanderBack, id(5));
         let during_pause = profile.duration_ms + profile.pause_ms / 2;
         let p = walk_progress(&profile, during_pause);
@@ -629,12 +517,9 @@ mod tests {
         );
     }
 
-    // ── zero-length path ─────────────────────────────────────────────────────
-
     #[test]
     fn zero_length_no_panic() {
         let profile = walk_profile(0, WalkIntent::SnapBack, id(6));
-        // Must not panic; progress should immediately be 1000.
         let p = walk_progress(&profile, 0);
         assert_eq!(
             p, 1000,
@@ -645,8 +530,6 @@ mod tests {
             "zero-length walk should arrive after its pause"
         );
     }
-
-    // ── intent ordering ──────────────────────────────────────────────────────
 
     #[test]
     fn commute_intents_faster_than_wander_intents() {
@@ -692,15 +575,11 @@ mod tests {
     }
 }
 
-// Property-based generalizations of the example tests above (the walkable.rs
-// `mod prop` pattern): the hand-picked cases pin a few Entry/WanderOut points
-// far from the regime boundary; these falsify the per-frame f32 kinematics —
-// walk_progress runs per moving sprite per frame (tui/floating/wasm) — across
-// thousands of generated (length, intent, agent, elapsed) inputs, INCLUDING
-// lengths within rounding of `L_crit = v²/a`, where the triangular/trapezoidal
-// branch selection in walk_profile vs walk_progress could disagree. A
-// violation renders as a live sprite teleporting mid-leg, so a failure here is
-// a real regression, not flake.
+// These sweep the per-frame f32 kinematics across generated (length, intent,
+// agent, elapsed) inputs, INCLUDING lengths within rounding of `L_crit = v²/a`,
+// where walk_profile's and walk_progress's branch selection could disagree — a
+// violation renders as a live sprite teleporting mid-leg, so a failure here is a
+// real regression, not flake.
 #[cfg(test)]
 mod prop {
     use super::*;
@@ -719,9 +598,7 @@ mod prop {
     }
 
     /// Sweep one profile's whole timeline: progress is bounded to [0, 1000],
-    /// non-decreasing in elapsed, exactly 1000 at/after duration_ms, and never
-    /// panics — the invariants every render path leans on. Returns proptest's
-    /// `TestCaseError` so the `prop_assert!`s compose with `?` at the call site.
+    /// non-decreasing, exactly 1000 at/after duration_ms, and never panics.
     fn assert_progress_invariants(p: &WalkProfile) -> Result<(), TestCaseError> {
         let mut prev = walk_progress(p, 0);
         prop_assert!(prev <= PROGRESS_SCALE, "p(0)={} out of range", prev);
@@ -750,8 +627,6 @@ mod prop {
     }
 
     proptest! {
-        // Arbitrary lengths across the full screen-scale input space (the doc
-        // header bounds real paths well under ~57k octile).
         #[test]
         fn walk_progress_is_bounded_monotone_and_saturating(
             l in 0u32..=60_000, intent_idx in 0usize..ALL_INTENTS.len(), seed in any::<u64>(),
@@ -760,17 +635,15 @@ mod prop {
             assert_progress_invariants(&p)?;
         }
 
-        // Lengths WITHIN ROUNDING of the regime crossover: derive L_crit from
-        // the SAME formula walk_profile/walk_progress branch on (v²/a, off the
-        // profile's own frozen v_cruise/accel) and probe ±3 octile around it —
-        // the band no hand-picked example test reaches.
+        // L_crit comes off the profile's own frozen v_cruise/accel — the SAME
+        // formula the branch uses — so ±3 octile really straddles the crossover.
         #[test]
         fn regime_boundary_lengths_keep_the_invariants(
             intent_idx in 0usize..ALL_INTENTS.len(), seed in any::<u64>(), delta in -3i64..=3,
         ) {
             let intent = ALL_INTENTS[intent_idx];
             let agent = prop_id(seed);
-            // The frozen per-agent v/a pair (any length yields the same pair).
+            // Any length yields the same frozen per-agent v/a pair.
             let probe = walk_profile(1, intent, agent);
             let l_crit = probe.v_cruise * probe.v_cruise / probe.accel;
             let l = (l_crit.round() as i64 + delta).max(0) as u32;

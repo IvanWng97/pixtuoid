@@ -13,17 +13,18 @@ use ratatui::Terminal;
 
 use crate::{due_navigations, SnapshotArgs, CELL_H, CELL_W};
 
-/// Tint every non-walkable terminal cell red and print a connectedness
-/// report. A non-walkable cell = either of its two half-block pixels is
-/// blocked in the mask. Bright red FG = top pixel blocked; bright red BG
-/// = bottom pixel blocked.
+/// Print a connectedness report for the walkable mask: a BFS from the door threshold,
+/// reachable vs total walkable pixels. If the two differ, the mask has an isolated
+/// region and A* falls back to a straight line when crossing into it — the root cause
+/// of any character teleport the user sees.
 ///
-/// Also runs a BFS from the door threshold and prints how many walkable
-/// pixels are reachable vs total — if the two numbers differ, the mask
-/// has an isolated region and A* will fall back to a straight line when
-/// crossing into it. That's the root cause of any remaining
-/// character teleport the user sees.
-pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> Result<()> {
+/// `floor_seed` MUST be the one the frame beside it was rendered with: the five layout
+/// variants have different obstacle placements, so a report computed for another
+/// variant is a tick about an office nobody looked at.
+pub(crate) fn debug_paint_walkable_overlay(
+    term: &mut Terminal<TestBackend>,
+    floor_seed: u64,
+) -> Result<()> {
     use pixtuoid_scene::layout::SceneLayout;
 
     let size = term.size()?;
@@ -33,13 +34,12 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
     let buf_h = scene_h * 2;
     // `None` = the SAME fill the renderer's draw_scene passes — the overlay
     // must mirror the real layout exactly (desks stamp the walkable mask).
-    let Some(layout) = SceneLayout::compute(buf_w, buf_h, None) else {
+    let Some(layout) = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed) else {
         println!("(debug_walkable) layout too small to compute");
         return Ok(());
     };
 
-    // BFS reachability from door_threshold (always inside the corridor,
-    // always walkable by construction).
+    // door_threshold is inside the corridor, walkable by construction.
     let reach_mask = compute_reachable(&layout);
     let w = layout.buf_w as usize;
     let h = layout.buf_h as usize;
@@ -60,7 +60,7 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
     }
     let disconnected = walkable_total.saturating_sub(reachable);
     println!(
-        "--- walkability report ---\n\
+        "--- walkability report (floor seed {floor_seed}) ---\n\
         total walkable pixels   : {walkable_total}\n\
         reachable from threshold: {reachable}\n\
         disconnected pixels     : {disconnected}{}",
@@ -79,8 +79,7 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
             print!("({x},{y})");
         }
         println!();
-        // Probe the door-threshold neighborhood + the suspected bridge
-        // pixel so we can spot which step of the chain is actually blocked.
+        // Probe the chain step by step to spot which one is actually blocked.
         let probe = |x: u16, y: u16, name: &str| {
             let wk = layout.is_walkable(x, y);
             let r = is_reachable(&reach_mask, &layout, x, y);
@@ -99,11 +98,9 @@ pub(crate) fn debug_paint_walkable_overlay(term: &mut Terminal<TestBackend>) -> 
         }
     }
 
-    // No cell-level redraw: the live `w` pixel overlay (painted into the
-    // RgbBuffer in draw_scene) already visualizes the mask + approach/seat
-    // markers + routes at pixel resolution. A crude full-cell wash here would
-    // just overwrite it. The text report above is the unique value this pass
-    // adds (the BFS isolated-region teleport detector), so keep that and stop.
+    // No cell-level redraw: the live `w` pixel overlay (painted into the RgbBuffer in
+    // draw_scene) already visualizes the mask at pixel resolution, and a crude
+    // full-cell wash here would just overwrite it.
     Ok(())
 }
 
@@ -216,10 +213,8 @@ pub(crate) fn compute_crop_rect(
         return Ok(None);
     };
 
-    // Positions are in the LOGICAL half-block buffer (1 px per cell across,
-    // 2 px per cell down — the same buf_w/buf_h fed to compute_with_seed
-    // above), NOT in PNG pixels: the 8x16 px-per-cell scaling happens later
-    // in save_backend_as_png.
+    // Positions are in the LOGICAL half-block buffer (1 px per cell across, 2 px per
+    // cell down), NOT in PNG pixels: the 8x16 px-per-cell scaling happens later.
     Ok(Some(centered_crop(
         target_pixel.x,
         target_pixel.y / 2,
@@ -228,8 +223,8 @@ pub(crate) fn compute_crop_rect(
     )))
 }
 
-/// 40x24-cell window centered on (cell_x, cell_y), clamped to stay inside the
-/// cols x rows buffer (shrinks only when the terminal itself is smaller).
+/// 40x24-cell window centered on (cell_x, cell_y), clamped to stay inside the cols x
+/// rows buffer (shrinks only when the terminal itself is smaller).
 pub(crate) fn centered_crop(
     cell_x: u16,
     cell_y: u16,
@@ -277,10 +272,7 @@ pub(crate) fn save_backend_as_png(
             let fg = color_to_rgb(cell.fg, ImgRgb([220, 220, 220]));
             let bg = color_to_rgb(cell.bg, ImgRgb([20, 22, 28]));
 
-            // For the half-block character "▀", the cell is split: top half = fg, bottom half = bg.
-            // Other characters are rasterized as real anti-aliased text via `pixtuoid::aa_text`
-            // (Monaspace Neon — what a real terminal shows, not a bitmap
-            // stand-in); a glyph neither face covers falls back to a centered fg block.
+            // The half-block "▀" splits the cell: top half = fg, bottom half = bg.
             let x0 = x as u32 * CELL_W;
             let y0 = y as u32 * CELL_H;
 
@@ -298,8 +290,8 @@ pub(crate) fn save_backend_as_png(
                     }
                 });
             } else {
-                // No glyph in any font set (a decorative symbol): keep the old
-                // centered block so the cell still reads in its fg color.
+                // No glyph in any face (a decorative symbol): a centered block still
+                // reads in the cell's fg color.
                 fill_rect(&mut img, x0, y0, CELL_W, CELL_H, bg);
                 let pad_x = 1;
                 let pad_y = 3;
@@ -319,9 +311,8 @@ pub(crate) fn save_backend_as_png(
     Ok(())
 }
 
-/// Rasterize a post-draw ratatui cell buffer to RGBA: half-block cells become
-/// two stacked pixels (fg = top, bg = bottom); text cells are drawn as real
-/// anti-aliased glyphs via `pixtuoid::aa_text` — same path as the PNG rasterizer.
+/// Rasterize a post-draw ratatui cell buffer to RGBA — the same path as the PNG
+/// rasterizer above.
 pub(crate) fn cells_to_rgba(
     term_buf: &ratatui::buffer::Buffer,
     cols: u16,
@@ -370,9 +361,8 @@ pub(crate) fn cells_to_rgba(
     rgba
 }
 
-/// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion)
-/// frame by frame and encode its TestBackend cell buffer. Covers multi-floor
-/// captures (via `navigations`) and pet clips (via `pets`).
+/// Drive the real TuiRenderer (slide transition, footer floor chip, pet motion) frame by
+/// frame and encode its TestBackend cell buffer.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn save_renderer_gif(
     term: Terminal<TestBackend>,
@@ -400,8 +390,8 @@ pub(crate) fn save_renderer_gif(
     let mut r = pixtuoid::tui::tui_renderer::TuiRenderer::new(term, theme, pets);
     let mut fired = vec![false; navigations.len()];
     for i in 0..frame_count {
-        // Exact, not i * frame_ms: the truncated frame_ms accumulates (15fps → a
-        // "10s" gif spans only 9834ms, so a late --navigate-at would never fire).
+        // Exact, not `i * frame_ms`: the truncated `frame_ms` accumulates, and the gif
+        // then ends early enough that a late --navigate-at never fires.
         let elapsed_ms = i as u64 * 1000 / fps.max(1);
         let now = start_now + Duration::from_millis(elapsed_ms);
         for floor in due_navigations(navigations, &mut fired, elapsed_ms) {
@@ -440,9 +430,9 @@ pub(crate) fn save_as_gif(
 ) -> Result<()> {
     let frame_count = (duration_secs * fps) as usize;
     let frame_ms = 1000 / fps.max(1);
-    // Pre-roll: render (advancing the persistent motion state) WITHOUT encoding
-    // for `skip_ms`, so an `--anim` capture starts at the agent's walk-out
-    // instead of its long seated dwell. 0 for normal GIFs.
+    // Pre-roll: render (advancing the persistent motion state) WITHOUT encoding for
+    // `skip_ms`, so an `--anim` capture starts at the agent's walk-out instead of its
+    // long seated dwell.
     let skip_frames = (skip_ms / frame_ms.max(1)) as usize;
     let img_w = cols as u32 * CELL_W;
     let img_h = rows as u32 * CELL_H;
@@ -453,18 +443,14 @@ pub(crate) fn save_as_gif(
 
     let mut chitchat_state = std::collections::HashMap::new();
     for i in 0..(skip_frames + frame_count) {
-        // Exact, not `i * frame_ms` — the same truncation the GIF path above already
-        // fixed with the same reasoning, which this one never got (the sibling-set
-        // class). At 12fps the truncated 83ms makes a "9s" clip span 8964ms, so every
-        // time-derived element drifts 36ms off the wall clock by the last frame.
+        // Exact, not `i * frame_ms` — the truncated frame_ms accumulates, drifting
+        // every time-derived element off the wall clock by the last frame.
         //
         // This does NOT make the site's `loop`ed clip seam-free, and no timing choice
         // can: `mascot_wander` picks each cycle's destination from a hash of the cycle
         // NUMBER, so the wander is aperiodic BY DESIGN and frame N is never frame 0
-        // however the duration is chosen. Verified by looking — the lobster still
-        // stands in a different column at the seam. Closing it would mean a scripted
-        // (non-wandering) timeline for the demo, which is a media decision, not a
-        // rendering one.
+        // however the duration is chosen. Closing it would mean a scripted
+        // (non-wandering) timeline for the demo — a media decision, not a rendering one.
         let now = start_now + Duration::from_millis(i as u64 * 1000 / fps.max(1));
         let mut draw_ctx = DrawCtx {
             buf,
@@ -475,10 +461,10 @@ pub(crate) fn save_as_gif(
             theme_picker: None,
             floor_info: None,
             per_floor: Default::default(),
-            // DERIVED from the scene, as the runtime does. All THREE DrawCtx sites in
-            // this example must agree: a hardcoded `None` here is what kept the `⬢gw`
-            // chip off the very CLIP whose job is demoing the gateway, and clips are
-            // NOT pixel-gated by `gen-check` (presence-only), so nothing would catch it.
+            // DERIVED from the scene, as the runtime does — all THREE DrawCtx sites in
+            // this example must agree. A hardcoded `None` keeps the `⬢gw` chip off the
+            // very clip whose job is demoing the gateway, and clips are NOT pixel-gated
+            // by `gen-check`, so nothing would catch it.
             gateway: pixtuoid_scene::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
             audio_audible: false,
             volume_flash: None,
@@ -521,9 +507,8 @@ pub(crate) fn save_as_gif(
     Ok(())
 }
 
-/// Bounded rect fill shared by the RGB + RGBA paths — they differ only in pixel
-/// type, so the loop is generic over `image::GenericImage` and can't drift between
-/// the two wrappers below.
+/// Bounded rect fill shared by the RGB + RGBA paths — generic over
+/// `image::GenericImage` so it can't drift between the two wrappers below.
 fn fill_rect_px<I: image::GenericImage>(img: &mut I, x: u32, y: u32, w: u32, h: u32, px: I::Pixel) {
     let (img_w, img_h) = (img.width(), img.height());
     for j in 0..h {
@@ -544,15 +529,14 @@ fn fill_rect(img: &mut RgbImage, x: u32, y: u32, w: u32, h: u32, color: ImgRgb<u
     fill_rect_px(img, x, y, w, h, color);
 }
 
-// Size chosen so the face fits the cell: line_height(14.7) rounds to CELL_H and
-// the Monaspace advance (7.96px) ≤ CELL_W — both pinned by `cell_font_px_fits_the_cell`.
+// Chosen so the face fits the cell: its line height rounds to CELL_H and the Monaspace
+// advance is ≤ CELL_W.
 const CELL_FONT_PX: f32 = 14.7;
 
-/// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, drawn
-/// in `pixtuoid::aa_text` (Monaspace Neon) at CELL_FONT_PX,
-/// horizontally centered on the cell's advance and CLIPPED to the cell rect so
-/// a wide fallback glyph can't bleed into a neighbor. Per-cell origins (never a
-/// running cursor) keep the raster locked to the terminal grid.
+/// Anti-aliased cell text at the terminal grid: one char per 8×16 cell, centered on the
+/// cell's advance and CLIPPED to the cell rect so a wide fallback glyph can't bleed into
+/// a neighbor. Per-cell origins (never a running cursor) keep the raster locked to the
+/// grid.
 fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)) {
     let s = ch.to_string();
     let adv = pixtuoid::aa_text::text_width(&s, CELL_FONT_PX);
@@ -574,8 +558,7 @@ fn draw_cell_text(ch: char, x0: u32, y0: u32, mut put: impl FnMut(u32, u32, f32)
     );
 }
 
-/// Per-channel mix of `fg` over `bg` by AA coverage — wraps the ONE blend
-/// curve (`aa_text::blend_channel`) for the `ImgRgb` pixel type.
+/// Per-channel mix of `fg` over `bg` by AA coverage.
 fn mix_rgb(bg: ImgRgb<u8>, fg: ImgRgb<u8>, cov: f32) -> ImgRgb<u8> {
     let mix = |b: u8, f: u8| pixtuoid::aa_text::blend_channel(b, f, cov);
     ImgRgb([mix(bg[0], fg[0]), mix(bg[1], fg[1]), mix(bg[2], fg[2])])
@@ -610,10 +593,8 @@ mod tests {
 
     #[test]
     fn draw_cell_text_stays_inside_its_cell_and_lights_ink() {
-        // Every emitted pixel must land INSIDE the 8×16 cell at the given origin
-        // (the clip is what keeps a wide glyph — ★ ink can exceed the face's
-        // advance — from bleeding into the neighbor cell), with coverage in
-        // [0,1], and a real glyph must light SOME ink.
+        // ★ ink can exceed the face's advance — the clip is what keeps it out of the
+        // neighbor cell.
         for (ch, ox, oy) in [('M', 0u32, 0u32), ('g', 8, 16), ('\u{2605}', 24, 32)] {
             let mut lit = 0usize;
             draw_cell_text(ch, ox, oy, |px, py, cov| {
@@ -630,10 +611,8 @@ mod tests {
 
     #[test]
     fn cell_font_px_fits_the_cell() {
-        // The WHY behind CELL_FONT_PX (14.7): the face's line height must fill the
-        // 8×16 cell exactly and its monospace advance must fit the cell width —
-        // a face/metric drift would silently clip descenders (the cell clip
-        // masks it visually), so pin both halves of the claim.
+        // A face/metric drift would silently clip descenders — the cell clip masks it
+        // visually, so pin both halves of the claim.
         assert_eq!(
             pixtuoid::aa_text::line_height(CELL_FONT_PX),
             CELL_H as i32,

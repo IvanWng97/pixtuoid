@@ -1,23 +1,11 @@
 //! The SIM half of the frame — advance the world, produce no pixels.
 //!
-//! `render_to_rgb_buffer` used to fuse sim-step and paint in one pass:
-//! `PixelCtx` carried six `&mut` sim stores, so there was no way to advance
-//! motion/lifecycle/venue state without painting, and no way to observe the
-//! outcomes except through a full render. The split: `sim_step` mutates the
-//! [`SimStores`] and returns an immutable [`SimFrame`] snapshot; the paint
-//! pass (still inside `render_to_rgb_buffer`) consumes `&SimFrame` and only
-//! ever writes the pixel buffer + the paint-local `FrameCache` (a render
-//! cache, deliberately NOT a sim store). Headless consumers drive
-//! `floor::FloorSession::observe` (the facade over `sim_step`) to observe
-//! poses/positions without buying a pixel pass.
-//!
-//! Store classification (what makes something SIM vs PAINT):
-//! * SIM — state that advances with time and must persist across frames:
-//!   `router` (A* cache), `overlay` (per-tick occupancy), `history` (pose
-//!   continuity), `motion` (walk legs/wander timeline), `light` (occupancy
-//!   fade), `chitchat` (venue conversations).
-//! * PAINT-LOCAL — `FrameCache` (recolored-sprite cache): flushing it changes
-//!   no behavior, only repaint cost. It stays on the paint side.
+//! `sim_step` mutates the [`SimStores`] and returns an immutable [`SimFrame`];
+//! the paint pass consumes `&SimFrame` and only ever writes the pixel buffer +
+//! the paint-local `FrameCache`. That cache is deliberately NOT a sim store:
+//! flushing it changes no behavior, only repaint cost. Headless consumers drive
+//! `floor::FloorSession::observe` to observe poses/positions without buying a
+//! pixel pass.
 
 use std::collections::HashMap;
 use std::time::SystemTime;
@@ -40,10 +28,7 @@ use super::anchors::{
 };
 use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
 
-/// The mutable world state one `sim_step` advances — every `&mut` store the
-/// fused pass used to hide inside `PixelCtx`. `render_to_rgb_buffer` builds
-/// one from its `PixelCtx`; a headless consumer builds one from its own
-/// `FloorCtx` + chitchat map.
+/// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
     pub router: &'a mut dyn Router,
     pub overlay: &'a mut OccupancyOverlay,
@@ -54,8 +39,8 @@ pub(crate) struct SimStores<'a> {
 }
 
 /// A theme-free glow decision for a character sprite. Sim decides WHETHER a
-/// glow applies (a pose/lifecycle fact); paint maps it to a `Theme` color —
-/// colors are presentation and must not leak into the sim layer.
+/// glow applies; paint maps it to a `Theme` color — colors are presentation
+/// and must not leak into the sim layer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CharacterGlow {
     /// No glow.
@@ -68,13 +53,11 @@ pub enum CharacterGlow {
 
 /// One character's fully resolved placement for this tick — everything the
 /// paint pass needs to blit the sprite, with no sim access and no colors.
-/// `agent_idx` indexes [`SimFrame::agents`].
 #[derive(Debug, Clone, Copy)]
 pub struct CharacterPlacement {
     /// Index into [`SimFrame::agents`] for this character.
     pub agent_idx: usize,
-    /// Y-sort key (breath-independent — see the arm comments in
-    /// `resolve_characters`).
+    /// Y-sort key (breath-independent).
     pub anchor_y: u16,
     /// The sprite animation to blit (e.g. `"seated"`, `"walk"`).
     pub anim_name: &'static str,
@@ -107,17 +90,15 @@ pub struct CharacterPlacement {
 
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
 /// Paint consumes it by `&` — rendering the same frame twice is byte-identical
-/// and cannot move the sim (the purity the split exists for). Owned data (no
-/// borrows into the stores) so the stores are free again the moment
+/// and cannot move the sim. Owned data, so the stores are free again the moment
 /// `sim_step` returns.
 pub struct SimFrame {
-    /// The tick's agent snapshot (the one clone per frame the fused pass
-    /// already made) — placements index into it, paint borrows from it.
+    /// The tick's agent snapshot — placements index into it, paint borrows
+    /// from it.
     pub agents: Vec<AgentSlot>,
-    /// The authoritative routed pose per home-desk agent this tick — the
-    /// headless observation payload (`None` = no renderable pose, e.g. the
-    /// exit window passed). Unread by paint BY DESIGN (that's the split's
-    /// point); `floor::FloorSession::observe` is the lib-side consumer.
+    /// The authoritative routed pose per home-desk agent this tick (`None` =
+    /// no renderable pose). Unread by paint BY DESIGN;
+    /// `floor::FloorSession::observe` is the lib-side consumer.
     pub poses: HashMap<AgentId, Option<Pose>>,
     /// Per-desk "occupant is actually seated right now" (drives screen glow +
     /// ceiling halos; exiting agents absent by construction).
@@ -129,24 +110,20 @@ pub struct SimFrame {
     /// Active speech bubbles after this tick's venue update.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller
-    /// persists them into its `CoffeeState` (unchanged epilogue contract).
+    /// persists them into its `CoffeeState`.
     pub new_coffee_carriers: Vec<AgentId>,
-    /// Waypoint indices with an occupant this tick — the paint-facing
-    /// observation (like `seated_agents`) that drives the appliance feedback
-    /// animations (printer eject / vending drop, B-4).
+    /// Waypoint indices with an occupant this tick — drives the appliance
+    /// feedback animations.
     pub occupied_waypoints: std::collections::HashSet<usize>,
 }
 
 /// Advance the world one tick WITHOUT painting: lighting fade, occupancy
-/// overlay, the authoritative `derive_with_routing` pose pass (walk legs /
-/// wander timeline / pose history side effects), character placement
-/// resolution, and the chitchat venue update. Returns the immutable
-/// [`SimFrame`] the paint pass (or a headless observer) consumes.
+/// overlay, the authoritative `derive_with_routing` pose pass, character
+/// placement resolution, and the chitchat venue update.
 ///
 /// `pack` is a genuine sim input: character anchors center on the pack's
-/// sprite width, and placement is position. `coffee` is the immutable
-/// carrier→fetch-time view (`CoffeeState::map`); `floor_idx` keys the
-/// chitchat venues. Time is a parameter — never read the clock here (wasm).
+/// sprite width, and placement is position. Time is a parameter — never read
+/// the clock here (wasm).
 pub(crate) fn sim_step(
     stores: &mut SimStores<'_>,
     scene: &SceneState,
@@ -158,23 +135,15 @@ pub(crate) fn sim_step(
 ) -> SimFrame {
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
-    // Per-floor lighting: tick the fade state with the current occupancy.
-    // `indoor_scale` smoothly travels from MIN_LEVEL (empty + past debounce)
-    // to 1.0 (populated). Windows/skyline are unaffected.
     let indoor_scale = stores.light.tick(scene.agents.is_empty(), now);
 
-    // Build per-frame occupancy from STATIONARY agent positions only — BEFORE
-    // the routed pose pass, which routes Walking poses against THIS overlay.
-    // Walkers are deliberately excluded — their position interpolates every
+    // Per-frame occupancy from STATIONARY agent positions only, BEFORE the
+    // routed pose pass (which routes Walking poses against THIS overlay).
+    // Walkers are deliberately excluded: their position interpolates every
     // frame, which would change the overlay signature every frame, wipe the
     // path cache, recompute A*, and snap walkers to new path segments (the
-    // visible "flash"). Sitters at desks are already covered by the static
-    // desk mask. Only waypoint visitors contribute here — they have stable
-    // positions across frames, so the signature is stable and the cache hits.
-    // Reads only the STATELESS `pose::derive` + stand_point (no dependency on
-    // the seated map / ambient), so it's safe up here.
-    // The pack's character sprite width (8 bundled, 10 robot), resolved ONCE and
-    // shared by every anchor AND the occupancy reservation; pack-constant → cache-stable.
+    // visible "flash"). Sitters at desks are already covered by the static desk
+    // mask, so only waypoint visitors — stable across frames — contribute.
     let char_w = pack
         .animation("standing")
         .and_then(|a| a.frames.first())
@@ -186,16 +155,13 @@ pub(crate) fn sim_step(
         };
         if let Pose::AtWaypoint { wp, .. } = pose {
             if let Some(w) = layout.waypoints.get(wp) {
-                // Reserve the cell the agent actually stands on (the stand cell,
-                // off the furniture), NOT the blocked furniture center — else
-                // another agent's A* routes straight through the stander. Same
-                // `desk` origin as every other stand_point caller.
+                // Reserve the cell the agent actually stands on, NOT the
+                // blocked furniture center — else another agent's A* routes
+                // straight through the stander.
                 let origin = layout
                     .home_desk(agent.desk_index.single_floor_local())
                     .unwrap_or(w.pos);
                 let stand = layout.stand_point(w.kind, w.pos, origin, w.facing);
-                // Reserve the pack-resolved footprint (char_w wide, WALKING_Y_OFF
-                // tall) — the SAME width the sprite anchor centers on, not a bare 8.
                 stores.overlay.add(
                     stand.x.saturating_sub(char_w / 2),
                     stand.y.saturating_sub(WALKING_Y_OFF / 2),
@@ -206,14 +172,11 @@ pub(crate) fn sim_step(
         }
     }
 
-    // Derive every home-desk agent's routed pose ONCE per frame. This is the
-    // AUTHORITATIVE pose derivation — it runs the advance_wander / walk_path /
-    // history side effects exactly once; placement resolution below just looks
-    // the cached pose up by agent_id instead of re-deriving (the old double-A*).
-    // The `exiting_at` filter is INTENTIONALLY absent: exiting agents are never
-    // SeatedTyping/Thinking (so `seated_agents` is unchanged), but their pose is
-    // needed for the character placement. Only the home_desk filter remains (a
-    // deskless agent can't render anyway).
+    // The AUTHORITATIVE pose derivation, ONCE per frame: it runs the
+    // advance_wander / walk_path / history side effects, and placement
+    // resolution below looks the result up instead of re-deriving (a second
+    // derive would double the A*). The `exiting_at` filter is INTENTIONALLY
+    // absent — an exiting agent's pose is still needed to place its character.
     let poses: HashMap<AgentId, Option<Pose>> = agents
         .iter()
         .filter(|a| {
@@ -237,11 +200,8 @@ pub(crate) fn sim_step(
         })
         .collect();
 
-    // Per-desk "is the occupant actually seated right now" map (pose is
-    // SeatedTyping/Thinking, not walking in / snapping back), derived from the
-    // cached poses so the desk-cubicle screen glow + ceiling halos share one gate
-    // and one pose derivation (no double A*). Exiting agents are absent from the
-    // seated set by construction (their pose is Walking, not Seated).
+    // Derived from the cached poses so the desk-cubicle screen glow and the
+    // ceiling halos share one gate.
     let seated_agents: HashMap<FloorLocalDeskIndex, bool> = agents
         .iter()
         .filter(|a| {
@@ -277,12 +237,10 @@ pub(crate) fn sim_step(
     }
 }
 
-/// Resolve every character's placement for this tick — the sim half of the
-/// old `enqueue_characters`. For each agent it looks up the routed pose from
-/// `poses` (the authoritative prepass ran the side effects once) and computes
-/// the sprite/anchor/z-key decisions. Returns the placements (paint maps them
-/// 1:1 to drawables), the waypoint visitors (for the chitchat venues), and the
-/// agents seen carrying coffee this tick.
+/// Resolve every character's placement for this tick from the routed poses
+/// `sim_step` already derived. Returns the placements (paint maps them 1:1 to
+/// drawables), the waypoint visitors (for the chitchat venues), the agents seen
+/// carrying coffee, and the occupied waypoint indices.
 fn resolve_characters(
     agents: &[AgentSlot],
     poses: &HashMap<AgentId, Option<Pose>>,
@@ -301,25 +259,13 @@ fn resolve_characters(
     let mut new_coffee_carriers: Vec<AgentId> = Vec::new();
     let mut wp_rank: HashMap<usize, usize> = HashMap::new();
     let mut waypoint_visitors: Vec<chitchat::Visitor> = Vec::new();
-    // The lounge-couch seat waypoints collapse to ONE chitchat venue (keyed on
-    // the first couch's index) so the couch hosts a single group conversation
-    // like the meeting room, without overloading the meeting-only `room_id`
-    // field (which indexes `meeting_rooms`). Pinned by
-    // multi_slot_venues_collapse_to_first_of_their_own_kind.
     for (agent_idx, agent) in agents.iter().enumerate() {
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // Look up the pose the authoritative prepass already derived (one
-        // derive_with_routing per agent per frame) instead of re-deriving — the
-        // prepass ran the advance_wander/walk_path/history side effects once.
         let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
             continue;
         };
-        // The three seated-at-desk arms differ only in anim/frame/glow/sleep-z;
-        // everything else (the desk anchor, the breath, the breath-independent
-        // z-key, flip/waiting/dust) is identical. One closure builds the
-        // `CharacterPlacement` so the arms stay a single delta-then-push line each.
         let seated = |anim_name: &'static str,
                       frame_idx: usize,
                       glow: CharacterGlow,
@@ -328,9 +274,8 @@ fn resolve_characters(
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,
-                // Breath-independent z-key (matches AtWaypoint/AimlessAt): the
-                // ±1px breath must not flip sort order against nearby desk decor
-                // frame-to-frame.
+                // Breath-independent z-key: the ±1px breath must not flip sort
+                // order against nearby desk decor frame-to-frame.
                 anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                 anim_name,
                 frame_idx,
@@ -370,9 +315,6 @@ fn resolve_characters(
                 let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
                 placements.push(CharacterPlacement {
                     agent_idx,
-                    // Breath-independent z-key (matches AtWaypoint/AimlessAt):
-                    // the ±1px breath must not flip sort order against nearby
-                    // desk decor frame-to-frame.
                     anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
                     anim_name: "standing",
                     frame_idx: 0,
@@ -391,30 +333,20 @@ fn resolve_characters(
                     wp_rank.insert(wp, rank + 1);
                     let dx = waypoint_rank_offset_x(kind, rank);
                     use crate::layout::WaypointKind;
-                    // Render anchor: the cell the agent occupies. For obstacles
-                    // this is the side stand cell (side-aware); for seats it is
-                    // `wp.pos` (the sprite sits ON the furniture) — the walk-in
-                    // approach cell is resolved separately by `approach_point`.
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-                    // Anchor-base + sprite height are the ONE authority
-                    // `SeatView::waypoint_render_anchor` (the label twin in
+                    // `waypoint_render_anchor` is the ONE authority for the
+                    // anchor base + sprite height (the label twin in
                     // `anchors::character_anchor` rides the SAME call, so they
-                    // can't drift). anim/flip STAY per-kind here: Pantry's
-                    // holding_coffee + the pack-fallback seat sprites need `pack`,
-                    // which the pure SeatView model can't hold.
+                    // can't drift). anim/flip STAY per-kind here: they need
+                    // `pack`, which the pure SeatView model can't hold.
                     let view = SeatView::of(kind, wp_obj.facing);
                     let (anchor_base, sprite_h) = view.waypoint_render_anchor(stand, char_w);
                     let (anim_name, flip_x) = match kind {
                         WaypointKind::Pantry => ("holding_coffee", false),
-                        // Couch/sofa (seated facing) + head-of-table chair
-                        // (SideSeated) + island stander all resolve their pose
-                        // sprite via the pack (with the base-pose fallback).
                         WaypointKind::Couch
                         | WaypointKind::MeetingSofa
                         | WaypointKind::MeetingChair
                         | WaypointKind::Island => seat_sprite_in_pack(pack, kind, wp_obj.facing),
-                        // PhoneBooth/StandingDesk/vending/printer/snack: the agent
-                        // just stands at the decor, head visible above it.
                         WaypointKind::PhoneBooth
                         | WaypointKind::StandingDesk
                         | WaypointKind::VendingMachine
@@ -427,7 +359,8 @@ fn resolve_characters(
                     };
                     if chitchat::supports_chitchat(kind) {
                         waypoint_visitors.push(chitchat::Visitor {
-                            // Couch seats share one venue (group chat); other
+                            // The couch's seats collapse to ONE venue so it
+                            // hosts a single group conversation; other
                             // waypoints key on their own index.
                             wp_idx: chitchat::venue_wp_idx(kind, wp, &layout.waypoints),
                             agent_id: agent.agent_id,
@@ -438,21 +371,11 @@ fn resolve_characters(
                     let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
                     placements.push(CharacterPlacement {
                         agent_idx,
-                        // Breath-independent sort key: a seated occupant must
-                        // y-sort identically every frame so the breath ±1px never
-                        // flips it under its sofa (the overlap bug). The visual
-                        // `anchor` above still breathes; only the z-order is pinned.
-                        //
-                        // Seats route through `SeatView::z_key_for_seat` — the SAME
-                        // key the sit-down/stand-up glide uses, so the agent can't
-                        // pop across its furniture's z-key at the walk→seat seam.
-                        // (back/front sofa+couch + the head-of-table chair →
-                        // pos+2, clearing the chair body; island stander → the plain
-                        // feet row, staying BEHIND the island's south-row key —
-                        // the bartender occlusion.) Obstacles (pantry/booth/
-                        // vending/printer) keep the stand-at-the-approach-cell
-                        // key — the agent stands AT them, there is no settle onto
-                        // them.
+                        // Seats route through `SeatView::z_key_for_seat` — the
+                        // SAME key the sit-down/stand-up glide uses, so the
+                        // agent can't pop across its furniture's z-key at the
+                        // walk→seat seam. Obstacles keep the stand-cell key:
+                        // the agent stands AT them, never settles onto them.
                         anchor_y: match kind {
                             WaypointKind::Couch
                             | WaypointKind::MeetingSofa
@@ -473,8 +396,6 @@ fn resolve_characters(
                 }
             }
             Pose::AimlessAt { dest } => {
-                // Breath-independent sort key (like the AtWaypoint arm): the
-                // ±1px breath bob must not flicker the z-order frame to frame.
                 let anchor_no_breath = waypoint_anchor(dest, char_w);
                 let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
                 placements.push(CharacterPlacement {
@@ -498,8 +419,8 @@ fn resolve_characters(
                 frame,
                 mut carrying_coffee,
             } => {
-                // Exit walks: core sets carrying_coffee=false (no
-                // render-side state), but we know from the coffee map.
+                // Exit walks: core sets carrying_coffee=false (it holds no
+                // render-side state), but the coffee map knows better.
                 if agent.exiting_at.is_some() && coffee.contains_key(&agent.agent_id) {
                     carrying_coffee = true;
                 }
@@ -510,22 +431,12 @@ fn resolve_characters(
                 let walker_anchor = walking_anchor(pos, char_w);
                 let dx = to.x as i32 - from.x as i32;
                 let dy = to.y as i32 - from.y as i32;
-                // A sit-down glide onto a seat faces the SEAT's seated direction
-                // (single source of truth — same `facing` as the seated render),
-                // NOT the travel direction. Without this a window-facing seat
-                // (couch / south meeting sofa, approached from the north, foot-cell
-                // to the south) renders a FRONT walk and the agent sits facing the
-                // camera until it snaps to `back_couch` at AtWaypoint. With it the
-                // agent backs into the seat already facing the window — no late
-                // flip. Ordinary travel segments keep the travel-direction rule.
-                // On the sit arc? `to` is a foot-cell while settling ONTO a seat
-                // (sit-down); `from` is a foot-cell while rising OFF one
-                // (stand-up). Either way the agent renders in the SEAT's view and
-                // at the SEAT's stable z-key for the whole glide — same single
-                // source as the seated render — so it neither faces the wrong way
-                // nor crosses its furniture's z-key mid-glide. Ordinary travel
-                // segments keep the travel-direction facing and foot-position
-                // z-key.
+                // A glide on/off a seat (`to` is a foot-cell sitting down,
+                // `from` rising) renders in the SEAT's view and at the SEAT's
+                // z-key, NOT the travel direction's. Without it a window-facing
+                // seat renders a FRONT walk and the agent sits facing the
+                // camera until it snaps at AtWaypoint. Ordinary travel segments
+                // keep the travel-direction facing and foot-position z-key.
                 let settle =
                     settle_seat_view(to, layout).or_else(|| settle_seat_view(from, layout));
                 let (going_back, flip) = match settle {
@@ -562,8 +473,8 @@ fn resolve_characters(
             }
         }
     }
-    // wp_rank's keys ARE this tick's occupied waypoints (every AtWaypoint
-    // occupant registers a rank) — no second bookkeeping pass.
+    // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint
+    // occupant registers a rank.
     (
         placements,
         waypoint_visitors,

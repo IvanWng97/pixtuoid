@@ -1,9 +1,7 @@
 //! The scriptable sources-CLI presenters over `pixtuoid::sources` (the TUI-free
 //! core): `setup` / `sources [set]` / the shared `connect`/`disconnect` runner.
-//! Binary-crate module (lifted out of `main.rs`) — a SIBLING of `sources.rs`,
-//! kept out of it on purpose: the core stays presenter-free (its other two
-//! presenters, the in-TUI panel and onboarding, live in their own modules too).
-//! `main.rs` dispatches here; the `--json` row shape is the typed
+//! A SIBLING of `sources.rs`, kept out of it on purpose so the core stays
+//! presenter-free. The `--json` row shape is the typed
 //! [`pixtuoid::sources::OutcomeRow`] wire contract.
 
 use std::path::Path;
@@ -13,11 +11,9 @@ use pixtuoid::{config, sources};
 
 use crate::logging::log_file_path;
 
-/// `pixtuoid setup [--yes]` — the headless onboarding twin (Raycast / CI /
-/// scripting). Detects installed agent CLIs and connects them via the SAME
-/// `sources::apply_choices` the in-TUI onboarding uses. Without `--yes` it is a
-/// DRY RUN (prints the detected set only) — writing to another tool's config is
-/// opt-in. Exits non-zero if any connect fails (a `$?`-checking caller's signal).
+/// `pixtuoid setup [--yes]` — the headless onboarding twin. Without `--yes` it is
+/// a DRY RUN: writing to another tool's config is opt-in. Exits non-zero if any
+/// connect fails, so a `$?`-checking caller gets a real signal.
 pub(crate) fn run_setup(yes: bool) -> Result<()> {
     let detected = sources::detect();
     if detected.is_empty() {
@@ -53,7 +49,13 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
 /// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
 pub(crate) fn run_sources_list(json: bool) -> Result<()> {
     let cfg = config::config_path();
-    let log = std::fs::read_to_string(log_file_path()).unwrap_or_default();
+    // An unreadable log leaves `health` under-reported, so say so instead of
+    // returning a silent clean bill — via tracing, never stdout, because `--json`
+    // stdout is the frozen Raycast array.
+    let (log, log_warning) = pixtuoid::doctor::read_log(&log_file_path());
+    if let Some(w) = log_warning {
+        tracing::warn!("{w}");
+    }
     let rows = sources::status(&cfg, &log);
     if json {
         println!("{}", serde_json::to_string_pretty(&rows)?);
@@ -90,11 +92,9 @@ pub(crate) fn run_sources_set(ids: &[String], json: bool) -> Result<()> {
     report_batch(&rows, json)
 }
 
-/// Shared `connect`/`disconnect` presenter: validate all ids up front, then apply
-/// each, reporting per-source. `op` returns the SUCCESS outcome; an `Err` becomes
-/// a `failed` row (message = the error) AND makes the whole command exit non-zero
-/// (after emitting all rows) so a `$?`-checking shell/CI/onboarding caller gets a
-/// real error signal.
+/// Shared `connect`/`disconnect` presenter. `op` returns the SUCCESS outcome; an
+/// `Err` becomes a `failed` row AND makes the whole command exit non-zero, after
+/// emitting all rows.
 pub(crate) fn run_change(
     ids: &[String],
     json: bool,
@@ -108,25 +108,17 @@ pub(crate) fn run_change(
     let rows: Vec<sources::OutcomeRow> = sids
         .into_iter()
         .map(|sid| {
-            let oc = op(&cfg, sid).unwrap_or_else(|e| {
-                // The same `failed` token + message split `sources set` emits —
-                // spelled through the ONE outcome→row authority (`OutcomeRow::new`)
-                // so the two command surfaces can't drift.
-                sources::ChangeOutcome::Failed(format!("{e:#}"))
-            });
+            let oc =
+                op(&cfg, sid).unwrap_or_else(|e| sources::ChangeOutcome::Failed(format!("{e:#}")));
             sources::OutcomeRow::new(sid.to_string(), &oc)
         })
         .collect();
     report_batch(&rows, json)
 }
 
-/// The shared tail of `run_change` / `run_sources_set`: emit the batch, then fail
-/// the command if any row failed. Emits BEFORE bailing — the `--json` rows must
-/// reach stdout even on the non-zero exit (the delivery contract the Raycast
-/// consumer rides, pinned by
-/// `cli_json::a_failing_connect_emits_the_outcome_rows_and_exits_nonzero`).
-/// `any_failed` is DERIVED from the rows (their `outcome` token), so the emitted
-/// rows and the exit code can't disagree.
+/// Emit the batch, then fail the command if any row failed. Emits BEFORE bailing:
+/// the `--json` rows must reach stdout even on the non-zero exit, and the failure
+/// flag is DERIVED from the rows so the two can't disagree.
 fn report_batch(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
     emit_outcomes(rows, json)?;
     if rows
@@ -139,10 +131,7 @@ fn report_batch(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
 }
 
 /// Print an [`sources::OutcomeRow`] batch as a text table or the `--json` array —
-/// the schema-backed envelope the Raycast extension parses back from
-/// `connect`/`disconnect`/`sources set` (pinned by
-/// `outcome_envelope_is_the_id_outcome_raycast_contract` here plus the
-/// byte-shape + committed-schema goldens in `sources.rs`).
+/// the schema-backed envelope the Raycast extension parses back.
 fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
     if json {
         println!("{}", serde_json::to_string_pretty(rows)?);
@@ -158,8 +147,7 @@ fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
 }
 
 /// The ONE human (non-`--json`) row form, shared by `emit_outcomes` and
-/// `run_setup`: `id: token`, with the failure detail appended (`id: failed: msg`
-/// — the same line shape the pre-split fold printed).
+/// `run_setup`: `id: token`, with the failure detail appended.
 fn text_line(row: &sources::OutcomeRow) -> String {
     match &row.message {
         Some(m) => format!("{}: {}: {m}", row.id, row.outcome),
@@ -169,13 +157,8 @@ fn text_line(row: &sources::OutcomeRow) -> String {
 
 /// The optional SECOND human line under a row — the target's post-install step,
 /// because connecting is not always the last one (OpenClaw's running gateway must
-/// restart before it loads the plugin). `None` unless the row actually connected
-/// AND its target declares a step.
-///
-/// Owned here, not written at each call site, so `connect` and `setup --yes` cannot
-/// disagree on the gate or the glyph. HUMAN output only: the `--json` envelope is
-/// the frozen `{id, outcome, message?}` Raycast contract where `message` means
-/// FAILURE, so an advisory there would change its meaning.
+/// restart before it loads the plugin). HUMAN output only: in the `--json`
+/// envelope `message` means FAILURE, so an advisory there would change its meaning.
 fn hint_line(row: &sources::OutcomeRow) -> Option<String> {
     (row.outcome == sources::WireOutcome::Connected)
         .then(|| sources::post_install_hint(&row.id))
@@ -189,15 +172,6 @@ mod tests {
 
     #[test]
     fn outcome_envelope_is_the_id_outcome_raycast_contract() {
-        // Pins the exact `{id, outcome, message?}` JSON rows `connect`/
-        // `disconnect`/`sources set --json` emit — the batch envelope the
-        // Raycast extension parses. A key rename must break THIS test, not the
-        // consumer. The outcome TOKEN set itself ("connected"/"disconnected"/
-        // "no_op"/"failed") is pinned by sources.rs's
-        // `change_outcome_wire_tokens_are_stable`, and every emission site
-        // routes through `OutcomeRow::new`, so the failed row below exercises
-        // the same token+message split the CLI ships.
-        //
         // Raycast is not the only consumer: homebrew-core's formula `test do`
         // parses `connect claude-code --json` and asserts the row equals
         // `{"id" => "claude-code", "outcome" => "connected"}`. Reshaping this
@@ -215,15 +189,11 @@ mod tests {
         );
     }
 
-    /// The hint line's GATE and its shape. Mutation testing found this feature had
-    /// no teeth at all: stubbing `hint_line` to `None` (i.e. silently never telling
-    /// the user to restart their gateway) passed the whole suite.
     #[test]
     fn the_post_install_hint_line_rides_a_connected_row_only() {
         let row =
             |id: &str, oc: sources::ChangeOutcome| sources::OutcomeRow::new(id.to_string(), &oc);
 
-        // A source WITH a step, actually connected ⇒ the indented `↳` second line.
         let line = hint_line(&row("openclaw", sources::ChangeOutcome::Connected))
             .expect("openclaw declares a post-install step");
         assert!(
@@ -236,9 +206,8 @@ mod tests {
             "the line carries the target's own hint verbatim, never a re-worded copy"
         );
 
-        // Every other outcome is NOT a completed install, so the step must not print:
-        // `no_op` especially, or a re-run of `setup --yes` would nag about a gateway
-        // the user already restarted.
+        // `no_op` especially: a re-run of `setup --yes` must not nag about a
+        // gateway the user already restarted.
         for oc in [
             sources::ChangeOutcome::NoOp,
             sources::ChangeOutcome::Disconnected,
@@ -250,7 +219,6 @@ mod tests {
             );
         }
 
-        // A connected source with no declared step stays a single line.
         assert!(
             hint_line(&row("claude-code", sources::ChangeOutcome::Connected)).is_none(),
             "claude-code's hooks take effect on its next run — nothing to add"

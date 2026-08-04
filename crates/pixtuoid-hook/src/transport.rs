@@ -1,18 +1,16 @@
-//! Best-effort one-line delivery to the daemon — the ONLY platform-split
-//! seam in the shim. Contract on every path (invariant: never block CC):
-//! all failures return silently (caller exits 0) and the entire send is
-//! bounded by ~WRITE_TIMEOUT on both platforms.
+//! Best-effort one-line delivery to the daemon. Contract on every path
+//! (invariant: never block CC): all failures return silently (caller exits 0)
+//! and the entire send is bounded by ~`WRITE_TIMEOUT` on both platforms.
 
 use std::time::Duration;
 
 pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
 /// Arm the send-timeout watchdog: a thread that hard-exits the process after
-/// `WRITE_TIMEOUT`, bounding the whole connect+write phase on BOTH platforms
-/// (invariant #5: never block CC — exit(0)-on-timeout IS the contract). Uses
-/// `Builder::spawn` (not `thread::spawn`) so OS thread exhaustion degrades to
-/// dropping the event instead of an abort. Returns `false` if the thread can't
-/// be spawned, so the caller bails before entering its connect/retry path.
+/// `WRITE_TIMEOUT`, bounding the whole connect+write phase (exit(0)-on-timeout
+/// IS the contract — never block CC). Uses `Builder::spawn`, not
+/// `thread::spawn`, so OS thread exhaustion degrades to dropping the event
+/// instead of an abort; `false` ⇒ the caller must not enter its connect path.
 fn spawn_timeout_watchdog() -> bool {
     std::thread::Builder::new()
         .spawn(|| {
@@ -25,30 +23,19 @@ fn spawn_timeout_watchdog() -> bool {
 #[cfg(unix)]
 pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     use std::io::Write;
-    // `UnixStream::connect` has no timeout knob — a missing daemon fails
-    // fast (NotFound/ConnectionRefused), but a backlog-saturated listener
-    // parks connect() indefinitely, past the 200ms invariant-#5 budget that
-    // set_write_timeout only enforces AFTER a successful connect (#167).
-    // Bound the WHOLE connect+write phase the way the Windows arm below
-    // does: a watchdog thread that hard-exits the process — after stdin is
-    // consumed this send is the shim's only job (see main), and
-    // exit(0)-on-timeout IS the contract (never block CC, spec §2). The write
-    // timeout stays as a second layer: it usually errors out of a stalled write
-    // before the watchdog has to shoot the process.
+    // `UnixStream::connect` has no timeout knob, and a backlog-saturated
+    // listener parks it indefinitely — past the budget `set_write_timeout` only
+    // enforces AFTER a successful connect (#167). The watchdog bounds the whole
+    // connect+write phase; the write timeout below is a secondary backstop.
     if !spawn_timeout_watchdog() {
         return;
     }
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
         // For the `/tmp/pixtuoid-{uid}/` fallback we own, verify the connected
-        // PEER is us BEFORE writing (#485). This closes the read-side TOCTOU a
-        // pre-connect path stat can't: even if a co-located user wins the
-        // create-race on an absent fallback dir and owns the listening socket,
-        // its peer uid != ours, so we drop instead of leaking the payload (cwd,
-        // tool names). The check is on the connected fd — atomic w.r.t. the
-        // connection, not a racy pre-stat of the path. Scoped to the fallback:
-        // an XDG or explicit PIXTUOID_SOCKET endpoint is the user's own trust
-        // decision (it may point at a cross-uid system daemon). One non-blocking
-        // getpeereid syscall, inside the watchdog bound.
+        // PEER is us BEFORE writing (#485) — on the connected fd, atomic w.r.t.
+        // the connection, closing a TOCTOU a pre-connect path stat can't. Scoped
+        // to the fallback: an XDG or explicit PIXTUOID_SOCKET endpoint is the
+        // user's own trust decision (it may point at a cross-uid system daemon).
         if crate::paths::owned_tmp_socket_dir(endpoint).is_some() && !peer_is_us(&s) {
             return;
         }
@@ -57,13 +44,10 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     }
 }
 
-/// True iff the connected peer's effective uid is OURS. Validated on the live fd
-/// (atomic w.r.t. the connection — no TOCTOU), so a co-located user who parked a
-/// listening socket at our rendezvous path is rejected before any payload is
-/// written. Fails CLOSED when the peer uid can't be read (`None` → `false` →
-/// drop): the syscall doesn't fail on a healthy connected `AF_UNIX` stream, so a
-/// failure means we cannot prove the peer is us. Complements the daemon's
-/// create-side 0700-dir hardening (`hook::unix::ensure_private_dir`).
+/// True iff the connected peer's effective uid is OURS, validated on the live fd
+/// (atomic w.r.t. the connection — no TOCTOU). Fails CLOSED when the peer uid
+/// can't be read: the syscall doesn't fail on a healthy connected `AF_UNIX`
+/// stream, so a failure means we cannot prove the peer is us.
 #[cfg(unix)]
 fn peer_is_us(stream: &std::os::unix::net::UnixStream) -> bool {
     use std::os::unix::io::AsRawFd;
@@ -72,8 +56,8 @@ fn peer_is_us(stream: &std::os::unix::net::UnixStream) -> bool {
 }
 
 /// The connected peer's uid, or `None` if it can't be read. Linux exposes it via
-/// `SO_PEERCRED` (`struct ucred`); macOS/BSD via `getpeereid` (`libc` doesn't
-/// declare `getpeereid` on Linux, hence the split).
+/// `SO_PEERCRED`; macOS/BSD via `getpeereid`, which `libc` doesn't declare on
+/// Linux — hence the split.
 #[cfg(any(target_os = "linux", target_os = "android"))]
 fn peer_uid(fd: std::os::unix::io::RawFd) -> Option<u32> {
     let mut cred = libc::ucred {
@@ -111,9 +95,6 @@ mod tests {
 
     #[test]
     fn peer_is_us_for_a_self_connection() {
-        // Both ends are this test process, so the peer's uid IS ours — the legit
-        // shim→daemon case (same user). Also proves getpeereid links + works on
-        // every CI platform the shim targets.
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let sock = tmp.path().join("s.sock");
         let listener = UnixListener::bind(&sock).expect("bind");
@@ -127,22 +108,14 @@ mod tests {
 #[cfg(windows)]
 pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
     use std::io::Write;
-    // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the
-    // 200ms invariant is enforced by a watchdog thread that hard-exits the
-    // process: after stdin is consumed this send is the shim's only job,
-    // and exit(0)-on-timeout IS the contract (never block CC, spec §2).
-    // The daemon's 1MiB pipe in-buffer covers the shim's capped stdin
-    // (`STDIN_CAP = 1MiB − STAMP_HEADROOM` in main.rs) PLUS the stamps +
-    // newline, so a write that gets through open() never stalls on quota. We
-    // must NOT enter the retry loop watchdog-less, or the 231 retry becomes
-    // unbounded.
+    // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the timeout
+    // invariant is enforced solely by the watchdog's hard exit. We must NOT enter
+    // the ERROR_PIPE_BUSY retry loop watchdog-less, or the retry is unbounded.
+    // The daemon's 1MiB pipe in-buffer covers the shim's capped stdin plus the
+    // stamps, so a write that gets through open() never stalls on quota.
     if !spawn_timeout_watchdog() {
         return;
     }
-    // ERROR_PIPE_BUSY = all named-pipe server instances mid-handshake. Now the
-    // windows-sys constant (#495 pulled the crate in for the peer check below),
-    // no longer a hand-hardcoded 231. The backoff is bounded by the 200ms send
-    // watchdog either way.
     const ERROR_PIPE_BUSY: i32 = windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32;
     const PIPE_BUSY_RETRY_BACKOFF_MS: u64 = 10;
     loop {
@@ -155,10 +128,8 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
                 // #495: before writing, verify the pipe SERVER runs as US — a
                 // co-located user who squatted our predictable default pipe (so
                 // our daemon's create failed → SocketBusy degrade) would else
-                // receive the payload (cwd, tool names). Scoped to our default
-                // rendezvous; an explicit PIXTUOID_SOCKET pipe is the user's
-                // trust call (parity with the Unix owned_tmp_socket_dir scope).
-                // Fail-closed drop, never a panic (invariant #5).
+                // receive the payload. Scoped to our default rendezvous; an
+                // explicit PIXTUOID_SOCKET pipe is the user's trust call.
                 if endpoint == crate::paths::default_windows_pipe_name() && !peer::server_is_us(&f)
                 {
                     return;
@@ -170,35 +141,24 @@ pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
             Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
                 std::thread::sleep(Duration::from_millis(PIPE_BUSY_RETRY_BACKOFF_MS));
             }
-            // NotFound etc.: daemon not running — drop the event, same as
-            // the Unix connect-failure path.
             Err(_) => return,
         }
     }
 }
 
 /// The Windows counterpart of the Unix `peer_is_us` check (#495): verify the
-/// named-pipe SERVER (the process that created the pipe) runs as OUR user before
-/// the shim writes the hook payload. Windows named pipes are a machine-global,
-/// unprivileged namespace, so a co-located user can pre-create our predictable
-/// `\\.\pipe\pixtuoid-{USERNAME}` (making our daemon's create fail → the hook
-/// plane silently degrades) and receive the payload. Comparing the connected
-/// server's token user SID to ours closes that. EVERYTHING here fails CLOSED
-/// (any FFI failure ⇒ `false` ⇒ drop) and never panics — invariant #5.
+/// named-pipe SERVER runs as OUR user before the shim writes the hook payload.
+/// Windows named pipes are a machine-global, unprivileged namespace, so a
+/// co-located user can pre-create our predictable `\\.\pipe\pixtuoid-{USERNAME}`
+/// and receive it. EVERYTHING here fails CLOSED (any FFI failure ⇒ `false` ⇒
+/// drop) and never panics.
 ///
-/// KNOWN SHARP EDGE — pid→token, not fd-atomic (don't "fix" it): unlike Unix
-/// `getpeereid` (which reads the peer off the connected fd atomically), this
-/// resolves the server via `GetNamedPipeServerProcessId` → `OpenProcess`, a
-/// pid→handle pair with an inherent PID-reuse TOCTOU. It is fail-closed AND
-/// effectively unexploitable: for the payload to leak, the squatter's server
-/// process must stay ALIVE to receive the write, so its pid can't have been
-/// recycled; a recycled pid means the squatter exited, its pipe instance died
-/// with it, and the write goes nowhere. There is no atomic Win32 alternative
-/// that ALSO survives elevation — `GetSecurityInfo(OWNER)` reads the pipe object
-/// owner in one call but would false-negative an admin daemon (owner = the
-/// Administrators group, not the user). The `default_windows_pipe_name` re-read
-/// in `send_line`'s scope check is a deliberate one-shot cost (the shim runs once
-/// per hook and exits).
+/// KNOWN SHARP EDGE — pid→token, not fd-atomic (don't "fix" it): resolving the
+/// server via `GetNamedPipeServerProcessId` → `OpenProcess` carries an inherent
+/// PID-reuse TOCTOU, but it is unexploitable — for the payload to leak the
+/// squatter's server must stay ALIVE to receive the write, so its pid can't have
+/// been recycled. The atomic alternative, `GetSecurityInfo(OWNER)`, would
+/// false-negative an admin daemon (owner = Administrators, not the user).
 #[cfg(windows)]
 mod peer {
     use std::os::windows::io::AsRawHandle;
@@ -214,8 +174,7 @@ mod peer {
 
     /// The `TOKEN_USER` blob for `process`'s token, `u64`-backed so the embedded
     /// `PSID` pointer is properly aligned (a `Vec<u8>` would only guarantee
-    /// align-1). The returned buffer OWNS the SID — keep it alive across the
-    /// `EqualSid` call. `None` on any failure.
+    /// align-1). The buffer OWNS the SID — keep it alive across `EqualSid`.
     ///
     /// SAFETY: `process` is a valid process handle for the call's duration.
     unsafe fn token_user_blob(process: HANDLE) -> Option<Vec<u64>> {
@@ -223,8 +182,7 @@ mod peer {
         if OpenProcessToken(process, TOKEN_QUERY, &mut token) == 0 {
             return None;
         }
-        // Size probe (returns 0 + sets `len`), then the real read; close the
-        // token on every path.
+        // Size probe (returns 0 + sets `len`), then the real read.
         let mut len: u32 = 0;
         GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len);
         let blob = if len == 0 {
@@ -277,15 +235,11 @@ mod peer {
 }
 
 // No in-process tests for `send_line` ON PURPOSE: it spawns a watchdog that
-// exit(0)s the whole process ~200ms later (both platforms), which would kill
-// sibling tests under plain `cargo test`'s shared-process runner. All
-// send_line coverage lives at the child-process level — tests/shim.rs
-// (delivery, missing endpoint, stalled listener) and its Windows twin
-// tests/shim_pipe.rs — where exit-is-the-contract is observable, not fatal.
-// `peer::server_is_us` spawns NO watchdog, so it IS unit-testable below.
+// exit(0)s the whole process ~200ms later, which would kill sibling tests under
+// `cargo test`'s shared-process runner. Its coverage lives at the child-process
+// level (tests/shim.rs and its Windows twin tests/shim_pipe.rs), where
+// exit-is-the-contract is observable, not fatal.
 
-// The peer-cred check runs only on the `windows-test` CI job (no reachable path
-// on Unix). Both ends of a self-hosted pipe are THIS process → same user → true.
 #[cfg(all(windows, test))]
 mod win_peer_tests {
     #[tokio::test]
@@ -295,7 +249,7 @@ mod win_peer_tests {
         let _server = tokio::net::windows::named_pipe::ServerOptions::new()
             .create(&name)
             .expect("create self-hosted pipe server");
-        // A blocking std client — the same handle type `send_line` writes over.
+        // A blocking std client: the same handle type `send_line` writes over.
         let client = std::fs::OpenOptions::new()
             .read(true)
             .write(true)

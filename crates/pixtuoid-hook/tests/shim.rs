@@ -1,8 +1,6 @@
 #![cfg(unix)]
 //! Integration tests for the hook shim BINARY's I/O contract (invariant #5:
-//! "always exit 0, never block CC"). The unit tests in main.rs only cover the
-//! pure `enrich_payload`; these spawn the real binary and exercise the
-//! connect / write / timeout / exit-0 / malformed-input paths end to end.
+//! "always exit 0, never block CC").
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
@@ -11,8 +9,8 @@ use std::time::{Duration, Instant};
 
 const BIN: &str = env!("CARGO_BIN_EXE_pixtuoid-hook");
 
-/// A short, unique socket path under /tmp (stays well under the ~104-byte
-/// `sun_path` limit, unlike a deep tempdir). Removed if a stale one exists.
+/// A short, unique socket path under /tmp — a deep tempdir would blow the
+/// ~104-byte `sun_path` limit.
 fn sock_path(tag: &str) -> std::path::PathBuf {
     let p = std::path::PathBuf::from(format!(
         "/tmp/pixtuoid-hook-it-{}-{tag}.sock",
@@ -22,10 +20,8 @@ fn sock_path(tag: &str) -> std::path::PathBuf {
     p
 }
 
-/// Spawn the shim with the given socket path, optional source env, and extra
-/// argv, pipe `stdin` to it, and return its exit status (after closing stdin →
-/// EOF). Generic over the arg type so the non-UTF-8-argv test can pass raw
-/// `OsStr` bytes.
+/// Generic over the arg type so the non-UTF-8-argv test can pass raw `OsStr`
+/// bytes.
 fn run_shim_inner<S: AsRef<std::ffi::OsStr>>(
     socket: &std::path::Path,
     source: Option<&str>,
@@ -57,7 +53,6 @@ fn run_shim_inner<S: AsRef<std::ffi::OsStr>>(
     child.wait().expect("wait shim")
 }
 
-/// Spawn the shim with a source via the `PIXTUOID_SOURCE` env (the Unix install form).
 fn run_shim(
     socket: &std::path::Path,
     source: Option<&str>,
@@ -66,8 +61,6 @@ fn run_shim(
     run_shim_inner::<&str>(socket, source, &[], stdin)
 }
 
-/// Spawn the shim with extra argv and NO `PIXTUOID_SOURCE` env, so a `--source`
-/// flag is the only source signal (the Windows install form).
 fn run_shim_args(
     socket: &std::path::Path,
     args: &[&str],
@@ -76,9 +69,6 @@ fn run_shim_args(
     run_shim_inner(socket, None, args, stdin)
 }
 
-/// Poll-accept one connection (the shim has already connected+written+exited),
-/// drain it to EOF, and parse the first delivered line as JSON. Shared by the
-/// env-source and argv-source delivery tests.
 fn recv_delivered_json(listener: &UnixListener) -> serde_json::Value {
     let deadline = Instant::now() + Duration::from_secs(3);
     let mut stream = loop {
@@ -94,8 +84,7 @@ fn recv_delivered_json(listener: &UnixListener) -> serde_json::Value {
             Err(e) => panic!("accept: {e}"),
         }
     };
-    // accept() inherited the listener's non-blocking mode — restore blocking. The
-    // shim has already exited, so its end is closed: read drains then sees EOF.
+    // accept() inherited the listener's non-blocking mode — restore blocking.
     stream.set_nonblocking(false).unwrap();
     let mut got = String::new();
     stream
@@ -129,8 +118,6 @@ fn delivers_one_json_line_to_listener_and_exits_zero() {
 
 #[test]
 fn argv_source_flag_stamps_source_without_env() {
-    // The Windows install form: `pixtuoid-hook --source codex` with NO
-    // PIXTUOID_SOURCE env. The flag alone must drive the `_pixtuoid_source` stamp.
     let path = sock_path("argvsrc");
     let listener = UnixListener::bind(&path).expect("bind listener");
     listener.set_nonblocking(true).unwrap();
@@ -154,17 +141,12 @@ fn argv_source_flag_stamps_source_without_env() {
 
 #[test]
 fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
-    // CodeWhale env-mode (`--event <name>`): the shim synthesizes the envelope
-    // from DEEPSEEK_* env vars and MUST NOT read stdin. For env-only events
-    // CodeWhale leaves the child's stdin = the TUI terminal, which NEVER reaches
-    // EOF — and `tool_call_before` runs SYNCHRONOUSLY, so a blind read_to_string
-    // would freeze the user's tool call (and steal keystrokes). This is the
-    // regression class invariant #5 exists for (cf. PR #198's missed panic), so
-    // the test must catch a re-added blocking read, not just an EOF-able one:
-    // we hold the child's stdin pipe OPEN (never write, never close → no EOF)
-    // and assert the shim still delivers + exits within a wall-clock bound. If
-    // env-mode regressed to read stdin, it would block on the open pipe forever
-    // and the bounded wait below would trip.
+    // Env-mode MUST NOT read stdin: CodeWhale leaves the child's stdin = the
+    // TUI terminal, which NEVER reaches EOF, and `tool_call_before` runs
+    // SYNCHRONOUSLY — a blind read_to_string would freeze the user's tool call.
+    // So the fixture holds the child's stdin pipe OPEN (never write, never
+    // close) and bounds the wait: a re-added blocking read hangs and trips it,
+    // where an EOF-able pipe would pass.
     let path = sock_path("cwevent");
     let listener = UnixListener::bind(&path).expect("bind listener");
     listener.set_nonblocking(true).unwrap();
@@ -180,8 +162,6 @@ fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     let mut child = cmd.spawn().expect("spawn shim");
-    // Hold stdin open for the child's whole lifetime — never write, never drop
-    // until after it exits → the read-end never sees EOF.
     let stdin = child.stdin.take().expect("stdin piped");
 
     let deadline = Instant::now() + Duration::from_millis(2000);
@@ -218,7 +198,6 @@ fn codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin() {
 
 #[test]
 fn missing_socket_exits_zero_without_blocking() {
-    // No listener bound at this path: connect fails, the event is dropped, exit 0.
     let path = sock_path("nosock");
     let start = Instant::now();
     let status = run_shim(&path, None, br#"{"hook_event_name":"Stop"}"#);
@@ -227,15 +206,12 @@ fn missing_socket_exits_zero_without_blocking() {
         "must exit 0 even with no listener; got {status:?}"
     );
     // A missing socket makes `connect()` return ConnectionRefused in
-    // microseconds, so this guards against a regression that added a blocking
-    // retry/backoff on connect failure — don't delete it. Bound decomposition
-    // (same as the stalled-listener test below and shim_pipe.rs's twins):
-    // worst-case child RUNTIME is the ~200ms #167 watchdog; the rest is
-    // spawn/exec jitter margin — the bound measures a CHILD PROCESS's whole
-    // spawn+exit wall-clock, which is load-sensitive (#161: flaked at 1s
-    // under the fully-parallel suite, passed isolated). The jitter term is
-    // attacked directly by .config/nextest.toml's threads-required override
-    // (this test runs with the machine to itself).
+    // microseconds, so this guards a regression that adds a blocking
+    // retry/backoff on connect failure — don't delete it. The bound is the
+    // ~200ms watchdog plus spawn/exec jitter: it measures a CHILD PROCESS's
+    // whole spawn+exit wall-clock, which is load-sensitive (#161 flaked at 1s
+    // under the fully-parallel suite), hence .config/nextest.toml's
+    // threads-required override giving this test the machine to itself.
     assert!(
         start.elapsed() < Duration::from_millis(1500),
         "shim must not block when the socket is absent"
@@ -244,18 +220,15 @@ fn missing_socket_exits_zero_without_blocking() {
 
 #[test]
 fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
-    // A listener whose accept loop is wedged while its backlog saturates —
-    // the one Unix path where `connect()` itself can park forever (#167).
-    // Kernel-dependent: Linux BLOCKS the shim's connect (the watchdog must
-    // shoot the process at ~200ms — the load-bearing arm, exercised on CI),
-    // macOS fails fast with ECONNREFUSED. Both must exit 0 within the bound.
-    // Mirrors shim_pipe.rs's stalled_daemon_shim_exits_zero_within_watchdog_bound.
+    // A wedged accept loop with a saturated backlog is the one Unix path where
+    // `connect()` itself can park forever (#167). Kernel-dependent: Linux
+    // BLOCKS the shim's connect (the load-bearing arm — the watchdog must shoot
+    // the process at ~200ms), macOS fails fast with ECONNREFUSED.
     let path = sock_path("stall");
     let listener = UnixListener::bind(&path).expect("bind listener");
 
-    // Saturate the accept backlog (std binds with backlog 128) without ever
-    // accepting. Each filler holds its connection (or its blocked connect)
-    // open by parking; the threads die with the test process.
+    // 160 fillers oversaturate the accept backlog (std binds with backlog 128);
+    // each parks to hold its connection — or its blocked connect — open.
     let fillers: Vec<_> = (0..160)
         .map(|_| {
             let p = path.clone();
@@ -273,8 +246,7 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
         status.success(),
         "stalled listener must still exit 0; got {status:?}"
     );
-    // Watchdog bound is 200ms; the rest is spawn-jitter headroom (the
-    // nextest threads-required override runs this test alone).
+    // Watchdog bound is 200ms; the rest is spawn-jitter headroom.
     assert!(
         start.elapsed() < Duration::from_millis(1500),
         "watchdog must bound the connect phase; took {:?}",
@@ -290,11 +262,9 @@ fn stalled_listener_shim_exits_zero_within_watchdog_bound() {
 fn non_utf8_argv_exits_zero() {
     use std::ffi::OsStr;
     use std::os::unix::ffi::OsStrExt;
-    // Non-UTF-8 bytes are legal in Unix argv (e.g. a binary installed under a
-    // non-UTF-8 path, or shell-expanded bytes in a settings.json hook
-    // command). `std::env::args()` PANICS while collecting such an argument —
-    // exit 101 + stderr, breaching invariant #5's silent exit-0 contract. The
-    // shim must collect argv panic-free and degrade gracefully instead.
+    // Non-UTF-8 bytes are legal in Unix argv, and `std::env::args()` PANICS
+    // while collecting such an argument — exit 101 + stderr, breaching
+    // invariant #5's silent exit-0 contract.
     let path = sock_path("nonutf8");
     let status = run_shim_inner(
         &path,
@@ -313,7 +283,6 @@ fn non_utf8_argv_exits_zero() {
 
 #[test]
 fn malformed_stdin_exits_zero() {
-    // Unparseable stdin must be dropped silently (never block / fail CC).
     let path = sock_path("garbage");
     let status = run_shim(&path, None, b"this is not json at all {{{");
     assert!(

@@ -16,8 +16,8 @@ pub(crate) fn paint_elevator_indicator(
     use ratatui::text::Line;
 
     let label = format!(" \u{25b2} F{current_floor} \u{25bc} ");
-    // Display COLUMNS via `display_width` (the width authority, shared with the
-    // footer): the ▲/▼ arrows are 3-byte single-column glyphs (byte len over-counts).
+    // Display COLUMNS, not byte length: the ▲/▼ arrows are 3-byte single-column
+    // glyphs, so a byte-length anchor lands 2 cells left of the door's center.
     let label_w = super::display_width(&label) as u16;
     let door_cell_x = door.x + 8u16.saturating_sub(label_w / 2);
     let door_cell_y = door.y / 2;
@@ -44,10 +44,6 @@ pub(crate) fn paint_elevator_indicator(
 mod tests {
     use super::*;
 
-    // The elevator indicator must center by DISPLAY COLUMNS, not byte length:
-    // " ▲ F1 ▼ " is 8 columns but 12 bytes (the arrows are 3-byte single-column
-    // glyphs), so a byte-length anchor `door.x + 8 - w/2` lands 2 cells left of
-    // the door's center.
     #[test]
     fn elevator_indicator_centers_by_display_columns_not_bytes() {
         use ratatui::backend::TestBackend;
@@ -60,7 +56,7 @@ mod tests {
         })
         .unwrap();
         let buf = term.backend().buffer();
-        let row = (door.y / 2 - 1) as usize; // indicator paints one cell above the door
+        let row = (door.y / 2 - 1) as usize;
         let bg = to_color(theme.ui.tooltip_bg);
         let cols: Vec<u16> = (0..80u16)
             .filter(|&x| buf.content()[row * 80 + x as usize].style().bg == Some(bg))

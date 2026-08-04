@@ -19,21 +19,39 @@ permissions:
 
 jobs:
   claude:
-    # Gate to repo-write actors. claude-code-action enforces this internally, but
-    # this is the only contents:write job — fail CLOSED at the yaml layer too,
-    # independent of the floating action tag. Each of the four event shapes needs
-    # its OWN author_association field, or the owner's own trigger gets blocked.
+    # Gate to repo-write actors: this is the only contents:write job, so fail
+    # CLOSED at the yaml layer too, independent of the floating action tag. Each
+    # event shape needs its OWN author_association field. The pull_request_review*
+    # arms also need the same-repo guard: refs/pull/<n>/merge would stage
+    # fork-authored files — including a repo-root CLAUDE.md the agent auto-loads
+    # as instructions — in the job holding contents:write and the OAuth token (#799).
     if: >
       (github.event_name == 'issues' && contains(github.event.issue.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
-      (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+      (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.comment.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' && github.event.pull_request.head.repo.full_name == github.repository && contains(github.event.review.body, '@claude') && contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     steps:
+      # Must precede BOTH checkouts (ours and the action's own). Resolving the PR
+      # is the only way to see fork-ness for an issue_comment payload.
+      - name: Refuse fork pull requests
+        if: github.event_name == 'issue_comment' && github.event.issue.pull_request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          head_repo="$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" --jq '.head.repo.full_name // ""')"
+          if [[ "$head_repo" != "$REPOSITORY" ]]; then
+            echo "::error::@claude does not run on fork pull requests: it would stage the fork's tree in the only contents:write job. Push the branch to this repository instead."
+            exit 1
+          fi
+
       - uses: actions/checkout@v7
         with:
           fetch-depth: 1

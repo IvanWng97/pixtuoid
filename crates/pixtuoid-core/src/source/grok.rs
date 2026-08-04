@@ -1,51 +1,29 @@
 //! Grok Build source (`grok`, xai-org/grok-build) — TRANSCRIPT-BEARING with a
 //! hook install target (the CC/Codex class: both transports).
 //!
-//! Wire facts were repo-derived from the open-source sync of the grok
-//! monorepo (v0.1.220-alpha.4 @ c68e39f6), then BYTE-REAL anchored against a
-//! live `grok 0.2.102 (ab5ebf69acec)` capture (2026-07-16, #637 — envelope
-//! fields, both method namespaces, the toolUseId==toolCallId join, and the
-//! `subagent_end` finish spelling all held; see the registry row comment for
-//! the absorbed 0.2.x deltas):
-//!
 //! - **Transcript**: `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`
 //!   is append-ONLY for the session's whole life (even `/rewind` appends a
-//!   `rewind_marker` instead of truncating; O_APPEND + flush per record, torn
-//!   tail healed upstream). The SIBLING `chat_history.jsonl` is REWRITTEN via
-//!   temp+rename on resume/compaction/rewind — never tail it (the watcher
-//!   path-filters to `updates.jsonl`). Line shape:
-//!   `{"timestamp":<unix-secs>,"method":"session/update"|"_x.ai/session/update",
-//!     "params":{"sessionId":"…","update":{"sessionUpdate":"<tag>",…}}}`.
-//! - **Hooks**: 14 lifecycle events, JSON envelope on stdin with **camelCase
-//!   field names and snake_case event values** (`hookEventName`,`sessionId`,
-//!   `cwd`,`workspaceRoot`,`toolName`,`toolUseId`,`toolInput`,…) — alien to the
-//!   shared CC-shaped arms (`hook_event_name`), hence the claims-all custom
-//!   decoder below. Only PreToolUse can block; everything else is observe-only
-//!   fail-open with a 5s default timeout, dispatched SEQUENTIALLY inline on the
-//!   session actor — the shim's 200ms bound matters here.
-//! - **Keying**: `sessionId` — consistent across every event of a session, ==
-//!   the transcript's parent-DIR name (grok-generated ids are UUIDv7), == a
-//!   subagent's `subagentId` (upstream: `child_session_id = subagent_id`,
-//!   handle_request.rs). Hook and watcher keys therefore coalesce by the same
-//!   string, and a child's tool hooks (which carry the CHILD's `sessionId` +
-//!   a `subagentType` marker) attribute to the child sprite with NO CC-style
-//!   `active_tasks` suppression needed.
-//! - **Subagents**: in-process child sessions persisted as FLAT siblings in the
-//!   normal sessions tree (only `meta.json` nests under the parent dir). The
-//!   parent linkage carriers are the `subagent_start`/`subagent_stop` hooks
-//!   (parent-keyed envelope + `subagentId` payload) and the parent transcript's
-//!   `subagent_spawned`/`subagent_finished` xAI lines. Children fire NO
-//!   `session_start` hook of their own — the hook `subagent_start` (or the
-//!   parent-transcript line) is the child's registration carrier, and the
-//!   child's own flat transcript first-sight coalesces/enriches.
-//! - **Exit profile**: `session_end` fires on `SessionCommand::Shutdown` and
-//!   channel-closed teardown but NOT on a plain TUI quit (the event loop breaks
-//!   without draining the actor — verified against run_loop/dispatch), and not
-//!   on kill. The reliable exit signal is the liveness ladder over grok's own
-//!   crash-recovery registry `{grok_home}/active_sessions.json`
-//!   (`{session_id,pid,cwd,opened_at}`, removed on clean quit, left on crash) —
-//!   see the native half. No open-FD probe is possible: every append opens and
-//!   drops the file handle (unlike Codex's for-lifetime rollout fd).
+//!   `rewind_marker` instead of truncating). The SIBLING `chat_history.jsonl`
+//!   is REWRITTEN via temp+rename on resume/compaction/rewind — never tail it.
+//! - **Hooks**: JSON envelope on stdin with **camelCase field names and
+//!   snake_case event values** (`hookEventName`, `sessionId`, `toolUseId`, …)
+//!   — alien to the shared CC-shaped arms (`hook_event_name`), hence the
+//!   claims-all custom decoder below. Hooks dispatch SEQUENTIALLY inline on
+//!   the session actor, so the shim's 200ms bound matters here.
+//! - **Keying**: `sessionId` is consistent across every event of a session, ==
+//!   the transcript's parent-DIR name, == a subagent's `subagentId`. Hook and
+//!   watcher keys therefore coalesce, and a child's tool hooks carry the
+//!   CHILD's `sessionId`, so no CC-style `active_tasks` suppression is needed.
+//! - **Subagents**: in-process children persisted as FLAT siblings in the
+//!   normal sessions tree. Children fire NO `session_start` hook of their own
+//!   — the `subagent_start` hook (or the parent transcript's
+//!   `subagent_spawned` line) is the child's registration carrier.
+//! - **Exit profile**: `session_end` fires on shutdown and channel-closed
+//!   teardown but NOT on a plain TUI quit, and not on kill. The reliable exit
+//!   signal is the liveness ladder over grok's own crash-recovery registry
+//!   `{grok_home}/active_sessions.json` (removed on clean quit, left on crash).
+//!   No open-FD probe is possible: every append opens and drops the file
+//!   handle, unlike Codex's for-lifetime rollout fd.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
@@ -66,35 +44,12 @@ pub use native::{live_grok_session_ids, GrokSource};
 pub const SOURCE_NAME: &str = "grok";
 
 /// Decode one grok hook payload (already identified by
-/// `_pixtuoid_source == "grok"`). Envelope per xai-grok-hooks `event.rs`
-/// (camelCase serde on `HookEventEnvelope`, snake_case `hookEventName` values).
+/// `_pixtuoid_source == "grok"`), keyed on `sessionId`.
 ///
-/// Event mapping, all keyed on `sessionId`:
-/// - `session_start`        → `SessionStart` (+ `ModelInfo` when `modelId` is
-///   offered — the fire site passes None today, decode-if-present)
-/// - `user_prompt_submit`   → `SessionStart` — the resurrect carrier: grok's
-///   `session_end` is unreliable (TUI quit fires none) so a stale-swept LIVE
-///   session must walk back in on its next prompt, the same reasoning as the
-///   shared Codex `UserPromptSubmit` arm (idempotent when the slot exists)
-/// - `pre_tool_use`         → `Identity` + `ActivityStart{toolUseId}`
-/// - `post_tool_use`(+`_failure`) → `Identity` + `ActivityEnd{toolUseId}`
-/// - `permission_denied`    → `Identity` + `ActivityEnd{toolUseId}` — a denied
-///   tool never reaches `post_tool_use`, and the End both closes the activity
-///   and resolves the reducer's `gated_before_waiting` entry for that tool
-/// - `notification`         → `Waiting` for `permission_prompt` /
-///   `elicitation_dialog`; `idle_prompt` (the 60s-idle nudge — the session is
-///   merely idle, not blocked) and unknown types decode to NOTHING (unknown
-///   additionally drops a drift breadcrumb)
-/// - `stop` / `stop_failure` → `ActivityEnd` (turn end → idle debounce; NO
-///   Identity — an end for an unknown agent proves nothing worth registering)
-/// - `subagent_start`       → child `SessionStart{parent_id}` + `Rename`
-/// - `subagent_stop` / `subagent_end` → child `SessionEnd{as_child: true}` —
-///   BOTH spellings: the docs name `SubagentStop`, but upstream's finish-site
-///   file-hook dispatch keys `SubagentEnd` (updates.rs) and the envelope
-///   serializes `"subagent_end"`; registration writes both (drift-watched)
-/// - `session_end`          → `SessionEnd` (best-effort — see module doc)
-/// - anything else          → bail (registered-vs-decoded drift must be loud;
-///   `pre_compact`/`post_compact` are deliberately unregistered)
+/// `user_prompt_submit` maps to `SessionStart` too — it is the resurrect
+/// carrier, because grok's `session_end` is unreliable (a TUI quit fires none)
+/// so a stale-swept LIVE session must walk back in on its next prompt.
+/// Anything unrecognized bails: registered-vs-decoded drift must be loud.
 pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()
@@ -103,8 +58,6 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("hookEventName")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("grok payload missing hookEventName"))?;
-    // `cwd` is a non-optional envelope field upstream; `workspaceRoot` is the
-    // defensive fallback (both are the workspace path for top-level sessions).
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
@@ -114,9 +67,6 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|s| s.as_str())
                 .filter(|s| !s.is_empty())
         });
-    // Key on `sessionId` — consistent across every event of a session and equal
-    // to the transcript's parent-dir name, so hook and watcher coalesce. The
-    // cwd fallback only guards a hypothetical future event that omits it.
     let key = obj
         .get("sessionId")
         .and_then(|s| s.as_str())
@@ -135,11 +85,10 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
 
     match event {
         "session_start" => {
-            // NOTE: grok's `session_start` payload ALSO carries a public
-            // `source` field ("new"/"load" — the start REASON, exactly CC's
-            // overload). Attribution comes ONLY from `_pixtuoid_source`; never
-            // read that field (the un-reapable-ghost lesson at
-            // `decode_hook_payload`).
+            // grok's payload ALSO carries a public `source` field ("new"/"load"
+            // — the start REASON, exactly CC's overload). Never read it:
+            // attribution comes ONLY from `_pixtuoid_source`, else agents split
+            // into un-reapable ghosts.
             let mut evs = vec![AgentEvent::SessionStart {
                 agent_id,
                 source: SOURCE_NAME.to_string(),
@@ -147,8 +96,8 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 cwd: cwd.unwrap_or("").into(),
                 parent_id: None,
             }];
-            // The type carries `modelId` but the current fire site passes
-            // None (run_loop.rs) — take it when a future build offers it.
+            // The fire site passes None today; take `modelId` if a future
+            // build offers it.
             if let Some(model) = obj
                 .get("modelId")
                 .and_then(|m| m.as_str())
@@ -187,11 +136,10 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             ])
         }
         // A FAILED tool fires `post_tool_use_failure` INSTEAD OF
-        // `post_tool_use`; a DENIED tool fires `permission_denied` and never
-        // runs at all. All three close the activity the same way — the End
-        // also resolves a pending permission `Waiting` gated on this tool
-        // (`gated_before_waiting`), which is exactly right for the denied
-        // case: the prompt is answered, the sprite must not stay Waiting.
+        // `post_tool_use`; a DENIED one fires `permission_denied` and never
+        // runs at all. All three close the activity, which also resolves a
+        // permission `Waiting` gated on this tool — right for the denied case:
+        // the prompt is answered, so the sprite must not stay Waiting.
         "post_tool_use" | "post_tool_use_failure" | "permission_denied" => Ok(vec![
             identity(),
             AgentEvent::ActivityEnd {
@@ -212,11 +160,9 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                     "?"
                 });
             match kind {
-                // Fires BEFORE the permission/question prompt shows
-                // (tool_calls.rs / idle_prompt.rs) — a genuine blocked-on-the-
-                // human state. Resolution: approval fires NO hook (the tool
-                // proceeds → its post_tool_use End clears the gate); denial
-                // fires permission_denied (same End, above).
+                // Fires BEFORE the prompt shows. Resolution: approval fires NO
+                // hook (the tool proceeds → its post_tool_use End clears the
+                // gate); denial fires permission_denied (same End, above).
                 "permission_prompt" | "elicitation_dialog" => {
                     let msg = obj
                         .get("message")
@@ -231,16 +177,16 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                         },
                     ])
                 }
-                // Known non-waiting types: `idle_prompt` is the 60s-idle nudge
-                // (the session is idle, not blocked — a Waiting would misrender
-                // every lunch break as a permission prompt); `agent_error` is
-                // the API-retry-exhausted error toast (hook_dispatch.rs) — an
-                // errored TURN, whose state signal is the `stop_failure` arm.
-                // Explicitly matched so neither spams the drift breadcrumb.
-                "idle_prompt" | "agent_error" => Ok(vec![]),
+                // `idle_prompt` is the 60s-idle nudge — idle, not blocked; a
+                // Waiting would misrender every lunch break as a permission
+                // prompt. `agent_error` is the retry-exhausted toast, an
+                // errored TURN whose state signal is the `stop_failure` arm.
+                // `task_complete` announces a BACKGROUNDED shell/monitor task
+                // finishing — no `toolUseId`, and its spawning tool call
+                // already Ended at backgrounding time, so nothing to close.
+                // All matched explicitly so none spams the breadcrumb.
+                "idle_prompt" | "agent_error" | "task_complete" => Ok(vec![]),
                 other => {
-                    // Sub-type drift breadcrumb (composed name — the event
-                    // itself is known, the TYPE vocabulary drifted).
                     crate::source::drift::unknown_event(
                         SOURCE_NAME,
                         &format!("notification:{other}"),
@@ -249,8 +195,8 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 }
             }
         }
-        // Turn end (`reason`: end_turn/cancelled/error; `stop_failure` is the
-        // API-error twin). Identity-LESS like the shared Stop arm.
+        // Turn end, identity-LESS: an end for an unknown agent proves nothing
+        // worth registering.
         "stop" | "stop_failure" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
@@ -266,15 +212,12 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 source: SOURCE_NAME.to_string(),
                 session_id: child_session_id,
                 // The envelope cwd is the PARENT's — correct for the default
-                // (inherited-cwd) child. A worktree-ISOLATED child actually
-                // runs elsewhere; its label is still fixed by the Rename below
-                // and only the outfit-palette cwd key stays parent-tinted
-                // (first-wins backfill) — accepted residual.
+                // inherited-cwd child. A worktree-ISOLATED child runs
+                // elsewhere, leaving only its outfit-palette cwd key
+                // parent-tinted: accepted residual.
                 cwd: cwd.unwrap_or("").into(),
                 parent_id: Some(agent_id),
             }];
-            // grok's own label precedence leads with the spawn `description`
-            // (3–5 words); `subagentType` is the fallback.
             if let Some(label) = obj
                 .get("description")
                 .and_then(|s| s.as_str())
@@ -299,19 +242,33 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
-            bail!("unsupported grok hook event: {other}")
+            bail!(
+                "unsupported grok hook event: {}",
+                crate::source::decoder::display_safe(other)
+            )
         }
     }
 }
 
-/// The child's `subagentId` — upstream sets `child_session_id = subagent_id`
-/// (handle_request.rs), so this key coalesces with the child's own tool hooks
-/// (which carry the child's `sessionId`) AND its flat transcript dir name.
+/// The child's `subagentId` — upstream sets `child_session_id = subagent_id`,
+/// so this key coalesces with the child's own tool hooks AND its flat
+/// transcript dir name.
 fn child_key(obj: &serde_json::Map<String, Value>) -> Option<String> {
     obj.get("subagentId")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .map(String::from)
+}
+
+/// The TRANSCRIPT lane's twin of [`child_key`]: the same id under
+/// `child_session_id`, with `subagent_id` as the older spelling. Shared by both
+/// subagent arms so the non-empty guard cannot be applied to one and forgotten
+/// on the other — an `""` mints a phantom child parented to the real session.
+fn transcript_child_key(update: &serde_json::Map<String, Value>) -> Option<&str> {
+    ["child_session_id", "subagent_id"]
+        .into_iter()
+        .find_map(|k| update.get(k).and_then(|s| s.as_str()))
+        .filter(|s| !s.is_empty())
 }
 
 fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Result<AgentId> {
@@ -324,32 +281,24 @@ fn subagent_child_id(obj: &serde_json::Map<String, Value>, event: &str) -> Resul
     }
 }
 
-/// Grok tool detail: `"name: target"` over grok's snake_case tool vocabulary
-/// (`run_terminal_command`/`read_file`/`search_replace`/`spawn_subagent`, …).
+/// Grok tool detail: `"name: target"` over grok's snake_case tool vocabulary.
 ///
 /// **`spawn_subagent` maps to `ToolDetail::Task` ONLY for an explicit
 /// `background: false` (blocking) dispatch — NOT on the CC-style semantic
-/// `subagent_type` detection.** Deliberate, and load-bearing: grok's spawn
-/// defaults to background=TRUE (xai-tool-types task.rs `default_true`), where
-/// `post_tool_use` fires at SPAWN time, not completion. A Task-detail Start
-/// whose End arrives immediately would drain `active_tasks` while the child
-/// is alive → the reducer's b1 drain-cascade (`B1_CASCADE_GRACE`, 2.5s) would
-/// `cascade_exit` the LIVE child subtree, unrecoverably. Blocking spawns are
-/// the one shape where End == completion, i.e. where CC Task semantics hold.
-/// Skipping Task detail for background spawns loses nothing structural: grok
-/// children are FIRST-CLASS (child-keyed tool hooks — no parent
-/// misattribution to suppress) and their ends are wire-carried
-/// (`subagent_stop` hook / `subagent_finished` transcript line), so neither
-/// of the two jobs `active_tasks` exists for applies.
+/// `subagent_type` detection.** grok's spawn defaults to background=TRUE, where
+/// `post_tool_use` fires at SPAWN time, not completion; a Task-detail Start
+/// whose End arrives immediately would drain `active_tasks` while the child is
+/// alive, and the reducer's b1 drain-cascade would then `cascade_exit` the LIVE
+/// child subtree, unrecoverably. Blocking spawns are the one shape where
+/// End == completion. Skipping Task detail elsewhere loses nothing: grok
+/// children are FIRST-CLASS (child-keyed tool hooks, no misattribution to
+/// suppress) and their ends are wire-carried, so neither job `active_tasks`
+/// exists for applies.
 fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     let is_spawn = tool == "spawn_subagent" || args.and_then(|a| a.get("subagent_type")).is_some();
-    // A background/default spawn falls through to the generic display (the
-    // `description` key below gives it a human-readable target).
     if is_spawn && spawn_is_blocking(args) {
         return ToolDetail::Task;
     }
-    // Per-source target vocabulary; assembly + caps live in
-    // `generic_tool_display` (the chokepoint — pitfall 3).
     const KEYS: &[&str] = &[
         "command",
         "file_path",
@@ -361,59 +310,28 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
-// ---------------------------------------------------------------------------
-// Transcript decoding (updates.jsonl)
-// ---------------------------------------------------------------------------
-
-/// The COMPLETE set of grok transcript `method` namespaces — the ACP standard
-/// `session/update` and the xAI extension `_x.ai/session/update` (both handled
-/// in `decode_grok_line`; stable wire namespaces, verified against grok-build's
-/// `updates.jsonl` envelope). The tail breadcrumbs a `method` OUTSIDE this set —
-/// a brand-new top-level wire namespace = a structural change, the LOW-cardinality
-/// axis. It stays SILENT on an unhandled `sessionUpdate` TAG under a KNOWN method
-/// (the HIGH-cardinality axis: the ACP chunk tags stream per token, xAI emits
-/// cosmetic churn — breadcrumbing each would flood, and `drift::unknown_event` has
-/// NO dedup). The finer ACP-tag tier (#766) now lives in the shared
-/// `source/acp.rs` (`KNOWN_ACP_TAGS` + `decode_session_update`), which the
-/// `session/update` arm of `decode_grok_line` delegates to — it breadcrumbs an
-/// unknown `sessionUpdate` tag while staying silent on the known per-token chunks;
-/// drift-watched against the live v1 ACP schema by `read_acp_tags`.
+/// The COMPLETE set of grok transcript `method` namespaces: the ACP standard
+/// `session/update` and the xAI extension `_x.ai/session/update`. A `method`
+/// outside this set is a brand-new top-level wire namespace and breadcrumbs —
+/// the LOW-cardinality axis. An unhandled `sessionUpdate` TAG under a known
+/// method stays SILENT: those chunks stream per token and `drift::unknown_event`
+/// has NO dedup, so breadcrumbing each would flood. (The finer ACP-tag tier
+/// lives in `source/acp.rs`.)
 const KNOWN_METHODS: &[&str] = &["session/update", "_x.ai/session/update"];
 
-/// Decode one `updates.jsonl` line. Envelope (storage/mod.rs
-/// `SessionUpdateEnvelope`): `{"timestamp":<unix-secs>,"method":…,"params":
-/// {"sessionId":…,"update":{"sessionUpdate":"<tag>",…},"_meta":…}}`.
+/// Decode one `updates.jsonl` line. Envelope: `{"timestamp":<unix-secs>,
+/// "method":…,"params":{"sessionId":…,"update":{"sessionUpdate":"<tag>",…}}}`,
+/// where ACP notifications use camelCase fields and the xAI extension's fields
+/// are verbatim snake_case Rust names (`rename_all` covers only the tag).
 ///
-/// Two method namespaces share the file:
-/// - `"session/update"` — ACP notifications (agent-client-protocol schema,
-///   camelCase fields, snake_case `sessionUpdate` tags): `tool_call` →
-///   `ActivityStart{toolCallId}` (a FRESH line OMITS `status` — Pending is the
-///   serde skip-default), `tool_call_update` with terminal `status`
-///   (`completed`/`failed`) → `ActivityEnd{toolCallId}`; `in_progress` and the
-///   message/thought/plan chunks decode to nothing (a chunk has no paired end,
-///   and the coalescer may even land an xAI line BEFORE the buffered text that
-///   preceded it — chunk ordering is not activity truth).
-/// - `"_x.ai/session/update"` — xAI extension updates (variant tags snake_case;
-///   FIELDS verbatim snake_case Rust names — `rename_all` covers only the tag):
-///   `subagent_spawned` → child `SessionStart{parent_id}` (+`Rename` from
-///   `description`/`subagent_type`), `subagent_finished` → child
-///   `SessionEnd{as_child: true}` (the JSONL twin of the `subagent_stop` hook —
-///   copilot precedent for a JSONL `as_child` constructor), `model_changed` →
-///   `ModelInfo{model_id, reasoning_effort}`, `hook_execution` with
-///   `event_name == "session_end"` → root `SessionEnd` (present only when a
-///   SessionEnd hook is registered — ours is — and best-effort: it races
-///   process exit and TUI quit skips it; the liveness ladder is the real exit
-///   authority). Every other tag decodes to nothing — grok emits many
-///   cosmetic updates (diff_review, compaction, rewind_marker, …) and, like
-///   the codex rollout decoder, an unknown tag is a silent skip covered
-///   one-directionally by the upstream drift watch.
+/// The message/thought/plan chunks decode to nothing: a chunk has no paired
+/// end, and the coalescer may even land an xAI line BEFORE the buffered text
+/// that preceded it, so chunk ordering is not activity truth.
 ///
-/// The agent id is derived from the PATH (`grok_id_from_path` — the parent-dir
-/// name), NEVER the line's `sessionId`: the path is the watcher's id space,
-/// and the two are equal by construction (upstream `session_dir(info)` joins
-/// the id). The hook transport keys on the same string, so cross-transport
-/// dedup (hook `toolUseId` == ACP `toolCallId` == the model call id,
-/// tool_calls.rs) actually fires.
+/// The agent id is derived from the PATH (`grok_id_from_path`), NEVER the
+/// line's `sessionId`: the path is the watcher's id space, and the two are
+/// equal by construction. The hook transport keys on the same string, so
+/// cross-transport dedup (hook `toolUseId` == ACP `toolCallId`) actually fires.
 pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
     let agent_id = AgentId::from_parts(source, &grok_id_from_path(Path::new(path)));
     let Some(method) = v.get("method").and_then(|m| m.as_str()) else {
@@ -428,24 +346,17 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
     let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
 
     match method {
-        // The ACP-STANDARD notifications → the shared ACP decoder (source/acp.rs):
-        // the tag vocabulary + lifecycle (tool_call→ActivityStart, tool_call_update
-        // terminal→ActivityEnd) + the flood-safe unknown-tag breadcrumb (#766).
-        // grok's tool vocabulary + Task-detection stay bespoke, injected as the
-        // detail builder (invariant #3: per-source dispatch judgment).
         "session/update" => Ok(crate::source::acp::decode_session_update(
             agent_id,
             SOURCE_NAME,
             update,
             grok_transcript_tool_detail,
         )),
-        // xAI PRIVATE extension namespace (`_`-prefix = ACP's reserved
-        // implementation-specific marker) — NOT ACP vocabulary, stays fully bespoke.
+        // xAI private extension namespace — ACP reserves the `_` prefix for
+        // implementation-specific methods, so none of this is ACP vocabulary.
         "_x.ai/session/update" => match tag {
             "subagent_spawned" => {
-                let Some(child_key) =
-                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
-                else {
+                let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
                 };
@@ -455,7 +366,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                     source: SOURCE_NAME.to_string(),
                     session_id: child_key.to_string(),
                     // The line carries no cwd; the child's own flat transcript
-                    // first-sight (path-derived cwd) or its tool hooks back-fill.
+                    // or its tool hooks back-fill it.
                     cwd: PathBuf::new(),
                     parent_id: Some(agent_id),
                 }];
@@ -472,9 +383,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 Ok(evs)
             }
             "subagent_finished" => {
-                let Some(child_key) =
-                    str_field("child_session_id").or_else(|| str_field("subagent_id"))
-                else {
+                let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
                 };
@@ -499,9 +408,8 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                     effort,
                 }])
             }
-            // Turn end — the transcript twin of the `stop` hook, settling a
-            // tool-less turn to idle for transcript-only setups. Drift-watched
-            // via the TurnCompleted arm of GROK_XAI_VARIANTS.
+            // The transcript twin of the `stop` hook: a tool-less turn's only
+            // end signal for transcript-only setups.
             "turn_completed" => Ok(vec![AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: None,
@@ -517,15 +425,11 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 }
             }
             // grok emits many cosmetic xAI updates (diff_review, compaction,
-            // rewind_marker, …); an unhandled extension tag is a silent skip — the
-            // high-cardinality axis (the low-card ACP tag tier lives in acp.rs).
+            // rewind_marker, …), so an unhandled extension tag is a silent skip.
             _ => Ok(vec![]),
         },
-        // Method tier (#767): a `method` OUTSIDE KNOWN_METHODS is a brand-new
-        // top-level wire namespace (structural) → breadcrumb (defense #2, the
-        // live-stream signal for a new grok method family; the hook side
-        // breadcrumbs its own transport separately). An empty-string method (an
-        // absent one already bailed) is a degenerate line — `!m.is_empty()` skips it.
+        // An empty-string method (an absent one already bailed) is a degenerate
+        // line, not a new namespace.
         m if !m.is_empty() && !KNOWN_METHODS.contains(&m) => {
             crate::source::drift::unknown_event(SOURCE_NAME, m);
             Ok(vec![])
@@ -534,24 +438,19 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
     }
 }
 
-/// The registry's `Transcript::cwd_extractor` slot: grok transcript lines
-/// carry NO cwd anywhere in their content (the envelope is
-/// `{timestamp,method,params:{sessionId,update}}` — the cwd exists only as the
-/// URL-encoded GROUP-DIR name one level up), so the content head-scan always
-/// yields nothing and the watcher's `with_cwd_deriver` PATH fallback
-/// ([`grok_cwd_from_path`], wired in the native half) is the real cwd source.
+/// grok transcript lines carry NO cwd anywhere in their content — it exists
+/// only as the URL-encoded GROUP-DIR name one level up — so the content
+/// head-scan always yields nothing and [`grok_cwd_from_path`] is the real
+/// cwd source.
 pub(crate) fn extract_grok_cwd(_v: &Value) -> Option<PathBuf> {
     None
 }
 
 /// Transcript tool detail: a FRESH `tool_call`'s `title` is the RAW tool name
-/// (`run_terminal_command` — capture-verified; the human label like
-/// "Execute `cat note.txt`" appears only on later `tool_call_update`s, which
-/// this fn never sees), so the title IS the display (still routed through the
-/// `generic_tool_display` cap chokepoint, no `: target` suffix). Task
-/// detection reads `rawInput` (the tool's args object) with the SAME
-/// blocking-only rule as the hook side — see [`grok_tool_detail`] for the b1
-/// WHY.
+/// (the human label like "Execute `cat note.txt`" appears only on later
+/// `tool_call_update`s, which this fn never sees), so the title IS the display.
+/// Task detection follows the SAME blocking-only rule as the hook side — see
+/// [`grok_tool_detail`] for the b1 WHY.
 fn grok_transcript_tool_detail(title: &str, raw_input: Option<&Value>) -> ToolDetail {
     if raw_input.is_some_and(|a| a.get("subagent_type").is_some()) && spawn_is_blocking(raw_input) {
         return ToolDetail::Task;
@@ -559,20 +458,14 @@ fn grok_transcript_tool_detail(title: &str, raw_input: Option<&Value>) -> ToolDe
     generic_tool_display(title, None)
 }
 
-/// Whether spawn args explicitly request a BLOCKING run (`false`), under
-/// EITHER spelling of the flag — the bool travels under two names by
-/// serialization layer (both verified upstream @ c68e39f6): the HOOK's
-/// `toolInput` is the model's RAW client-form args, where the model-facing
-/// schema renames `run_in_background` → `background` (xai-grok-agent
-/// config.rs `task_tool_config`); the ACP `tool_call`'s `rawInput` is the
-/// parsed `ToolInput` RE-serialized with the struct's own field names
-/// (`send_tool_call_start` → `serde_json::to_value`), i.e.
-/// `run_in_background` (xai-tool-types task.rs carries no serde rename).
-/// Reading both keys on both transports also survives either layer dropping
-/// its rename. (Upstream parses the flag LENIENTLY — a model-emitted
-/// `"false"` STRING still runs blocking — which this `as_bool` read misses
-/// toward the SAFE side only: a missed `false` skips the Task detail, never
-/// over-mints it into the b1 machinery.)
+/// Whether spawn args explicitly request a BLOCKING run (`false`), under EITHER
+/// spelling of the flag: the bool travels as `background` in the hook's
+/// `toolInput` (the model-facing schema's rename) and as `run_in_background` in
+/// the ACP `tool_call`'s `rawInput` (the struct's own field name). Reading both
+/// keys on both transports also survives either layer dropping its rename.
+/// Upstream parses the flag LENIENTLY — a model-emitted `"false"` STRING still
+/// runs blocking — which this `as_bool` read misses toward the SAFE side only:
+/// a missed `false` skips the Task detail, never over-mints it into b1.
 fn spawn_is_blocking(args: Option<&Value>) -> bool {
     ["background", "run_in_background"]
         .iter()
@@ -580,19 +473,12 @@ fn spawn_is_blocking(args: Option<&Value>) -> bool {
         == Some(false)
 }
 
-/// The first-sight gate's session-ended checker over the transcript's tail
-/// bytes: an ended grok session is recognizable ONLY by the best-effort
-/// `hook_execution{event_name:"session_end"}` line our own installed hook
-/// causes (see [`decode_grok_line`]). STRUCTURAL parse per complete line —
-/// never a substring scan, which user-controllable content (a tool result
-/// QUOTING this marker inside a JSON string) could false-positive; a parsed
-/// line's method/tag/field structure can't be forged from inside a string
-/// field. A torn first line in the tail window fails the parse and is skipped.
+/// The first-sight gate's session-ended checker: an ended grok session is
+/// recognizable ONLY by the best-effort `hook_execution{event_name:
+/// "session_end"}` line our own installed hook causes. The per-line parse must
+/// stay STRUCTURAL — a substring scan would false-positive on a tool result
+/// QUOTING this marker inside a JSON string.
 pub fn grok_session_ended(tail: &[u8]) -> bool {
-    // Structural per-line parse via the shared `parsed_tail_lines` scaffold. The
-    // xAI end marker is our OWN installed hook's best-effort `hook_execution`
-    // line — the vocabulary stays here; the parse (never a substring scan, which
-    // a tool result QUOTING this marker could forge) is shared.
     parsed_tail_lines(tail).any(|v| {
         v.get("method").and_then(|m| m.as_str()) == Some("_x.ai/session/update")
             && v.pointer("/params/update/sessionUpdate")
@@ -604,14 +490,19 @@ pub fn grok_session_ended(tail: &[u8]) -> bool {
     })
 }
 
-// ---------------------------------------------------------------------------
-// Path derivers (the watcher's id/cwd come from the PATH, not line content)
-// ---------------------------------------------------------------------------
+/// Only `updates.jsonl` is the tailable transcript. Every session dir carries
+/// SIBLING `.jsonl` files that must never be walked: `chat_history.jsonl` and
+/// `rewind_points.jsonl` are REWRITTEN via temp+rename (a tail would replay
+/// whole files as fresh events and mint a second path-keyed sprite), and
+/// `feedback.jsonl`/`btw_history.jsonl`/`prompt_history.jsonl` are not session
+/// streams at all.
+pub(crate) fn is_updates_jsonl(p: &Path) -> bool {
+    p.file_name().and_then(|n| n.to_str()) == Some("updates.jsonl")
+}
 
-/// Session id from a transcript path: the PARENT-DIR name (the filename stem
-/// is the constant `updates`) — `…/sessions/<enc-cwd>/<session-id>/updates.jsonl`.
-/// Same shape as copilot's parent-dir UUID. Equal to every hook event's
-/// `sessionId`, so the two transports coalesce.
+/// Session id from a transcript path: the PARENT-DIR name, the filename stem
+/// being the constant `updates`. Equal to every hook event's `sessionId`, so
+/// the two transports coalesce.
 pub fn grok_id_from_path(path: &Path) -> String {
     path.parent()
         .and_then(|d| d.file_name())
@@ -619,13 +510,11 @@ pub fn grok_id_from_path(path: &Path) -> String {
         .unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
-/// The session's cwd from a transcript path — updates.jsonl lines carry NO cwd
-/// anywhere, so it lives one level up: the GRANDPARENT dir name is grok's
-/// `encode_cwd_dirname(cwd)`. Mirrors upstream `decode_cwd_from_dirname`
-/// exactly: URL-decode the name and accept it only when it looks like an
-/// absolute path (Unix `/…`, Windows drive letter); otherwise it's the
-/// `{slug}-{blake3_hex16}` long-path form, whose original cwd upstream records
-/// in a sibling `.cwd` file (trimmed).
+/// The session's cwd from a transcript path: the GRANDPARENT dir name is
+/// grok's `encode_cwd_dirname(cwd)`. Mirrors upstream `decode_cwd_from_dirname`
+/// exactly — URL-decode the name and accept it only when it looks absolute;
+/// otherwise it is the `{slug}-{blake3_hex16}` long-path form, whose original
+/// cwd upstream records in a sibling `.cwd` file.
 pub fn grok_cwd_from_path(path: &Path) -> Option<PathBuf> {
     let group = path.parent()?.parent()?;
     let name = group.file_name()?.to_str()?;
@@ -635,16 +524,12 @@ pub fn grok_cwd_from_path(path: &Path) -> Option<PathBuf> {
             return Some(PathBuf::from(decoded));
         }
     }
-    // Long-path fallback: the `.cwd` metadata file (small by construction —
-    // it holds one filesystem path; the bounded read guards a planted file).
     let raw = read_bounded(&group.join(".cwd"), MAX_CWD_FILE_BYTES)?;
     let trimmed = raw.trim();
     (!trimmed.is_empty()).then(|| PathBuf::from(trimmed))
 }
 
-/// A `.cwd` file holds one path (< 4 KiB by construction: upstream only writes
-/// it when the URL-encoded cwd exceeds 255 bytes, and PATH_MAX-scale inputs
-/// are ~1–4 KiB); the cap only guards a planted oversized file.
+/// A `.cwd` file holds one path, so the cap only guards a planted file.
 const MAX_CWD_FILE_BYTES: u64 = 4096;
 
 fn read_bounded(path: &Path, cap: u64) -> Option<String> {
@@ -655,10 +540,8 @@ fn read_bounded(path: &Path, cap: u64) -> Option<String> {
     Some(buf)
 }
 
-/// Pure `%XX` percent-decoding (the inverse of upstream's
-/// `urlencoding::encode`, which never emits `+` for spaces — so `+` passes
-/// through literally, matching `urlencoding::decode`). Returns `None` on
-/// malformed escapes or non-UTF-8 decoded bytes.
+/// Pure `%XX` percent-decoding. Upstream's `urlencoding::encode` never emits
+/// `+` for a space, so `+` passes through literally.
 fn percent_decode(s: &str) -> Option<String> {
     let bytes = s.as_bytes();
     let mut out = Vec::with_capacity(bytes.len());
@@ -680,11 +563,9 @@ fn percent_decode(s: &str) -> Option<String> {
 
 /// The grok home dir — `$GROK_HOME` UNCONDITIONALLY when set (grok takes the
 /// env var without an exists-check and `create_dir_all`s it, unlike codex's
-/// gate), else `<home>/.grok`. The public entry BOTH the watcher's
-/// `default_paths()` and the installer's `default_config_path()` (and the
-/// liveness probe) route through, so the watched root, the installed hooks
-/// file, and the probed registry can never disagree. See
-/// `crate::platform::grok_home`.
+/// gate), else `<home>/.grok`. The watcher, the installer and the liveness
+/// probe all route through here, so the watched root, the installed hooks file
+/// and the probed registry can never disagree.
 pub fn grok_home() -> PathBuf {
     crate::platform::grok_home()
 }
@@ -698,8 +579,8 @@ mod tests {
         decode_grok_hook_payload(&v).expect("decodes")
     }
 
-    /// The payload's MAIN event — the last decoded event (activity arms
-    /// prepend an `Identity`, subagent_start appends a `Rename`).
+    /// The payload's MAIN event is the LAST decoded one — activity arms
+    /// prepend an `Identity`, subagent_start appends a `Rename`.
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
     }
@@ -713,8 +594,6 @@ mod tests {
             "timestamp": "2026-07-16T12:00:00Z"
         })
     }
-
-    // ---- keying + lifecycle arms ----
 
     #[test]
     fn session_start_keys_on_session_id() {
@@ -741,9 +620,6 @@ mod tests {
 
     #[test]
     fn session_start_public_source_field_never_drives_attribution() {
-        // grok reuses `source` for the start REASON ("new"/"load") — the CC
-        // overload that once split agents into un-reapable ghosts. The decoded
-        // source must be OURS regardless of the field's value.
         for reason in ["new", "load"] {
             let mut v = envelope("session_start");
             v["source"] = json!(reason);
@@ -756,8 +632,6 @@ mod tests {
 
     #[test]
     fn session_start_takes_model_id_when_offered() {
-        // The fire site passes None today; the type has the field — decode it
-        // when a future build fills it.
         let mut v = envelope("session_start");
         v["modelId"] = json!("grok-4-code");
         let evs = decode_all(v);
@@ -766,15 +640,11 @@ mod tests {
             matches!(&evs[1], AgentEvent::ModelInfo { model: Some(m), effort: None, .. }
             if m == "grok-4-code")
         );
-        // Absent → exactly one event.
         assert_eq!(decode_all(envelope("session_start")).len(), 1);
     }
 
     #[test]
     fn user_prompt_submit_is_the_resurrect_carrier() {
-        // Maps to SessionStart (idempotent for a live slot) so a stale-swept
-        // LIVE session re-registers on its next prompt — grok's session_end
-        // does not fire on TUI quit, making this the Codex-class carrier.
         let ev = decode(envelope("user_prompt_submit"));
         assert!(matches!(ev, AgentEvent::SessionStart { agent_id, .. }
             if agent_id == AgentId::from_parts(SOURCE_NAME, "0197fa30-sess")));
@@ -792,8 +662,6 @@ mod tests {
             }
         ));
     }
-
-    // ---- tool activity ----
 
     #[test]
     fn pre_tool_use_is_identity_plus_activity_start_with_tool_id() {
@@ -834,9 +702,6 @@ mod tests {
 
     #[test]
     fn post_tool_use_variants_and_denial_close_the_activity() {
-        // post_tool_use / post_tool_use_failure / permission_denied all end
-        // the SAME tool id — the denial arm is what resolves a Waiting gated
-        // on the denied tool (no post_tool_use will ever come).
         for event in [
             "post_tool_use",
             "post_tool_use_failure",
@@ -873,23 +738,16 @@ mod tests {
         }
     }
 
-    // ---- the b1 trap: spawn_subagent Task detail ----
-
     #[test]
     fn blocking_spawn_is_task_background_and_default_are_not() {
-        // The HOOK transport's toolInput carries the model's client-form args,
-        // where the schema renames the flag to `background` (upstream
-        // task_tool_config). background:false (blocking) → PostToolUse ==
-        // completion → CC Task semantics hold → ToolDetail::Task.
         let blocking = grok_tool_detail(
             "spawn_subagent",
             Some(&json!({"subagent_type": "explore", "background": false})),
         );
         assert!(blocking.is_task(), "blocking spawn must read Delegating");
 
-        // background:true AND the absent-field DEFAULT (upstream default_true)
-        // → PostToolUse fires at SPAWN → Task detail would b1-cascade the LIVE
-        // child. Both must stay generic.
+        // background:true AND the absent-field DEFAULT (grok's spawn defaults
+        // to background) must both stay generic.
         for input in [
             json!({"subagent_type": "explore", "background": true}),
             json!({"subagent_type": "explore", "description": "map the build"}),
@@ -900,9 +758,7 @@ mod tests {
                 "background/default spawn must NOT be Task (b1 would evict the live child): {input}"
             );
         }
-        // Input-less spawn (degenerate) — default is background → generic.
         assert!(!grok_tool_detail("spawn_subagent", None).is_task());
-        // The semantic field alone (renamed dispatch) follows the same rule.
         let renamed = grok_tool_detail(
             "task",
             Some(&json!({"subagent_type": "explore", "background": false})),
@@ -915,11 +771,6 @@ mod tests {
 
     #[test]
     fn blocking_flag_reads_both_wire_spellings_on_both_transports() {
-        // The flag travels under TWO names by serialization layer (see
-        // `spawn_is_blocking`): hook toolInput = client-form `background`,
-        // transcript rawInput = canonical `run_in_background`. Each fn must
-        // accept EITHER so a layer dropping its rename can't kill the
-        // blocking detection (or worse, resurrect the b1 hazard unnoticed).
         for key in ["background", "run_in_background"] {
             let blocking = json!({"subagent_type": "explore", key: false});
             assert!(
@@ -934,8 +785,7 @@ mod tests {
             assert!(!grok_tool_detail("spawn_subagent", Some(&background)).is_task());
             assert!(!grok_transcript_tool_detail("Spawn subagent", Some(&background)).is_task());
         }
-        // A model-emitted STRING "false" (upstream parses leniently) is missed
-        // toward the SAFE side: no Task detail, never an over-mint.
+        // A model-emitted STRING "false" (upstream parses leniently).
         let lenient = json!({"subagent_type": "explore", "background": "false"});
         assert!(!grok_tool_detail("spawn_subagent", Some(&lenient)).is_task());
     }
@@ -976,8 +826,6 @@ mod tests {
         }
     }
 
-    // ---- waiting (notification) ----
-
     #[test]
     fn permission_and_elicitation_notifications_are_waiting() {
         for kind in ["permission_prompt", "elicitation_dialog"] {
@@ -1002,22 +850,38 @@ mod tests {
             if reason == "permission_prompt"));
     }
 
+    /// Zero events is the SAME observable for a knowingly-ignored type and an
+    /// unrecognized one, so the test above cannot tell them apart — this one
+    /// does, on the drift breadcrumb. `task_complete` is dispatched by upstream
+    /// on every background-task completion (`tools/notification_bridge.rs`),
+    /// and `drift::unknown_event` is undeduped on the hook plane, so leaving it
+    /// unmatched turns routine background work into a recurring "the wire
+    /// changed" warning that `pixtuoid doctor` surfaces.
     #[test]
-    fn idle_prompt_and_unknown_notification_types_decode_to_nothing() {
-        // idle_prompt = the 60s-idle nudge and agent_error = the retry-
-        // exhausted toast — neither is a blocked state; an unknown type must
-        // not invent a Waiting either (drift breadcrumb only).
-        for kind in ["idle_prompt", "agent_error", "some_future_nudge"] {
+    fn known_notification_types_stay_silent_while_a_novel_one_breadcrumbs() {
+        for known in ["idle_prompt", "agent_error", "task_complete"] {
             let mut v = envelope("notification");
-            v["notificationType"] = json!(kind);
+            v["notificationType"] = json!(known);
+            let logs = crate::test_capture::capture_logs(|| {
+                assert!(decode_all(v).is_empty());
+            });
             assert!(
-                decode_all(v).is_empty(),
-                "{kind} must decode to zero events"
+                !logs.contains("unknown_event"),
+                "{known} is a KNOWN non-waiting type — it must not breadcrumb, got:\n{logs}"
             );
         }
+        // Control: the breadcrumb still fires for a genuinely new type, so the
+        // assertions above are silence-by-recognition, not a dead detector.
+        let mut novel = envelope("notification");
+        novel["notificationType"] = json!("some_future_nudge");
+        let logs = crate::test_capture::capture_logs(|| {
+            assert!(decode_all(novel).is_empty());
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("notification:some_future_nudge"),
+            "an unrecognized notificationType must still breadcrumb, got:\n{logs}"
+        );
     }
-
-    // ---- subagents ----
 
     #[test]
     fn subagent_start_registers_the_child_under_the_parent() {
@@ -1067,9 +931,8 @@ mod tests {
 
     #[test]
     fn both_subagent_stop_spellings_end_the_child_as_child() {
-        // Docs say SubagentStop; upstream's finish site fires SubagentEnd
-        // (serialized "subagent_end"). BOTH must decode — whichever spelling a
-        // given build emits, the child ends promptly.
+        // grok's docs name SubagentStop, but upstream's finish site fires
+        // SubagentEnd — whichever spelling a build emits must decode.
         for event in ["subagent_stop", "subagent_end"] {
             let mut v = envelope(event);
             v["subagentId"] = json!("0197fa31-child");
@@ -1094,8 +957,6 @@ mod tests {
             );
         }
     }
-
-    // ---- coalescing + malformed ----
 
     #[test]
     fn all_events_for_one_session_share_one_agent_id() {
@@ -1148,8 +1009,7 @@ mod tests {
 
     #[test]
     fn unregistered_events_bail_loudly() {
-        // pre/post_compact are deliberately unregistered; a PascalCase or
-        // CC-style value reaching this decoder is drift and must be loud.
+        // pre/post_compact are deliberately unregistered.
         for ev in ["pre_compact", "post_compact", "PreToolUse", "bogus"] {
             assert!(
                 decode_grok_hook_payload(&envelope(ev)).is_err(),
@@ -1157,8 +1017,6 @@ mod tests {
             );
         }
     }
-
-    // ---- transcript decoding (updates.jsonl) ----
 
     const TRANSCRIPT: &str =
         "/home/u/.grok/sessions/%2Fhome%2Fu%2Fproj/0197fa30-sess/updates.jsonl";
@@ -1180,10 +1038,8 @@ mod tests {
 
     #[test]
     fn fresh_tool_call_line_is_activity_start_keyed_by_path() {
-        // A FRESH tool_call OMITS `status` (Pending is the serde skip-default,
-        // agent-client-protocol schema) — absence must still decode as a Start.
-        // Shape per the 0.2.102 capture: a fresh tool_call's title is the RAW
-        // tool name (the human label appears only on later updates).
+        // A FRESH tool_call OMITS `status` (Pending is the ACP schema's serde
+        // skip-default) and its `title` is the RAW tool name.
         let evs = decode_line(acp_line(json!({
             "sessionUpdate": "tool_call",
             "toolCallId": "call_42",
@@ -1228,7 +1084,6 @@ mod tests {
                 "{status} must end call_42"
             );
         }
-        // in_progress and a status-less content delta are NOT completions.
         for update in [
             json!({"sessionUpdate": "tool_call_update", "toolCallId": "c", "status": "in_progress"}),
             json!({"sessionUpdate": "tool_call_update", "toolCallId": "c",
@@ -1240,11 +1095,9 @@ mod tests {
 
     #[test]
     fn transcript_blocking_spawn_is_task_background_is_not() {
-        // Same b1 rule as the hook side, read from rawInput. Shape per the
-        // 0.2.102 live capture: `title` is the RAW tool name, rawInput carries
-        // the CLIENT-form keys (`background`, no enum tag) — the c68e39f6
-        // code-read predicted the canonical `run_in_background` re-serialization
-        // here, which the cross-spelling test still covers (both keys read).
+        // In a live capture the transcript's rawInput carried the CLIENT-form
+        // `background` key, not the canonical `run_in_background`; the
+        // cross-spelling test covers both.
         let blocking = decode_line(acp_line(json!({
             "sessionUpdate": "tool_call", "toolCallId": "call-0b8fe95b-2070-4e76-a5c7-036d4ad88f12-0",
             "title": "spawn_subagent",
@@ -1268,8 +1121,6 @@ mod tests {
 
     #[test]
     fn turn_completed_settles_the_turn_to_idle() {
-        // 0.2.x addition (capture-verified): the transcript twin of the `stop`
-        // hook — a tool-less turn's only end signal for transcript-only setups.
         let evs = decode_line(xai_line(json!({"sessionUpdate": "turn_completed"})));
         assert!(matches!(
             &evs[..],
@@ -1303,8 +1154,7 @@ mod tests {
 
     #[test]
     fn subagent_spawned_line_registers_child_under_parent() {
-        // Byte shape from the verification report (fields snake_case verbatim —
-        // rename_all covers only the variant tag).
+        // Fields are snake_case verbatim; rename_all covers only the tag.
         let evs = decode_line(xai_line(json!({
             "sessionUpdate": "subagent_spawned",
             "subagent_id": "0197fa31-child",
@@ -1339,6 +1189,22 @@ mod tests {
     }
 
     #[test]
+    fn transcript_subagent_arms_reject_an_empty_child_id_like_the_hook_twin() {
+        for tag in ["subagent_spawned", "subagent_finished"] {
+            for id_field in ["child_session_id", "subagent_id"] {
+                let evs = decode_line(xai_line(json!({
+                    "sessionUpdate": tag,
+                    id_field: "",
+                })));
+                assert!(
+                    evs.is_empty(),
+                    "{tag} with an empty {id_field} must decode to nothing, got {evs:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn subagent_finished_line_ends_the_child_as_child() {
         let evs = decode_line(xai_line(json!({
             "sessionUpdate": "subagent_finished",
@@ -1364,14 +1230,13 @@ mod tests {
             matches!(&evs[..], [AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
                 if m == "grok-4-code" && e == "high")
         );
-        // Effort is optional on the wire; empty payload emits nothing.
+        // Effort is optional on the wire.
         assert!(decode_line(xai_line(json!({"sessionUpdate": "model_changed"}))).is_empty());
     }
 
     #[test]
     fn hook_execution_session_end_is_the_persisted_end_marker() {
-        // Byte shape from the verification report — present only when a
-        // SessionEnd hook is registered (ours is).
+        // This line exists only because a SessionEnd hook is registered.
         let end = xai_line(json!({
             "sessionUpdate": "hook_execution",
             "event_name": "session_end",
@@ -1385,7 +1250,6 @@ mod tests {
                 ..
             }]
         ));
-        // Other hook_execution events (stop, pre_tool_use) are not ends.
         for name in ["stop", "pre_tool_use"] {
             let evs = decode_line(xai_line(json!({
                 "sessionUpdate": "hook_execution", "event_name": name, "runs": []
@@ -1414,15 +1278,8 @@ mod tests {
         }
     }
 
-    /// grok breadcrumbs at TWO tiers: an unknown top-level `method` (method tier,
-    /// #767) AND — delegating to the shared `acp::decode_session_update` — an
-    /// unknown ACP `sessionUpdate` tag under `session/update` (tag tier, #766).
-    /// The per-token ACP chunks and the xAI extension's cosmetic churn stay SILENT
-    /// (the high-cardinality axes). This pins the DELEGATION end-to-end (the tag
-    /// tier's own exhaustive coverage lives in `source::acp::tests`).
     #[test]
     fn unknown_method_and_acp_tag_breadcrumb_but_chunks_and_xai_stay_silent() {
-        // novel method → method-tier breadcrumb.
         let novel = json!({"timestamp": 1721131200u64, "method": "_x.ai/session/telemetry",
                            "params": {"sessionId": "s", "update": {"sessionUpdate": "beam"}}});
         let logs = crate::test_capture::capture_logs(|| {
@@ -1436,8 +1293,6 @@ mod tests {
             "a brand-new grok method must fire the drift breadcrumb, got:\n{logs}"
         );
 
-        // novel ACP tag under session/update → tag-tier breadcrumb, delegated to
-        // acp.rs, with the composed `session/update:{tag}` name.
         let tag_logs = crate::test_capture::capture_logs(|| {
             assert!(decode_line(acp_line(
                 json!({"sessionUpdate": "future_acp_capability_2027"})
@@ -1450,8 +1305,6 @@ mod tests {
             "a brand-new ACP sessionUpdate tag must breadcrumb via the shared acp decode, got:\n{tag_logs}"
         );
 
-        // silent-real: the per-token ACP chunks (the flood case) + the xAI
-        // extension's cosmetic churn must stay SILENT.
         for v in [
             acp_line(json!({"sessionUpdate": "agent_message_chunk"})),
             acp_line(json!({"sessionUpdate": "user_message_chunk"})),
@@ -1467,8 +1320,6 @@ mod tests {
             );
         }
     }
-
-    // ---- session-ended checker ----
 
     #[test]
     fn session_ended_checker_matches_only_the_structural_marker() {
@@ -1486,7 +1337,6 @@ mod tests {
         .unwrap();
         assert!(grok_session_ended(end_line.as_bytes()));
         assert!(!grok_session_ended(stop_line.as_bytes()));
-        // Multi-line tail with the marker mid-window.
         let tail = format!("{stop_line}\n{end_line}\n");
         assert!(grok_session_ended(tail.as_bytes()));
         // A torn leading line must not break the scan.
@@ -1496,9 +1346,6 @@ mod tests {
 
     #[test]
     fn session_ended_checker_is_immune_to_quoted_content() {
-        // A tool result QUOTING the marker inside a string field — the
-        // structural parse must not fire (user-controllable content must
-        // never drive lifecycle).
         let quoted = serde_json::to_string(&acp_line(json!({
             "sessionUpdate": "tool_call_update",
             "toolCallId": "c",
@@ -1508,8 +1355,6 @@ mod tests {
         .unwrap();
         assert!(!grok_session_ended(quoted.as_bytes()));
     }
-
-    // ---- path derivers ----
 
     #[test]
     fn id_is_the_parent_dir_name() {
@@ -1530,9 +1375,8 @@ mod tests {
 
     #[test]
     fn cwd_slug_form_reads_the_dot_cwd_file() {
-        // The >255-byte encoded form is `{slug}-{blake3_hex16}` — never
-        // absolute after decoding — and upstream records the real cwd in a
-        // sibling `.cwd` file.
+        // The >255-byte encoded form is `{slug}-{blake3_hex16}`, never absolute
+        // after decoding, so upstream records the real cwd in a `.cwd` sibling.
         let tmp = std::env::temp_dir().join(format!("pixtuoid-grok-cwd-{}", std::process::id()));
         let group = tmp.join("sessions").join("deep-project-a1b2c3d4e5f60718");
         let session = group.join("0197fa30-sess");
@@ -1543,7 +1387,6 @@ mod tests {
             grok_cwd_from_path(&p),
             Some(PathBuf::from("/very/deep/project"))
         );
-        // No `.cwd` file → None (never guess from a slug).
         std::fs::remove_file(group.join(".cwd")).unwrap();
         assert_eq!(grok_cwd_from_path(&p), None);
         let _ = std::fs::remove_dir_all(&tmp);
@@ -1553,10 +1396,27 @@ mod tests {
     fn percent_decode_handles_escapes_and_rejects_malformed() {
         assert_eq!(percent_decode("%2Fa%20b"), Some("/a b".into()));
         assert_eq!(percent_decode("plain"), Some("plain".into()));
-        // `+` passes through literally (urlencoding never emits it for space).
         assert_eq!(percent_decode("a+b"), Some("a+b".into()));
         assert_eq!(percent_decode("%2"), None, "truncated escape");
         assert_eq!(percent_decode("%zz"), None, "non-hex escape");
         assert_eq!(percent_decode("%FF"), None, "invalid UTF-8 byte");
+    }
+
+    #[test]
+    fn path_filter_admits_only_updates_jsonl() {
+        let dir = Path::new("/h/.grok/sessions/%2Fr/0197-sess");
+        assert!(is_updates_jsonl(&dir.join("updates.jsonl")));
+        for sibling in [
+            "chat_history.jsonl",
+            "rewind_points.jsonl",
+            "feedback.jsonl",
+            "btw_history.jsonl",
+            "prompt_history.jsonl",
+        ] {
+            assert!(
+                !is_updates_jsonl(&dir.join(sibling)),
+                "{sibling} must be filtered (rewrite-on-resume / not a session stream)"
+            );
+        }
     }
 }

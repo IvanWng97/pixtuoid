@@ -62,9 +62,6 @@ fn phases(agent_id: AgentId) -> (u64, u64, u64, u64) {
     )
 }
 
-/// Find the lowest cycle index where the agent decides to take a trip.
-/// Pose tests that probe walking/waypoint phases need a known trip cycle
-/// to drive the elapsed offset off of.
 fn first_trip_cycle(agent_id: AgentId) -> u64 {
     (0u64..1000)
         .find(|n| takes_trip(agent_id, *n))
@@ -130,8 +127,6 @@ fn idle_phase_2_is_at_waypoint() {
     let midpoint = trip_n * cycle + walk_out_end + (at_wp_end - walk_out_end) / 2;
     let (s, now) = slot(ActivityState::Idle, midpoint);
     let l = layout();
-    // Trip cycles land at either a named waypoint or an aimless point,
-    // depending on per-agent personality.
     match derive(&s, now, &l).expect("pose") {
         Pose::AtWaypoint { wp, .. } => assert!(wp < l.waypoints.len()),
         Pose::AimlessAt { .. } => {}
@@ -155,9 +150,9 @@ fn idle_phase_3_is_walking_back() {
     }
 }
 
-/// Regression: an agent heading to the pantry must walk to a WALKABLE
-/// stand cell, not the blocked counter center (which forced A* to detour
-/// around/below the counter and the sprite to pop on arrival).
+/// Regression: a pantry-bound agent must walk to a WALKABLE stand cell, not the
+/// blocked counter center — that forced A* to detour and the sprite to pop on
+/// arrival.
 #[test]
 fn pantry_walk_destination_is_walkable() {
     let l = layout();
@@ -166,7 +161,6 @@ fn pantry_walk_destination_is_walkable() {
         .iter()
         .position(|w| w.kind == WaypointKind::Pantry)
         .expect("standard floor has a pantry");
-    // Find an agent whose first non-aimless trip cycle lands on the pantry.
     let (id, n) = (0..8000u64)
         .find_map(|i| {
             let id = AgentId::from_transcript_path(&format!("/p/pw{i}.jsonl"));
@@ -229,7 +223,6 @@ fn dwell_ms_varies_across_agents_and_is_deterministic() {
         .map(|i| dwell_ms(WaypointKind::Couch, aid(i)))
         .collect();
     assert!(vals.len() >= 16, "expected dwell jitter across agents");
-    // Deterministic per agent.
     assert_eq!(
         dwell_ms(WaypointKind::Couch, aid(7)),
         dwell_ms(WaypointKind::Couch, aid(7))
@@ -251,8 +244,6 @@ fn seated_dwell_and_est_cycle_are_consistent() {
 
 #[test]
 fn idle_pose_holds_at_waypoint_for_the_whole_dwell_window() {
-    // Across the full at-waypoint beat the agent stays put (AtWaypoint or
-    // AimlessAt), never walking — the "rests too briefly" fix.
     let (test_slot, _) = slot(ActivityState::Idle, 0);
     let (_, walk_out_end, at_wp_end, cycle) = phases(test_slot.agent_id);
     let trip_n = first_trip_cycle(test_slot.agent_id);
@@ -276,8 +267,8 @@ fn idle_pose_holds_at_waypoint_for_the_whole_dwell_window() {
 fn takes_trip_fires_roughly_42_percent_of_cycles() {
     let id = AgentId::from_transcript_path("/p/sample.jsonl");
     let trips = (0u64..1000).filter(|n| takes_trip(id, *n)).count();
-    // Per-agent trip chance varies 25..=60%, so across 1000 cycles the
-    // count is bounded by those extremes with reasonable tolerance.
+    // Per-agent trip chance varies 25..=60%, so the bound is those extremes
+    // plus tolerance.
     assert!(
         (200..=650).contains(&trips),
         "expected 200..=650 trips out of 1000 (personality-driven), got {trips}"
@@ -306,11 +297,9 @@ fn non_trip_cycle_is_seated_idle_throughout() {
     let (test_slot, _) = slot(ActivityState::Idle, 0);
     let id = test_slot.agent_id;
     let cycle = est_wander_cycle_ms(id);
-    // Find a cycle where the agent does NOT trip.
     let stay_n = (0u64..100)
         .find(|n| !takes_trip(id, *n))
         .expect("agent should have a non-trip cycle");
-    // Sample 10 points across that cycle; all should be SeatedIdle.
     for k in 0..10 {
         let t = stay_n * cycle + (k * cycle / 10);
         let (s, now) = slot(ActivityState::Idle, t);
@@ -330,8 +319,6 @@ fn idle_cycle_loops_after_one_cycle() {
     let (s_early, now_early) = slot(ActivityState::Idle, 1_000);
     let (s_loop, now_loop) = slot(ActivityState::Idle, 1_000 + cycle);
     let l = layout();
-    // Same phase within cycle, BUT waypoint differs because cycle_n changed.
-    // Only the destination changes — the phase itself is the same kind.
     let e = derive(&s_early, now_early, &l).expect("e");
     let lp = derive(&s_loop, now_loop, &l).expect("loop");
     assert!(
@@ -389,8 +376,6 @@ fn derive_returns_none_when_desk_index_out_of_range() {
 
 #[test]
 fn exit_override_walks_desk_to_door_within_window() {
-    // exiting_at set < ENTRY_ANIMATION_MS ago → Walking from the desk anchor
-    // to the door threshold (the inverse of the entry walk).
     let (mut s, now) = slot(ActivityState::Idle, 0);
     s.exiting_at = Some(now - Duration::from_secs(1));
     let l = layout();
@@ -414,7 +399,6 @@ fn exit_override_walks_desk_to_door_within_window() {
 
 #[test]
 fn exit_override_returns_none_past_window() {
-    // exiting_at older than ENTRY_ANIMATION_MS → nothing to render (slot GC'd).
     let (mut s, now) = slot(ActivityState::Idle, 0);
     s.exiting_at = Some(now - Duration::from_millis(ENTRY_ANIMATION_MS + 1000));
     assert!(derive(&s, now, &layout()).is_none());
@@ -429,30 +413,24 @@ fn waypoint_index_is_zero_when_no_waypoints() {
 #[test]
 fn entry_window_fall_through_uses_state_driven_pose() {
     // door_threshold is Some but since_spawn >= ENTRY_ANIMATION_MS, so the
-    // entry override's inner `if` is false and derive falls through to
-    // state_driven_pose. A Waiting slot must yield StandingAtDesk (not Walking).
+    // entry override's inner `if` is false and derive falls through.
     let (mut s, now) = slot(
         ActivityState::Waiting {
             reason: "perm".into(),
         },
         ENTRY_ANIMATION_MS + 5_000,
     );
-    // created_at is 60s before `started`, and probe is well past the entry
-    // window, so the entry override does not fire.
     let l = layout();
     assert!(
         l.door_threshold.is_some(),
         "layout must populate door_threshold"
     );
-    // Push created_at far enough back to be unambiguously past the window.
     s.created_at = now - Duration::from_millis(ENTRY_ANIMATION_MS + 10_000);
     assert_eq!(derive(&s, now, &l), Some(Pose::StandingAtDesk));
 }
 
 #[test]
 fn stale_resume_gap_ms_varies_across_agents() {
-    // Sanity: a handful of different agent ids should not all map to the
-    // same cycle length.
     let ids: Vec<AgentId> = (0..10)
         .map(|i| AgentId::from_transcript_path(&format!("/p/{i}.jsonl")))
         .collect();
@@ -478,9 +456,6 @@ fn waypoint_choice_changes_across_cycles_for_same_agent() {
     let (_, walk_out_end, at_wp_end, _) = phases(test_slot.agent_id);
     let mid_at_wp = walk_out_end + (at_wp_end - walk_out_end) / 2;
 
-    // Capture destinations chosen across many cycles. Trip cycles produce
-    // either AtWaypoint or AimlessAt — both contribute to destination
-    // variety, so we count distinct destination x coords.
     let mut dest_xs = std::collections::HashSet::new();
     for n in 0..50u64 {
         let t = n * cycle + mid_at_wp;
@@ -528,23 +503,18 @@ fn freshly_spawned_idle_skips_thinking() {
     assert_ne!(p, Pose::SeatedThinking);
 }
 
-// `in_thinking_window` is the ONE gate both `state_driven_pose` (the pure
-// overlay) and `derive_with_routing` (the routed render) consult — pin the
-// predicate directly so a change to it is caught here at the interface, not
-// left to drift between the two callers.
+// `in_thinking_window` is the ONE gate both `state_driven_pose` and
+// `derive_with_routing` consult, so pin it directly at the interface.
 #[test]
 fn in_thinking_window_gates_on_recency_and_prior_activity() {
     let (mut s, now) = slot(ActivityState::Idle, 5_000);
 
-    // Freshly spawned (last_event_at == created_at): never active → false.
     assert_eq!(s.last_event_at, s.created_at);
     assert!(!in_thinking_window(&s, now));
 
-    // Recently active, still inside the window → true.
     s.last_event_at = now - Duration::from_secs(THINKING_WINDOW_SECS - 1);
     assert!(in_thinking_window(&s, now));
 
-    // Active, but the window has lapsed → false.
     s.last_event_at = now - Duration::from_secs(THINKING_WINDOW_SECS + 1);
     assert!(!in_thinking_window(&s, now));
 }
@@ -570,7 +540,6 @@ fn walk_back_from_pantry_carries_coffee() {
     let (_, _, at_wp_end, _) = phases(test_slot.agent_id);
     let trip_n = first_trip_cycle_to_kind(test_slot.agent_id, &l, WaypointKind::Pantry)
         .expect("agent should visit Pantry within 2000 cycles");
-    // Place time in the walk-back phase (phase 3).
     let midpoint = trip_n * cycle + at_wp_end + (cycle - at_wp_end) / 2;
     let (s, now) = slot(ActivityState::Idle, midpoint);
     match derive(&s, now, &l).expect("pose") {
@@ -589,7 +558,6 @@ fn walk_back_from_non_pantry_no_coffee() {
     let l = layout();
     let cycle = est_wander_cycle_ms(test_slot.agent_id);
     let (_, _, at_wp_end, _) = phases(test_slot.agent_id);
-    // Find a trip cycle to a non-Pantry waypoint.
     let trip_n = (0u64..2000)
         .find(|n| {
             takes_trip(test_slot.agent_id, *n) && !is_aimless_cycle(test_slot.agent_id, *n) && {
@@ -653,10 +621,8 @@ fn entry_walk_does_not_carry_coffee() {
     }
 }
 
-/// `derive_state_only` must return the state-driven pose even when the
-/// slot is inside the entry-animation window (now - created_at < 4 s).
-/// This proves it does NOT emit the door→desk entry Walking pose that
-/// `derive` would return — preventing double-walk when the routed motion physics
+/// `derive_state_only` must NOT emit the door→desk entry Walking pose `derive`
+/// would return here — that would double-walk an agent whose routed motion
 /// layer is already driving its own entry walk.
 #[test]
 fn derive_state_only_skips_entry_override() {
@@ -669,7 +635,6 @@ fn derive_state_only_skips_entry_override() {
         session_id: std::sync::Arc::from("abc"),
         cwd: std::sync::Arc::from(PathBuf::from("/repo").as_path()),
         label: "cc".into(),
-        // Active state so we can assert a non-Walking result.
         state: ActivityState::Active {
             tool_use_id: Some("t".into()),
             detail: Some("Edit".into()),
@@ -695,14 +660,11 @@ fn derive_state_only_skips_entry_override() {
     let probe = now0 + Duration::from_millis(1500);
     let l = layout();
 
-    // `derive` would return a door→desk Walking pose here.
     match derive(&s, probe, &l).expect("derive pose") {
         Pose::Walking { .. } => {} // expected — entry override fires in derive
         other => panic!("derive should return Walking in entry window, got {other:?}"),
     }
 
-    // `derive_state_only` must return the state-driven pose (SeatedTyping),
-    // NOT the entry Walking.
     match derive_state_only(&s, probe, &l).expect("derive_state_only pose") {
         Pose::SeatedTyping { .. } => {}
         other => panic!(
@@ -711,12 +673,8 @@ fn derive_state_only_skips_entry_override() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Thinking-gate release continuity (#22)
-// ---------------------------------------------------------------------------
-
-/// Search the id space for an agent matching `pred` (personality/dwell are
-/// id-hashed, so tests that need a specific combination scan for one).
+/// Personality/dwell are id-hashed, so a test needing a specific combination
+/// has to scan the id space for one.
 fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
     (0..100_000u64)
         .map(|i| AgentId::from_transcript_path(&format!("/think/{i}.jsonl")))
@@ -725,8 +683,7 @@ fn agent_matching(pred: impl Fn(AgentId) -> bool) -> AgentId {
 }
 
 /// Build an Idle slot whose SeatedThinking gate releases `hold_ms` into the
-/// Idle period: `last_event_at = state_started_at - (THINKING_WINDOW - hold)`,
-/// i.e. the reducer settled to Idle (window - hold) after the last event.
+/// Idle period: `last_event_at = state_started_at - (THINKING_WINDOW - hold)`.
 fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
     let (mut s, _) = slot(ActivityState::Idle, 0);
     s.agent_id = id;
@@ -737,23 +694,18 @@ fn thinking_slot(id: AgentId, hold_ms: u64) -> AgentSlot {
 
 #[test]
 fn thinking_gate_release_is_continuous_with_seated_thinking() {
-    // The gate holds SeatedThinking while `since_last_event < 20s`, but the
-    // wander clock runs from `state_started_at` throughout — so when the
-    // release lands PAST the cycle's seated phase, `derive()` jumped straight
-    // from SeatedThinking (at the desk) to mid-Walking / AtWaypoint (a
-    // desk→corridor pop in every stateless consumer). The release cycle must
-    // instead stay seated: SeatedThinking → SeatedIdle is continuous.
+    // The wander clock runs from `state_started_at` throughout, so a release
+    // landing PAST the cycle's seated phase would pop the agent straight from
+    // SeatedThinking at the desk to mid-Walking in the corridor.
     let l = layout();
     // Settle lag 2s → gate releases 18s into the Idle period.
     let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
     let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) + 500 < hold_ms);
     let s = thinking_slot(id, hold_ms);
 
-    // Just before release: the gate itself holds the thinking pose.
     let before = s.state_started_at + Duration::from_millis(hold_ms - 100);
     assert_eq!(derive(&s, before, &l), Some(Pose::SeatedThinking));
 
-    // Just after release: continuous with the desk, NOT mid-wander.
     let after = s.state_started_at + Duration::from_millis(hold_ms + 200);
     assert_eq!(
         derive(&s, after, &l),
@@ -764,10 +716,8 @@ fn thinking_gate_release_is_continuous_with_seated_thinking() {
 
 #[test]
 fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
-    // When the gate releases while the cycle is still in its seated phase
-    // (hold <= seated_dwell), nothing was masked — the cycle-0 walk-out must
-    // run normally from its beginning (pins that the continuity guard does
-    // not over-suppress).
+    // A release inside the seated phase masked nothing, so the continuity guard
+    // must not suppress this cycle's walk-out.
     let l = layout();
     let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
     let id = agent_matching(|id| takes_trip(id, 0) && seated_dwell_ms(id) > hold_ms + 1_000);
@@ -787,8 +737,6 @@ fn walk_out_intact_when_gate_releases_during_the_seated_phase() {
 
 #[test]
 fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
-    // The continuity guard is confined to the RELEASE cycle: the next trip
-    // cycle's walk-out plays in full, starting at phase 0.
     let l = layout();
     let hold_ms = THINKING_WINDOW_SECS * 1000 - 2_000;
     let id = agent_matching(|id| {
@@ -809,34 +757,39 @@ fn cycle_after_a_suppressed_release_walks_out_from_its_beginning() {
     }
 }
 
-// ---------------------------------------------------------------------------
-// pick_aimless_dest fallback walkability (#24)
-// ---------------------------------------------------------------------------
-
+/// Forcing the fallback needs a mask with ONE small open pocket, so the seeds
+/// whose weighted zone isn't the corridor spend all 32 probes in a fully blocked
+/// zone. The pocket is sized past the coarse router's `cell_walkable` floor —
+/// a lone walkable pixel is an island `find_path` would refuse.
 #[test]
 fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
-    // The corridor midline hosts furniture footprints (vending / printer /
-    // water cooler / trash), so the post-probe fallback point can be blocked.
-    // Force the fallback (only ONE walkable pixel in the whole mask — the 32
-    // zone probes virtually never hit it) and require a walkable result.
     let mut l = layout();
     let c = l.corridor.unwrap_or(l.cubicle_aisle);
     let mid_y = c.y + c.height / 2;
+    const POCKET_PX: u16 = 12;
     let open = Point {
-        x: c.x + c.width - 2,
+        x: c.x + c.width - POCKET_PX / 2,
         y: mid_y,
     };
     let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
     mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);
-    mask.mark_walkable(open.x, open.y, 1, 1);
+    mask.mark_walkable(
+        open.x - POCKET_PX / 2,
+        open.y - POCKET_PX / 2,
+        POCKET_PX,
+        POCKET_PX,
+    );
+    // `reachable` is DERIVED from `walkable` in a real layout — rebuild it, or
+    // the routability filter reads a ReachSet describing a different office.
+    l.reachable = crate::layout::ReachSet::from_mask(&mask, open);
     l.walkable = mask;
 
     let desk = l.home_desks[0];
     for seed in 0..16u64 {
         let p = pick_aimless_dest(&l, seed, desk);
         assert!(
-            l.is_walkable(p.x, p.y),
-            "seed {seed}: fallback returned a blocked cell {p:?}"
+            l.is_walkable(p.x, p.y) && l.reachable.reaches(p),
+            "seed {seed}: fallback returned an unroutable cell {p:?}"
         );
         assert_eq!(
             p,
@@ -848,9 +801,8 @@ fn aimless_fallback_scans_the_midline_for_a_walkable_cell() {
 
 #[test]
 fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
-    // Degenerate layout (nothing walkable at all): the fallback must hand out
-    // the agent's own desk anchor — a destination every consumer already
-    // handles (A* snap / render anchor) — rather than a cell inside furniture.
+    // Degenerate layout (nothing walkable at all): the desk anchor is a
+    // destination every consumer already handles (A* snap / render anchor).
     let mut l = layout();
     let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(l.buf_w, l.buf_h);
     mask.mark_blocked(0, 0, l.buf_w, l.buf_h, 0);

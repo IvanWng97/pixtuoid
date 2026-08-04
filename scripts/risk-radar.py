@@ -3,28 +3,16 @@
 
 Reads a list of changed file paths (one per line on stdin, repo-relative) and
 prints a Markdown checklist of the review escalations that apply to the
-high-risk seams the diff touches. It is a *lever, not a gate*: pure path
-matching (NO LLM, NO network, NO model judgement), never blocks merge, and
-emits no attestation artifact. It only SURFACES the audits the review prompts
-(`.github/prompts/pr_review_rules.md` "Escalate by what the diff touches",
-`.github/prompts/pr-review.prompt.md` "When two lenses aren't enough", and the
-root `CLAUDE.md` invariants) already mandate — converting prose-only escalation
-(which slipped both the bot and local review in #198) into something the PR
-states outright.
+high-risk seams the diff touches. A *lever, not a gate*: pure path matching (no
+LLM, no network, no model judgement), never blocks merge, emits no attestation
+artifact.
 
-SCOPE (deliberate): this covers **blast-radius / invariant** seams — code whose
-change can break a contract, a platform, the office's rendered look, or a CI
-gate. It does NOT cover *prose-quality* escalations (the editorial lens for
-README/site/release-notes), which aren't blast-radius. Committed-art review is
-keyed on the SOURCE change that alters the render (layout/theme/painter/…), not
-on the regenerated `docs/images` / `site/public/demos` artifacts.
+Scope is deliberately **blast-radius / invariant** seams, not prose-quality
+escalations. Committed-art review is keyed on the SOURCE change that alters the
+render (layout/theme/painter/…), not on the regenerated artifacts.
 
 Anti-rot: each `Seam` names the doc anchor it mirrors (`source=`), and
-`_selftest` asserts that anchor substring still exists in the referenced file —
-so if someone removes/renames an escalation in the docs, the seam's grounding
-goes red instead of silently drifting (the repo's `expand_tilde`-divergence
-bug class). Adding a seam is ONE `Seam(...)` row + the per-path/anchor asserts
-in `_selftest`.
+`_selftest` asserts that anchor substring still exists in the referenced file.
 
 Usage:
   git diff --name-only BASE HEAD | python3 scripts/risk-radar.py   # -> radar.md on stdout (empty if no seam)
@@ -40,8 +28,6 @@ from typing import Callable
 
 MARKER = "<!-- risk-radar -->"
 
-# Repo root (this file lives at <root>/scripts/risk-radar.py) — used only by the
-# selftest's anti-rot anchor check.
 _ROOT = Path(__file__).resolve().parent.parent
 
 
@@ -49,20 +35,16 @@ _ROOT = Path(__file__).resolve().parent.parent
 class Seam:
     key: str
     title: str
-    # True iff this repo-relative path belongs to the seam.
     match: Callable[[str], bool]
-    # Checklist lines (the escalation), rendered as GitHub task items.
     audit: tuple[str, ...]
-    # (doc file, distinctive substring it must still contain) — the grounding
-    # this seam mirrors; bridge-tested by `_selftest` so prose drift goes red.
+    # (doc file, distinctive substring it must still contain) — bridge-tested by
+    # `_selftest` so prose drift goes red.
     source: tuple[str, str]
 
 
-# --- The seam map (single source of truth for path-based escalation) ---------
-# Grounded in the documented escalation triggers; each predicate is a plain,
-# obvious path rule (prefix / substring / suffix) — no glob semantics to be
-# surprised by. ADD A SEAM HERE (and a _selftest case + the `source` anchor)
-# when a new high-risk surface appears.
+# ADD A SEAM HERE (plus a _selftest case and the `source` anchor) when a new
+# high-risk surface appears. Each predicate is a plain path rule — no glob
+# semantics to be surprised by.
 SEAMS: tuple[Seam, ...] = (
     Seam(
         key="hook-shim",
@@ -86,13 +68,9 @@ SEAMS: tuple[Seam, ...] = (
         ),
         source=(".github/prompts/pr_review_rules.md", "walk-leg"),
     ),
-    # reducer-liveness matches by DIRECTORY (state/ + source/jsonl/) so a NEW
-    # file in either is covered automatically — the old explicit file list was
-    # the rot-prone outlier (every other seam matches by dir substring) and
-    # silently missed jsonl/mod.rs + jsonl/health.rs, the watcher orchestration
-    # loop (refresh_probe_snapshot / walk_jsonl / drain_child_end_unclaims /
-    # FailureLatch). The source/-root probe rungs aren't in a dir of their own,
-    # so they stay slash-anchored file matches.
+    # Matches by DIRECTORY so a NEW file in either is covered automatically; the
+    # source/-root probe rungs aren't in a dir of their own, so they stay
+    # slash-anchored file matches.
     Seam(
         key="reducer-liveness",
         title="🧠 Reducer / liveness ladder / scope (state machine + concurrency)",
@@ -104,6 +82,22 @@ SEAMS: tuple[Seam, ...] = (
             "Check the negative branches are pinned (a test that survives deleting the guarded constant pins nothing).",
         ),
         source=(".github/prompts/pr_review_rules.md", "liveness ladder"),
+    ),
+    # Deliberately its own seam rather than a branch of `hook-shim` (which audits
+    # the shim's never-panic contract) or `reducer-liveness` (state-machine
+    # reasoning): this is endpoint creation and arbitration, a security surface
+    # with its own questions.
+    Seam(
+        key="hook-endpoint",
+        title="🔌 Hook endpoint (daemon side) — socket/pipe creation + arbitration",
+        match=lambda p: "/source/hook/" in p,
+        audit=(
+            "The endpoint must never be reachable with looser-than-owner-only modes: create-restricted-then-rename, **never** a process-global umask (it races every other task's file creation).",
+            "Liveness arbitration must not be able to steal a LIVE owner's socket, and a hostile pre-squat must fail the bind LOUDLY rather than silently degrade.",
+            "Check the guard is actually PINNED, not merely present — the whole #485 dir guard was once deletable (`-> Ok(())`) with a green suite. Mutate it; don't read it.",
+            "`unix.rs` / `windows.rs`: the Windows arm is excluded from mutation testing and only ever runs in CI, so changes there need explicit reasoning.",
+        ),
+        source=(".github/prompts/pr_review_rules.md", "the daemon side"),
     ),
     Seam(
         key="visual",
@@ -129,13 +123,8 @@ SEAMS: tuple[Seam, ...] = (
         ),
         source=("CLAUDE.md", "write_config_atomic"),
     ),
-    # json-contract deliberately fires on ANY source/registry.rs + source/mod.rs
-    # edit (not only contract-shape changes): they hold the source roster
-    # (registered_source_names() over REGISTRY) + AgentEvent + the Source trait,
-    # the contract-bearing items — over-firing is the safe side
-    # for a wire contract (a 5s "shape unchanged" dismissal beats a missed
-    # gen-contract). Same rationale for justfile and composite actions under
-    # ci-gates: both are shared implementations, so any edit can weaken a gate.
+    # Fires on ANY source/registry.rs + source/mod.rs edit, not only
+    # contract-shape changes: over-firing is the safe side for a wire contract.
     Seam(
         key="json-contract",
         title="🔌 `--json` / Source contract surface",
@@ -174,13 +163,11 @@ SEAMS: tuple[Seam, ...] = (
 
 
 def match_seams(changed_files: list[str]) -> list[Seam]:
-    """Return the seams (in declaration order, deduped) any changed file hits."""
     norm = [f.strip().replace("\\", "/") for f in changed_files if f.strip()]
     return [s for s in SEAMS if any(s.match(p) for p in norm)]
 
 
 def render(seams: list[Seam]) -> str:
-    """Markdown checklist for the matched seams, or '' when none match."""
     if not seams:
         return ""
     out = [
@@ -206,7 +193,6 @@ def _selftest() -> int:
     """Encode the spec; CI runs this before the radar so the map can't rot."""
     keys = lambda files: [s.key for s in match_seams(files)]
 
-    # Each seam fires for a representative path.
     assert keys(["crates/pixtuoid-hook/src/main.rs"]) == ["hook-shim"]
     assert keys(["crates/pixtuoid-scene/src/motion/mod.rs"]) == ["motion-pose"]
     assert keys(["crates/pixtuoid-scene/src/pose/tests.rs"]) == ["motion-pose"]
@@ -218,17 +204,14 @@ def _selftest() -> int:
     assert keys([".github/actions/setup-cargo-just/action.yml"]) == ["ci-gates"]
     assert keys(["justfile"]) == ["ci-gates"]
 
-    # reducer-liveness matches whole dirs (state/ + source/jsonl/) + the
-    # source/-root probe rungs. Includes jsonl/mod.rs + jsonl/health.rs — the
-    # watcher orchestration loop the old file-list silently missed.
     for p in (
         "crates/pixtuoid-core/src/state/mod.rs",
-        "crates/pixtuoid-core/src/state/reducer.rs",
+        "crates/pixtuoid-core/src/state/reducer/mod.rs",
         "crates/pixtuoid-core/src/state/fsm.rs",
         "crates/pixtuoid-core/src/state/scope.rs",
         "crates/pixtuoid-core/src/state/correlation.rs",
-        "crates/pixtuoid-core/src/source/jsonl/mod.rs",  # was uncovered
-        "crates/pixtuoid-core/src/source/jsonl/health.rs",  # was uncovered
+        "crates/pixtuoid-core/src/source/jsonl/mod.rs",
+        "crates/pixtuoid-core/src/source/jsonl/health.rs",
         "crates/pixtuoid-core/src/source/jsonl/liveness.rs",
         "crates/pixtuoid-core/src/source/jsonl/unclaim.rs",
         "crates/pixtuoid-core/src/source/jsonl/walk.rs",
@@ -241,7 +224,18 @@ def _selftest() -> int:
     # name that is NOT under state/ or jsonl/ must NOT fire reducer-liveness.
     assert keys(["crates/pixtuoid-core/src/source/copilot.rs"]) == []
     assert keys(["crates/x/src/reinstate.rs"]) == []
-    # visual fires on the office-look SOURCE dirs, not just sprites/painter:
+
+    for p in (
+        "crates/pixtuoid-core/src/source/hook/mod.rs",
+        "crates/pixtuoid-core/src/source/hook/unix.rs",
+        "crates/pixtuoid-core/src/source/hook/windows.rs",
+        "crates/pixtuoid-core/src/source/hook/router.rs",
+        "crates/pixtuoid-core/src/source/hook/pid_watch.rs",
+    ):
+        assert keys([p]) == ["hook-endpoint"], p
+    # Slash-anchored: a same-named sibling file must not be swallowed.
+    assert keys(["crates/pixtuoid-hook/src/main.rs"]) == ["hook-shim"]
+    assert keys(["crates/pixtuoid-core/src/source/hook.rs"]) == []
     for p in (
         "crates/pixtuoid-scene/src/theme/cyberpunk.rs",
         "crates/pixtuoid-scene/src/layout/compute.rs",
@@ -249,16 +243,11 @@ def _selftest() -> int:
         "crates/pixtuoid-scene/src/chitchat.rs",
     ):
         assert keys([p]) == ["visual"], p
-    # json-contract fires on the module root + the registry:
     assert keys(["crates/pixtuoid-core/src/source/mod.rs"]) == ["json-contract"]
     assert keys(["crates/pixtuoid-core/src/source/registry.rs"]) == ["json-contract"]
-    # ...AND the DTO home (SourceStatus/OutcomeRow/WireOutcome) + the committed
-    # Raycast contract goldens — the files most likely to carry a wire-shape change:
     assert keys(["crates/pixtuoid/src/sources.rs"]) == ["json-contract"]
     assert keys(["integrations/raycast/contract/outcome-row.schema.json"]) == ["json-contract"]
-    # ci-gates fires on the hooks dir too:
     assert keys([".githooks/pre-push"]) == ["ci-gates"]
-    # ...AND the gate policy plus gate LOGIC under scripts/:
     assert keys(["policy/ci-observability/main.rego"]) == ["ci-gates"]
     assert keys(["scripts/compare-screenshots.py"]) == ["ci-gates"]
     assert keys(["scripts/gen-media.py"]) == ["ci-gates"]
@@ -266,19 +255,16 @@ def _selftest() -> int:
     # A non-gate script stays silent (scripts/ is NOT a blanket match).
     assert keys(["scripts/crop-snapshot.py"]) == []
 
-    # `pet.rs` matching is slash-anchored — a hypothetical `carpet.rs` must NOT fire.
+    # Slash-anchored: a hypothetical `carpet.rs` must NOT fire `pet.rs`.
     assert keys(["crates/x/src/carpet.rs"]) == []
 
-    # Non-risk diffs are silent (no false alarms).
     assert keys(["README.md", "docs/ARCHITECTURE.md"]) == []
     assert keys(["site/src/features.json"]) == []
     assert keys([]) == []
     assert render([]) == ""
 
-    # Backslash paths (Windows-style diff) normalize.
     assert keys([r"crates\pixtuoid-hook\src\main.rs"]) == ["hook-shim"]
 
-    # A multi-seam diff lists each seam ONCE, in declaration order.
     multi = keys(
         [
             "crates/pixtuoid/src/install/io.rs",
@@ -288,15 +274,11 @@ def _selftest() -> int:
     )
     assert multi == ["hook-shim", "install"], multi
 
-    # Rendered output carries the marker + a task item per audit line.
     md = render(match_seams(["crates/pixtuoid-hook/src/main.rs"]))
     assert md.startswith(MARKER), md
     assert "- [ ]" in md
     assert "never-panic" in md
 
-    # Anti-rot bridge: every seam's grounding anchor must still exist in its doc.
-    # If an escalation is removed/renamed upstream, this goes red — forcing a
-    # re-sync instead of a silently-stale audit comment.
     for s in SEAMS:
         doc, anchor = s.source
         text = (_ROOT / doc).read_text(encoding="utf-8")

@@ -23,6 +23,12 @@ actionlint_config_path := ".github/actionlint.yaml"
 actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
 actionlint_release_queue_ignore := "unexpected key \"queue\" for \"concurrency\" section"
 zizmor_config_path := ".github/zizmor.yml"
+dependabot_config_path := ".github/dependabot.yml"
+composite_action_root := ".github/actions"
+github_actions_ecosystem := "github-actions"
+lint_workflow_path := ".github/workflows/ci-lint.yml"
+zizmor_recipe := "just zizmor"
+github_token_env := "GH_TOKEN"
 cache_cleanup_workflow_path := ".github/workflows/cache-cleanup.yml"
 claude_action := "anthropics/claude-code-action@v1"
 json_schema_flag := "--json-schema"
@@ -35,7 +41,18 @@ claude_manual_commands := {
 	claude_security_workflow_path: "/security-review",
 }
 
-claude_automatic_condition := `(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.base.ref == github.event.repository.default_branch)`
+claude_tag_workflow_path := ".github/workflows/claude.yml"
+claude_same_repo_head_condition := "github.event.pull_request.head.repo.full_name == github.repository"
+
+# The events whose GITHUB_REF is refs/pull/<n>/merge, so a ref-less checkout
+# stages fork-authored files; issues/issue_comment get the default branch.
+claude_pull_request_event_names := {"pull_request_review", "pull_request_review_comment"}
+
+claude_automatic_condition := sprintf(
+	`(github.event_name == 'pull_request_target' && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && %s && github.event.pull_request.base.ref == github.event.repository.default_branch)`,
+	[claude_same_repo_head_condition],
+)
+
 claude_trusted_association_condition := `contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)`
 pr_resolution_step_name := "Resolve pull request"
 claude_model_step_name := "Run read-only Claude review"
@@ -146,6 +163,41 @@ entries_using(action) := [entry |
 	action_matches(entry.uses, action)
 ]
 
+# `.github/actions/upload-codecov/action.yml` -> `/.github/actions/upload-codecov`,
+# the leading-slash directory form a Dependabot `directories` entry matches.
+dependabot_directory(path) := directory if {
+	segments := split(path, "/")
+	directory := sprintf("/%s", [concat("/", array.slice(segments, 0, count(segments) - 1))])
+}
+
+# Both spellings are legitimate: `directories` (one entry for all composites)
+# and the singular `directory` (the pre-2024 one-entry-per-composite workaround).
+# They are NOT interchangeable — GitHub's options reference: "The `directories`
+# key supports globbing and the wildcard character `*`. These features are not
+# supported by the `directory` key." So copying the glob into the singular key
+# resolves nothing upstream, and must not read as coverage here.
+declared_actions_directory_globs contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	some directory in object.get(update, "directories", [])
+}
+
+declared_actions_directory_literals contains directory if {
+	some update in object.get(documents[dependabot_config_path], "updates", [])
+	object.get(update, "package-ecosystem", "") == github_actions_ecosystem
+	directory := object.get(update, "directory", "")
+	directory != ""
+}
+
+dependabot_covers(directory) if {
+	some declared in declared_actions_directory_globs
+	glob.match(declared, ["/"], directory)
+}
+
+dependabot_covers(directory) if {
+	directory in declared_actions_directory_literals
+}
+
 codecov_action_reference(value) if {
 	parts := split(value, "@")
 	count(parts) == 2
@@ -232,6 +284,48 @@ pinned_npm_setup_steps(path, job_name) := [step |
 	object.get(step, "continue-on-error", false) == false
 ]
 
+# `run: just zizmor` and its `run: |` block-scalar twin differ only by the
+# trailing newline yq preserves — the same command either way, so matching the
+# raw string would report a rename that never happened.
+runs_zizmor(step) if trim_space(object.get(step, "run", "")) == zizmor_recipe
+
+# GitHub layers a step's environment workflow < job < step and "uses the most
+# specific variable" (workflow-syntax reference, `env`), so the token is equally
+# live wherever it is declared and hoisting it to the job is a valid refactor.
+# The nearest DECLARATION wins even when its value is empty, which is why these
+# arms are mutually exclusive rather than an any-of: a step-level `GH_TOKEN: ""`
+# shadows the job's token and puts zizmor back offline.
+effective_gh_token(_, _, step) := token if {
+	token := object.get(step, ["env", github_token_env], null)
+	token != null
+}
+
+effective_gh_token(_, job, step) := token if {
+	object.get(step, ["env", github_token_env], null) == null
+	token := object.get(job, ["env", github_token_env], null)
+	token != null
+}
+
+effective_gh_token(workflow, job, step) := token if {
+	object.get(step, ["env", github_token_env], null) == null
+	object.get(job, ["env", github_token_env], null) == null
+	token := object.get(workflow, ["env", github_token_env], "")
+}
+
+# One entry per LIVE `just zizmor` invocation, carrying the token GitHub would
+# actually place in that step's environment. A conditional or continue-on-error
+# step is not a live invocation — it reaches green without auditing anything.
+zizmor_invocations(path) := [{"job": job_name, "token": effective_gh_token(workflow, job, step)} |
+	workflow := documents[path]
+	some job_name, job in object.get(workflow, "jobs", {})
+	object.get(job, "if", null) == null
+	object.get(job, "continue-on-error", false) == false
+	some step in object.get(job, "steps", [])
+	runs_zizmor(step)
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
+]
+
 codecov_uploads := [entry |
 	some entry in uses_entries
 	action_matches(entry.uses, codecov_wrapper)
@@ -306,8 +400,99 @@ claude_trigger_workflow_paths := {
 	claude_security_workflow_path,
 }
 
+# Identified by the action it runs, not by its job NAME: keying on the literal
+# name `claude` let a rename retire the head guard below in silence.
+claude_job_runs_the_action(job) if {
+	some step in object.get(job, "steps", [])
+	action_matches(object.get(step, "uses", ""), claude_action)
+}
+
+claude_tag_jobs := [job |
+	some job in object.get(documents[claude_tag_workflow_path], "jobs", {})
+	claude_job_runs_the_action(job)
+]
+
+claude_tag_condition := normalized_claude_condition(object.get(claude_tag_jobs[0], "if", ""))
+
+claude_tag_arms(event) := [arm |
+	some arm in split(claude_tag_condition, " || ")
+	contains(arm, sprintf("github.event_name == '%s'", [event]))
+]
+
+# `on:` takes a mapping (each event carrying `types:`) OR a bare sequence of
+# event names; both reach the job, so both count as a trigger.
+claude_tag_triggers_event(event) if {
+	object.get(documents, [claude_tag_workflow_path, "on", event], "missing") != "missing"
+}
+
+claude_tag_triggers_event(event) if {
+	some declared in object.get(documents[claude_tag_workflow_path], "on", [])
+	declared == event
+}
+
+# Guarded means the event is REACHABLE only through guarded arms: at least one
+# arm names it (none at all = a missing condition, which gates nothing) and
+# every arm that names it carries the head check.
+claude_tag_event_is_guarded(event) if {
+	arms := claude_tag_arms(event)
+	count(arms) > 0
+	every arm in arms {
+		contains(arm, claude_same_repo_head_condition)
+	}
+}
+
+claude_tag_steps := object.get(claude_tag_jobs[0], "steps", [])
+
+# Keyed on the API field the refusal must READ, not on its step name — the same
+# reason `claude_tag_jobs` keys off the action instead of the job name.
+claude_fork_refusal_marker := "head.repo.full_name"
+
+claude_fork_refusal_indices := [idx |
+	some idx, step in claude_tag_steps
+	contains(object.get(step, "run", ""), claude_fork_refusal_marker)
+	contains(object.get(step, "if", ""), "issue_comment")
+]
+
+claude_action_step_indices := [idx |
+	some idx, step in claude_tag_steps
+	action_matches(object.get(step, "uses", ""), claude_action)
+]
+
+claude_fork_refusal_precedes_the_action if {
+	min(claude_fork_refusal_indices) < min(claude_action_step_indices)
+}
+
 claude_reusable := object.get(documents, claude_reusable_workflow_path, {})
 claude_reusable_jobs := object.get(claude_reusable, "jobs", {})
+
+claude_absence_condition := "needs.analyze.result == 'failure'"
+
+# The decline arm has no red job behind it, so its removal is what nothing else
+# would catch.
+claude_decline_condition := "needs.analyze.outputs.reviewable == 'false'"
+
+# Without one of these an implicit `success()` is applied over `needs: analyze`,
+# so the job is skipped in precisely the situation it exists for — and the
+# inert form reads like a tidy-up, which is how it would land.
+claude_status_functions := {"always()", "!cancelled()", "failure()"}
+
+claude_absence_conditioned_jobs := [job |
+	some job in claude_reusable_jobs
+	condition := normalized_claude_condition(object.get(job, "if", ""))
+	contains(condition, claude_absence_condition)
+	contains(condition, claude_decline_condition)
+]
+
+claude_condition_has_status_function(condition) if {
+	some status_function in claude_status_functions
+	contains(condition, status_function)
+}
+
+claude_absence_jobs := [job |
+	some job in claude_absence_conditioned_jobs
+	claude_condition_has_status_function(normalized_claude_condition(object.get(job, "if", "")))
+]
+
 claude_analyze_job := object.get(claude_reusable_jobs, "analyze", {})
 claude_publish_job := object.get(claude_reusable_jobs, "publish", {})
 claude_analyze_steps := object.get(claude_analyze_job, "steps", [])
@@ -570,6 +755,57 @@ deny contains msg if {
 	count(claude_caller_jobs(path)) == 1
 	not claude_caller_condition_is_trusted(path)
 	msg := sprintf("%s must preserve the trusted automatic and manual review guards", [path])
+}
+
+# claude.yml is the only contents:write Claude job and it checks out without a
+# ref, so on these events an unguarded arm stages fork-authored files — a
+# repo-root CLAUDE.md among them — as the agent's own instructions. Keyed off
+# the `on:` trigger set, not the `if:` arms — a condition that never mentions
+# the event is a SKIPPED job, but a MISSING condition is an ungated one, and
+# deleting the whole `if:` block is the cheapest way to lose the guard.
+deny contains msg if {
+	some event in claude_pull_request_event_names
+	claude_tag_triggers_event(event)
+	not claude_tag_event_is_guarded(event)
+	msg := sprintf("%s %s arm must require `%s`", [claude_tag_workflow_path, event, claude_same_repo_head_condition])
+}
+
+# The issue_comment arm cannot be closed by an `if:` at all: its payload carries
+# no pull_request object, and the fork tree arrives through the action's own
+# setupBranch (tag mode checks the PR head out for every open PR, fork or not)
+# rather than through GITHUB_REF. So the guard has to be a STEP, and it has to
+# run before the action stages that tree. #799
+deny contains msg if {
+	claude_tag_triggers_event("issue_comment")
+	count(claude_tag_jobs) == 1
+	not claude_fork_refusal_precedes_the_action
+	msg := sprintf("%s must refuse fork pull requests in a step scoped to `issue_comment`, before `%s` runs", [claude_tag_workflow_path, claude_action])
+}
+
+# The existence half: the guard above resolves the job through its action step,
+# so a workflow where no job runs the action leaves nothing to check.
+deny contains msg if {
+	_ := documents[claude_tag_workflow_path]
+	count(claude_tag_jobs) != 1
+	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
+}
+
+# The merge gate reads "Findings: 0 at HEAD", so a run that produces no verdict
+# must SAY so — otherwise a spent quota is indistinguishable from a clean review
+# (publish skips, nothing comments, the PR just reads UNSTABLE). #819
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_conditioned_jobs) != 1
+	msg := sprintf("%s must report an absent review in exactly one job, conditioned on BOTH `%s` and `%s`", [claude_reusable_workflow_path, claude_absence_condition, claude_decline_condition])
+}
+
+# Split from the rule above so the maintainer who deleted `always()` as tidy-up
+# is not told to add a condition they can see is already there.
+deny contains msg if {
+	_ := documents[claude_reusable_workflow_path]
+	count(claude_absence_conditioned_jobs) == 1
+	count(claude_absence_jobs) == 0
+	msg := sprintf("%s absent-review job's `if:` needs a status function (one of %v) — without one an implicit `success()` skips it exactly when analyze fails", [claude_reusable_workflow_path, claude_status_functions])
 }
 
 deny contains msg if {
@@ -1020,14 +1256,63 @@ deny contains msg if {
 	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
 }
 
+# The actions ignore rule below suppresses patch and minor, so MAJOR is the only
+# class that ever opens a PR — and zizmor accepts a symbolic ref regardless of
+# age. Dependabot is therefore the sole mechanism that reports a major bump, and
+# `directory: /` searches only `.github/workflows` plus a root `action.yml`: a
+# pin extracted into a composite silently leaves coverage, which is what
+# #784/#785 did to four of them. Keyed off the pins that EXIST, so a composite
+# holding nothing but sibling `./` references needs no entry.
+deny contains msg if {
+	some entry in uses_entries
+	startswith(entry.path, sprintf("%s/", [composite_action_root]))
+	not startswith(entry.uses, "./")
+	directory := dependabot_directory(entry.path)
+	not dependabot_covers(directory)
+	msg := sprintf("%s must list a github-actions directory covering %s: %s is otherwise invisible to Dependabot", [dependabot_config_path, directory, entry.uses])
+}
+
+# zizmor picks its operating mode from ambient env, not from the recipe: with no
+# token it runs OFFLINE and silently skips impostor-commit,
+# known-vulnerable-actions, ref-confusion and stale-action-refs. The local gate
+# is tokenless on purpose (see the justfile recipe's WHY), so this step is the
+# ONLY place those four ever run — dropping its env would retire them
+# repository-wide while every gate stayed green. actionlint cannot express
+# "this step's env is load-bearing for that recipe's coverage".
+# Two halves, because the property rule alone retires itself: it is keyed on the
+# step it describes, so any edit that stops the match — a renamed recipe, an
+# `if:`, a continue-on-error — makes it vacuously true and the missing env
+# invisible again. The count rule is the existence half; it fires when the step
+# this policy is about stops being there to check.
+deny contains msg if {
+	invocations := zizmor_invocations(lint_workflow_path)
+	count(invocations) != 1
+	msg := sprintf(
+		"%s must run `%s` in exactly one step that nothing skips or softens — no `if:` or continue-on-error on either the step or its job — found %d; restore that step, or retarget this policy's zizmor_recipe if the recipe was genuinely renamed, because zizmor's four online audits run nowhere else",
+		[lint_workflow_path, zizmor_recipe, count(invocations)],
+	)
+}
+
+deny contains msg if {
+	some invocation in zizmor_invocations(lint_workflow_path)
+	invocation.token == ""
+	msg := sprintf(
+		"%s job %q must give `%s` a non-empty %s — GitHub layers step env over job env over workflow env, so declaring it at any one of the three is enough; tokenless, zizmor drops to offline and silently skips impostor-commit, known-vulnerable-actions, ref-confusion and stale-action-refs, which run nowhere else",
+		[lint_workflow_path, invocation.job, zizmor_recipe, github_token_env],
+	)
+}
+
 deny contains msg if {
 	object.get(codeql, ["on", "push", "branches"], null) != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
 }
 
+# Only a bare `pull_request:` analyzes EVERY pull request; any filter (types,
+# branches, paths) lets some PR merge unanalyzed, so the pin is exact-null. The
+# path form keeps the rule defined — and firing — when `on:` itself is gone.
 deny contains msg if {
-	object.get(codeql.on, "pull_request", "missing") != null
-	msg := sprintf("%s must run on pull requests", [codeql_workflow_path])
+	object.get(codeql, ["on", "pull_request"], "missing") != null
+	msg := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
 }
 
 deny contains msg if {

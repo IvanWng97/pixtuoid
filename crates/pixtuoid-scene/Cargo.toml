@@ -1,9 +1,8 @@
 [package]
 name                   = "pixtuoid-scene"
 description            = "Backend-agnostic render + simulation engine for pixtuoid"
-# site_badge_colors.rs reads ../../site/src/sources.json at runtime — fine for
-# publish verify (compiles), but `cargo test` on the extracted .crate would
-# panic (no workspace tree). Same treatment as pixtuoid-core's manifest test.
+# Reads ../../site/src/sources.json at runtime, so `cargo test` on the
+# extracted .crate would panic (no workspace tree).
 exclude                = ["tests/site_badge_colors.rs"]
 version.workspace      = true
 edition.workspace      = true
@@ -15,15 +14,14 @@ homepage.workspace     = true
 keywords.workspace     = true
 categories.workspace   = true
 
-# NB: `workspace = true` cannot be combined with per-crate lint tables (Cargo
-# rejects the manifest), so the crate-specific `forbid(unsafe_code)` lives as
-# the crate-root attribute in src/lib.rs instead.
+# `workspace = true` cannot be combined with per-crate lint tables (Cargo
+# rejects the manifest), so this crate's `forbid(unsafe_code)` is a crate-root
+# attribute in src/lib.rs instead.
 [lints]
 workspace = true
 
-# `native` (default) forwards to pixtuoid-core's async runtime + watcher layer.
-# `cargo build -p pixtuoid-scene --no-default-features` drops it, giving a
-# wasm32-buildable render engine (no tokio/notify) — the WebAssembly office hero.
+# `--no-default-features` drops `native`, giving a wasm32-buildable render
+# engine (no tokio/notify) — the WebAssembly office hero.
 [features]
 default = ["native"]
 native  = ["pixtuoid-core/native"]
@@ -32,17 +30,16 @@ native  = ["pixtuoid-core/native"]
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.16.0", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
-# clock feature gives us Local::now() w/ system timezone for the wall clock.
+# `clock` gives Local::now() w/ system timezone for the wall clock.
 chrono        = { version = "0.4", default-features = false, features = ["clock"] }
-# palette gives Lab-space color blending — perceptually-correct twilight
-# transitions and dim overlays vs naive sRGB linear blend.
+# Lab-space color blending — perceptually-correct twilight transitions and dim
+# overlays vs naive sRGB linear blend.
 palette       = { version = "0.7", default-features = false, features = ["std"] }
 
 [dev-dependencies]
+# `harness` is dev-only (see core's manifest), so `examples/corpus_check.rs`
+# requests it here rather than in [dependencies].
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.16.0", default-features = false, features = ["harness"] }
 serde_json = { workspace = true }
-# Property-based testing of the pure-geometry algebraic invariants (the
-# walk-physics module today; the walkable-mask props stayed core-side): generate thousands of inputs to
-# falsify a property, shrinking any failure to a minimal counterexample. Found
-# failures persist under `proptest-regressions/` so they re-run forever.
 proptest   = "1"
 tempfile   = "3"

@@ -2,10 +2,6 @@ use super::*;
 
 #[test]
 fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
-    // Roomy Senior floor: island + its 4 stands (E/W flank + the two
-    // "bartender" slots INSIDE the body — occluded by the counter's y-sort)
-    // all inside the pantry, clear of the counter's padded north (the
-    // anti-merge routing line).
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let island = l
         .pantry
@@ -26,9 +22,6 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
             s.pos
         );
     }
-    // The bartender pair stands ON the island's center row (feet inside the
-    // body, so the counter occludes their legs), at the quarter points —
-    // 8px-wide sprites at ±w/4 on a 20px island can't overlap each other.
     let mut bartenders: Vec<Point> = stands
         .iter()
         .filter(|s| s.facing == Facing::South)
@@ -50,9 +43,8 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
         ],
         "two South-facing bartender slots at the island's quarter points"
     );
-    // Small Standard floor: the 26-wide pantry can't host the island +
-    // stands + clearances (needs ≥42 = 2·(clr + stand_dx)) — refuse, don't
-    // force (and no stray stand waypoints).
+    // Small Standard floor: a 26-wide pantry, under the ≥42 the island + stands +
+    // clearances need.
     let s = SceneLayout::compute_with_seed(96, 70, None, 0).expect("fits");
     assert_eq!(
         s.pantry.and_then(|p| p.kitchen_island),
@@ -69,13 +61,8 @@ fn kitchen_island_places_on_roomy_pantries_and_refuses_small() {
 
 #[test]
 fn meeting_room_donates_surplus_height_to_the_pantry() {
-    // Short standard floor (≈ a 50-row terminal, the live report that drove
-    // this): under the old unconditional half-split the pantry got ~35 rows
-    // < its content height, so the island AND snack shelf y-refused while
-    // the meeting trio floated in empty floor. The content-fit split must
-    // free exactly the rows the pantry needs — this is the drift guard
-    // pinning `pantry_content_h`'s inverse-clamp math to the island block's
-    // real clamps (if either side changes alone, the island vanishes here).
+    // The drift guard pinning `pantry_content_h`'s inverse-clamp math to the island
+    // block's real clamps: if either side changes alone, the island vanishes here.
     let l = SceneLayout::compute_with_seed(215, 98, None, 0).expect("fits");
     assert!(
         l.pantry.and_then(|p| p.kitchen_island).is_some(),
@@ -95,8 +82,6 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
         mr.height,
         pr.height
     );
-    // Tall floors sit at the ceiling of the clamp (the old half-split) —
-    // their geometry is unchanged by the transfer.
     let tall = SceneLayout::compute_with_seed(240, 160, None, 0).expect("fits");
     let (tmr, tpr) = (
         tall.meeting_room_bounds(0).expect("meeting room"),
@@ -108,12 +93,9 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
         usable / 2,
         "tall floors keep the old half-split exactly"
     );
-    // Floor arm: just below the donation floor (donated < trio fit) the old
-    // half-split stands and the starved pantry refuses the island — pins the
-    // all-or-nothing rule from the other side. (The pin is deliberately
-    // asymmetric: if the island's clamps RELAX while pantry_content_h stays,
-    // the split merely over-donates a benign row or two — only the
-    // starve/rescue boundary is load-bearing.)
+    // Deliberately asymmetric: if the island's clamps RELAX while pantry_content_h
+    // stays, the split merely over-donates a benign row or two — only the
+    // starve/rescue boundary is load-bearing.
     let short = SceneLayout::compute_with_seed(215, 87, None, 0).expect("fits");
     assert_eq!(
         short.pantry.and_then(|p| p.kitchen_island),
@@ -133,16 +115,8 @@ fn meeting_room_donates_surplus_height_to_the_pantry() {
 
 #[test]
 fn island_bartenders_approach_from_behind_never_through_the_front() {
-    // The bartender slots sit INSIDE the island body (blocked cells) — the
-    // couch-seat pattern: A* routes to a walkable approach cell, the settle
-    // glide bridges onto the slot. The approach must be REAL (not the "no
-    // valid approach" pos sentinel, which would silently demote every
-    // bartender trip to an aimless amble) and must never be SOUTH of the
-    // body: a south approach glides visibly THROUGH the counter's front
-    // face. Behind (north) and lateral glides stay behind the countertop
-    // for the whole settle (the glide z is pinned to the feet row).
-    // 240×160 = the roomy tall floor; 215×98 = the donated content-fit
-    // floor where the island sits at its single valid y (tightest lane).
+    // 240×160 = the roomy tall floor; 215×98 = the donated content-fit floor where
+    // the island sits at its single valid y (the tightest lane).
     let mut exercised = false;
     for (bw, bh) in [(240u16, 160u16), (215, 98)] {
         for seed in 0..5u64 {
@@ -186,8 +160,6 @@ fn island_bartenders_approach_from_behind_never_through_the_front() {
 
 #[test]
 fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
-    // Roomy floor: one shelf waypoint against the west wall (the east bridge
-    // must stay open), its ground inside the room.
     let l = SceneLayout::compute_with_seed(240, 160, None, 2).expect("fits");
     let pr = l.pantry.map(|p| p.bounds).expect("pantry");
     let shelf = l
@@ -197,7 +169,7 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // Narrow room (36-wide buffer ⇒ 6-7px pantry): refuse.
+    // A 36-wide buffer yields a 6-7px pantry.
     let s = SceneLayout::compute_with_seed(36, 100, None, 1).expect("fits");
     assert!(
         !s.waypoints
@@ -209,12 +181,9 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
 
 #[test]
 fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
-    // #557 door policy (owner call): two stacked meeting rooms do NOT
-    // interconnect — their shared wall renders as ONE solid segment — while
-    // each room keeps its own centered corridor door in the east wall (the
-    // connectivity the sweep's BFS pins). The golden named "dense_seed6" is
-    // actually a Senior floor (from_seed(6)), so this REAL dual-floor pin
-    // lives here instead of a snapshot.
+    // #557 door policy (owner call): two stacked meeting rooms do NOT interconnect
+    // — their shared wall renders as ONE solid segment — while each room keeps its
+    // own centered corridor door in the east wall.
     let mut saw_dual = false;
     for seed in 0..10u64 {
         let l = SceneLayout::compute_with_seed(192, 160, Some(8), seed).expect("fits");
@@ -234,7 +203,6 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
             (0, l.meeting_rooms[1].bounds.width),
             "seed {seed}: no inter-meeting door gap"
         );
-        // Each room's east wall still carries a real (non-degenerate) gap.
         for (id, room) in l.meeting_rooms.iter().enumerate() {
             let b = room.bounds;
             let vx = b.x + b.width;
@@ -265,12 +233,6 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
 
 #[test]
 fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
-    // The join-key pin (#557): a room's index in `meeting_rooms` IS the
-    // `room_id` its waypoints carry — bounds and trio live in ONE element,
-    // so a bare room keeps its slot and the id can never shift (the old
-    // compacted `meeting_furniture` Vec could mis-join if a bare room 0 sat
-    // above a fitted room 1; latent then, unrepresentable now). Also pins
-    // room-1 furniture containment on the dual-meeting Dense floor.
     let mut saw_dual = false;
     for seed in 0..10u64 {
         let l = SceneLayout::compute_with_seed(192, 160, Some(8), seed).expect("fits");
@@ -279,8 +241,6 @@ fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
             None,
             "no room past the Vec"
         );
-        // Every meeting waypoint's room_id joins to a room whose bounds
-        // CONTAIN it — the definition of the id being the Vec index.
         for wp in l.waypoints.iter().filter(|w| {
             matches!(
                 w.kind,
@@ -328,22 +288,15 @@ fn meeting_rooms_vec_indexes_are_the_waypoint_room_ids() {
 
 #[test]
 fn desk_is_walk_behind_the_monitor() {
-    // ground_y: End south-anchors the shallow DESK_FOOT_H footprint, so the
-    // surface + monitor overhang NORTH and those cells stay walkable — a
-    // walker passes behind the monitor, occluded by the desk's own y-sort.
-    // The desk's north row (its NW corner) must be walkable; its south
-    // front-contact row must be blocked.
     let l = SceneLayout::compute(200, 90, Some(64)).expect("fits");
     let vis = crate::layout::desk_furniture_def().visual;
     let foot_h = crate::layout::DESK_FOOT_H;
     for &d in &l.home_desks {
         let cx = d.x + vis.w / 2;
-        // North (monitor overhang) walkable — the walk-behind lane.
         assert!(
             l.walkable.is_walkable(cx, d.y),
             "desk {d:?}: north row (monitor overhang) must be walkable (walk-behind)"
         );
-        // South front-contact row blocked (the footprint's south base).
         let south = d.y + vis.h.saturating_sub(1);
         assert!(
             !l.walkable.is_walkable(cx, south.saturating_sub(foot_h / 2)),
@@ -372,21 +325,11 @@ fn home_desk_typed_accessor_matches_raw_vec() {
 
 #[test]
 fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
-    // Covers the partial-BOTTOM-ROW capacity break in `compute_pod_desks`
-    // (compute.rs `'partial_y` loop): a layout whose fill needs the partial
-    // bottom row to reach `cap`, fed `num_agents` that runs out PART-WAY through
-    // that row. The break must fire after the first partial-row desk, leaving
-    // `home_desks.len() == num_agents` (NOT the full row). The earlier full-pod
-    // `break 'outer` (small num_agents) caps before this phase, so it never
-    // exercises these lines — `num_agents` must be tuned to the grid (here
-    // `cap - 1`, one short of filling the 2-desk partial row).
-    //
-    // Sizes chosen empirically (each has a 2-desk partial bottom row whose first
+    // Sizes chosen empirically: each has a 2-desk partial bottom row whose first
     // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
-    // 'partial_y loop mid-row). Driven through the public compute path (the
-    // private PodGrid has no constructor — see the cov verdict).
+    // `'partial_y` loop MID-ROW. A smaller num_agents caps in the earlier full-pod
+    // phase instead and never reaches it.
     for (w, h, cap) in [(88u16, 108u16, 6usize), (88, 120, 8), (88, 175, 10)] {
-        // Total capacity at this size is exactly `cap`.
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(
             full.home_desks.len(),
@@ -402,8 +345,6 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
                 .filter(|d| d.y == max_y)
                 .count()
         };
-        // Exact truncation: asking for n agents (n ≤ cap) yields exactly n desks,
-        // so the cap break fires in whichever phase the count lands in.
         for n in 1..=cap {
             assert_eq!(
                 SceneLayout::compute_with_seed(w, h, Some(n), 0)
@@ -414,9 +355,6 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
                 "{w}x{h}: num_agents {n} must truncate to exactly {n} desks"
             );
         }
-        // The partial bottom row fills incrementally: empty at cap-2, one desk at
-        // cap-1 (the 'partial_y push ran, then the break fired), full at cap. This
-        // is the proof the break executed INSIDE the partial-row loop.
         assert_eq!(
             band_at(cap),
             2,
@@ -437,13 +375,6 @@ fn compute_returns_none_when_buf_too_small() {
 
 #[test]
 fn every_role_enum_variant_maps_to_a_furniture_row() {
-    // Each role enum (WallDecor, PlantKind) maps onto exactly one Furniture
-    // geometry row via `.furniture()`. The golden seeds never place
-    // WallDecor::BulletinBoard or PlantKind::Ficus, so their `.furniture()` arms
-    // are otherwise uncovered; this exhaustive sweep (mirrors the
-    // `sprite_name()` registry test) maps every variant and confirms each
-    // resolves a real Furniture row, doubling as a guard that a new variant
-    // can't ship without a mapping.
     for wd in [
         WallDecor::Bookshelf,
         WallDecor::Whiteboard,
@@ -452,7 +383,6 @@ fn every_role_enum_variant_maps_to_a_furniture_row() {
         WallDecor::MeetingScreen,
     ] {
         let f = wd.furniture();
-        // The mapped row must exist in the unified table (visual non-degenerate).
         assert!(
             furniture_def(f).visual.w > 0 && furniture_def(f).visual.h > 0,
             "{wd:?} → {f:?} must resolve a sized Furniture row"
@@ -465,9 +395,6 @@ fn every_role_enum_variant_maps_to_a_furniture_row() {
         PlantKind::Succulent,
     ] {
         let f = pk.furniture();
-        // Every plant resolves a Furniture row with a (shallow, overhung)
-        // ground footprint and a sized canopy visual. Ficus/Tall share the
-        // PLANT_FOOTPRINT; Flower/Succulent are de-shared (smaller pot strips).
         let def = furniture_def(f);
         assert!(
             def.footprint.is_some(),
@@ -480,14 +407,11 @@ fn every_role_enum_variant_maps_to_a_furniture_row() {
     }
 }
 
-// Regression: the percentage math (`buf_h * 30`, `buf_w * 35`, …) used bare
-// u16 multiplies that overflow once a dimension exceeds ~1872–2184. On an
-// absurdly large terminal a debug build PANICKED (overflow check) and release
-// silently WRAPPED to a garbage layout. pct() now computes in u32.
 #[test]
 fn compute_does_not_overflow_on_huge_terminal() {
     for &seed in &[0u64, 1, 2, 3, 4] {
-        // 4000×4000 px buffer → buf_h*30 = 120_000, well past u16::MAX.
+        // 4000×4000 px buffer → the percentage math's `buf_h * 30` = 120_000, well
+        // past u16::MAX.
         let l = SceneLayout::compute_with_seed(4000, 4000, Some(TEST_DEFAULT_DESKS), seed);
         assert!(
             l.is_some(),
@@ -498,9 +422,6 @@ fn compute_does_not_overflow_on_huge_terminal() {
 
 #[test]
 fn none_fills_desks_past_the_old_cap_on_a_large_buffer() {
-    // The office is no longer hard-capped at TEST_DEFAULT_DESKS: a buffer that
-    // physically fits more desks is a fuller office (the web hero + big
-    // terminals). `None` = fill to the room's true capacity.
     let l = SceneLayout::compute_with_seed(800, 500, None, 0).expect("large buffer lays out");
     assert!(
         l.home_desks.len() > TEST_DEFAULT_DESKS,
@@ -533,20 +454,15 @@ fn compute_zones_are_ordered_top_to_bottom_and_nonoverlapping() {
     assert!(l.cubicle_band.y < l.cubicle_aisle.y);
     let c_bot = l.cubicle_band.y + l.cubicle_band.height;
     assert!(c_bot <= l.cubicle_aisle.y, "cubicle overlaps cubicle_aisle");
-    // Walkway runs to the baseboard now that lounge_band is gone.
     let w_bot = l.cubicle_aisle.y + l.cubicle_aisle.height;
     assert!(w_bot <= l.buf_h);
 }
 
 #[test]
 fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
-    // 34-66px-wide buffers force one pod column (`pod_cols` floors at 1) even
-    // when the 36px pod doesn't fit. Without an x clamp in `push_desk` the
-    // pod's 2nd desk column landed past the band's right edge — even entirely
-    // off-buffer (x=47 at buf_w=40) — giving agents invisible desks whose walk
-    // anchors sit outside the mask. Mirror of the y clamp: those desks are
-    // skipped and the floor degrades to fewer desks (capacity auto-computes
-    // from home_desks.len(), so the smaller count IS the floor's capacity).
+    // 34-66px-wide buffers force one pod column (`pod_cols` floors at 1) even when
+    // the 36px pod doesn't fit — so the pod's 2nd desk column is the one that can
+    // land past the band's right edge, or entirely off-buffer.
     for &w in &[40u16, 50, 60] {
         for seed in 0..6u64 {
             let Some(l) = SceneLayout::compute_with_seed(w, 70, Some(8), seed) else {
@@ -580,9 +496,7 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
 #[test]
 fn compute_places_all_waypoint_kinds() {
     let l = SceneLayout::compute(120, 96, Some(1)).expect("fits");
-    // Couch + Pantry are unconditional; PhoneBooth / StandingDesk
-    // may appear depending on the random pod_decor pick — so just
-    // require the unconditional pair and let the rest vary.
+    // Only Couch + Pantry are unconditional; the rest ride a random pod_decor pick.
     assert!(l.waypoints.len() >= 2);
     let kinds: std::collections::HashSet<_> = l.waypoints.iter().map(|w| w.kind).collect();
     assert!(kinds.contains(&WaypointKind::Couch));
@@ -598,12 +512,6 @@ fn compute_places_all_waypoint_kinds() {
                 assert!(w.pos.y >= l.top_margin);
                 assert!(w.pos.y < l.cubicle_band.y + DESK_GAP_Y);
             }
-            // PhoneBooth + StandingDesk waypoints come from
-            // pod_decor slots in the cubicle band. They're
-            // valid anywhere inside the cubicle band — the
-            // tighter check just confirms they're south of the
-            // top wall.
-            // The pantry-redesign kinds all live inside the pantry room.
             WaypointKind::Island | WaypointKind::SnackShelf => {
                 let pr = l
                     .pantry
@@ -619,8 +527,6 @@ fn compute_places_all_waypoint_kinds() {
                 assert!(w.pos.y >= l.top_margin);
             }
             WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                // A meeting slot only exists when a meeting room does, and
-                // it carries the room id it belongs to.
                 assert!(!l.meeting_rooms.is_empty());
                 assert!(w.room_id.is_some());
             }
@@ -630,14 +536,11 @@ fn compute_places_all_waypoint_kinds() {
 
 #[test]
 fn every_home_desk_has_a_reachable_north_approach() {
-    // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y;
-    // the first walkable cell scanning north sits at the gap's south EDGE,
-    // whose coarse routing cell straddles the desk → ReachSet-rejected. The
-    // reachable-aware deeper scan steps past that edge into the gap interior
-    // (which always holds a reachable coarse cell), so EVERY desk — front and
-    // back row — gets a north approach. Was ~50% (front row only). Pushing the
-    // origin far north makes `approach_point` prefer the north side whenever it
-    // has a reachable cell, so a north return proves the scan reached it.
+    // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y, whose
+    // south EDGE cell has a coarse routing cell that straddles the desk and is
+    // ReachSet-rejected — so only the deeper reachable-aware scan finds them.
+    // Pushing the origin far north makes `approach_point` prefer the north side
+    // whenever it has a reachable cell, so a north return proves the scan got there.
     use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
@@ -671,14 +574,8 @@ fn every_home_desk_has_a_reachable_north_approach() {
 
 #[test]
 fn sofas_seat_three_people() {
-    // Both venues seat 3: each meeting sofa (3 seats per sofa) and the
-    // lounge couch (3 seats). Seats are dx ∈ {-6, 0, +6} on the
-    // 20px sprite. The lounge keeps room_id = None — its group-chat
-    // grouping happens at the chitchat venue-key layer, not via the
-    // meeting-only room_id field.
-    // 120 wide so the meeting room clears MEETING_FURNITURE_MIN_W (a 96-wide
-    // room is too narrow to route to the sofa seats and is intentionally
-    // left bare — see the gate in compute.rs). seed 0 → has_meeting.
+    // 120 wide so the meeting room clears MEETING_FURNITURE_MIN_W: a 96-wide room
+    // is too narrow to route to the sofa seats and is intentionally left bare.
     let l = SceneLayout::compute(120, 80, Some(4)).expect("fits");
 
     let couch: Vec<_> = l
@@ -700,7 +597,6 @@ fn sofas_seat_three_people() {
         .expect("couch sprite center recorded");
     assert_eq!(center.x, xs[1], "sprite center sits on the middle seat");
 
-    // 1 meeting room → 2 sofas (per room) → 3 seats each.
     assert!(!l.meeting_rooms.is_empty(), "expected a meeting room");
     let sofa_seats = l
         .waypoints
@@ -718,9 +614,6 @@ fn sofas_seat_three_people() {
 
 #[test]
 fn meeting_slots_track_meeting_trios() {
-    // Across every floor variant, a meeting slot exists iff a meeting
-    // room exists, every slot carries a valid room_id, and a dual-meeting
-    // floor produces slots for both rooms.
     let mut saw_room = false;
     let mut saw_no_room = false;
     let mut saw_dual = false;
@@ -782,13 +675,10 @@ fn meeting_slots_track_meeting_trios() {
 #[test]
 fn meeting_table_is_centered_between_its_two_sofas() {
     // The two sofas face each other across the table, so the table must sit
-    // vertically EQUIDISTANT from both — each sofa's front (toward the table)
-    // then gets equal, routable approach clearance. Room-CENTER placement
-    // packed the north sofa's front against the table (a sub-coarse-grid seam
-    // that cost its seats their front approach) while the south sofa had room
-    // — an asymmetry users spotted as "the south-facing sofa is missing entry
-    // points." Sofa/table positions are window-height-driven, so this relative
-    // invariant is swept across sizes × seeds, NOT a fixed pixel offset.
+    // vertically EQUIDISTANT from both — otherwise the near sofa's front packs
+    // against it and its seats lose their approach. Sofa/table positions are
+    // window-height-driven, so this is a relative invariant swept across
+    // sizes × seeds, NOT a fixed pixel offset.
     for (w, h) in [(128u16, 80u16), (160, 120), (192, 160), (240, 160)] {
         for seed in 0..8u64 {
             let Some(l) = SceneLayout::compute_with_seed(w, h, Some(8), seed) else {
@@ -817,11 +707,6 @@ fn meeting_table_is_centered_between_its_two_sofas() {
 
 #[test]
 fn meeting_slots_face_the_table() {
-    // Sofa seats face the table across the room (north seat faces South,
-    // south seat faces North); chair seats face inward toward the table
-    // centre (west faces East, east faces West). Sofa facing drives front
-    // "seated" vs "back_couch"; chair facing drives the painted chair body's
-    // backrest side (the occupant always renders front "seated").
     for seed in 0..40u64 {
         let l = SceneLayout::compute_with_seed(160, 120, Some(8), seed).expect("fits");
         for w in &l.waypoints {
@@ -861,15 +746,10 @@ fn meeting_slots_face_the_table() {
     }
 }
 
-// Regression: the WEST MeetingChair point used to land on the table's padded
-// obstacle (blocked x ∈ [t.x-8, t.x+7]; the symmetric -8 hit the inclusive
-// left edge), so the router had to snap it off-target. Both chair cells must
-// stay walkable across seeds/sizes — DELIBERATELY so, unlike the island's
-// in-body slots: the chair has no furniture body to sit inside
-// (`Furniture::MeetingChair` keeps `footprint: None`, the painted 7×7 chair
-// blocks nothing), and blocking the cell would ripple the mask/approach for
-// a piece walkers can visually clip at worst. See the scene CLAUDE.md decor
-// entry.
+// DELIBERATELY walkable, unlike the island's in-body slots: the chair has no
+// furniture body to sit inside (`Furniture::MeetingChair` keeps `footprint: None`),
+// so blocking the cell would ripple the mask/approach for a piece a walker can
+// visually clip at worst.
 #[test]
 fn meeting_chair_cells_stay_walkable() {
     for seed in 0..40u64 {
@@ -904,10 +784,6 @@ fn compute_places_bookshelf_on_wall_and_whiteboard_in_walkway() {
 
 #[test]
 fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
-    // The rolling whiteboard's 8-px board panel overhangs its 3-px wheel base
-    // (invariant #6): the mask must block ONLY the south wheel strip so a
-    // walker can pass BEHIND the panel (occluded by it), not the full 11-px
-    // sprite. Was the full height — a walker couldn't get above the board.
     let l = SceneLayout::compute(120, 96, Some(1)).expect("fits");
     let pos = l
         .wall_decor
@@ -915,13 +791,11 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
         .find(|i| i.kind == WallDecor::Whiteboard)
         .expect("a free-standing whiteboard")
         .pos;
-    // Wall board is TopLeft-anchored; the 14×11 sprite's wheels sit at rows
-    // 8-10. A panel-surface cell well north of the wheels must be WALKABLE.
+    // TopLeft-anchored: the 14×11 sprite's wheels sit at rows 8-10.
     assert!(
         l.is_walkable(pos.x + 5, pos.y + 2),
         "the elevated whiteboard panel must NOT block the floor (invariant #6)"
     );
-    // A wheel-base cell (the sprite's south rows) must stay BLOCKED.
     assert!(
         !l.is_walkable(pos.x + 5, pos.y + 9),
         "the whiteboard wheel base must block the floor"
@@ -930,10 +804,6 @@ fn whiteboard_blocks_only_its_wheel_base_not_the_elevated_panel() {
 
 #[test]
 fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
-    // Decor arc: the aquarium joins the lounge vignette (owner-picked spot —
-    // east of the couch's floor lamp, against the north wall band). It rides
-    // the SAME lounge gate as lamp/side table, plus an east-clearance gate so
-    // it never crowds the elevator door threshold.
     let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let lamp = l.floor_lamp().expect("lounge fits at this size");
     let tank = l.fish_tank().expect("tank fits at this size");
@@ -949,7 +819,6 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
         tank.x + half_w + super::compute::FISH_TANK_ELEVATOR_CLEARANCE <= door_west,
         "tank + clearance stays west of the elevator door column"
     );
-    // The vignette lives and dies together: never a tank without the couch.
     for (w, h) in [(96u16, 70u16), (120, 80), (150, 68), (215, 98), (240, 160)] {
         let Some(l) = SceneLayout::compute(w, h, Some(TEST_DEFAULT_DESKS)) else {
             continue;
@@ -965,9 +834,6 @@ fn fish_tank_sits_east_of_the_lounge_lamp_clear_of_the_elevator() {
 
 #[test]
 fn meeting_table_ends_are_chair_seats_not_stands() {
-    // Decor arc (owner-ratified): the two table-end spots are SEATS now —
-    // same positions/facings as the old stands (E/W flanking the table),
-    // renamed MeetingChair with a seated render + a painted chair body.
     let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let trio = l.meeting_rooms[0].trio.as_ref().expect("trio");
     let chairs: Vec<_> = l
@@ -989,9 +855,6 @@ fn meeting_table_ends_are_chair_seats_not_stands() {
     assert_eq!(west.facing, Facing::East, "west chair faces the table");
     assert_eq!(east.facing, Facing::West, "east chair faces the table");
     assert_eq!(west.pos.y, trio.table.y, "chairs sit on the table's row");
-    // The stands-era offsets were -9/+8, so the east
-    // chair body sat 1px closer to the table wood and swallowed the rug
-    // border its west twin showed. Chairs must MIRROR around the table.
     assert_eq!(
         trio.table.x - west.pos.x,
         east.pos.x - trio.table.x,
@@ -1001,9 +864,8 @@ fn meeting_table_ends_are_chair_seats_not_stands() {
 
 #[test]
 fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
-    // On fitted rooms ≲40 wide the rack's coats (west reach cx−2) would
-    // overprint the east chair body + its sitter, so the rack yields in that
-    // geometry; bare rooms and roomy floors keep it.
+    // On fitted rooms ≲40 wide the rack's coats would overprint the east chair body
+    // and its sitter; bare rooms and roomy floors keep it.
     let narrow = SceneLayout::compute(120, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let r = &narrow.meeting_rooms[0];
     assert!(r.trio.is_some(), "120x160 hosts a fitted room");
@@ -1021,10 +883,8 @@ fn coat_rack_yields_to_the_east_chair_in_narrow_fitted_rooms() {
 
 #[test]
 fn pod_grid_fills_every_desk_row_that_fits() {
-    // #552: main_pod_used_h counted a phantom trailing aisle below the last
-    // pod row, starving residual_h so a bottom row that physically fits never
-    // fired. Invariant, from outputs only: a whole extra desk row (one full
-    // row gap below the lowest row) must NOT fit inside the band.
+    // #552: a phantom trailing aisle below the last pod row starved residual_h, so
+    // a bottom row that physically fits never fired.
     for w in [140u16, 160, 192, 215, 240] {
         for h in (100..=240u16).step_by(10) {
             let Some(l) = SceneLayout::compute(w, h, Some(64)) else {
@@ -1047,10 +907,8 @@ fn pod_grid_fills_every_desk_row_that_fits() {
 
 #[test]
 fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
-    // #553 (ratified: snap-to-stride): every desk column sits on the pod
-    // lattice — offset from the grid origin is k*stride + {0 | intra column
-    // step} — and sweeping the width only ADDS columns (band-relative offsets
-    // never move), so resize can't make inter-desk spacing jump.
+    // #553: widening only ADDS columns (band-relative offsets never move), so a
+    // resize can't make inter-desk spacing jump.
     use std::collections::BTreeSet;
     let stride_x = POD_SIDE * DESK_W + (POD_SIDE - 1) * INTRA_POD_GAP_X + INTER_POD_AISLE_X;
     let mut prev: BTreeSet<u16> = BTreeSet::new();
@@ -1077,10 +935,6 @@ fn desk_columns_stay_on_one_lattice_and_never_shift_with_width() {
 
 #[test]
 fn desk_rows_stay_on_one_lattice() {
-    // The Y twin of the #553 column invariant (the partial
-    // bottom row sat 14px below the last full row vs the 23px inter-pod
-    // rhythm). Every desk row top must be on the row lattice: offset from
-    // the grid origin is k*stride_y + {0 | intra row step}.
     let stride_y = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y + INTER_POD_AISLE_Y;
     for w in [140u16, 160, 192, 240] {
         for h in (100..=240u16).step_by(20) {
@@ -1105,10 +959,6 @@ fn desk_rows_stay_on_one_lattice() {
 
 #[test]
 fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
-    // Owner-ratified B-3 spots: one Ficus west of the elevator door (the
-    // greeting plant), one on the lounge's west flank. Each rides its
-    // anchor's own gate (door / lounge) and the settle pipeline like every
-    // scatter plant.
     let l = SceneLayout::compute(192, 160, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let ficus: Vec<_> = l
         .plants
@@ -1132,11 +982,9 @@ fn ficus_greets_at_the_elevator_and_fills_the_lounge_west_flank() {
 
 #[test]
 fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
-    // The water-cooler/trash-bin/doormat placement + fit-gate live on the room
-    // aggregates as the ONE authority the scene painter AND the binary's hover
-    // hit-test both read (the coat_rack_pos pattern), so a sprite move can't
-    // strand the hover box across the crate boundary. These expected boxes ARE
-    // the pixels paint_water_cooler/paint_trash_bin/paint_doormat draw.
+    // These expected boxes ARE the pixels
+    // paint_water_cooler/paint_trash_bin/paint_doormat draw, so the hover hit-test
+    // in the binary can't strand itself across the crate boundary.
     let pantry = PantryRoom {
         bounds: Bounds {
             x: 10,
@@ -1184,8 +1032,8 @@ fn pantry_and_meeting_procedural_rects_match_the_painted_geometry() {
         }),
     );
 
-    // Fit gate: a too-small room yields None (the painters no-op there), so the
-    // hit-test's box vanishes in lockstep with the sprite.
+    // A too-small room yields None (the painters no-op there), so the hit-test's
+    // box vanishes in lockstep with the sprite.
     let tiny_pantry = PantryRoom {
         bounds: Bounds {
             x: 0,
@@ -1221,8 +1069,6 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
     let sofa_fp_w = crate::layout::furniture_def(crate::layout::Furniture::MeetingSofaBody)
         .footprint
         .map_or(0, |s| s.w);
-    // A fitted room: the drain edge reads the REAL placed sofa (sofas[0].x,
-    // x-centred by place_trio) + half the sofa footprint + the obstacle pad.
     let trio = MeetingRoom::place_trio(bounds, false);
     let room = MeetingRoom {
         bounds,
@@ -1232,14 +1078,13 @@ fn sofa_east_drain_edge_reads_the_placed_sofa_and_is_none_when_bare() {
         room.sofa_east_drain_edge(),
         Some(trio.sofas[0].x + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
     );
-    // …and place_trio centres the sofa on cx, so it stays byte-identical to the
-    // retired bounds reconstruction (mr.x + mr.width/2 + fp/2 + pad).
+    // place_trio centres the sofa on cx, so the placed-sofa reading and the
+    // bounds-only reconstruction must agree exactly.
     assert_eq!(
         room.sofa_east_drain_edge(),
         Some(bounds.x + bounds.width / 2 + sofa_fp_w / 2 + crate::layout::OBSTACLE_PAD_PX)
     );
 
-    // A bare room (no trio) has no sofa to route around → None.
     let bare = MeetingRoom { bounds, trio: None };
     assert_eq!(bare.sofa_east_drain_edge(), None);
 }

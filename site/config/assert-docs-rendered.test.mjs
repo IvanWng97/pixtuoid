@@ -1,7 +1,3 @@
-// Unit tests for the doc-render guard's pure core. The guard is the safety net
-// this PR adds against the silent empty-render class, so its own logic (the
-// regex, the body-size floor, the svg + no-doc-pages branches) must have teeth —
-// mirroring the config/*.mjs pure-fn + node:test convention.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { checkDocPages, MIN_BODY_CHARS } from './assert-docs-rendered.mjs';

@@ -1,5 +1,4 @@
-//! Ratatui widget paint functions: footer, labels, wall display, tooltips,
-//! and theme picker overlay.
+//! Ratatui widget paint functions.
 
 mod connection;
 mod dashboard;
@@ -28,13 +27,11 @@ pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
 pub(super) use version_popup::{paint_version_popup, version_popup_url_rect, VERSION_POPUP_URL};
 pub(super) use wall_board::{paint_wall_display, star_hit_rect};
 pub(super) use welcome::paint_welcome;
-// `pub`: the snapshot example reuses the real formatter for its
-// --source-warning screenshots so the wording cannot drift from production
-// (the pixtuoid lib target is not a semver surface).
+// `pub`: the snapshot example reuses the real formatter so its --source-warning
+// screenshots cannot drift from production.
 pub use footer::source_warning_message;
-// `pub`: the BIN crate's crash reporter (crash.rs, a main.rs module — a separate
-// crate) derives its issue-report URL from this one authority (same rationale as
-// source_warning_message above).
+// `pub`: the bin crate's crash reporter derives its issue-report URL from this one
+// authority.
 pub use version_popup::REPO_URL;
 
 use std::time::SystemTime;
@@ -50,51 +47,29 @@ fn to_color(c: Rgb) -> Color {
     Color::Rgb(c.r, c.g, c.b)
 }
 
-/// Display columns a string occupies in the terminal — the ONE width authority
-/// (the same `unicode-width` ratatui uses), replacing scattered `chars().count()`
-/// so a wide glyph in a HUD widget can't miscount its layout. For the HUD's
-/// ambiguous-width glyphs (`·×↑↓●◐○◌`) this equals `chars().count()`; it diverges
-/// only for genuinely wide (2-col) or zero-width (combining) chars. (The footer's
-/// own right-flush now lives in `scene::footer`, measuring `chars().count()` —
-/// byte-identical here because its whole glyph vocabulary is single-column, pinned
-/// by `footer_vocabulary_is_single_column_…`.)
+/// Display columns a string occupies in the terminal — the ONE width authority (the same
+/// `unicode-width` ratatui uses), replacing scattered `chars().count()` so a wide glyph
+/// in a HUD widget can't miscount its layout.
 pub(crate) fn display_width(s: &str) -> usize {
     use unicode_width::UnicodeWidthStr;
     s.width()
 }
 
-// --- Shared scene stats (spine 1: footer + board agree) -----------------------
-// The per-scene activity tally, the gateway rollup, and `compact_hms` moved to
-// the backend-agnostic `pixtuoid_scene::board` module so `pixtuoid-web` can build
-// the wall board too (not just this binary). Re-exported here under their original
-// names, so the footer/board call sites are unchanged. `StateCounts` stays `pub`
-// (reachable via the pub `DrawCtx::per_floor` field, like its peer `FloorInfo`);
-// the binary lib target is not a semver surface. Per-state tallies are read via
-// `RungKind::count` (the vocabulary re-exported below as `StateKind`).
+// `StateCounts` stays `pub`: it is reachable via the pub `DrawCtx::per_floor` field.
 pub use pixtuoid_scene::board::StateCounts;
 pub(crate) use pixtuoid_scene::board::{
     compact_hms, gateway_rollup, per_floor_counts, scene_stats,
 };
 
-// --- Shared state vocabulary (glyph + letter + word + hue) --------------------
-// The vocabulary (glyph/letter/word/ALL/count) lives ONCE in
-// `pixtuoid_scene::footer::RungKind` — so the footer MODEL and this binary's
-// tooltip/dashboard read the SAME channels, with no parallel enum to keep in
-// step. Re-exported here as `StateKind` so every existing call site is unchanged.
-// The hue can't be an inherent method (it returns a ratatui `Color`, and
-// `RungKind` is a foreign type — orphan rule), so it's the `state_color` shim
-// below over the shared `footer_tone_rgb` — the ONE tone→theme-role authority
-// both footer painters ride. Each state still carries FOUR redundant channels;
-// hue is never the sole carrier, so the design survives colour removal, a
-// colour-blind viewer, and a terminal that tofus a glyph.
-
-/// The four-state activity vocabulary, re-exported from `scene::footer`.
+// Each state carries FOUR redundant channels (glyph/letter/word/hue); hue is never the
+// sole carrier, so the design survives colour removal, a colour-blind viewer, and a
+// terminal that tofus a glyph.
 pub(crate) use pixtuoid_scene::footer::RungKind as StateKind;
 
 /// A [`StateKind`]'s themed ratatui hue — the binary shim over the shared
-/// [`footer_tone_rgb`](pixtuoid_scene::footer::footer_tone_rgb) authority
-/// (reproducing the retired `StateKind::color`), so the footer/tooltip/dashboard
-/// state colours can't drift from the footer model's.
+/// [`footer_tone_rgb`](pixtuoid_scene::footer::footer_tone_rgb) authority, so the
+/// footer/tooltip/dashboard state colours can't drift from the footer model's. It can't
+/// be an inherent method: it returns a ratatui `Color` on the foreign `RungKind`.
 pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
     to_color(pixtuoid_scene::footer::footer_tone_rgb(
         pixtuoid_scene::footer::FooterTone::Rung(kind),
@@ -102,25 +77,15 @@ pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
     ))
 }
 
-// --- Shared borderless-card backing (shadow + clear + bg fill) ----------------
-// The ONE place the "block board" look every borderless card sits on is defined.
-// `borderless_panel` (modals) and the framed tooltips both delegate to
-// `paint_card_backing`, so the drop shadow can't be applied inconsistently or
-// silently forgotten by a future card.
-
-/// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged) —
-/// ONE flat color for the whole shadow, no gradient.
+/// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged).
 const SHADOW_FACTOR: f32 = 0.42;
-/// How far the shadow silhouette is offset down-and-right of the card, in cells —
-/// what makes it read as a cast box-shadow (the card floats above it) rather than
-/// an outline. This is the width of the visible right band and the height of the
-/// visible bottom band.
+/// How far the shadow silhouette is offset down-and-right of the card, in cells — what
+/// makes it read as a cast box-shadow (the card floats above it) rather than an outline.
 const SHADOW_OFFSET: u16 = 1;
 
-/// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a
-/// real RGB on BOTH `fg` (top sub-pixel) and `bg` (bottom sub-pixel), so a clean
-/// shadow darkens both — ratatui's own `Block::shadow` tints bg-only / stamps a
-/// shade glyph, which smears over the pixel art.
+/// Multiply an `Rgb` color toward black by `f`. Half-block office cells carry a real RGB
+/// on BOTH `fg` (top sub-pixel) and `bg` (bottom sub-pixel), so a clean shadow darkens
+/// both — ratatui's own `Block::shadow` tints bg-only and smears over the pixel art.
 fn dim_rgb(c: Color, f: f32) -> Color {
     match c {
         Color::Rgb(r, g, b) => Color::Rgb(
@@ -132,11 +97,9 @@ fn dim_rgb(c: Color, f: f32) -> Color {
     }
 }
 
-/// Darken the cell at `(x, y)` by the uniform `SHADOW_FACTOR`, if it is a real
-/// `Rgb` and inside `bounds`. With `top_half_only`, darkens only the upper
-/// half-block sub-pixel (`fg`) and leaves the lower one (`bg`) lit — a 1px-tall
-/// line; otherwise darkens the whole cell. Bounds-checked so it never indexes past
-/// the frame.
+/// Darken the cell at `(x, y)` by the uniform `SHADOW_FACTOR`, if it is a real `Rgb` and
+/// inside `bounds`. With `top_half_only`, darkens only the upper half-block sub-pixel
+/// (`fg`) and leaves the lower one lit — a 1px-tall line.
 fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_only: bool) {
     if x < bounds.x || y < bounds.y || x >= bounds.right() || y >= bounds.bottom() {
         return;
@@ -149,15 +112,17 @@ fn dim_cell(f: &mut ratatui::Frame<'_>, x: u16, y: u16, bounds: Rect, top_half_o
 }
 
 /// Cast a flat, single-color drop shadow: the card's own silhouette darkened by one
-/// uniform `SHADOW_FACTOR` and offset `SHADOW_OFFSET` cells down-and-right. The card
-/// is painted over its own cells afterward, so what stays visible is an even L-band
-/// — a `SHADOW_OFFSET`-wide strip down the right and a `SHADOW_OFFSET`-tall strip
-/// along the bottom, meeting at the corner, all ONE color. The bottom-most row of
-/// the silhouette (the visible bottom band + corner) is rendered TOP-HALF only, so
-/// the bottom shadow reads as a 1px contact line instead of a full 2px cell, while
-/// the vertical right strip stays full cells. Bounds-checked per cell.
+/// uniform `SHADOW_FACTOR` and offset `SHADOW_OFFSET` cells down-and-right. The
+/// bottom-most row of the silhouette is rendered TOP-HALF only, so the bottom shadow
+/// reads as a 1px contact line instead of a full 2px cell.
+///
+/// Clipped to `scene_rect`, NOT the frame: the footer is painted before every card and
+/// the bottom band dims `fg` only, so a band reaching that row repaints the live `[q]uit`
+/// over its still-lit bg. Keeping the card BODY off the footer
+/// (`panel::RESERVED_FOOTER_ROWS`) is only half the rule — the silhouette is offset a row
+/// further DOWN.
 fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
-    let bounds = f.area();
+    let bounds = crate::tui::renderer::scene_rect(f.area());
     let sx = area.x.saturating_add(SHADOW_OFFSET);
     let sy = area.y.saturating_add(SHADOW_OFFSET);
     let last_row = sy.saturating_add(area.height.saturating_sub(1));
@@ -169,11 +134,9 @@ fn cast_drop_shadow(f: &mut ratatui::Frame<'_>, area: Rect) {
     }
 }
 
-/// Paint the shared backing for a borderless card over `area`: cast the drop
-/// shadow into the office cells below-right, `Clear` the card's own cells, then
-/// fill them with the solid `tooltip_bg`. Both `panel::borderless_panel` (modals)
-/// and the framed tooltips delegate here, so the "block board" look — bg fill +
-/// shadow — has one definition and can't drift between popup kinds.
+/// Paint the shared backing for a borderless card over `area`: drop shadow, `Clear`, then
+/// a solid `tooltip_bg` fill. Both `panel::borderless_panel` (modals) and the framed
+/// tooltips delegate here, so the "block board" look can't drift between popup kinds.
 fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
     cast_drop_shadow(f, area);
     f.render_widget(Clear, area);
@@ -183,20 +146,15 @@ fn paint_card_backing(f: &mut ratatui::Frame<'_>, area: Rect, theme: &Theme) {
     );
 }
 
-/// The badge color for a source's 2-char label prefix — shared by the dashboard
-/// and Sources-panel row painters. Resolves via `SourceColors::by_prefix`,
-/// falling back to `label_idle` for an unknown prefix (the same fallback the
-/// inlined `match` arms used). Never reversed at the call sites: a low-luminance
-/// hue inverted vanishes against the highlight bg.
+/// The badge color for a source's 2-char label prefix, falling back to `label_idle` for
+/// an unknown prefix.
 fn badge_color_for(tag: &str, theme: &pixtuoid_scene::theme::Theme) -> Color {
     to_color(theme.source.by_prefix(tag).unwrap_or(theme.ui.label_idle))
 }
 
-/// The `[xx]` two-letter source badge span, coloured by the source's theme hue.
-/// The ONE badge builder shared by the dashboard, the Sources panel, AND the
-/// tooltip dossier so the three can't drift (`tag` is a 2-char `label_prefix`).
-/// Never REVERSED — a low-luminance hue inverted vanishes against a highlight bg,
-/// so callers reverse the OTHER spans (name/state) on selection, never this one.
+/// The `[xx]` two-letter source badge span, coloured by the source's theme hue. Never
+/// REVERSED — a low-luminance hue inverted vanishes against a highlight bg, so callers
+/// reverse the OTHER spans (name/state) on selection, never this one.
 pub(crate) fn source_badge_span(tag: &str, theme: &Theme) -> ratatui::text::Span<'static> {
     ratatui::text::Span::styled(
         format!("[{tag:<2}]"),
@@ -204,11 +162,9 @@ pub(crate) fn source_badge_span(tag: &str, theme: &Theme) -> ratatui::text::Span
     )
 }
 
-/// Truncate to `max` characters (char-safe), appending `…` when clipped. Shared
-/// by the dashboard + connection popup row painters (display-column safe — never
-/// slices a multi-byte glyph). Budget: the `…` is INCLUDED, so the clipped
-/// output is EXACTLY `max` chars — unlike `decoder::ellipsize`, which excludes
-/// it (N+1).
+/// Truncate to `max` characters (char-safe), appending `…` when clipped. The `…` is
+/// INCLUDED in the budget, so the clipped output is EXACTLY `max` chars — unlike
+/// `decoder::ellipsize`, which excludes it (N+1).
 fn truncate(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
@@ -221,23 +177,17 @@ fn truncate(s: &str, max: usize) -> String {
     out
 }
 
-/// Time (ms) the marquee dwells on each character while scrolling
-/// (~6.7 chars/sec) — the auto-scroll cadence for the dashboard/connection
-/// selected-row fields.
+/// Time (ms) the marquee dwells on each character while scrolling.
 const MARQUEE_MS_PER_CHAR: u64 = 150;
 /// Time (ms) the marquee holds at each end (head / tail) before reversing.
 const MARQUEE_END_PAUSE_MS: u64 = 1200;
 
-/// Visible char-window of `s` for a ping-pong auto-scrolling field `width`
-/// columns wide, at time `now`. If `s` fits, it is returned unchanged (the
-/// caller pads/uses it exactly as it would `truncate`'s output). Otherwise it
-/// bounces — hold head → scroll to tail → hold tail → scroll back — purely as a
-/// function of `now`, with NO per-frame state (a stateless wallclock window, so
-/// two painters can call it freely). Char-windowed,
-/// matching `truncate` (single-column glyphs only; a wide CJK glyph would
-/// misalign by a column mid-scroll — the same assumption `truncate` makes).
-/// Unlike `truncate`, the scrolling window emits NO `…` — the motion signals
-/// "more". `[p]ause` freezes `now`, which freezes the scroll.
+/// Visible char-window of `s` for a ping-pong auto-scrolling field `width` columns wide,
+/// at time `now`. If `s` fits, it is returned unchanged. Otherwise it bounces — hold head
+/// → scroll to tail → hold tail → scroll back — purely as a function of `now`, with NO
+/// per-frame state, so two painters can call it freely. Char-windowed like `truncate` (a
+/// wide CJK glyph would misalign by a column mid-scroll); unlike `truncate` it emits NO
+/// `…` — the motion signals "more".
 fn marquee_window(s: &str, width: usize, now: SystemTime) -> String {
     let chars: Vec<char> = s.chars().collect();
     let len = chars.len();
@@ -269,9 +219,9 @@ fn marquee_window(s: &str, width: usize, now: SystemTime) -> String {
     chars[off..off + width].iter().collect()
 }
 
-/// The focused (selected) row auto-scrolls overflowing text via ping-pong; every
-/// other row stays statically `…`-truncated. Both honor the same `width` contract
-/// so the caller's fixed-width padding is unchanged. Shared by both popups.
+/// The focused (selected) row auto-scrolls overflowing text via ping-pong; every other
+/// row stays statically `…`-truncated. Both honor the same `width` contract, so the
+/// caller's fixed-width padding is unchanged.
 fn marquee_or_truncate(s: &str, width: usize, selected: bool, now: SystemTime) -> String {
     if selected {
         marquee_window(s, width, now)

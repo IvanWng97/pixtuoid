@@ -1,14 +1,7 @@
 //! `pixtuoid-web` — the WebAssembly canvas painter over the `pixtuoid-scene`
-//! engine. The THIRD painter (alongside the binary's `tui` + `floating`): it
-//! runs the real render+sim engine in the browser and blits each frame of the
-//! shared `pixtuoid_scene::floor::render_floor` seam (#423) into a `<canvas>`
-//! — the live office hero, NOT a gif.
-//!
-//! A sibling thin caller of the same seam as the binary's painters (no window,
-//! no terminal): an [`Office`]
-//! handle owns everything cross-frame so motion/pose stay continuous, and
-//! `step(now_ms, w, h)` renders one frame into an RGBA staging buffer JS reads
-//! zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`] → `ImageData`.
+//! engine: an [`Office`] handle owns everything cross-frame so motion/pose stay
+//! continuous, and `step(now_ms, w, h)` renders one frame into an RGBA staging
+//! buffer JS reads zero-copy via [`Office::frame_ptr`]/[`Office::frame_len`].
 //!
 //! Time is a PARAMETER (`now_ms` from JS): the engine never calls
 //! `SystemTime::now()` (it panics on wasm32-unknown-unknown).
@@ -36,48 +29,34 @@ use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs
 use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
 
-/// A scheduled one-shot event for a visitor hire — an absolute-time
-/// (`SystemTime`) event queued OUTSIDE the loop machinery, so a hire's lifecycle
-/// never replays on wrap. Named over the former `(SystemTime, AgentEvent)`
-/// tuple (cf. `PlantItem`/`WallDecorItem`).
+/// A visitor hire's one-shot event, queued OUTSIDE the loop machinery so a
+/// hire's lifecycle never replays on wrap.
 struct ScheduledEvent {
     at: SystemTime,
     event: AgentEvent,
 }
 
-/// The visitor-hire lane (#434): the pending one-shot queue, the live-id
-/// registry the cap counts, and the monotonic key counter — grouped so the cap
-/// invariant lives in ONE place across the enqueue (`try_hire`) and drain
-/// (`drain_due`) sides. This is grouping/taste, NOT an illegal-state fix — it
-/// makes no bad combination unrepresentable; it co-locates the two methods that
-/// jointly own the cap so they can't drift.
+/// The visitor-hire lane — grouped so the cap invariant lives in ONE place
+/// across the enqueue (`try_hire`) and drain (`drain_due`) sides.
 #[derive(Default)]
 struct VisitorHires {
-    /// Absolute-time one-shot events, kept sorted by time; drained from the front.
+    /// Kept sorted by time; drained from the front.
     pending: Vec<ScheduledEvent>,
-    /// Live hire ids (pruned against the scene) — caps concurrent hires.
     ids: Vec<AgentId>,
-    /// Monotonic hire counter → unique session keys.
     seq: u32,
 }
 
 impl VisitorHires {
-    /// Cap on concurrently-alive visitor hires: enough that repeat clicks
-    /// visibly stack, few enough that click-spam can't crowd out the cast.
+    /// Cap on concurrently-alive hires: enough that repeat clicks visibly stack,
+    /// few enough that click-spam can't crowd out the cast.
     const MAX_LIVE: usize = 3;
 
-    /// Queue one more hire's lifecycle — the enqueue side of `Office::hire`.
-    /// Owns the full prune → cap → free-desk → push → sort. Returns whether the
-    /// hire was admitted (`true`) or refused (`false`, no-op) — refused when the
-    /// cap is reached or the canvas-synced office has no free desk to seat one.
-    /// `scene` is the live scene (read-only here — the reducer applies the
-    /// queued events later, in `drain_due`).
+    /// Queue one more hire's lifecycle. Refused (`false`, a no-op) when the cap
+    /// is reached or the canvas-synced office has no free desk to seat one.
     fn try_hire(&mut self, base: SystemTime, scene: &SceneState) -> bool {
-        // `ids` is THE registry the cap counts — each admitted hire is in it
-        // exactly once. Prune only ids that are neither LIVE (in the scene) nor
-        // still QUEUED (SessionStart pending): pruning queued ids would
-        // permanently lose them, and a click one frame after a burst would
-        // overshoot the cap (the review-caught under-count, PR #436).
+        // Prune only ids that are neither LIVE (in the scene) nor still QUEUED
+        // (SessionStart pending): pruning a queued id loses it permanently, and a
+        // click one frame after a burst would overshoot the cap.
         self.ids.retain(|id| {
             scene.agents.contains_key(id)
                 || self.pending.iter().any(
@@ -87,12 +66,10 @@ impl VisitorHires {
         if self.ids.len() >= Self::MAX_LIVE {
             return false;
         }
-        // A hire the office can't SEAT is refused outright: the reducer would
-        // drop its SessionStart (no free desk), yet the id would hold one of
-        // the MAX_LIVE slots for the full stay — dead flourish, zero visual
-        // feedback. Live agents keep their desks through exit grace and each
-        // queued SessionStart will claim one, so count both against the
-        // canvas-synced capacity (`sync_capacity`).
+        // A hire the office can't SEAT would hold a MAX_LIVE slot for its whole
+        // stay with zero visual feedback. Live agents keep their desks through
+        // exit grace and each queued SessionStart will claim one, so count both
+        // against the canvas-synced capacity.
         let queued_starts = self
             .pending
             .iter()
@@ -116,8 +93,7 @@ impl VisitorHires {
     }
 
     /// Fire every queued hire event due by `now`, each applied at its SCHEDULED
-    /// time (not `now`) so the reducer's time-based semantics hold. The queue is
-    /// push-sorted, so drain from the front.
+    /// time (not `now`) so the reducer's time-based semantics hold.
     fn drain_due(&mut self, now: SystemTime, reducer: &mut Reducer, scene: &mut SceneState) {
         while self.pending.first().is_some_and(|ev| ev.at <= now) {
             let ev = self.pending.remove(0);
@@ -126,75 +102,54 @@ impl VisitorHires {
     }
 }
 
-/// A live office rendered to a reusable RGBA buffer across frames. Owns a
-/// `FloorSession` (the scene-owned painter session: per-floor render caches +
-/// persistent office coffee/chitchat + the dual eviction) so keeping ONE
-/// handle alive across `step` calls is what keeps motion/pose continuous
-/// (no walk-flash) — same contract as `OfficeRenderer`.
+/// A live office rendered to a reusable RGBA buffer across frames. Keeping ONE
+/// handle alive across `step` calls is what keeps motion/pose continuous.
 #[wasm_bindgen]
 pub struct Office {
     scene: SceneState,
     session: FloorSession,
-    /// RGBA staging (the render buffer is packed RGB, no alpha) — its ptr/len
-    /// back a JS `Uint8ClampedArray` view into wasm memory, so blitting is
-    /// zero-copy on the JS side.
+    /// RGBA staging (the render buffer is packed RGB) — its ptr/len back a JS
+    /// view into wasm memory, so blitting is zero-copy on the JS side.
     rgba: Vec<u8>,
     pack: Pack,
     theme: &'static Theme,
     seed: u64,
-    /// The REAL reducer + the looped hero script driving it — the office is
-    /// populated by the same state machine the app uses, not a hand-rolled fake.
     reducer: Reducer,
     beats: Vec<Beat>,
-    /// Next un-fired beat in the current loop.
     cursor: usize,
-    /// The lobster's lane (#434): scripted OpenClaw presence deltas, applied
-    /// through the real `apply_presence` state machine — its own cursor, same
-    /// loop clock as `beats`.
+    /// Scripted gateway presence deltas — own cursor, same loop clock as `beats`.
     presence_beats: Vec<PresenceBeat>,
     presence_cursor: usize,
     /// t0 of the current loop; set on the first `step` call.
     epoch: Option<SystemTime>,
-    /// Visitor-hired agents (#434): the one-shot event queue + live-id registry
-    /// + key counter, grouped in `VisitorHires` — outside the loop machinery, so
-    /// a hire's lifecycle never replays on wrap. Enqueued by `hire()`, drained
-    /// by `advance_script`.
+    /// Visitor hires — outside the loop machinery, so one never replays on wrap.
     hires: VisitorHires,
-    /// The clock of the most recent `step` — `hire()` has no clock parameter
-    /// (it's a JS click handler), so it schedules relative to this.
+    /// The clock of the most recent `step` — `hire()` has no clock parameter, so
+    /// it schedules relative to this.
     last_now: Option<SystemTime>,
-    /// The buffer size `floor_capacities` was last synced for — capacity only
-    /// changes on resize, so `sync_capacity` skips the layout recompute on
-    /// every other frame.
+    /// The buffer size `floor_capacities` was last synced for — lets
+    /// `sync_capacity` skip the layout recompute on every other frame.
     caps_size: Option<(u16, u16)>,
-    /// Override the weather for this office (`"clear"|"rain"|"storm"|"snow"|"fog"|
-    /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-    /// Applied each `step` (see the force_weather invariant) so two Offices sharing
-    /// the one wasm module never fight over the thread-local override.
     weather_override: Option<String>,
-    /// The WebAudio engine (#633) — `None` until the visitor clicks ♩ (browser
-    /// autoplay policy: no sound without a gesture, matching muted-by-default).
-    /// `audio_begin` creates it; JS pumps `audio_warmup_step`, uploads the
-    /// buffers, then drives `audio_tick` per rAF.
+    /// The WebAudio engine — `None` until the visitor clicks ♩ (browser autoplay
+    /// policy: no sound without a gesture).
     audio: Option<audio::WebAudioDriver>,
-    /// An in-flight worker-prewarm handoff (#705) — staged by
-    /// `audio_adopt_begin`, filled piece-by-piece, promoted to `audio` by
-    /// `audio_adopt_finish` (unless a click-warmed driver got there first).
+    /// An in-flight worker-prewarm handoff — staged by `audio_adopt_begin`,
+    /// promoted to `audio` by `audio_adopt_finish`.
     adopting: Option<audio::Adoption>,
 }
 
 #[wasm_bindgen]
 impl Office {
     /// Build an office seeded with `seed` (drives the layout variant). Errors
-    /// only if the compile-time-embedded sprite pack fails to parse (a build
-    /// bug), surfaced to JS as an exception.
+    /// only if the compile-time-embedded sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
         let pack = load_sprite_pack(None).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Office {
-            // Slot capacity starts empty and is synced from the CANVAS's own
-            // layout on every `step` (`sync_capacity`) before any beat fires,
-            // so the reducer only admits agents the rendered office can seat.
+            // Capacity starts empty and is synced from the CANVAS's own layout
+            // on every `step` before any beat fires, so the reducer only admits
+            // agents the rendered office can seat.
             scene: SceneState::default(),
             session: FloorSession::new(),
             rgba: Vec::new(),
@@ -220,44 +175,36 @@ impl Office {
     /// buffer.
     ///
     /// CONTRACT: `now_ms` must be UNIX-epoch milliseconds — `Date.now()`, NOT
-    /// `performance.now()` and NOT a `requestAnimationFrame` timestamp (both
-    /// are ms-since-page-load: motion still animates, but the office's
-    /// day/night cycle and wall clock decode `now` as calendar time, so a
-    /// page-relative clock pins the scene at 1970 — permanently 00:00,
-    /// defeating the browser-timezone support entirely).
+    /// `performance.now()` and NOT a `requestAnimationFrame` timestamp: those are
+    /// ms-since-page-load, which pins the day/night cycle and wall clock at 1970.
     pub fn step(&mut self, now_ms: f64, w: u32, h: u32) {
-        // `f64 as u64` saturates (negatives/NaN → 0) since Rust 1.45, so the
-        // contract's "epoch ms" pre-clamp is already the cast's behavior.
+        // `f64 as u64` saturates (negatives/NaN → 0), so no pre-clamp is needed.
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
         self.last_now = Some(now);
         let buf_w = w.clamp(1, u16::MAX as u32) as u16;
         let buf_h = h.clamp(1, u16::MAX as u32) as u16;
-        // Re-apply THIS office's weather every frame: force_weather is a thread-local
-        // shared by every Office in the module, so the last writer before a render
-        // wins — each office must set its own value right before rendering.
-        let _ = pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref());
+        // `force_weather` is a thread-local shared by every Office in the module, so
+        // each office must set its own value right before rendering. An unknown name
+        // leaves that thread-local UNTOUCHED, which would silently render whatever
+        // the last writer forced — hence the Err path clearing it.
+        if pixtuoid_scene::pixel_painter::force_weather(self.weather_override.as_deref()).is_err() {
+            let _ = pixtuoid_scene::pixel_painter::force_weather(None);
+        }
         // Capacity BEFORE the script advances: the SessionStarts due this
         // frame must allocate desks against the canvas this frame renders.
         self.sync_capacity(buf_w, buf_h);
         self.advance_script(now);
-        // The per-frame sweep: Active→Idle debounce, exit GC, walkouts.
         self.reducer.tick(&mut self.scene, now);
-        // The DAEMON sweep the app's reducer task runs on its own tick — the hero
-        // was missing it, so the lobster's `Down` row lived until the next loop's
-        // `GatewayUp` and the wall board showed a stale `gw down` chip for the ~30s
-        // tail of every loop. Same fn, same TTL profile as production; the run/TTL
-        // decay it also drives is inert here (the script's runs pair cleanly).
-        // Registry-driven, exactly like the app's reducer task: the hero must not
-        // re-state WHICH daemon it sweeps or WITH WHAT TTL, or an Nth daemon row
-        // would decay in production and linger here.
+        // The DAEMON sweep the app's reducer task runs: without it a `Down` row
+        // lives until the next loop's `GatewayUp` and the wall board shows a stale
+        // `gw down` chip. Registry-driven so an Nth daemon row can't decay in
+        // production yet linger here.
         for (source, ttl) in pixtuoid_core::source::registry::daemon_sources() {
             pixtuoid_core::source::daemon::sweep_presence_ttl(&mut self.scene, source, ttl, now);
         }
-        // `render` (the FloorSession) evicts per-agent render state for the
-        // agents the sweep removed — load-bearing here: the looped script
-        // REUSES agent ids, and a returning cast member with stale walk legs
-        // teleports in (see `FloorCtx::evict_missing`'s doc). Structural
-        // since the session owns it — this painter can't forget it again.
+        // `render` evicts per-agent render state for the agents the sweep removed
+        // — load-bearing: the looped script REUSES agent ids, and a returning cast
+        // member with stale walk legs teleports in.
         self.render(now, buf_w, buf_h);
         self.expand_rgba();
     }
@@ -265,9 +212,9 @@ impl Office {
     /// Pointer to the RGBA frame in wasm linear memory (`w*h*4` bytes).
     ///
     /// CONTRACT: re-read this (and rebuild any `Uint8ClampedArray` view) after
-    /// EVERY `step` — a canvas resize reallocates the staging buffer (the
-    /// pointer moves), and any wasm `memory.grow` invalidates existing JS
-    /// views into linear memory even when the pointer value is unchanged.
+    /// EVERY `step` — a canvas resize reallocates the staging buffer, and any
+    /// wasm `memory.grow` invalidates existing JS views into linear memory even
+    /// when the pointer value is unchanged.
     pub fn frame_ptr(&self) -> *const u8 {
         self.rgba.as_ptr()
     }
@@ -277,35 +224,26 @@ impl Office {
         self.rgba.len()
     }
 
-    /// Hire one more agent (#434): the site's install section calls this on a
-    /// Copy click, and a new coworker walks into the background office, works
-    /// a few spells, and heads out ~70s later. Returns whether the hire was
-    /// admitted (`true`) or refused (`false`) — refused before the first `step`
-    /// (no clock yet), while `MAX_LIVE` hires are already alive (click-spam
-    /// can't crowd out the cast), and when the canvas-sized office has no free
-    /// desk to seat one. The caller (the site's install-copy chain) answers its
-    /// receipt event from this return, not a JS-side mirror of the cap. Never
-    /// throws.
+    /// Hire one more agent: a new coworker walks into the background office,
+    /// works a few spells, and heads out ~70s later. Refused (`false`) before
+    /// the first `step` (no clock yet), while `MAX_LIVE` hires are already
+    /// alive, and when the canvas-sized office has no free desk. Never throws.
     pub fn hire(&mut self) -> bool {
         let Some(base) = self.last_now else {
             return false;
         };
-        // Delegate to the grouped hire lane (prune → cap → free-desk → push).
         self.hires.try_hire(base, &self.scene)
     }
 
     /// Force the office's weather (`"clear"|"rain"|"storm"|"snow"|"fog"|
     /// "overcast"|"windy"|"smog"`), or `None` to follow the clock-based cycle.
-    /// Applied each `step` (see the force_weather invariant) so two Offices sharing
-    /// the one wasm module never fight over the thread-local override.
+    /// An unrecognized name renders as the clock-based cycle.
     pub fn set_weather(&mut self, name: Option<String>) {
         self.weather_override = name;
     }
 
     /// Recolor the whole office to a theme by name (`"normal"|"cyberpunk"|
     /// "dracula"|"tokyo-night"|"catppuccin"|"gruvbox"`). Unknown name = no-op.
-    /// Flushes the recolor cache so agent sprites repaint on the next frame; the
-    /// env recolors on its own (painted fresh each frame from `self.theme`).
     pub fn set_theme(&mut self, name: &str) {
         if let Some(t) = pixtuoid_scene::theme::theme_by_name(name) {
             self.theme = t;
@@ -313,29 +251,23 @@ impl Office {
         }
     }
 
-    /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24). The
-    /// site's VIBING sky-slider reads this to draw its thumb as a sun by day /
-    /// moon by night, so the control can't drift from the office it previews —
-    /// it delegates to the engine's ONE day/night boundary (`SUN_RISE_H`/
-    /// `SUN_SET_H`, `pixtuoid_scene`'s `sky::hour_is_day`). Pure in `hour`; the
-    /// `&self` receiver keeps it a JS method on the office handle JS already holds.
+    /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24) — the
+    /// site's sky-slider thumb reads this, so it delegates to the engine's ONE
+    /// day/night boundary rather than restating it.
     pub fn is_day(&self, hour: f32) -> bool {
         pixtuoid_scene::pixel_painter::hour_is_day(hour)
     }
 
     /// Export the current frame's name-badge labels + neon wall-board TEXT as a
-    /// small JSON string for the site's DOM overlay (`OfficeBackdrop.astro`).
+    /// small JSON string for the site's DOM overlay.
     ///
     /// The wasm office renders at a SMALL buffer that CSS upscales with
     /// `image-rendering: pixelated`, so anti-aliased text CANNOT be baked into the
-    /// pixels (it would nearest-neighbor blow up blocky). Instead the site lays
-    /// crisp Monaspace Neon DOM spans over the canvas from this model. Coordinates
-    /// are OFFICE-BUFFER px (a label's `x` is the sprite CENTER, `y` its head-top;
-    /// the board `rect` is the neon-panel interior) — the site scales them to the
-    /// CSS-displayed canvas. Colors are RESOLVED against the CURRENT theme, so a
-    /// `set_theme` reflects with no extra call. Call right after `step` (it reads
-    /// the step's clock). No serde — the payload is tiny and hand-built (escaped);
-    /// the site wraps `JSON.parse` in try/catch so a bad frame degrades to no overlay.
+    /// pixels — the site lays crisp DOM spans over the canvas from this model
+    /// instead. Coordinates are OFFICE-BUFFER px (a label's `x` is the sprite
+    /// CENTER, `y` its head-top; the board `rect` is the neon-panel interior).
+    /// Colors are RESOLVED against the CURRENT theme. Call right after `step` (it
+    /// reads the step's clock).
     pub fn overlay_json(&mut self) -> String {
         use pixtuoid_scene::pixel_painter::{
             NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
@@ -345,8 +277,6 @@ impl Office {
         };
         let theme = self.theme;
 
-        // Labels + board — both delegated to the session, which owns the layout
-        // the sprite pass used + the route state (shared with the floating painter).
         let labels = self.session.overlay(&self.scene, now, None);
         let board = self.session.board(&self.scene, now, None);
 
@@ -359,14 +289,9 @@ impl Office {
             out.push_str(&format!("{{\"x\":{cx},\"y\":{},\"text\":", el.anchor_px.y));
             push_json_string(&mut out, &format!("\u{25cf}{}", el.text));
             out.push_str(&format!(",\"color\":\"{}\"", label_hex(theme, el.tone)));
-            // The CLI-identity half (#657, owner-ratified design): the
-            // registry prefix before the first '·' resolves to the source's
-            // badge hue — the SAME SourceColors::by_prefix the dashboard/
-            // Sources/tooltip badges ride. The site paints the WHOLE name in
-            // it while the ● marker stays the activity tone (the status-dot
-            // idiom: dot = busy/idle, text = identity — all three painters
-            // share this split). An unregistered prefix emits no badge and
-            // the whole label stays tone-colored.
+            // The registry prefix before the first '·' resolves to the source's
+            // badge hue: the site paints the WHOLE name in it while the ● marker
+            // stays the activity tone. An unregistered prefix emits no badge.
             if let Some(rgb) = pixtuoid_scene::overlay::badge_hue(&el.text, theme) {
                 out.push_str(&format!(",\"badge\":\"{}\"", hex(rgb)));
             }
@@ -386,15 +311,12 @@ impl Office {
         out
     }
 
-    // --- WebAudio (#633) -----------------------------------------------------
-    // JS drives this after the ♩ click (browser autoplay policy): audio_begin →
-    // pump audio_warmup_step off setTimeout(0) → upload the buffers via the
-    // ptr/len getters → audio_tick per rAF, applying the returned JSON commands.
+    // JS drives the audio after the ♩ click (browser autoplay policy):
+    // audio_begin → pump audio_warmup_step off setTimeout(0) → upload the
+    // buffers via the ptr/len getters → audio_tick per rAF.
 
-    /// Create the audio engine for the CURRENT day/night + weather (from the
-    /// last `step`'s clock). Idempotent — a second call is ignored, so JS can
-    /// call it freely on the ♩ click. Costs nothing until `audio_warmup_step`
-    /// synthesizes the beds.
+    /// Create the audio engine for the CURRENT day/night + weather. Idempotent —
+    /// a second call is ignored. Costs nothing until `audio_warmup_step`.
     pub fn audio_begin(&mut self) {
         if self.audio.is_some() {
             return;
@@ -403,10 +325,9 @@ impl Office {
         self.audio = Some(audio::WebAudioDriver::new(track));
     }
 
-    /// Build ONE synthesis piece; returns pieces REMAINING (0 = ready to
-    /// upload buffers + tick). JS loops it off `setTimeout(0)` so the multi-
-    /// second synthesis never blocks the main thread in one shot. 0 if audio
-    /// hasn't begun.
+    /// Build ONE synthesis piece; returns pieces REMAINING (0 = ready to upload
+    /// buffers + tick). JS loops it off `setTimeout(0)` so the multi-second
+    /// synthesis never blocks the main thread in one shot.
     pub fn audio_warmup_step(&mut self) -> u32 {
         self.audio.as_mut().map_or(0, |a| a.warmup_step())
     }
@@ -419,7 +340,7 @@ impl Office {
 
     /// Zero-copy pointer/length into the looping bed samples for stem `idx`
     /// (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
-    /// reports `swapped` (a track swap / any `memory.grow` moves the data).
+    /// reports `swapped`.
     pub fn audio_loop_ptr(&self, idx: usize) -> *const f32 {
         self.audio
             .as_ref()
@@ -431,8 +352,7 @@ impl Office {
 
     /// Zero-copy pointer/length into a one-shot buffer: `pool` is the wire index
     /// (0=keystroke, 1=raindrop, 2=door chime, 3=printer, 4=vending), `idx` the
-    /// pool slot (keystrokes/drops are pools; the appliance cues are single).
-    /// Uploaded once after warmup.
+    /// pool slot.
     pub fn audio_oneshot_ptr(&self, pool: u8, idx: usize) -> *const f32 {
         self.audio.as_ref().map_or(std::ptr::null(), |a| {
             OneShotPool::from_wire(pool)
@@ -447,11 +367,9 @@ impl Office {
 
     /// Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
     /// same as `step`) and return the JS glue commands as JSON:
-    /// `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}`.
-    /// `gains` are the 6 loop-stem target amplitudes (JS ramps each GainNode);
-    /// `plays` are one-shots to spawn; `swapped` = re-read the loop buffers.
-    /// Empty-ish before the beds are ready. No serde (tiny hand-built payload,
-    /// like `overlay_json`).
+    /// `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
+    /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
+    /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
         let Some(now) = self.last_now else {
             return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
@@ -459,12 +377,8 @@ impl Office {
         if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
             return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         }
-        // The office's shared observer composes the whole AudioFrame (stems +
-        // cues + track), single-sourced with the desktop painters — no per-painter
-        // hand-assembly (was the floating-vs-web waypoint_kind drift). Single-floor
-        // hero → floor 0: `per_floor_counts[0]` == the old `scene_stats`, all hero
-        // agents are ground floor, and the observer's `select_track` matches the
-        // old `current_track()` by construction.
+        // The shared observer composes the whole AudioFrame, single-sourced with
+        // the desktop painters. Single-floor hero → floor 0.
         let frame = self.session.audio_frame(&self.scene, 0, now);
         let cmd = self
             .audio
@@ -474,15 +388,8 @@ impl Office {
         audio::commands_json(&cmd)
     }
 
-    // --- worker prewarm adoption (#705) --------------------------------------
-    // A Web Worker synthesizes the whole take in its OWN wasm instance
-    // (`SynthTake`), transfers the buffers over, and JS copies them in here
-    // piece-by-piece off setTimeout(0). After `audio_adopt_finish` the driver
-    // is READY — the ♩ click skips synthesis entirely and only uploads.
-
-    /// Stage a handoff for the worker's spawn-time track (`night` + 10-min
-    /// `epoch` block). A stale epoch at click time self-heals through the
-    /// normal chunked swap. Overwrites any prior stage.
+    /// Stage a handoff for the worker's spawn-time track. A stale epoch at click
+    /// time self-heals through the normal chunked swap. Overwrites any prior stage.
     pub fn audio_adopt_begin(&mut self, night: bool, epoch: f64) {
         let epoch = epoch as u64;
         let track = if night {
@@ -494,8 +401,7 @@ impl Office {
     }
 
     /// Copy in one one-shot buffer (the worker's pool-discovery order).
-    /// `false` = refused (no stage / bad pool / overflow) — JS abandons the
-    /// handoff and the click-time warmup takes over.
+    /// `false` = refused (no stage / bad pool / overflow).
     pub fn audio_adopt_oneshot(&mut self, pool: u8, samples: &[f32]) -> bool {
         let Some(ad) = self.adopting.as_mut() else {
             return false;
@@ -506,8 +412,8 @@ impl Office {
         }
     }
 
-    /// Copy in loop stem `idx` (`LoopStem::ALL` order: beds sequentially,
-    /// rain last). Same `false` contract as `audio_adopt_oneshot`.
+    /// Copy in loop stem `idx` (`LoopStem::ALL` order). Same `false` contract as
+    /// `audio_adopt_oneshot`.
     pub fn audio_adopt_loop(&mut self, idx: usize, samples: &[f32]) -> bool {
         match self.adopting.as_mut() {
             Some(ad) => ad.push_loop(idx, samples),
@@ -515,9 +421,8 @@ impl Office {
         }
     }
 
-    /// Promote a COMPLETE handoff to the live driver. `true` = the ♩ click is
-    /// now upload-only. Refuses a torn handoff, and refuses to stomp a driver
-    /// a click already warmed (first ready wins).
+    /// Promote a COMPLETE handoff to the live driver. Refuses a torn handoff, and
+    /// refuses to stomp a driver a click already warmed (first ready wins).
     pub fn audio_adopt_finish(&mut self) -> bool {
         let Some(ad) = self.adopting.take() else {
             return false;
@@ -535,11 +440,9 @@ impl Office {
     }
 }
 
-/// The worker-side synthesizer (#705): the audio-prewarm Web Worker
-/// instantiates its OWN wasm module (memories can't be shared), pumps
-/// [`SynthTake::step`] to 0 — blocking is fine off the main thread — then
-/// copies each buffer out through the ptr/len getters (the driver's read
-/// contract) and transfers them to the main thread for `Office::audio_adopt_*`.
+/// The worker-side synthesizer: the audio-prewarm Web Worker instantiates its
+/// OWN wasm module (memories can't be shared), pumps [`SynthTake::step`] to 0,
+/// then transfers each buffer to the main thread for `Office::audio_adopt_*`.
 #[wasm_bindgen]
 pub struct SynthTake {
     driver: audio::WebAudioDriver,
@@ -549,16 +452,13 @@ pub struct SynthTake {
 
 #[wasm_bindgen]
 impl SynthTake {
-    /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) —
-    /// selects the same day/night + weather track the office would at that
-    /// instant (procedural weather; a `weather_override` mismatch on the main
-    /// office self-heals through the normal swap).
+    /// `now_ms` = UNIX-epoch milliseconds (the `Office::step` contract) — selects
+    /// the same day/night + weather track the office would at that instant.
     #[wasm_bindgen(constructor)]
     pub fn new(now_ms: f64) -> SynthTake {
         let now = SystemTime::UNIX_EPOCH + Duration::from_millis(now_ms as u64);
-        // The ONE track-pick authority (floor::track_for) — shared with the
-        // per-tick observer + Office::current_track; recover (night, epoch) for
-        // the adopt wire from the returned TrackId (its payload IS track_epoch).
+        // `floor::track_for` is the ONE track-pick authority; its TrackId payload
+        // IS the track epoch, so the adopt wire's (night, epoch) recovers from it.
         let track = pixtuoid_scene::floor::track_for(now);
         let (night, epoch) = match track {
             pixtuoid_scene::audio::TrackId::GenNight(e) => (true, e),
@@ -584,15 +484,14 @@ impl SynthTake {
         self.epoch as f64
     }
 
-    /// The loop-stem count — the worker's copy-out bound, read from the ONE
-    /// authority (`LoopStem::ALL`) instead of a JS-side literal. Loops aren't
-    /// self-terminating like the one-shot pools, so JS can't discover it.
+    /// The loop-stem count — loops aren't self-terminating like the one-shot
+    /// pools, so JS can't discover the copy-out bound itself.
     pub fn loop_count(&self) -> usize {
         pixtuoid_scene::audio::mixer::LoopStem::ALL.len()
     }
 
     /// Zero-copy reads, same contract as the `Office::audio_*` getters — the
-    /// worker copies (`Float32Array.slice`) before its next wasm call.
+    /// worker copies before its next wasm call.
     pub fn loop_ptr(&self, idx: usize) -> *const f32 {
         self.driver.loop_buffer(idx).as_ptr()
     }
@@ -610,9 +509,6 @@ impl SynthTake {
 }
 
 impl Office {
-    /// The mood track for the CURRENT clock + weather — day/night off the
-    /// SAME sun window the lighting renders (`is_day_at`) plus precipitation.
-    /// Day before the first `step` (no clock yet).
     fn current_track(&self) -> pixtuoid_scene::audio::TrackId {
         match self.last_now {
             Some(now) => pixtuoid_scene::floor::track_for(now),
@@ -622,27 +518,20 @@ impl Office {
 }
 
 impl Office {
-    /// The rendered RGBA frame (`w*h*4`, opaque alpha) — the safe NATIVE
-    /// accessor (rlib consumers: the `hero_still` example, tests). The
-    /// wasm-JS boundary keeps the zero-copy [`Office::frame_ptr`]/
-    /// [`Office::frame_len`] contract instead — a `&[u8]` doesn't cross
-    /// wasm-bindgen without copying.
+    /// The rendered RGBA frame (`w*h*4`, opaque alpha) — the safe NATIVE accessor
+    /// for rlib consumers; the wasm-JS boundary keeps the zero-copy
+    /// [`Office::frame_ptr`]/[`Office::frame_len`] pair instead, because a
+    /// `&[u8]` doesn't cross wasm-bindgen without copying.
     pub fn frame(&self) -> &[u8] {
         &self.rgba
     }
 
     /// Keep the reducer's desk capacity in lockstep with the office actually
-    /// rendered at this buffer size — the authority is the layout's home-desk
-    /// count, the same per-resize sync the TUI and the floating window run
-    /// (`sync_floor_caps`). Without it the two decouple: an admitted agent's
-    /// desk index can exceed the canvas layout's desk count, so it paints
-    /// NOWHERE (its anchors return `None`) while staying alive in the scene —
-    /// on narrow/portrait canvases that stranded every visitor hire (and on
-    /// the tightest buffers part of the cast). Single floor: the hero renders
-    /// floor 0 only, so the other floors hold 0 desks and `total_capacity` IS
-    /// the canvas's desk count. A shrink lowers capacity for FUTURE
-    /// admissions; already-seated excess agents stay alive-but-offscreen,
-    /// same as the TUI on terminal shrink.
+    /// rendered at this buffer size. Without it an admitted agent's desk index
+    /// can exceed the canvas layout's desk count, so it paints NOWHERE (its
+    /// anchors return `None`) while staying alive in the scene. A shrink lowers
+    /// capacity for FUTURE admissions only; already-seated excess agents stay
+    /// alive-but-offscreen, same as the TUI on terminal shrink.
     fn sync_capacity(&mut self, buf_w: u16, buf_h: u16) {
         if self.caps_size == Some((buf_w, buf_h)) {
             return;
@@ -654,14 +543,11 @@ impl Office {
         self.caps_size = Some((buf_w, buf_h));
     }
 
-    /// Fire every scripted beat due by `now`, each applied at its SCHEDULED
-    /// time (not `now`) so the reducer's time-based semantics — the 1.5s
-    /// Active debounce, exit grace — hold even when a hidden tab's rAF pauses
-    /// and a resumed step has to catch up a large gap. Wraps the loop epoch;
-    /// a gap past one full loop is re-anchored instead of replayed N times.
+    /// Fire every scripted beat due by `now`, each applied at its SCHEDULED time
+    /// (not `now`) so the reducer's time-based semantics hold even when a hidden
+    /// tab's rAF pauses and a resumed step has to catch up a large gap. A gap
+    /// past one full loop is re-anchored instead of replayed N times.
     fn advance_script(&mut self, now: SystemTime) {
-        // Track the loop epoch in a local and write it back at each mutation —
-        // no Option re-read (and no unreachable-expect) inside the loop.
         let mut epoch = *self.epoch.get_or_insert(now);
         let mut elapsed = now
             .duration_since(epoch)
@@ -688,10 +574,8 @@ impl Office {
                     .apply(&mut self.scene, beat.event.clone(), at, beat.transport);
                 self.cursor += 1;
             }
-            // The lobster's lane (#434): same loop clock, its own cursor. Each
-            // delta lands through the REAL apply_presence state machine at its
-            // SCHEDULED time, so enter/busy/leave motion anchors correctly even
-            // on a catch-up step.
+            // Each presence delta lands at its SCHEDULED time, so enter/busy/leave
+            // motion anchors correctly even on a catch-up step.
             while let Some(pb) = self.presence_beats.get(self.presence_cursor) {
                 if pb.at_ms > elapsed {
                     break;
@@ -703,7 +587,6 @@ impl Office {
             if elapsed < LOOP_MS {
                 break;
             }
-            // Loop wrap: restart the script one LOOP_MS later.
             epoch += Duration::from_millis(LOOP_MS);
             self.epoch = Some(epoch);
             self.cursor = 0;
@@ -711,20 +594,14 @@ impl Office {
             elapsed -= LOOP_MS;
         }
 
-        // Visitor hires (#434): absolute-time one-shots, independent of the
-        // loop machinery (a hire's lifecycle must not replay on wrap).
         self.hires
             .drain_due(now, &mut self.reducer, &mut self.scene);
     }
 
     fn render(&mut self, now: SystemTime, buf_w: u16, buf_h: u16) {
-        // The scene-owned session owns the whole frame (#423 → FloorSession):
-        // the dual per-agent eviction, buffer sizing, layout (`None` desk cap
-        // = fill — the office packs as many desk pods as the canvas
-        // physically fits), the pixel pass, and the coffee/door-anim
-        // epilogue. Too-small layouts leave the cleared buffer; never panics.
-        // The layout seed is the hero's variant seed (NOT floor-derived), so
-        // build the meta then override the seed.
+        // The layout seed is the hero's variant seed (NOT floor-derived), so build
+        // the meta then override the seed. Too-small layouts leave the cleared
+        // buffer; never panics.
         let floor_meta = FloorMeta {
             floor_seed: self.seed,
             ..FloorMeta::for_floor(0, 1)
@@ -743,8 +620,8 @@ impl Office {
         });
     }
 
-    /// Expand the packed-RGB render buffer into the RGBA staging vec (opaque
-    /// alpha). `Rgb` is not `repr(C)`, so expand per-pixel — don't cast.
+    /// `Rgb` is not `repr(C)`, so expand into the RGBA staging vec per-pixel
+    /// (opaque alpha) — don't cast.
     fn expand_rgba(&mut self) {
         let px = self.session.buf().as_slice();
         self.rgba.clear();
@@ -755,29 +632,23 @@ impl Office {
     }
 }
 
-// --- overlay_json helpers (hand-built JSON — no serde in the wasm artifact) ---
+// Hand-built JSON — the wasm artifact ships no serde.
 
-/// `#rrggbb` for an `Rgb`.
 fn hex(c: pixtuoid_core::sprite::Rgb) -> String {
     format!("#{:02x}{:02x}{:02x}", c.r, c.g, c.b)
 }
 
-/// A label tone → this theme's hex color. The tone→role map is single-sourced in
-/// `scene::overlay`; this surface only formats the resolved `Rgb` as `#rrggbb`.
 fn label_hex(theme: &Theme, tone: pixtuoid_scene::overlay::LabelTone) -> String {
     hex(pixtuoid_scene::overlay::label_tone_rgb(tone, theme))
 }
 
-/// A board tone → this theme's hex color. The tone→role map is single-sourced in
-/// `scene::board` (shared with the tui + floating painters), so the three surfaces
-/// can't drift; this surface only formats the resolved `Rgb` as `#rrggbb`.
 fn board_hex(theme: &Theme, tone: pixtuoid_scene::board::BoardTone) -> String {
     hex(pixtuoid_scene::board::tone_rgb(tone, theme))
 }
 
 /// Append `s` as a JSON string literal (quotes + escapes) to `out`. Agent labels
-/// derive from arbitrary cwds, so `"`/`\`/control chars MUST be escaped or one
-/// bad label breaks the whole frame's `JSON.parse` on the site.
+/// derive from arbitrary cwds, so one unescaped char would break the whole
+/// frame's `JSON.parse` on the site.
 fn push_json_string(out: &mut String, s: &str) {
     out.push('"');
     for ch in s.chars() {
@@ -794,7 +665,6 @@ fn push_json_string(out: &mut String, s: &str) {
     out.push('"');
 }
 
-/// Append `"key":{"text":<escaped>,"color":"#hex"}` for one board segment.
 fn push_board_segment(
     out: &mut String,
     key: &str,
@@ -806,7 +676,6 @@ fn push_board_segment(
     out.push_str(&format!(",\"color\":\"{}\"}}", board_hex(theme, seg.tone)));
 }
 
-/// Append a `[{text,color},…]` array of board segments.
 fn push_board_segments(
     out: &mut String,
     segs: &[pixtuoid_scene::board::BoardSegment],
@@ -824,18 +693,12 @@ fn push_board_segments(
     out.push(']');
 }
 
-// The rlib half of the crate-type exists exactly for these: the full
-// `Office` pipeline (script drive + reducer + render + staging) runs
-// natively — the same headless-render precedent as `floating::offscreen`.
-// Only the JS boundary (the wasm-bindgen glue) is wasm-only.
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::script::cast_id;
 
-    /// `Office::new`'s error arm constructs a `JsError` (inert off-wasm), so
-    /// tests unwrap via match — the embedded pack parsing is a build-time
-    /// invariant and the Ok path never touches a JS value.
+    /// `Office::new`'s error arm constructs a `JsError`, so unwrap via match.
     fn office() -> Office {
         match Office::new(1) {
             Ok(o) => o,
@@ -843,9 +706,7 @@ mod tests {
         }
     }
 
-    /// The worker→main handoff, minus the JS/postMessage hop: pump a
-    /// [`SynthTake`] to done, adopt every piece into `o`. Returns the take
-    /// for byte comparisons.
+    /// The worker→main handoff, minus the JS/postMessage hop.
     fn adopt_take_into(o: &mut Office, now_ms: f64) -> SynthTake {
         let mut take = SynthTake::new(now_ms);
         while take.step() > 0 {}
@@ -875,7 +736,6 @@ mod tests {
         let mut o = office();
         let take = adopt_take_into(&mut o, 1_753_000_000_000.0);
         assert!(o.audio_adopt_finish(), "complete handoff promotes");
-        // the ♩ click path: audio_begin is a no-op, warmup already done
         o.audio_begin();
         assert_eq!(o.audio_warmup_step(), 0, "click-time synthesis skipped");
         for i in 0..take.loop_count() {
@@ -903,16 +763,12 @@ mod tests {
             "first ready wins — a late adoption must not stomp the live driver"
         );
         assert_eq!(o.audio_loop_len(0), baseline, "live driver untouched");
-        // pushes with nothing staged are refused (finish consumed the stage)
         assert!(!o.audio_adopt_loop(0, &[0.1]));
         assert!(!o.audio_adopt_oneshot(0, &[0.1]));
     }
 
     #[test]
     fn synth_take_matches_what_the_main_thread_would_have_synthesized() {
-        // worker and main both start a fresh driver at BUILD_SEED for the
-        // same track — the adopted bytes must be exactly what a click-time
-        // warmup would have produced (the determinism the handoff rides on)
         let mut take = SynthTake::new(1_753_000_000_000.0);
         while take.step() > 0 {}
         let mut take2 = SynthTake::new(1_753_000_000_000.0);
@@ -938,18 +794,13 @@ mod tests {
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 10_000.0, 320, 180);
         let json = o.overlay_json();
-        // cc·api resolves the SAME SourceColors::by_prefix hue the dashboard
-        // badges ride; the site paints the whole name in it (● stays tone).
         let cc = pixtuoid_scene::theme::ALL_THEMES[0].source.claude_code;
         let expect = format!("\"badge\":\"#{:02x}{:02x}{:02x}\"", cc.r, cc.g, cc.b);
         assert!(
             json.contains(&expect),
             "labels carry the cc badge hue: {json}"
         );
-        // Every label of the scripted cast has a REGISTERED prefix, so every
-        // label carries a badge — none silently falls back to tone-only.
-        // (Scope the count to the labels array: board segments also emit
-        // "text" keys.)
+        // Scope the count to the labels array: board segments also emit "text".
         let labels_json = json.split("],\"board\"").next().unwrap();
         let labels = labels_json.split("\"text\":").count() - 1;
         let badges = labels_json.split("\"badge\":").count() - 1;
@@ -979,8 +830,6 @@ mod tests {
         let mut o = office();
         o.step(T0_MS, 320, 180);
         assert_eq!(o.frame_len(), 320 * 180 * 4);
-        // Grow: the staging Vec reallocates — the documented frame_ptr
-        // re-read contract's trigger.
         o.step(T0_MS + 100.0, 480, 270);
         assert_eq!(o.frame_len(), 480 * 270 * 4);
         // Too small for any layout: render early-returns, still a valid frame.
@@ -990,9 +839,6 @@ mod tests {
 
     #[test]
     fn beats_fire_once_at_scheduled_times_across_a_wrap() {
-        // Drive PAST one loop in coarse steps: the cast must exist (beats
-        // fired), and the office must stay bounded (no double-fired
-        // SessionStarts duplicating agents across the wrap).
         let mut o = office();
         let step_ms = 5_000u64;
         let total = LOOP_MS + LOOP_MS / 2;
@@ -1006,14 +852,11 @@ mod tests {
             "cast bounded across the wrap, got {}",
             o.scene.agents.len()
         );
-        // Cursor is mid-loop (the wrap reset it from the end of loop 1).
         assert!(o.cursor > 0 && o.cursor < o.beats.len());
     }
 
     #[test]
     fn overlay_json_before_first_step_is_empty_but_valid() {
-        // No step yet → no clock/layout → an empty-but-parseable payload (the site
-        // wraps JSON.parse in try/catch, but the null-safe shape means it never has to).
         let mut o = office();
         let v: serde_json::Value = serde_json::from_str(&o.overlay_json()).expect("valid JSON");
         assert!(v["labels"].as_array().unwrap().is_empty());
@@ -1022,15 +865,12 @@ mod tests {
 
     #[test]
     fn json_string_escapes_quotes_backslashes_and_controls() {
-        // Agent labels derive from arbitrary cwds — a stray quote/backslash/control
-        // char must not break the whole frame's parse.
         let mut s = String::new();
         push_json_string(&mut s, "a\"b\\c\n\td");
         assert_eq!(s, r#""a\"b\\c\n\td""#);
         let mut ctrl = String::new();
         push_json_string(&mut ctrl, "x\u{0001}y");
         assert_eq!(ctrl, "\"x\\u0001y\"");
-        // Round-trips through a real parser back to the original bytes.
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&s)
                 .unwrap()
@@ -1043,8 +883,7 @@ mod tests {
     #[test]
     fn overlay_json_exports_a_board_and_a_label_per_visible_agent() {
         let mut o = office();
-        // Drive to mid-loop at a poster-sized canvas so the hero script seats
-        // several visible agents (same drive shape as `beats_fire_once`).
+        // Poster-sized canvas, driven to mid-loop, so several agents are seated.
         let mut t = 0u64;
         while t <= LOOP_MS / 2 {
             o.step(T0_MS + t as f64, 288, 180);
@@ -1058,7 +897,6 @@ mod tests {
         let json = o.overlay_json();
         let v: serde_json::Value = serde_json::from_str(&json).expect("overlay_json is valid JSON");
 
-        // Board — always present; brand carries the version, the rect is the panel interior.
         let board = &v["board"];
         assert!(
             board["brand"]["text"]
@@ -1077,11 +915,8 @@ mod tests {
             board["rect"]["h"].as_u64().unwrap(),
             pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_H as u64
         );
-        // Every color is a resolved #rrggbb (theme-tracked, not a tone token).
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 
-        // Labels — one per VISIBLE agent (`character_anchor` places them), each with
-        // buffer-px coords + a ●-marked text + a resolved color.
         let labels = v["labels"].as_array().unwrap();
         assert!(!labels.is_empty(), "visible agents produce badges");
         for l in labels {
@@ -1093,7 +928,6 @@ mod tests {
 
     #[test]
     fn overlay_json_colors_track_set_theme() {
-        // Resolving colors wasm-side means a theme swap reflects with no extra call.
         let mut o = office();
         o.step(T0_MS, 288, 180);
         let normal: serde_json::Value = serde_json::from_str(&o.overlay_json()).unwrap();
@@ -1111,7 +945,7 @@ mod tests {
         let mut o = office();
         o.step(T0_MS, 160, 96);
         let epoch_before = o.epoch.unwrap();
-        // 10 simulated minutes of a hidden tab (5 whole loops).
+        // 10 simulated minutes of a hidden tab.
         let gap = 10 * 60 * 1_000u64;
         o.step(T0_MS + gap as f64, 160, 96);
         let epoch_after = o.epoch.unwrap();
@@ -1119,8 +953,6 @@ mod tests {
             .duration_since(epoch_before)
             .unwrap()
             .as_millis() as u64;
-        // The epoch jumped by WHOLE loops (phase kept), leaving < 2 loops of
-        // catch-up — not a 5-loop replay.
         assert_eq!(advanced % LOOP_MS, 0, "re-anchor keeps the loop phase");
         assert!(gap - advanced < 2 * LOOP_MS, "at most one wrap replays");
         assert!(
@@ -1132,14 +964,10 @@ mod tests {
 
     #[test]
     fn exited_agents_render_state_is_evicted_so_loop_two_walks_dont_teleport() {
-        // The door-traffic ids (cast 5 walks out at 104s, cast 7 at wrap-2s)
-        // RECUR next loop. Stale MotionState entry/exit legs gate on
-        // `is_none()`, so a leftover entry from the previous life would skip
-        // the new walk-in — the teleport this eviction exists to prevent.
+        // The door-traffic cast ids RECUR next loop; a stale entry/exit leg gates
+        // on `is_none()`, so a leftover would skip the new walk-in.
         let mut o = office();
         let mut t = 0u64;
-        // Positive control first: while agent 5 lives, its render state must
-        // EXIST — otherwise the absence asserts below pass vacuously.
         while t <= 60_000 {
             o.step(T0_MS + t as f64, 160, 96);
             t += 1_000;
@@ -1149,7 +977,7 @@ mod tests {
                 && o.session.floor.ctx.motion.contains_key(&cast_id(5)),
             "agent 5 must be live with motion state mid-loop (positive control)"
         );
-        // Past agent 5's SessionEnd (104s) + the 4.5s exit grace + sweep.
+        // Past agent 5's SessionEnd + the exit grace + sweep.
         while t <= 115_000 {
             o.step(T0_MS + t as f64, 160, 96);
             t += 1_000;
@@ -1178,14 +1006,11 @@ mod tests {
                 .daemon(gw.source(), gw.instance())
                 .map(|p| p.display_state())
         };
-        o.step(T0_MS, 160, 96); // anchor the loop epoch at T0
-                                // Before the GatewayUp beat: absent (the ~99% no-gateway office).
+        o.step(T0_MS, 160, 96);
         o.step(T0_MS + 10_000.0, 160, 96);
         assert!(lobster(&o).is_none(), "no lobster before 25s");
-        // 30s: up + idle amble.
         o.step(T0_MS + 30_000.0, 160, 96);
         assert_eq!(lobster(&o), Some(DaemonState::Idle));
-        // 45s: run 1 in flight → busy shuttle.
         o.step(T0_MS + 45_000.0, 160, 96);
         assert_eq!(lobster(&o), Some(DaemonState::Busy));
         assert_eq!(
@@ -1194,23 +1019,17 @@ mod tests {
                 .map(|p| p.in_flight_runs.len()),
             Some(1)
         );
-        // 100s (the wide poster's instant): both runs done → idle.
         o.step(T0_MS + 100_000.0, 160, 96);
         assert_eq!(lobster(&o), Some(DaemonState::Idle));
-        // 115s: walked out (Down ≠ absent — the leave animation anchors on it).
+        // Down ≠ absent — the leave animation anchors on it.
         o.step(T0_MS + 115_000.0, 160, 96);
         assert_eq!(lobster(&o), Some(DaemonState::Down));
-        // …and the daemon sweep then REMOVES the row once the walk-out window has
-        // passed, exactly as the app does. Without it the hero kept a `Down` entry
-        // for the rest of the loop and the wall board showed a stale `gw down` chip.
         o.step(T0_MS + 121_000.0, 160, 96);
         assert_eq!(
             lobster(&o),
             None,
             "a walked-out gateway must go ABSENT, not linger Down to the loop wrap"
         );
-        // Next loop, 30s in: the wrap reset the presence cursor; GatewayUp
-        // resurrects Down → Idle and re-anchors the enter walk.
         let wrap30 = T0_MS + LOOP_MS as f64 + 30_000.0;
         o.step(wrap30, 160, 96);
         assert_eq!(lobster(&o), Some(DaemonState::Idle));
@@ -1219,7 +1038,6 @@ mod tests {
     #[test]
     fn hire_walks_in_works_and_leaves_without_replaying_on_wrap() {
         let mut o = office();
-        // No clock yet → refused, never panics.
         assert!(!o.hire(), "hire before the first step is refused");
         assert!(
             o.hires.pending.is_empty(),
@@ -1232,11 +1050,9 @@ mod tests {
         assert!(o.hire(), "the hire is admitted");
         o.step(T0_MS + 31_000.0, 160, 96);
         assert_eq!(o.scene.agents.len(), baseline + 1, "the hire walked in");
-        // Mid-stay: still present (working its spells).
         o.step(T0_MS + 80_000.0, 160, 96);
         assert_eq!(o.scene.agents.len(), baseline + 1);
-        // Past SessionEnd (+70s) + exit grace + GC: gone — and crossing the
-        // loop wrap must NOT resurrect it (hires live outside the loop lanes).
+        // Past SessionEnd + exit grace + GC, and across the loop wrap.
         let after = T0_MS + 31_000.0 + 70_000.0 + 20_000.0 + LOOP_MS as f64;
         o.step(after, 160, 96);
         let hired_alive = o
@@ -1252,8 +1068,6 @@ mod tests {
     fn frame_exposes_the_same_bytes_as_the_ptr_len_contract() {
         let mut o = office();
         o.step(T0_MS, 160, 96);
-        // The safe accessor and the wasm-JS zero-copy pair must be two views
-        // of ONE buffer — same base pointer, same length.
         assert_eq!(o.frame().len(), o.frame_len());
         assert_eq!(o.frame().as_ptr(), o.frame_ptr());
     }
@@ -1261,14 +1075,9 @@ mod tests {
     #[test]
     fn capacity_tracks_the_canvas_layout_so_no_agent_is_stranded_unpainted() {
         use pixtuoid_scene::layout::Layout;
-        // A modest hero buffer (the site renders BUF_H=130; this width seats
-        // the full 11-cast plus at least one spare). The reducer's capacity
-        // must derive from THAT layout, so an admitted agent always has a
-        // paintable desk anchor — an agent whose desk index falls off the
-        // canvas layout renders NOWHERE (character_anchor returns None) while
-        // staying alive in the scene. Free-desk count is DERIVED (capacity −
-        // cast), not a size literal — the density pass re-tunes
-        // desk-per-buffer out from under any hardcoded count.
+        // The site renders BUF_H=130; this width seats the full cast plus at
+        // least one spare. The free-desk count is DERIVED, not a size literal —
+        // the density pass re-tunes desks-per-buffer out from under a literal.
         let (w, h) = (192u32, 130u32);
         let mut o = office();
         let mut t = 0u64;
@@ -1276,9 +1085,6 @@ mod tests {
             o.step(T0_MS + t as f64, w, h);
             t += 1_000;
         }
-        // Click-spam one past the free desks: every free desk seats a hire,
-        // then exhaustion refuses outright — a doomed hire would burn one of
-        // the MAX_LIVE slots for its whole stay with zero feedback.
         let free = o.scene.total_capacity() - o.scene.agents.len();
         assert!(free >= 1, "the layout must leave a spare desk for a hire");
         let clicks = free.min(VisitorHires::MAX_LIVE) + 1;
@@ -1317,10 +1123,6 @@ mod tests {
 
     #[test]
     fn a_phone_narrow_office_the_cast_fills_refuses_hires_outright() {
-        // The 64-96px bufW floor lays out fewer desks than the 11-cast — the
-        // cast that fits seats, the rest stay unadmitted, and a hire click is
-        // politely refused (the documented narrow-phone easter-egg behavior,
-        // now reachable by cast overflow too, not just exact-fit).
         let (w, h) = (96u32, 130u32);
         let mut o = office();
         let mut t = 0u64;
@@ -1342,9 +1144,7 @@ mod tests {
 
     #[test]
     fn hire_cap_holds_under_click_spam() {
-        // 320×180 (a roomy 16:9 canvas) lays out 32 desks — ample room, so
-        // this exercises the MAX_LIVE cap, not desk exhaustion (the
-        // narrow-canvas test above covers that).
+        // A roomy canvas: this exercises the MAX_LIVE cap, not desk exhaustion.
         let mut o = office();
         o.step(T0_MS, 320, 180);
         o.step(T0_MS + 30_000.0, 320, 180);
@@ -1367,9 +1167,6 @@ mod tests {
             VisitorHires::MAX_LIVE,
             "click spam caps at the limit"
         );
-        // The review-caught under-count: one MORE click after the burst's
-        // SessionStarts have drained must still be refused — the registry
-        // counts live hires, not just queued ones.
         assert!(!o.hire(), "a post-burst click must not overshoot the cap");
         o.step(T0_MS + 33_000.0, 320, 180);
         assert_eq!(
@@ -1381,10 +1178,6 @@ mod tests {
 
     #[test]
     fn hire_after_the_stay_ends_re_admits_past_the_cap() {
-        // MAX_LIVE caps CONCURRENT hires, not lifetime hires (the addendum
-        // this test exists for, PR #504's under-claim finding): once the
-        // earlier three finish their stay and get pruned from the office, a
-        // fresh click must be admitted again, not refused forever.
         use crate::script::HIRE_STAY_MS;
         let mut o = office();
         o.step(T0_MS, 320, 180);
@@ -1409,7 +1202,7 @@ mod tests {
         };
         assert_eq!(count_hires(&o), VisitorHires::MAX_LIVE);
 
-        // Past the stay + exit grace + GC sweep: all three pruned out.
+        // Past the stay + exit grace + GC sweep.
         let after_stay = T0_MS + 32_000.0 + HIRE_STAY_MS as f64 + 20_000.0;
         o.step(after_stay, 320, 180);
         assert_eq!(count_hires(&o), 0, "the earlier hires left the office");
@@ -1424,7 +1217,6 @@ mod tests {
 
     #[test]
     fn set_weather_forces_that_weather_and_two_offices_dont_fight() {
-        // Storm and clear render measurably different frames at the same instant.
         let mut storm = Office::new(1).unwrap();
         storm.set_weather(Some("storm".into()));
         storm.step(T0_MS, 160, 96);
@@ -1436,8 +1228,6 @@ mod tests {
         let clear_frame = clear.frame().to_vec();
         assert_ne!(storm_frame, clear_frame, "storm vs clear must differ");
 
-        // ISOLATION: re-stepping `storm` after `clear` set the shared thread-local
-        // must still render STORM (each step re-applies its own override).
         storm.step(T0_MS, 160, 96);
         assert_eq!(
             storm.frame(),
@@ -1445,10 +1235,26 @@ mod tests {
             "storm office must keep its own weather after another office stepped"
         );
 
-        // Unknown name = no panic, no-op (falls back to clock-based).
-        let mut c = Office::new(1).unwrap();
-        c.set_weather(Some("not-a-weather".into()));
-        c.step(T0_MS, 160, 96); // must not panic
+        // `force_weather` leaves the override UNTOUCHED on Err, so a swallowed Err
+        // would render the PREVIOUS office's weather — here, storm.
+        let mut typo = Office::new(1).unwrap();
+        typo.set_weather(Some("stormy".into()));
+        typo.step(T0_MS, 160, 96);
+        let typo_frame = typo.frame().to_vec();
+
+        let mut unforced = Office::new(1).unwrap();
+        typo.step(T0_MS, 160, 96); // leave `typo`'s (mis)override as the last writer
+        unforced.step(T0_MS, 160, 96);
+        // `assert!` over the slices, not `assert_eq!`: a mismatch would otherwise
+        // dump two whole frames into the failure output.
+        assert!(
+            typo_frame == unforced.frame(),
+            "an unknown weather name must render the clock-based cycle"
+        );
+        assert!(
+            typo_frame != storm_frame,
+            "…and specifically must NOT inherit the sibling office's storm"
+        );
     }
 
     #[test]
@@ -1465,7 +1271,7 @@ mod tests {
             "cyberpunk must repaint the office differently from normal"
         );
 
-        a.set_theme("nonsense"); // no-op, no panic, keeps cyberpunk
+        a.set_theme("nonsense");
         let before = a.frame().to_vec();
         a.step(T0_MS, 160, 96);
         assert_eq!(a.frame(), &before[..], "unknown theme is a no-op");
@@ -1473,9 +1279,6 @@ mod tests {
 
     #[test]
     fn is_day_matches_the_engine_sun_window() {
-        // The site's sky-slider phase reads this; it must be the SAME boundary
-        // the office's own sky renders (sky::hour_is_day, [SUN_RISE_H, SUN_SET_H))
-        // so the slider's sun/moon thumb can't drift from the office it previews.
         let o = office();
         assert!(!o.is_day(4.9), "pre-dawn is night");
         assert!(o.is_day(5.0), "sunrise is day");

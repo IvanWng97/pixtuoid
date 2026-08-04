@@ -1,12 +1,11 @@
-//! The generator's STATISTICAL listen gate: render N random-seed
-//! generated takes to wav so the owner can blind-audition the COMPOSER
-//! (not one take). All seeds passing = the generator is ratified; a dud
-//! = tighten `compose`'s constraints and re-batch. Renders through the
-//! REAL `synth::gen_beds` chain, so what you hear is what ships.
+//! The generator's STATISTICAL listen gate: render N random-seed takes to wav so
+//! the owner blind-auditions the COMPOSER, not one take. Renders through the REAL
+//! `synth::gen_beds` chain, so what you hear is what ships.
 //!
 //! Usage:
 //!   cargo run --release -p pixtuoid-scene --example lofi_audition -- \
-//!     [--mood day|night] [--seeds N] [--start S] [--out DIR]
+//!     [--mood day|night] [--seeds N] [--start S] [--out DIR] \
+//!     [--solo pad|sparkle|keys|drums|texture]
 
 use std::fs::File;
 use std::io::{BufWriter, Write as _};
@@ -17,17 +16,35 @@ use pixtuoid_scene::audio::compose::{compose, Mood};
 use pixtuoid_scene::audio::dsp::{NoiseStream, SAMPLE_RATE};
 use pixtuoid_scene::audio::synth::gen_beds;
 
-/// The ratified audition mix gains per mood (pad, sparkle, keys, drums,
-/// texture — `TRACK_STEMS` order), from the frozen takes' LISTEN mixes.
+/// Audition mix gains per mood, in `TRACK_STEMS` order
+/// (pad, sparkle, keys, drums, texture).
 const DAY_MIX: [f32; 5] = [0.70, 0.60, 0.55, 0.45, 0.84];
 const NIGHT_MIX: [f32; 5] = [0.75, 0.55, 0.50, 0.30, 0.84];
 
 /// Soak length target per take — long enough to hear the loop breathe.
 const SOAK_SECS: f32 = 90.0;
 
-/// Every take renders at ONE loudness (playlist consistency — the mix
-/// audit measured 1.6 LU spread under peak normalization).
+/// Every take renders at ONE loudness, so a blind A/B compares takes not gain.
 const TARGET_RMS_DBFS: f32 = -16.0;
+
+/// The soloable lanes, in `gen_beds` order — the ONE spelling `--solo` accepts.
+const SOLO_LANES: [&str; 5] = ["pad", "sparkle", "keys", "drums", "texture"];
+
+/// The `--mood` vocabulary paired with its [`Mood`], so the parse and the error
+/// message can't list different spellings.
+const MOODS: [(&str, Mood); 2] = [("day", Mood::Day), ("night", Mood::Night)];
+
+/// A usage error. This example IS the blind-audition gate, so an unusable
+/// argument fails instead of rendering a DIFFERENT take than the one asked for.
+fn usage_error(msg: String) -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, msg)
+}
+
+fn parse_count(v: Option<String>, flag: &str) -> std::io::Result<u64> {
+    let raw = v.ok_or_else(|| usage_error(format!("{flag} needs a non-negative integer")))?;
+    raw.parse()
+        .map_err(|_| usage_error(format!("{flag} needs a non-negative integer, got {raw:?}")))
+}
 
 fn main() -> ExitCode {
     match run() {
@@ -49,23 +66,45 @@ fn run() -> std::io::Result<()> {
     while let Some(a) = args.next() {
         match a.as_str() {
             "--mood" => {
-                mood = match args.next().as_deref() {
-                    Some("night") => Mood::Night,
-                    _ => Mood::Day,
+                let v = args.next().unwrap_or_default();
+                match MOODS.iter().find(|(name, _)| *name == v) {
+                    Some(&(_, m)) => mood = m,
+                    None => {
+                        return Err(usage_error(format!(
+                            "unknown --mood {v:?}; valid: {}",
+                            MOODS.map(|(name, _)| name).join("|")
+                        )))
+                    }
                 }
             }
-            "--seeds" => seeds = args.next().and_then(|v| v.parse().ok()).unwrap_or(12),
-            "--start" => start = args.next().and_then(|v| v.parse().ok()).unwrap_or(0),
-            "--out" => out = args.next().map(PathBuf::from).unwrap_or(out),
-            // fast voice/lane iteration: hear one stem alone
-            "--solo" => {
-                solo = args.next().as_deref().and_then(|v| {
-                    ["pad", "sparkle", "keys", "drums", "texture"]
-                        .iter()
-                        .position(|&l| l == v)
-                })
+            "--seeds" => {
+                seeds = parse_count(args.next(), "--seeds")?;
+                if seeds == 0 {
+                    return Err(usage_error("--seeds must be at least 1".into()));
+                }
             }
-            _ => {}
+            "--start" => start = parse_count(args.next(), "--start")?,
+            "--out" => match args.next() {
+                Some(v) => out = PathBuf::from(v),
+                None => return Err(usage_error("--out needs a directory".into())),
+            },
+            "--solo" => {
+                let v = args.next().unwrap_or_default();
+                match SOLO_LANES.iter().position(|&l| l == v) {
+                    Some(i) => solo = Some(i),
+                    None => {
+                        return Err(usage_error(format!(
+                            "unknown --solo lane {v:?}; valid: {}",
+                            SOLO_LANES.join("|")
+                        )))
+                    }
+                }
+            }
+            other => {
+                return Err(usage_error(format!(
+                    "unknown argument {other:?}; valid: --mood --seeds --start --out --solo"
+                )))
+            }
         }
     }
     std::fs::create_dir_all(&out)?;
@@ -120,8 +159,8 @@ fn run() -> std::io::Result<()> {
     Ok(())
 }
 
-/// One-figure loudness: scale the mixdown to TARGET_RMS_DBFS (gain
-/// capped ×4 so a sparse take can't be blown up into noise).
+/// Scale the mixdown to `TARGET_RMS_DBFS`; the gain is capped so a sparse take
+/// can't be blown up into noise.
 fn rms_normalize(x: &mut [f32]) {
     let rms = (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt();
     let target = 10f32.powf(TARGET_RMS_DBFS / 20.0);
@@ -131,8 +170,7 @@ fn rms_normalize(x: &mut [f32]) {
     }
 }
 
-/// 16-bit stereo RIFF/WAVE (mono mixdown duplicated L/R) with the
-/// audition soft clip — the same tanh(1.1)·0.85 the python gate used.
+/// 16-bit stereo RIFF/WAVE (mono mixdown duplicated L/R) with the audition soft clip.
 fn write_wav(path: &PathBuf, mono: &[f32]) -> std::io::Result<()> {
     let mut w = BufWriter::new(File::create(path)?);
     let n = mono.len() as u32;

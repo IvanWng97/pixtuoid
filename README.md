@@ -105,7 +105,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
-_Also supported: [Antigravity CLI](https://github.com/antiGravity-AI/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [Oh My Pi](https://omp.sh), [OpenClaw](https://github.com/openclaw/openclaw), [Grok Build](https://github.com/xai-org/grok-build), [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)._
+_Also supported: [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [Oh My Pi](https://omp.sh), [OpenClaw](https://github.com/openclaw/openclaw), [Grok Build](https://github.com/xai-org/grok-build), [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)._
 
 **→ [Full tool × OS support matrix on the site](https://pixtuoid.dev/#tools)**
 
@@ -149,7 +149,7 @@ config), see **[SECURITY.md](SECURITY.md)**.
 
 ## Contributing
 
-PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (the ten agent CLIs plus the OpenClaw gateway already wired up are in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
+PRs welcome — especially new themes, sprite/decoration polish, and `Source` adapters for agent CLIs we don't support yet (the twelve agent CLIs plus the OpenClaw gateway already wired up are in [Supported Tools](#supported-tools)). See **[CONTRIBUTING.md](docs/CONTRIBUTING.md)** for the build/test workflow, conventions, the review process, and how to add a new agent CLI. Architecture and the load-bearing invariants live in [`CLAUDE.md`](CLAUDE.md).
 
 ## Acknowledgments
 

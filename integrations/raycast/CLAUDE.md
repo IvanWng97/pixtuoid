@@ -41,8 +41,9 @@ generated — eslint/prettier-ignored, never hand-edit them. This is
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests still pin
 the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
 token plus an optional failure-detail field, split from the old folded
-`failed: <msg>` form BEFORE store publication — see the sharp edge below and
-the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
+`failed: <msg>` form back when this in-repo copy was the only consumer — see
+the sharp edge below and the wire-shape sharp edge in
+`crates/pixtuoid/CLAUDE.md`.)
 
 ## Sharp edges (don't be surprised by these)
 
@@ -73,17 +74,42 @@ the wire-shape sharp edge in `crates/pixtuoid/CLAUDE.md`.)
   emitted only by `pixtuoid sources set` (the declarative reconcile this
   extension never invokes). Failure detail rides in the optional `message`
   field (present exactly when `outcome === "failed"`) — match tokens exactly,
-  no prefix-stripping. This clean split landed while the in-repo extension was
-  the ONLY consumer (it ships atomically with the binary; NOT yet on the
-  Raycast store). **After store publication, installed copies parse the wire
-  independently of the binary's version — any further wire change needs a
-  version handshake, not a flag-day edit.**
+  no prefix-stripping. This clean split was made ASSUMING the in-repo extension
+  was the ONLY consumer. **It was not** — the last `ray publish` marker
+  (`__raycast_latest_publish_ext/pixtuoid__` → b870d8ba, 2026-06-19) PREDATES
+  the split (e21ec7f0, 2026-07-02), so the break shipped to the store: what
+  users have installed still prefix-strips `failed: <msg>` and renders a bare
+  `failed` toast with the real reason dropped. A republish clears that; the
+  parse in `src/` is already correct. **Treat the wire as PUBLISHED from here
+  on** (`raycast.com/IvanWng97/pixtuoid`) — installed copies parse it
+  independently of the binary's version, so any further wire change needs a
+  version handshake, not a flag-day edit.
 
 ## Gates
 
-CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npx tsc
---noEmit` → `npx eslint .`. Run those two locally before "done." **`ray build` /
+CI (`.github/workflows/raycast.yml`, Linux runner): `npm ci` → `npm run audit` →
+the `gen:contract` freshness diff → `npx tsc --noEmit` → `npx eslint .`. Run them
+locally before "done." **`ray build` /
 `ray lint`** (manifest + icon validation, the Prettier pass) need the **macOS
 Raycast app** and only run before a store publish — they are NOT in CI, so a
 green PR does not prove the manifest is publishable. See the
 [README](README.md) for `npm run {build,dev,lint}`.
+
+- **`npm ci` reports HIGH advisories here, and the "don't fix" call is CHECKED
+  rather than asserted.** `npm run audit` (`scripts/audit-adjudicated.mjs`)
+  passes only while the live advisory set EQUALS the adjudicated set in that
+  file — so a new advisory reds CI, and one that clears upstream reds it too,
+  which keeps a refusal from outliving its reason. It is a script because
+  `npm audit` has no per-advisory ignore flag (only `--audit-level`). Today's
+  one entry is the brace-expansion DoS **GHSA-mh99-v99m-4gvg**, reached solely
+  through `@oclif/core → ejs ^3 → jake ^10 → filelist ^1 → minimatch ^5`; the
+  entry carries why the override is refused (5.x made the export an object,
+  so `npm audit` goes green over code that throws) and the one upstream move
+  that clears it.
+- **A chord Raycast RESERVES is swallowed, so its Action is unreachable — and
+  `@raycast/no-reserved-shortcut` is escalated to `error` here.** Upstream ships
+  it at warn and `eslint .` exits 0 on warnings, which is how an `Open Extension
+  Preferences` action bound to `⌘,` (Raycast's own `OpenPreferences`) shipped
+  dead. Nothing else sees it: `tsc` types the chord fine and `ray lint` is not in
+  CI. Its sibling `@raycast/prefer-common-shortcut` stays a warning — style
+  advice a routine version bump could turn into a surprise red.
