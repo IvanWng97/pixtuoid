@@ -253,7 +253,7 @@ display-line authority (`starText`), unit-tested on its null-stars arm since
   busy/idle, text = identity. An unregistered prefix omits `badge` and the
   label stays tone-only. SHARP EDGE:
   the engine re-derives the prefix by splitting the label on its FIRST `·` —
-  a cross-crate echo of core's `source_label_prefix` + `·` join, pinned by
+  a cross-crate echo of core's `decoder::label_prefix_for` + `·` join, pinned by
   the web `labels == badges` test, not a shared const.
   `OfficeBackdrop.astro` lays pooled Monaspace Neon (`var(--font-mono)`)
   DOM `<span>`s over the canvas at DISPLAY resolution, positioned by the canvas's
