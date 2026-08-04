@@ -15,8 +15,14 @@ path = "junit.xml"
 # These assert wall-clock bounds on a CHILD PROCESS's spawn+exit; under the
 # fully-parallel suite on a loaded machine, exec/dyld scheduling jitter alone
 # blows the bound, so give them the machine to themselves.
+# Listed by NAME, not by suffix: the shape is "spawns the shim and polls a
+# deadline", which no name pattern infers — a suffix filter silently missed one.
 [[profile.default.overrides]]
-filter = 'test(_exits_zero_without_blocking) | test(_within_watchdog_bound)'
+filter = '''
+  test(missing_socket_exits_zero_without_blocking)
+  | test(stalled_listener_shim_exits_zero_within_watchdog_bound)
+  | test(codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin)
+'''
 threads-required = "num-cpus"
 
 # Same load-sensitivity as the shim bounds above: this pair spawns a real
