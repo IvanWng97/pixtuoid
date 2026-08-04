@@ -396,6 +396,21 @@ pub fn density_variant_name(base: &str, density: u16) -> String {
     format!("{base}{DENSITY_VARIANT_SEP}{density}x")
 }
 
+/// The largest density a variant name may claim.
+///
+/// A pack author types this number, so it is untrusted input to arithmetic that
+/// multiplies it by a frame dimension. `desk@60000x` parsed happily and then
+/// overflowed `base.width() * density` — a panic in any debug build (the crash
+/// hook fires, offering to file a bug for a pack typo) and a wrapped, wrong
+/// dimension in release. Bounding it HERE fixes every downstream multiply at
+/// once, and keeps a nonsense density out of `RenderScale::fit`, where
+/// `(available / density) * density` would floor to zero and silently withdraw
+/// the richer profile.
+///
+/// 64 is far past any authoring grid: the bundled art is 4x, and a 64x variant
+/// of the 14px desk would already be a 896px sprite.
+pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
+
 /// The base piece and density a variant name denotes, if it is one.
 ///
 /// `1x` is deliberately NOT a variant: it would be a second name for the base
@@ -410,7 +425,7 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
         return None;
     }
     let n: u16 = digits.parse().ok()?;
-    (n >= 2).then_some((base, n))
+    (2..=MAX_DENSITY_VARIANT).contains(&n).then_some((base, n))
 }
 
 /// Whether `name` is a furniture animation a pack may provide — either a
@@ -499,16 +514,26 @@ pub struct ValidationReport {
     /// Each density variant whose frame size is not its base piece's times the
     /// density its NAME claims.
     pub mismatched_density: Vec<DensityMismatch>,
+    /// Each density variant whose BASE piece the pack does not ship.
+    ///
+    /// The size claim is unprovable without the base, so the variant would load
+    /// and then be validated against whatever the default pack supplies — an
+    /// author who renamed `desk.sprite` to `desk@4x.sprite` instead of adding it
+    /// otherwise gets a clean bill of health from the one tool whose job is to
+    /// tell them.
+    pub orphan_variants: Vec<String>,
 }
 
 impl ValidationReport {
     /// True when the pack is unusable — a required animation is missing, one
-    /// has too few frames, or a density variant is not the size it claims.
-    /// Missing OPTIONAL animations do not count.
+    /// has too few frames, or a density variant is not the size it claims (or
+    /// has no base to claim it against). Missing OPTIONAL animations do not
+    /// count.
     pub fn has_errors(&self) -> bool {
         !self.missing_required.is_empty()
             || !self.insufficient_frames.is_empty()
             || !self.mismatched_density.is_empty()
+            || !self.orphan_variants.is_empty()
     }
 }
 
@@ -585,13 +610,24 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     // the claim is only ever tested by whichever renderer happens to look for
     // that density — i.e. silently, at paint time, on someone else's terminal.
     for (name, base, density) in &variants {
-        let (Some(art), Some(base_art)) = (
-            pack.animation(name).and_then(|a| a.frames.first()),
-            pack.animation(base).and_then(|a| a.frames.first()),
-        ) else {
+        let Some(base_art) = pack.animation(base).and_then(|a| a.frames.first()) else {
+            // No base means no claim to check it against. Reported rather than
+            // skipped: silence here is what let a renamed `desk.sprite` pass.
+            report.orphan_variants.push(name.clone());
             continue;
         };
-        let claimed = (base_art.width() * density, base_art.height() * density);
+        let Some(art) = pack.animation(name).and_then(|a| a.frames.first()) else {
+            // An empty variant is already `insufficient_frames`' finding.
+            continue;
+        };
+        // Saturating, not `*`: the density is bounded but the BASE is not — a
+        // pack may ship art of any size, and this number is only ever REPORTED.
+        // A saturated claim still differs from any real frame size, so the
+        // mismatch fires either way.
+        let claimed = (
+            base_art.width().saturating_mul(*density),
+            base_art.height().saturating_mul(*density),
+        );
         let found = (art.width(), art.height());
         if claimed != found {
             report.mismatched_density.push(DensityMismatch {
@@ -788,6 +824,71 @@ mod validation_floor_tests {
             report.has_errors(),
             "a lying variant must fail validate-pack, not merely be noted"
         );
+    }
+
+    /// The density is pack-author input to arithmetic that multiplies it by a
+    /// frame dimension. Unbounded, `desk@60000x` panicked every debug build —
+    /// including `run --pack-dir`, where the crash hook offered to file a bug
+    /// for a typo — and wrapped to a nonsense dimension in release.
+    #[test]
+    fn a_density_past_the_ceiling_is_not_a_variant_at_all() {
+        assert_eq!(split_density_variant("desk@60000x"), None);
+        assert_eq!(split_density_variant("desk@65535x"), None);
+        // The boundary from both sides, so a future `<` typo cannot slip through.
+        assert_eq!(
+            split_density_variant("desk@64x"),
+            Some(("desk", MAX_DENSITY_VARIANT))
+        );
+        assert_eq!(split_density_variant("desk@65x"), None);
+        // An out-of-range density is not a variant, so the name is simply
+        // unknown — never a piece whose base the pack must supply.
+        assert!(!is_optional_furniture_animation("desk@60000x"));
+    }
+
+    /// A bounded density still meets an unbounded BASE, and the claim is only
+    /// ever reported — so it saturates rather than wrapping, and the mismatch
+    /// still fires.
+    #[test]
+    fn a_huge_base_saturates_its_claim_instead_of_wrapping() {
+        let wide = format!("@frame 0\n{}", "A ".repeat(2000).trim_end());
+        let pack = load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.desk]\nframes=[\"wide.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
+            &[("wide.sprite", &wide), ("one.sprite", "@frame 0\nA")],
+        )
+        .expect("pack builds");
+        let report = validate_pack_animations(&pack);
+        let m = report
+            .mismatched_density
+            .first()
+            .expect("the variant is not 64x the base");
+        assert_eq!(
+            m.claimed.0,
+            u16::MAX,
+            "2000 * 64 saturates instead of wrapping to 62_464"
+        );
+        assert_ne!(m.claimed, m.found, "a saturated claim is still a mismatch");
+    }
+
+    /// Renaming `desk.sprite` to `desk@4x.sprite` instead of ADDING it used to
+    /// pass clean: the loader has no base to check the claim against, and the
+    /// runtime merge then validates it against the DEFAULT pack's art.
+    #[test]
+    fn a_variant_whose_base_the_pack_does_not_ship_is_an_error() {
+        let pack = load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.\"desk@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n",
+            &[("four.sprite", "@frame 0\nA A A A")],
+        )
+        .expect("pack builds");
+        let report = validate_pack_animations(&pack);
+        assert_eq!(report.orphan_variants, vec!["desk@4x".to_string()]);
+        assert!(
+            report.mismatched_density.is_empty(),
+            "with no base there is no size claim to contradict"
+        );
+        assert!(report.has_errors(), "the author must be told, not passed");
     }
 
     #[test]

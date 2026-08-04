@@ -682,7 +682,13 @@ fn densest_art<'a>(
         else {
             continue;
         };
-        if art.width() != base.width() * density || art.height() != base.height() * density {
+        // Saturating for the same reason the validator's twin is: the density
+        // is bounded, the BASE is not. A saturated expectation matches nothing,
+        // so an absurd pair falls through to the base art rather than wrapping
+        // into a size that happens to match.
+        if art.width() != base.width().saturating_mul(density)
+            || art.height() != base.height().saturating_mul(density)
+        {
             continue;
         }
         // `density` divides `s` and both are >= 1, so the quotient is nonzero.

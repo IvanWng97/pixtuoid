@@ -38,10 +38,10 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it. `missing_required`/
-    // `missing_optional` are registry constants, but insufficient-frames and
-    // mismatched-density names can be DENSITY VARIANTS, which the validator
-    // finds by walking the pack's own table — so those are pack input too, and
-    // get the same sanitising as the unknown keys.
+    // `missing_optional` are registry constants, but insufficient-frames,
+    // mismatched-density and orphan-variant names can be DENSITY VARIANTS,
+    // which the validator finds by walking the pack's own table — so those are
+    // pack input too, and get the same sanitising as the unknown keys.
     for name in &report.missing_required {
         eprintln!("ERROR: missing required animation \"{name}\"");
     }
@@ -61,6 +61,12 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
             m.claimed.1
         );
     }
+    for name in &report.orphan_variants {
+        eprintln!(
+            "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
+            strip_control_chars(name)
+        );
+    }
     for name in &report.missing_optional {
         println!("WARN:  missing optional animation \"{name}\" (will not render)");
     }
@@ -70,7 +76,8 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     let errors = report.missing_required.len()
         + report.insufficient_frames.len()
-        + report.mismatched_density.len();
+        + report.mismatched_density.len()
+        + report.orphan_variants.len();
     let warnings = report.missing_optional.len();
     eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
 
