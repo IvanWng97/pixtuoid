@@ -1,10 +1,10 @@
-use super::source_label_prefix;
+use super::label_prefix_for;
 use crate::source::registry;
 
 #[test]
 fn every_registered_source_has_two_char_label_prefix() {
     for src in registry::registered_source_names() {
-        let prefix = source_label_prefix(src);
+        let prefix = label_prefix_for(src);
         assert_eq!(
             prefix.chars().count(),
             2,

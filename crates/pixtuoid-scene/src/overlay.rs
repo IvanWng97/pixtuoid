@@ -18,8 +18,8 @@ use crate::theme::Theme;
 
 /// The separator between a label's source prefix and its cwd/disambiguation
 /// tail (`cc·repo`, `cc·repo·1a2b`). The label itself is WRITTEN core-side as a
-/// bare `·` (`reducer::source_label_prefix`) — a crate boundary this const can't
-/// reach — so it must MATCH that char.
+/// bare `·` (`source::decoder::cwd_basename_label`) — a crate boundary this
+/// const can't reach — so it must MATCH that char.
 const LABEL_SEP: char = '\u{b7}';
 
 /// Activity-derived label tone — backend-agnostic.
