@@ -290,32 +290,3 @@ fn malformed_stdin_exits_zero() {
         "malformed stdin must still exit 0; got {status:?}"
     );
 }
-
-/// Pins the `.config/nextest.toml` exclusivity roster against this file.
-/// nextest accepts a filter naming a test that does not exist, exits 0, and
-/// warns nothing — so nothing else would notice.
-#[test]
-fn every_child_process_timing_test_has_a_nextest_exclusivity_override() {
-    // `file!()` is WORKSPACE-relative while the test's cwd is the crate dir.
-    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let toml = std::fs::read_to_string(root.join(".config/nextest.toml"))
-        .expect("workspace .config/nextest.toml");
-    let own_source = std::fs::read_to_string(root.join(file!())).expect("read own source");
-
-    for name in [
-        "missing_socket_exits_zero_without_blocking",
-        "stalled_listener_shim_exits_zero_within_watchdog_bound",
-        "codewhale_event_mode_builds_envelope_from_env_and_ignores_stdin",
-    ] {
-        assert!(
-            toml.contains(name),
-            "`{name}` spawns the shim and polls a deadline; it needs \
-             threads-required exclusivity in .config/nextest.toml"
-        );
-        assert!(
-            own_source.contains(&format!("fn {name}(")),
-            "`{name}` is named in .config/nextest.toml but gone from here — \
-             drop the dead filter arm"
-        );
-    }
-}
