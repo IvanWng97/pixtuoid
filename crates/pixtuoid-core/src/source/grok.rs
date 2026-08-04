@@ -1030,6 +1030,90 @@ mod tests {
                "params": {"sessionId": "0197fa30-sess", "update": update}})
     }
 
+    #[test]
+    fn a_known_or_empty_method_never_breadcrumbs_as_unknown() {
+        // Every line MUST carry a `sessionUpdate` tag or the decode bails
+        // before the method match and the assertion below proves nothing.
+        let line = |method: &str| {
+            json!({"timestamp": 1721131200u64, "method": method,
+                   "params": {"sessionId": "0197fa30-sess",
+                              "update": {"sessionUpdate": "plan"}}})
+        };
+        for method in ["session/update", "_x.ai/session/update", ""] {
+            let logs = crate::test_capture::capture_logs(|| {
+                let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line(method));
+            });
+            assert!(
+                !logs.contains("unknown_event"),
+                "method {method:?} must stay silent, got:\n{logs}"
+            );
+        }
+        // Positive control: the arm DOES fire for a genuinely new namespace, so
+        // the silence asserted above is a decision and not an early return.
+        let logs = crate::test_capture::capture_logs(|| {
+            let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line("_x.ai/teleport"));
+        });
+        assert!(
+            logs.contains("unknown_event") && logs.contains("_x.ai/teleport"),
+            "an unknown method must breadcrumb, got:\n{logs}"
+        );
+    }
+
+    #[test]
+    fn model_info_surfaces_when_only_one_of_model_or_effort_is_present() {
+        for (field, value) in [("model_id", "grok-4"), ("reasoning_effort", "high")] {
+            let evs = decode_line(json!({
+                "timestamp": 1721131200u64, "method": "_x.ai/session/update",
+                "params": {"sessionId": "0197fa30-sess",
+                           "update": {"sessionUpdate": "model_changed", field: value}}
+            }));
+            assert!(
+                evs.iter()
+                    .any(|e| matches!(e, AgentEvent::ModelInfo { .. })),
+                "{field} alone must still surface ModelInfo, got {evs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bare_spawn_subagent_call_is_task_detail_without_a_subagent_type_arg() {
+        // `background: false` is what makes a spawn BLOCKING; the args carry no
+        // `subagent_type`, so only the tool NAME can classify this one.
+        assert_eq!(
+            grok_tool_detail("spawn_subagent", Some(&json!({"background": false}))),
+            ToolDetail::Task,
+            "the tool NAME alone marks a blocking spawn"
+        );
+        assert_ne!(
+            grok_tool_detail("read_file", Some(&json!({"background": false}))),
+            ToolDetail::Task
+        );
+    }
+
+    #[test]
+    fn grok_content_never_supplies_a_cwd_so_the_path_deriver_still_runs() {
+        // `walk.rs` combines these as `content.or_else(path_deriver)`, so a
+        // `Some(empty)` here would SHORT-CIRCUIT `grok_cwd_from_path` and land
+        // the slot on the unknown-cwd short reap.
+        assert_eq!(extract_grok_cwd(&json!({"cwd": "/Users/dev/proj"})), None);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn a_drive_letter_group_dir_is_not_absolute_off_windows() {
+        // `C:/proj` percent-encoded: only the `cfg!(windows)` arm may accept a
+        // drive letter, so off Windows this must fall through to the `.cwd`
+        // sibling rather than read as an absolute path.
+        let dir = tempfile::tempdir().unwrap();
+        let group = dir.path().join("C%3A%2Fproj");
+        std::fs::create_dir_all(group.join("0197fa30-sess")).unwrap();
+        assert_eq!(
+            grok_cwd_from_path(&group.join("0197fa30-sess").join("updates.jsonl")),
+            None,
+            "no .cwd sibling and a non-absolute decode resolves nothing"
+        );
+    }
+
     fn xai_line(update: Value) -> Value {
         json!({"timestamp": 1721131200u64, "method": "_x.ai/session/update",
                "params": {"sessionId": "0197fa30-sess", "update": update,

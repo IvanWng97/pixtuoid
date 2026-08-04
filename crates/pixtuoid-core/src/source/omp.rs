@@ -344,6 +344,19 @@ mod tests {
     const CHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha.jsonl";
     const GRANDCHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha/GoodWolf.jsonl";
 
+    #[test]
+    fn a_root_stem_needs_both_the_date_shape_and_the_uuid_separator() {
+        // The length gate is EXCLUSIVE: `<19-char ts>_` is the longest stem that
+        // still carries no uuid, so it must not read as a root.
+        assert!(!looks_like_session_stem("2026-07-16T12-00-05_"));
+        assert!(looks_like_session_stem("2026-07-16T12-00-05_abc"));
+        // Date-shaped and long enough, but no `_` at all — a subagent task id
+        // can never reach this shape, so the separator is what makes it a root.
+        assert!(!looks_like_session_stem("2026-07-16T12-00-05-999999"));
+        // The `T` check stays case-insensitive for the lowercased Windows key.
+        assert!(looks_like_session_stem("2026-07-16t12-00-05_abc"));
+    }
+
     fn root() -> AgentId {
         AgentId::from_parts(SOURCE_NAME, ROOT_KEY)
     }

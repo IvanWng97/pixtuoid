@@ -8,6 +8,7 @@ use pixtuoid_core::source::antigravity::AntigravitySource;
 use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 use pixtuoid_core::source::codex::CodexSource;
 use pixtuoid_core::source::copilot::CopilotSource;
+use pixtuoid_core::source::grok::GrokSource;
 use pixtuoid_core::source::AgentEvent;
 use pixtuoid_core::source::Source;
 use pixtuoid_core::source::Transport;
@@ -292,6 +293,72 @@ async fn copilot_source_run_emits_session_start_from_events_jsonl() {
         session_id.as_deref(),
         Some("65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3"),
         "CopilotSource::run should surface a copilot SessionStart from events.jsonl"
+    );
+    handle.abort();
+}
+
+// grok was the ONE transcript source with no `run` coverage here, which is why
+// mutating its body to `Ok(())` survived the whole suite while the other five
+// sources' identical mutants were caught (#828).
+// Layout: <sessions_root>/<url-encoded-cwd>/<session-id>/updates.jsonl.
+#[tokio::test]
+async fn grok_source_run_emits_events_from_updates_jsonl() {
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let sessions_root = dir.path().to_path_buf();
+    let session_id = "0197fa30-1111-7000-8000-000000000001";
+    let session_dir = sessions_root.join("%2Frepo").join(session_id);
+    tokio::fs::create_dir_all(&session_dir).await.unwrap();
+    let transcript = session_dir.join("updates.jsonl");
+
+    use pixtuoid_core::AgentId;
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let src = GrokSource {
+        sessions_root,
+        child_end_unclaims: None,
+    };
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    let tool_call = serde_json::json!({
+        "timestamp": 1_784_203_205u64,
+        "method": "session/update",
+        "params": {"sessionId": session_id,
+                   "update": {"sessionUpdate": "tool_call",
+                              "toolCallId": "c1", "title": "grep"}}
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&transcript)
+        .await
+        .unwrap();
+    f.write_all(format!("{tool_call}\n").as_bytes())
+        .await
+        .unwrap();
+    f.flush().await.unwrap();
+    drop(f);
+
+    let mut saw_start = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::ActivityStart { agent_id, .. }))) => {
+                // grok keys on the transcript's PARENT-DIR name, so the id the
+                // watcher mints must equal the hook leg's for the same session.
+                assert_eq!(agent_id, AgentId::from_parts("grok", session_id));
+                saw_start = true;
+                break;
+            }
+            Ok(Some(_)) => continue,
+            _ => continue,
+        }
+    }
+    assert!(
+        saw_start,
+        "GrokSource::run should surface ActivityStart from updates.jsonl"
     );
     handle.abort();
 }

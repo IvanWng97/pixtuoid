@@ -37,4 +37,20 @@ exclude_re = [
     # Reached under test, but only on a branch where the mutation is unobservable.
     'unix\.rs.*replace ensure_owned_socket_dir ->',   # tests hit only the no-op branch
     'liveness\.rs.*replace ProbeSnapshot::from_open_fds ->',  # proc walk finds nothing under test
+    # #828: pure-substitution wrappers whose decision logic + pins live in the
+    # `_resolved` core one line down. Keep them substitutions — logic added here
+    # is unmeasurable, exactly as `ensure_owned_socket_dir` above.
+    'hermes\.rs.*replace hermes_home ->',
+    'omp/native\.rs.*replace omp_probe_root ->',
+    'grok/native\.rs.*replace grok_probe_root ->',
+    # #828: the `from_open_fds` family — under test the proc walk finds nothing,
+    # so `Some(empty)` is indistinguishable from the real answer. Pinned to the
+    # `Some(Default` spelling: each fn's `-> None` twin IS killable and caught.
+    'omp/native\.rs.*replace live_omp_session_ids -> Option<ProbeSnapshot> with Some\(Default',
+    'codex/native\.rs.*replace live_codex_rollout_ids -> Option<ProbeSnapshot> with Some\(Default',
+    'mod\.rs.*replace codex_pid_for_session -> Option<i32> with None',
+    # #828: `cfg!(windows)` short-circuits this comparison to a constant `false`
+    # off Windows, so the operator is unobservable there. Its `&&` sibling one
+    # column left IS killable and is caught.
+    'grok\.rs.*replace == with != in grok_cwd_from_path',
 ]

@@ -750,6 +750,35 @@ impl SceneState {
 mod tests {
     use super::*;
 
+    #[test]
+    fn slot_label_borrows_the_same_text_through_every_view() {
+        let label = SlotLabel::new("pixtuoid", LabelProvenance::Renamed);
+        assert_eq!(AsRef::<str>::as_ref(&label), "pixtuoid");
+        assert_eq!(&*label, "pixtuoid");
+        assert_eq!(label.to_string(), "pixtuoid");
+    }
+
+    #[test]
+    fn tokens_used_is_omitted_only_when_it_is_actually_zero() {
+        let id = AgentId::from_transcript_path("/p/tok.jsonl");
+        let mut slot = make_slot(id, 0);
+
+        let zero = serde_json::to_string(&slot).expect("serialize");
+        assert!(
+            !zero.contains("tokens_used"),
+            "a zero accumulator stays off the wire, got {zero}"
+        );
+
+        slot.tokens_used = 7;
+        let seven = serde_json::to_string(&slot).expect("serialize");
+        assert!(
+            seven.contains(r#""tokens_used":7"#),
+            "a NONZERO accumulator must serialize, got {seven}"
+        );
+        let back: AgentSlot = serde_json::from_str(&seven).expect("deserialize");
+        assert_eq!(back.tokens_used, 7);
+    }
+
     fn make_slot(id: AgentId, desk_index: usize) -> AgentSlot {
         let now = SystemTime::now();
         AgentSlot {

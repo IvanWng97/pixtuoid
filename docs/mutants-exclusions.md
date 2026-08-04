@@ -97,6 +97,67 @@ its sole caller collapses both spellings one line later:
 call site in the tree. The grok OVERRIDE that makes the seam matter is pinned
 separately by the `with_cwd_deriver` test.
 
+## The #828 triage (2026-08): 77 survivors, 58 real
+
+A full re-run of `source/**` + `state/**` (minus `hook/`, `jsonl/`) scored
+**1105 mutants: 898 caught, 77 missed, 126 unviable, 4 timeouts**. Re-running the
+77 under `--test-workspace true` split them **58 real gaps / 19 false positives**
+— the blind spot this file exists to warn about, measured rather than assumed.
+
+Two findings worth carrying forward:
+
+- **The false-positive set is not where it was expected.** `state/mod.rs` was 6
+  of 9, not 9 of 9. The largest single group was `<impl Source for X>::name`,
+  10 mutants across five `native.rs` files, all killed by the binary's tests.
+- **`--timeout-multiplier` must clear nextest's own watchdog.**
+  `.config/nextest.toml` sets `slow-timeout = { period = "60s",
+  terminate-after = 3 }`, so a hung test is killed and reported BY NAME at 180s.
+  Below that, cargo-mutants' own timeout fires first and files a genuine
+  infinite-loop detection as a `timeout` row instead of a `caught` one. The four
+  Phase-A timeouts were all real hangs (`i *= 1`, `i *= 3`, `i -= 1` on loop
+  indices); a further 20 timeouts were pure CPU contention from a second
+  mutation run and every one resolved to `missed` on a quiet machine.
+
+Load asymmetry, for anyone re-running this: contention makes tests slower (false
+timeout) or flaky-failing (false *caught*), but never makes one spuriously PASS.
+So `missed` verdicts are load-robust and only `caught`/`timeout` need a quiet
+re-run.
+
+### Pure-substitution wrappers (`hermes_home`, `omp_probe_root`, `grok_probe_root`)
+
+Each is a one-line substitution over a `_resolved` core that takes the resolved
+environment explicitly, and each core carries its own pins — 4 in-test call sites
+for `resolve_hermes_home`, 4 for `grok_probe_root_resolved`, 10 for
+`omp_probe_root_resolved`. Same shape and same rule as `ensure_owned_socket_dir`
+above: **keep them substitutions.** Logic added to the wrapper becomes
+unmeasurable.
+
+`omp_probe_root_resolved` was NOT excluded — it was under-pinned relative to its
+codex twin, which already had
+`probe_root_accepts_resolved_codex_home_sessions_layout`, and got the missing
+test instead (both halves of the `.omp/agent` layout check). All 10 of its
+mutants are now caught.
+
+### The `from_open_fds` family (`live_omp_session_ids`, `live_codex_rollout_ids`, `codex_pid_for_session`)
+
+Same derivation as `ProbeSnapshot::from_open_fds` above: reaching the firing
+branch needs a live process of the right name holding a transcript fd, so under
+test the walk finds nothing and `Some(empty)` is indistinguishable from the real
+answer. `codex_pid_for_session -> None` is the same wall one level up — its
+`Some(n)` twins are all caught, so only the `None` spelling is pinned.
+
+Each entry pins the exact replacement value, never the function name, because
+every one of these fns has a killable sibling under the same name.
+
+### `grok_cwd_from_path` — `==` vs `!=` inside a `cfg!(windows)` guard
+
+`decoded.starts_with('/') || (cfg!(windows) && decoded.chars().nth(1) ==
+Some(':'))`. Off Windows `cfg!(windows)` folds to `false`, and `false && X` is
+`false` for either operator, so the comparison is unobservable on the hosts that
+run mutants. Its `&&` sibling one column left IS observable off Windows (`false
+|| X` exposes `X`) and is caught by
+`a_drive_letter_group_dir_is_not_absolute_off_windows`.
+
 ## Deliberately NOT excluded
 
 `mascot_position`'s walk-in boundary (`if entered < MASCOT_ENTER_MS`) is an
@@ -112,6 +173,29 @@ mascot_position"), so no regex can exclude one without the other. Hence neither 
 the walk-in shows up as a known-noise row, documented here, and the stagger one is
 caught. Same call as the `% with /` pair in `mascot_spot_for` before that fn was
 deleted.
+
+**`proc_start.rs` — `imp`'s cfg triplet (#828).** `pid_start_marker` substitutes
+into a per-OS `imp`: `cfg(macos)`, `cfg(linux)`, and a `cfg(not(any(…)))` stub.
+On a macOS host only the first COMPILES, so the other two survive as
+cross-compile noise. Measured: line 21 (macOS) is caught on all 3 of its mutants
+plus its `!=` operator; lines 47 and 54 miss on all 5 of theirs. Line 54 carries
+2 rather than 3 because its body already IS `None`, so cargo-mutants skips the
+identity mutation.
+
+The descriptions are identical apart from the line number — `replace imp ->
+Option<u64> with None` is BOTH a caught row and a missed one — so any regex
+hiding lines 47/54 also hides the killable line 21. Per this file's own rule,
+none is added. The compiled variant is pinned per-platform by
+`marker_is_stable_for_a_live_process_and_none_after_it_dies`.
+
+**`grok/native.rs` — `live_grok_session_ids`'s cfg twin (#828).** Same shape: the
+`cfg(unix)` implementation at line 28 has BOTH its mutants caught (including
+`Some(Default::default())`, killed by
+`binder_reads_a_real_registry_and_binds_our_own_live_pid`), while the
+`cfg(not(unix))` stub at line 61 carries the same description and cannot compile
+here. Excluded by neither, for the same reason. Note this is the ONE
+`live_*_session_ids` outside the `from_open_fds` family — grok reads a JSON
+registry, so its unix half is fully killable.
 
 ## Reached-under-test but unobservable
 
