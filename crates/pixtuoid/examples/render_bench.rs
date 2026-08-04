@@ -104,7 +104,7 @@ fn main() -> Result<()> {
             let _ = r.render(&scene, &pack, theme, now, w, h, FloorMeta::ground(), None);
             samples.push(t.elapsed().as_secs_f64() * 1000.0);
         }
-        samples.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        samples.sort_by(f64::total_cmp);
         let min = samples[0];
         let p50 = samples[samples.len() / 2];
         let px = w as f64 * h as f64;
