@@ -587,14 +587,13 @@ old CommonJS launcher line to 0.15.2 (removing its deprecated
 `rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
 while LHCI 0.15.1 still calls `require('chrome-launcher')`.
 
-**Nothing gates a STALE `overrides` entry** — unlike `deny.toml`'s
-`unused-ignored-advisory = "deny"` or raycast's `audit-adjudicated.mjs`, npm
-has no "this pin stopped doing anything" check, so retiring one is a manual
-audit. The test is a FRESH resolve: `package.json` alone, no lockfile, with
-and without the entry — identical trees mean it is inert. **`npm audit` is
-the WRONG test**, and confidently so: drop `chrome-launcher` and audit still
-reads clean while `rimraf@3`/`glob@7`/`inflight`/`mkdirp@0.5` come back,
-because what it guards is a deprecated chain no advisory covers.
-The `yaml-language-server` → `yaml 2.8.3` pin was retired exactly this way,
-once `@astrojs/check` 0.9.10 pulled a language-server whose
-`yaml-language-server` resolves the patched 2.8.3 on its own.
+**Nothing gates a STALE `overrides` entry**, so retiring one is a manual
+audit: copy `package.json` to a scratch dir (never the working tree, whose
+lockfile is the artifact under test), `npm install --package-lock-only` with
+and without the entry, and diff the generated `packages` maps — identical
+means inert. The `yaml-language-server` → `yaml 2.8.3` pin was retired this
+way once `@astrojs/check` 0.9.10 pulled a language-server whose
+`yaml-language-server` declares an exact `yaml 2.8.3` of its own. **`npm
+audit` alone cannot clear an entry**: `chrome-launcher`'s guards a deprecated
+chain no advisory covers, so audit reads clean while
+`rimraf@3`/`glob@7`/`inflight` come back.
