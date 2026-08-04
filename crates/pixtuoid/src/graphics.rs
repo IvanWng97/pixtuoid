@@ -107,24 +107,13 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 
 /// Real pixels per logical office unit, for this terminal and this pack.
 ///
-/// Rounded DOWN to a multiple of `max_density`, because a density variant is
-/// only usable at a scale its density divides. Found on a real Retina Ghostty:
-/// a 17px cell makes 17 the natural scale, 17 is PRIME, and every variant in
-/// the pack sits unused while the base art block-scales 17x. Giving up at most
-/// `max_density - 1` px of office (17 -> 16, ~6%) to make the richer art
-/// reachable is not a close call — not being upscaled is the whole point of
-/// the variants.
-///
-/// A pack with no variants reports 1, so this is the identity there and the
-/// classic-density path is untouched.
+/// Two facts meet here and neither belongs to the other: the CELL is the
+/// terminal's, `max_density` is the PACK's. The pack half is
+/// [`RenderScale::fit`] in the engine, so the window and canvas painters get
+/// the same rule without re-deriving it — this function is only the terminal's
+/// contribution to it.
 pub fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
-    let raw = raw_scale_for_cell(cell);
-    let usable = if max_density >= 2 && raw >= max_density {
-        (raw / max_density) * max_density
-    } else {
-        raw
-    };
-    RenderScale::new(usable)
+    RenderScale::fit(raw_scale_for_cell(cell), max_density)
 }
 
 /// Decide what to paint. Pure — [`detect`] supplies the argument.
@@ -372,35 +361,16 @@ mod tests {
         }
     }
 
-    /// The real case, from a Retina Ghostty: a 17x41 cell. 17 is PRIME, so
-    /// with the natural scale every 4x variant in the pack is unusable and
-    /// the base art block-scales 17x — the mixed-density work would be inert
-    /// on this machine while reporting success.
+    /// The terminal half of the scale: a real Retina Ghostty reports a 17x41
+    /// cell, and 17 is what the CELL alone allows. What the pack then does with
+    /// it is `RenderScale::fit`'s test, not this one.
     #[test]
-    fn the_scale_rounds_down_so_the_packs_densest_art_can_actually_land() {
-        let retina = CellSize { w: 17, h: 41 };
-        assert_eq!(raw_scale_for_cell(retina), 17, "the cell alone says 17");
+    fn the_cell_alone_gives_the_raw_scale() {
+        assert_eq!(raw_scale_for_cell(CellSize { w: 17, h: 41 }), 17);
+        // And the two halves compose: 4x art cannot land on a prime scale.
         assert_eq!(
-            render_scale_for_cell(retina, 4).map(|s| s.get()),
-            Some(16),
-            "4x art must divide the scale, so 17 rounds to 16"
-        );
-
-        // A pack with no variants must be untouched — this rule may only ever
-        // COST office area when there is richer art to spend it on.
-        assert_eq!(render_scale_for_cell(retina, 1).map(|s| s.get()), Some(17));
-
-        // Already a multiple: nothing to give up.
-        assert_eq!(
-            render_scale_for_cell(CELL_8X16, 4).map(|s| s.get()),
-            Some(8)
-        );
-
-        // Art DENSER than the whole scale can never land however we round, so
-        // rounding to zero (no office at all) must not be the answer.
-        assert_eq!(
-            render_scale_for_cell(CellSize { w: 3, h: 8 }, 4).map(|s| s.get()),
-            Some(3)
+            render_scale_for_cell(CellSize { w: 17, h: 41 }, 4).map(|s| s.get()),
+            Some(16)
         );
     }
 

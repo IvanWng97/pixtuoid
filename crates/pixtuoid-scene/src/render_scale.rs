@@ -32,6 +32,33 @@ impl RenderScale {
         NonZeroU16::new(n).map(Self)
     }
 
+    /// The densest scale that `available` pixels allow AND the pack's art can
+    /// land on — rounded DOWN to a multiple of `max_density`.
+    ///
+    /// A density variant is only usable at a scale its density divides, so the
+    /// two facts have to meet somewhere. They meet HERE, in the engine, because
+    /// `max_density` is a property of the PACK: every painter that picks a scale
+    /// needs this rule, and only one of them is a terminal. Putting it in the
+    /// terminal's capability module (where it was first written) would make the
+    /// window and canvas painters re-derive it.
+    ///
+    /// Found on a real Retina Ghostty: a 17px cell makes 17 the natural scale,
+    /// 17 is PRIME, and every `@4x` sprite in the pack sits unused while the
+    /// base art block-scales 17x. Giving up at most `max_density - 1` px of
+    /// office (17 -> 16, ~6%) is not a close call — not being upscaled is the
+    /// whole point of the variants.
+    ///
+    /// A pack with no variants passes `max_density = 1`, so this is exactly
+    /// [`RenderScale::new`] there and the classic path is untouched.
+    pub fn fit(available: u16, max_density: u16) -> Option<Self> {
+        let usable = if max_density >= 2 && available >= max_density {
+            (available / max_density) * max_density
+        } else {
+            available
+        };
+        Self::new(usable)
+    }
+
     /// Buffer pixels per layout unit.
     pub fn get(self) -> u16 {
         self.0.get()
@@ -72,6 +99,35 @@ impl Default for RenderScale {
 mod tests {
     use super::*;
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
+
+    /// A pack ships art at ONE density; a painter picks a scale from its own
+    /// surface. `fit` is where those meet, and the rule is that the art must
+    /// divide the scale or it is simply never drawn.
+    #[test]
+    fn a_scale_rounds_down_so_the_packs_densest_art_can_land_on_it() {
+        // The case that motivated it: a Retina Ghostty's 17px cell. 17 is
+        // PRIME, so at the natural scale every 4x sprite would sit unused while
+        // the base art block-scales 17x.
+        assert_eq!(RenderScale::fit(17, 4).map(|s| s.get()), Some(16));
+        // A pack with no variants must be untouched — this rule may only ever
+        // COST office area when there is richer art to spend it on.
+        assert_eq!(RenderScale::fit(17, 1).map(|s| s.get()), Some(17));
+        // Already a multiple: nothing to give up.
+        assert_eq!(RenderScale::fit(16, 4).map(|s| s.get()), Some(16));
+    }
+
+    /// Rounding must never round the office away.
+    #[test]
+    fn art_denser_than_the_whole_scale_does_not_round_to_nothing() {
+        // 4x art at a 3px scale can never land however we round, so the honest
+        // answer is the unrounded scale (the art is skipped), NOT zero.
+        assert_eq!(RenderScale::fit(3, 4).map(|s| s.get()), Some(3));
+        assert_eq!(
+            RenderScale::fit(0, 4),
+            None,
+            "zero pixels is still no scale"
+        );
+    }
 
     #[test]
     fn zero_is_refused_because_it_would_divide_the_office_away() {
