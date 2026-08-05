@@ -347,11 +347,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   CAN SELECT IT — `pixtuoid-web` paints at `RenderScale::ONE` by design (the
 │                   chunky look), and only `densest_art` reads variants. Budgeting the art
 │                   phase: `gen-wasm-check` gates the GZIP size, because raw and served bytes
-│                   disagree by ~2.5x on this payload and sprite text is the most compressible
-│                   part of it — a variant that looks expensive on disk is cheap over the wire.
-│                   Run the recipe for the live numbers rather than trusting a figure written
-│                   here; the cap and its reasoning are in the justfile above it. GitHub Pages
-│                   serves gzip and does not offer brotli.
+│                   disagree by more than 2x on this payload and sprite text compresses far
+│                   better than the wasm code around it — a variant that looks expensive on
+│                   disk is cheap over the wire.
+│                   Run the recipe for the live raw/gzip figures rather than trusting one
+│                   written here; the cap and its reasoning are in the justfile above it. What
+│                   the CDN actually transfers is a SEPARATE check the recipe cannot make —
+│                   `curl -sIL -H 'Accept-Encoding: gzip, br, zstd'` answered gzip as of
+│                   2026-08, with brotli an open GitHub feature request, not a published
+│                   contract; if it ever lands, this gate becomes a ~20% overestimate.
 │                   Also: `pack.toml` declares the variant, so dropping the `include_str!`
 │                   alone makes `build_pack` fail on a missing frame — the loader would have to
 │                   skip variant animations too.
