@@ -815,10 +815,12 @@ gen-wasm: gen-wasm-tools wasm-build
 
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
-# formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
-# ~350-400 KB gzipped over the wire, which is where the cap comes from.
-# The artifact is ~900 KB (the recipe prints the exact figure and the headroom
-# left against the cap — read it there rather than trusting this line). Pair (#424): the
+# formatting machinery, an accidental debug build) fails loudly. The cap is on
+# the GZIPPED size, because the wire cost is what the poster is hiding; it was a
+# raw-byte PROXY for that number until the proxy ran high enough on this payload
+# to block density-variant sprite art (#871). The recipe prints both figures and
+# the headroom left against the cap — read it there rather than trusting a
+# number written into this line. Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
@@ -844,13 +846,29 @@ gen-wasm-check:
     W=site/public/wasm/pixtuoid_web_bg.wasm
     M=site/public/wasm/manifest.sha256
     test -f "$W" || { echo "missing $W — run 'just gen-wasm'"; exit 1; }
-    CAP=1048576
-    SIZE=$(wc -c < "$W" | tr -d ' ')
-    test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
+    # Gate the GZIP size — that is what GitHub Pages transfers, and the raw byte
+    # count is a number no user ever downloads. Local gzip runs slightly UNDER
+    # what the CDN sends (different implementation and level), so the cap carries
+    # margin rather than being tuned to the last KB. Raw stays REPORTED, not
+    # gated: it is browser parse/compile cost, a real but much looser constraint
+    # than transfer — and gating it is what blocked the density-variant art
+    # (#871), whose sprite text costs several times less over the wire than on
+    # disk.
+    CAP=524288
+    # Compress to a FILE, not through a pipe: POSIX sh has no `pipefail`, so
+    # `gzip … | wc -c` reports wc's status and a broken gzip would measure zero
+    # bytes and pass the cap unconditionally — the gate would go green exactly
+    # when it stopped working.
+    GZ=$(mktemp)
+    trap 'rm -f "$GZ"' EXIT
+    gzip -9 -c "$W" > "$GZ"
+    WIRE=$(wc -c < "$GZ" | tr -d ' ')
+    RAW=$(wc -c < "$W" | tr -d ' ')
+    test "$WIRE" -le "$CAP" || { echo "$W gzips to $WIRE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
     # Report the headroom, don't just pass silently. A ratchet you can only read
     # at the moment it breaks gives no warning that it is about to — and a prose
     # estimate of the size drifts unnoticed precisely because every run is green.
-    echo "wasm $SIZE / $CAP bytes ($((SIZE * 100 / CAP))% of cap, $(((CAP - SIZE) / 1024)) KB headroom)"
+    echo "wasm $WIRE / $CAP bytes gzipped ($((WIRE * 100 / CAP))% of cap, $(((CAP - WIRE) / 1024)) KB headroom; $RAW raw)"
     test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
     (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
         || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
@@ -860,7 +878,7 @@ gen-wasm-check:
         awk -v want="./$b" '$2 == want { found = 1 } END { exit !found }' "$M" \
             || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
     done
-    echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP), pair manifest verified"
+    echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only

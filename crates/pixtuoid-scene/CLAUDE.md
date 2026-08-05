@@ -345,14 +345,13 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   `the_drawn_size_is_the_same_whichever_density_the_art_came_from`).
 │                   VARIANT ART IS EMBEDDED FOR EVERY TARGET, INCLUDING WASM, WHERE NOTHING
 │                   CAN SELECT IT — `pixtuoid-web` paints at `RenderScale::ONE` by design (the
-│                   chunky look), and only `densest_art` reads variants. Numbers, measured
-│                   2026-08-04, for whoever budgets the art phase: `gen-wasm-check`'s 1 MiB is
-│                   a RAW cap standing in for ~350-400 KB gzipped (its rationale is in the
-│                   justfile above the recipe). The artifact is 1,006,260 raw / 394,722 gzip
-│                   locally; GitHub Pages serves it gzip at 390,240 and does not offer brotli.
-│                   Sprite files are palette-key text: `desk@4x` is 4,087 raw, 518 gzip, 388
-│                   brotli. So ~27 further pieces are ~110 KB raw, ~14 KB gzip. Note only that
-│                   raw and served-bytes disagree by an order of magnitude on this payload.
+│                   chunky look), and only `densest_art` reads variants. Budgeting the art
+│                   phase: `gen-wasm-check` gates the GZIP size, because raw and served bytes
+│                   disagree by ~2.5x on this payload and sprite text is the most compressible
+│                   part of it — a variant that looks expensive on disk is cheap over the wire.
+│                   Run the recipe for the live numbers rather than trusting a figure written
+│                   here; the cap and its reasoning are in the justfile above it. GitHub Pages
+│                   serves gzip and does not offer brotli.
 │                   Also: `pack.toml` declares the variant, so dropping the `include_str!`
 │                   alone makes `build_pack` fail on a missing frame — the loader would have to
 │                   skip variant animations too.
