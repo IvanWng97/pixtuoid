@@ -72,6 +72,12 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent, where matching the
         // `match` brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.17.0" => Some(&[
+            "`validate-pack` now rejects a density variant whose size doesn't match the density its own name claims, and says so at load time too",
+            "Sprite packs may now DECLARE higher-density art — a `desk@4x` alongside `desk`. Nothing paints it yet: this release defines the contract so packs can be authored ahead of the renderer that will use it",
+            "`pixtuoid doctor` gained a `graphics:` row reporting what this terminal COULD paint, and `--graphics off` to skip the query",
+            "Otherwise groundwork: the office looks the same, but its SIZE and its RESOLUTION are now separate — so a later release can draw the same room in more detail instead of more desks",
+        ]),
         "0.16.0" => Some(&[
             "The office you can hear — press m for procedural lofi that builds with the bustle, plus typing, rain, door and appliance cues. Starts muted; + and - set volume",
             "It never repeats — a fresh 10-minute track, slower and sparser at night or in rain",
@@ -197,8 +203,8 @@ mod tests {
     /// the twin of the `[bump-inject-here]` match-arm injection.
     const SHIPPED_VERSIONS: &[&str] = &[
         // [bump-version-list-here]
-        "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0", "0.9.0",
-        "0.8.0", "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
+        "0.17.0", "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0",
+        "0.9.0", "0.8.0", "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
     ];
 
     #[test]

@@ -1,0 +1,43 @@
+# 56x32 desk at 4x authoring density -- the SAME piece as desk.sprite, drawn on a
+# grid big enough to hold what 14x8 could not: grain along the boards, a thin
+# monitor bezel, readable screen content, individual keycaps, and the key
+# light's top edge baked in.
+#
+# OPTIONAL, and the name is the contract: `<base>@<N>x` declares art authored at
+# N times `desk`'s size, so this file must stay exactly 4x `desk.sprite`'s
+# dimensions or the painter skips it. The cutaway picks the densest variant whose
+# N DIVIDES the render scale — this one at scale 4 (blitted 1:1) or 8 (block-scaled
+# the remaining 2x), never at 2. A pack with no variants renders exactly as before.
+@frame 0
+. . . . . . . . . . . . n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+. . . . . . . . . . . . M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M . . . . . . . . . . . .
+g g g g g g g g g g g g M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M g g g g g g g g g g g g
+D D D D D D D D D D D D M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M M D D D D D D D D D D D D
+D d d d d D D D D D D D M M M n n n n n n n n n n n n n n n n n n n n n n n n n n M M M D d d d d D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D d d d D D D M M M n j j M M M M M M M M M M j j j j j j j j j j j j n M M M D D D D D D d d d D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D d d d d d D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D d d d d d D D D D D
+D D D D D D D D D D D D M M M n j j M M M M M M M M M M M M M M M M j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j j j j j j j j j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D M M M n j j M M M M M M M j j j j j j j j j j j j j j j n M M M D D D D D D D D D D D D
+D D D D D D D D D D D D n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n k k n k k n k k n k k n k k n k k n k k n k k n k k n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n k k n k k n k k n k k n k k n k k n k k n k k n k k n n n D D D D D D D D D D D D
+D D D D D D D D D D D D n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n n D D D D D D D D D D D D
+D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D D
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d
+d d d d d d d d . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . d d d d d d d d

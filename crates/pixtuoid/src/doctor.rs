@@ -659,8 +659,8 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
 /// builder is unit-testable. `log_path` is injected by `main`, which owns the
-/// log-path resolution.
-pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
+/// log-path resolution; `graphics` is the `--graphics` flag.
+pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
     let mut warnings = Vec::new();
     let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
     // `doctor` is a separate PROCESS from the running TUI, so it derives the
@@ -704,6 +704,26 @@ pub fn run(log_path: &std::path::Path) -> anyhow::Result<String> {
         out.push_str(line);
         out.push('\n');
     }
+    // Whether this terminal could paint the cutaway profile, gated on the SAME
+    // `probe_ok` as the truecolor row: the capability query writes escape
+    // sequences and reads the replies, so a piped `doctor > file` must neither
+    // emit them nor wait for an answer that cannot come. `--graphics off` skips
+    // it too — the flag says not to consider protocols, so asking anyway would
+    // spend up to 2s establishing a fact the answer cannot use.
+    let ask = probe_ok && graphics != crate::GraphicsMode::Off;
+    out.push_str(&crate::graphics::graphics_diagnostic_row(
+        graphics,
+        ask.then(crate::graphics::detect).flatten(),
+        // The pack a default `run` resolves — embedded, with the user's
+        // `$XDG_CONFIG_HOME/pixtuoid/sprites` merged over it if they have one.
+        // NOT just the bundled art: a user pack that ships density variants
+        // raises this, and reporting the bundled number would understate what
+        // their own `run` could draw. `--pack-dir` is the one case this misses,
+        // and doctor was not pointed at it.
+        pixtuoid_scene::embedded_pack::load_sprite_pack(None)
+            .map_or(1, |p| p.max_density_variant()),
+    ));
+    out.push('\n');
     // A malformed config makes every source read disconnected, and a diagnostic
     // tool must say WHY rather than silently swallow it. Sanitized: a warning can
     // interpolate config content.
@@ -909,7 +929,11 @@ mod tests {
 
     #[test]
     fn run_renders_the_structural_report_headers() {
-        let out = run(std::path::Path::new("/nonexistent-pixtuoid-doctor-log")).unwrap();
+        let out = run(
+            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+            crate::GraphicsMode::Auto,
+        )
+        .unwrap();
         assert!(out.contains("pixtuoid doctor — source health"), "{out}");
         assert!(out.contains("config:"), "{out}");
         assert!(out.contains("terminal: TERM="), "{out}");
@@ -935,7 +959,7 @@ mod tests {
             "got: {warning}"
         );
 
-        let out = run(dir.path()).unwrap();
+        let out = run(dir.path(), crate::GraphicsMode::Auto).unwrap();
         assert!(out.contains("⚠ log unreadable"), "{out}");
     }
 
@@ -1001,7 +1025,10 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
         std::env::remove_var("OPENCODE_CONFIG_DIR");
         std::env::set_var("PATH", &bin);
-        let out = run(std::path::Path::new("/nonexistent-pixtuoid-doctor-log"));
+        let out = run(
+            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+            crate::GraphicsMode::Auto,
+        );
         let spawned = marker.exists();
         for (k, v) in saved {
             match v {

@@ -37,14 +37,35 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     let report = validate_pack_animations(&pack);
 
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
-    // parseable channel even when a caller redirects it. The missing/insufficient
-    // names come from the REQUIRED/OPTIONAL registry constants, not pack input, so
-    // only the OK line and the unknown keys are untrusted.
+    // parseable channel even when a caller redirects it. `missing_required`/
+    // `missing_optional` are registry constants, but insufficient-frames,
+    // mismatched-density and orphan-variant names can be DENSITY VARIANTS,
+    // which the validator finds by walking the pack's own table — so those are
+    // pack input too, and get the same sanitising as the unknown keys.
     for name in &report.missing_required {
         eprintln!("ERROR: missing required animation \"{name}\"");
     }
     for (name, need, got) in &report.insufficient_frames {
-        eprintln!("ERROR: \"{name}\" needs at least {need} frames, has {got}");
+        eprintln!(
+            "ERROR: \"{}\" needs at least {need} frames, has {got}",
+            strip_control_chars(name)
+        );
+    }
+    for m in &report.mismatched_density {
+        eprintln!(
+            "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
+            strip_control_chars(&m.name),
+            m.found.0,
+            m.found.1,
+            m.claimed.0,
+            m.claimed.1
+        );
+    }
+    for name in &report.orphan_variants {
+        eprintln!(
+            "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
+            strip_control_chars(name)
+        );
     }
     for name in &report.missing_optional {
         println!("WARN:  missing optional animation \"{name}\" (will not render)");
@@ -53,7 +74,10 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         println!("{}", unknown_line(name));
     }
 
-    let errors = report.missing_required.len() + report.insufficient_frames.len();
+    let errors = report.missing_required.len()
+        + report.insufficient_frames.len()
+        + report.mismatched_density.len()
+        + report.orphan_variants.len();
     let warnings = report.missing_optional.len();
     eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
 

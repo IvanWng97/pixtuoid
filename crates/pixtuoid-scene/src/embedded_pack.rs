@@ -67,6 +67,28 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             "custom sprite pack animation has too few frames — it will render as nothing"
         );
     }
+    // Every error category `has_errors` counts must warn here, or the load path
+    // stays quiet about exactly the failure the check exists to catch: a
+    // mis-sized variant is picked up BY NAME and drawn at the wrong size, and
+    // the author only ever sees it if they happened to run `validate-pack`.
+    for m in &report.mismatched_density {
+        tracing::warn!(
+            origin,
+            animation = %m.name,
+            claimed = ?m.claimed,
+            found = ?m.found,
+            "custom sprite pack density variant is not the size its name claims — \
+             it will draw at the wrong size wherever a renderer picks that density"
+        );
+    }
+    for name in &report.orphan_variants {
+        tracing::warn!(
+            origin,
+            animation = %name,
+            "custom sprite pack ships a density variant whose base piece it does not — \
+             its size claim is checked against the default pack's art, not yours"
+        );
+    }
     report
 }
 
@@ -148,6 +170,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "walking_coffee_0.sprite",
         "walking_coffee_1.sprite",
         "desk.sprite",
+        "desk@4x.sprite",
         "plant.sprite",
         "plant_tall.sprite",
         "plant_flower.sprite",

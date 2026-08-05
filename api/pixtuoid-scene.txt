@@ -1296,6 +1296,7 @@ pub pixtuoid_scene::pixel_painter::CharacterPlacement::anim_name: &'static str
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::flip_x: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::frame_idx: usize
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::glow: pixtuoid_scene::pixel_painter::CharacterGlow
+pub pixtuoid_scene::pixel_painter::CharacterPlacement::seat_desk: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::sleep_z_seed: core::option::Option<u64>
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::waiting_bubble: bool
 pub pixtuoid_scene::pixel_painter::CharacterPlacement::walking_dust_frame: core::option::Option<usize>
@@ -1503,6 +1504,36 @@ pub fn pixtuoid_scene::pose::stale_resume_gap_ms(pixtuoid_core::id::AgentId) -> 
 pub fn pixtuoid_scene::pose::takes_trip(pixtuoid_core::id::AgentId, u64) -> bool
 pub fn pixtuoid_scene::pose::walking_frame(u64) -> usize
 pub fn pixtuoid_scene::pose::waypoint_index_for_cycle(pixtuoid_core::id::AgentId, u64, usize) -> usize
+pub mod pixtuoid_scene::render_scale
+pub struct pixtuoid_scene::render_scale::RenderScale(_)
+impl pixtuoid_scene::render_scale::RenderScale
+pub const pixtuoid_scene::render_scale::RenderScale::ONE: Self
+pub fn pixtuoid_scene::render_scale::RenderScale::factor(self) -> core::num::nonzero::NonZeroU16
+pub fn pixtuoid_scene::render_scale::RenderScale::fit(u16, u16) -> core::option::Option<Self>
+pub fn pixtuoid_scene::render_scale::RenderScale::get(self) -> u16
+pub fn pixtuoid_scene::render_scale::RenderScale::logical(self, u16) -> u16
+pub fn pixtuoid_scene::render_scale::RenderScale::new(u16) -> core::option::Option<Self>
+pub fn pixtuoid_scene::render_scale::RenderScale::to_buffer(self, u16) -> u16
+impl core::clone::Clone for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::clone(&self) -> pixtuoid_scene::render_scale::RenderScale
+impl core::cmp::Eq for pixtuoid_scene::render_scale::RenderScale
+impl core::cmp::PartialEq for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::eq(&self, &pixtuoid_scene::render_scale::RenderScale) -> bool
+impl core::default::Default for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::default() -> Self
+impl core::fmt::Debug for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_scene::render_scale::RenderScale
+pub fn pixtuoid_scene::render_scale::RenderScale::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::StructuralPartialEq for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::Freeze for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::Send for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::Sync for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::Unpin for pixtuoid_scene::render_scale::RenderScale
+impl core::marker::UnsafeUnpin for pixtuoid_scene::render_scale::RenderScale
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::render_scale::RenderScale
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::render_scale::RenderScale
 pub mod pixtuoid_scene::theme
 pub enum pixtuoid_scene::theme::ThemeKind
 pub pixtuoid_scene::theme::ThemeKind::Dark

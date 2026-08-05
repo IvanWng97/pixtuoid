@@ -36,6 +36,8 @@ pub mod board;
 pub mod burn;
 pub mod chitchat;
 pub(crate) mod creatures;
+#[doc(hidden)]
+pub mod cutaway;
 pub mod embedded_pack;
 pub mod floor;
 #[doc(hidden)]
@@ -52,6 +54,7 @@ pub mod pet;
 pub mod physics;
 pub mod pixel_painter;
 pub mod pose;
+pub mod render_scale;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;

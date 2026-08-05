@@ -97,7 +97,18 @@ pub enum Cmd {
     },
     /// Diagnose source health: connection, hooks, and decode drift recorded in
     /// the log. Read-only.
-    Doctor,
+    Doctor {
+        /// Whether to consider terminal image protocols (kitty/iTerm2/SIXEL)
+        /// when reporting the `graphics:` row. `off` skips the capability query
+        /// entirely and reports the classic profile with that as the reason.
+        ///
+        /// It lives on `doctor` and not on `run` because `run` paints classic
+        /// unconditionally today — the same flag moves to `run` when the
+        /// cutaway profile reaches a painter, and a flag `run` silently ignored
+        /// would be worse than no flag.
+        #[arg(long, value_enum, default_value_t = crate::GraphicsMode::Auto)]
+        graphics: crate::GraphicsMode,
+    },
     /// List agent sources + their connection state, or apply a set. The
     /// scriptable twin of the in-TUI Sources panel (Raycast / automation).
     Sources {
@@ -223,6 +234,34 @@ fn parse_nonempty_path(s: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The flag has to REACH `doctor`, not merely parse: an accepted value that
+    /// never arrives is the declared-but-unwired class, and `GraphicsMode` had
+    /// no producer at all before this.
+    #[test]
+    fn graphics_off_parses_and_reaches_doctor() {
+        let cli = Cli::try_parse_from(["pixtuoid", "doctor", "--graphics", "off"]).expect("parses");
+        assert!(matches!(
+            cli.cmd,
+            Some(Cmd::Doctor {
+                graphics: crate::GraphicsMode::Off
+            })
+        ));
+        // Absent means Auto, so an existing `pixtuoid doctor` is unchanged.
+        let cli = Cli::try_parse_from(["pixtuoid", "doctor"]).expect("parses");
+        assert!(matches!(
+            cli.cmd,
+            Some(Cmd::Doctor {
+                graphics: crate::GraphicsMode::Auto
+            })
+        ));
+    }
+
+    #[test]
+    fn graphics_typo_is_a_hard_parse_error() {
+        let err = Cli::try_parse_from(["pixtuoid", "doctor", "--graphics", "no"]).unwrap_err();
+        assert_eq!(err.kind(), clap::error::ErrorKind::InvalidValue);
+    }
 
     #[test]
     fn empty_socket_is_a_hard_parse_error() {

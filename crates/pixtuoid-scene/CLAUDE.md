@@ -287,6 +287,100 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── embedded_pack.rs  include_str! the default character pack at compile time (from this crate's own
 │                   ../sprites/default/, watched by pixtuoid-scene's build.rs for rerun-if-changed) →
 │                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it
+├── cutaway/        the ENRICHED orthographic cutaway PROFILE — the sibling renderer, not a
+│                   fidelity knob on the classic one. The brief models two renderers over ONE
+│                   shared scene frame, and that frame already exists: `pixel_painter::sim.rs`'s
+│                   `sim_step` returns an owned immutable `SimFrame`, so this module becomes its
+│                   SECOND reader and no new seam is invented. shade.rs = the vocabulary the
+│                   visual mock ratified BEFORE any of it was written: `Ramp {lit, base, shade}`
+│                   (one key light from the north windows, every material carries one — uniformity
+│                   is why the room reads lit from one direction) + `slab` (top-lit mass; a 1-row
+│                   mass is all `base`, since either edge tone would make a 1px detail read as a
+│                   highlight/shadow instead of the material) + `dither_band` (4x4 Bayer). The
+│                   dither is NOT a workaround: an indexed palette cannot blend, so a gradient IS
+│                   a dither — and it costs TWO palette slots instead of a dozen, which is what
+│                   keeps theme recolour an index swap and SIXEL free of a quantisation pass.
+│                   paint.rs = `render_cutaway(frame, layout, pack, theme, scale, now, cache, buf)`
+│                   -> `Vec<CutawayLabel>` (badge anchors; the engine cannot draw text, so the
+│                   painter renders them). Floor + wall band + rooms + desks + furniture + cast;
+│                   DELIBERATELY partial in EFFECTS only (weather/glow/steam/pet stay classic's).
+│                   order.rs = the draw ORDER: a dependency graph over `Span::behind` + a
+│                   topological sort, NOT a sort key. With today's predicate the two are
+│                   EQUIVALENT (the relation is derived from a total order on base rows, so it
+│                   cannot cycle) — the graph earns its place as `check_order`, which turns every
+│                   pairwise geometric fact into an assertion, and as the shape ELEVATION will
+│                   need. The one thing it cannot fix: a LONG object has no meaningful base row,
+│                   so wall runs are SPLIT into `WALL_SEG_H` segments (no predicate substitutes
+│                   for splitting). Decisions worth not re-deriving: (1) every piece's sort row
+│                   comes from `layout::anchored_top_left` — the SAME anchoring the walkable mask
+│                   and the classic painter use — so the box a piece sorts by cannot drift from
+│                   the box it blits into; the desk needs NO divergence for the occupant to read
+│                   over its surface, that falls out once both are measured at their true base
+│                   rows; (2) the desk BLITS the pack's `desk` sprite at classic's exact anchor
+│                   (`desk.y - 1`, its monitor-bezel raise) and derives the cutaway's front face by
+│                   SAMPLING the sprite's own base row. The desk's brown lives in the PACK
+│                   (`"D" = #8b5a2b`), NOT the theme — `furniture.wood_top` is a different material
+│                   that reads nearly identical to the carpet in tokyo-night — and sampling means a
+│                   custom `--pack-dir` desk gets a matching front face for free.
+│                   (3) a desk-seated pose is RE-PROJECTED: `CharacterPlacement.seat_desk`
+│                   carries the desk the sim seated an agent at, because `anchor` is already
+│                   projected FOR CLASSIC (it raises the sprite so the monitor overhangs and hides
+│                   the lower body) and a second profile cannot recover the desk from it. Classic
+│                   ignores the field; the cutaway anchors at the desk's own row so the head reads
+│                   OVER the surface. That field is what "one simulation, two projections" has to
+│                   mean in practice — without it the shared frame silently belongs to one painter.
+│                   (4) MIXED DENSITY: `densest_art(pack, name, scale)` prefers a `<name>@<N>x`
+│                   pack variant (see the core guide) over block-scaling the base — picking the
+│                   densest one that DIVIDES the render scale and blitting it at the remainder,
+│                   so 4x art still HALVES the upscale at 8x instead of being discarded for not
+│                   matching exactly. Its direction is the point: richer art REMOVES the upscale
+│                   rather than fighting it, so the asset work lands one piece at a time instead
+│                   of as a flag day, and a pack with no variants renders byte-identically. The
+│                   size check here is only the render-time BACKSTOP for an unvalidated pack —
+│                   `validate_pack_animations` is where an author is meant to find out. The one
+│                   arithmetic trap: `paint_desk` sizes the front face off `art.width() *
+│                   blit_at`, NOT `art.width() * scale` — variant art is already in buffer
+│                   units, and multiplying twice puts the front face a whole desk below the
+│                   surface it belongs to (pinned by
+│                   `the_drawn_size_is_the_same_whichever_density_the_art_came_from`).
+│                   VARIANT ART IS EMBEDDED FOR EVERY TARGET, INCLUDING WASM, WHERE NOTHING
+│                   CAN SELECT IT — `pixtuoid-web` paints at `RenderScale::ONE` by design (the
+│                   chunky look), and only `densest_art` reads variants. Numbers, measured
+│                   2026-08-04, for whoever budgets the art phase: `gen-wasm-check`'s 1 MiB is
+│                   a RAW cap standing in for ~350-400 KB gzipped (its rationale is in the
+│                   justfile above the recipe). The artifact is 1,006,260 raw / 394,722 gzip
+│                   locally; GitHub Pages serves it gzip at 390,240 and does not offer brotli.
+│                   Sprite files are palette-key text: `desk@4x` is 4,087 raw, 518 gzip, 388
+│                   brotli. So ~27 further pieces are ~110 KB raw, ~14 KB gzip. Note only that
+│                   raw and served-bytes disagree by an order of magnitude on this payload.
+│                   Also: `pack.toml` declares the variant, so dropping the `include_str!`
+│                   alone makes `build_pack` fail on a missing frame — the loader would have to
+│                   skip variant animations too.
+│                   The bundled `desk@4x` also records two ART decisions made against the
+│                   RENDERED OFFICE rather than the sprite: grain runs ALONG the boards (random
+│                   dots read as dirt) and screen chrome is the monitor-frame grey, NOT a bright
+│                   tone — the cutaway says "occupied" with the `lit` glow it paints OVER the
+│                   screen, so bright baked content made all 12 desks read as staffed.
+│                   Visual check: `cargo run --release --example cutaway_snapshot`
+├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
+│                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling
+│                   the buffer builds a room with 4× the desks rather than drawing the same room
+│                   sharper (measured: 25 desks at 192×160, 1554 at 1536×1280). `RenderScale`
+│                   splits them: layout keeps computing in LOGICAL units (capacity, desk
+│                   assignment and the walkable mask untouched), the painter multiplies on its
+│                   way to pixels. `RenderScale::ONE` is the classic path, byte-identical to the
+│                   pre-seam behaviour. `floor::floor_capacity_scaled` is the seam-aware twin of
+│                   `floor_capacity` — deliberately a SECOND fn, not a defaulted param: every
+│                   existing caller means "buffer pixels ARE layout units" and must keep meaning
+│                   it, so a painter adopting a scale opts in at its own call site. The scale is an
+│                   explicit PARAMETER of the one entry point that has one (`render_cutaway`), not
+│                   a field on `FrameInputs`/`PixelCtx`/`DrawableCtx`: those describe the classic
+│                   pass, where buffer pixels ARE layout units, and a field they all default to ONE
+│                   is a question every painter answers identically. `render_floor` is where they part — the buffer sizes
+│                   in PIXELS, the layout computes at `scale.logical(size)`. Density is the core
+│                   blitter's `blit_frame_scaled` for art authored BELOW the render scale, and
+│                   the pack's `<piece>@<N>x` variants for art authored AT it (`cutaway::paint::
+│                   densest_art` is the picker); see the core guide
 └── pixel_painter/  the SHARED world render (render_to_rgb_buffer) — TWO phases behind that one seam:
                     sim.rs (sim_step: advances every &mut sim store — router/overlay/history/motion/
                     light/chitchat, bundled as SimStores — and returns an OWNED immutable SimFrame:
@@ -306,7 +400,15 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     private PaintCtx), background/ (weather, sunset, skyline,
                     sky.rs, lighting.rs, celestial.rs [sun/moon disc + night stars, #469]),
                     ambient.rs (sun spot + dust motes + ceiling halos),
-                    drawable.rs (y-sort Drawable enum + paint dispatch; creature BEHAVIOR moved to crate::creatures — only the Pet/GatewayMascot PAINT arms + paint_mascot_bubbles stay here), effects.rs (glow/z's/steam/dust/bubble),
+                    drawable.rs (y-sort Drawable enum + paint dispatch via `DrawableCtx` — the
+                                  param BUNDLE {buf, pack, cache, now, theme}: this was five
+                                  positional params, the growth PixelCtx/PaintCtx already answered
+                                  the same way. `blit_centered`
+                                  is THE density-aware centring seam every centred sprite rides — it
+                                  centres in LOGICAL space then converts ONCE (centring in buffer space
+                                  halves the already-scaled width and drifts odd-width art off the
+                                  footprint its mask stamped — a drift NO scale-1 test can see, pinned by
+                                  `a_centred_blit_scales_both_its_position_and_its_art`); creature BEHAVIOR moved to crate::creatures — only the Pet/GatewayMascot PAINT arms + paint_mascot_bubbles stay here), effects.rs (glow/z's/steam/dust/bubble),
                     palette.rs (agent palette + recolor + tool_glow_tint), anchors.rs (breath, character_anchor —
                     pub(crate); walk position re-imported from motion::walking_position;
                     the per-pose anchor fns take `sprite_w` — the pack's character width,
@@ -409,6 +511,7 @@ pays for the entry it needs instead of all of them. Grep it for the
 question:
 
 - Where does a furniture's footprint / visual size / approach side / dwell come from?
+- Why doesn't a bigger buffer just render the office sharper?
 - How is the office laid out?
 - How does walk-pace physics work?
 - Which side does an agent approach furniture from?

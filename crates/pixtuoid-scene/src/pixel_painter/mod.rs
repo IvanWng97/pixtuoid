@@ -81,7 +81,7 @@ mod drawable;
 mod effects;
 mod furniture;
 mod palette;
-mod seat;
+pub(crate) mod seat;
 mod sim;
 mod wall;
 
@@ -235,7 +235,8 @@ pub struct PixelCtx<'a> {
     /// SEPARATE field: it is a sibling of the `FloorCtx` on a `PerFloor`,
     /// borrowed disjointly by a multi-floor painter's `split_at_mut`.
     pub store: &'a mut crate::floor::FloorCtx,
-    /// The RGB pixel buffer this pass paints into.
+    /// The RGB pixel buffer this pass paints into. Its pixels ARE `layout`'s
+    /// logical units — this pass has no scale of its own.
     pub buf: &'a mut RgbBuffer,
     /// The live scene state to render.
     pub scene: &'a SceneState,
@@ -621,7 +622,16 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // furniture paints BEFORE it.
     drawables.sort_by_key(|d| d.anchor_y);
     for d in &drawables {
-        paint_drawable(d, ctx.buf, ctx.pack, ctx.cache, ctx.now, ctx.theme);
+        paint_drawable(
+            d,
+            &mut drawable::DrawableCtx {
+                buf: &mut *ctx.buf,
+                pack: ctx.pack,
+                cache: &mut *ctx.cache,
+                now: ctx.now,
+                theme: ctx.theme,
+            },
+        );
     }
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
@@ -635,6 +645,23 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     (resolved_pet_pos, resolved_mascots)
 }
 
+/// Resolve the sim's theme-free [`CharacterGlow`] to a `Theme` colour.
+///
+/// The ONE mapping, shared with the cutaway profile: the sim deliberately emits
+/// a theme-free decision, so if each painter resolved it itself the same agent
+/// would glow differently in the two profiles for no reason anyone chose.
+pub(crate) fn character_glow_tint(
+    glow: CharacterGlow,
+    agent: &pixtuoid_core::state::AgentSlot,
+    theme: &crate::theme::Theme,
+) -> Option<pixtuoid_core::sprite::Rgb> {
+    match glow {
+        CharacterGlow::None => None,
+        CharacterGlow::Thinking => Some(theme.tool_glow.default),
+        CharacterGlow::Tool => palette::tool_glow_tint(agent, &theme.tool_glow),
+    }
+}
+
 /// Map the sim's resolved [`sim::CharacterPlacement`]s 1:1 onto y-sorted
 /// drawables. The ONLY paint-side work is presentation — resolving the
 /// theme-free [`CharacterGlow`] to a `Theme` color.
@@ -645,11 +672,7 @@ fn enqueue_characters<'a>(
 ) {
     for p in &frame.characters {
         let agent = &frame.agents[p.agent_idx];
-        let glow_tint = match p.glow {
-            CharacterGlow::None => None,
-            CharacterGlow::Thinking => Some(ctx.theme.tool_glow.default),
-            CharacterGlow::Tool => palette::tool_glow_tint(agent, &ctx.theme.tool_glow),
-        };
+        let glow_tint = character_glow_tint(p.glow, agent, ctx.theme);
         drawables.push(Drawable {
             anchor_y: p.anchor_y,
             kind: DrawableKind::Character {

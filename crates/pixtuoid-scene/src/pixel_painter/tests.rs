@@ -2074,6 +2074,62 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     );
 }
 
+/// `seat_desk` is the whole of "one simulation, two projections": the cutaway
+/// re-anchors a desk-seated body and cannot recover the desk from `anchor`,
+/// which is already projected FOR CLASSIC. Its polarity had no test at all —
+/// the classic painter never reads the field, so flipping an arm to `None`
+/// would break the second profile while every existing assertion stayed green.
+///
+/// Driven through the real `sim_step` rather than by constructing a placement,
+/// so it pins what the sim DECIDES, not what a fixture was handed.
+#[test]
+fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
+    use crate::pose::Pose;
+    use std::time::Duration;
+    let (scene, layout, id, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
+
+    // Far enough past the entry walk that the agent has arrived and sat down.
+    let mut seated_seen = false;
+    let mut walking_seen = false;
+    for ms in [50u64, 250, 1_000, 4_000, 12_000, 40_000] {
+        let f = sim_step(
+            &mut stores,
+            &scene,
+            &layout,
+            &pack,
+            &coffee,
+            0,
+            now0 + Duration::from_millis(ms),
+        );
+        let Some(c) = f.characters.first() else {
+            continue;
+        };
+        match f.poses.get(&id) {
+            Some(Some(Pose::Walking { .. })) => {
+                walking_seen = true;
+                assert_eq!(
+                    c.seat_desk, None,
+                    "a WALKING agent is not seated at a desk (t={ms}ms)"
+                );
+            }
+            Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
+                seated_seen = true;
+                let desk = c.seat_desk.expect("a seated agent carries its desk");
+                assert!(
+                    layout.home_desks.contains(&desk),
+                    "the carried desk must be one the layout placed (t={ms}ms)"
+                );
+            }
+            _ => {}
+        }
+    }
+    assert!(walking_seen, "the sweep never observed a walking pose");
+    assert!(seated_seen, "the sweep never observed a seated pose");
+}
+
 #[test]
 fn sim_step_advances_motion_without_painting() {
     use crate::pose::Pose;
@@ -2486,7 +2542,16 @@ fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
             anchor_y: pos.y + 2,
             kind: DrawableKind::Printer { pos, busy },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        paint_drawable(
+            &d,
+            &mut super::drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme,
+            },
+        );
         buf
     };
     let busy = render(true);
@@ -2514,7 +2579,16 @@ fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
             anchor_y: pos.y + 3,
             kind: DrawableKind::VendingMachine { pos, busy },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme);
+        paint_drawable(
+            &d,
+            &mut super::drawable::DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme,
+            },
+        );
         buf
     };
     let busy = render(true);

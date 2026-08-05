@@ -225,6 +225,13 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
 }
 
 /// Blit `frame` CENTRED on `pos` (origin = `pos − size/2`, saturating).
+///
+/// Layout units ARE buffer pixels in this pass, so the centring is plain
+/// integer arithmetic. If a scaled classic painter is ever built, halve the
+/// sprite in LOGICAL space and convert AFTERWARDS — halving an already-scaled
+/// width drifts odd-width art half a logical unit off the footprint its mask
+/// stamped, and no scale-1 test can see it (`pixtuoid-scene/CLAUDE.md`, the
+/// render-scale sharp edge).
 fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
     let px = pos.x.saturating_sub(frame.width() / 2);
     let py = pos.y.saturating_sub(frame.height() / 2);
@@ -239,16 +246,25 @@ fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut
     }
 }
 
+/// The paint-time context one [`Drawable`] arm needs — the subset of `PaintCtx`
+/// they touch. Bundled rather than passed flat: this was six positional
+/// parameters and the render scale would have made seven, the growth
+/// `PixelCtx`/`PaintCtx` already answered the same way.
+pub(super) struct DrawableCtx<'a> {
+    pub buf: &'a mut RgbBuffer,
+    pub pack: &'a Pack,
+    pub cache: &'a mut FrameCache,
+    pub now: SystemTime,
+    pub theme: &'a crate::theme::Theme,
+}
+
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
-pub(super) fn paint_drawable(
-    d: &Drawable<'_>,
-    buf: &mut RgbBuffer,
-    pack: &Pack,
-    cache: &mut FrameCache,
-    now: SystemTime,
-    theme: &crate::theme::Theme,
-) {
+pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
+    // Re-bound to the original names so the arms below are untouched.
+    let buf = &mut *c.buf;
+    let cache = &mut *c.cache;
+    let (pack, now, theme) = (c.pack, c.now, c.theme);
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
@@ -668,14 +684,32 @@ mod tests {
         let th = theme();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, None);
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+            },
+        );
         assert_eq!(paper_pixel_count(&buf, th), 0);
         // …including a mid-fall sheet: a big EARLY reading can clear the sheet
         // minimum before cumulative usage reaches T1.
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(Point { x: 40, y: 30 }, 0, Some(2));
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+            },
+        );
         assert_eq!(paper_pixel_count(&buf, th), 0);
     }
 
@@ -690,7 +724,16 @@ mod tests {
             let mut cache = FrameCache::new();
             let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
             let d = desk_cubicle_drawable(desk, tier, None);
-            paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now: SystemTime::UNIX_EPOCH,
+                    theme: th,
+                },
+            );
             counts.push(paper_pixel_count(&buf, th));
             for xoff in 0..STACK_W {
                 assert_eq!(
@@ -710,7 +753,16 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 3, None);
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+            },
+        );
         let t3_top = base_y - (3 * STACK_PX_PER_TIER - 1);
         let overhang = buf.get(desk.x + STACK_X_OFF + STACK_W, t3_top);
         assert!(
@@ -729,13 +781,31 @@ mod tests {
         let mut cache = FrameCache::new();
         let mut buf = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(2));
-        paint_drawable(&d, &mut buf, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+            },
+        );
         let sy = stack_top - (crate::token_meter::SHEET_FALL_PX - 2);
         assert_eq!(buf.get(desk.x + STACK_X_OFF, sy), th.furniture.paper);
         let mut cache = FrameCache::new();
         let mut buf2 = RgbBuffer::filled(120, 80, Rgb { r: 1, g: 2, b: 3 });
         let d = desk_cubicle_drawable(desk, 1, Some(crate::token_meter::SHEET_FALL_PX));
-        paint_drawable(&d, &mut buf2, &pack, &mut cache, SystemTime::UNIX_EPOCH, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf2,
+                pack: &pack,
+                cache: &mut cache,
+                now: SystemTime::UNIX_EPOCH,
+                theme: th,
+            },
+        );
         for y in 0..stack_top {
             for xoff in 0..STACK_W {
                 let c = buf2.get(desk.x + STACK_X_OFF + xoff, y);
@@ -782,7 +852,17 @@ mod tests {
                 sheet_fall: None,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+            },
+        );
+        // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
         let cab_x = desk.x.saturating_sub(cab.width() + 1);
         let mut cab_painted = false;
         for dy in 0..cab.height() {
@@ -823,7 +903,16 @@ mod tests {
                 anchor_y: pos.y,
                 kind: DrawableKind::MeetingSofa { pos, mirrored },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                },
+            );
             buf
         };
         let plain = render(false);
@@ -857,7 +946,16 @@ mod tests {
                 pet_elapsed_ms: None,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+            },
+        );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing pet anim must paint nothing");
@@ -884,7 +982,16 @@ mod tests {
                     pet_elapsed_ms: None,
                 },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                },
+            );
             buf
         };
         let count_above = |buf: &RgbBuffer| {
@@ -919,7 +1026,16 @@ mod tests {
             anchor_y: pos.y,
             kind: DrawableKind::VendingMachine { pos, busy: false },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: th,
+            },
+        );
         let vx = pos.x - VENDING_BODY.w / 2;
         let vy = pos.y - VENDING_BODY.h / 2;
         assert_eq!(
@@ -963,7 +1079,16 @@ mod tests {
             anchor_y: pos.y,
             kind: DrawableKind::Printer { pos, busy: false },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, th);
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: th,
+            },
+        );
         let px0 = pos.x - PRINTER_BODY.w / 2;
         let py0 = pos.y - PRINTER_BODY.h / 2;
         assert_eq!(
@@ -1026,7 +1151,16 @@ mod tests {
                 degraded: false,
             },
         };
-        paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+        paint_drawable(
+            &d,
+            &mut DrawableCtx {
+                buf: &mut buf,
+                pack: &pack,
+                cache: &mut cache,
+                now,
+                theme: theme(),
+            },
+        );
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), bg, "missing mascot anim must paint nothing");
@@ -1056,7 +1190,16 @@ mod tests {
                     degraded,
                 },
             };
-            paint_drawable(&d, &mut buf, &pack, &mut cache, now, theme());
+            paint_drawable(
+                &d,
+                &mut DrawableCtx {
+                    buf: &mut buf,
+                    pack: &pack,
+                    cache: &mut cache,
+                    now,
+                    theme: theme(),
+                },
+            );
             buf
         };
         let plain = render(false);

@@ -44,6 +44,29 @@ pub fn floor_capacity(buf_w: u16, buf_h: u16, floor_seed: u64) -> usize {
         .unwrap_or(0)
 }
 
+/// How many home desks a floor fits when `buf_w × buf_h` PIXELS are painted at
+/// `scale` — i.e. the capacity of the logical office those pixels cover.
+///
+/// [`floor_capacity`] is the `RenderScale::ONE` case. The two are separate
+/// functions rather than one defaulted parameter because every existing caller
+/// means "buffer pixels are layout units" and must keep meaning it; a painter
+/// that adopts a scale opts in at its own call site.
+///
+/// `#[cfg(test)]` because no painter has opted in yet: this is the vehicle for
+/// `render_scale`'s scale-invariance proof, not shipped behaviour. Un-gate it
+/// the day a painter passes a scale — the proof is what makes that safe, and
+/// leaving it compiled-but-uncalled would have been the same unreached-surface
+/// claim the seam itself was flagged for.
+#[cfg(test)]
+pub(crate) fn floor_capacity_scaled(
+    buf_w: u16,
+    buf_h: u16,
+    scale: crate::render_scale::RenderScale,
+    floor_seed: u64,
+) -> usize {
+    floor_capacity(scale.logical(buf_w), scale.logical(buf_h), floor_seed)
+}
+
 /// Per-floor identity + look: index, altitude, and derived layout seed.
 #[derive(Debug, Clone, Copy)]
 pub struct FloorMeta {
@@ -288,7 +311,8 @@ pub struct FrameInputs<'a> {
     pub theme: &'static Theme,
     /// This frame's wall-clock time.
     pub now: SystemTime,
-    /// Target pixel-buffer size.
+    /// Target pixel-buffer size. Buffer pixels ARE layout units in this pass,
+    /// so this is also the office's logical extent.
     pub size: Size,
     /// This floor's index, altitude, and layout seed.
     pub floor_meta: FloorMeta,

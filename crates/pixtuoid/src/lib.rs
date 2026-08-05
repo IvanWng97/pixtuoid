@@ -8,6 +8,12 @@ pub mod config;
 pub mod doctor;
 pub mod floating;
 pub(crate) mod focus;
+pub(crate) mod graphics;
+/// The one graphics item that IS public API: `Cmd::Doctor` carries it, and
+/// `main.rs` is a separate crate. Everything else in the module — the plan, the
+/// probe, the scale rule — is `pub(crate)`, because a `pub` item on a published
+/// crate is the one thing a follow-up cannot quietly undo.
+pub use graphics::GraphicsMode;
 pub mod init_pack;
 pub mod install;
 pub mod runtime;
