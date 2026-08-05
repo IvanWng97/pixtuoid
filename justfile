@@ -815,10 +815,19 @@ gen-wasm: gen-wasm-tools wasm-build
 
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
-# formatting machinery, an accidental debug build) fails loudly — 1 MiB raw ≈
-# ~350-400 KB gzipped over the wire, which is where the cap comes from.
-# The artifact is ~900 KB (the recipe prints the exact figure and the headroom
-# left against the cap — read it there rather than trusting this line). Pair (#424): the
+# formatting machinery, an accidental debug build) fails loudly. The cap is on
+# the GZIPPED size, because the wire cost is what the poster is hiding — gating
+# the raw proxy instead is what blocked the density-variant sprite art (#871).
+# Raw is REPORTED, not gated — it is parse/compile cost, which the site's own
+# Lighthouse budget measures DIRECTLY on the runner (total-blocking-time and
+# user-timings:pixtuoid-revealed are `error`-level in site/lighthouserc.json,
+# and site.yml fires on site/** which is where the wasm lives), so a byte-count
+# proxy for it would be the weaker instrument. Meanwhile the cap is deliberately
+# LOOSE — sized for the density-art phase
+# rather than today's payload, so its headroom is art budget and NOT regression
+# sensitivity; the recipe prints the gap so you can see how much. RETIRE that
+# slack once the art phase lands: re-run the recipe and set the cap to the new
+# figure plus a margin. Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
@@ -843,14 +852,30 @@ gen-wasm-check:
     set -eu
     W=site/public/wasm/pixtuoid_web_bg.wasm
     M=site/public/wasm/manifest.sha256
-    test -f "$W" || { echo "missing $W — run 'just gen-wasm'"; exit 1; }
-    CAP=1048576
-    SIZE=$(wc -c < "$W" | tr -d ' ')
-    test "$SIZE" -le "$CAP" || { echo "$W is $SIZE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
+    # -s, not -f: an EMPTY committed wasm passes -f, and the ratio below divides
+    # by its size. Failing here says what is wrong; failing there says "division
+    # by 0".
+    test -s "$W" || { echo "missing or empty $W — run 'just gen-wasm'"; exit 1; }
+    # Not tuned to the last KB: this measures gzip locally while the CDN does its
+    # own, and the cap carries deliberate art-phase slack (see the note above).
+    CAP=524288
+    # Compress to a FILE, not through a pipe: POSIX sh has no `pipefail`, so
+    # `gzip … | wc -c` reports wc's status and a broken gzip would measure zero
+    # bytes and pass the cap unconditionally — the gate would go green exactly
+    # when it stopped working.
+    GZ=$(mktemp)
+    trap 'rm -f "$GZ"' EXIT
+    gzip -9 -c "$W" > "$GZ"
+    WIRE=$(wc -c < "$GZ" | tr -d ' ')
+    RAW=$(wc -c < "$W" | tr -d ' ')
+    test "$WIRE" -le "$CAP" || { echo "$W gzips to $WIRE bytes (> $CAP cap) — investigate the bloat"; exit 1; }
     # Report the headroom, don't just pass silently. A ratchet you can only read
     # at the moment it breaks gives no warning that it is about to — and a prose
     # estimate of the size drifts unnoticed precisely because every run is green.
-    echo "wasm $SIZE / $CAP bytes ($((SIZE * 100 / CAP))% of cap, $(((CAP - SIZE) / 1024)) KB headroom)"
+    # Raw rides along with its RATIO, not bare: a bare byte count has nothing to
+    # be read against. The ratio does — it is gzipped-over-raw, so RISING means
+    # new poorly-compressible code and falling means new sprite text.
+    echo "wasm $WIRE / $CAP bytes gzipped ($((WIRE * 100 / CAP))% of cap, $(((CAP - WIRE) / 1024)) KB headroom; $RAW raw, compressing to $((WIRE * 100 / RAW))%)"
     test -f "$M" || { echo "missing $M — run 'just gen-wasm' (the wasm/glue pair manifest)"; exit 1; }
     (cd site/public/wasm && shasum -a 256 --strict -c manifest.sha256 >/dev/null) \
         || { echo "wasm/glue pair MISMATCH vs $M — a partial regen or one-sided merge; run 'just gen-wasm' and commit all of site/public/wasm/"; exit 1; }
@@ -860,7 +885,7 @@ gen-wasm-check:
         awk -v want="./$b" '$2 == want { found = 1 } END { exit !found }' "$M" \
             || { echo "$f is not covered by $M — run 'just gen-wasm'"; exit 1; }
     done
-    echo "gen-wasm-check OK: $W ($SIZE bytes <= $CAP), pair manifest verified"
+    echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
 # Drift gate: fail if any committed README section OR rendered still is stale.
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
@@ -872,7 +897,7 @@ gen-wasm-check:
 # + a release build of the snapshot example.
 [group('gen')]
 [doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: compare-selftest gen-readme-check gen-wasm-check
+gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
@@ -1091,6 +1116,33 @@ setup-tools:
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.
     git config core.hooksPath .githooks
+
+# The size gate's own negative control, because nothing else can be one: the
+# justfile is outside SHELL_SOURCES, so shellcheck never reads a recipe body, and
+# a size cap that stops measuring reports success for any artifact at all. This
+# pins the FAIL-OPEN class specifically — the first draft of the gzip gate wrote
+# `gzip … | wc -c`, which under POSIX sh (no pipefail) reports wc's status, so a
+# broken gzip measured zero and PASSED. Driving the real recipe with a gzip that
+# exits 1 is what that form cannot survive.
+# Not covered, deliberately: the over-cap and empty-artifact arms, which would
+# have to mutate the committed wasm to exercise. Their failures are loud; the
+# fail-open one is the silent class worth a test.
+[group('meta')]
+[doc('Self-test the wasm size gate: prove it still reds when its measurement breaks')]
+wasm-check-selftest:
+    #!/usr/bin/env sh
+    set -eu
+    stub=$(mktemp -d)
+    trap 'rm -rf "$stub"' EXIT
+    printf '#!/bin/sh\nexit 1\n' > "$stub/gzip"
+    chmod +x "$stub/gzip"
+    if PATH="$stub:$PATH" just gen-wasm-check >/dev/null 2>&1; then
+        echo "wasm-check-selftest: FAIL — gen-wasm-check passed with a broken gzip;"
+        echo "  the size measurement is fail-OPEN. Did the gzip call become a pipe?"
+        exit 1
+    fi
+    just gen-wasm-check >/dev/null
+    echo "wasm-check-selftest: OK (reds on a broken measurement, greens on a real one)"
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job, and
 # it had no test of its own — an always-green comparator reports success for any
