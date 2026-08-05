@@ -852,7 +852,10 @@ gen-wasm-check:
     set -eu
     W=site/public/wasm/pixtuoid_web_bg.wasm
     M=site/public/wasm/manifest.sha256
-    test -f "$W" || { echo "missing $W — run 'just gen-wasm'"; exit 1; }
+    # -s, not -f: an EMPTY committed wasm passes -f, and the ratio below divides
+    # by its size. Failing here says what is wrong; failing there says "division
+    # by 0".
+    test -s "$W" || { echo "missing or empty $W — run 'just gen-wasm'"; exit 1; }
     # Not tuned to the last KB: this measures gzip locally while the CDN does its
     # own, and the cap carries deliberate art-phase slack (see the note above).
     CAP=524288
