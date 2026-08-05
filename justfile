@@ -897,7 +897,7 @@ gen-wasm-check:
 # + a release build of the snapshot example.
 [group('gen')]
 [doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: compare-selftest gen-readme-check gen-wasm-check
+gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
@@ -1116,6 +1116,33 @@ setup-tools:
     # would otherwise be the only gate). Idempotent. CI re-runs `just preflight`
     # regardless, so a skipped local hook still meets the same checks at merge.
     git config core.hooksPath .githooks
+
+# The size gate's own negative control, because nothing else can be one: the
+# justfile is outside SHELL_SOURCES, so shellcheck never reads a recipe body, and
+# a size cap that stops measuring reports success for any artifact at all. This
+# pins the FAIL-OPEN class specifically — the first draft of the gzip gate wrote
+# `gzip … | wc -c`, which under POSIX sh (no pipefail) reports wc's status, so a
+# broken gzip measured zero and PASSED. Driving the real recipe with a gzip that
+# exits 1 is what that form cannot survive.
+# Not covered, deliberately: the over-cap and empty-artifact arms, which would
+# have to mutate the committed wasm to exercise. Their failures are loud; the
+# fail-open one is the silent class worth a test.
+[group('meta')]
+[doc('Self-test the wasm size gate: prove it still reds when its measurement breaks')]
+wasm-check-selftest:
+    #!/usr/bin/env sh
+    set -eu
+    stub=$(mktemp -d)
+    trap 'rm -rf "$stub"' EXIT
+    printf '#!/bin/sh\nexit 1\n' > "$stub/gzip"
+    chmod +x "$stub/gzip"
+    if PATH="$stub:$PATH" just gen-wasm-check >/dev/null 2>&1; then
+        echo "wasm-check-selftest: FAIL — gen-wasm-check passed with a broken gzip;"
+        echo "  the size measurement is fail-OPEN. Did the gzip call become a pipe?"
+        exit 1
+    fi
+    just gen-wasm-check >/dev/null
+    echo "wasm-check-selftest: OK (reds on a broken measurement, greens on a real one)"
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job, and
 # it had no test of its own — an always-green comparator reports success for any
