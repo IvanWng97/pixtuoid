@@ -10,6 +10,10 @@ expression: events
     parent_id: ~
 - ModelInfo:
     agent_id: 7773501557500286957
+    model: ~
+    effort: high
+- ModelInfo:
+    agent_id: 7773501557500286957
     model: deepseek-v4-flash
     effort: ~
 - Usage:

@@ -43,6 +43,8 @@ use crate::AgentId;
 #[cfg(feature = "native")]
 mod native;
 #[cfg(feature = "native")]
+pub(crate) use native::live_omp_session_ids_for_focus;
+#[cfg(feature = "native")]
 pub use native::OmpSource;
 
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
@@ -61,10 +63,10 @@ pub const SOURCE_NAME: &str = "omp";
 /// calls `fs.existsSync`).
 ///
 /// All three directory vars are read through the `.env` overlay first
-/// ([`with_omp_dotenv`], upstream `env.ts`), because upstream applies those files
+/// (`with_omp_dotenv`, upstream `env.ts`), because upstream applies those files
 /// and then REBUILDS this resolver — so a var set only in `~/.env` moves omp's
 /// sessions dir, and reading process env alone would watch an empty directory.
-pub(crate) fn omp_sessions_dir() -> PathBuf {
+pub fn omp_sessions_dir() -> PathBuf {
     let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
         std::fs::read_to_string(p).ok()
     });
@@ -471,11 +473,12 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
 /// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so
 /// this watch is the ONLY signal an entry type rename gives us.
 #[cfg(test)]
-pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM];
+pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM, THINKING_LEVEL_CHANGE];
 
 const SESSION: &str = "session";
 const MESSAGE: &str = "message";
 const CUSTOM: &str = "custom";
+const THINKING_LEVEL_CHANGE: &str = "thinking_level_change";
 
 /// The `customType` marking a clean teardown — the ONLY structural end omp
 /// writes. Exported for the drift surface because the guard below falls through
@@ -632,6 +635,17 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
+        // Forwarded RAW: omp's `--thinking` vocabulary already contains
+        // `burn::MAX_EFFORTS` verbatim, so translating would be a second
+        // vocabulary to sync. `configured` is the user's PIN, not the turn's.
+        THINKING_LEVEL_CHANGE => match obj.get("thinkingLevel").and_then(|l| l.as_str()) {
+            Some(level) if !level.is_empty() => vec![AgentEvent::ModelInfo {
+                agent_id: acting,
+                model: None,
+                effort: Some(ellipsize(level, MAX_DECODED_FIELD_CHARS)),
+            }],
+            _ => vec![],
+        },
         // Not sprite-visible.
         // (model_change stays undecoded even though the burn tier reads model:
         // its value is the provider-prefixed combined form, and every assistant
@@ -679,9 +693,9 @@ mod tests {
 
     /// Each entry type reaches a real arm. The arms dispatch on these same
     /// consts, so a value cannot drift; what this proves is that none of them
-    /// has stopped being handled. `custom` is GUARDED on
-    /// `customType == "session_exit"`, so its payload has to clear the guard —
-    /// a bare `custom` falls through to the catch-all like any unread type.
+    /// has stopped being handled. The guarded `custom` and
+    /// `thinking_level_change` arms get the payload each needs to emit; a bare
+    /// guarded type falls through like any unread type.
     #[test]
     fn the_decoded_entry_type_set_is_exactly_what_the_arms_match() {
         let drive = |ty: &str| {
@@ -691,6 +705,8 @@ mod tests {
                 MESSAGE => json!({"type": ty, "id": "x", "parentId": null, "timestamp": "t",
                                   "message": {"role": "assistant", "timestamp": 1,
                                               "model": "anthropic/claude-opus-4-5"}}),
+                THINKING_LEVEL_CHANGE => json!({"type": ty, "id": "x", "parentId": null,
+                                                "timestamp": "t", "thinkingLevel": "high"}),
                 _ => json!({"type": ty, "version": 3, "id": "x", "timestamp": "t",
                             "cwd": "/home/u/proj"}),
             };
@@ -992,6 +1008,45 @@ mod tests {
                 assert_eq!(m.as_str(), "claude-fable-5");
             }
             other => panic!("expected one ModelInfo, got {other:?}"),
+        }
+    }
+
+    /// Byte-real shape, anchored by the recorded `omp/ask-recorded` fixture:
+    /// `configured` is the user's PIN and is `null` whenever the pin is "auto",
+    /// while `thinkingLevel` is what the turn actually ran at — only the latter
+    /// is an effort observation.
+    #[test]
+    fn thinking_level_change_is_an_effort_observation_that_spares_the_model() {
+        let line = r#"{"type":"thinking_level_change","id":"3576fccd","parentId":"db62fa97","timestamp":"2026-06-23T12:22:24.469Z","thinkingLevel":"xhigh","configured":null}"#;
+        match &decode(line)[..] {
+            [AgentEvent::ModelInfo {
+                agent_id,
+                model: None,
+                effort: Some(effort),
+            }] => {
+                assert_eq!(*agent_id, root());
+                // Forwarded RAW: `burn::MAX_EFFORTS` already contains "xhigh"
+                assert_eq!(effort.as_str(), "xhigh");
+            }
+            other => panic!("expected one model-free ModelInfo, got {other:?}"),
+        }
+        // A pin the user set to a DIFFERENT level must not leak in — the
+        // running level wins.
+        let pinned = r#"{"type":"thinking_level_change","id":"a","parentId":null,"timestamp":"t","thinkingLevel":"max","configured":"xhigh"}"#;
+        match &decode(pinned)[..] {
+            [AgentEvent::ModelInfo {
+                effort: Some(e), ..
+            }] => assert_eq!(e.as_str(), "max"),
+            other => panic!("expected the RUNNING level, got {other:?}"),
+        }
+        // Absent/blank stays silent rather than stamping an empty effort, which
+        // would blank an already-observed one for a whole TTL.
+        for quiet in [
+            r#"{"type":"thinking_level_change","id":"a","parentId":null,"timestamp":"t","configured":"max"}"#,
+            r#"{"type":"thinking_level_change","id":"a","parentId":null,"timestamp":"t","thinkingLevel":""}"#,
+            r#"{"type":"thinking_level_change","id":"a","parentId":null,"timestamp":"t","thinkingLevel":3}"#,
+        ] {
+            assert!(decode(quiet).is_empty(), "expected no events for {quiet}");
         }
     }
 

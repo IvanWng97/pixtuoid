@@ -18,8 +18,9 @@ const TOP_MODELS: &[&str] = &["claude-fable", "claude-mythos", "gpt-5.6-sol"];
 /// Effort values that set a top model on fire.
 const MAX_EFFORTS: &[&str] = &["ultra", "ultrathink", "xhigh", "max"];
 
-/// How long an effort observation stays "fresh". Both sources re-stamp well
-/// inside this window while active, so it only expires once the agent idles.
+/// How long an effort observation stays "fresh". The per-turn carriers (Codex,
+/// CC) re-stamp well inside this window; omp's fires only on CHANGE, so a
+/// pinned max-effort session under-flames past it — cosmetic, accepted.
 pub(crate) const EFFORT_TTL_SECS: u64 = 600;
 
 /// The three visual tiers.
