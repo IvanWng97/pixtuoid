@@ -10,6 +10,9 @@ Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--selftest]
   --worktree   diff the WORKING TREE vs BASE, not the committed BASE...HEAD range
   --selftest   pin this driver's pathspec + hidden-dir scan on a throwaway repo
 """
+
+from __future__ import annotations
+
 import json
 import pathlib
 import re
