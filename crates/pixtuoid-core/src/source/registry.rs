@@ -619,7 +619,8 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 };
 
 /// HOOK-ONLY: Hermes Agent (Nous Research) has no tailable transcript; the
-/// reachable seam is Hermes shell hooks (`~/.hermes/config.yaml`). The envelope
+/// reachable seam is Hermes shell hooks (the `config.yaml` under
+/// `hermes::hermes_home`, which is NOT `~/.hermes` on Windows). The envelope
 /// reuses CC's `hook_event_name` field NAME with snake_case values, so the
 /// custom decoder claims every event and keys on `session_id` — not the
 /// workspace, which would merge a user's concurrent instances.

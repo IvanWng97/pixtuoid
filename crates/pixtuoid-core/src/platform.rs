@@ -63,6 +63,37 @@ pub(crate) fn nonempty(v: Option<String>) -> Option<String> {
     v.filter(|s| !s.trim().is_empty())
 }
 
+/// [`nonempty`]'s TRIMMING twin — the value comes back STRIPPED, not merely
+/// tested. This is Python's `os.environ.get(K, "").strip()` idiom, which hermes
+/// applies to both `HERMES_HOME` and `LOCALAPPDATA`, so `" /srv/hm "` IS
+/// `/srv/hm` upstream while `nonempty` hands back the padded string.
+pub(crate) fn nonempty_trimmed(v: Option<String>) -> Option<String> {
+    nonempty(v).map(|s| s.trim().to_string())
+}
+
+/// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
+///
+/// None of the agent CLIs absolutizes such an override or expands a leading `~`
+/// (source-verified against claude-code 2.1.226, copilot 1.0.78 and hermes
+/// 2026.8.3), so each resolves it against ITS OWN cwd — and pixtuoid's differs,
+/// which makes one string name two directories and leaves the watcher tailing,
+/// or the installer writing, somewhere the CLI never looks. That failure is
+/// otherwise mute: an empty office and no error (#880).
+pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
+    if !dir.is_absolute() {
+        // Undeduped: this resolves a handful of times per run (source
+        // construction + install), never per event.
+        tracing::warn!(
+            var = %var,
+            dir = %dir.display(),
+            "env home override is a RELATIVE path; it resolves against each \
+             process's own cwd, so pixtuoid and the CLI may disagree on where \
+             this points — set an absolute path",
+        );
+    }
+    dir
+}
+
 /// Pure precedence core, separated so it's unit-testable without env mutation.
 /// On a set-but-absent `CODEX_HOME` upstream codex returns a FATAL error; we
 /// deliberately fall back to `~/.codex` — benign for a visualizer, since codex
@@ -183,6 +214,51 @@ mod tests {
         assert_eq!(nonempty(s("   ")), None);
         assert_eq!(nonempty(s("\t \n")), None);
         assert_eq!(nonempty(s(" /home/u ")).as_deref(), Some(" /home/u "));
+    }
+
+    #[test]
+    fn nonempty_trimmed_strips_the_value_where_nonempty_only_tests_it() {
+        assert_eq!(nonempty_trimmed(None), None);
+        assert_eq!(nonempty_trimmed(s("")), None);
+        assert_eq!(nonempty_trimmed(s("   ")), None);
+        assert_eq!(nonempty_trimmed(s(" /home/u ")).as_deref(), Some("/home/u"));
+        assert_eq!(
+            nonempty(s(" /home/u ")).as_deref(),
+            Some(" /home/u "),
+            "the twins MUST differ here — that difference is the whole point"
+        );
+    }
+
+    #[test]
+    fn a_relative_override_warns_and_an_absolute_one_stays_quiet() {
+        let noisy = crate::test_capture::capture_logs(|| {
+            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from("rel/dir"));
+        });
+        assert!(
+            noisy.contains("CLAUDE_CONFIG_DIR") && noisy.contains("rel/dir"),
+            "a relative override must name itself in the warn floor:\n{noisy}"
+        );
+
+        // Negative control: the same helper on an absolute path must be silent,
+        // or the warn is noise rather than signal.
+        let quiet = crate::test_capture::capture_logs(|| {
+            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from("/abs/dir"));
+        });
+        assert!(
+            !quiet.contains("CLAUDE_CONFIG_DIR"),
+            "an absolute override must not warn:\n{quiet}"
+        );
+    }
+
+    #[test]
+    fn warn_if_relative_override_is_pass_through() {
+        for p in ["rel/dir", "/abs/dir", ""] {
+            assert_eq!(
+                warn_if_relative_override("X", PathBuf::from(p)),
+                PathBuf::from(p),
+                "the helper reports, it never rewrites"
+            );
+        }
     }
 
     #[test]

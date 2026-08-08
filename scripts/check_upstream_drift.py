@@ -266,6 +266,20 @@ HERMES_SHELL_HOOK_URL = (
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+# `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env` — the only file
+# in the roster where a home resolver is fetchable source rather than a shipped
+# binary (claude-code / copilot keep theirs in a closed binary and a Rust napi
+# addon, so those two are defense-#2-only). ONE-DIRECTIONAL: a depended env var
+# VANISHING means we resolve a config.yaml hermes no longer reads — the #880
+# fail-silent class, whose only symptom is a missing sprite.
+HERMES_HOME_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_constants.py"
+)
+# Both are read via `os.environ.get(NAME, "").strip()`, so both appear quoted.
+# The `.strip()` and the `%LOCALAPPDATA%\hermes` SHAPE are behaviour, not names —
+# those are pinned by the hermes unit tests against a live probe of the installed
+# CLI, which no name sweep can do.
+HERMES_HOME_ENV_VARS = {"HERMES_HOME", "LOCALAPPDATA"}
 
 # Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
 # (each name appears verbatim in the summary table AND the payload examples), so —
@@ -407,6 +421,11 @@ ANCHORS: dict[str, Anchor] = {
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
     HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
+    # Not the sibling `_get_platform_default_hermes_home` (which owns
+    # LOCALAPPDATA alone): `_hermes_home_from_env` is the whole resolution we
+    # mirror — it reads HERMES_HOME and delegates to that default — so it is the
+    # declaration whose disappearance actually invalidates the sweep.
+    HERMES_HOME_URL: Anchor(r"def _hermes_home_from_env", "`_hermes_home_from_env`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName", "the `PluginHookName` union"),
     # NOT `SessionNotification` (the obvious pick): it sits earlier in the file and
     # does not own the variants, so moving the enum out would leave it satisfied
@@ -1802,6 +1821,17 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"decode_hermes_hook_payload) is GONE from agent/shell_hooks.py "
                         f"_serialize_payload — renamed; the shell-hook JSON omits it and the "
                         f"decoder reads None (no coalesce key / no tool label)."
+                    )
+        home = fetch_anchored(HERMES_HOME_URL, "Hermes home resolver", report)
+        if home is not None:
+            for var in sorted(HERMES_HOME_ENV_VARS):
+                if f'"{var}"' not in home:
+                    report.add_breaking(
+                        f"Hermes env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::hermes::resolve_hermes_home) is GONE from "
+                        f"hermes_constants.py _hermes_home_from_env — hermes now resolves its "
+                        f"home some other way, so we install shell hooks into a config.yaml it "
+                        f"never reads (installed, but no sprite)."
                     )
 
     if ours.kimi is not None:

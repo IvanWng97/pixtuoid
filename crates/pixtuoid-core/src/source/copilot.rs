@@ -33,11 +33,19 @@ pub use native::CopilotSource;
 /// The GitHub Copilot CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "copilot";
 
-/// `$COPILOT_HOME` if set, else `~/.copilot`. An empty OR whitespace-only value
-/// counts as unset — otherwise it resolves the sessions base to a relative path.
+/// `$COPILOT_HOME` if set, else `~/.copilot` — mirroring copilot 1.0.78's own
+/// `resolveCopilotHome`, which lives in the Rust `runtime.node` addon and was
+/// probed directly rather than read: an EMPTY value is unset there too, `~` is
+/// NOT expanded, and `<home>/.copilot` is the default on every platform (the
+/// `%LOCALAPPDATA%` branch nearby belongs to the CACHE dir, not this one).
+///
+/// WHITESPACE-only is where we knowingly differ — upstream takes `"   "` as a
+/// literal relative dir — along with the `--config-dir` flag and XDG, which we
+/// cannot reach at all; all three are in this crate's `CLAUDE.md` "per-CLI home
+/// resolvers" sharp edge.
 pub fn copilot_home() -> PathBuf {
     match crate::platform::nonempty(std::env::var("COPILOT_HOME").ok()) {
-        Some(v) => PathBuf::from(v),
+        Some(v) => crate::platform::warn_if_relative_override("COPILOT_HOME", PathBuf::from(v)),
         None => PathBuf::from(crate::platform::user_home()).join(".copilot"),
     }
 }

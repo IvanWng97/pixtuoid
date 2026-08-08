@@ -8,8 +8,8 @@
 //!
 //! **Consent gate — deliberately NOT bypassed.** A freshly-declared Hermes shell hook is
 //! "not allowlisted" until the user approves it through Hermes's OWN flow. pixtuoid
-//! writes ONLY config.yaml and does NOT forge an approval in
-//! `~/.hermes/shell-hooks-allowlist.json` (the Codex `trusted_hash` precedent), so a
+//! writes ONLY config.yaml and does NOT forge an approval in that home's
+//! `shell-hooks-allowlist.json` (the Codex `trusted_hash` precedent), so a
 //! newly-connected Hermes sprite appears only AFTER that one-time approval.
 //!
 //! The YAML merge preserves the user's other config keys but does NOT round-trip

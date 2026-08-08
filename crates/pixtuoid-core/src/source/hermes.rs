@@ -1,7 +1,9 @@
 //! Hermes Agent (Nous Research) source — HOOK-ONLY: pixtuoid never spawns the user's
 //! agent and Hermes's on-disk sessions are not tailable JSONL, so the shell hooks in
-//! `~/.hermes/config.yaml` (or `$HERMES_HOME/config.yaml`) are the only seam a
-//! passive observer can reach.
+//! the `config.yaml` under [`hermes_home`] are the only seam a passive observer can
+//! reach. That home is `$HERMES_HOME` when set, else `~/.hermes` — but
+//! `%LOCALAPPDATA%\hermes` on Windows, which is why every caller resolves it through
+//! that fn rather than joining `.hermes` itself.
 //!
 //! Keyed on `session_id`, not the workspace: a user may run several Hermes sessions
 //! in ONE project and cwd-keying would merge them (the Cursor lesson).
@@ -27,24 +29,49 @@ use crate::AgentId;
 /// The Hermes CLI source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "hermes";
 
-/// The Hermes home dir (`config.yaml` lives directly in it), mirroring Hermes's own
-/// resolution: a non-empty `HERMES_HOME` is taken VERBATIM even when the dir does not
-/// exist — unlike Codex's exists-check — else `<user_home>/.hermes`.
+/// The Hermes home dir (`config.yaml` lives directly in it), mirroring hermes's
+/// own `hermes_constants._hermes_home_from_env` (2026.8.3): `HERMES_HOME`
+/// STRIPPED and taken verbatim when what's left is non-empty — even for a dir
+/// that does not exist, unlike Codex's exists-check — else the PLATFORM-NATIVE
+/// default, which is `%LOCALAPPDATA%\hermes` on Windows and only elsewhere
+/// `<user_home>/.hermes`.
+///
+/// Hermes PROFILES are applied out-of-band and are deliberately not mirrored —
+/// see this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
 pub fn hermes_home() -> Option<PathBuf> {
     resolve_hermes_home(
         std::env::var("HERMES_HOME").ok(),
+        std::env::var("LOCALAPPDATA").ok(),
+        cfg!(windows),
         crate::platform::user_home_opt(),
     )
+    .map(|d| crate::platform::warn_if_relative_override("HERMES_HOME", d))
 }
 
+/// Pure precedence core, separated so the Windows arm is unit-testable on any
+/// host. `user_home` mirrors `Path.home()`, whose Windows arm is
+/// `USERPROFILE`-first (`ntpath.expanduser`) exactly like [`user_home_opt`].
+///
+/// [`user_home_opt`]: crate::platform::user_home_opt
 fn resolve_hermes_home(
     hermes_home_env: Option<String>,
+    local_appdata: Option<String>,
+    windows: bool,
     user_home: Option<String>,
 ) -> Option<PathBuf> {
-    if let Some(h) = crate::platform::nonempty(hermes_home_env) {
+    use crate::platform::nonempty_trimmed;
+
+    if let Some(h) = nonempty_trimmed(hermes_home_env) {
         return Some(PathBuf::from(h));
     }
-    user_home.map(|h| PathBuf::from(h).join(".hermes"))
+    if !windows {
+        return user_home.map(|h| PathBuf::from(h).join(".hermes"));
+    }
+    let base = match nonempty_trimmed(local_appdata) {
+        Some(l) => PathBuf::from(l),
+        None => PathBuf::from(user_home?).join("AppData").join("Local"),
+    };
+    Some(base.join("hermes"))
 }
 
 /// Decode one Hermes hook payload (already identified by
@@ -328,20 +355,84 @@ mod tests {
         assert!(decode_hermes_hook_payload(&json!({"hook_event_name": "on_session_end"})).is_err());
     }
 
+    /// The unix arm, pinned against a live probe of hermes 2026.8.3's own
+    /// `_hermes_home_from_env` — including the STRIP, which `nonempty` alone
+    /// would have left as the padded `"  /custom/hm  "`.
     #[test]
-    fn hermes_home_prefers_verbatim_env_then_dot_hermes() {
+    fn hermes_home_strips_the_env_value_then_falls_back_to_dot_hermes() {
+        let unix = |env: Option<&str>| {
+            resolve_hermes_home(
+                env.map(str::to_string),
+                None,
+                false,
+                Some("/home/u".to_string()),
+            )
+        };
+        let default = Some(PathBuf::from("/home/u").join(".hermes"));
+
+        assert_eq!(unix(Some("/custom/hm")), Some(PathBuf::from("/custom/hm")));
         assert_eq!(
-            resolve_hermes_home(Some("/custom/hm".into()), Some("/home/u".into())),
-            Some(PathBuf::from("/custom/hm"))
+            unix(Some("  /custom/hm  ")),
+            Some(PathBuf::from("/custom/hm")),
+            "upstream reads HERMES_HOME through `.strip()` — the value is trimmed, not just tested"
+        );
+        assert_eq!(unix(None), default);
+        assert_eq!(unix(Some("")), default);
+        assert_eq!(unix(Some("   ")), default);
+        assert_eq!(resolve_hermes_home(None, None, false, None), None);
+    }
+
+    /// The Windows arm — `%LOCALAPPDATA%\hermes`, NOT `<home>/.hermes`. Running
+    /// the generic answer there wrote hooks into a config.yaml hermes never
+    /// reads, and the only symptom was a missing sprite (#880).
+    #[test]
+    fn hermes_home_on_windows_is_local_appdata_not_dot_hermes() {
+        let win = |env: Option<&str>, appdata: Option<&str>| {
+            resolve_hermes_home(
+                env.map(str::to_string),
+                appdata.map(str::to_string),
+                true,
+                Some(r"C:\Users\ada".to_string()),
+            )
+        };
+
+        assert_eq!(
+            win(None, Some(r"C:\Users\ada\AppData\Local")),
+            Some(PathBuf::from(r"C:\Users\ada\AppData\Local").join("hermes"))
+        );
+        // LOCALAPPDATA is `.strip()`ed upstream too, so a padded or blank one
+        // falls through to the same relative default.
+        let relative_default = Some(
+            PathBuf::from(r"C:\Users\ada")
+                .join("AppData")
+                .join("Local")
+                .join("hermes"),
+        );
+        assert_eq!(win(None, None), relative_default);
+        assert_eq!(win(None, Some("   ")), relative_default);
+        assert_eq!(
+            win(None, Some(r"  C:\pad  ")),
+            Some(PathBuf::from(r"C:\pad").join("hermes"))
         );
         assert_eq!(
-            resolve_hermes_home(None, Some("/home/u".into())),
-            Some(PathBuf::from("/home/u").join(".hermes"))
+            win(
+                Some(r"D:\profiles\work"),
+                Some(r"C:\Users\ada\AppData\Local")
+            ),
+            Some(PathBuf::from(r"D:\profiles\work")),
+            "HERMES_HOME still outranks the platform default"
         );
-        assert_eq!(
-            resolve_hermes_home(Some("   ".into()), Some("/home/u".into())),
-            Some(PathBuf::from("/home/u").join(".hermes"))
+        assert_eq!(resolve_hermes_home(None, None, true, None), None);
+    }
+
+    /// The two arms MUST disagree for the same inputs — the assertion that
+    /// would have caught the Windows bug had it existed.
+    #[test]
+    fn the_windows_and_unix_defaults_diverge() {
+        let home = Some(r"C:\Users\ada".to_string());
+        assert_ne!(
+            resolve_hermes_home(None, None, true, home.clone()),
+            resolve_hermes_home(None, None, false, home),
         );
-        assert_eq!(resolve_hermes_home(None, None), None);
     }
 }
