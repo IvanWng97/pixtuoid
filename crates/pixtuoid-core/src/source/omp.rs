@@ -47,14 +47,6 @@ pub use native::OmpSource;
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";
 
-/// omp's agent dir, mirroring `DirResolver`'s `agentDir` in upstream
-/// `packages/utils/src/dirs.ts`. See `omp_sessions_dir` for the axes; this is
-/// the pre-XDG half, and it is NOT where sessions necessarily live.
-pub fn omp_agent_dir() -> PathBuf {
-    let env = OmpEnv::from_process();
-    resolve_omp_agent_dir(&env)
-}
-
 /// omp's SESSIONS root, mirroring `dirs.ts` — deliberately NOT
 /// `omp_agent_dir().join("sessions")`, because the XDG redirect FLATTENS the
 /// `agent/` segment away (`$XDG_DATA_HOME/omp/sessions`).
@@ -1186,28 +1178,33 @@ mod tests {
         );
     }
 
-    /// Live-env twin of the injected matrix: proves the fn reads the process env.
+    /// Live-env twin of the injected matrix: proves the PRODUCTION fn reads
+    /// the process env, not merely that the pure core computes from injected
+    /// values.
     #[test]
-    fn omp_agent_dir_honors_non_empty_env_override() {
+    fn omp_sessions_dir_honors_non_empty_env_override() {
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("PI_CODING_AGENT_DIR");
 
         std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
-        assert_eq!(omp_agent_dir(), PathBuf::from("/custom/agent"));
+        assert_eq!(
+            omp_sessions_dir(),
+            PathBuf::from("/custom/agent").join("sessions")
+        );
 
         for blank in ["", "   "] {
             std::env::set_var("PI_CODING_AGENT_DIR", blank);
-            let dflt = omp_agent_dir();
+            let dflt = omp_sessions_dir();
             assert!(
-                dflt.ends_with(Path::new(".omp/agent")),
+                dflt.ends_with(Path::new(".omp/agent/sessions")),
                 "blank override {blank:?} → ~/.omp/agent fallback, got {dflt:?}"
             );
         }
 
         std::env::remove_var("PI_CODING_AGENT_DIR");
-        assert!(omp_agent_dir().ends_with(Path::new(".omp/agent")));
+        assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
 
         match saved {
             Some(v) => std::env::set_var("PI_CODING_AGENT_DIR", v),

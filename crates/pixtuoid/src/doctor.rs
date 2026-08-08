@@ -780,7 +780,13 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
             let root = pixtuoid_core::source::resolved_source_root(src)?;
             let env = registry::descriptor_for(src)
                 .and_then(|d| d.home_env)
-                .map(|v| (v, std::env::var_os(v).is_some_and(|s| !s.is_empty())));
+                // Trim-based, matching every resolver's `nonempty` policy: a `"  "`
+                // override is ignored by the resolver, so it must not render as
+                // `via $VAR` or raise the ⚠ (the #172 class).
+                .map(|v| {
+                    let set = std::env::var(v).is_ok_and(|s| !s.trim().is_empty());
+                    (v, set)
+                });
             Some(root_row(src, &root, root.is_dir(), env))
         })
         .collect();

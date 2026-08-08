@@ -731,7 +731,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 };
 
 /// Oh My Pi (`omp`, omp.sh). TRANSCRIPT-ONLY: the whole lifecycle is persisted
-/// to `<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl` and omp has NO
+/// to `<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl` and omp has NO
 /// shell-hook seam (its hooks are in-process TS extensions), so it needs no
 /// install target and no custom hook decoder. Subagents persist as SEPARATE
 /// nested files (`<parent-stem>/<taskId>.jsonl`), parent-linked by path.
@@ -1188,11 +1188,22 @@ mod tests {
     #[cfg(feature = "native")]
     #[test]
     fn every_declared_home_env_actually_moves_that_sources_root() {
-        use std::path::PathBuf;
-
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
+
+        // A dev with OMP_PROFILE/PI_PROFILE exported reds this gate with a
+        // message blaming the resolver, when the resolver is right: a named
+        // profile derives its own agent dir and IGNORES the override
+        // (`dirs.ts`, pinned in omp's own matrix). Scrub them for the duration —
+        // we already hold TEST_ENV_LOCK.
+        let saved_profiles: Vec<_> = ["OMP_PROFILE", "PI_PROFILE"]
+            .iter()
+            .map(|k| (*k, std::env::var_os(k)))
+            .collect();
+        for (k, _) in &saved_profiles {
+            std::env::remove_var(k);
+        }
 
         let declared: Vec<_> = REGISTRY
             .iter()
@@ -1203,6 +1214,9 @@ mod tests {
             "a floor, so an emptied column can't make this pass vacuously: {declared:?}"
         );
 
+        // Collect rather than assert in-loop: an in-loop panic would leak the
+        // scrubbed profile vars into every later test in this process.
+        let mut failures: Vec<String> = Vec::new();
         for (name, var) in declared {
             // A REAL dir, because codex gates `CODEX_HOME` on the path existing
             // (upstream `find_codex_home` does) — a bare string would silently
@@ -1212,27 +1226,35 @@ mod tests {
             let saved = std::env::var_os(var);
             std::env::set_var(var, &root_env);
 
-            let resolved: PathBuf =
-                crate::source::resolved_source_root(name).unwrap_or_else(|| {
-                    panic!(
-                        "{name} declares home_env={var} but `resolved_source_root` has no arm \
-                     for it — add one, or the declaration is unproven"
-                    )
-                });
+            let resolved = crate::source::resolved_source_root(name);
 
             match saved {
                 Some(v) => std::env::set_var(var, v),
                 None => std::env::remove_var(var),
             }
 
-            assert!(
-                resolved.starts_with(&root_env),
-                "{name}: ${var}={} did not reach the resolved root {} — the \
-                 override is declared but does not actually relocate anything",
-                root_env.display(),
-                resolved.display(),
-            );
+            match resolved {
+                None => failures.push(format!(
+                    "{name} declares home_env={var} but `resolved_source_root` has no arm \
+                     for it — add one, or the declaration is unproven"
+                )),
+                Some(r) if !r.starts_with(&root_env) => failures.push(format!(
+                    "{name}: ${var}={} did not reach the resolved root {} — the override is \
+                     declared but does not actually relocate anything",
+                    root_env.display(),
+                    r.display(),
+                )),
+                Some(_) => {}
+            }
         }
+
+        for (k, v) in &saved_profiles {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
     }
 
     /// Negative control: without an override, no root may land under the temp

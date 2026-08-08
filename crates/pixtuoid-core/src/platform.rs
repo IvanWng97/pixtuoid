@@ -35,6 +35,10 @@ pub fn user_home_opt() -> Option<String> {
 /// The Codex home dir, matching codex's own precedence (`codex-rs`
 /// `find_codex_home`): `CODEX_HOME` if it's set to an EXISTING directory, else
 /// `<user_home>/.codex`.
+///
+/// Not mirrored: upstream `canonicalize`s the ENV value (the default branch it
+/// leaves alone) — the inverse scoping of grok's, which canonicalizes only its
+/// DEFAULT. Same class, same reason it is unobservable here.
 pub(crate) fn codex_home() -> PathBuf {
     resolve_codex_home(std::env::var("CODEX_HOME").ok(), user_home())
 }
@@ -46,10 +50,11 @@ pub(crate) fn codex_home() -> PathBuf {
 /// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
 /// Windows, `$HOME` never consulted there), which `user_home` mirrors.
 ///
-/// Not mirrored: upstream `dunce::canonicalize`s the home before joining
-/// `.grok`, so under a SYMLINKED `$HOME` its path string differs from ours
-/// while naming the same directory — unobservable here (grok's registry keys on
-/// session id, not root path).
+/// Not mirrored: upstream `dunce::canonicalize`s the DEFAULT home before joining
+/// `.grok` (never `$GROK_HOME`), so under a SYMLINKED `$HOME` its path string
+/// differs from ours while naming the same directory. Unobservable because the
+/// exposed surface — the sessions WATCH ROOT — is opened, not string-compared,
+/// and both forms resolve through the link to one dir.
 pub(crate) fn grok_home() -> PathBuf {
     resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
 }
@@ -78,9 +83,10 @@ pub(crate) fn nonempty_trimmed(v: Option<String>) -> Option<String> {
 
 /// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
 ///
-/// No agent CLI absolutizes such an override or expands `~`, so each resolves
-/// it against ITS OWN cwd — one string, two directories, and the failure is
-/// otherwise mute: an empty office and no error (#880).
+/// Of the call sites only omp's is absolutized upstream (`path.resolve`, against
+/// OMP's cwd) and only codewhale expands `~`; the rest take it verbatim. Either
+/// way each process resolves against its OWN cwd — one string, two directories,
+/// and the failure is otherwise mute: an empty office and no error (#880).
 pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
     if !dir.is_absolute() {
         // Undeduped: this resolves a handful of times per run (source
@@ -118,7 +124,10 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
 /// resolves.
 ///
 /// Source-verified HOME-first CLIs (the only consumers):
-/// - **CodeWhale** — `config::effective_home_dir` = `$HOME ?? dirs::home_dir()`.
+/// - **CodeWhale** — `paths::user_home` = `$HOME ?? $USERPROFILE ??
+///   HOMEDRIVE+HOMEPATH ?? dirs::home_dir()`. We mirror the first two; the
+///   Windows-pair rung is unmirrored but fails LOUD (`anyhow!` → "pass
+///   --config"), never silently to a wrong dir.
 /// - **OpenClaw** — `infra/home-dir.ts::resolveRawOsHomeDir` = `$HOME ??
 ///   $USERPROFILE ?? os.homedir()`.
 ///
