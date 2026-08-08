@@ -802,11 +802,11 @@ pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 /// The walk-anchor offset for a desk whose occupant sits SOUTH of it, back to
 /// the viewer.
 ///
-/// PROVISIONAL: no desk is `North` yet, so nothing renders through this. The
-/// value it should take is a visual judgement — how far the occupant's head sits
-/// below the monitor — and belongs to the mock gate that introduces the first
-/// north-facing desk, not to this plumbing change.
-pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = 15;
+/// Ratified against a three-way render: at this offset the occupant sits AT the
+/// desk, overlapping its front edge, with the name badge still clear above the
+/// monitor. Further south (8, 11) they detach onto open floor and the badge
+/// lands on the desk surface.
+pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = 5;
 
 /// Where an agent walks to/from for its home `desk`, given which way that desk
 /// seats its occupant.

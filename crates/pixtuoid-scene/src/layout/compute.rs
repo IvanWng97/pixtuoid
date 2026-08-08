@@ -190,7 +190,7 @@ pub(super) fn compute_with_seed(
         couch_to_desk_extra,
     };
 
-    let home_desks = compute_pod_desks(max_desks, &cubicle_band, pod_grid);
+    let (home_desks, desk_facings) = compute_pod_desks(max_desks, &cubicle_band, pod_grid);
 
     let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
@@ -507,12 +507,46 @@ pub(super) fn compute_with_seed(
             fish_tank,
         });
 
+    // A back-turned desk is approached from its SOUTH front, and at a narrow band
+    // that side can be walled off — the desk then has no reachable approach at
+    // all and every leg to it straight-lines through the desk body. Demote those
+    // to the viewer-facing seat rather than dropping the desk: the office loses a
+    // little of the pod read, never a workstation. The same graceful-degradation
+    // rung the lounge and the scatter plants already take.
+    //
+    // Safe to do AFTER the mask: a desk's blocked ground is its body, which is
+    // the same whichever way its occupant sits, so nothing needs rebuilding.
+    let desk_facings: Vec<Facing> = home_desks
+        .iter()
+        .zip(&desk_facings)
+        .map(|(&desk, &facing)| {
+            if facing == Facing::North && {
+                // `approach_point` returns the probed cell itself as its
+                // "no allowed+reachable side" sentinel.
+                let chair = desk_walk_anchor_facing(desk, facing);
+                approach_point(
+                    Furniture::Desk,
+                    chair,
+                    facing,
+                    pantry_counter_size,
+                    &walkable,
+                    chair,
+                    &reachable,
+                ) == chair
+            } {
+                Facing::South
+            } else {
+                facing
+            }
+        })
+        .collect();
+
     Some(SceneLayout {
         buf_w,
         buf_h,
         cubicle_band,
         cubicle_aisle,
-        desk_facings: desk_facings_for(&home_desks),
+        desk_facings,
         home_desks,
         waypoints,
         plants,
@@ -1063,22 +1097,26 @@ impl FloorGeometry {
 
 /// Pod-grid desk placement: full pods, partial columns at right edge,
 /// partial row at bottom edge.
-/// Which way each emitted desk's occupant faces, parallel to the returned
-/// positions.
+/// Which way a desk on pod row `r` seats its occupant.
 ///
-/// EXPAND phase: every desk is `South` — byte-identical to the pre-facing
-/// painter, which hardcoded that orientation at four separate sites. The pod
-/// row is what will drive it; the plumbing lands first so the flip is provable
-/// on its own.
-pub(super) fn desk_facings_for(desks: &[Point]) -> Vec<Facing> {
-    desks.iter().map(|_| Facing::South).collect()
+/// A pod is 2x2, and its two rows face EACH OTHER across the inner gap — the
+/// arrangement a real open-plan pod has, with both rows' monitors meeting back
+/// to back down the middle. Row 0 keeps the viewer-facing seat; row 1 turns
+/// around. A partial bottom row is the next pod's row 0, so it faces the viewer
+/// like any other top row.
+fn pod_row_facing(r: u16) -> Facing {
+    if r == 0 {
+        Facing::South
+    } else {
+        Facing::North
+    }
 }
 
 pub(super) fn compute_pod_desks(
     max_desks: Option<usize>,
     cubicle_band: &Bounds,
     grid: PodGrid,
-) -> Vec<Point> {
+) -> (Vec<Point>, Vec<Facing>) {
     let PodGrid {
         cols: pod_cols,
         rows: pod_rows,
@@ -1091,6 +1129,7 @@ pub(super) fn compute_pod_desks(
     let grid_desk_cap =
         (pod_cols as usize) * (pod_rows as usize) * (POD_SIDE as usize) * (POD_SIDE as usize);
     let mut home_desks = Vec::with_capacity(n.min(grid_desk_cap.max(1)));
+    let mut facings = Vec::with_capacity(n.min(grid_desk_cap.max(1)));
     // Honest GROUND clamp on Y (the twin of desk_x_max below): the desk is
     // walk-behind (ground_y: End), so its blocked ground reaches DESK_GROUND_H
     // below the desk Point, NOT DESK_H (the slot) — clamping on DESK_H let a
@@ -1105,11 +1144,17 @@ pub(super) fn compute_pod_desks(
     // sprite, and DESK_W here let it poke past the buffer edge.
     let desk_x_max =
         (cubicle_band.x + cubicle_band.width).saturating_sub(super::decor::DESK_GROUND_W);
-    let push_desk = |desks: &mut Vec<Point>, x: u16, y: u16| -> bool {
+    let push_desk = |desks: &mut Vec<Point>,
+                     facings: &mut Vec<Facing>,
+                     x: u16,
+                     y: u16,
+                     facing: Facing|
+     -> bool {
         if desks.len() >= n || y > desk_y_max || x > desk_x_max {
             return desks.len() >= n;
         }
         desks.push(Point { x, y });
+        facings.push(facing);
         false
     };
 
@@ -1120,8 +1165,10 @@ pub(super) fn compute_pod_desks(
                 for c in 0..POD_SIDE {
                     let full = push_desk(
                         &mut home_desks,
+                        &mut facings,
                         pod_origin_x + c * (DESK_W + INTRA_POD_GAP_X),
                         pod_origin_y + r * (DESK_H + INTRA_POD_GAP_Y),
+                        pod_row_facing(r),
                     );
                     if full {
                         break 'outer;
@@ -1152,8 +1199,10 @@ pub(super) fn compute_pod_desks(
                 for i in 0..partial_col_count {
                     let full = push_desk(
                         &mut home_desks,
+                        &mut facings,
                         partial_col_x(i),
                         pod_origin_y + r * (DESK_H + INTRA_POD_GAP_Y),
+                        pod_row_facing(r),
                     );
                     if full {
                         break 'partial_x;
@@ -1174,8 +1223,10 @@ pub(super) fn compute_pod_desks(
             for c in 0..POD_SIDE {
                 let full = push_desk(
                     &mut home_desks,
+                    &mut facings,
                     pod_origin_x + c * (DESK_W + INTRA_POD_GAP_X),
                     partial_y,
+                    pod_row_facing(0),
                 );
                 if full {
                     break 'partial_y;
@@ -1183,14 +1234,20 @@ pub(super) fn compute_pod_desks(
             }
         }
         for i in 0..partial_col_count {
-            let full = push_desk(&mut home_desks, partial_col_x(i), partial_y);
+            let full = push_desk(
+                &mut home_desks,
+                &mut facings,
+                partial_col_x(i),
+                partial_y,
+                pod_row_facing(0),
+            );
             if full {
                 break;
             }
         }
     }
 
-    home_desks
+    (home_desks, facings)
 }
 
 /// Decor items placed in aisles between 2x2 desk pods.

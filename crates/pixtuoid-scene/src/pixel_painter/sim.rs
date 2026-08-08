@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+/// The desk occupant's back view, substituted for `seated` on a north-facing desk.
+const SEATED_BACK: &str = "seated_back";
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -270,7 +272,19 @@ fn resolve_characters(
                       frame_idx: usize,
                       glow: CharacterGlow,
                       sleep_z_seed: Option<u64>| {
-            let anchor_no_breath = seated_anchor_facing(desk, char_w, layout.desk_facing_at(desk));
+            let facing = layout.desk_facing_at(desk);
+            let anchor_no_breath = seated_anchor_facing(desk, char_w, facing);
+            // A back-turned occupant shows their back. Only the still pose has a
+            // back view — `typing` keeps its front frames, so a north desk's
+            // typist reads as seated rather than losing the animation entirely.
+            let anim_name = match (facing, anim_name) {
+                (crate::layout::Facing::North, "seated")
+                    if pack.animation(SEATED_BACK).is_some() =>
+                {
+                    SEATED_BACK
+                }
+                _ => anim_name,
+            };
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,
