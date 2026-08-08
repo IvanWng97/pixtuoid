@@ -1,0 +1,50 @@
+# 14x11 top-down desk for a NORTH-facing seat -- one whose occupant sits on
+# the NEAR side with their back to the viewer (`layout.desk_facings`, read by
+# `desk_facing_at`). Same 14 px width and same BOTTOM THREE rows as
+# `desk.sprite` (front edge + legs); the three extra rows are all above, which
+# is the entire point.
+#
+# WHY a second sprite rather than a taller shared one: a back-turned occupant
+# is anchored at `desk.y` and y-sorts IN FRONT of their desk, so on the base
+# sprite their head lands exactly on rows 2-3 -- the screen -- and covers it.
+# Here the monitor stands tall enough that both screen rows sit at `desk.y-2`
+# and `desk.y-1`, clear of the head, so the screen and its tool-coloured glow
+# are visible on precisely the desks whose occupant is looking at one. A
+# far-seated desk keeps `desk.sprite`: its occupant is BEHIND the monitor, so a
+# raised screen would show a display nobody in the scene can see.
+#
+# THREE extra rows, not four: the screen rows must clear `desk.y` and nothing
+# more, so `blit_y = desk.y - 4` is the LOWEST lift that works and the sprite
+# height falls out of it.
+#
+# The desk SURFACE runs up behind the screen rows rather than stopping under
+# them, so the monitor is drawn standing IN the desk rather than perched at its
+# back edge -- wood flanks it at rows 2-4 and only the top two rows rise clear,
+# the same 1-2 rows of proud monitor the base desk already reads with. Two
+# earlier passes got this wrong: 14x12 with a 1px stand neck floating the
+# monitor a whole row above the wood (owner-rejected as too tall, and the neck
+# was hidden behind the head anyway), then 14x11 with the surface starting
+# below the chin, which left the monitor touching the wood but never
+# overlapping it. The desk reads 2 rows deeper than `desk.sprite` as a result;
+# that is a VISUAL overhang north, which the shallow south-strip footprint
+# (`ground_y: End`, invariant #6) does not care about.
+#
+# Rows 1-4 are STRUCTURALLY IDENTICAL to `desk.sprite`'s rows 1-4. That is
+# load-bearing, not tidiness: `effects::paint_screen_glow` addresses the screen
+# by fixed dy 0..3 offsets from a screen-top row, so a monitor block that
+# reshuffled its rows -- or dropped the bezel row to save height -- would light
+# the wrong pixels. The painter derives the screen-top row from the blit anchor
+# and the blit anchor from the height difference, so nothing here is a second
+# copy of "3".
+@frame 0
+. . . M M M M M M M M . . .
+. . . M M M M M M M M . . .
+D D D M j j j j j j M D D D
+D D D M j j j j j j M D D D
+D D D D n n n n n n D D D D
+D D D D D D D D D D D D D D
+D D D D D D D D D D D D D D
+D D D D D D D D D D D D D D
+d d d d d d d d d d d d d d
+d d . . . . . . . . . . d d
+d d . . . . . . . . . . d d

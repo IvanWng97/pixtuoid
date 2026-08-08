@@ -172,6 +172,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "walking_coffee_1.sprite",
         "desk.sprite",
         "desk@4x.sprite",
+        "desk_north.sprite",
         "plant.sprite",
         "plant_tall.sprite",
         "plant_flower.sprite",

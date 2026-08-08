@@ -25,6 +25,22 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
+/// Buffer rows a badge rises by when its agent sits at a desk that raises its
+/// monitor above their head.
+///
+/// A badge anchors on the sprite TOP, which for a back-turned seat is the head
+/// at `desk.y` — exactly where `desk_north.sprite` puts the screen. Without this
+/// the label paints over the display the raised art exists to reveal.
+///
+/// It is a COPY of that sprite's extra height rather than a derivation:
+/// [`build_overlay`] takes no `Pack` (three painters share the signature and two
+/// of them have no reason to hold one), so the height difference is not
+/// reachable here. Rounded UP to an even number of rows because a half-block
+/// painter divides this by two to get a cell — an odd lift can round back onto
+/// the screen. `desk_north_art_fits_under_the_label_lift` pins both properties
+/// against the embedded pack, which is what keeps the copies honest.
+const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
+
 /// Activity-derived label tone — backend-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelTone {
@@ -65,6 +81,35 @@ pub struct LabelElement {
     pub hovered: bool,
 }
 
+/// Raise a badge clear of a raised monitor, when this agent is the one sitting
+/// under it.
+///
+/// Gated on the anchor MATCHING the desk's seated anchor rather than on the pose:
+/// the same agent walking past their own desk gets the same `Facing::North` from
+/// the layout, and lifting their badge mid-corridor would detach it from them.
+fn lift_over_raised_monitor(
+    anchor: Point,
+    agent: &pixtuoid_core::AgentSlot,
+    layout: &Layout,
+) -> Point {
+    let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
+        return anchor;
+    };
+    let facing = layout.desk_facing_at(desk);
+    if facing != crate::layout::Facing::North {
+        return anchor;
+    }
+    let seated =
+        crate::pixel_painter::seated_anchor_for(desk, crate::layout::CHARACTER_SPRITE_W, facing);
+    if anchor != seated {
+        return anchor;
+    }
+    Point {
+        x: anchor.x,
+        y: anchor.y.saturating_sub(RAISED_MONITOR_LABEL_LIFT),
+    }
+}
+
 /// Build one `LabelElement` per VISIBLE agent — off-floor agents get no
 /// `character_anchor` and are skipped, so labels align 1:1 with the sprites.
 pub fn build_overlay(
@@ -83,6 +128,7 @@ pub fn build_overlay(
         let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
         };
+        let anchor = lift_over_raised_monitor(anchor, agent, layout);
         let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
@@ -359,5 +405,35 @@ mod tests {
         let a = disambig_suffix("/naïveté/app");
         assert_eq!(a, disambig_suffix("/naïveté/app"));
         assert_eq!(a.len(), 4);
+    }
+
+    /// The one copied number in this file, checked against the art it copies.
+    ///
+    /// Two properties, both load-bearing: the lift must COVER the raised art's
+    /// extra height (or the badge still lands on the screen), and it must be
+    /// EVEN, because a half-block painter divides the anchor by two to get a
+    /// terminal cell and an odd lift can round straight back down onto it.
+    #[test]
+    fn desk_north_art_fits_under_the_label_lift() {
+        let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let h = |name: &str| {
+            pack.animation(name)
+                .and_then(|a| a.frames.first())
+                .unwrap_or_else(|| panic!("the embedded pack ships {name}"))
+                .height()
+        };
+        let extra = h("desk_north") - h("desk");
+        let lift = super::RAISED_MONITOR_LABEL_LIFT;
+        assert!(
+            lift >= extra,
+            "desk_north rises {extra} rows above desk, but the badge lifts only \
+             {lift} — it would paint over the screen"
+        );
+        assert_eq!(
+            lift % 2,
+            0,
+            "an odd lift can round back onto the monitor once a half-block \
+             painter halves the anchor into a terminal cell"
+        );
     }
 }

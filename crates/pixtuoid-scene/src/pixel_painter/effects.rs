@@ -8,10 +8,13 @@ use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
+/// `screen_top` is the buffer row of the monitor's first frame row, NOT
+/// `desk.y`: a raised-monitor desk variant puts the screen several rows higher,
+/// and the caller derives this from the blit anchor so the two cannot disagree.
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
-    desk_y: u16,
+    screen_top: u16,
     now: SystemTime,
     tint: Rgb,
     theme: &Theme,
@@ -26,7 +29,7 @@ pub(super) fn paint_screen_glow(
     let glow_bright = blend_rgb(tint, white, 0.4);
     let scanline = blend_rgb(tint, white, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
-        buf.put_checked(desk_x + dx, desk_y + dy, c);
+        buf.put_checked(desk_x + dx, screen_top + dy, c);
     };
     for dx in 3..=10 {
         put(buf, dx, 0, frame_lit);

@@ -760,6 +760,7 @@ fn enqueue_desk_cubicles<'a>(
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
+                facing: ctx.layout.desk_facing(local),
                 divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,

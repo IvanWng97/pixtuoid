@@ -465,6 +465,7 @@ pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
 /// inherits any that are missing from the base pack, density variants included.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
+    "desk_north",
     "filing_cabinet",
     "plant",
     "plant_tall",

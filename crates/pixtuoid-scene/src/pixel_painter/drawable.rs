@@ -52,6 +52,10 @@ pub(super) enum DrawableKind<'a> {
     /// bottom-edge row.
     DeskCubicle {
         desk: Point,
+        /// Which way this desk seats its occupant — it picks the art. A
+        /// back-turned seat gets the raised-monitor variant so the sitter's head
+        /// does not land on the screen.
+        facing: crate::layout::Facing,
         /// Buffer column of this cubicle's pod divider, or `None` when the desk
         /// has no east pod-mate to be divided FROM (the row's last desk, or a
         /// pod whose second column the band clamp dropped).
@@ -260,6 +264,28 @@ pub(super) struct DrawableCtx<'a> {
 
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
+/// How far a desk sprite's top row rises above `desk.y` — the monitor bezel
+/// standing proud of the desk back, which is also why the screen's first row is
+/// exactly one below the blit anchor.
+const DESK_BEZEL_RAISE: u16 = 1;
+
+/// The desk art for a seat facing `facing`, or `None` to use the base `desk`.
+///
+/// Only a back-turned seat needs its own: its occupant is anchored at `desk.y`
+/// and y-sorts in FRONT of the desk, so on the base art their head covers the
+/// screen outright. Every other facing seats them behind the monitor, where the
+/// base art is already right — and a raised screen would be showing a display
+/// nobody in the scene is looking at. An east/west seat lands here as one more
+/// arm plus its sprite.
+fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
+    match facing {
+        crate::layout::Facing::North => Some("desk_north"),
+        crate::layout::Facing::South
+        | crate::layout::Facing::East
+        | crate::layout::Facing::West => None,
+    }
+}
+
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     // Re-bound to the original names so the arms below are untouched.
     let buf = &mut *c.buf;
@@ -268,6 +294,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
+            facing,
             divider_x,
             has_cabinet,
             screen_glow,
@@ -300,15 +327,30 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                     }
                 }
             }
-            if let Some(frame) = pack.animation("desk").and_then(|a| a.frames.first()) {
-                // The desk sprite's top row is the monitor's raised bezel, 1px
-                // above the desk back, so blit 1px higher.
-                blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
+            let base_h = pack
+                .animation("desk")
+                .and_then(|a| a.frames.first())
+                .map_or(0, |f| f.height());
+            // A taller variant keeps the BASE sprite's bottom row, so its extra
+            // rows all land above `desk.y` — derived from the two heights rather
+            // than restated as an offset that would drift the day the art
+            // changes. Falls back to `desk` for a pack that ships no variant.
+            let art = desk_sprite_name(*facing)
+                .and_then(|n| pack.animation(n))
+                .or_else(|| pack.animation("desk"))
+                .and_then(|a| a.frames.first());
+            let mut screen_top = desk.y;
+            if let Some(frame) = art {
+                let top = desk
+                    .y
+                    .saturating_sub(DESK_BEZEL_RAISE + frame.height().saturating_sub(base_h));
+                blit_frame(frame, desk.x, top, buf);
+                screen_top = top + DESK_BEZEL_RAISE;
             }
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, screen_top, now, *tint, theme);
             }
         }
         DrawableKind::Character {
@@ -653,6 +695,7 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
+                facing: crate::layout::Facing::South,
                 divider_x: None,
                 has_cabinet: false,
                 screen_glow: None,
@@ -843,6 +886,7 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
+                facing: crate::layout::Facing::South,
                 divider_x: None,
                 has_cabinet: true,
                 screen_glow: None,

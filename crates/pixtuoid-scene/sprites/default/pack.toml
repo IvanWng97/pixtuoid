@@ -89,6 +89,14 @@ frame_ms = 600
 frames   = ["desk@4x.sprite"]
 frame_ms = 600
 
+# The desk of a NORTH-facing seat: same width and same bottom row as `desk`,
+# monitor raised onto a stand so the back-turned occupant's head does not cover
+# the screen. OPTIONAL — a pack without it renders every desk as `desk`, which
+# is exactly the pre-facing look.
+[animations.desk_north]
+frames   = ["desk_north.sprite"]
+frame_ms = 600
+
 [animations.plant]
 frames   = ["plant.sprite"]
 frame_ms = 600
