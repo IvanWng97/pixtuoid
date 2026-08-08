@@ -772,11 +772,9 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         any_drift,
     ));
 
-    // "The watcher polls a directory the CLI never writes to" has no other
-    // symptom than an empty office, so doctor states the resolved root outright
-    // rather than making the user infer it (#880). Resolved through
-    // `resolved_source_root`, the SAME call the driver makes — a second copy
-    // here could show a healthy path while the watcher polled another.
+    // A wrong root has no symptom but an empty office, so state it outright
+    // (#880). Via `resolved_source_root` — the SAME call the driver makes, since
+    // a second copy could show a healthy path while the watcher polled another.
     let roots: Vec<String> = registry::registered_source_names()
         .filter_map(|src| {
             let root = pixtuoid_core::source::resolved_source_root(src)?;
@@ -816,13 +814,9 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
     Ok(out)
 }
 
-/// One `roots:` line per source that resolves to a single on-disk root.
-///
-/// This is a FACT row, not an alarm: a missing root is normal for a CLI the
-/// user never runs, so the only judgement here is the narrow one — missing
-/// WHILE a CLI-specific override is set, which is real evidence the override
-/// points somewhere that CLI does not use (#880). Pure (path + existence + env
-/// injected) so both arms unit-test without touching the filesystem.
+/// One `roots:` line per source with a single on-disk root. A FACT row, not an
+/// alarm — a missing root is normal for a CLI the user never runs, so the only
+/// ⚠ is missing WHILE that source's override is set (#880).
 pub(crate) fn root_row(
     source: &str,
     root: &std::path::Path,

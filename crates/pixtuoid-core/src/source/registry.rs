@@ -119,28 +119,15 @@ pub struct SourceDescriptor {
     /// argv to probe the installed CLI version. `None` = no stable CLI binary;
     /// `doctor` runs it best-effort and degrades to "version: unknown".
     pub version_probe: Option<&'static [&'static str]>,
-    /// The CLI-SPECIFIC env var that relocates the root
-    /// [`crate::source::resolved_source_root`] reports for this source
-    /// (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, …). Where a CLI has SEVERAL, this
-    /// names the one that relocates the root most directly — omp answers
-    /// `PI_CODING_AGENT_DIR` while `PI_CONFIG_DIR` / `OMP_PROFILE` / `PI_PROFILE`
-    /// / `XDG_DATA_HOME` move it too (its module doc enumerates them).
+    /// The CLI-specific env var relocating the root
+    /// [`crate::source::resolved_source_root`] reports. Compiler-forced, which
+    /// is the recurrence gate for the #880 class; pinned truthful by
+    /// `every_declared_home_env_actually_moves_that_sources_root`.
     ///
-    /// **Scoped to CORE-resolved roots, and `None` does NOT mean "this CLI has
-    /// no override".** A hook-only source's root is its INSTALLER's config path,
-    /// which lives binary-side in `pixtuoid/src/install/` and is out of core's
-    /// reach — `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are real overrides
-    /// declared there, not here. `None` also covers a root that moves only with
-    /// a PLATFORM var (`HOME`, `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME`), which one
-    /// `&'static str` could not express per-OS anyway.
-    ///
-    /// This is a fact about OUR resolver, not upstream's, and it is compiler-
-    /// forced: a new row cannot be added without answering it, which is the
-    /// recurrence gate for the #880 class (three sources shipped a home
-    /// resolver nobody had checked against the CLI's own). `doctor` names it
-    /// when a root is missing, and
-    /// `every_declared_home_env_actually_moves_that_sources_root` proves each
-    /// declaration is truthful rather than decorative.
+    /// **`None` does NOT mean "no override exists".** A hook-only source's root
+    /// is its installer's config path, binary-side and out of core's reach —
+    /// `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are declared there. Where a CLI
+    /// has several (omp), this names the most direct one.
     pub home_env: Option<&'static str>,
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
@@ -1184,14 +1171,8 @@ mod tests {
         }
     }
 
-    /// `home_env` is only worth a column if the declared var REACHES the root
-    /// production watches — a source could read it in the installer and not the
-    /// watcher (they would then disagree about where the CLI lives, which is
-    /// the #880 defect one layer up). So resolve each root through the SAME
-    /// `default_paths()` the driver calls and prove the override moves it.
-    ///
-    /// The match is a LOCKSTEP: a new row declaring `home_env` with no arm here
-    /// fails on the `unreachable!`, rather than silently going unproven.
+    /// A declared var is only worth a column if it REACHES the root production
+    /// watches — a source could read it in the installer and not the watcher.
     #[cfg(feature = "native")]
     #[test]
     fn every_declared_home_env_actually_moves_that_sources_root() {
@@ -1242,9 +1223,8 @@ mod tests {
         }
     }
 
-    /// The negative control for the test above: with NO override set, no root
-    /// may land under the temp dir — otherwise `starts_with` could be passing
-    /// for a reason unrelated to the env var.
+    /// Negative control: without an override, no root may land under the temp
+    /// dir — else `starts_with` above could pass for an unrelated reason.
     #[cfg(feature = "native")]
     #[test]
     fn a_source_root_does_not_wander_into_an_unset_overrides_directory() {

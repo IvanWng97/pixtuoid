@@ -355,9 +355,7 @@ mod tests {
         assert!(decode_hermes_hook_payload(&json!({"hook_event_name": "on_session_end"})).is_err());
     }
 
-    /// The unix arm, pinned against a live probe of hermes 2026.8.3's own
-    /// `_hermes_home_from_env` — including the STRIP, which `nonempty` alone
-    /// would have left as the padded `"  /custom/hm  "`.
+    /// Pinned against a live probe of hermes 2026.8.3, the STRIP included.
     #[test]
     fn hermes_home_strips_the_env_value_then_falls_back_to_dot_hermes() {
         let unix = |env: Option<&str>| {
@@ -382,9 +380,8 @@ mod tests {
         assert_eq!(resolve_hermes_home(None, None, false, None), None);
     }
 
-    /// The Windows arm — `%LOCALAPPDATA%\hermes`, NOT `<home>/.hermes`. Running
-    /// the generic answer there wrote hooks into a config.yaml hermes never
-    /// reads, and the only symptom was a missing sprite (#880).
+    /// `%LOCALAPPDATA%\hermes`, NOT `<home>/.hermes` — the generic answer wrote
+    /// hooks into a config.yaml hermes never reads (#880).
     #[test]
     fn hermes_home_on_windows_is_local_appdata_not_dot_hermes() {
         let win = |env: Option<&str>, appdata: Option<&str>| {
@@ -425,8 +422,7 @@ mod tests {
         assert_eq!(resolve_hermes_home(None, None, true, None), None);
     }
 
-    /// The two arms MUST disagree for the same inputs — the assertion that
-    /// would have caught the Windows bug had it existed.
+    /// The arms MUST disagree — the assertion that would have caught the bug.
     #[test]
     fn the_windows_and_unix_defaults_diverge() {
         let home = Some(r"C:\Users\ada".to_string());

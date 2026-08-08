@@ -90,11 +90,9 @@ fn omp_probe_root(sessions_root: &Path) -> Option<PathBuf> {
     omp_probe_root_resolved(sessions_root, &omp_sessions_dir())
 }
 
-/// The injectable core of [`omp_probe_root`]: `resolved_sessions` is the
-/// SESSIONS root this environment resolves — deliberately not the agent dir,
-/// which the XDG redirect bypasses entirely (it flattens `agent/` away, so an
-/// XDG user's `$XDG_DATA_HOME/omp/sessions` has no agent-dir parent to match
-/// and would silently lose the FD liveness probe).
+/// The injectable core of [`omp_probe_root`]. `resolved_sessions` is the
+/// SESSIONS root, not the agent dir: XDG flattens `agent/` away, so an XDG root
+/// has no agent-dir parent and would silently lose the probe.
 fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Option<PathBuf> {
     if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
         return None;
@@ -107,9 +105,8 @@ fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Op
                 .and_then(|n| n.to_str())
                 == Some(".omp")
     });
-    // Every relocating axis at once — `PI_CODING_AGENT_DIR`, `PI_CONFIG_DIR`,
-    // a profile, XDG — because `default_paths` and this gate call the SAME
-    // `omp_sessions_dir()`, so they cannot disagree about what is first-party.
+    // Covers every relocating axis at once: this gate and `default_paths` call
+    // the SAME `omp_sessions_dir()`, so they cannot disagree.
     let is_resolved_root = sessions_root == resolved_sessions;
     if !parent_is_dot_omp_agent && !is_resolved_root {
         return None;
@@ -169,9 +166,8 @@ mod tests {
         );
     }
 
-    /// The XDG shape has NO `agent/` parent to recognise — it is flattened away
-    /// — so before the gate compared against the resolved SESSIONS dir, an XDG
-    /// user silently lost the FD liveness probe and fell back to pure mtime.
+    /// The XDG shape has no `agent/` parent to recognise, so it used to lose the
+    /// probe and fall back to pure mtime.
     #[test]
     fn probe_root_attaches_for_the_xdg_flattened_layout() {
         let xdg = Path::new("/xdg/omp/sessions");

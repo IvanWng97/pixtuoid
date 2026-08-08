@@ -351,18 +351,16 @@ you:
    current" section in `crates/pixtuoid-core/CLAUDE.md`).
 
    **Audit its HOME RESOLVER in the same pass, per axis** — home order,
-   config-dir API, env-override semantics (verbatim vs `~`-expanded, and whether
-   empty/whitespace count as unset), profile or workspace subtrees, XDG, legacy-
-   dir fallbacks. `$SOME_ENV else ~/.<cli>` is only correct if you READ their
-   resolver and found it generic; assume it and every unmirrored axis is
-   fail-silent — the watcher polls a directory the CLI never writes to and the
-   office is simply empty, with no error and no health row (#880 shipped three
-   of these after #343/#342/#195 had each adjudicated the same lesson). Prefer
-   PROBING the installed artifact over reading docs: a closed CLI's resolver is
-   still reachable (`strings` a bun binary, `require()` a napi `.node`, run the
-   bundled interpreter), and a case matrix settles empty/whitespace/`~`/relative
-   — the cases nobody writes down. Record the verdict per axis as a sharp edge,
-   and add a `check_upstream_drift.py` row when the resolver is fetchable source.
+   config-dir API, env-override semantics (verbatim vs `~`-expanded; is
+   empty/whitespace unset?), profile subtrees, XDG, legacy-dir fallbacks.
+   `$SOME_ENV else ~/.<cli>` is correct only if you READ their resolver and
+   found it generic; assumed, every unmirrored axis is fail-silent — the watcher
+   polls a directory the CLI never writes to and the office is empty, with no
+   error (#880). PROBE the installed artifact rather than reading docs: `strings`
+   a bun binary, `require()` a napi `.node`, run the bundled interpreter — a case
+   matrix settles empty/whitespace/`~`/relative, the cases nobody writes down.
+   Record each verdict, and add a `check_upstream_drift.py` row when the resolver
+   is fetchable source.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`
    with a `SOURCE_NAME` const, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`),
    a label deriver, and unit tests for every event mapping. Per-source format

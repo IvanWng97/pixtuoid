@@ -46,13 +46,10 @@ pub(crate) fn codex_home() -> PathBuf {
 /// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
 /// Windows, `$HOME` never consulted there), which `user_home` mirrors.
 ///
-/// ONE axis is deliberately not mirrored: `default_grok_home` CANONICALIZES the
-/// home (`dunce::canonicalize`, to keep Windows `\\?\` verbatim prefixes out of
-/// paths it hands to `git`) before joining `.grok`, so under a SYMLINKED `$HOME`
-/// its path STRING differs from ours while naming the same directory. Watching
-/// and installing both resolve through the link, and grok's own registry is
-/// keyed by session id rather than by root path, so the difference is
-/// unobservable here — the same class as CC's NFC normalization.
+/// Not mirrored: upstream `dunce::canonicalize`s the home before joining
+/// `.grok`, so under a SYMLINKED `$HOME` its path string differs from ours
+/// while naming the same directory — unobservable here (grok's registry keys on
+/// session id, not root path).
 pub(crate) fn grok_home() -> PathBuf {
     resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
 }
@@ -81,11 +78,8 @@ pub(crate) fn nonempty_trimmed(v: Option<String>) -> Option<String> {
 
 /// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
 ///
-/// None of the agent CLIs absolutizes such an override or expands a leading `~`
-/// (source-verified against claude-code 2.1.226, copilot 1.0.78 and hermes
-/// 2026.8.3), so each resolves it against ITS OWN cwd — and pixtuoid's differs,
-/// which makes one string name two directories and leaves the watcher tailing,
-/// or the installer writing, somewhere the CLI never looks. That failure is
+/// No agent CLI absolutizes such an override or expands `~`, so each resolves
+/// it against ITS OWN cwd — one string, two directories, and the failure is
 /// otherwise mute: an empty office and no error (#880).
 pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
     if !dir.is_absolute() {

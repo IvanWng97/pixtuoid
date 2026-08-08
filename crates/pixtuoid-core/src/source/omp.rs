@@ -55,33 +55,17 @@ pub fn omp_agent_dir() -> PathBuf {
     resolve_omp_agent_dir(&env)
 }
 
-/// omp's SESSIONS root — deliberately NOT `omp_agent_dir().join("sessions")`,
-/// because the XDG redirect FLATTENS the `agent/` segment away
-/// (`~/.omp/agent/sessions` becomes `$XDG_DATA_HOME/omp/sessions`, upstream's
-/// own comment). omp is the roster's deepest resolver, so each axis, as read
-/// off `dirs.ts` on `main`:
+/// omp's SESSIONS root, mirroring `dirs.ts` — deliberately NOT
+/// `omp_agent_dir().join("sessions")`, because the XDG redirect FLATTENS the
+/// `agent/` segment away (`$XDG_DATA_HOME/omp/sessions`).
 ///
-/// - **`PI_CONFIG_DIR` is a directory NAME, not a path** — `path.join(homedir(),
-///   name)`, and Node's join does not let an absolute second argument escape the
-///   base, so `/srv/omp` lands at `<home>/srv/omp`. Rust's `Path::join` does the
-///   OPPOSITE, hence this module's `node_join`.
-/// - **`OMP_PROFILE` else `PI_PROFILE`** selects `<root>/profiles/<name>/agent`.
-///   `OMP_PROFILE` wins whenever it is PRESENT, even empty — an empty value
-///   explicitly selects the default profile instead of falling through to
-///   `PI_PROFILE`. A syntactically invalid name throws upstream, but the
-///   module-load path catches it and uses the default profile, which is the
-///   state an outside observer sees — so `normalize_profile_name` returns
-///   `None` there rather than failing.
-/// - **`PI_CODING_AGENT_DIR`** overrides the agent dir, but is DROPPED when it
-///   equals the `PI_PROFILE`-derived agent dir (a value a parent's `setProfile`
-///   exported, which must not become the default-mode baseline).
-/// - **XDG** applies on linux AND darwin, only when no agent-dir override is in
-///   play, and only when the target directory EXISTS (the file's own header says
-///   no existence check is performed — the code disagrees, and the code is what
-///   runs).
-///
-/// A RELATIVE `PI_CODING_AGENT_DIR` is `path.resolve`d against omp's OWN cwd,
-/// which is why it rides `warn_if_relative_override` like every other CLI's.
+/// Axes, in precedence order: `PI_CODING_AGENT_DIR` (dropped when it equals the
+/// `PI_PROFILE`-derived dir); `OMP_PROFILE` else `PI_PROFILE` →
+/// `profiles/<name>/agent`, where `OMP_PROFILE` wins whenever PRESENT so an
+/// EMPTY value selects default rather than falling through; `PI_CONFIG_DIR` as
+/// a directory NAME under home; XDG on linux+darwin, only with no override and
+/// only when the target EXISTS (the file's header claims otherwise — its code
+/// calls `fs.existsSync`).
 pub fn omp_sessions_dir() -> PathBuf {
     let env = OmpEnv::from_process();
     resolve_omp_sessions_dir(
@@ -1010,9 +994,8 @@ mod tests {
         }
     }
 
-    /// The omp axis matrix, against `dirs.ts` on `main`. Every arm is injected,
-    /// so the darwin/linux XDG branch and the Windows-reserved-name rejection
-    /// both run on any host.
+    /// Every arm injected, so the XDG and Windows-reserved-name branches run on
+    /// any host.
     #[test]
     fn omp_sessions_dir_mirrors_every_axis_of_the_upstream_resolver() {
         let base = |f: &dyn Fn(&mut OmpEnv)| {
@@ -1098,8 +1081,7 @@ mod tests {
         );
     }
 
-    /// XDG is the axis that changes the SHAPE, not just the prefix: it replaces
-    /// the base, flattening `agent/` away entirely.
+    /// XDG changes the SHAPE, not the prefix: it replaces the base.
     #[test]
     fn omp_xdg_flattens_the_agent_segment_and_only_when_the_dir_exists() {
         let env = |xdg: Option<&str>, profile: Option<&str>, agent: Option<&str>| OmpEnv {
@@ -1162,9 +1144,7 @@ mod tests {
         );
     }
 
-    /// The live-env twin of the injected matrix above: proves `omp_agent_dir`
-    /// actually reads the process environment, not just that the pure core
-    /// computes correctly from injected values.
+    /// Live-env twin of the injected matrix: proves the fn reads the process env.
     #[test]
     fn omp_agent_dir_honors_non_empty_env_override() {
         let _env = crate::TEST_ENV_LOCK
