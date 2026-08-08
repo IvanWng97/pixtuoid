@@ -101,12 +101,28 @@ impl OmpEnv {
 }
 
 /// Node's `path.join` for the ONE place the difference bites: a second segment
-/// that is ABSOLUTE. Node appends it to the base; Rust's `Path::join` discards
-/// the base and returns the segment. omp joins `PI_CONFIG_DIR` under the home
-/// dir, so using Rust's semantics would let `PI_CONFIG_DIR=/srv/omp` escape a
-/// home it never escapes upstream.
+/// that is ROOTED. Node appends it to the base; Rust's `Path::join` discards the
+/// base (`PathBuf::push`: an absolute path "replaces the current path", and one
+/// with a prefix but no root "replaces self"). omp joins `PI_CONFIG_DIR` under
+/// the home dir, so Rust's semantics would let it escape a home it never escapes
+/// upstream.
+///
+/// Dropping the PREFIX matters as much as the root, and only on Windows: there
+/// `C:\srv\omp` parses as Prefix+RootDir and replaces the base, while on Unix it
+/// is one ordinary component that never could. Node keeps that `C:` as a literal
+/// segment (`<home>\C:\srv\omp`), which Windows cannot even create — so for that
+/// pathological input we deliberately produce the BOUND `<home>\srv\omp` rather
+/// than reproduce an unusable path byte-for-byte. `..` is likewise left literal
+/// rather than lexically normalized; the filesystem resolves it the same way.
 fn node_join(base: &Path, segment: &str) -> PathBuf {
-    base.join(segment.trim_start_matches(['/', '\\']))
+    let mut out = base.to_path_buf();
+    for c in Path::new(segment).components() {
+        match c {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
 }
 
 /// `normalizeProfileName`: trimmed; empty or `"default"` is the implicit default
@@ -991,6 +1007,32 @@ mod tests {
                 assert_eq!(cwd, Path::new(""), "missing cwd → empty path fallback");
             }
             other => panic!("expected one SessionStart, got {other:?}"),
+        }
+    }
+
+    /// `PI_CONFIG_DIR` is user-controlled, so the invariant is that NO value
+    /// escapes home. Its TEETH are Windows-CI-only, and deliberately so: the
+    /// drive-letter escape exists only there (`C:\\srv` parses as Prefix+RootDir
+    /// and replaces the base), while on Unix the same string is one ordinary
+    /// component that never could — so a green macOS run does NOT prove this,
+    /// exactly like the windows-test class the root `CLAUDE.md` describes. The
+    /// earlier test pinned only the POSIX form and was blind to it.
+    #[test]
+    fn node_join_never_lets_a_rooted_segment_escape_the_base() {
+        let base = Path::new("/home/u");
+        for hostile in [
+            "/srv/omp",
+            r"C:\srv\omp",
+            r"C:srv",
+            r"\srv",
+            r"\\?\C:\srv",
+            "plain",
+        ] {
+            let got = node_join(base, hostile);
+            assert!(
+                got.starts_with(base),
+                "{hostile:?} escaped the base: {got:?}"
+            );
         }
     }
 

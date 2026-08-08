@@ -39,13 +39,22 @@ pub const SOURCE_NAME: &str = "hermes";
 /// Hermes PROFILES are applied out-of-band and are deliberately not mirrored —
 /// see this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
 pub fn hermes_home() -> Option<PathBuf> {
-    resolve_hermes_home(
-        std::env::var("HERMES_HOME").ok(),
+    let raw = std::env::var("HERMES_HOME").ok();
+    let from_env = crate::platform::nonempty_trimmed(raw.clone()).is_some();
+    let dir = resolve_hermes_home(
+        raw,
         std::env::var("LOCALAPPDATA").ok(),
         cfg!(windows),
         crate::platform::user_home_opt(),
-    )
-    .map(|d| crate::platform::warn_if_relative_override("HERMES_HOME", d))
+    )?;
+    // Only the ENV branch may be blamed on HERMES_HOME. A relative DEFAULT comes
+    // from HOME/LOCALAPPDATA, and naming an unset var as the cause sends the
+    // reader chasing the wrong one (#881 review).
+    Some(if from_env {
+        crate::platform::warn_if_relative_override("HERMES_HOME", dir)
+    } else {
+        dir
+    })
 }
 
 /// Pure precedence core, separated so the Windows arm is unit-testable on any
@@ -353,6 +362,52 @@ mod tests {
         assert!(decode_hermes_hook_payload(&json!("just a string")).is_err());
         assert!(decode_hermes_hook_payload(&json!(42)).is_err());
         assert!(decode_hermes_hook_payload(&json!({"hook_event_name": "on_session_end"})).is_err());
+    }
+
+    /// An UNSET `HERMES_HOME` must never be blamed for a relative default: the
+    /// default is derived from HOME/LOCALAPPDATA, so naming the wrong variable
+    /// sends the reader chasing a var they never set (#881 review).
+    #[test]
+    fn an_unset_hermes_home_is_never_named_as_the_cause_of_a_relative_default() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved_h = std::env::var_os("HERMES_HOME");
+        let saved_home = std::env::var_os("HOME");
+        let saved_up = std::env::var_os("USERPROFILE");
+
+        // A relative HOME makes the DERIVED default relative, with no override set.
+        std::env::remove_var("HERMES_HOME");
+        std::env::set_var("HOME", "relative-home");
+        std::env::set_var("USERPROFILE", "relative-home");
+        let quiet = crate::test_capture::capture_logs(|| {
+            let _ = hermes_home();
+        });
+        assert!(
+            !quiet.contains("HERMES_HOME"),
+            "an unset HERMES_HOME must not be named as the cause:\n{quiet}"
+        );
+
+        // Positive control: the ENV branch still warns, or the gate is inert.
+        std::env::set_var("HERMES_HOME", "rel/hm");
+        let loud = crate::test_capture::capture_logs(|| {
+            let _ = hermes_home();
+        });
+        assert!(
+            loud.contains("HERMES_HOME"),
+            "a RELATIVE HERMES_HOME must still warn:\n{loud}"
+        );
+
+        for (k, v) in [
+            ("HERMES_HOME", saved_h),
+            ("HOME", saved_home),
+            ("USERPROFILE", saved_up),
+        ] {
+            match v {
+                Some(val) => std::env::set_var(k, val),
+                None => std::env::remove_var(k),
+            }
+        }
     }
 
     /// Pinned against a live probe of hermes 2026.8.3, the STRIP included.
