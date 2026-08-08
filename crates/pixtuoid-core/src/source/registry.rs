@@ -119,6 +119,26 @@ pub struct SourceDescriptor {
     /// argv to probe the installed CLI version. `None` = no stable CLI binary;
     /// `doctor` runs it best-effort and degrades to "version: unknown".
     pub version_probe: Option<&'static [&'static str]>,
+    /// The CLI-SPECIFIC env var that relocates the root
+    /// [`crate::source::resolved_source_root`] reports for this source
+    /// (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, …).
+    ///
+    /// **Scoped to CORE-resolved roots, and `None` does NOT mean "this CLI has
+    /// no override".** A hook-only source's root is its INSTALLER's config path,
+    /// which lives binary-side in `pixtuoid/src/install/` and is out of core's
+    /// reach — `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are real overrides
+    /// declared there, not here. `None` also covers a root that moves only with
+    /// a PLATFORM var (`HOME`, `%LOCALAPPDATA%`, `$XDG_CONFIG_HOME`), which one
+    /// `&'static str` could not express per-OS anyway.
+    ///
+    /// This is a fact about OUR resolver, not upstream's, and it is compiler-
+    /// forced: a new row cannot be added without answering it, which is the
+    /// recurrence gate for the #880 class (three sources shipped a home
+    /// resolver nobody had checked against the CLI's own). `doctor` names it
+    /// when a root is missing, and
+    /// `every_declared_home_env_actually_moves_that_sources_root` proves each
+    /// declaration is truthful rather than decorative.
+    pub home_env: Option<&'static str>,
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
     pub kind: SourceKind,
@@ -354,6 +374,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cc",
     verified_version: "unknown",
     version_probe: Some(&["claude", "--version"]),
+    home_env: Some("CLAUDE_CONFIG_DIR"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: claude_code::decode_cc_line,
@@ -389,6 +410,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     label_prefix: "cx",
     verified_version: "unknown",
     version_probe: Some(&["codex", "--version"]),
+    home_env: Some("CODEX_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: codex::decode_codex_line,
@@ -422,6 +444,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     label_prefix: "ag",
     verified_version: "unknown",
     version_probe: Some(&["agy", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: antigravity::decode_ag_line,
@@ -458,6 +481,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     label_prefix: "rx",
     verified_version: "unknown",
     version_probe: Some(&["reasonix", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -490,6 +514,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cw",
     verified_version: "unknown",
     version_probe: Some(&["codewhale", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -516,6 +541,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "oc",
     verified_version: "unknown",
     version_probe: Some(&["opencode", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -548,6 +574,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     label_prefix: "ok",
     verified_version: "2026.6.6",
     version_probe: Some(&["openclaw", "--version"]),
+    home_env: None,
     kind: SourceKind::Daemon {
         presence_decoder: openclaw::decode_openclaw_hook_payload,
     },
@@ -562,6 +589,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     label_prefix: "cp",
     verified_version: "1.0.62",
     version_probe: Some(&["copilot", "--version"]),
+    home_env: Some("COPILOT_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: copilot::decode_copilot_line,
@@ -596,6 +624,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     label_prefix: "cu",
     verified_version: "unknown",
     version_probe: Some(&["cursor-agent", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -629,6 +658,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     label_prefix: "hm",
     verified_version: "0.18.0",
     version_probe: Some(&["hermes", "--version"]),
+    home_env: Some("HERMES_HOME"),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -659,6 +689,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
     label_prefix: "gk",
     verified_version: "0.2.102",
     version_probe: Some(&["grok", "--version"]),
+    home_env: Some("GROK_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: grok::decode_grok_line,
@@ -707,6 +738,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
     label_prefix: "om",
     verified_version: "16.4.0",
     version_probe: Some(&["omp", "--version"]),
+    home_env: Some("PI_CODING_AGENT_DIR"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
             line_decoder: omp::decode_omp_line,
@@ -746,6 +778,7 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     label_prefix: "km",
     verified_version: "unknown",
     version_probe: Some(&["kimi", "--version"]),
+    home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
@@ -1145,6 +1178,93 @@ mod tests {
                 }
             }
             let _ = crate::source::decoder::decode_hook_payload(v.clone());
+        }
+    }
+
+    /// `home_env` is only worth a column if the declared var REACHES the root
+    /// production watches — a source could read it in the installer and not the
+    /// watcher (they would then disagree about where the CLI lives, which is
+    /// the #880 defect one layer up). So resolve each root through the SAME
+    /// `default_paths()` the driver calls and prove the override moves it.
+    ///
+    /// The match is a LOCKSTEP: a new row declaring `home_env` with no arm here
+    /// fails on the `unreachable!`, rather than silently going unproven.
+    #[cfg(feature = "native")]
+    #[test]
+    fn every_declared_home_env_actually_moves_that_sources_root() {
+        use std::path::PathBuf;
+
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let declared: Vec<_> = REGISTRY
+            .iter()
+            .filter_map(|d| d.home_env.map(|v| (d.name, v)))
+            .collect();
+        assert!(
+            declared.len() >= 6,
+            "a floor, so an emptied column can't make this pass vacuously: {declared:?}"
+        );
+
+        for (name, var) in declared {
+            // A REAL dir, because codex gates `CODEX_HOME` on the path existing
+            // (upstream `find_codex_home` does) — a bare string would silently
+            // fall back and read as "the override doesn't work".
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root_env = tmp.path().to_path_buf();
+            let saved = std::env::var_os(var);
+            std::env::set_var(var, &root_env);
+
+            let resolved: PathBuf =
+                crate::source::resolved_source_root(name).unwrap_or_else(|| {
+                    panic!(
+                        "{name} declares home_env={var} but `resolved_source_root` has no arm \
+                     for it — add one, or the declaration is unproven"
+                    )
+                });
+
+            match saved {
+                Some(v) => std::env::set_var(var, v),
+                None => std::env::remove_var(var),
+            }
+
+            assert!(
+                resolved.starts_with(&root_env),
+                "{name}: ${var}={} did not reach the resolved root {} — the \
+                 override is declared but does not actually relocate anything",
+                root_env.display(),
+                resolved.display(),
+            );
+        }
+    }
+
+    /// The negative control for the test above: with NO override set, no root
+    /// may land under the temp dir — otherwise `starts_with` could be passing
+    /// for a reason unrelated to the env var.
+    #[cfg(feature = "native")]
+    #[test]
+    fn a_source_root_does_not_wander_into_an_unset_overrides_directory() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        for (name, root) in [
+            (
+                "claude-code",
+                crate::source::resolved_source_root("claude-code").unwrap(),
+            ),
+            (
+                "copilot",
+                crate::source::resolved_source_root("copilot").unwrap(),
+            ),
+        ] {
+            assert!(
+                !root.starts_with(tmp.path()),
+                "{name}: resolved {} under a directory nothing pointed at",
+                root.display()
+            );
         }
     }
 }

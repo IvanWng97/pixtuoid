@@ -40,7 +40,11 @@ These are the ones with a failing test attached — do NOT stop before them:
   theme file + a `dashboard_line` match arm; two guard tests fail otherwise.
 - **`pub fn <cli>_home()`** if the CLI has a custom config root — one fn honoring
   its `*_HOME` precedence, called from BOTH the watcher's `default_paths()` AND the
-  installer's `default_config_path()` so they can't disagree.
+  installer's `default_config_path()` so they can't disagree. **Audit that
+  precedence against the CLI's OWN resolver per axis before you write it** (#880 —
+  the axis list is in `CONTRIBUTING.md` step 1); `$ENV else ~/.<cli>` guessed
+  rather than read is fail-silent, and the compiler will make you answer the
+  registry's `home_env` column either way.
 - **A captured fixture** under `tests/sources/fixtures/<name>/<scenario>/`
   exercising the **SessionStart hook** — the conformance test forces one, and its
   one-AgentId assertion guards against the reason-field ghost.

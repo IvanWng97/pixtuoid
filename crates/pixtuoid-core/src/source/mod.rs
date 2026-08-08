@@ -262,6 +262,33 @@ impl AgentEvent {
     }
 }
 
+/// The on-disk root a source resolves — the transcript root its watcher polls,
+/// or for a hook-only source the config root its installer writes into.
+///
+/// Resolved through the SAME `default_paths()` the driver calls, because a
+/// second copy of the resolution is precisely the #880 defect one layer up: a
+/// reporter that computed the root its own way could show a healthy path while
+/// the watcher polled a different, empty one. `None` = this source has no
+/// single root (a daemon is port-keyed; a hook-only CLI whose config lives
+/// under a platform config dir is reported by its install target instead).
+///
+/// The match is a LOCKSTEP with [`registry::SourceDescriptor::home_env`]: a row
+/// declaring an override with no arm here fails
+/// `every_declared_home_env_actually_moves_that_sources_root`.
+#[cfg(feature = "native")]
+pub fn resolved_source_root(name: &str) -> Option<std::path::PathBuf> {
+    Some(match name {
+        "claude-code" => claude_code::ClaudeCodeSource::default_paths().projects_root,
+        "codex" => codex::CodexSource::default_paths().sessions_root,
+        "copilot" => copilot::CopilotSource::default_paths().sessions_root,
+        "grok" => grok::GrokSource::default_paths().sessions_root,
+        "omp" => omp::OmpSource::default_paths().sessions_root,
+        "antigravity" => antigravity::AntigravitySource::default_paths().brain_root,
+        "hermes" => hermes::hermes_home()?,
+        _ => return None,
+    })
+}
+
 /// Focus-jump pid point-queries for the transcript family — the ONE public
 /// seam the binary's `focus` module consumes. A point query against the live
 /// registry, never a transcript scan; it rides the recycle-guarded probe, the
