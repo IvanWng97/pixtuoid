@@ -248,7 +248,7 @@ impl SeatView {
 /// Covers the home desk too: `layout.home_desks` are NOT waypoints, but the
 /// chair is a settle target once the desk's arrival glides onto it.
 pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, u16)> {
-    use crate::layout::{seated_foot_cell, Furniture};
+    use crate::layout::seated_foot_cell;
     layout
         .waypoints
         .iter()
@@ -259,14 +259,31 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
             })
         })
         .or_else(|| {
+            // The desk arm reads the desk's OWN facing rather than
+            // `seated_foot_cell`'s viewer-facing default: a back-turned desk
+            // seats its occupant a different distance south, and matching on the
+            // default cell simply never recognised those chairs — the settle
+            // silently lost its seat view. The z-key follows the same anchor, so
+            // it cannot disagree with where the sprite lands.
             layout.home_desks.iter().find_map(|&desk| {
-                (seated_foot_cell(Furniture::Desk, desk) == Some(cell))
-                    .then_some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF))
+                let facing = layout.desk_facing_at(desk);
+                (crate::layout::desk_walk_anchor_facing(desk, facing) == cell).then(|| {
+                    let view = if facing == crate::layout::Facing::North {
+                        SeatView::Back
+                    } else {
+                        SeatView::Front
+                    };
+                    (view, cell.y.saturating_sub(SEAT_Z_LIFT))
+                })
             })
         })
 }
 
-/// The home-desk sitter's z-key offset south of `desk`: `seated_anchor.y(=desk.y
-/// − 8) + sprite_h(12) = desk.y + 4`. Below the desk furniture key (`desk.y + 7`)
-/// so the sitter and its sit-down glide always sort behind the desk monitor.
-pub(super) const DESK_SEAT_Z_OFF: u16 = 4;
+/// How far ABOVE its chair cell a desk sitter's z-key sits.
+///
+/// Derived from the chair rather than the desk so it moves with the seat: a
+/// viewer-facing chair at `desk.y + 4` keeps the historical `desk.y + 4` key,
+/// below the desk furniture's `desk.y + 7`, so that sitter and its sit-down
+/// glide sort behind the monitor. A back-turned chair is further south and its
+/// key follows, which is what puts that occupant IN FRONT of their desk.
+pub(super) const SEAT_Z_LIFT: u16 = 0;

@@ -2,7 +2,7 @@ use super::anchors::{
     back_couch_anchor, seated_anchor_facing, standing_at_desk_anchor, walking_anchor,
     waypoint_anchor, CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
+use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView};
 use super::wall::WALL_THICK_H_PX;
 use super::*;
 use crate::layout::stitch_vertical_wall;
@@ -724,11 +724,17 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
         Point { x: 7, y: 5 }, // near-origin: saturating_sub edge
     ] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            assert_eq!(
-                walking_anchor(crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South), w),
-                seated_anchor_facing(desk, w, crate::layout::Facing::South),
-                "walking_anchor(desk_walk_anchor_facing({desk:?}, South), {w}) must equal seated_anchor_facing",
-            );
+            // BOTH facings: the no-arrival-pop identity is what lets a desk seat
+            // its occupant on either side, so pinning it at `South` alone would
+            // leave the back-turned seat free to drift.
+            for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
+                assert_eq!(
+                    walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),
+                    seated_anchor_facing(desk, w, facing),
+                    "walking_anchor(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
+                     must equal seated_anchor_facing",
+                );
+            }
         }
     }
 }
@@ -872,15 +878,32 @@ fn settle_seat_view_recognizes_the_home_desk() {
     use crate::layout::{desk_walk_anchor_facing, Furniture};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
-    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
+    // The view follows the desk's own facing — a back-turned desk settles as
+    // `Back`. Pinning `Front` unconditionally would assert the pre-facing world
+    // and pass only while every desk happened to face the viewer.
+    let want_view = if l.desk_facing_at(desk) == crate::layout::Facing::North {
+        SeatView::Back
+    } else {
+        SeatView::Front
+    };
     assert_eq!(
         settle_seat_view(chair, &l),
-        Some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF)),
-        "the desk chair {chair:?} must settle as SeatView::Front at the desk z-key"
+        Some((want_view, chair.y)),
+        "the desk chair {chair:?} must settle as {want_view:?} at its own chair row"
     );
+    // `seated_foot_cell` is facing-BLIND — it takes a kind and a position, so its
+    // desk arm can only answer for the viewer-facing seat. `settle_seat_view` no
+    // longer routes desks through it for exactly that reason; the remaining desk
+    // caller is none, and the waypoint callers are unaffected. Pinned at the
+    // default so the limitation is visible rather than inferred from a
+    // coincidence.
     assert_eq!(
         crate::layout::seated_foot_cell(Furniture::Desk, desk),
-        Some(chair)
+        Some(crate::layout::desk_walk_anchor_facing(
+            desk,
+            crate::layout::Facing::South
+        ))
     );
     assert_eq!(
         settle_seat_view(desk, &l),
@@ -895,13 +918,14 @@ fn desk_settle_z_key_matches_the_seated_arm() {
         for w in [CHARACTER_SPRITE_W, 10] {
             let seated_arm_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
             assert_eq!(
-                desk.y + DESK_SEAT_Z_OFF,
+                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y,
                 seated_arm_z,
                 "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
             );
             let visual_h = crate::layout::desk_furniture_def().visual.h;
             assert!(
-                desk.y + DESK_SEAT_Z_OFF < desk.y + visual_h,
+                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y
+                    < desk.y + visual_h,
                 "desk sitter must sort behind the desk furniture"
             );
         }

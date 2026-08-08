@@ -86,6 +86,22 @@ mod sim;
 mod wall;
 
 pub use anchors::character_anchor;
+
+/// The painter's own seat anchor, for the binary's hit-test.
+///
+/// `#[doc(hidden)]` — public for MECHANISM, not contract (the overlay/board
+/// pattern). It exists so the click target is computed by the same fn that
+/// places the sprite, rather than by a second copy of its arithmetic that
+/// drifts the first time a desk seats its occupant on the other side.
+#[doc(hidden)]
+pub fn seated_anchor_for(
+    desk: crate::layout::Point,
+    sprite_w: u16,
+    facing: crate::layout::Facing,
+) -> crate::layout::Point {
+    anchors::seated_anchor_facing(desk, sprite_w, facing)
+}
+
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
 // footer tool colour matches the sprite's monitor glow exactly.
 pub use palette::tool_glow_for_kind;

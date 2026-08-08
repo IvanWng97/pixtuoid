@@ -64,10 +64,17 @@ pub(crate) fn hit_test_from_tui(
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // The painter's seated anchor: the 8px sprite centered on the SAME DESK_W
-        // the painter centers on, 8px above the desk.
-        let ax = desk.x + pixtuoid_scene::layout::DESK_W.saturating_sub(SPRITE_W) / 2;
-        let ay = desk.y.saturating_sub(8);
+        // Through the painter's OWN seat anchor, not a second copy of its
+        // arithmetic: this used to re-derive `desk.y - 8`, which silently stopped
+        // matching the moment a desk could seat its occupant on the south side —
+        // the agent rendered where the painter put them and was hit-testable
+        // where this thought they were.
+        let a = pixtuoid_scene::pixel_painter::seated_anchor_for(
+            desk,
+            SPRITE_W,
+            layout.desk_facing_at(desk),
+        );
+        let (ax, ay) = (a.x, a.y);
         let cell_x = ax;
         let cell_y = ay / 2;
         if mx >= cell_x

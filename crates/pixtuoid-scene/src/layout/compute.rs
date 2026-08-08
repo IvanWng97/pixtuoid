@@ -1106,9 +1106,9 @@ impl FloorGeometry {
 /// like any other top row.
 fn pod_row_facing(r: u16) -> Facing {
     if r == 0 {
-        Facing::South
-    } else {
         Facing::North
+    } else {
+        Facing::South
     }
 }
 

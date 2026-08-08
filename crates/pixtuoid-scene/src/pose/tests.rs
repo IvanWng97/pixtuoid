@@ -629,7 +629,7 @@ fn snap_back_routes_via_the_approach_cell_then_settles_onto_the_chair() {
         .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
         .expect("a desk with a valid approach cell");
     let desk = l.home_desks[desk_index];
-    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let mut slot = active_slot(now, now - Duration::from_secs(60));
@@ -1627,7 +1627,7 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
     let l = layout();
     let mut any_some = false;
     for &desk in &l.home_desks {
-        let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+        let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
         assert!(
             !l.is_walkable(chair.x, chair.y),
             "the desk chair {chair:?} must be blocked (covered by the desk's \
@@ -1661,7 +1661,7 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
         .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
         .expect("a desk with a valid approach cell");
     let desk = l.home_desks[desk_index];
-    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let slot = entry_slot_far(now, desk_index);
@@ -1716,7 +1716,7 @@ fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
         .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
         .expect("a desk with a valid approach cell");
     let desk = l.home_desks[desk_index];
-    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let trip_id = (0u64..3000)
@@ -1812,7 +1812,7 @@ fn exit_from_desk_rises_off_the_chair_via_the_approach_cell() {
         .find(|&i| desk_approach_cell(l.home_desks[i], &l).is_some())
         .expect("a desk with a valid approach cell");
     let desk = l.home_desks[desk_index];
-    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     let approach = desk_approach_cell(desk, &l).expect("approach cell");
 
     let mut slot = exiting_slot(now, now - Duration::from_secs(300));

@@ -535,35 +535,74 @@ fn compute_places_all_waypoint_kinds() {
 }
 
 #[test]
-fn every_home_desk_has_a_reachable_north_approach() {
-    // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y, whose
-    // south EDGE cell has a coarse routing cell that straddles the desk and is
-    // ReachSet-rejected — so only the deeper reachable-aware scan finds them.
-    // Pushing the origin far north makes `approach_point` prefer the north side
-    // whenever it has a reachable cell, so a north return proves the scan got there.
+fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
+    // A pod's back row faces the front row across the thin INTRA_POD_GAP_Y, whose
+    // edge cell sits in a coarse routing cell that straddles the desk and is
+    // ReachSet-rejected — only the deeper reachable-aware scan finds it. Probing
+    // from far off the desk's FAR side makes `approach_point` prefer that side
+    // whenever it has a reachable cell, so landing there proves the scan got in.
+    //
+    // The far side follows the desk's own facing: a viewer-facing desk seats its
+    // occupant to the north, a back-turned one to the south. Reading it from the
+    // layout rather than assuming `South` is what keeps this test measuring
+    // production — asserting a NORTH approach for every desk stopped being true
+    // the moment a pod's back row turned around.
     use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
-        for &desk in &l.home_desks {
-            let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
-            let north_origin = Point {
-                x: chair.x,
-                y: chair.y.saturating_sub(40),
+        // Without this the whole loop is vacuous: feeding it one facing makes the
+        // chair, the probe and the assertion agree under ANY assumption, so it
+        // passes on an all-`South` layout that never exercises the tight side at
+        // all. This is the one line that ties it to what `compute` actually built.
+        assert!(
+            l.desk_facings.contains(&Facing::North),
+            "{w}x{h}: no desk faces north — the pod back row never turned around, \
+             so nothing below probes the gap-side approach"
+        );
+        for (i, &desk) in l.home_desks.iter().enumerate() {
+            let facing = l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
+            let chair = desk_walk_anchor_facing(desk, facing);
+            const PROBE_DIST: u16 = 40;
+            let origin = match facing {
+                Facing::North => Point {
+                    x: chair.x,
+                    y: chair.y.saturating_add(PROBE_DIST),
+                },
+                _ => Point {
+                    x: chair.x,
+                    y: chair.y.saturating_sub(PROBE_DIST),
+                },
             };
             let a = approach_point(
                 Furniture::Desk,
                 chair,
-                Facing::South,
+                facing,
                 l.pantry_counter_size(),
                 &l.walkable,
-                north_origin,
+                origin,
                 &l.reachable,
             );
-            assert_ne!(a, chair, "desk {desk:?}: no reachable approach (sentinel)");
-            assert!(
-                a.y < chair.y,
-                "desk {desk:?}: approach {a:?} should be NORTH of the chair {chair:?}"
+            assert_ne!(
+                a, chair,
+                "desk {desk:?} ({facing:?}): no reachable approach"
             );
+            // The contract is the ROTATED approach set, not one specific side:
+            // E/W stay allowed either way, so a west cell at the chair's own row
+            // is a legitimate answer. What must never happen is an approach on
+            // the side the occupant sits on — that is the walk-through-the-desk
+            // path `DESK_APPROACH` excludes.
+            match facing {
+                Facing::North => assert!(
+                    a.y >= chair.y,
+                    "desk {desk:?} faces north: approach {a:?} is NORTH of {chair:?}, \
+                     the side its occupant sits on"
+                ),
+                _ => assert!(
+                    a.y <= chair.y,
+                    "desk {desk:?} faces south: approach {a:?} is SOUTH of {chair:?}, \
+                     the side its occupant sits on"
+                ),
+            }
             assert!(
                 l.reachable.reaches(a),
                 "desk {desk:?}: approach {a:?} must be A*-reachable"
