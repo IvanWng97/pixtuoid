@@ -159,6 +159,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     }
     embedded_sprites![
         "seated.sprite",
+        "seated_back.sprite",
         "side_seated.sprite",
         "typing_0.sprite",
         "typing_1.sprite",

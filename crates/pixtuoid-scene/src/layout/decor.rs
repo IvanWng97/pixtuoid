@@ -789,17 +789,50 @@ pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
 /// `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` — the agent settles
-/// exactly onto its north seat with no arrival pop, just clear of the desk
-/// obstacle. That identity is locked by a `pixel_painter` test.
+/// exactly onto its seat with no arrival pop, just clear of the desk obstacle.
+///
+/// That identity is now STRUCTURAL: `seated_anchor` derives itself from this
+/// offset rather than restating the difference, so the two cannot drift. It used
+/// to be two independent literals held together by a test.
 pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
+/// The walk-anchor offset for a desk whose occupant sits NORTH of it, facing the
+/// viewer — the only arrangement the office had before desks carried a facing.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
-/// The cell an agent walks to/from for its home `desk` (top-left Point).
-pub fn desk_walk_anchor(desk: Point) -> Point {
+/// The walk-anchor offset for a desk whose occupant sits SOUTH of it, back to
+/// the viewer.
+///
+/// PROVISIONAL: no desk is `North` yet, so nothing renders through this. The
+/// value it should take is a visual judgement — how far the occupant's head sits
+/// below the monitor — and belongs to the mock gate that introduces the first
+/// north-facing desk, not to this plumbing change.
+pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = 15;
+
+/// Where an agent walks to/from for its home `desk`, given which way that desk
+/// seats its occupant.
+///
+/// Desks are only ever laid out along the N-S axis, so `East`/`West` are not
+/// reachable; they take the viewer-facing arrangement rather than a panic,
+/// because a layout bug should render a slightly wrong office, not kill the
+/// render thread.
+pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
+    let y_off = match facing {
+        Facing::North => DESK_WALK_Y_OFF_BACK,
+        Facing::South | Facing::East | Facing::West => DESK_WALK_Y_OFF,
+    };
     Point {
         x: desk.x + DESK_WALK_X_OFF,
-        y: desk.y + DESK_WALK_Y_OFF,
+        y: desk.y + y_off,
     }
+}
+
+/// The viewer-facing walk anchor — [`desk_walk_anchor_facing`] at `South`.
+///
+/// The MIGRATE half of a parallel change: every caller still reads this while
+/// they move over one at a time, so the tree stays green at each step instead of
+/// 33 call sites breaking at once. Delete it once none remain.
+pub fn desk_walk_anchor(desk: Point) -> Point {
+    desk_walk_anchor_facing(desk, Facing::South)
 }
 
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders

@@ -21,11 +21,30 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 // character width — so a non-8-wide pack stays centered. The vertical pose
 // offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
 // stay fixed.
-pub(super) fn seated_anchor(desk: Point, sprite_w: u16) -> Point {
+/// Where a desk's occupant RENDERS, derived from where they WALK to.
+///
+/// `y` is the walk anchor lifted by the sprite height, which IS the identity
+/// `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` the settle relies
+/// on — so a facing that moves the seat moves both together. This used to be a
+/// bare `desk.y - 8` that happened to agree with `desk_walk_anchor`'s `+4`, held
+/// in step only by a test.
+pub(super) fn seated_anchor_facing(
+    desk: Point,
+    sprite_w: u16,
+    facing: crate::layout::Facing,
+) -> Point {
+    let walk = crate::layout::desk_walk_anchor_facing(desk, facing);
     Point {
         x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
-        y: desk.y.saturating_sub(8),
+        y: walk.y.saturating_sub(crate::layout::WALKING_Y_OFF),
     }
+}
+
+/// The viewer-facing render anchor — [`seated_anchor_facing`] at `South`.
+///
+/// The MIGRATE half of a parallel change; see `desk_walk_anchor`.
+pub(super) fn seated_anchor(desk: Point, sprite_w: u16) -> Point {
+    seated_anchor_facing(desk, sprite_w, crate::layout::Facing::South)
 }
 
 pub(super) fn standing_at_desk_anchor(desk: Point, sprite_w: u16) -> Point {

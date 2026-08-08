@@ -1,0 +1,20 @@
+# 8x10 seated occupant seen from BEHIND — the cutaway's over-the-shoulder read.
+#
+# Same footprint as `seated` so the pose routing and the desk geometry are
+# untouched; only the head reverses. The face rows become hair exactly as
+# `walking_back` reverses `walking`, so the two back views share one vocabulary
+# and an agent recoloured in one is recoloured in the other.
+#
+# The bottom rows carry sleeve rather than the hands `seated` shows: from behind,
+# the forearms are in front of the body and the desk occludes them anyway.
+@frame 0
+. n H H H H n .
+n H H H H H H n
+H H H H H H H H
+H H H H H H H H
+. H H H H H H .
+. n H H H H n .
+. B B B B B B .
+B B B B B B B B
+B B B B B B B B
+. B B B B B B .

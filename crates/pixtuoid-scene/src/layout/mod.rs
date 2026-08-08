@@ -20,9 +20,9 @@ pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::repels_plants;
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
-    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
-    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    desk_furniture_def, desk_walk_anchor, desk_walk_anchor_facing, furniture_def, seated_foot_cell,
+    ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor,
+    WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
@@ -164,6 +164,14 @@ pub struct SceneLayout {
     /// Per-agent home-desk anchor positions, indexed floor-locally (read via
     /// [`Self::home_desk`]).
     pub home_desks: Vec<Point>,
+    /// Which way each home desk's occupant faces, parallel to [`Self::home_desks`]
+    /// (read via [`Self::desk_facing`]).
+    ///
+    /// A SEPARATE vec rather than a field on the desk: `home_desks` is read at 74
+    /// sites that care only about the position, and widening it would churn every
+    /// one of them for a fact three of them need. The two are kept in lockstep by
+    /// construction — `compute_pod_desks` emits them together.
+    pub desk_facings: Vec<Facing>,
     /// Named stops (lounge seats, appliances, meeting slots) agents walk to.
     pub waypoints: Vec<Waypoint>,
     /// Placed potted plants.
@@ -329,6 +337,17 @@ impl SceneLayout {
     /// with an `AgentSlot.desk_index` directly.
     pub fn home_desk(&self, i: FloorLocalDeskIndex) -> Option<Point> {
         self.home_desks.get(i.0).copied()
+    }
+
+    /// Which way desk `i`'s occupant faces — the ONE authority both painters and
+    /// the approach/walk geometry read, so a seat can never be rendered on a
+    /// different side than it is routed to.
+    ///
+    /// Falls back to `South` for an out-of-range index rather than `Option`: every
+    /// caller already holds a desk it resolved, and the classic-facing default is
+    /// the safe answer for a desk the parallel vec somehow missed.
+    pub fn desk_facing(&self, i: FloorLocalDeskIndex) -> Facing {
+        self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }
 
     /// The visible top window-wall band height in px (`compute` names the same

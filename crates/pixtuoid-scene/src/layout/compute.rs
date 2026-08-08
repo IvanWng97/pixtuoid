@@ -512,6 +512,7 @@ pub(super) fn compute_with_seed(
         buf_h,
         cubicle_band,
         cubicle_aisle,
+        desk_facings: desk_facings_for(&home_desks),
         home_desks,
         waypoints,
         plants,
@@ -1062,6 +1063,17 @@ impl FloorGeometry {
 
 /// Pod-grid desk placement: full pods, partial columns at right edge,
 /// partial row at bottom edge.
+/// Which way each emitted desk's occupant faces, parallel to the returned
+/// positions.
+///
+/// EXPAND phase: every desk is `South` — byte-identical to the pre-facing
+/// painter, which hardcoded that orientation at four separate sites. The pod
+/// row is what will drive it; the plumbing lands first so the flip is provable
+/// on its own.
+pub(super) fn desk_facings_for(desks: &[Point]) -> Vec<Facing> {
+    desks.iter().map(|_| Facing::South).collect()
+}
+
 pub(super) fn compute_pod_desks(
     max_desks: Option<usize>,
     cubicle_band: &Bounds,

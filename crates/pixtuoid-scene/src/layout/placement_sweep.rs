@@ -152,6 +152,9 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         cubicle_band: _,  // container, not a piece
         cubicle_aisle: _, // container, not a piece
         home_desks,
+        desk_facings: _, // an ATTRIBUTE of a desk already swept via `home_desks`,
+        // not a piece of its own — but its LENGTH must match, which
+        // `every_desk_has_a_facing` asserts rather than this sweep.
         waypoints,
         plants,
         wall_decor,
@@ -696,6 +699,22 @@ fn every_wander_destination_is_routable_from_its_desk() {
 /// `desk_approach_cell` returns its no-valid-approach sentinel and every leg for
 /// the severed desks degrades to a straight `door→chair` line through furniture.
 ///
+/// `desk_facings` is parallel to `home_desks`, and NOTHING in the type system
+/// says so — the two are separate vecs precisely to spare 74 position-only read
+/// sites. A short `desk_facings` makes `desk_facing()` silently return its
+/// `South` fallback for the tail desks, which renders and routes them as if the
+/// flip never happened: a wrong office that passes every geometry invariant.
+fn assert_every_desk_has_a_facing(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    assert_eq!(
+        l.desk_facings.len(),
+        l.home_desks.len(),
+        "{w}x{h} seed {seed}: {} desks but {} facings — the tail would silently \
+         fall back to South",
+        l.home_desks.len(),
+        l.desk_facings.len()
+    );
+}
+
 /// A free fn, not a closure, because THREE sweeps need it: the placement seed
 /// axis, the production floor seeds, and the step-1 `NARROW_BAND` width scan.
 fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &SceneLayout) {
@@ -723,6 +742,12 @@ fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &Scene
 fn every_home_desk_approach_is_routable_from_the_door() {
     sweep(assert_home_desk_approaches_are_routable);
     sweep_production_floors(assert_home_desk_approaches_are_routable);
+}
+
+#[test]
+fn every_desk_has_a_facing() {
+    sweep(assert_every_desk_has_a_facing);
+    sweep_production_floors(assert_every_desk_has_a_facing);
 }
 
 #[test]
