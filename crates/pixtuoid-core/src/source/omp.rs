@@ -1,7 +1,7 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
 //! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`.
 //! That root is USUALLY `<agent-dir>/sessions`, but the XDG redirect flattens
-//! the `agent/` segment away — see [`omp_sessions_dir`], which owns every axis.
+//! the `agent/` segment away — see `omp_sessions_dir`, which owns every axis.
 //! TRANSCRIPT-ONLY: omp's "hooks" are in-process TS extension modules, so there
 //! is no shell-hook install target.
 //!
@@ -48,7 +48,7 @@ pub use native::OmpSource;
 pub const SOURCE_NAME: &str = "omp";
 
 /// omp's agent dir, mirroring `DirResolver`'s `agentDir` in upstream
-/// `packages/utils/src/dirs.ts`. See [`omp_sessions_dir`] for the axes; this is
+/// `packages/utils/src/dirs.ts`. See `omp_sessions_dir` for the axes; this is
 /// the pre-XDG half, and it is NOT where sessions necessarily live.
 pub fn omp_agent_dir() -> PathBuf {
     let env = OmpEnv::from_process();
@@ -66,7 +66,7 @@ pub fn omp_agent_dir() -> PathBuf {
 /// a directory NAME under home; XDG on linux+darwin, only with no override and
 /// only when the target EXISTS (the file's header claims otherwise — its code
 /// calls `fs.existsSync`).
-pub fn omp_sessions_dir() -> PathBuf {
+pub(crate) fn omp_sessions_dir() -> PathBuf {
     let env = OmpEnv::from_process();
     resolve_omp_sessions_dir(
         &env,

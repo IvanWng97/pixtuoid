@@ -242,9 +242,17 @@ mod tests {
         );
 
         // Negative control: the same helper on an absolute path must be silent,
-        // or the warn is noise rather than signal.
+        // or the warn is noise rather than signal. The path is per-platform
+        // because `/abs/dir` is NOT absolute on Windows — it is drive-relative,
+        // so it resolves against the process's current DRIVE and the warn is
+        // CORRECT there. Hardcoding the Unix form asserted the opposite.
+        let absolute = if cfg!(windows) {
+            r"C:\abs\dir"
+        } else {
+            "/abs/dir"
+        };
         let quiet = crate::test_capture::capture_logs(|| {
-            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from("/abs/dir"));
+            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from(absolute));
         });
         assert!(
             !quiet.contains("CLAUDE_CONFIG_DIR"),

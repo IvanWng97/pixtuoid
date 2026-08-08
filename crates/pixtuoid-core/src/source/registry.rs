@@ -9,6 +9,18 @@
 //! production DEPENDS on, not one a report consults. The `ActivityRecency` clock
 //! is the near-miss that fails (2) and `should_seed_at_eof` the one that fails
 //! it hardest — both stay owner-passed.
+//!
+//! **ONE deliberate exception, and it is a different KIND of column:
+//! `home_env`.** It fails (2) outright — only `doctor` and a test read it — and
+//! it stays because its value is not the datum but the QUESTION a struct literal
+//! forces. `ActivityRecency` was rejected because owner-passing already got the
+//! answer to whoever needed it; here the failure mode is that NOBODY asks, which
+//! is how three sources shipped an unverified home resolver (#880, after
+//! #343/#342/#195 each adjudicated the same lesson). A checklist bullet had
+//! already failed at that job three times; a required field cannot be skipped.
+//! So the bar for a future column like this is narrow: it must force an answer
+//! that a reviewer would otherwise have to REMEMBER to ask for, and it must come
+//! with a test proving the declaration is true rather than decorative.
 
 use anyhow::Result;
 use serde_json::Value;

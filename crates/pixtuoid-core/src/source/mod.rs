@@ -270,6 +270,8 @@ impl AgentEvent {
 /// LOCKSTEP with [`registry::SourceDescriptor::home_env`]: a row declaring an
 /// override with no arm here fails
 /// `every_declared_home_env_actually_moves_that_sources_root`.
+/// Internal cross-crate helper, not a stable API.
+#[doc(hidden)]
 #[cfg(feature = "native")]
 pub fn resolved_source_root(name: &str) -> Option<std::path::PathBuf> {
     Some(match name {
