@@ -10,8 +10,32 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-/// The desk occupant's back view, substituted for `seated` on a north-facing desk.
+/// The back view a desk occupant is drawn in when their desk seats them facing
+/// away from the viewer.
 const SEATED_BACK: &str = "seated_back";
+
+/// Which animation a desk occupant is drawn in, given the way their desk seats
+/// them.
+///
+/// EVERY seated pose takes the back view on a back-turned desk, not just the
+/// still one. The still pose is the only back view the pack ships, so a typist
+/// loses their keyboard flicker — deliberately, because the alternative renders
+/// a body sitting with its back to us wearing a FACE, which is what four desks
+/// of the office did. An earlier revision kept the front frames for exactly that
+/// animation, decided while the two seats were ONE pixel apart and the
+/// substitution was invisible either way; the seat has since moved a full
+/// sprite-height, so that trade no longer holds.
+///
+/// A pack without `seated_back` keeps its front frames — the same per-piece
+/// degrade a custom pack already gets for `side_seated`, never an invisible
+/// sitter. A per-pose back view lands as its sprite plus one arm here.
+fn seated_anim(anim: &'static str, facing: crate::layout::Facing, pack: &Pack) -> &'static str {
+    if facing == crate::layout::Facing::North && pack.animation(SEATED_BACK).is_some() {
+        SEATED_BACK
+    } else {
+        anim
+    }
+}
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -80,13 +104,16 @@ pub struct CharacterPlacement {
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing).
     ///
-    /// `anchor` is already projected for the classic top-down painter (it rises
-    /// the sprite above the desk so the monitor overhangs). A second profile
-    /// needs to project the SAME seated agent differently — the cutaway seats
-    /// them at the near side with their head over the surface — and cannot
-    /// recover the desk from a pre-projected anchor. Carrying the desk keeps the
-    /// sim's one pass authoritative while leaving the projection to each
-    /// painter, which is what "one simulation, two projections" has to mean.
+    /// The desk is carried because `anchor` is already PROJECTED and a second
+    /// profile cannot recover the desk from it — it needs the desk to draw the
+    /// things that belong to a workstation rather than to a body. The cutaway
+    /// keys its chair and its suppressed contact shadow on this.
+    ///
+    /// It is deliberately NOT how a profile decides which side of the desk the
+    /// occupant sits on: that is `layout.desk_facings`, and both profiles read it
+    /// through `seated_anchor_facing`, so `anchor` already carries the answer.
+    /// The cutaway re-projected onto the desk's own row until a pod's two rows
+    /// started facing opposite ways and the override began contradicting the sim.
     pub seat_desk: Option<Point>,
 }
 
@@ -274,17 +301,7 @@ fn resolve_characters(
                       sleep_z_seed: Option<u64>| {
             let facing = layout.desk_facing_at(desk);
             let anchor_no_breath = seated_anchor_facing(desk, char_w, facing);
-            // A back-turned occupant shows their back. Only the still pose has a
-            // back view — `typing` keeps its front frames, so a north desk's
-            // typist reads as seated rather than losing the animation entirely.
-            let anim_name = match (facing, anim_name) {
-                (crate::layout::Facing::North, "seated")
-                    if pack.animation(SEATED_BACK).is_some() =>
-                {
-                    SEATED_BACK
-                }
-                _ => anim_name,
-            };
+            let anim_name = seated_anim(anim_name, facing, pack);
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,
