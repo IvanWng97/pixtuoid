@@ -266,6 +266,15 @@ HERMES_SHELL_HOOK_URL = (
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+# `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
+# a depended env var VANISHING means we resolve a config.yaml hermes no longer
+# reads — the #880 fail-silent class, whose only symptom is a missing sprite.
+HERMES_HOME_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_constants.py"
+)
+# The `.strip()` and the `%LOCALAPPDATA%\hermes` SHAPE are behaviour, not names,
+# so they are pinned by the hermes unit tests instead.
+HERMES_HOME_ENV_VARS = {"HERMES_HOME", "LOCALAPPDATA"}
 
 # Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
 # (each name appears verbatim in the summary table AND the payload examples), so —
@@ -372,6 +381,19 @@ OMP_MESSAGE_FIELDS = {"toolCallId", "arguments", "model"}
 # block to Waiting — and the first question's text feeds the Waiting reason.
 # `arguments.i` (the intent fallback) is harness-wide, not defined in ask.ts, and
 # its loss only degrades the label, so it is deliberately unwatched.
+# `omp::resolve_omp_sessions_dir` MIRRORS `DirResolver`. ONE-DIRECTIONAL: a
+# depended env var VANISHING means we watch a sessions dir omp no longer writes
+# to — an empty office and no error, the #880 fail-silent class.
+OMP_DIRS_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/utils/src/dirs.ts"
+# The SHAPES (Node-join binding, the agent/ flatten, the charset) are behaviour
+# no name sweep can see — pinned by the omp axis-matrix unit tests.
+OMP_DIRS_ENV_VARS = {
+    "PI_CONFIG_DIR",
+    "OMP_PROFILE",
+    "PI_PROFILE",
+    "PI_CODING_AGENT_DIR",
+    "XDG_DATA_HOME",
+}
 OMP_ASK_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
 )
@@ -407,6 +429,9 @@ ANCHORS: dict[str, Anchor] = {
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
     HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
+    # `_hermes_home_from_env` is the whole resolution we mirror (it reads
+    # HERMES_HOME and delegates to the platform default), so it owns both names.
+    HERMES_HOME_URL: Anchor(r"def _hermes_home_from_env", "`_hermes_home_from_env`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName", "the `PluginHookName` union"),
     # NOT `SessionNotification` (the obvious pick): it sits earlier in the file and
     # does not own the variants, so moving the enum out would leave it satisfied
@@ -416,6 +441,9 @@ ANCHORS: dict[str, Anchor] = {
     # keeps the identifier, so the anchor holds and the check still fires.
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
+    # Owns the agentDir + XDG resolution; the profile / config-dir-name helpers
+    # are its collaborators in the same file.
+    OMP_DIRS_URL: Anchor(r"class DirResolver", "the `DirResolver` class"),
     # identity-grade: co-located, not owning. A union head or page title.
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -1641,6 +1669,21 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
 
     if ours.omp is not None:
+        dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
+        if dirs is not None:
+            for var in sorted(OMP_DIRS_ENV_VARS):
+                # Word-boundary, NOT the quoted form the other checks use:
+                # dirs.ts reads most of these as `process.env.X` (unquoted), so
+                # requiring quotes false-alarms on two working vars. Safe — these
+                # are distinctive SCREAMING_SNAKE names with no prose collision.
+                if not re.search(rf"\b{re.escape(var)}\b", dirs):
+                    report.add_breaking(
+                        f"omp env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::omp::resolve_omp_sessions_dir) is GONE from "
+                        f"packages/utils/src/dirs.ts — omp now resolves its sessions dir some "
+                        f"other way, so the watcher polls a directory it never writes to "
+                        f"(an empty office, no error)."
+                    )
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
             # Quote-anchored on purpose: the entry types are generic English words,
@@ -1802,6 +1845,17 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"decode_hermes_hook_payload) is GONE from agent/shell_hooks.py "
                         f"_serialize_payload — renamed; the shell-hook JSON omits it and the "
                         f"decoder reads None (no coalesce key / no tool label)."
+                    )
+        home = fetch_anchored(HERMES_HOME_URL, "Hermes home resolver", report)
+        if home is not None:
+            for var in sorted(HERMES_HOME_ENV_VARS):
+                if f'"{var}"' not in home:
+                    report.add_breaking(
+                        f"Hermes env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::hermes::resolve_hermes_home) is GONE from "
+                        f"hermes_constants.py _hermes_home_from_env — hermes now resolves its "
+                        f"home some other way, so we install shell hooks into a config.yaml it "
+                        f"never reads (installed, but no sprite)."
                     )
 
     if ours.kimi is not None:

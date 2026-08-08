@@ -402,10 +402,22 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
     d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",
     d.OMP_ASK_URL: "export class AskTool extends Tool {}",
+    d.OMP_DIRS_URL: (
+        "class DirResolver {\n"
+        '  constructor() { process.env.PI_CONFIG_DIR; process.env.OMP_PROFILE;\n'
+        '    process.env.PI_PROFILE; process.env.PI_CODING_AGENT_DIR;\n'
+        '    process.env.XDG_DATA_HOME; }\n'
+        "}\n"
+    ),
     d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
     d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
     d.HERMES_SHELL_HOOK_URL: "def _serialize_payload(event: str) -> str:",
+    d.HERMES_HOME_URL: (
+        "def _hermes_home_from_env() -> Path:\n"
+        '    val = os.environ.get("HERMES_HOME", "").strip()\n'
+        '    return Path(val) if val else Path(os.environ.get("LOCALAPPDATA", ""))\n'
+    ),
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
     d.CC_TOOLS_URL: "\n# Tools reference\n",
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
@@ -422,7 +434,7 @@ def test_anchor_gate_fires_in_both_directions() -> None:
     try:
         # A floor, because everything below iterates `ANCHORS`: an emptied table
         # would run zero loop bodies and this test would pass VACUOUSLY.
-        check(len(d.ANCHORS) >= 17, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
+        check(len(d.ANCHORS) >= 19, f"ANCHORS covers every swept document, got {len(d.ANCHORS)}")
         missing_samples = sorted(set(d.ANCHORS) - set(ANCHOR_SAMPLES))
         check(not missing_samples, f"every ANCHORS entry needs a sample: {missing_samples}")
 

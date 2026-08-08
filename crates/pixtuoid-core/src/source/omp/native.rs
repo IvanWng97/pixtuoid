@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{decode_omp_line, omp_agent_dir, omp_id_from_path, SOURCE_NAME};
+use super::{decode_omp_line, omp_id_from_path, omp_sessions_dir, SOURCE_NAME};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
@@ -30,7 +30,7 @@ impl OmpSource {
     /// Construct pointed at the default omp `sessions` root.
     pub fn default_paths() -> Self {
         Self {
-            sessions_root: omp_agent_dir().join("sessions"),
+            sessions_root: omp_sessions_dir(),
         }
     }
 }
@@ -82,17 +82,18 @@ fn omp_recognize(path: &Path) -> bool {
 }
 
 /// Attach the probe ONLY for omp's first-party layout — the standard
-/// `~/.omp/agent/sessions` shape or the resolved `omp_agent_dir()/sessions` for
+/// `~/.omp/agent/sessions` shape, or whatever `omp_sessions_dir()` resolves for
 /// THIS environment. A test/replay root pointed at an arbitrary dir must keep
 /// the pure-mtime first-sight gate, or a replayed transcript vouched for by a
 /// coincidentally running bun process resurrects as live.
 fn omp_probe_root(sessions_root: &Path) -> Option<PathBuf> {
-    omp_probe_root_resolved(sessions_root, &omp_agent_dir())
+    omp_probe_root_resolved(sessions_root, &omp_sessions_dir())
 }
 
-/// The injectable core of [`omp_probe_root`]: `agent_dir` is the resolved omp
-/// agent dir for this environment.
-fn omp_probe_root_resolved(sessions_root: &Path, agent_dir: &Path) -> Option<PathBuf> {
+/// The injectable core of [`omp_probe_root`]. `resolved_sessions` is the
+/// SESSIONS root, not the agent dir: XDG flattens `agent/` away, so an XDG root
+/// has no agent-dir parent and would silently lose the probe.
+fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Option<PathBuf> {
     if sessions_root.file_name().and_then(|n| n.to_str()) != Some("sessions") {
         return None;
     }
@@ -104,10 +105,10 @@ fn omp_probe_root_resolved(sessions_root: &Path, agent_dir: &Path) -> Option<Pat
                 .and_then(|n| n.to_str())
                 == Some(".omp")
     });
-    // The PI_CODING_AGENT_DIR case: `omp_agent_dir()` honors the env var the
-    // same way `default_paths` does, one resolution for both.
-    let parent_is_resolved_agent_dir = parent.is_some_and(|p| p == agent_dir);
-    if !parent_is_dot_omp_agent && !parent_is_resolved_agent_dir {
+    // Covers every relocating axis at once: this gate and `default_paths` call
+    // the SAME `omp_sessions_dir()`, so they cannot disagree.
+    let is_resolved_root = sessions_root == resolved_sessions;
+    if !parent_is_dot_omp_agent && !is_resolved_root {
         return None;
     }
     // Not canonicalized here: the dir may not exist yet at wiring time (omp
@@ -130,7 +131,7 @@ mod tests {
         let standard = home.path().join(".omp").join("agent").join("sessions");
         std::fs::create_dir_all(&standard).unwrap();
         assert_eq!(
-            omp_probe_root_resolved(&standard, &elsewhere),
+            omp_probe_root_resolved(&standard, &elsewhere.join("sessions")),
             Some(standard.clone()),
             "the first-party `.omp/agent/sessions` layout attaches the probe"
         );
@@ -140,21 +141,45 @@ mod tests {
         // replay would be vouched for by any running bun process.
         let impostor = home.path().join("work").join("agent").join("sessions");
         std::fs::create_dir_all(&impostor).unwrap();
-        assert_eq!(omp_probe_root_resolved(&impostor, &elsewhere), None);
+        assert_eq!(
+            omp_probe_root_resolved(&impostor, &elsewhere.join("sessions")),
+            None
+        );
 
         let wrong_parent = home.path().join(".omp").join("other").join("sessions");
         std::fs::create_dir_all(&wrong_parent).unwrap();
-        assert_eq!(omp_probe_root_resolved(&wrong_parent, &elsewhere), None);
+        assert_eq!(
+            omp_probe_root_resolved(&wrong_parent, &elsewhere.join("sessions")),
+            None
+        );
 
         // The PI_CODING_AGENT_DIR case still attaches on the resolved dir.
         let resolved = elsewhere.join("sessions");
         std::fs::create_dir_all(&resolved).unwrap();
         assert_eq!(
-            omp_probe_root_resolved(&resolved, &elsewhere),
+            omp_probe_root_resolved(&resolved, &elsewhere.join("sessions")),
             Some(resolved)
         );
         assert_eq!(
-            omp_probe_root_resolved(Path::new("/tmp/fixture"), &elsewhere),
+            omp_probe_root_resolved(Path::new("/tmp/fixture"), &elsewhere.join("sessions")),
+            None
+        );
+    }
+
+    /// The XDG shape has no `agent/` parent to recognise, so it used to lose the
+    /// probe and fall back to pure mtime.
+    #[test]
+    fn probe_root_attaches_for_the_xdg_flattened_layout() {
+        let xdg = Path::new("/xdg/omp/sessions");
+        assert_eq!(
+            omp_probe_root_resolved(xdg, xdg),
+            Some(xdg.to_path_buf()),
+            "the flattened `$XDG_DATA_HOME/omp/sessions` root is first-party too"
+        );
+        // Still not a blanket accept: an arbitrary `.../sessions` that is NOT
+        // what this environment resolves stays on the mtime gate.
+        assert_eq!(
+            omp_probe_root_resolved(Path::new("/srv/x/sessions"), xdg),
             None
         );
     }
@@ -260,21 +285,21 @@ mod tests {
 
     #[test]
     fn probe_root_requires_first_party_layout() {
-        let agent_dir = Path::new("/home/u/.omp/agent");
+        let resolved = Path::new("/home/u/.omp/agent/sessions");
         assert_eq!(
-            omp_probe_root_resolved(Path::new("/home/u/.omp/agent/sessions"), agent_dir),
+            omp_probe_root_resolved(Path::new("/home/u/.omp/agent/sessions"), resolved),
             Some(PathBuf::from("/home/u/.omp/agent/sessions"))
         );
         assert_eq!(
-            omp_probe_root_resolved(Path::new("/tmp/fixture"), agent_dir),
+            omp_probe_root_resolved(Path::new("/tmp/fixture"), resolved),
             None
         );
         assert_eq!(
-            omp_probe_root_resolved(Path::new("/srv/other/sessions"), agent_dir),
+            omp_probe_root_resolved(Path::new("/srv/other/sessions"), resolved),
             None
         );
         assert_eq!(
-            omp_probe_root_resolved(Path::new("sessions"), agent_dir),
+            omp_probe_root_resolved(Path::new("sessions"), resolved),
             None
         );
     }
@@ -285,7 +310,7 @@ mod tests {
         let sessions = agent_dir.path().join("sessions");
         std::fs::create_dir_all(&sessions).unwrap();
         assert_eq!(
-            omp_probe_root_resolved(&sessions, agent_dir.path()),
+            omp_probe_root_resolved(&sessions, &sessions),
             Some(sessions.clone())
         );
     }

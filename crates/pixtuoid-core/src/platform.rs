@@ -35,6 +35,10 @@ pub fn user_home_opt() -> Option<String> {
 /// The Codex home dir, matching codex's own precedence (`codex-rs`
 /// `find_codex_home`): `CODEX_HOME` if it's set to an EXISTING directory, else
 /// `<user_home>/.codex`.
+///
+/// Not mirrored: upstream `canonicalize`s the ENV value (the default branch it
+/// leaves alone) — the inverse scoping of grok's, which canonicalizes only its
+/// DEFAULT. Same class, same reason it is unobservable here.
 pub(crate) fn codex_home() -> PathBuf {
     resolve_codex_home(std::env::var("CODEX_HOME").ok(), user_home())
 }
@@ -45,6 +49,12 @@ pub(crate) fn codex_home() -> PathBuf {
 /// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
 /// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
 /// Windows, `$HOME` never consulted there), which `user_home` mirrors.
+///
+/// Not mirrored: upstream `dunce::canonicalize`s the DEFAULT home before joining
+/// `.grok` (never `$GROK_HOME`), so under a SYMLINKED `$HOME` its path string
+/// differs from ours while naming the same directory. Unobservable because the
+/// exposed surface — the sessions WATCH ROOT — is opened, not string-compared,
+/// and both forms resolve through the link to one dir.
 pub(crate) fn grok_home() -> PathBuf {
     resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
 }
@@ -61,6 +71,35 @@ fn resolve_grok_home(grok_home_env: Option<String>, home: String) -> PathBuf {
 /// whitespace-only path is never a valid home/config dir.
 pub(crate) fn nonempty(v: Option<String>) -> Option<String> {
     v.filter(|s| !s.trim().is_empty())
+}
+
+/// [`nonempty`]'s TRIMMING twin — the value comes back STRIPPED, not merely
+/// tested. This is Python's `os.environ.get(K, "").strip()` idiom, which hermes
+/// applies to both `HERMES_HOME` and `LOCALAPPDATA`, so `" /srv/hm "` IS
+/// `/srv/hm` upstream while `nonempty` hands back the padded string.
+pub(crate) fn nonempty_trimmed(v: Option<String>) -> Option<String> {
+    nonempty(v).map(|s| s.trim().to_string())
+}
+
+/// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
+///
+/// Of the call sites only omp's is absolutized upstream (`path.resolve`, against
+/// OMP's cwd) and only codewhale expands `~`; the rest take it verbatim. Either
+/// way each process resolves against its OWN cwd — one string, two directories,
+/// and the failure is otherwise mute: an empty office and no error (#880).
+pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
+    if !dir.is_absolute() {
+        // Undeduped: this resolves a handful of times per run (source
+        // construction + install), never per event.
+        tracing::warn!(
+            var = %var,
+            dir = %dir.display(),
+            "env home override is a RELATIVE path; it resolves against each \
+             process's own cwd, so pixtuoid and the CLI may disagree on where \
+             this points — set an absolute path",
+        );
+    }
+    dir
 }
 
 /// Pure precedence core, separated so it's unit-testable without env mutation.
@@ -85,7 +124,10 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
 /// resolves.
 ///
 /// Source-verified HOME-first CLIs (the only consumers):
-/// - **CodeWhale** — `config::effective_home_dir` = `$HOME ?? dirs::home_dir()`.
+/// - **CodeWhale** — `paths::user_home` = `$HOME ?? $USERPROFILE ??
+///   HOMEDRIVE+HOMEPATH ?? dirs::home_dir()`. We mirror the first two; the
+///   Windows-pair rung is unmirrored but fails LOUD (`anyhow!` → "pass
+///   --config"), never silently to a wrong dir.
 /// - **OpenClaw** — `infra/home-dir.ts::resolveRawOsHomeDir` = `$HOME ??
 ///   $USERPROFILE ?? os.homedir()`.
 ///
@@ -183,6 +225,59 @@ mod tests {
         assert_eq!(nonempty(s("   ")), None);
         assert_eq!(nonempty(s("\t \n")), None);
         assert_eq!(nonempty(s(" /home/u ")).as_deref(), Some(" /home/u "));
+    }
+
+    #[test]
+    fn nonempty_trimmed_strips_the_value_where_nonempty_only_tests_it() {
+        assert_eq!(nonempty_trimmed(None), None);
+        assert_eq!(nonempty_trimmed(s("")), None);
+        assert_eq!(nonempty_trimmed(s("   ")), None);
+        assert_eq!(nonempty_trimmed(s(" /home/u ")).as_deref(), Some("/home/u"));
+        assert_eq!(
+            nonempty(s(" /home/u ")).as_deref(),
+            Some(" /home/u "),
+            "the twins MUST differ here — that difference is the whole point"
+        );
+    }
+
+    #[test]
+    fn a_relative_override_warns_and_an_absolute_one_stays_quiet() {
+        let noisy = crate::test_capture::capture_logs(|| {
+            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from("rel/dir"));
+        });
+        assert!(
+            noisy.contains("CLAUDE_CONFIG_DIR") && noisy.contains("rel/dir"),
+            "a relative override must name itself in the warn floor:\n{noisy}"
+        );
+
+        // Negative control: the same helper on an absolute path must be silent,
+        // or the warn is noise rather than signal. The path is per-platform
+        // because `/abs/dir` is NOT absolute on Windows — it is drive-relative,
+        // so it resolves against the process's current DRIVE and the warn is
+        // CORRECT there. Hardcoding the Unix form asserted the opposite.
+        let absolute = if cfg!(windows) {
+            r"C:\abs\dir"
+        } else {
+            "/abs/dir"
+        };
+        let quiet = crate::test_capture::capture_logs(|| {
+            warn_if_relative_override("CLAUDE_CONFIG_DIR", PathBuf::from(absolute));
+        });
+        assert!(
+            !quiet.contains("CLAUDE_CONFIG_DIR"),
+            "an absolute override must not warn:\n{quiet}"
+        );
+    }
+
+    #[test]
+    fn warn_if_relative_override_is_pass_through() {
+        for p in ["rel/dir", "/abs/dir", ""] {
+            assert_eq!(
+                warn_if_relative_override("X", PathBuf::from(p)),
+                PathBuf::from(p),
+                "the helper reports, it never rewrites"
+            );
+        }
     }
 
     #[test]

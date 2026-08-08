@@ -771,6 +771,32 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         &broken,
         any_drift,
     ));
+
+    // A wrong root has no symptom but an empty office, so state it outright
+    // (#880). Via `resolved_source_root` — the SAME call the driver makes, since
+    // a second copy could show a healthy path while the watcher polled another.
+    let roots: Vec<String> = registry::registered_source_names()
+        .filter_map(|src| {
+            let root = pixtuoid_core::source::resolved_source_root(src)?;
+            let env = registry::descriptor_for(src)
+                .and_then(|d| d.home_env)
+                // Trim-based, matching every resolver's `nonempty` policy: a `"  "`
+                // override is ignored by the resolver, so it must not render as
+                // `via $VAR` or raise the ⚠ (the #172 class).
+                .map(|v| {
+                    let set = std::env::var(v).is_ok_and(|s| !s.trim().is_empty());
+                    (v, set)
+                });
+            Some(root_row(src, &root, root.is_dir(), env))
+        })
+        .collect();
+    if !roots.is_empty() {
+        out.push_str("\nresolved roots\n");
+        for r in roots {
+            out.push_str(&r);
+            out.push('\n');
+        }
+    }
     // Probe roots come from the DEFAULT resolution: a --projects-root /
     // --codex-sessions-root override changes the RUNNING app, but doctor
     // deliberately diagnoses the default setup.
@@ -792,6 +818,36 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         out.push_str(&format!("\n{adv}\n"));
     }
     Ok(out)
+}
+
+/// One `roots:` line per source with a single on-disk root. A FACT row, not an
+/// alarm — a missing root is normal for a CLI the user never runs, so the only
+/// ⚠ is missing WHILE that source's override is set (#880).
+pub(crate) fn root_row(
+    source: &str,
+    root: &std::path::Path,
+    exists: bool,
+    home_env: Option<(&str, bool)>,
+) -> String {
+    let via = match home_env {
+        Some((var, true)) => format!(" via ${var}"),
+        _ => String::new(),
+    };
+    let mark = if exists { "ok" } else { "missing" };
+    let mut line = format!(
+        "  {:<13} {} ({mark}{via})",
+        source,
+        sanitize(&root.display().to_string())
+    );
+    if !exists {
+        if let Some((var, true)) = home_env {
+            line.push_str(&format!(
+                "\n    ⚠ ${var} is set but that root does not exist — if this source's \
+                 sprite never appears, that env var is the first thing to check"
+            ));
+        }
+    }
+    line
 }
 
 /// The rolled-up doctor footer: the broken-install rollup (locally fixable via
@@ -1043,6 +1099,36 @@ mod tests {
             "doctor spawned `opencode --version` in a pristine HOME where opencode \
              is undetected — the probe must be gated on evidence the user runs it"
         );
+    }
+
+    #[test]
+    fn root_row_states_the_fact_and_only_warns_on_missing_with_an_override() {
+        let p = std::path::Path::new("/home/u/.copilot/session-state");
+
+        let ok = root_row("copilot", p, true, Some(("COPILOT_HOME", true)));
+        assert!(ok.contains("(ok via $COPILOT_HOME)"), "{ok}");
+        assert!(!ok.contains('⚠'), "an existing root never warns: {ok}");
+
+        // A missing root with NO override is the ordinary "never ran this CLI"
+        // case — a fact, not an alarm.
+        let quiet = root_row("copilot", p, false, Some(("COPILOT_HOME", false)));
+        assert!(quiet.contains("(missing)"), "{quiet}");
+        assert!(!quiet.contains('⚠'), "no override set -> no alarm: {quiet}");
+        assert!(
+            !quiet.contains("via $"),
+            "an unset var is not a 'via': {quiet}"
+        );
+
+        // Missing WHILE overridden is the #880 shape, and the only one worth a ⚠.
+        let loud = root_row("copilot", p, false, Some(("COPILOT_HOME", true)));
+        assert!(
+            loud.contains('⚠') && loud.contains("COPILOT_HOME"),
+            "{loud}"
+        );
+
+        // A source with no override column at all never grows a `via`.
+        let plain = root_row("antigravity", p, false, None);
+        assert!(!plain.contains('⚠') && !plain.contains("via $"), "{plain}");
     }
 
     #[test]

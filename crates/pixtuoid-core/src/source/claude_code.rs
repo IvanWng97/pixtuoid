@@ -131,12 +131,17 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
     }
 }
 
-/// Resolve `CLAUDE_CONFIG_DIR`; an empty OR whitespace-only value is treated
-/// as unset (a `"  "` value otherwise resolved hooks/watch to a relative
-/// `"  /…"`). Internal cross-crate helper, not a stable API.
+/// Resolve `CLAUDE_CONFIG_DIR`. Upstream (read out of the 2.1.226 binary) is
+/// `(env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")).normalize("NFC")` —
+/// nothing else layers on, no XDG / `%APPDATA%` / profile / legacy dir. The two
+/// deliberate divergences (`""`/`"  "` treated as unset, NFC dropped) are in
+/// this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
+/// Internal cross-crate helper, not a stable API.
 #[doc(hidden)]
 pub fn claude_config_dir() -> Option<PathBuf> {
-    crate::platform::nonempty(std::env::var("CLAUDE_CONFIG_DIR").ok()).map(PathBuf::from)
+    crate::platform::nonempty(std::env::var("CLAUDE_CONFIG_DIR").ok())
+        .map(PathBuf::from)
+        .map(|d| crate::platform::warn_if_relative_override("CLAUDE_CONFIG_DIR", d))
 }
 
 /// The COMPLETE set of CC transcript top-level `type` discriminators, swept

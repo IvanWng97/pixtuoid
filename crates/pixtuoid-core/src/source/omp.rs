@@ -1,7 +1,9 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
-//! (`<omp_agent_dir>/sessions/<encoded-cwd>/<ts>_<uuid>.jsonl`) via
-//! `JsonlWatcher`. TRANSCRIPT-ONLY: omp's "hooks" are in-process TS extension
-//! modules, so there is no shell-hook install target.
+//! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`.
+//! That root is USUALLY `<agent-dir>/sessions`, but the XDG redirect flattens
+//! the `agent/` segment away — see `omp_sessions_dir`, which owns every axis.
+//! TRANSCRIPT-ONLY: omp's "hooks" are in-process TS extension modules, so there
+//! is no shell-hook install target.
 //!
 //! Wire shape (upstream `packages/coding-agent/src/session/`):
 //! - **File**: `${fileSafeTimestamp}_${uuidv7}.jsonl`, under a per-cwd encoded
@@ -45,17 +47,196 @@ pub use native::OmpSource;
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";
 
-/// omp's agent config dir: `$PI_CODING_AGENT_DIR` if set non-empty, else
-/// `~/.omp/agent`. The XDG split (`$XDG_DATA_HOME/omp`, opt-in via `omp config
-/// init-xdg`) and `OMP_PROFILE` are deliberately unmirrored — the watcher just
-/// sees an empty default dir for those minority setups.
-pub fn omp_agent_dir() -> PathBuf {
-    match crate::platform::nonempty(std::env::var("PI_CODING_AGENT_DIR").ok()) {
-        Some(v) => PathBuf::from(v),
-        None => PathBuf::from(crate::platform::user_home())
-            .join(".omp")
-            .join("agent"),
+/// omp's SESSIONS root, mirroring `dirs.ts` — deliberately NOT
+/// `omp_agent_dir().join("sessions")`, because the XDG redirect FLATTENS the
+/// `agent/` segment away (`$XDG_DATA_HOME/omp/sessions`).
+///
+/// Axes, in precedence order: `PI_CODING_AGENT_DIR` (dropped when it equals the
+/// `PI_PROFILE`-derived dir); `OMP_PROFILE` else `PI_PROFILE` →
+/// `profiles/<name>/agent`, where `OMP_PROFILE` wins whenever PRESENT so an
+/// EMPTY value selects default rather than falling through; `PI_CONFIG_DIR` as
+/// a directory NAME under home; XDG on linux+darwin, only with no override and
+/// only when the target EXISTS (the file's header claims otherwise — its code
+/// calls `fs.existsSync`).
+pub(crate) fn omp_sessions_dir() -> PathBuf {
+    let env = OmpEnv::from_process();
+    resolve_omp_sessions_dir(
+        &env,
+        cfg!(any(target_os = "linux", target_os = "macos")),
+        &|p| p.exists(),
+    )
+}
+
+/// The process environment omp's resolver reads, injected so every arm — the
+/// Windows one, the XDG one, the profile ones — unit-tests on any host.
+struct OmpEnv {
+    home: Option<String>,
+    config_dir_name: Option<String>,
+    omp_profile: Option<String>,
+    pi_profile: Option<String>,
+    agent_dir: Option<String>,
+    xdg_data_home: Option<String>,
+}
+
+impl OmpEnv {
+    fn from_process() -> Self {
+        let var = |k: &str| std::env::var(k).ok();
+        Self {
+            home: crate::platform::user_home_opt(),
+            config_dir_name: var("PI_CONFIG_DIR"),
+            omp_profile: var("OMP_PROFILE"),
+            pi_profile: var("PI_PROFILE"),
+            agent_dir: var("PI_CODING_AGENT_DIR"),
+            xdg_data_home: var("XDG_DATA_HOME"),
+        }
     }
+}
+
+/// Node's `path.join` for the ONE place the difference bites: a second segment
+/// that is ROOTED. Node appends it to the base; Rust's `Path::join` discards the
+/// base (`PathBuf::push`: an absolute path "replaces the current path", and one
+/// with a prefix but no root "replaces self"). omp joins `PI_CONFIG_DIR` under
+/// the home dir, so Rust's semantics would let it escape a home it never escapes
+/// upstream.
+///
+/// Dropping the PREFIX matters as much as the root, and only on Windows: there
+/// `C:\srv\omp` parses as Prefix+RootDir and replaces the base, while on Unix it
+/// is one ordinary component that never could. Node keeps that `C:` as a literal
+/// segment (`<home>\C:\srv\omp`), which Windows cannot even create — so for that
+/// pathological input we deliberately produce the BOUND `<home>\srv\omp` rather
+/// than reproduce an unusable path byte-for-byte. `..` is likewise left literal
+/// rather than lexically normalized; the filesystem resolves it the same way.
+fn node_join(base: &Path, segment: &str) -> PathBuf {
+    let mut out = base.to_path_buf();
+    for c in Path::new(segment).components() {
+        match c {
+            std::path::Component::Prefix(_) | std::path::Component::RootDir => {}
+            other => out.push(other.as_os_str()),
+        }
+    }
+    out
+}
+
+/// `normalizeProfileName`: trimmed; empty or `"default"` is the implicit default
+/// profile. An invalid name THROWS upstream, but every path we observe catches
+/// it and proceeds with the default — so an invalid name is `None` here too.
+fn normalize_profile_name(raw: Option<&str>) -> Option<String> {
+    let n = raw?.trim();
+    if n.is_empty() || n == "default" {
+        return None;
+    }
+    // `^[a-z0-9][a-z0-9._-]{0,63}$`, plus the "." / ".." / trailing-dot bans.
+    let ok_len = (1..=64).contains(&n.chars().count());
+    let mut chars = n.chars();
+    let head_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    let tail_ok =
+        chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'));
+    if !ok_len || !head_ok || !tail_ok || n.ends_with('.') {
+        return None;
+    }
+    // Windows reserved device basenames, extension included, case-insensitive.
+    let stem = n.split('.').next().unwrap_or(n).to_ascii_uppercase();
+    let reserved = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || (stem.len() == 4
+            && (stem.starts_with("COM") || stem.starts_with("LPT"))
+            && stem.as_bytes()[3].is_ascii_digit());
+    (!reserved).then(|| n.to_string())
+}
+
+/// `resolveProfileEnv`: `OMP_PROFILE` wins whenever PRESENT — an empty value
+/// selects the default profile rather than falling through to `PI_PROFILE`.
+fn resolve_profile(env: &OmpEnv) -> Option<String> {
+    match env.omp_profile.as_deref() {
+        Some(omp) => normalize_profile_name(Some(omp)),
+        None => normalize_profile_name(env.pi_profile.as_deref()),
+    }
+}
+
+/// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
+fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
+    let name = env
+        .config_dir_name
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(".omp");
+    let root = node_join(Path::new(&env.home.clone()?), name);
+    Some(match profile {
+        Some(p) => root.join("profiles").join(p),
+        None => root,
+    })
+}
+
+/// `DirResolver`'s `agentDir`, plus the `isDefault` flag the XDG arm gates on.
+fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<String>)> {
+    let profile = resolve_profile(env);
+    let default_agent = omp_config_root(env, profile.as_deref())?.join("agent");
+    if profile.is_some() {
+        // A named profile derives its own agent dir; the override is ignored.
+        return Some((default_agent, true, profile));
+    }
+    // `resolvePreProfileAgentDir`: drop a value that IS the PI_PROFILE-derived
+    // agent dir — it was exported by a parent's setProfile, not chosen here.
+    let override_dir = crate::platform::nonempty(env.agent_dir.clone()).filter(|v| {
+        let derived = normalize_profile_name(env.pi_profile.as_deref())
+            .and_then(|p| omp_config_root(env, Some(&p)))
+            .map(|r| r.join("agent"));
+        derived.is_none_or(|d| Path::new(v) != d)
+    });
+    match override_dir {
+        Some(v) => Some((
+            crate::platform::warn_if_relative_override("PI_CODING_AGENT_DIR", PathBuf::from(v)),
+            false,
+            profile,
+        )),
+        None => Some((default_agent, true, profile)),
+    }
+}
+
+fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
+    resolve_omp_agent_dir_parts(env)
+        .map(|(d, _, _)| d)
+        // The home-less fallback keeps the pre-#880 shape rather than inventing
+        // a new one: an unresolvable home was already `/tmp`-rooted by `user_home`.
+        .unwrap_or_else(|| {
+            PathBuf::from(crate::platform::user_home())
+                .join(".omp")
+                .join("agent")
+        })
+}
+
+/// `getSessionsDir()` = `agentSubdir(undefined, "sessions", "data")`.
+fn resolve_omp_sessions_dir(
+    env: &OmpEnv,
+    xdg_platform: bool,
+    exists: &dyn Fn(&Path) -> bool,
+) -> PathBuf {
+    let Some((agent_dir, is_default, profile)) = resolve_omp_agent_dir_parts(env) else {
+        return resolve_omp_agent_dir(env).join("sessions");
+    };
+    let xdg = (xdg_platform && is_default)
+        .then(|| xdg_app_root(env.xdg_data_home.as_deref(), profile.as_deref(), exists))
+        .flatten();
+    // The flatten lives here: with XDG the base REPLACES `<…>/agent`, it does
+    // not sit under it.
+    xdg.unwrap_or(agent_dir).join("sessions")
+}
+
+/// `resolveIf`: `$XDG_DATA_HOME/omp` (or its `profiles/<name>` child) when that
+/// directory EXISTS — the existence gate is what makes a not-yet-migrated user
+/// keep the home-rooted layout.
+fn xdg_app_root(
+    xdg_data_home: Option<&str>,
+    profile: Option<&str>,
+    exists: &dyn Fn(&Path) -> bool,
+) -> Option<PathBuf> {
+    let app_root = node_join(Path::new(xdg_data_home.filter(|s| !s.is_empty())?), "omp");
+    let candidate = match profile {
+        Some(p) => app_root.join("profiles").join(p),
+        None => app_root,
+    };
+    exists(&candidate).then_some(candidate)
 }
 
 /// Does a path component look like a ROOT session file stem
@@ -821,27 +1002,209 @@ mod tests {
         }
     }
 
+    /// `PI_CONFIG_DIR` is user-controlled, so the invariant is that NO value
+    /// escapes home. Its TEETH are Windows-CI-only, and deliberately so: the
+    /// drive-letter escape exists only there (`C:\\srv` parses as Prefix+RootDir
+    /// and replaces the base), while on Unix the same string is one ordinary
+    /// component that never could — so a green macOS run does NOT prove this,
+    /// exactly like the windows-test class the root `CLAUDE.md` describes. The
+    /// earlier test pinned only the POSIX form and was blind to it.
     #[test]
-    fn omp_agent_dir_honors_non_empty_env_override() {
+    fn node_join_never_lets_a_rooted_segment_escape_the_base() {
+        let base = Path::new("/home/u");
+        for hostile in [
+            "/srv/omp",
+            r"C:\srv\omp",
+            r"C:srv",
+            r"\srv",
+            r"\\?\C:\srv",
+            "plain",
+        ] {
+            let got = node_join(base, hostile);
+            assert!(
+                got.starts_with(base),
+                "{hostile:?} escaped the base: {got:?}"
+            );
+        }
+    }
+
+    /// Every arm injected, so the XDG and Windows-reserved-name branches run on
+    /// any host.
+    #[test]
+    fn omp_sessions_dir_mirrors_every_axis_of_the_upstream_resolver() {
+        let base = |f: &dyn Fn(&mut OmpEnv)| {
+            let mut e = OmpEnv {
+                home: Some("/home/u".into()),
+                config_dir_name: None,
+                omp_profile: None,
+                pi_profile: None,
+                agent_dir: None,
+                xdg_data_home: None,
+            };
+            f(&mut e);
+            e
+        };
+        let never = |_: &Path| false;
+        let sessions = |e: &OmpEnv| resolve_omp_sessions_dir(e, true, &never);
+
+        assert_eq!(
+            sessions(&base(&|_| {})),
+            PathBuf::from("/home/u/.omp/agent/sessions")
+        );
+
+        // PI_CONFIG_DIR is a NAME under home...
+        assert_eq!(
+            sessions(&base(&|e| e.config_dir_name = Some(".myomp".into()))),
+            PathBuf::from("/home/u/.myomp/agent/sessions")
+        );
+        // ...and an ABSOLUTE value does NOT escape home, because upstream joins
+        // it Node-style. Rust's own `Path::join` would return `/srv/omp/...`.
+        assert_eq!(
+            sessions(&base(&|e| e.config_dir_name = Some("/srv/omp".into()))),
+            PathBuf::from("/home/u/srv/omp/agent/sessions"),
+            "an absolute PI_CONFIG_DIR must stay bound under home"
+        );
+
+        // Profiles.
+        assert_eq!(
+            sessions(&base(&|e| e.omp_profile = Some("work".into()))),
+            PathBuf::from("/home/u/.omp/profiles/work/agent/sessions")
+        );
+        assert_eq!(
+            sessions(&base(&|e| e.pi_profile = Some("work".into()))),
+            PathBuf::from("/home/u/.omp/profiles/work/agent/sessions"),
+            "PI_PROFILE is the legacy fallback when OMP_PROFILE is ABSENT"
+        );
+        assert_eq!(
+            sessions(&base(&|e| {
+                e.omp_profile = Some(String::new());
+                e.pi_profile = Some("work".into());
+            })),
+            PathBuf::from("/home/u/.omp/agent/sessions"),
+            "an EMPTY OMP_PROFILE explicitly selects default — it does not fall through"
+        );
+        for bad in ["CON", "com1.txt", "Work", "..", "trailing.", "-lead"] {
+            assert_eq!(
+                sessions(&base(&|e| e.omp_profile = Some(bad.into()))),
+                PathBuf::from("/home/u/.omp/agent/sessions"),
+                "invalid profile {bad:?} degrades to default, it does not build a path"
+            );
+        }
+
+        // PI_CODING_AGENT_DIR, and the profile-derived drop rule.
+        assert_eq!(
+            sessions(&base(&|e| e.agent_dir = Some("/custom/agent".into()))),
+            PathBuf::from("/custom/agent/sessions")
+        );
+        assert_eq!(
+            sessions(&base(&|e| {
+                e.omp_profile = Some("work".into());
+                e.agent_dir = Some("/custom/agent".into());
+            })),
+            PathBuf::from("/home/u/.omp/profiles/work/agent/sessions"),
+            "a named profile derives its own agent dir; the override is ignored"
+        );
+        assert_eq!(
+            sessions(&base(&|e| {
+                e.omp_profile = Some(String::new());
+                e.pi_profile = Some("work".into());
+                e.agent_dir = Some("/home/u/.omp/profiles/work/agent".into());
+            })),
+            PathBuf::from("/home/u/.omp/agent/sessions"),
+            "a PI_PROFILE-derived override is DROPPED, not adopted as the default baseline"
+        );
+    }
+
+    /// XDG changes the SHAPE, not the prefix: it replaces the base.
+    #[test]
+    fn omp_xdg_flattens_the_agent_segment_and_only_when_the_dir_exists() {
+        let env = |xdg: Option<&str>, profile: Option<&str>, agent: Option<&str>| OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: None,
+            omp_profile: profile.map(str::to_string),
+            pi_profile: None,
+            agent_dir: agent.map(str::to_string),
+            xdg_data_home: xdg.map(str::to_string),
+        };
+        let exists = |want: &'static str| move |p: &Path| p == Path::new(want);
+        let home_default = PathBuf::from("/home/u/.omp/agent/sessions");
+
+        assert_eq!(
+            resolve_omp_sessions_dir(&env(Some("/xdg"), None, None), true, &exists("/xdg/omp")),
+            PathBuf::from("/xdg/omp/sessions"),
+            "the agent/ segment is FLATTENED, not prefixed"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(&env(Some("/xdg"), None, None), true, &|_| false),
+            home_default,
+            "an absent $XDG_DATA_HOME/omp keeps the home layout — the existence gate"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(&env(Some("/xdg"), None, None), false, &exists("/xdg/omp")),
+            home_default,
+            "XDG is linux/darwin only"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(
+                &env(Some("/xdg"), None, Some("/custom/agent")),
+                true,
+                &exists("/xdg/omp")
+            ),
+            PathBuf::from("/custom/agent/sessions"),
+            "an agent-dir override makes isDefault false, which disables XDG"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(
+                &env(Some("/xdg"), Some("work"), None),
+                true,
+                &exists("/xdg/omp/profiles/work")
+            ),
+            PathBuf::from("/xdg/omp/profiles/work/sessions"),
+            "a profile keys the XDG choice on the PROFILE path, never the app root"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(
+                &env(Some("/xdg"), Some("work"), None),
+                true,
+                &exists("/xdg/omp")
+            ),
+            PathBuf::from("/home/u/.omp/profiles/work/agent/sessions"),
+            "the base app root existing is NOT enough for a named profile"
+        );
+        assert_eq!(
+            resolve_omp_sessions_dir(&env(Some(""), None, None), true, &exists("/xdg/omp")),
+            home_default,
+            "an empty XDG_DATA_HOME is unset"
+        );
+    }
+
+    /// Live-env twin of the injected matrix: proves the PRODUCTION fn reads
+    /// the process env, not merely that the pure core computes from injected
+    /// values.
+    #[test]
+    fn omp_sessions_dir_honors_non_empty_env_override() {
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         let saved = std::env::var_os("PI_CODING_AGENT_DIR");
 
         std::env::set_var("PI_CODING_AGENT_DIR", "/custom/agent");
-        assert_eq!(omp_agent_dir(), PathBuf::from("/custom/agent"));
+        assert_eq!(
+            omp_sessions_dir(),
+            PathBuf::from("/custom/agent").join("sessions")
+        );
 
         for blank in ["", "   "] {
             std::env::set_var("PI_CODING_AGENT_DIR", blank);
-            let dflt = omp_agent_dir();
+            let dflt = omp_sessions_dir();
             assert!(
-                dflt.ends_with(Path::new(".omp/agent")),
+                dflt.ends_with(Path::new(".omp/agent/sessions")),
                 "blank override {blank:?} → ~/.omp/agent fallback, got {dflt:?}"
             );
         }
 
         std::env::remove_var("PI_CODING_AGENT_DIR");
-        assert!(omp_agent_dir().ends_with(Path::new(".omp/agent")));
+        assert!(omp_sessions_dir().ends_with(Path::new(".omp/agent/sessions")));
 
         match saved {
             Some(v) => std::env::set_var("PI_CODING_AGENT_DIR", v),
