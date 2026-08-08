@@ -121,7 +121,10 @@ pub struct SourceDescriptor {
     pub version_probe: Option<&'static [&'static str]>,
     /// The CLI-SPECIFIC env var that relocates the root
     /// [`crate::source::resolved_source_root`] reports for this source
-    /// (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, …).
+    /// (`CLAUDE_CONFIG_DIR`, `COPILOT_HOME`, …). Where a CLI has SEVERAL, this
+    /// names the one that relocates the root most directly — omp answers
+    /// `PI_CODING_AGENT_DIR` while `PI_CONFIG_DIR` / `OMP_PROFILE` / `PI_PROFILE`
+    /// / `XDG_DATA_HOME` move it too (its module doc enumerates them).
     ///
     /// **Scoped to CORE-resolved roots, and `None` does NOT mean "this CLI has
     /// no override".** A hook-only source's root is its INSTALLER's config path,

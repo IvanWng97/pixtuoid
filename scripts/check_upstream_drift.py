@@ -386,6 +386,23 @@ OMP_MESSAGE_FIELDS = {"toolCallId", "arguments", "model"}
 # block to Waiting — and the first question's text feeds the Waiting reason.
 # `arguments.i` (the intent fallback) is harness-wide, not defined in ask.ts, and
 # its loss only degrades the label, so it is deliberately unwatched.
+# `omp::resolve_omp_sessions_dir` MIRRORS `DirResolver` — the roster's deepest
+# home resolver (a config-dir NAME bound under home, two profile vars, an
+# agent-dir override with a drop rule, and an existence-gated XDG redirect that
+# FLATTENS the `agent/` segment). ONE-DIRECTIONAL: a depended env var VANISHING
+# means we watch a sessions dir omp no longer writes to — an empty office and no
+# error, the #880 fail-silent class.
+OMP_DIRS_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/utils/src/dirs.ts"
+# The SHAPES (Node-join binding, the agent/ flatten, the reserved-name charset)
+# are behaviour no name sweep can see — those are pinned by the omp axis-matrix
+# unit tests against this file's source.
+OMP_DIRS_ENV_VARS = {
+    "PI_CONFIG_DIR",
+    "OMP_PROFILE",
+    "PI_PROFILE",
+    "PI_CODING_AGENT_DIR",
+    "XDG_DATA_HOME",
+}
 OMP_ASK_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
 )
@@ -435,6 +452,11 @@ ANCHORS: dict[str, Anchor] = {
     # keeps the identifier, so the anchor holds and the check still fires.
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
+    # The class that OWNS the agentDir + XDG resolution; the profile and
+    # config-dir-name helpers are its collaborators in the same file, so a
+    # reorganization that moves it invalidates the whole sweep, which is what an
+    # anchor is for.
+    OMP_DIRS_URL: Anchor(r"class DirResolver", "the `DirResolver` class"),
     # identity-grade: co-located, not owning. A union head or page title.
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -1660,6 +1682,23 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
 
     if ours.omp is not None:
+        dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
+        if dirs is not None:
+            for var in sorted(OMP_DIRS_ENV_VARS):
+                # Word-boundary, NOT the quoted-literal form the other checks
+                # use: dirs.ts reads most of these as `process.env.PI_CONFIG_DIR`
+                # (dot notation, unquoted) and only some via a quoted key, so
+                # requiring quotes false-alarms on two working vars. Safe here
+                # because these are distinctive SCREAMING_SNAKE identifiers with
+                # no prose collision (the Cursor `stop` hazard is absent).
+                if not re.search(rf"\b{re.escape(var)}\b", dirs):
+                    report.add_breaking(
+                        f"omp env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::omp::resolve_omp_sessions_dir) is GONE from "
+                        f"packages/utils/src/dirs.ts — omp now resolves its sessions dir some "
+                        f"other way, so the watcher polls a directory it never writes to "
+                        f"(an empty office, no error)."
+                    )
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
             # Quote-anchored on purpose: the entry types are generic English words,

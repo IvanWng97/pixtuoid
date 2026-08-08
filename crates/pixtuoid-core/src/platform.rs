@@ -45,6 +45,14 @@ pub(crate) fn codex_home() -> PathBuf {
 /// of codex's existing-dir gate), else `<home>/.grok` on EVERY OS (no XDG, no
 /// APPDATA). Upstream resolves home via `std::env::home_dir()` (USERPROFILE on
 /// Windows, `$HOME` never consulted there), which `user_home` mirrors.
+///
+/// ONE axis is deliberately not mirrored: `default_grok_home` CANONICALIZES the
+/// home (`dunce::canonicalize`, to keep Windows `\\?\` verbatim prefixes out of
+/// paths it hands to `git`) before joining `.grok`, so under a SYMLINKED `$HOME`
+/// its path STRING differs from ours while naming the same directory. Watching
+/// and installing both resolve through the link, and grok's own registry is
+/// keyed by session id rather than by root path, so the difference is
+/// unobservable here — the same class as CC's NFC normalization.
 pub(crate) fn grok_home() -> PathBuf {
     resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
 }
