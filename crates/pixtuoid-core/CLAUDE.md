@@ -268,16 +268,24 @@ hook-command parent, never recycle-guarded, and a stamped stale pid would
 shadow the probe in `resolve_pid`. Their channel is the
 recycle-guarded probes, exposed as the two pub point-query seams
 `source::cc_pid_for_session` (projects root → sibling sessions registry) and
-`source::codex_pid_for_session` (rollout UUID). On Windows the SHIM sends no
-pid (the hook runs under `cmd /C`, so getppid would name a transient cmd.exe —
-the documented `parent_pid` trap), so shim-dependent sources focus-no-op there;
-a plugin-stamped pid (opencode's `process.pid`) still flows — the peek doesn't
-need the exit-watch, whose backend is also absent on Windows/pre-5.3 Linux. On
-those no-watch platforms an abrupt exit can't set `exiting_at`; the #527
-start-marker check still refuses the recycled pid at click time on pre-5.3
-LINUX (marker readable at stamp time), but `pid_start_marker` is None on every
-non-mac/linux OS — Windows hook-family stamps are markerless, so the guard is
-inert there and the wide staleness window REMAINS a Windows sharp edge (#528).
+`source::codex_pid_for_session` (rollout UUID). **Windows now resolves a pid
+too — by WALKING, not by getppid** (#528): a raw getppid there names the transient
+`cmd /C` the hook runner interposed, so the shim walks past it instead
+(`pixtuoid-hook`'s `cli_pid` — one Toolhelp32 snapshot, skip `cmd`/`powershell`/
+`pwsh`, stop at the first ancestor that is the CLI; a parent already absent from
+the snapshot yields NO stamp rather than a maybe-recycled pid). That stamp is
+safe to trust because the marker landed with it: `pid_start_marker` reads the
+creation `FILETIME` on Windows, so the #527 click-time recycle check is live
+there rather than inert. A plugin-stamped pid (opencode's `process.pid`) still
+wins where it exists — the peek needs no exit-watch, whose backend is absent on
+Windows/pre-5.3 Linux, which is also why an abrupt exit can't set `exiting_at`
+on those platforms and the click-time marker re-read is the guard that carries
+it. The skip list is by NAME, so a runner interposing some OTHER shell still
+stamps a transient pid — and that degrades to exactly the pre-#528 behaviour
+rather than a wrong window, because the pid is dead by click time and the marker
+re-read refuses it. The one residual the guard CANNOT catch is a parent that
+exits and has its pid recycled inside the shim's own sub-200ms run: the marker
+is then stamped from the impostor and matches itself.
 
 ## Known sharp edges (don't be surprised by these)
 

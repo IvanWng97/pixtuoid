@@ -427,8 +427,11 @@ mod tests {
 }
 
 /// Live dogfood (manual, `--ignored`): walks THIS test process's own ancestor
-/// chain with the real OS table and activates the terminal app it finds.
-#[cfg(all(test, target_os = "macos"))]
+/// chain with the real OS table and activates the terminal app it finds. On
+/// Windows this is the ONLY exercise of the foreground-lock retry — the
+/// activation path is unreachable from a headless runner, so `windows-test`
+/// compiles it and a human runs it.
+#[cfg(all(test, any(target_os = "macos", windows)))]
 mod live_dogfood {
     use super::*;
 
@@ -440,7 +443,7 @@ mod live_dogfood {
             .expect("a GUI ancestor (terminal app) above this test process");
         assert!(
             activate_os(app),
-            "macOS accepted the activation for pid {app}"
+            "the OS accepted the activation for pid {app}"
         );
     }
 }

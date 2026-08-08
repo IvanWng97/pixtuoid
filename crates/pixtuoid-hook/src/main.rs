@@ -12,6 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde_json::Value;
 
+mod cli_pid;
+use cli_pid::cli_pid;
+
 mod paths;
 use paths::default_socket_path;
 
@@ -85,7 +88,7 @@ fn main() -> Result<()> {
         // form; grok delivers the same var via its handler `env` map, so this arm
         // serves both). `--event` is orthogonal and never implies a source.
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
-        enrich_payload(map, source, now_ms(), parent_pid());
+        enrich_payload(map, source, now_ms(), cli_pid());
     }
 
     // Best-effort send, hard-bounded so a stuck daemon can never block CC's
@@ -105,22 +108,7 @@ fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, parent_pid(), |k| std::env::var(k).ok())
-}
-
-/// The spawning CLI's pid — the shim's parent, since `sh -c` EXECs the hook.
-/// Feeds the daemon's liveness watch (an abrupt exit that fires no `session_end`
-/// still ends the sprite) and the TUI's focus-jump. Windows sends none: under
-/// `cmd /C` the parent is `cmd.exe`, the WRONG pid, and it exits right after
-/// spawning the shim → a false exit / a recycled-pid focus.
-#[cfg(unix)]
-fn parent_pid() -> Option<u32> {
-    // Safety: getppid takes no args and is infallible.
-    u32::try_from(unsafe { libc::getppid() }).ok()
-}
-#[cfg(not(unix))]
-fn parent_pid() -> Option<u32> {
-    None
+    env_payload_from(event, cwd_fallback, cli_pid(), |k| std::env::var(k).ok())
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -221,7 +209,7 @@ fn enrich_payload(
     map: &mut serde_json::Map<String, Value>,
     source: Option<String>,
     ts_ms: u64,
-    ppid: Option<u32>,
+    pid: Option<u32>,
 ) {
     map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
@@ -231,10 +219,10 @@ fn enrich_payload(
         }
     }
     // `_pid` is deliberately NOT shim-owned: opencode's plugin and CodeWhale's
-    // env-mode supply their own, more authoritative than our getppid, so an
-    // inbound value is KEPT and the shim only fills the gap.
-    if let Some(ppid) = ppid {
-        map.entry("_pid").or_insert_with(|| Value::from(ppid));
+    // env-mode supply their own, more authoritative than what `cli_pid` can
+    // resolve, so an inbound value is KEPT and the shim only fills the gap.
+    if let Some(pid) = pid {
+        map.entry("_pid").or_insert_with(|| Value::from(pid));
     }
 }
 

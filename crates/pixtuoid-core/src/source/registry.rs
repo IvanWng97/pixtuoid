@@ -175,9 +175,9 @@ pub struct Transcript {
 /// doctor report bucketing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusChannel {
-    /// The shim stamps its `getppid` into `_pid` — trustworthy because `sh -c`
-    /// EXECs the hook so the parent IS the CLI; absent on Windows (`cmd /C`
-    /// transient parent).
+    /// The shim RESOLVES the CLI's pid into `_pid` — `getppid` on Unix, where
+    /// `sh -c` EXECs the hook so the parent IS the CLI; on Windows an ancestor
+    /// walk past the transient `cmd /C` parent (`pixtuoid-hook`'s `cli_pid`).
     ShimStamp,
     /// The source's own runtime stamps `_pid` — cross-platform, and survives
     /// even where the shim sends nothing.
