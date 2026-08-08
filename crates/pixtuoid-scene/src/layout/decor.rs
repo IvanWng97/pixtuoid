@@ -799,14 +799,15 @@ pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
 /// viewer — the only arrangement the office had before desks carried a facing.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
-/// The walk-anchor offset for a desk whose occupant sits SOUTH of it, back to
-/// the viewer.
+/// The walk-anchor offset for a desk whose occupant sits on the NEAR side, back
+/// to the viewer.
 ///
-/// Ratified against a three-way render: at this offset the occupant sits AT the
-/// desk, overlapping its front edge, with the name badge still clear above the
-/// monitor. Further south (8, 11) they detach onto open floor and the badge
-/// lands on the desk surface.
-pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = 5;
+/// DERIVED, not chosen: at `WALKING_Y_OFF` the occupant's sprite TOP lands on the
+/// desk's own row, so they overlap the desk body's lower half and their z-key —
+/// which is this chair row — puts them in front of it. That is a statable
+/// geometric fact; a free constant here is how a value that moved the occupant
+/// ONE pixel once passed for a side swap.
+pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
 /// Where an agent walks to/from for its home `desk`, given which way that desk
 /// seats its occupant.

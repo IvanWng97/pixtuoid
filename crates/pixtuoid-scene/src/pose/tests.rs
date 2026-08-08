@@ -1622,18 +1622,58 @@ fn entry_walk_coordinates_are_continuous() {
     );
 }
 
+/// Whether a chair is BLOCKED follows from where the facing puts it relative to
+/// the desk's stamped ground — it is not a property every chair has.
+///
+/// This assertion used to read `!is_walkable(chair)` unconditionally, which held
+/// only because every desk seated its occupant on the far side: that chair lands
+/// inside the desk's `OBSTACLE_PAD_PX` routing pad with ONE pixel of slack. A
+/// near-side chair sits past the desk's south base, on open floor. The
+/// difference is behavioural — A\* aimed at a BLOCKED goal snaps to the nearest
+/// walkable cell (possibly the monitor side), which is the whole reason
+/// [`desk_leg_endpoint`] routes to an approach cell and glides — so the pad's
+/// coverage is pinned against the same table `mask.rs` stamps from, on both axes,
+/// rather than as a boolean that silently means "far seat".
+///
+/// The other two assertions are cheap contract nets, not discoveries:
+/// `first_reachable_on_side` only ever returns a walkable cell at distance ≥ 1,
+/// so they hold by construction unless that contract changes.
 #[test]
 fn desk_approach_cell_is_never_inside_the_blocked_desk() {
+    use crate::layout::{furniture_def, Facing, Furniture, OBSTACLE_PAD_PX};
     let l = layout();
+    // The ONE table `mask::stamp_ground` reads — the aligns resolve the blocked
+    // rect inside the visual box, so this can't drift when the sprite is resized.
+    let def = furniture_def(Furniture::Desk);
+    let fp = def.footprint.expect("the desk carries a static footprint");
+    let (gx, gy) = (
+        def.ground_x.offset(def.visual.w, fp.w),
+        def.ground_y.offset(def.visual.h, fp.h),
+    );
     let mut any_some = false;
+    let mut facings: Vec<Facing> = Vec::new();
     for &desk in &l.home_desks {
-        let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
-        assert!(
-            !l.is_walkable(chair.x, chair.y),
-            "the desk chair {chair:?} must be blocked (covered by the desk's \
-             OBSTACLE_PAD_PX routing pad)"
+        let facing = l.desk_facing_at(desk);
+        if !facings.contains(&facing) {
+            facings.push(facing);
+        }
+        let chair = desk_walk_anchor_facing(desk, facing);
+        // The blocked ground + routing pad, on BOTH axes, so an east/west seat is
+        // judged by the same rect a north/south one is.
+        let (x0, y0) = (desk.x + gx, desk.y + gy);
+        let in_pad = (x0.saturating_sub(OBSTACLE_PAD_PX)..x0 + fp.w + OBSTACLE_PAD_PX)
+            .contains(&chair.x)
+            && (y0.saturating_sub(OBSTACLE_PAD_PX)..y0 + fp.h + OBSTACLE_PAD_PX).contains(&chair.y);
+        assert_eq!(
+            l.is_walkable(chair.x, chair.y),
+            !in_pad,
+            "desk {desk:?} facing {facing:?} seats its occupant at {chair:?}, \
+             {} the desk's routing pad — so the mask must report it \
+             {walkable}",
+            if in_pad { "inside" } else { "outside" },
+            walkable = if in_pad { "blocked" } else { "walkable" },
         );
-        // None = degenerate layout (every N/E/W side walled off); the entry then
+        // None = degenerate layout (every allowed side walled off); the entry then
         // falls back to the direct chair target. Acceptable, so not asserted.
         if let Some(cell) = desk_approach_cell(desk, &l) {
             any_some = true;
@@ -1648,6 +1688,12 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
     assert!(
         any_some,
         "at least one desk in an open layout must have a valid approach cell"
+    );
+    assert!(
+        facings.len() >= 2,
+        "a pod seats its two rows on opposite sides, so this layout must exercise \
+         more than one facing — got {facings:?}. Under a single facing the pad \
+         check above only ever sees one side of the desk."
     );
 }
 

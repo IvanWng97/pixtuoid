@@ -220,7 +220,7 @@ impl SeatView {
     /// (`sim::resolve_characters`) AND its label twin
     /// (`anchors::character_anchor`) derive the anchor from, so the badge can
     /// never float above the sitter. The home-DESK sitter is NOT covered here —
-    /// it anchors via `seated_anchor_facing(desk, w, crate::layout::Facing::South)`.
+    /// it anchors via `seated_anchor_facing(desk, w, layout.desk_facing_at(desk))`.
     pub(super) fn waypoint_render_anchor(self, stand: Point, sprite_w: u16) -> (Point, u16) {
         // UPRIGHT height REUSES the offset `waypoint_anchor` subtracts, so the
         // obstacle z-key `anchor.y + sprite_h` recovers the feet row BY

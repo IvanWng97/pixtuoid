@@ -444,6 +444,12 @@ pub(super) fn compute_with_seed(
             return true;
         }
         let reach = ReachSet::from_mask(mask, conn_seed);
+        // Judged at `Facing::South` for EVERY desk, whatever the pod grid seated
+        // it as — South is the universal fallback the demotion pass below retreats
+        // an unreachable desk to, so proving the south seat reachable proves no
+        // decor arrangement can strand a workstation. Judging each desk by its own
+        // facing instead would degrade decor to rescue a seat the layout is free
+        // to abandon, and would still leave the fallback unproven.
         home_desks.iter().any(|&d| {
             let chair = desk_walk_anchor_facing(d, crate::layout::Facing::South);
             approach_point(
@@ -1106,9 +1112,9 @@ impl FloorGeometry {
 /// like any other top row.
 fn pod_row_facing(r: u16) -> Facing {
     if r == 0 {
-        Facing::North
-    } else {
         Facing::South
+    } else {
+        Facing::North
     }
 }
 

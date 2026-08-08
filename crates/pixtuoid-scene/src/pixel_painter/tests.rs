@@ -3373,3 +3373,33 @@ fn pod_divider_spans_the_desk_rows_between_pod_mates_and_nowhere_else() {
         "the rig must cover both cases (pairs={checked_pairs}, row-ends={checked_ends})"
     );
 }
+
+/// A back-turned seat must put the occupant on the OTHER SIDE of the desk body,
+/// not merely lower.
+///
+/// This is the assertion that was missing when `DESK_WALK_Y_OFF_BACK` was a free
+/// constant: at 5 it moved the sprite ONE pixel and every test stayed green,
+/// because nothing anywhere stated what "the other side" means in pixels.
+#[test]
+fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
+    use crate::layout::{Facing, Furniture};
+    let desk_h = crate::layout::furniture_def(Furniture::Desk).visual.h;
+    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
+        let far = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        assert!(
+            far.y < desk.y,
+            "a viewer-facing occupant sits ABOVE the desk row: {far:?} vs {desk:?}"
+        );
+        assert!(
+            near.y >= desk.y,
+            "a back-turned occupant must reach the desk's own row, not hover above \
+             it: {near:?} vs {desk:?}"
+        );
+        assert!(
+            near.y < desk.y + desk_h,
+            "…but still overlap the desk body rather than float below it: \
+             {near:?} vs desk {desk:?} + visual h {desk_h}"
+        );
+    }
+}
