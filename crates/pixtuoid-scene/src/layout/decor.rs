@@ -788,7 +788,7 @@ pub const WALKING_Y_OFF: u16 = 12;
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
-/// `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` — the agent settles
+/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)` — the agent settles
 /// exactly onto its seat with no arrival pop, just clear of the desk obstacle.
 ///
 /// That identity is now STRUCTURAL: `seated_anchor` derives itself from this
@@ -826,15 +826,6 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     }
 }
 
-/// The viewer-facing walk anchor — [`desk_walk_anchor_facing`] at `South`.
-///
-/// The MIGRATE half of a parallel change: every caller still reads this while
-/// they move over one at a time, so the tree stays green at each step instead of
-/// 33 call sites breaking at once. Delete it once none remain.
-pub fn desk_walk_anchor(desk: Point) -> Point {
-    desk_walk_anchor_facing(desk, Facing::South)
-}
-
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders
 /// with no arrival jump — the inverse of the render anchor under
 /// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`.
@@ -857,7 +848,7 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         // waypoint render (`== walking_anchor`): S == pos.
         Furniture::IslandStand => pos,
         // desk render is `seated_anchor`; its inverse is `desk_walk_anchor`.
-        Furniture::Desk => desk_walk_anchor(pos),
+        Furniture::Desk => desk_walk_anchor_facing(pos, crate::layout::Facing::South),
         // The early return handled every obstacle kind. A FUTURE occupies_pos seat
         // that forgets its arm here must fail loud, not silently settle the
         // occupant on the blocked furniture centre (walk-through-desk bugs).

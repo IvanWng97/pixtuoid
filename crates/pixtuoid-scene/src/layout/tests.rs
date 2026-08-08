@@ -481,7 +481,7 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
                     "{w}x70 seed {seed}: desk x={} overflows the band's right edge {band_right}",
                     d.x
                 );
-                let a = desk_walk_anchor(*d);
+                let a = desk_walk_anchor_facing(*d, crate::layout::Facing::South);
                 assert!(
                     a.x < l.buf_w && a.y < l.buf_h,
                     "{w}x70 seed {seed}: desk_walk_anchor {a:?} is off-buffer ({}x{})",
@@ -541,11 +541,11 @@ fn every_home_desk_has_a_reachable_north_approach() {
     // ReachSet-rejected — so only the deeper reachable-aware scan finds them.
     // Pushing the origin far north makes `approach_point` prefer the north side
     // whenever it has a reachable cell, so a north return proves the scan got there.
-    use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+    use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
         for &desk in &l.home_desks {
-            let chair = desk_walk_anchor(desk);
+            let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
             let north_origin = Point {
                 x: chair.x,
                 y: chair.y.saturating_sub(40),

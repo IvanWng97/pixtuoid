@@ -242,7 +242,6 @@ fn reachset_never_claims_an_unroutable_cell() {
 #[test]
 fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     use crate::floor::floor_seed;
-    use crate::layout::desk_walk_anchor;
     use crate::pose::{aimless_wander_seed, desk_leg_endpoint, pick_aimless_dest};
     use pixtuoid_core::state::MAX_FLOORS;
     use pixtuoid_core::AgentId;
@@ -274,7 +273,12 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
                     for cycle in 0..8u64 {
                         let seed = aimless_wander_seed(id, cycle);
                         let dest = pick_aimless_dest(&l, seed, desk);
-                        if dest == desk_walk_anchor(desk) {
+                        if dest
+                            == crate::layout::desk_walk_anchor_facing(
+                                desk,
+                                crate::layout::Facing::South,
+                            )
+                        {
                             continue; // documented last resort: the agent's own seat
                         }
                         for &origin in &origins {

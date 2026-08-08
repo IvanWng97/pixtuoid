@@ -23,7 +23,7 @@ use crate::pathfind::Router;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
+    seated_anchor_facing, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
     waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
 use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
@@ -270,7 +270,7 @@ fn resolve_characters(
                       frame_idx: usize,
                       glow: CharacterGlow,
                       sleep_z_seed: Option<u64>| {
-            let anchor_no_breath = seated_anchor(desk, char_w);
+            let anchor_no_breath = seated_anchor_facing(desk, char_w, layout.desk_facing_at(desk));
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,

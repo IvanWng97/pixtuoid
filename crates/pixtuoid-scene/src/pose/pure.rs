@@ -6,8 +6,8 @@
 use std::time::{Duration, SystemTime};
 
 use crate::layout::{
-    desk_furniture_def, desk_walk_anchor, furniture_def, Bounds, DwellWindow, Point, SceneLayout,
-    WaypointKind,
+    desk_furniture_def, desk_walk_anchor_facing, furniture_def, Bounds, DwellWindow, Point,
+    SceneLayout, WaypointKind,
 };
 use crate::motion::{WanderKind, WanderTarget};
 use pixtuoid_core::state::{ActivityState, AgentSlot};
@@ -199,7 +199,11 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64;
         if since_exit < ENTRY_ANIMATION_MS {
-            return Some(linear_walk_pose(since_exit, desk_walk_anchor(desk), target));
+            return Some(linear_walk_pose(
+                since_exit,
+                desk_walk_anchor_facing(desk, layout.desk_facing_at(desk)),
+                target,
+            ));
         }
         return None;
     }
@@ -213,7 +217,11 @@ pub fn derive(slot: &AgentSlot, now: SystemTime, layout: &SceneLayout) -> Option
             .unwrap_or(Duration::ZERO)
             .as_millis() as u64;
         if since_spawn < ENTRY_ANIMATION_MS {
-            return Some(linear_walk_pose(since_spawn, from, desk_walk_anchor(desk)));
+            return Some(linear_walk_pose(
+                since_spawn,
+                from,
+                desk_walk_anchor_facing(desk, layout.desk_facing_at(desk)),
+            ));
         }
     }
 
@@ -357,7 +365,7 @@ pub fn pick_aimless_dest(layout: &SceneLayout, seed: u64, home_desk: Point) -> P
     // Whole midline blocked (degenerate layout): the agent's own desk anchor is
     // a destination every consumer already handles — return it rather than hand
     // out a cell inside furniture.
-    desk_walk_anchor(home_desk)
+    desk_walk_anchor_facing(home_desk, layout.desk_facing_at(home_desk))
 }
 
 /// Whether an Idle agent holds `Pose::SeatedThinking`: it recently finished

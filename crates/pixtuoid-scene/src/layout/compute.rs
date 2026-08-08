@@ -445,7 +445,7 @@ pub(super) fn compute_with_seed(
         }
         let reach = ReachSet::from_mask(mask, conn_seed);
         home_desks.iter().any(|&d| {
-            let chair = desk_walk_anchor(d);
+            let chair = desk_walk_anchor_facing(d, crate::layout::Facing::South);
             approach_point(
                 Furniture::Desk,
                 chair,

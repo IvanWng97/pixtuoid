@@ -1,6 +1,6 @@
 use super::anchors::{
-    back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
-    CHARACTER_SPRITE_W,
+    back_couch_anchor, seated_anchor_facing, standing_at_desk_anchor, walking_anchor,
+    waypoint_anchor, CHARACTER_SPRITE_W,
 };
 use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
 use super::wall::WALL_THICK_H_PX;
@@ -718,7 +718,6 @@ fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
 
 #[test]
 fn desk_walk_anchor_settles_exactly_on_the_seat() {
-    use crate::layout::desk_walk_anchor;
     for desk in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
@@ -726,9 +725,9 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
     ] {
         for w in [CHARACTER_SPRITE_W, 10] {
             assert_eq!(
-                walking_anchor(desk_walk_anchor(desk), w),
-                seated_anchor(desk, w),
-                "walking_anchor(desk_walk_anchor({desk:?}), {w}) must equal seated_anchor",
+                walking_anchor(crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South), w),
+                seated_anchor_facing(desk, w, crate::layout::Facing::South),
+                "walking_anchor(desk_walk_anchor_facing({desk:?}, South), {w}) must equal seated_anchor_facing",
             );
         }
     }
@@ -760,7 +759,7 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
             let sd = seated_foot_cell(Furniture::Desk, pos).expect("desk is occupies_pos");
             assert_eq!(
                 walking_anchor(sd, w),
-                seated_anchor(pos, w),
+                seated_anchor_facing(pos, w, crate::layout::Facing::South),
                 "Desk: walking_anchor(seated_foot_cell)={:?} must equal seated_anchor",
                 walking_anchor(sd, w),
             );
@@ -870,10 +869,10 @@ fn island_settle_z_stays_behind_the_countertop() {
 #[test]
 fn settle_seat_view_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    use crate::layout::{desk_walk_anchor, Furniture};
+    use crate::layout::{desk_walk_anchor_facing, Furniture};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
-    let chair = desk_walk_anchor(desk);
+    let chair = desk_walk_anchor_facing(desk, crate::layout::Facing::South);
     assert_eq!(
         settle_seat_view(chair, &l),
         Some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF)),
@@ -894,7 +893,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
 fn desk_settle_z_key_matches_the_seated_arm() {
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            let seated_arm_z = seated_anchor(desk, w).y + 12;
+            let seated_arm_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
             assert_eq!(
                 desk.y + DESK_SEAT_Z_OFF,
                 seated_arm_z,
@@ -987,7 +986,7 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
             let desk_furniture_z = desk.y + visual_h;
-            let seated_z = seated_anchor(desk, w).y + 12;
+            let seated_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
             let standing_z = standing_at_desk_anchor(desk, w).y + 12;
             assert!(
                 seated_z < desk_furniture_z,
@@ -1063,7 +1062,11 @@ fn character_anchor_y_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_anchor_y_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seated_anchor = seated_anchor(Point { x: 0, y: desk_y }, CHARACTER_SPRITE_W);
+    let seated_anchor = seated_anchor_facing(
+        Point { x: 0, y: desk_y },
+        CHARACTER_SPRITE_W,
+        crate::layout::Facing::South,
+    );
     let char_feet_anchor = seated_anchor.y + 12;
     let desk_anchor_y = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)

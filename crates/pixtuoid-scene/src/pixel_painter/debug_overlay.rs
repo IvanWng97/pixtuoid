@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_pixel;
 use crate::layout::{
-    desk_walk_anchor, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
+    desk_walk_anchor_facing, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
 };
 use crate::motion::MotionState;
 
@@ -132,7 +132,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     // can't clear the desk body.
     let desk_def = furniture_def(Furniture::Desk);
     for desk in &layout.home_desks {
-        let chair = desk_walk_anchor(*desk);
+        let chair = desk_walk_anchor_facing(*desk, layout.desk_facing_at(*desk));
         blob(buf, chair.x as i32, chair.y as i32, SEAT, 0.7);
         for (dx, dy) in DIRS {
             if !desk_def.approach.allows(Facing::South, (dx, dy)) {
@@ -233,7 +233,7 @@ mod tests {
         use crate::layout::{Facing, Furniture};
         let l = SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
         let desk = *l.home_desks.first().expect("a home desk");
-        let chair = desk_walk_anchor(desk);
+        let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
         let mut buf = RgbBuffer::filled(l.buf_w, l.buf_h, Rgb { r: 0, g: 0, b: 0 });
         paint_approach(&mut buf, &l);
 

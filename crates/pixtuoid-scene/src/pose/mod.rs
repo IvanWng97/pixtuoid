@@ -30,7 +30,7 @@ pub use pure::{
 // visibility.
 pub(crate) use pure::{resolve_wander_target, SpotClaims};
 
-use crate::layout::{desk_walk_anchor, Layout, Point};
+use crate::layout::{desk_walk_anchor_facing, Layout, Point};
 use crate::pathfind::Router;
 
 /// The per-frame routing engine state threaded through pose derivation,
@@ -111,9 +111,13 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// the EAST — the east side would read as walled-off. `None` only in a
 /// degenerate layout where every allowed side is walled off.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
-    use crate::layout::{desk_walk_anchor, Facing, Furniture};
-    let chair = desk_walk_anchor(desk);
-    let cell = layout.approach_point(Furniture::Desk, chair, chair, Facing::South);
+    use crate::layout::{desk_walk_anchor_facing, Furniture};
+    // The desk's OWN facing, not a constant: `ApproachSides` is canonical
+    // (facing-South) and rotated by this, so a back-turned desk is approached
+    // from its south front instead of walled off there.
+    let facing = layout.desk_facing_at(desk);
+    let chair = desk_walk_anchor_facing(desk, facing);
+    let cell = layout.approach_point(Furniture::Desk, chair, chair, facing);
     // `approach_point` returns the scanned pos (== chair) as its "no approach"
     // sentinel when no allowed+reachable side exists.
     (cell != chair).then_some(cell)
@@ -129,7 +133,7 @@ pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> 
 /// on/off the seat the router never plans), or `None` in the degenerate boxed-in
 /// layout where the leg reverts to the direct chair target.
 pub(crate) fn desk_leg_endpoint(desk: Point, layout: &Layout) -> (Point, Option<Point>) {
-    let chair = crate::layout::desk_walk_anchor(desk);
+    let chair = crate::layout::desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
     match desk_approach_cell(desk, layout) {
         Some(approach) => (approach, Some(chair)),
         None => (chair, None),
@@ -227,7 +231,7 @@ pub fn derive_with_routing(
             // Start the exit from wherever the agent actually is; without this an
             // agent mid-coffee-run when its session ends teleports back to the
             // desk before walking to the door.
-            let desk_anchor = desk_walk_anchor(desk);
+            let desk_anchor = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
             let from = rctx
                 .history
                 .recent(slot.agent_id, HISTORY_RECENT_MS, now)
@@ -275,12 +279,13 @@ pub fn derive_with_routing(
 
         // Must reproduce the snapshotted profile's endpoints, or the leg's
         // duration no longer matches the distance it renders.
-        let (from, exit_settle) = if stored_from == desk_walk_anchor(desk) {
-            let (approach, chair) = desk_leg_endpoint(desk, layout);
-            (approach, chair.map_or(Settle::None, Settle::Start))
-        } else {
-            (stored_from, Settle::None)
-        };
+        let (from, exit_settle) =
+            if stored_from == desk_walk_anchor_facing(desk, layout.desk_facing_at(desk)) {
+                let (approach, chair) = desk_leg_endpoint(desk, layout);
+                (approach, chair.map_or(Settle::None, Settle::Start))
+            } else {
+                (stored_from, Settle::None)
+            };
 
         return route_walking_pose(
             slot,
@@ -497,7 +502,7 @@ pub fn derive_with_routing(
                     // Distance to the CHAIR, not the desk origin: the chair is offset
                     // from the origin, so a desk-origin gate would re-fire forever
                     // once the agent has settled ON the chair.
-                    let chair = desk_walk_anchor(desk);
+                    let chair = desk_walk_anchor_facing(desk, layout.desk_facing_at(desk));
                     let dist = (prev.x as i32 - chair.x as i32).abs()
                         + (prev.y as i32 - chair.y as i32).abs();
                     if dist >= SNAP_BACK_MIN_DIST {

@@ -20,9 +20,9 @@ pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::repels_plants;
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor, desk_walk_anchor_facing, furniture_def, seated_foot_cell,
-    ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor,
-    WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    desk_furniture_def, desk_walk_anchor_facing, furniture_def, seated_foot_cell, ApproachSides,
+    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
+    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
@@ -343,6 +343,20 @@ impl SceneLayout {
     /// the approach/walk geometry read, so a seat can never be rendered on a
     /// different side than it is routed to.
     ///
+    /// Which way the desk AT `pos` seats its occupant.
+    ///
+    /// A position lookup rather than an index one because most callers hold the
+    /// desk `Point` and never its index — threading an index to each would widen
+    /// half a dozen signatures to carry what this can recover. Desk positions are
+    /// unique and there are at most a couple dozen per floor, so the scan is
+    /// cheaper than the allocation any map would need.
+    pub fn desk_facing_at(&self, pos: Point) -> Facing {
+        self.home_desks
+            .iter()
+            .position(|&d| d == pos)
+            .map_or(Facing::South, |i| self.desk_facing(FloorLocalDeskIndex(i)))
+    }
+
     /// Falls back to `South` for an out-of-range index rather than `Option`: every
     /// caller already holds a desk it resolved, and the classic-facing default is
     /// the safe answer for a desk the parallel vec somehow missed.
