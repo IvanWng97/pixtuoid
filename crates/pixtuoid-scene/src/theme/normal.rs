@@ -54,11 +54,6 @@ pub static NORMAL: Theme = Theme {
             g: 42,
             b: 54,
         },
-        cubicle_divider: Rgb {
-            r: 72,
-            g: 82,
-            b: 104,
-        },
         runner_base: Rgb {
             r: 160,
             g: 120,

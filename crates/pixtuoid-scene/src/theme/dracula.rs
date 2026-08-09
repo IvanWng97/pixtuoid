@@ -54,11 +54,6 @@ pub static DRACULA: Theme = Theme {
             g: 31,
             b: 40,
         },
-        cubicle_divider: Rgb {
-            r: 68,
-            g: 71,
-            b: 90,
-        },
         runner_base: Rgb {
             r: 60,
             g: 45,

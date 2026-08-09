@@ -78,8 +78,6 @@ pub struct OfficeColors {
     pub room_wall_trim_light: Rgb,
     /// Room-divider door jambs + dark trim (also the aquarium frame).
     pub room_wall_trim_dark: Rgb,
-    /// Cubicle pod-divider wall.
-    pub cubicle_divider: Rgb,
     /// Corridor runner-rug base.
     pub runner_base: Rgb,
     /// Corridor runner-rug stripe.

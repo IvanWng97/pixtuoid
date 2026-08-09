@@ -59,10 +59,6 @@ pub(super) enum DrawableKind<'a> {
         /// back-turned seat gets the raised-monitor variant so the sitter's head
         /// does not land on the screen.
         facing: crate::layout::Facing,
-        /// Buffer column of this cubicle's pod divider, or `None` when the desk
-        /// has no east pod-mate to be divided FROM (the row's last desk, or a
-        /// pod whose second column the band clamp dropped).
-        divider_x: Option<u16>,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
         /// Standby-screen strength, already scaled by darkness — 0 by day.
@@ -301,7 +297,6 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         DrawableKind::DeskCubicle {
             desk,
             facing,
-            divider_x,
             has_cabinet,
             screen_glow,
             screen_idle,
@@ -310,18 +305,6 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             token_tier,
             sheet_fall,
         } => {
-            let divider = theme.office.cubicle_divider;
-            if let Some(div_x) = *divider_x {
-                // Spans the desk sprite's own painted rows so it reads as tall
-                // as the workstation.
-                let visual_h = crate::layout::desk_furniture_def().visual.h;
-                for dy in 0..=visual_h {
-                    let py = desk.y.saturating_sub(1) + dy;
-                    if div_x < buf.width() && py < buf.height() {
-                        buf.put(div_x, py, divider);
-                    }
-                }
-            }
             if *has_cabinet {
                 if let Some(cab) = pack
                     .animation("filing_cabinet")
@@ -763,7 +746,6 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                divider_x: None,
                 has_cabinet: false,
                 screen_glow: None,
                 screen_idle: 0.0,
@@ -955,7 +937,6 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                divider_x: None,
                 has_cabinet: true,
                 screen_glow: None,
                 screen_idle: 0.0,

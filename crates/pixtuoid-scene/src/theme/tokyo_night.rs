@@ -54,11 +54,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 24,
             b: 36,
         },
-        cubicle_divider: Rgb {
-            r: 65,
-            g: 72,
-            b: 104,
-        },
         runner_base: Rgb {
             r: 40,
             g: 44,

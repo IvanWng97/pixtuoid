@@ -55,11 +55,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 24,
             b: 37,
         },
-        cubicle_divider: Rgb {
-            r: 69,
-            g: 71,
-            b: 90,
-        },
         runner_base: Rgb {
             r: 55,
             g: 50,

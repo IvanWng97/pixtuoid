@@ -54,11 +54,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 16,
             b: 32,
         },
-        cubicle_divider: Rgb {
-            r: 50,
-            g: 40,
-            b: 75,
-        },
         runner_base: Rgb {
             r: 40,
             g: 35,

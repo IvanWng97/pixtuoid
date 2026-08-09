@@ -781,16 +781,6 @@ fn enqueue_desk_cubicles<'a>(
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
-        let Some(Size { w: desk_fp_w, .. }) = desk_def.footprint else {
-            continue;
-        };
-        let mate_x = desk.x + DESK_W + crate::layout::INTRA_POD_GAP_X;
-        let divider_x = ctx
-            .layout
-            .home_desks
-            .iter()
-            .any(|d| d.y == desk.y && d.x == mate_x)
-            .then(|| (desk.x + desk_fp_w + mate_x) / 2);
         let occupant = agents
             .iter()
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
@@ -820,7 +810,6 @@ fn enqueue_desk_cubicles<'a>(
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing,
-                divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
                 screen_idle: if shows_screen {

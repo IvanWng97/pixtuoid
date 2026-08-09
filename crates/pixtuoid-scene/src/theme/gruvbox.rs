@@ -55,11 +55,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 32,
             b: 33,
         },
-        cubicle_divider: Rgb {
-            r: 80,
-            g: 73,
-            b: 69,
-        },
         runner_base: Rgb {
             r: 70,
             g: 60,
