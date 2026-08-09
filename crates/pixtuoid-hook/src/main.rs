@@ -12,6 +12,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 use serde_json::Value;
 
+mod cli_pid;
+use cli_pid::cli_pid;
+
 mod paths;
 use paths::default_socket_path;
 
@@ -79,48 +82,39 @@ fn main() -> Result<()> {
         }
     };
 
+    // Everything past here is OUR work on CC's clock — `cli_pid` walks a process
+    // snapshot on Windows — so the bound is armed first (see `arm_watchdog`).
+    let Some(bound) = transport::arm_watchdog() else {
+        return Ok(());
+    };
+
     if let Value::Object(map) = &mut payload {
         // Source precedence: the `--source <name>` argv flag (the Windows install
         // form) wins over the `PIXTUOID_SOURCE` env var (the Unix env-prefix
         // form; grok delivers the same var via its handler `env` map, so this arm
         // serves both). `--event` is orthogonal and never implies a source.
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
-        enrich_payload(map, source, now_ms(), parent_pid());
+        enrich_payload(map, source, now_ms(), cli_pid);
     }
 
     // Best-effort send, hard-bounded so a stuck daemon can never block CC's
     // subprocess wait — see transport.rs.
     let mut line = serde_json::to_vec(&payload).unwrap_or_default();
     line.push(b'\n');
-    transport::send_line(&socket, &line);
+    transport::send_line(&bound, &socket, &line);
     Ok(())
 }
 
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
 /// The `std::env` reads live here so `env_payload_from` stays testable without
-/// mutating process-global env.
+/// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), so the shim's own cwd is the reliable fallback.
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, parent_pid(), |k| std::env::var(k).ok())
-}
-
-/// The spawning CLI's pid — the shim's parent, since `sh -c` EXECs the hook.
-/// Feeds the daemon's liveness watch (an abrupt exit that fires no `session_end`
-/// still ends the sprite) and the TUI's focus-jump. Windows sends none: under
-/// `cmd /C` the parent is `cmd.exe`, the WRONG pid, and it exits right after
-/// spawning the shim → a false exit / a recycled-pid focus.
-#[cfg(unix)]
-fn parent_pid() -> Option<u32> {
-    // Safety: getppid takes no args and is infallible.
-    u32::try_from(unsafe { libc::getppid() }).ok()
-}
-#[cfg(not(unix))]
-fn parent_pid() -> Option<u32> {
-    None
+    env_payload_from(event, cwd_fallback, |k| std::env::var(k).ok())
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -148,14 +142,10 @@ fn cap_env_field(mut val: String) -> String {
 fn env_payload_from(
     event: &str,
     cwd_fallback: Option<String>,
-    pid: Option<u32>,
     get: impl Fn(&str) -> Option<String>,
 ) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
-    if let Some(pid) = pid {
-        map.insert("_pid".into(), Value::from(pid));
-    }
     // cwd is the AgentId KEY (the decoder drops a cwd-less event), and
     // DEEPSEEK_WORKSPACE is UNSET for a fresh `codewhale` launched without `-C`
     // until the workspace resolves — so `session_start` would otherwise never
@@ -221,7 +211,7 @@ fn enrich_payload(
     map: &mut serde_json::Map<String, Value>,
     source: Option<String>,
     ts_ms: u64,
-    ppid: Option<u32>,
+    resolve_pid: impl FnOnce() -> Option<u32>,
 ) {
     map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
@@ -230,11 +220,12 @@ fn enrich_payload(
             map.insert("_pixtuoid_source".into(), Value::from(src));
         }
     }
-    // `_pid` is deliberately NOT shim-owned: opencode's plugin and CodeWhale's
-    // env-mode supply their own, more authoritative than our getppid, so an
-    // inbound value is KEPT and the shim only fills the gap.
-    if let Some(ppid) = ppid {
-        map.entry("_pid").or_insert_with(|| Value::from(ppid));
+    // The opencode/OpenClaw plugins stamp `process.pid` from inside the CLI —
+    // keep theirs, and stay LAZY so they never pay for the Windows snapshot.
+    if !map.contains_key("_pid") {
+        if let Some(pid) = resolve_pid() {
+            map.insert("_pid".into(), Value::from(pid));
+        }
     }
 }
 

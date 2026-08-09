@@ -163,6 +163,11 @@ impl Drop for UndeliveredEvents {
 /// a slot, and `Identity` is the ONLY registration carrier for a mid-attached
 /// session whose `SessionStart` predates the daemon (opencode never re-emits
 /// `session.created`). Activity/Waiting/End never register a new slot.
+///
+/// Matches on event SHAPE, so unlike [`patch_identity_pids`] this is NOT
+/// `FocusChannel`-gated — sound only while every platform with an `ExitWatch`
+/// backend takes its pid from an exec'd parent. A Windows backend would need
+/// this bind gated on `accepts_stamp()`; there is nothing to gate until then.
 fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
     match ev {
         AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {
@@ -178,9 +183,9 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 ///
 /// The gate is the registry's [`FocusChannel`] capability, shared with
 /// `focus::resolve_pid`. `TranscriptProbe` sources (CC/Codex) are skipped: the
-/// shim's `getppid` is their hook-command parent (possibly a transient shell,
-/// never recycle-guarded), and a stamped stale pid would shadow the probe's
-/// recycle guard in `resolve_pid`. The kernel start marker (#527, so the
+/// shim's resolved pid is their hook-command's parent, not necessarily the CLI,
+/// and a stamped stale pid would shadow the probe's recycle guard in
+/// `resolve_pid`. The kernel start marker (#527, so the
 /// click-time guard can refuse a recycled pid) is read LAZILY on the first
 /// accepting Identity, sparing the high-volume non-accepting sources a syscall.
 fn patch_identity_pids(evs: &mut [AgentEvent], pid: Option<i32>) {

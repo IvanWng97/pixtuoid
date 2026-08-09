@@ -29,11 +29,11 @@ anyhow     = { workspace = true }
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# The client-side peer-cred check (#495) needs Win32 — verified decls beat hand-FFI
-# in a never-panic shim. Pin the SAME major as pixtuoid-core / pixtuoid so the
-# bindings don't double-compile.
+# The client-side peer-cred check (#495) and the `cli_pid` ancestor walk (#528)
+# need Win32 — verified decls beat hand-FFI in a never-panic shim. Pin the SAME
+# major as pixtuoid-core / pixtuoid so the bindings don't double-compile.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Pipes", "Win32_System_Threading"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [target.'cfg(unix)'.dev-dependencies]
 tempfile = "3"

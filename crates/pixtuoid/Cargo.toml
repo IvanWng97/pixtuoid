@@ -120,6 +120,8 @@ windows-sys = { version = "0.61", features = [
     # focus/windows.rs: Toolhelp32 ancestor walk + EnumWindows/SetForegroundWindow
     "Win32_System_Diagnostics_ToolHelp",
     "Win32_UI_WindowsAndMessaging",
+    # focus/windows.rs: AttachThreadInput + GetCurrentThreadId, the foreground-lock retry
+    "Win32_System_Threading",
 ] }
 
 [dev-dependencies]

@@ -175,16 +175,17 @@ pub struct Transcript {
 /// doctor report bucketing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusChannel {
-    /// The shim stamps its `getppid` into `_pid` — trustworthy because `sh -c`
-    /// EXECs the hook so the parent IS the CLI; absent on Windows (`cmd /C`
-    /// transient parent).
+    /// The shim RESOLVES the CLI's pid into `_pid` — `getppid` on Unix, where a
+    /// runner either direct-execs the shim or `sh -c`s it (which EXECs), so the
+    /// parent IS the CLI; on Windows an ancestor walk past the transient
+    /// `cmd /C` parent (`pixtuoid-hook`'s `cli_pid`).
     ShimStamp,
     /// The source's own runtime stamps `_pid` — cross-platform, and survives
     /// even where the shim sends nothing.
     PluginStamp,
     /// Pid resolves through a recycle-guarded liveness probe at CLICK time; hook
-    /// stamps are never trusted (the shim's getppid is the hook-command parent,
-    /// not the CLI). The probe fn itself lives in the binary.
+    /// stamps are never trusted (the shim resolves its hook-command's parent,
+    /// not necessarily the CLI). The probe fn itself lives in the binary.
     TranscriptProbe,
     /// No pid channel — a focus click silently no-ops (the ONE failure rule).
     Unsupported,

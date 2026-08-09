@@ -58,7 +58,9 @@ rustix = { version = "1", features = ["event", "process", "pipe"] }
 # 0.61 to match the major tokio already pulls (via mio) for this target —
 # a second windows-sys major would double-compile the bindings.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization"] }
+# Win32_System_Threading: OpenProcess + GetProcessTimes, the `proc_start`
+# creation-FILETIME marker (the Windows half of the pid-recycle guard).
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
 
 [dev-dependencies]
 # Depending on ourselves BY PATH is how a crate turns its own non-default
