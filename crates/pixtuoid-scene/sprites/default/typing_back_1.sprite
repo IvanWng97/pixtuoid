@@ -1,0 +1,14 @@
+# 8x11 BACK view of the typing pose, frame 1 — see `typing_back_0.sprite`.
+# Mirrors that frame's hand alternation, matching `typing_1.sprite`.
+@frame 0
+. n H H H H n .
+n H H H H H H n
+H H H H H H H H
+H H H H H H H H
+. H H H H H H .
+. . n S S n . .
+. B B B B B B .
+B B B B B B B B
+B B B B B B B B
+. B B B B B B S
+. S . . . . . .

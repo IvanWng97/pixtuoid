@@ -29,12 +29,37 @@ const SEATED_BACK: &str = "seated_back";
 /// A pack without `seated_back` keeps its front frames — the same per-piece
 /// degrade a custom pack already gets for `side_seated`, never an invisible
 /// sitter. A per-pose back view lands as its sprite plus one arm here.
+/// The back view of a seated pose, or `None` where the pack has no distinct one.
+///
+/// A TABLE, not a `format!("{anim}_back")`, because `CharacterPlacement.anim_name`
+/// is `&'static str` and a formatted name cannot be. Adding a pose's back view is
+/// this row plus its sprite; nothing else changes.
+const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing", "typing_back")];
+
+/// Which animation a desk occupant is drawn in, given the way their desk seats
+/// them.
+///
+/// Three rungs, and the middle one is why this is not a bare lookup: a pose with
+/// its OWN back view keeps its animation (a back-turned typist still types), a
+/// pose without one falls back to the STILL back view rather than showing a
+/// face — an occupant with their back to the room must never render front-on —
+/// and a pack with no back art at all keeps its front frames, the same per-piece
+/// degrade `side_seated` already gets.
+///
+/// The fallback rung is a real cost, not a formality: a back-turned sleeper
+/// currently renders as a still sitter, losing the head-down read. It buys the
+/// invariant that orientation is never wrong, which is the more visible error.
 fn seated_anim(anim: &'static str, facing: crate::layout::Facing, pack: &Pack) -> &'static str {
-    if facing == crate::layout::Facing::North && pack.animation(SEATED_BACK).is_some() {
-        SEATED_BACK
-    } else {
-        anim
+    if facing != crate::layout::Facing::North {
+        return anim;
     }
+    SEATED_BACK_VIEWS
+        .iter()
+        .find(|(front, _)| *front == anim)
+        .map(|&(_, back)| back)
+        .filter(|back| pack.animation(back).is_some())
+        .or_else(|| pack.animation(SEATED_BACK).is_some().then_some(SEATED_BACK))
+        .unwrap_or(anim)
 }
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};

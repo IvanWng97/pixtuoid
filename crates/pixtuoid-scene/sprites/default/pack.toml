@@ -77,6 +77,12 @@ frame_ms = 220
 frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite"]
 frame_ms = 220
 
+# BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
+# still `seated_back`, which is what every back-turned agent used to get.
+[animations.typing_back]
+frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
+frame_ms = 220
+
 [animations.desk]
 frames   = ["desk.sprite"]
 frame_ms = 600

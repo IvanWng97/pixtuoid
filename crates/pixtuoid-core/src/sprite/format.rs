@@ -383,8 +383,12 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
 /// Character animation names a pack MAY omit — the renderer degrades
 /// gracefully (`side_seated` and `seated_back` both fall back to the front
 /// `seated` pose).
-pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] =
-    &["walking_coffee", "side_seated", "seated_back"];
+pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
+    "walking_coffee",
+    "side_seated",
+    "seated_back",
+    "typing_back",
+];
 
 /// Separator joining a furniture animation to the density it is drawn at:
 /// `desk@4x` is the `desk` piece drawn on a 4x grid, for a painter rendering

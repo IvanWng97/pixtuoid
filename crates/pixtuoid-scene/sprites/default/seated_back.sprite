@@ -1,20 +1,26 @@
-# 8x10 seated occupant seen from BEHIND — the cutaway's over-the-shoulder read.
+# 8x10 seated character seen from BEHIND — the desk pose for a back-turned seat
+# (`layout.desk_facings`), and the fallback for every seated pose whose own back
+# view the pack does not ship.
 #
-# Same footprint as `seated` so the pose routing and the desk geometry are
-# untouched; only the head reverses. The face rows become hair exactly as
-# `walking_back` reverses `walking`, so the two back views share one vocabulary
-# and an agent recoloured in one is recoloured in the other.
+# Two rows carry SKIN on purpose: the nape at row 5 and the hands at row 9.
+# The first revision was six solid rows of hair over four of shirt, and it read
+# as a BALL rather than a person — the front view spends only 2 rows on hair and
+# 4 on a face, so the two silhouettes had nothing in common at a glance. Worse,
+# it left skin at ZERO: per-agent identity is hair + skin (`agent_id`-seeded)
+# while the outfit is cwd-seeded and therefore SHARED across a repo's agents, so
+# a room of back-turned workers from one project became indistinguishable. The
+# nape and hands put that axis back without inventing a face we cannot see.
 #
-# The bottom rows carry sleeve rather than the hands `seated` shows: from behind,
-# the forearms are in front of the body and the desk occludes them anyway.
+# Hands sit exactly where `seated.sprite` puts them (row 9, both edges), so the
+# front and back views read as the same person at the same desk.
 @frame 0
 . n H H H H n .
 n H H H H H H n
 H H H H H H H H
 H H H H H H H H
 . H H H H H H .
-. n H H H H n .
+. . n S S n . .
 . B B B B B B .
 B B B B B B B B
 B B B B B B B B
-. B B B B B B .
+. S B B B B S .
