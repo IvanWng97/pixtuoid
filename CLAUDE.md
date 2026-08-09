@@ -39,13 +39,19 @@ tag-is-a-publish rule) are in
 like a bug are documented, load-bearing design — the "Known sharp edges"
 section in each nested file (indexed below) explains why.
 
-**Two things about how these files load.** Each nested guide keeps its
-"how does X work?" answers in a sibling `WHERE-TO-LOOK.md`, indexed by question
-in the guide itself — so a session pays for the one answer it needs instead of
-every answer the crate has. And a nested `CLAUDE.md` is re-read only when you
-next touch a file in its tree: unlike this root file, it is **not** re-injected
-after a `/compact`, so on a long arc re-open one file from the crate before
-trusting your memory of its sharp edges.
+**Two things about how these files load.** A nested `CLAUDE.md` is an INDEX; its
+bulk lives in siblings that are **not** auto-loaded — you must open them. Each
+guide indexes `LAYOUT.md` (the annotated module tree), `SHARP-EDGES.md` (the full
+WHY per edge), and `WHERE-TO-LOOK.md` ("how does X work?"), plus
+`UPSTREAM-DRIFT.md` in core and `SINGLE-SOURCED.md` in site. **Every index line
+is the sibling entry's own opening phrase, verbatim — grep that phrase to land on
+the full text.** So: before changing a module whose annotation you haven't read,
+and ALWAYS before "fixing" something an index line names, open the sibling. An
+index line is enough to recognize a trap, never enough to justify a change.
+And a nested `CLAUDE.md` is re-read only when you next touch a file in its tree:
+unlike this root file, it is **not** re-injected after a `/compact`, so on a long
+arc re-open one file from the crate before trusting your memory of its sharp
+edges.
 
 ## What this is
 
