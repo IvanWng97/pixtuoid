@@ -3085,20 +3085,38 @@ fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
         pools.len(),
         l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
     );
-    for (pool, desk) in pools.iter().zip(&l.home_desks) {
-        assert_eq!(pool.cx, desk.x + DESK_W / 2);
-        assert_eq!(pool.cy, desk.y.saturating_sub(2));
+    let mut desk_rows = std::collections::HashSet::new();
+    for (i, ((pool, keep), desk)) in pools.iter().zip(&l.home_desks).enumerate() {
+        // Derived from the ONE authority rather than restating its arithmetic —
+        // `decor`'s own test pins what that authority computes.
+        let want = crate::layout::desk_ceiling_pool_center(
+            *desk,
+            l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
+        );
+        assert_eq!((pool.cx, pool.cy), (want.x, want.y));
         assert_eq!((pool.half_w, pool.half_h), (10, 5));
+        assert!(*keep < 1.0, "a desk tube dims after dark");
+        desk_rows.insert(pool.cy as i32 - desk.y as i32);
     }
+    // The point of routing through the authority: the offset is NOT one constant
+    // any more. A layout seating both sides must produce two distinct lifts, or
+    // the assertion above is satisfied by a facing-blind implementation.
+    assert!(
+        desk_rows.len() >= 2,
+        "this layout seats both sides, so its desk lights must sit at two \
+         different offsets — got {desk_rows:?}"
+    );
     if let Some(pr) = l.pantry.map(|p| p.bounds) {
-        let p = pools[l.home_desks.len()];
+        let (p, keep) = pools[l.home_desks.len()];
         assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
         assert_eq!((p.half_w, p.half_h), (12, 6));
+        assert_eq!(keep, 1.0, "shared spaces keep their overhead light");
     }
     if let Some(c) = l.corridor {
-        let p = *pools.last().unwrap();
+        let (p, keep) = *pools.last().unwrap();
         assert_eq!((p.cx, p.cy), (c.x + c.width / 2, c.y + c.height / 2));
         assert_eq!((p.half_w, p.half_h), (14, 5));
+        assert_eq!(keep, 1.0, "shared spaces keep their overhead light");
     }
 }
 

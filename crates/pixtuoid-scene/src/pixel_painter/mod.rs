@@ -364,32 +364,63 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
 /// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
 /// deliberately NOT here — it is a different painter with its own strength +
 /// anchor, and the order (pools THEN halo) is load-bearing for byte-identity.
-fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
+/// How much of the ceiling pools' NIGHT gain each kind keeps.
+///
+/// The desk tubes go nearly out after dark. An office working late kills the
+/// overhead light over the workstations and the room reads by screen glow —
+/// that is the look, and it is also the only way twelve 20x10 pools stop
+/// overlapping into one pale sheet across the whole cubicle band, which is
+/// what they did at full gain (invisible by day at the 0.15 base, so it only
+/// ever showed on a dark theme). The shared spaces keep theirs: someone still
+/// has to find the coffee machine.
+const DESK_POOL_NIGHT_KEEP: f32 = 0.18;
+/// Night-gain retention for the pantry and corridor pools — unchanged.
+const SHARED_POOL_NIGHT_KEEP: f32 = 1.0;
+
+fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = (Ellipse, f32)> + '_ {
     // Half-extents (a fluorescent tube's lit footprint) per pool kind.
     const DESK_POOL_HALF: (u16, u16) = (10, 5);
     const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
     const CORRIDOR_POOL_HALF: (u16, u16) = (14, 5);
-    // The desk tube hangs NORTH of the desk origin (above the monitor, not on
-    // the surface).
-    const DESK_POOL_CY_LIFT: u16 = 2;
-
-    let desks = layout.home_desks.iter().map(|desk| Ellipse {
-        cx: desk.x + DESK_W / 2,
-        cy: desk.y.saturating_sub(DESK_POOL_CY_LIFT),
-        half_w: DESK_POOL_HALF.0,
-        half_h: DESK_POOL_HALF.1,
+    // Centre comes from the SEAT, so the light tracks the occupant a facing put
+    // there — see `layout::desk_ceiling_pool_center`. A hardcoded lift left the
+    // pool over empty floor behind a back-turned worker.
+    let desks = layout.home_desks.iter().enumerate().map(|(i, desk)| {
+        let c = crate::layout::desk_ceiling_pool_center(
+            *desk,
+            layout.desk_facing(FloorLocalDeskIndex(i)),
+        );
+        (
+            Ellipse {
+                cx: c.x,
+                cy: c.y,
+                half_w: DESK_POOL_HALF.0,
+                half_h: DESK_POOL_HALF.1,
+            },
+            DESK_POOL_NIGHT_KEEP,
+        )
     });
-    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| Ellipse {
-        cx: pr.x + pr.width / 2,
-        cy: pr.y + pr.height / 2,
-        half_w: PANTRY_POOL_HALF.0,
-        half_h: PANTRY_POOL_HALF.1,
+    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| {
+        (
+            Ellipse {
+                cx: pr.x + pr.width / 2,
+                cy: pr.y + pr.height / 2,
+                half_w: PANTRY_POOL_HALF.0,
+                half_h: PANTRY_POOL_HALF.1,
+            },
+            SHARED_POOL_NIGHT_KEEP,
+        )
     });
-    let corridor = layout.corridor.map(|c| Ellipse {
-        cx: c.x + c.width / 2,
-        cy: c.y + c.height / 2,
-        half_w: CORRIDOR_POOL_HALF.0,
-        half_h: CORRIDOR_POOL_HALF.1,
+    let corridor = layout.corridor.map(|c| {
+        (
+            Ellipse {
+                cx: c.x + c.width / 2,
+                cy: c.y + c.height / 2,
+                half_w: CORRIDOR_POOL_HALF.0,
+                half_h: CORRIDOR_POOL_HALF.1,
+            },
+            SHARED_POOL_NIGHT_KEEP,
+        )
     });
     desks.chain(pantry).chain(corridor)
 }
@@ -534,9 +565,13 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         buf_h,
         look.spill_strength * DAYLIGHT_FLOOR_LIFT,
     );
-    let pool_strength = (0.15 + 0.30 * look.darkness) * indoor_scale;
-    for pool in ceiling_pool_regions(ctx.layout) {
-        paint_ceiling_pool(ctx.buf, pool, pool_strength, ctx.theme);
+    // Split base from night gain so a pool kind can opt out of the DARK half
+    // without losing its daylight presence — see `DESK_POOL_NIGHT_KEEP`.
+    const POOL_BASE: f32 = 0.15;
+    const POOL_NIGHT_GAIN: f32 = 0.30;
+    for (pool, night_keep) in ceiling_pool_regions(ctx.layout) {
+        let strength = (POOL_BASE + POOL_NIGHT_GAIN * look.darkness * night_keep) * indoor_scale;
+        paint_ceiling_pool(ctx.buf, pool, strength, ctx.theme);
     }
     if let Some(lamp) = ctx.layout.floor_lamp() {
         paint_floor_lamp_halo(

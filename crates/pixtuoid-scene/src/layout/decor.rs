@@ -827,6 +827,29 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     }
 }
 
+/// Where a desk's ceiling tube pools its light, given which way that desk seats
+/// its occupant.
+///
+/// Derived from the SEAT, not the desk origin: the pool exists to light the
+/// WORKSTATION, and which side of the desk that is became a per-desk fact the
+/// day desks grew a facing. It resolves to the occupant's own vertical middle —
+/// the walk anchor is their feet, so half a standing height above it is their
+/// centre.
+///
+/// For a viewer-facing seat that is `desk.y - 2`, byte-identical to the
+/// hardcoded north lift it replaced, so the historical look is untouched. A
+/// back-turned seat moves the light SOUTH onto the person instead of leaving it
+/// over the empty floor behind them, which is what it had been doing since the
+/// pod grew a second facing. East/west follows for free, on both axes, because
+/// the walk anchor is already a function of facing — no second site to remember.
+pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
+    let walk = desk_walk_anchor_facing(desk, facing);
+    Point {
+        x: walk.x,
+        y: walk.y.saturating_sub(WALKING_Y_OFF / 2),
+    }
+}
+
 /// The cell where a seated agent's WALK visually ends so the seated sprite renders
 /// with no arrival jump — the inverse of the render anchor under
 /// [`WALKING_Y_OFF`], solving `walking_anchor(S) == render_anchor(pos)`.
@@ -1266,5 +1289,38 @@ mod tests {
                 "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
             );
         }
+    }
+
+    /// The claim the doc comment makes, proven rather than asserted in prose:
+    /// deriving the pool from the seat reproduces the hardcoded north lift
+    /// EXACTLY for a viewer-facing desk, so no existing render moved — while a
+    /// back-turned desk's light finally follows its occupant south instead of
+    /// staying over the empty floor behind them.
+    #[test]
+    fn the_desk_light_follows_the_seat_and_leaves_a_far_seat_where_it_was() {
+        // The lift and centring the pool used before it read the facing.
+        const HISTORICAL_CY_LIFT: u16 = 2;
+        let desk = Point { x: 40, y: 30 };
+
+        let far = desk_ceiling_pool_center(desk, Facing::South);
+        assert_eq!(
+            far,
+            Point {
+                x: desk.x + DESK_W / 2,
+                y: desk.y - HISTORICAL_CY_LIFT,
+            },
+            "a viewer-facing desk must light exactly where the hardcoded lift did"
+        );
+
+        let near = desk_ceiling_pool_center(desk, Facing::North);
+        assert!(
+            near.y > desk.y,
+            "a back-turned desk seats its occupant SOUTH, so its light must move \
+             there too: {near:?} vs desk {desk:?}"
+        );
+        assert!(
+            near.y < desk_walk_anchor_facing(desk, Facing::North).y,
+            "...but stay on the body rather than drop to their feet: {near:?}"
+        );
     }
 }
