@@ -265,30 +265,18 @@ These are load-bearing; don't break them without updating the spec.
 
 ## Known sharp edges (index)
 
-Don't be surprised by these — and don't "fix" them. One line each here; the
-full WHY lives in the nested `CLAUDE.md` for the owning crate.
+Don't be surprised by these — and don't "fix" them. Each crate's nested
+`CLAUDE.md` indexes ITS OWN edges one line each, verbatim-greppable into that
+crate's `SHARP-EDGES.md`. This is only the cross-crate map of **which crate owns
+a class of trap**, for when you don't yet know where to look.
 
-**`pixtuoid-core`** ([full entries](crates/pixtuoid-core/CLAUDE.md)):
-- CC hook payloads DO include `tool_use_id` (hook-wins dedup fires).
-- CC hook `transcript_path` points at the PARENT transcript; subagent-leak is suppressed via `active_tasks`, and liveness flows UP (`refresh_lineage`). CC's `SubagentStart`/`SubagentStop` hooks decode (`decode_cc_hook_custom`).
-- The JSONL watcher gates historical/ended transcripts on EVERY first-sight path (`should_seed_at_eof`), and "recent" is the source's own ACTIVITY clock where it has one (CC only), not the file mtime — the same verdict guards the revive-on-append path; a liveness vouch (CC pid registry / Codex+omp open FDs / grok registry) exempts the RECENCY half only — a structural end marker still gates, and `revouch_gated_files` re-checks it. Content NEVER drives lifecycle. The probe also powers ongoing liveness: the `ProofOfLife` sweep exemption, the negative vouch, and the ms-scale `exit_watch` rung.
-- A hook event for an unknown session id registers it (hooks are proof of life), normally with real `Identity`; JSONL events never synthesize.
-- Abrupt exits have no `SessionEnd` → stale-sweep cascade, guarded by the liveness-vs-readiness exemptions.
-- Subagent display names come from `attributionAgent`; the dispatch tool is **`Agent`** (the one known name — the legacy `Task` name arm was dropped in 0.12.0; a pre-rename dispatch still carries `subagent_type`, THE semantic detection signal); `Workflow` is deliberately NOT mapped.
-- Codex subagents wire via the SubagentStart/Stop hooks (flat rollout, no path nesting).
-- Subagent clean-exit ladder: b1 drain / SubagentStop hooks / child-ledger re-links / the un-claim side-channel.
-- `AgentSlot.state_started_at` is `SystemTime` (process-local; the whole `SceneState` tree is `Serialize`/`Deserialize` for debug dumps + the snapshot golden, NOT a stable wire contract — the v2-daemon consumer is closed out-of-scope, #279/#280/#281); `ActivityState::Active` ≠ "tool executing" (debounced via `ACTIVE_GRACE_WINDOW`).
-- Each CLI's home resolver is a MIRROR of that CLI's own (audited against the shipped artifact, not docs); the axes deliberately NOT mirrored — copilot's `--config-dir` and legacy XDG, hermes's out-of-band profiles, CC's NFC + empty-value split — are named per source, and a RELATIVE override is unmirrorable because each process resolves it against its own cwd. omp is the deepest (config-dir NAME bound under home Node-style, two profile vars, an agent-dir override with a drop rule, and an XDG redirect that FLATTENS `agent/` away, which is why `omp_sessions_dir` is its own fn). `SourceDescriptor.home_env` makes the next source answer this at compile time.
-- A daemon's runtime identity is its SOURCE's wire fact — OpenClaw's resolved gateway PORT, never the profile/pid/session; the process incarnation is separate state, and no pid start-marker guard is needed there.
-- A `gatewayPort`-less OpenClaw envelope (a stale installed plugin) falls back to ONE legacy instance + a drift breadcrumb, rather than vanishing the mascot; a present-but-invalid port is rejected.
-- `GatewayDown` (a first-hand wire report) may create an absent instance; the locally-synthesized `PidExited` never may — the creation-polarity asymmetry is deliberate.
+- **`pixtuoid-core`** ([index](crates/pixtuoid-core/CLAUDE.md) · [full](crates/pixtuoid-core/SHARP-EDGES.md)) — a session's LIFECYCLE and IDENTITY: what may register or end one, hook-vs-JSONL dedup, the first-sight gate and the liveness-probe ladder, subagent parenting and the clean-exit ladder, per-CLI home resolution, daemon presence and instance keying, and the `native`/`harness` feature boundaries.
+- **`pixtuoid-scene`** ([index](crates/pixtuoid-scene/CLAUDE.md) · [full](crates/pixtuoid-scene/SHARP-EDGES.md)) — how the world LOOKS and MOVES: palette recolor by RGB equality, walk timing and per-leg A\* freezing, layout footprints and emergent occlusion, sky/weather light invariants, and reachability filtering of destinations.
+- **`pixtuoid`** ([index](crates/pixtuoid/CLAUDE.md) · [full](crates/pixtuoid/SHARP-EDGES.md)) — install/verify and runtime wiring: config rewriting (incl. OpenClaw's JSON5 refusal), desk-capacity growth, the floating-window boot order, `doctor`'s probes, the daemon announce-only model.
+  - the **`tui`** painter ([index](crates/pixtuoid/src/tui/CLAUDE.md) · [full](crates/pixtuoid/src/tui/SHARP-EDGES.md)) — the terminal flush: popup geometry, the click/hover hit-test ladders, key dispatch, overlay repaint.
 
-**`pixtuoid-scene` engine + `pixtuoid` painters `tui`/`floating`** ([scene engine crate](crates/pixtuoid-scene/CLAUDE.md), [binary](crates/pixtuoid/CLAUDE.md), [tui painter](crates/pixtuoid/src/tui/CLAUDE.md)). The backend-agnostic render+sim engine is its OWN crate `pixtuoid-scene` (`render_to_rgb_buffer`, layout, pose/motion, pathfind, theme model, pets, chitchat, …), sitting between `pixtuoid-core` and the binary; `tui` and `floating` (in the `pixtuoid` binary) are sibling thin painters over it.
-- `draw_scene` is called through `TuiRenderer` (owns cross-frame state, returns the cached `Layout`) — it's the terminal flush in the binary's `tui::renderer`, delegating the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer`.
-- `recolor_frame` (`pixtuoid_scene::pixel_painter::palette`) substitutes by RGB equality (palette keys must map to unique RGBs).
-- Terminal cell aspect drives sprite design (~16×16 px ceiling; bundled pack maxes at 8×12).
-- EXIT walks are time-compressed to fit the GC window; snap-back runs pure physics (`SNAP_BACK_MS` is only the ARM window); entry/wander are uncompressed (`pixtuoid_scene::pose`/`pixtuoid_scene::motion`).
-- A walk leg's A\* polyline is frozen once per leg, not re-routed per frame (`pixtuoid_scene::motion`).
+**Terminal cell aspect drives sprite design** (~16×16 px ceiling; the bundled
+pack maxes at 8×12) — the one constraint that binds the render path end to end.
 
 ## Things NOT to do
 
