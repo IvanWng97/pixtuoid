@@ -23,8 +23,8 @@ pub(crate) struct WebAudioDriver {
     beds: Option<TrackBeds>,
     stage: u8,
     warm: Option<LaneBuild>,
-    /// An in-flight CHUNKED rebuild, one bed per tick: synthesizing all five
-    /// beds in one rAF tick hitched the page at every switch.
+    /// An in-flight CHUNKED rebuild, one bed per tick: synthesizing every
+    /// track bed in one rAF tick hitched the page at every switch.
     pending: Option<PendingBuild>,
     track: TrackId,
 
