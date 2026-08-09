@@ -62,16 +62,3 @@ rustix = { version = "1", features = ["event", "process", "pipe"] }
 # creation-FILETIME marker (the Windows half of the pid-recycle guard).
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_System_Threading"] }
 
-[dev-dependencies]
-# Depending on ourselves BY PATH is how a crate turns its own non-default
-# feature on for its dev targets — Cargo has no direct mechanism for it. The
-# workspace's `resolver = "2"` keeps dev-dependency features out of a normal
-# build (under v1 they would unify in and `harness` would ship).
-pixtuoid-core = { path = ".", features = ["harness"] }
-tokio = { workspace = true, features = ["sync", "rt", "macros", "fs", "net", "time", "io-util", "rt-multi-thread"] }
-proptest = "1"
-tempfile = "3"
-filetime = "0.2"
-insta = { version = "1", features = ["yaml"] }
-tracing-subscriber = { workspace = true }
-

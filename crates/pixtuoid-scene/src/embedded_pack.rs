@@ -565,6 +565,34 @@ mod tests {
                 );
             }
         }
+
+        // ...and the SURFACE DEPTH over the WHOLE sprite, which the loop above
+        // is blind to: it starts at `desk.y`, so wood the raised variant grows
+        // ABOVE that row is invisible to it. Exactly that shipped once — the
+        // flanking wood was left beside the lifted screen rows, making this desk
+        // seven rows deep against every other desk's five, and the loop stayed
+        // green.
+        //
+        // Count rows carrying the SURFACE COLOUR, sampled from the base sprite
+        // rather than named: a first attempt counted opaque rows instead, which
+        // is identical either way (a screen row is opaque with or without wood
+        // beside it) and passed its own negative control.
+        let wood = base
+            .get(0, BASE_DESK_Y_ROW)
+            .expect("the desk's west edge at desk.y is surface");
+        let surface_rows = |f: &pixtuoid_core::sprite::Frame| {
+            (0..f.height())
+                .filter(|&y| (0..f.width()).any(|x| f.get(x, y) == Some(wood)))
+                .count()
+        };
+        assert_eq!(
+            surface_rows(north),
+            surface_rows(base),
+            "the raised variant may only add MONITOR rows — its surface is {} \
+             rows deep against the base's {}",
+            surface_rows(north),
+            surface_rows(base)
+        );
     }
 
     // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the
