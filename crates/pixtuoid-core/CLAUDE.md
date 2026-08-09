@@ -289,9 +289,14 @@ activate. Do NOT restate that as "the marker refuses it" — Windows documents a
 process HANDLE as valid after termination, so a marker read is not a liveness
 proof there the way a macOS/Linux one is; the guard this arm actually earns is
 the RECYCLED-pid half (a reused pid belongs to a process with its own creation
-time). The residual neither half catches is a parent that exits and has its pid
-recycled inside the shim's own sub-200ms run: the marker is then stamped from
-the impostor and matches itself.
+time). Two residuals neither half catches. A stamp the daemon could NOT read a
+marker for — the named process already gone when it decoded the line, or an
+elevated CLI it may not open — skips the identity check entirely, so that pid is
+cached unguarded; the walk from a recycled one normally dead-ends on a
+non-focusable chain, but a wrong window is reachable. And a parent that exits
+and has its pid recycled between the shim's snapshot and the daemon's marker
+read — a window bounded by socket delivery and daemon scheduling, NOT by the
+shim's send bound — is stamped from the impostor and matches itself.
 
 ## Known sharp edges (don't be surprised by these)
 

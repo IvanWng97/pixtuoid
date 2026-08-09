@@ -5,9 +5,11 @@
 //! Linux clock ticks since boot (read RAW — equality needs no
 //! boot-time/ticks-per-sec conversion), Windows the creation `FILETIME`. The
 //! units DIFFER per OS: compare two markers from the SAME machine for equality,
-//! never across hosts and never as wall-clock. `None` on any failure (pid gone,
-//! EPERM, unsupported OS) — callers treat a missing marker as "no identity
-//! check available", never an error.
+//! never across hosts and never as wall-clock. `None` on any failure (EPERM,
+//! unsupported OS, and on unix a pid that is gone) — callers treat a missing
+//! marker as "no identity check available", never an error. A `Some` is NOT
+//! proof of life on Windows: a terminated pid still reads while any handle to
+//! it is open.
 
 /// Opaque start marker for `pid`, or `None` when unreadable/unsupported.
 pub fn pid_start_marker(pid: i32) -> Option<u64> {
@@ -57,8 +59,10 @@ fn imp(pid: i32) -> Option<u64> {
     };
 
     let pid = u32::try_from(pid).ok()?;
-    // SAFETY: QUERY_LIMITED_INFORMATION is granted across integrity levels
-    // where QUERY_INFORMATION is not; a null return means no handle was made.
+    // QUERY_LIMITED_INFORMATION over QUERY_INFORMATION: the lesser right
+    // GetProcessTimes accepts, and the one MSDN does NOT list among those a
+    // protected process refuses.
+    // SAFETY: all arguments are by-value; the null check screens the handle.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
     if handle.is_null() {
         return None;
@@ -68,7 +72,7 @@ fn imp(pid: i32) -> Option<u64> {
     let mut times: [FILETIME; 4] = unsafe { std::mem::zeroed() };
     let (created, rest) = times.split_at_mut(1);
     // SAFETY: `handle` is live until the CloseHandle below; all four out-params
-    // are ours. GetProcessTimes has no partial-write mode — nonzero = all set.
+    // are ours.
     let ok = unsafe {
         GetProcessTimes(
             handle,
@@ -144,6 +148,26 @@ mod tests {
     #[test]
     fn own_process_has_a_marker() {
         assert!(pid_start_marker(std::process::id() as i32).is_some());
+    }
+
+    /// The marker must DISTINGUISH incarnations — the property the recycle
+    /// guard rests on. Every other Windows assertion here survives an `imp`
+    /// that returns a constant, so without this one that platform has no teeth
+    /// at all (the dies-with-the-process test is unix-only).
+    ///
+    /// Windows-only because it needs sub-second resolution: macOS's marker is
+    /// epoch SECONDS and Linux's is ~10ms ticks, so a child spawned inside the
+    /// test would routinely read identical there. The 100ns creation FILETIME
+    /// cannot collide.
+    #[cfg(windows)]
+    #[test]
+    fn two_live_processes_have_different_markers() {
+        let mut child = spawn_sleeper();
+        let mine = pid_start_marker(std::process::id() as i32).expect("our own marker");
+        let theirs = pid_start_marker(child.id() as i32).expect("the child's marker");
+        child.kill().expect("kill the child");
+        child.wait().expect("reap the child");
+        assert_ne!(mine, theirs, "a later-started process reads differently");
     }
 
     #[test]

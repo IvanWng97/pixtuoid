@@ -201,6 +201,13 @@ async fn codex_cmd_c_invocation_of_hook_command_stamps_source() {
         "the bare `<exe> --source codex` form must reach the shim through cmd.exe /C \
          and stamp the source: {line:?}"
     );
+    // #528, and the ONLY exercise of the real walk against a real cmd.exe: the
+    // shim's parent here IS the transient `cmd /C`, so a raw ppid would name it.
+    // We are its grandparent, so a correct skip stamps US.
+    assert!(
+        line.contains(&format!(r#""_pid":{}"#, std::process::id())),
+        "the walk must skip the cmd.exe /C parent and stamp this process: {line:?}"
+    );
 
     let status = shim.join().expect("join");
     assert!(status.success(), "cmd.exe wrapper exits 0");

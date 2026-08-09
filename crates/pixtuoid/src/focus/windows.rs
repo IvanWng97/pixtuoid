@@ -4,8 +4,8 @@
 //!
 //! A console app does not own its host window — conhost/WindowsTerminal does —
 //! and the click asking for the jump is an input event THAT process received,
-//! not ours. So none of the conditions the system grants `SetForegroundWindow`
-//! on hold for us, and it refuses: per its Remarks an application "cannot force
+//! not ours. So for a console TUI none of the conditions the system grants
+//! `SetForegroundWindow` on normally hold, and it refuses: per its Remarks an application "cannot force
 //! a window to the foreground while the user is working with another window.
 //! Instead, Windows flashes the taskbar button". [`activate_os`] therefore
 //! borrows the foreground thread's input state (`AttachThreadInput`), which
@@ -30,6 +30,10 @@ use super::ProcessTable;
 pub(crate) struct OsProcessTable;
 
 impl ProcessTable for OsProcessTable {
+    /// Re-snapshots per hop because `ancestor_walk` asks one pid at a time. The
+    /// shim's `cli_pid::process_snapshot` reads the same table once for a whole
+    /// walk; the copies are deliberate (it cannot depend on this crate) — fix a
+    /// Toolhelp32 bug in BOTH.
     fn ppid(&self, pid: i32) -> Option<i32> {
         // SAFETY: Toolhelp32 snapshot enumeration per its documented protocol;
         // the entry struct is plain-old-data and owned by us.
@@ -114,10 +118,11 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     raise(hwnd)
 }
 
-/// One activation attempt, judged by OBSERVATION: `SetForegroundWindow`'s BOOL
-/// is not a verdict we can act on, since the denial path raises no error and
-/// merely flashes the taskbar button, so the truth is which window the system
-/// reports as foreground afterwards. A wrong `false` costs one extra attempt.
+/// One activation attempt, judged by OBSERVATION rather than the BOOL: MSDN
+/// documents zero on refusal but says nothing about the flash-only outcome, and
+/// the call sets no error, so asking who the foreground window IS afterwards is
+/// the only check that separates a real raise from a flash. A wrong `false`
+/// costs one extra attempt.
 fn raise(hwnd: HWND) -> bool {
     // SAFETY: hwnd is a live window handle from the enumeration above;
     // GetForegroundWindow takes no arguments.
@@ -128,9 +133,9 @@ fn raise(hwnd: HWND) -> bool {
 }
 
 /// The thread whose input state is worth borrowing — the one owning the current
-/// foreground window. `None` when there is no foreground window (no lock exists
-/// then, so the plain attempt already had the right) or when it is our own
-/// thread (nothing to borrow, and a self-attach is rejected by definition).
+/// foreground window. `None` when there is no foreground window (nothing to
+/// borrow from, and with no foreground process there is no lock to beat) or
+/// when it is our own thread (a self-attach is rejected by definition).
 fn foreground_input_thread() -> Option<u32> {
     // SAFETY: both take no arguments; `owner` is our own out-param and `fg` is
     // whatever handle the system reports, which the null check screens.

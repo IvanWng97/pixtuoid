@@ -612,7 +612,7 @@ pub(crate) fn focus_section(
     ));
     if !shim_stamp.is_empty() {
         out.push_str(&format!(
-            "  {} — shim `_pid` (getppid) rides each hook event (unix; absent on Windows)\n",
+            "  {} — shim-resolved `_pid` rides each hook event (getppid on unix; an ancestor walk past cmd.exe on Windows)\n",
             shim_stamp.join(", ")
         ));
     }
@@ -958,7 +958,7 @@ mod tests {
             "plugin stampers listed separately: {s}"
         );
         assert!(
-            s.contains("cursor") && s.contains("shim `_pid`"),
+            s.contains("cursor") && s.contains("shim-resolved `_pid`"),
             "shim stampers listed separately: {s}"
         );
         let no_channel_line = s

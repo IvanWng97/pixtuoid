@@ -37,8 +37,8 @@ pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // `UnixStream::connect` has no timeout knob, and a backlog-saturated
     // listener parks it indefinitely — past the budget `set_write_timeout` only
-    // enforces AFTER a successful connect (#167). The caller's `TimeBound`
-    // covers it; the write timeout below is a secondary backstop.
+    // enforces AFTER a successful connect (#167) — the caller's `TimeBound`
+    // covers it.
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
         // For the `/tmp/pixtuoid-{uid}/` fallback we own, verify the connected
         // PEER is us BEFORE writing (#485) — on the connected fd, atomic w.r.t.
@@ -118,10 +118,9 @@ mod tests {
 pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the timeout
-    // invariant is enforced solely by the watchdog's hard exit — which is why the
-    // `TimeBound` is a parameter: the ERROR_PIPE_BUSY retry below is unbounded
-    // without it. The daemon's 1MiB pipe in-buffer covers the shim's capped stdin
-    // plus the stamps, so a write that gets through open() never stalls on quota.
+    // invariant is enforced solely by the watchdog's hard exit — hence the
+    // `TimeBound` parameter: the ERROR_PIPE_BUSY retry below is unbounded without
+    // it.
     const ERROR_PIPE_BUSY: i32 = windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32;
     const PIPE_BUSY_RETRY_BACKOFF_MS: u64 = 10;
     loop {

@@ -94,7 +94,7 @@ fn main() -> Result<()> {
         // form; grok delivers the same var via its handler `env` map, so this arm
         // serves both). `--event` is orthogonal and never implies a source.
         let source = source_from_argv(&args).or_else(|| std::env::var("PIXTUOID_SOURCE").ok());
-        enrich_payload(map, source, now_ms(), cli_pid());
+        enrich_payload(map, source, now_ms(), cli_pid);
     }
 
     // Best-effort send, hard-bounded so a stuck daemon can never block CC's
@@ -213,7 +213,7 @@ fn enrich_payload(
     map: &mut serde_json::Map<String, Value>,
     source: Option<String>,
     ts_ms: u64,
-    pid: Option<u32>,
+    resolve_pid: impl FnOnce() -> Option<u32>,
 ) {
     map.remove("_pixtuoid_source");
     map.insert("_shim_ts_ms".into(), Value::from(ts_ms));
@@ -223,11 +223,14 @@ fn enrich_payload(
         }
     }
     // `_pid` is deliberately NOT shim-owned: the opencode and OpenClaw plugins
-    // pipe their OWN `process.pid`, which beats anything `cli_pid` can infer
-    // from the process tree, so an inbound value is KEPT and the shim only
-    // fills the gap. This is also the ONE site that stamps it.
-    if let Some(pid) = pid {
-        map.entry("_pid").or_insert_with(|| Value::from(pid));
+    // stamp `process.pid` from INSIDE the CLI, which beats any ancestor walk, so
+    // an inbound value is KEPT and the shim only fills the gap. Resolving is
+    // LAZY because filling that gap is a process-snapshot walk on Windows — a
+    // plugin-stamped payload must not pay for a value it already has.
+    if !map.contains_key("_pid") {
+        if let Some(pid) = resolve_pid() {
+            map.insert("_pid".into(), Value::from(pid));
+        }
     }
 }
 
