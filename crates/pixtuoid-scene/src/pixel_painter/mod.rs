@@ -667,6 +667,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
+    enqueue_desk_chairs(ctx, &mut drawables);
 
     // V before H: at an inside corner the vertical's stitched `y_bot` ties the
     // horizontal's south-base anchor, and inserting V first keeps H winning
@@ -742,7 +743,6 @@ fn enqueue_characters<'a>(
                 sleep_z_seed: p.sleep_z_seed,
                 waiting_bubble: p.waiting_bubble,
                 walking_dust_frame: p.walking_dust_frame,
-                chair_back: chair_back_for(p, ctx.layout),
             },
         });
     }
@@ -762,23 +762,40 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// seated frame — `typing_back` runs 11 rows from `desk.y` against
 /// `seated_back`'s 10 — so the chair can never cover the typing hands, which
 /// are the one moving part a back-turned agent has left.
-fn chair_back_for(p: &CharacterPlacement, layout: &Layout) -> Option<Point> {
+/// One chair per NORTH-facing home desk, occupied or not — the office keeps its
+/// furniture when a session ends.
+///
+/// The chair belongs to the DESK, not to whoever is in it. Owning it from the
+/// occupant made the draw order free (paint it right after that character) but
+/// tied a fixture's existence to a session's lifetime, and slid it sideways
+/// under a sitter still gliding into the seat. The z key buys the same order
+/// honestly: a seated character's own key reduces to
+/// `desk_walk_anchor_facing(desk, facing).y` — `seated_anchor_facing` subtracts
+/// `WALKING_Y_OFF` from the walk anchor and the sim adds it straight back — so
+/// the chair TIES with its occupant, and this pass runs after
+/// `enqueue_characters` where a stable sort resolves that tie chair-last.
+fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>) {
     /// Where the chair starts, deliberately OVER the occupant rather than below
     /// them: the chair paints after the character, so an offset that clears the
     /// sprite entirely wastes that order and leaves a detached slab at their feet.
     /// Here the backrest crosses the lower torso instead, which is what reads as
     /// leaning back into a seat.
     const CHAIR_BACK_TOP_DY: u16 = 6;
-    /// The chair is the character's own width, so it shares their column.
-    const CHAIR_BACK_DX: u16 = 0;
-    let desk = p.seat_desk?;
-    if layout.desk_facing_at(desk) != crate::layout::Facing::North {
-        return None;
+    for &desk in &ctx.layout.home_desks {
+        let facing = ctx.layout.desk_facing_at(desk);
+        if facing != crate::layout::Facing::North {
+            continue;
+        }
+        drawables.push(Drawable {
+            anchor_y: crate::layout::desk_walk_anchor_facing(desk, facing).y,
+            kind: DrawableKind::DeskChair {
+                pos: Point {
+                    x: anchors::seated_anchor_facing(desk, drawable::CHAIR_BACK_W, facing).x,
+                    y: desk.y + CHAIR_BACK_TOP_DY,
+                },
+            },
+        });
     }
-    Some(Point {
-        x: p.anchor.x.saturating_sub(CHAIR_BACK_DX),
-        y: desk.y + CHAIR_BACK_TOP_DY,
-    })
 }
 
 /// Desk cubicles — each carries its divider + cabinet + screen glow. The desk

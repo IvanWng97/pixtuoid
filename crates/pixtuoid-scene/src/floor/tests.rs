@@ -972,3 +972,53 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
 // itself is garbled — the classic pass honoured the scale at a handful of
 // centred blits and nowhere else. `FrameInputs` no longer carries a scale, so
 // there is no half-kept promise left to certify.
+
+#[test]
+fn every_north_facing_desk_keeps_its_chair_with_nobody_in_it() {
+    // The chair used to hang off the occupant, so an empty office had bare
+    // desks. Scoped to each desk's own column on purpose: `chair_trim` also
+    // paints the MEETING chairs, which render with zero agents either way and
+    // would satisfy a whole-buffer count without the desk chairs existing.
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme exists");
+    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut session = FloorSession::new();
+    let scene = SceneState::new([8; MAX_FLOORS]);
+    let layout = session
+        .render(FrameInputs {
+            scene: &scene,
+            pack: &pack,
+            theme,
+            now,
+            size: Size { w: 192, h: 160 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        })
+        .expect("192x160 lays out");
+    assert!(
+        scene.agents.is_empty(),
+        "the subject is an EMPTY office — an occupant would prove nothing"
+    );
+    let north: Vec<_> = layout
+        .home_desks
+        .iter()
+        .copied()
+        .filter(|&d| layout.desk_facing_at(d) == crate::layout::Facing::North)
+        .collect();
+    assert!(
+        !north.is_empty(),
+        "no north-facing desk in the fixture — the test has no subject"
+    );
+    let buf = session.buf();
+    // A band generous enough not to re-pin the chair's exact offset: the point
+    // is that SOME chair is at this desk, not where its rows start.
+    const SEARCH_H: u16 = 16;
+    for d in north {
+        let found = (d.y..d.y + SEARCH_H).any(|y| {
+            (d.x..d.x + crate::layout::DESK_W).any(|x| buf.get(x, y) == theme.furniture.chair_trim)
+        });
+        assert!(found, "north-facing desk {d:?} rendered with no chair");
+    }
+}

@@ -84,11 +84,12 @@ pub(super) enum DrawableKind<'a> {
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
-        /// Top-left of this occupant's office-chair back, or `None` when no
-        /// chair is visible from here. Painted straight AFTER the character:
-        /// the chair belongs to exactly one of them, so tying it to that one
-        /// makes the draw order correct by construction rather than by z-key.
-        chair_back: Option<Point>,
+    },
+    /// A home desk's office chair — one per NORTH-facing desk whether or not
+    /// anyone is in it. Keyed to TIE with that seat's occupant and enqueued
+    /// after the characters, so the stable sort paints it over them.
+    DeskChair {
+        pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
     /// in z-order. `use_large` picks the detailed 32×10 kitchen sprite vs. the
@@ -366,7 +367,6 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             sleep_z_seed,
             waiting_bubble,
             walking_dust_frame,
-            chair_back,
         } => {
             if let Some(dust_frame) = walking_dust_frame {
                 paint_walking_dust(buf, *anchor, *dust_frame, theme);
@@ -380,10 +380,8 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
             }
-            if let Some(chair) = chair_back {
-                paint_chair_back(buf, *chair, theme);
-            }
         }
+        DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, theme),
         DrawableKind::WaypointPantry { pos, use_large } => {
             let anim_name = if *use_large { "pantry" } else { "pantry_small" };
             // A character behind the counter is occluded by the counter's own
@@ -665,7 +663,7 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
 const CHAIR_BACK_H: u16 = 5;
 /// Chair-back width — flush with the 8 px character, so the back reads as the
 /// seat they are IN rather than a wider ledge behind them.
-const CHAIR_BACK_W: u16 = 8;
+pub(super) const CHAIR_BACK_W: u16 = 8;
 
 /// Task lamp on the desk's west wing, plus its warm pool.
 ///
