@@ -1,4 +1,4 @@
-# 14x8 top-down desk (slimmed 16x9 -> 14x8 for laptop density; front
+# 14x9 top-down desk (slimmed from 16x9 for laptop density; front
 # redesigned 2026-07-11, user-pick "Apple style": side LEGS + open gap
 # instead of the old keyboard slab -- the two front-lip rows are legs at
 # both edges with transparent middle, so the carpet (and anyone walking
@@ -7,8 +7,8 @@
 # on an even 14-px top).
 # Row 0 is the raised monitor bezel that RISES 1px above the desk back
 # (blitted at desk.y-1, see DeskCubicle in drawable.rs) so the screen reads
-# as a standing display. Screen uses `j` (dark) so the lime screen-glow
-# overlay reads as "workstation active" by contrast. The sprite is
+# as a standing display. Its monitor block is all `M`: a viewer-facing seat
+# never shows a screen, so no glow is painted here. The sprite is
 # DESK_W + 4 = 14 px wide == the FurnitureDef visual.w AND the blocked-ground
 # width (footprint is (DESK_W+4) x DESK_FOOT_H, a shallow south strip,
 # ground_y: End -- the monitor + surface overhang NORTH = walk-behind,

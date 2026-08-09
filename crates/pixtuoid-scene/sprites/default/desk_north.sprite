@@ -39,13 +39,13 @@
 # that is a VISUAL overhang north, which the shallow south-strip footprint
 # (`ground_y: End`, invariant #6) does not care about.
 #
-# Rows 1-4 are STRUCTURALLY IDENTICAL to `desk.sprite`'s rows 1-4. That is
-# load-bearing, not tidiness: `effects::paint_screen_glow` addresses the screen
-# by fixed dy 0..3 offsets from a screen-top row, so a monitor block that
-# reshuffled its rows -- or dropped the bezel row to save height -- would light
-# the wrong pixels. The painter derives the screen-top row from the blit anchor
-# and the blit anchor from the height difference, so nothing here is a second
-# copy of "3".
+# The monitor block's ROW ROLES are load-bearing, not tidiness: from this
+# sprite's own top row, 0-1 are casing, 2-3 glass, 4 the chin, and
+# `effects::{paint_screen_glow,paint_screen_idle}` light exactly those
+# (`SCREEN_CASING_ROWS`/`SCREEN_GLASS_ROWS`/`SCREEN_CHIN_ROW`, cols 3..=10 and
+# 4..=9). Reshuffling them, or dropping a casing row to save height, lights the
+# wrong pixels. `desk.sprite` satisfies the same roles from ITS top row; the two
+# blocks are no longer pixel-identical, so do not restore that as the check.
 @frame 0
 . . . M M M M M M M M . . .
 . . . M M M M M M M M . . .
