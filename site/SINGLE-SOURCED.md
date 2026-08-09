@@ -65,7 +65,7 @@ Every rendered copy on the site and where it is generated FROM. Hand-editing the
   REAL `TuiRenderer` (and, for `hero-wide.png` + `vibing-poster.png`, the real
   wasm `Office` via the `pixtuoid-web` `hero_still` example — the latter with
   `--hour 18 --weather clear`) — `just gen` regenerates, `just
-  gen-check` pixel-diffs the committed stills. Clips (`.webm`/`.mp4`) are presence-gated, not pixel-gated
+gen-check` pixel-diffs the committed stills. Clips (`.webm`/`.mp4`) are presence-gated, not pixel-gated
   (encoding is non-deterministic). The §3 proof split (demos/proof*) renders via
   snapshot --proof over the committed proof-session fixture
   (`crates/pixtuoid-core/tests/sources/fixtures/claude-code/proof-session/`) — its
@@ -135,7 +135,7 @@ Every rendered copy on the site and where it is generated FROM. Hand-editing the
   name badges + the neon wall board as a MODEL — `pixtuoid-web`'s
   `Office.overlay_json()` (the SAME `pixtuoid_scene::overlay` + `pixtuoid_scene::board`
   the TUI/floating painters use) → `{ labels:[{x,y,text,color,badge?}],
-  board:{rect,brand, star,mood,context} }`, coords in OFFICE-BUFFER px, colors
+board:{rect,brand, star,mood,context} }`, coords in OFFICE-BUFFER px, colors
   resolved against the current theme. A label's optional `badge` (#657,
   owner-ratified across ALL THREE painters) is the CLI-identity color: the
   source's per-CLI hue (`SourceColors::by_prefix` — the SAME hue the app's
@@ -222,34 +222,34 @@ Every rendered copy on the site and where it is generated FROM. Hand-editing the
   assumption that "dark theme ⇒ fine".
   Pinned by `smoke.spec.ts` ("crisp AA captions
   overlay the live office" — incl. the 3-span split with a colored prefix —
-  + the reduced-motion hide twin). This layer is part
-  of the same `is:inline` script the CSP hook hashes — no manual CSP step.
-  The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
-  component: pause stops the rAF loop (frozen frame stays on the canvas) and
-  resume subtracts the paused span from the sim clock (`pauseOffset`) so the
-  timeline doesn't lurch-jump. Pause is **page-scoped**: `setPaused` dispatches
-  `pix:paused` and every other >5s auto-motion listens (the statusline feed
-  ticker, the hero dust) — one control governs the page's *ambient* motion,
-  and the statusline reads `❚❚ PAUSED`. The Showcase demo clips ARE in the
-  `pix:paused` set (`Showcase.astro` `syncVideos` gates play on `userPaused`):
-  in normal motion they auto-loop with NO visible controls, so in-view-gating
-  alone did not satisfy 2.2.2 — the page pause button is their pause affordance.
-  (Under reduced-motion the clips instead pause and show native `<video>`
-  controls, a separate path.) Because that ambient motion is **wasm-independent**,
-  `#office-pause` is decoupled from the office canvas (#456): the button is shown
-  whenever motion runs = NOT reduced-motion, and its control (`setPaused` / the
-  click handler) wires up even on a no-wasm engine or a failed fetch — so a
-  non-reduced-motion visitor whose wasm never loads can still pause the ticker /
-  dust / clips. Only the office RENDER path (`boot`/`paint`) is gated on `hasWasm`;
-  `start`/`stop` are no-ops without a live office, so `setPaused` is safe
-  standalone. Reduced-motion hides the button (nothing auto-animates there). The
-  wasm fetch is **deferred** off the render-critical window (`load` →
-  `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
-  a live un-reduce still boots promptly via the mq listener. The dimmer
-  controller honours a per-block `data-lit-max`: the hero's `data-lit` block caps
-  its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
-  above the fold, while downpage statement holds keep `DIM_MAX` for copy
-  legibility (the `[data-lit]::before` radial wash still floors local contrast).
+  - the reduced-motion hide twin). This layer is part
+    of the same `is:inline` script the CSP hook hashes — no manual CSP step.
+    The backdrop's pause switch (`#office-pause`, WCAG 2.2.2) lives in the same
+    component: pause stops the rAF loop (frozen frame stays on the canvas) and
+    resume subtracts the paused span from the sim clock (`pauseOffset`) so the
+    timeline doesn't lurch-jump. Pause is **page-scoped**: `setPaused` dispatches
+    `pix:paused` and every other >5s auto-motion listens (the statusline feed
+    ticker, the hero dust) — one control governs the page's _ambient_ motion,
+    and the statusline reads `❚❚ PAUSED`. The Showcase demo clips ARE in the
+    `pix:paused` set (`Showcase.astro` `syncVideos` gates play on `userPaused`):
+    in normal motion they auto-loop with NO visible controls, so in-view-gating
+    alone did not satisfy 2.2.2 — the page pause button is their pause affordance.
+    (Under reduced-motion the clips instead pause and show native `<video>`
+    controls, a separate path.) Because that ambient motion is **wasm-independent**,
+    `#office-pause` is decoupled from the office canvas (#456): the button is shown
+    whenever motion runs = NOT reduced-motion, and its control (`setPaused` / the
+    click handler) wires up even on a no-wasm engine or a failed fetch — so a
+    non-reduced-motion visitor whose wasm never loads can still pause the ticker /
+    dust / clips. Only the office RENDER path (`boot`/`paint`) is gated on `hasWasm`;
+    `start`/`stop` are no-ops without a live office, so `setPaused` is safe
+    standalone. Reduced-motion hides the button (nothing auto-animates there). The
+    wasm fetch is **deferred** off the render-critical window (`load` →
+    `requestIdleCallback`) so it doesn't compete with the above-fold poster/fonts;
+    a live un-reduce still boots promptly via the mq listener. The dimmer
+    controller honours a per-block `data-lit-max`: the hero's `data-lit` block caps
+    its darkness at 0.74 (below the shared `DIM_MAX` 0.86) so the LIVE office reads
+    above the fold, while downpage statement holds keep `DIM_MAX` for copy
+    legibility (the `[data-lit]::before` radial wash still floors local contrast).
 - **The ♩ office-sound toggle (`#office-audio`, #633 web-audio).** The hero's
   `Office` runs the real Rust `WebAudioDriver` (`pixtuoid-web`'s `audio.rs` — the
   SAME scene mixer/schedulers/TrackSwitch the desktop app runs); `OfficeBackdrop.astro`
@@ -319,7 +319,7 @@ Every rendered copy on the site and where it is generated FROM. Hand-editing the
   `__pixWasm` promise — a per-consumer retry would reintroduce the very
   double-instantiate race above. Since #721 that shared init AND the frame-memory
   contract (`new Uint8ClampedArray(wasm.memory.buffer, office.frame_ptr(),
-  office.frame_len())`, re-read per frame) live ONCE in the runtime-loaded
+office.frame_len())`, re-read per frame) live ONCE in the runtime-loaded
   **`public/office-driver.js`** module (`sharedWasm` / `officeFrameView`), which both
   is:inline consumers dynamic-`import()` at boot (the audio-worker.js precedent — a
   bundled `src/` import can't reach an is:inline script); the divergent blit stays
@@ -328,10 +328,10 @@ Every rendered copy on the site and where it is generated FROM. Hand-editing the
   consts live in office-driver.js and neither consumer re-inlines them). On FINAL
   exhaustion the promise is NULLED so a later-booting consumer re-attempts — safe
   because it only clears a SETTLED (rejected) promise, never an in-flight one (#671). Schema: `kind:"live"`
-  + `variantGroups` (per-group `retint`) + `poster` + `timeSlider` in `showcase.json`,
-  resolved by `showcaseGroups` in `consts.ts`, validated by the `astro.config.mjs`
-  showcase guard's live branch. Fallback (no-JS / no-wasm / reduced-motion): the
-  static `vibing-poster.png` (gen'd via `hero_still --hour 18 --weather clear`).
+  - `variantGroups` (per-group `retint`) + `poster` + `timeSlider` in `showcase.json`,
+    resolved by `showcaseGroups` in `consts.ts`, validated by the `astro.config.mjs`
+    showcase guard's live branch. Fallback (no-JS / no-wasm / reduced-motion): the
+    static `vibing-poster.png` (gen'd via `hero_still --hour 18 --weather clear`).
 - **Scoped `<style>` does NOT reach `set:html` content.** Astro scopes component
   styles by stamping a `data-astro-*` hash on template elements AND selectors;
   markup injected at runtime via `set:html` (e.g. the SupportedTools per-OS
