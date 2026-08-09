@@ -294,6 +294,11 @@ pub static NORMAL: Theme = Theme {
             g: 200,
             b: 200,
         },
+        monitor_idle: Rgb {
+            r: 72,
+            g: 112,
+            b: 145,
+        },
         sleep_z: Rgb {
             r: 110,
             g: 110,

@@ -8,6 +8,41 @@ use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
+/// A powered-but-quiet screen, painted on EVERY desk rather than only occupied
+/// ones.
+///
+/// The office reads by screen light after dark — that is the whole reason the
+/// desk ceiling pools dim (`DESK_POOL_NIGHT_KEEP`) — and a grid of black
+/// rectangles reads as "everyone went home", not as "nobody is at this desk
+/// right now". The caller scales `strength` by the interior darkness, so this
+/// is strongest where the room needs it and faintest in full daylight; see
+/// there for why it does not go to zero by day.
+///
+/// Deliberately NOT [`paint_screen_glow`] at low alpha: that one lights the
+/// BEZEL and runs a scanline, both of which say "a tool is running here". A
+/// standby screen must not claim activity, so it tints the glass only.
+pub(super) fn paint_screen_idle(
+    buf: &mut RgbBuffer,
+    desk_x: u16,
+    screen_top: u16,
+    tint: Rgb,
+    strength: f32,
+) {
+    if strength <= 0.0 {
+        return;
+    }
+    for dx in SCREEN_GLASS_COLS {
+        for dy in 1..=2 {
+            blend_pixel(buf, desk_x + dx, screen_top + dy, tint, strength);
+        }
+    }
+}
+
+/// The screen's GLASS columns, offset from the desk sprite's left edge — the
+/// `j` cells between the bezel's frame columns. Shared by the idle tint and the
+/// active glow so the two can never light different pixels.
+const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
+
 /// `screen_top` is the buffer row of the monitor's first frame row, NOT
 /// `desk.y`: a raised-monitor desk variant puts the screen several rows higher,
 /// and the caller derives this from the blit anchor so the two cannot disagree.
@@ -34,11 +69,11 @@ pub(super) fn paint_screen_glow(
     for dx in 3..=10 {
         put(buf, dx, 0, frame_lit);
     }
-    for dx in 4..=9 {
+    for dx in SCREEN_GLASS_COLS {
         put(buf, dx, 1, glow_bright);
         put(buf, dx, 2, glow);
     }
-    for dx in 4..=9 {
+    for dx in SCREEN_GLASS_COLS {
         put(buf, dx, 3, frame_lit);
     }
     const SCANLINE_STEP_MS: u64 = 120;

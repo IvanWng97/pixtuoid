@@ -294,6 +294,11 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 71,
             b: 90,
         },
+        monitor_idle: Rgb {
+            r: 86,
+            g: 104,
+            b: 150,
+        },
         sleep_z: Rgb {
             r: 137,
             g: 220,

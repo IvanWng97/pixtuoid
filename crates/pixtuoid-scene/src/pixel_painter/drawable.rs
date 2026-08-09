@@ -13,8 +13,8 @@ use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
-    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_sleep_z, paint_waiting_bubble,
-    paint_walking_dust,
+    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_screen_idle, paint_sleep_z,
+    paint_waiting_bubble, paint_walking_dust,
 };
 use super::epoch_ms;
 use super::frame_at;
@@ -62,6 +62,9 @@ pub(super) enum DrawableKind<'a> {
         divider_x: Option<u16>,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
+        /// Standby-screen strength, already scaled by darkness — 0 by day.
+        /// Painted on EVERY desk, under any `screen_glow`.
+        screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
         /// 0 = no tower (byte-identical to the pre-meter desk), 1..=3 = reams.
@@ -298,6 +301,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             divider_x,
             has_cabinet,
             screen_glow,
+            screen_idle,
             has_coffee,
             coffee_steam,
             token_tier,
@@ -347,6 +351,13 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 blit_frame(frame, desk.x, top, buf);
                 screen_top = top + DESK_BEZEL_RAISE;
             }
+            paint_screen_idle(
+                buf,
+                desk.x,
+                screen_top,
+                theme.effects.monitor_idle,
+                *screen_idle,
+            );
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
             if let Some(tint) = screen_glow {
@@ -699,6 +710,7 @@ mod tests {
                 divider_x: None,
                 has_cabinet: false,
                 screen_glow: None,
+                screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,
                 token_tier,
@@ -890,6 +902,7 @@ mod tests {
                 divider_x: None,
                 has_cabinet: true,
                 screen_glow: None,
+                screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,
                 token_tier: 0,

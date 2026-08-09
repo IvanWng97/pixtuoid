@@ -183,6 +183,10 @@ pub struct FurnitureColors {
 pub struct EffectColors {
     /// Lit monitor bezel on an active screen.
     pub monitor_frame_lit: Rgb,
+    /// A powered-but-quiet screen — every desk after dark, whether or not
+    /// anyone is at it. Distinct from [`Self::monitor_frame_lit`], which is the
+    /// BEZEL of a screen actively running a tool.
+    pub monitor_idle: Rgb,
     /// Floating "z" of a sleeping agent.
     pub sleep_z: Rgb,
     /// Steam wisp off a fresh coffee cup.

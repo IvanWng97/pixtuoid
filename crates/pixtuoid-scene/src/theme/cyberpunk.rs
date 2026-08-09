@@ -276,6 +276,11 @@ pub static CYBERPUNK: Theme = Theme {
             g: 60,
             b: 200,
         },
+        monitor_idle: Rgb {
+            r: 96,
+            g: 56,
+            b: 168,
+        },
         sleep_z: Rgb {
             r: 0,
             g: 200,

@@ -293,6 +293,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 72,
             b: 104,
         },
+        monitor_idle: Rgb {
+            r: 56,
+            g: 92,
+            b: 145,
+        },
         sleep_z: Rgb {
             r: 125,
             g: 207,

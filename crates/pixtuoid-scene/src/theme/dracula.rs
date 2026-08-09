@@ -292,6 +292,11 @@ pub static DRACULA: Theme = Theme {
             g: 114,
             b: 164,
         },
+        monitor_idle: Rgb {
+            r: 72,
+            g: 88,
+            b: 140,
+        },
         sleep_z: Rgb {
             r: 139,
             g: 233,

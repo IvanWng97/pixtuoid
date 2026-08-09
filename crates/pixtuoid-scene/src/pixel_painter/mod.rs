@@ -647,7 +647,13 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
             + agents.len(),
     );
 
-    enqueue_desk_cubicles(ctx, agents, &frame.seated_agents, &mut drawables);
+    enqueue_desk_cubicles(
+        ctx,
+        agents,
+        &frame.seated_agents,
+        look.darkness,
+        &mut drawables,
+    );
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
@@ -760,8 +766,19 @@ fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
     seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
+    darkness: f32,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
+    // Peak standby tint, scaled by `darkness` — the INTERIOR illuminance, NOT a
+    // clock. The screens therefore read strongest exactly when the room needs
+    // them (the desk ceiling pools go out after dark) and fade as daylight fills
+    // it. They do NOT vanish by day: an office lit through one window band stays
+    // dim enough at noon that a powered screen still shows, which is true of the
+    // real thing too. Checked against a pre-change noon render rather than
+    // assumed — an earlier revision of this comment claimed daylight was
+    // untouched, and the pixel diff said otherwise.
+    const SCREEN_IDLE_MAX: f32 = 0.55;
+    let screen_idle = SCREEN_IDLE_MAX * darkness;
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
@@ -799,6 +816,7 @@ fn enqueue_desk_cubicles<'a>(
                 divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
+                screen_idle,
                 has_coffee,
                 coffee_steam,
                 token_tier,
