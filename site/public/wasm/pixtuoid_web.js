@@ -76,8 +76,8 @@ export class Office {
     }
     /**
      * Zero-copy pointer/length into the looping bed samples for stem `idx`
-     * (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
-     * reports `swapped`.
+     * (0=Pad … 6=Rain, `LoopStem::ALL` order). RE-READ after warmup completes
+     * AND whenever a tick reports `swapped`.
      * @param {number} idx
      * @returns {number}
      */
@@ -118,7 +118,7 @@ export class Office {
     /**
      * Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
      * same as `step`) and return the JS glue commands as JSON:
-     * `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
+     * `{"gains":[g0..g6],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
      * ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
      * re-reads the loop buffers.
      * @param {number} now_ms
@@ -525,11 +525,15 @@ function __wbg_finalize_init(instance, module) {
 
 async function __wbg_load(module, imports) {
     if (typeof Response === 'function' && module instanceof Response) {
+        if (!module.ok) {
+            throw new Error(`failed to fetch Wasm: ${module.status} ${module.statusText} fetching '${module.url}'`);
+        }
+
         if (typeof WebAssembly.instantiateStreaming === 'function') {
             try {
                 return await WebAssembly.instantiateStreaming(module, imports);
             } catch (e) {
-                const validResponse = module.ok && expectedResponseType(module.type);
+                const validResponse = expectedResponseType(module.type);
 
                 if (validResponse && module.headers.get('Content-Type') !== 'application/wasm') {
                     console.warn("`WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:\n", e);
