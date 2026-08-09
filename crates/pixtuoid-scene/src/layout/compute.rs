@@ -1,5 +1,6 @@
 //! Layout computation helpers for `SceneLayout`.
 
+use super::decor::DESK_GROUND_H;
 use super::mask;
 use super::*;
 
@@ -371,7 +372,8 @@ pub(super) fn compute_with_seed(
         meeting_rooms.first(),
         door,
         has_meeting || has_pantry,
-        &home_desks,
+        &cubicle_band,
+        pod_grid,
     );
 
     // The island pushes its 4 Island slots BEFORE the snack shelf's slot — the
@@ -477,11 +479,15 @@ pub(super) fn compute_with_seed(
         // the pocket".
         plants.retain(|p| !plant_ground_in_bounds(p, &cubicle_aisle));
         walkable = build_mask(&plants, &wall_decor);
-        // Next rung — the whiteboard is the one wall-decor kind with a floor
-        // footprint that juts into an aisle, so drop it before the drastic
-        // clear-all-plants: losing a whiteboard beats losing every plant.
+        // Next rung — a wall decor that TOUCHES THE FLOOR is the only kind that can
+        // seal a lane, so drop those before the drastic clear-all-plants: losing one
+        // board beats losing every plant. Selected by footprint rather than by kind
+        // because the kind that used to seal (the free-standing whiteboard) now
+        // stands in an inter-pod aisle, where a walker rounds it either way — this
+        // rung is a net for the NEXT footprint-bearing wall decor, and no swept
+        // size reaches it today.
         if severed(&walkable) {
-            wall_decor.retain(|d| d.kind != WallDecor::Whiteboard);
+            wall_decor.retain(|d| furniture_def(d.kind.furniture()).footprint.is_none());
             walkable = build_mask(&plants, &wall_decor);
         }
         // Last resort: drop every remaining scatter plant.
@@ -595,7 +601,8 @@ fn place_wall_decor(
     meeting_room: Option<&MeetingRoom>,
     door: Option<Point>,
     has_side_rooms: bool,
-    home_desks: &[Point],
+    cubicle_band: &Bounds,
+    pod_grid: PodGrid,
 ) -> Vec<WallDecorItem> {
     let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
     let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
@@ -665,18 +672,26 @@ fn place_wall_decor(
         },
     });
     if has_side_rooms {
-        let pos = Point {
+        // `usable_h / 3` is a hint, not a slot: it knows nothing of the desk grid,
+        // so on its own it drops the board wherever the fraction lands — a desk
+        // row, or the intra-pod gap, where the wheel strip plugs the west lane the
+        // pod's own occupants walk. Snapping to the nearest pod-free band puts it
+        // in an aisle instead, and keeps it there as `INTRA_POD_GAP_Y` tightens.
+        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
+        let hint = Point {
             x: mid_x + 3,
             y: top_margin + usable_h / 3,
         };
-        // The whiteboard's y (usable_h / 3) is independent of the desk grid, so
-        // at some band heights it lands ON a desk row instead of an aisle — skip
-        // the board when its wheel-strip ground would collide with a desk's.
-        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
-        let collides_a_desk = wb_def
-            .ground_rect(Anchor::TopLeft, pos)
-            .is_some_and(|wb_r| overlaps_a_desk_ground(wb_r, home_desks));
-        if !collides_a_desk {
+        let snapped = wb_def
+            .ground_rect(Anchor::TopLeft, hint)
+            .and_then(|(ground, size)| {
+                let y = pod_grid.snap_inter_pod_ground_y(cubicle_band, ground.y, size.h)?;
+                Some(Point {
+                    x: hint.x,
+                    y: y.saturating_sub(ground.y - hint.y),
+                })
+            });
+        if let Some(pos) = snapped {
             wall_decor.push(WallDecorItem {
                 kind: WallDecor::Whiteboard,
                 pos,
@@ -998,6 +1013,49 @@ impl PodGrid {
             + self.couch_to_desk_extra
             + pod_r * self.stride_y;
         (x, y)
+    }
+
+    /// The full-width y-bands BETWEEN consecutive pod rows — the only floor a
+    /// free-standing piece may stand on, returned north-to-south. Empty when the
+    /// band holds a single pod row.
+    ///
+    /// Deliberately NOT "every strip no pod occupies": the north margin and the
+    /// south remainder are pod-free too, and both are already spoken for — the
+    /// lounge cluster and the door's approach live there, so a piece snapped into
+    /// one lands on the couch or seals the threshold. Between two pod rows is the
+    /// only strip that is free by construction. Full-width is what makes the band
+    /// sufficient on its own: it clears every pod at once, so a caller placing
+    /// inside one never has to reason about x.
+    fn inter_pod_y_bands(self, cubicle_band: &Bounds) -> Vec<(u16, u16)> {
+        // NOT `stride_y - INTER_POD_AISLE_Y`: that is the pod's SLOT pitch, and a
+        // desk's blocked ground runs to `DESK_GROUND_H` below its corner — past the
+        // last slot row. Pricing the slot leaves the overhang rows looking free and
+        // parks the piece on the south desk's own ground strip.
+        let pod_h = (POD_SIDE - 1) * (DESK_H + INTRA_POD_GAP_Y) + DESK_GROUND_H;
+        (0..self.rows.saturating_sub(1))
+            .map(|pod_r| {
+                let (_, top) = self.pod_origin(cubicle_band, 0, pod_r);
+                (top + pod_h, top + self.stride_y)
+            })
+            .filter(|&(start, end)| end > start)
+            .collect()
+    }
+
+    /// Top row for a ground strip `h` px tall, centred in whichever inter-pod
+    /// aisle sits closest to `desired` — or `None` when no aisle can hold it.
+    ///
+    /// Centring is not cosmetic: it is what keeps the strip from sealing the lane
+    /// it stands in. A piece flush against a pod leaves its whole clearance on one
+    /// side; centred in an [`INTER_POD_AISLE_Y`] aisle it leaves a walkable margin
+    /// north AND south, so a walker can round either end.
+    fn snap_inter_pod_ground_y(self, cubicle_band: &Bounds, desired: u16, h: u16) -> Option<u16> {
+        let distance_to = |(start, end): (u16, u16)| (start + (end - start) / 2).abs_diff(desired);
+        let (start, end) = self
+            .inter_pod_y_bands(cubicle_band)
+            .into_iter()
+            .filter(|&(start, end)| end - start >= h)
+            .min_by_key(|&band| distance_to(band))?;
+        Some(start + (end - start - h) / 2)
     }
 }
 

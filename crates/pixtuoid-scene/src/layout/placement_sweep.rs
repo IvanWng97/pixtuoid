@@ -5,6 +5,7 @@
 //! truth, and [`pieces`] destructures `SceneLayout` with NO `..` so a new
 //! furniture collection fails compilation here until it is swept or exempted.
 
+use super::decor::DESK_GROUND_H;
 use super::mask::pantry_ground_rect;
 use super::placement::rects_overlap;
 use super::*;
@@ -833,24 +834,80 @@ fn appliance_strip_not_sealed_at_a_single_pod_band() {
     assert_walkable_connected(59, 160, 3, &l);
 }
 
+/// Reconstruct each pod's vertical extent from the desks alone, so the guard
+/// below tests the LAYOUT's output rather than the placement helper's own idea
+/// of where the pods are. Two desk rows belong to one pod exactly when they sit
+/// `DESK_H + INTRA_POD_GAP_Y` apart; the pod then spans from the upper row's top
+/// to the lower row's blocked-ground base, intra-pod gap included.
+fn pod_y_extents(l: &SceneLayout) -> Vec<(u16, u16)> {
+    let mut ys: Vec<u16> = l.home_desks.iter().map(|d| d.y).collect();
+    ys.sort_unstable();
+    ys.dedup();
+    let mut pods = Vec::new();
+    let mut i = 0;
+    while i < ys.len() {
+        let top = ys[i];
+        if ys.get(i + 1) == Some(&(top + DESK_H + INTRA_POD_GAP_Y)) {
+            pods.push((top, ys[i + 1] + DESK_GROUND_H));
+            i += 2;
+        } else {
+            pods.push((top, top + DESK_GROUND_H));
+            i += 1;
+        }
+    }
+    pods
+}
+
 #[test]
-fn free_standing_whiteboard_yields_when_it_seals_the_west_aisle() {
-    // At 32x120 seed 3 the free-standing whiteboard sits +3px east of the
-    // vertical divider, so the 4px wall is flush against its west edge and the
-    // desk column closes the east side, sealing the entire south.
+fn free_standing_furniture_never_stands_inside_a_pod() {
+    sweep(|w, h, seed, l| {
+        let pods = pod_y_extents(l);
+        for d in &l.wall_decor {
+            let Some((g, gs)) =
+                furniture_def(d.kind.furniture()).ground_rect(Anchor::TopLeft, d.pos)
+            else {
+                continue; // wall-hung: no ground contact, nothing to wedge into a pod
+            };
+            for &(top, bottom) in &pods {
+                assert!(
+                    g.y >= bottom || g.y + gs.h <= top,
+                    "{w}x{h} seed {seed}: {:?}'s ground rows {}..{} fall inside the pod \
+                     spanning {top}..{bottom} — free-standing furniture belongs in the \
+                     aisles BETWEEN pods, never in a pod's own desk rows or intra-pod gap",
+                    d.kind,
+                    g.y,
+                    g.y + gs.h
+                );
+            }
+        }
+    });
+}
+
+#[test]
+fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
+    // 32x120 seed 3 is the size that FORCED the aisle rule: the board sat +3px
+    // east of the vertical divider, so the 4px wall was flush against its west
+    // edge and the desk column closed the east side, sealing the entire south —
+    // and the connectivity guard had to drop the board to reopen it.
+    //
+    // Snapped into an inter-pod aisle it bridges the same wall-to-desk span, but
+    // the aisle runs east-west past the desk column, so a walker rounds it and
+    // nothing is severed. The guard therefore keeps it. Revert the snap and this
+    // goes red: the board seals again, the guard drops it, and the office loses a
+    // whiteboard it should never have had to spend.
     let l = SceneLayout::compute_with_seed(32, 120, None, 3).expect("32x120 lays out");
     assert_walkable_connected(32, 120, 3, &l);
     assert!(
-        !l.wall_decor
+        l.wall_decor
             .iter()
             .any(|d| matches!(d.kind, super::WallDecor::Whiteboard)),
-        "the sealing whiteboard must be dropped, not merely un-blocked (else the \
-         painter draws a whiteboard a walker passes straight through)"
+        "the whiteboard must survive — an aisle-seated board severs nothing, so the \
+         connectivity guard has no cause to spend it"
     );
     assert_eq!(
         l.plants.len(),
         2,
-        "the two innocent far-south plants survive — only the whiteboard yields"
+        "the two far-south plants survive alongside it — the guard spends nothing here"
     );
 }
 
