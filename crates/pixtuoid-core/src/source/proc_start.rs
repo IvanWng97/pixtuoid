@@ -125,9 +125,11 @@ mod tests {
         child.wait().expect("reap the child");
     }
 
-    /// Unix-only: `std::process::Child` owns the process HANDLE past `wait()`,
-    /// which keeps the pid reserved on Windows — the same read there would test
-    /// std's handle lifetime, not the kernel's.
+    /// Unix-only. Windows documents a process HANDLE as valid after termination
+    /// and `std::process::Child` holds one past `wait()`, so the same read there
+    /// would be asserting std's handle lifetime rather than a kernel guarantee.
+    /// Nothing depends on the dead-pid read; the guard that matters is the
+    /// recycled-pid one, where a reused pid carries its own creation time.
     #[cfg(unix)]
     #[test]
     fn marker_is_none_after_the_process_dies() {

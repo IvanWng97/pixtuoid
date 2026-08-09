@@ -6,30 +6,39 @@ use std::time::Duration;
 
 pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
-/// Arm the send-timeout watchdog: a thread that hard-exits the process after
-/// `WRITE_TIMEOUT`, bounding the whole connect+write phase (exit(0)-on-timeout
-/// IS the contract — never block CC). Uses `Builder::spawn`, not
+/// Proof that the time bound is armed. [`send_line`] takes one, so reaching a
+/// send — or the pid walk before it — with no watchdog running is a compile
+/// error rather than a rule someone has to remember.
+pub(crate) struct TimeBound(());
+
+/// Arm the shim's hard time bound: a thread that exits the process after
+/// `WRITE_TIMEOUT`, so nothing after this point can block CC
+/// (exit(0)-on-timeout IS the contract). Uses `Builder::spawn`, not
 /// `thread::spawn`, so OS thread exhaustion degrades to dropping the event
-/// instead of an abort; `false` ⇒ the caller must not enter its connect path.
-fn spawn_timeout_watchdog() -> bool {
+/// instead of an abort.
+///
+/// Arm it before the shim's own OS work, not just the send: on Windows
+/// `cli_pid` walks a Toolhelp32 snapshot, which an AV/EDR filter can slow
+/// arbitrarily while the CLI waits on this child (#882). Reading stdin stays
+/// OUTSIDE the bound deliberately — that is the CLI writing to US, and a large
+/// slow payload should arrive, not be cut into a dropped event.
+pub(crate) fn arm_watchdog() -> Option<TimeBound> {
     std::thread::Builder::new()
         .spawn(|| {
             std::thread::sleep(WRITE_TIMEOUT);
             std::process::exit(0);
         })
-        .is_ok()
+        .ok()
+        .map(|_| TimeBound(()))
 }
 
 #[cfg(unix)]
-pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // `UnixStream::connect` has no timeout knob, and a backlog-saturated
     // listener parks it indefinitely — past the budget `set_write_timeout` only
-    // enforces AFTER a successful connect (#167). The watchdog bounds the whole
-    // connect+write phase; the write timeout below is a secondary backstop.
-    if !spawn_timeout_watchdog() {
-        return;
-    }
+    // enforces AFTER a successful connect (#167). The caller's `TimeBound`
+    // covers it; the write timeout below is a secondary backstop.
     if let Ok(mut s) = std::os::unix::net::UnixStream::connect(endpoint) {
         // For the `/tmp/pixtuoid-{uid}/` fallback we own, verify the connected
         // PEER is us BEFORE writing (#485) — on the connected fd, atomic w.r.t.
@@ -106,16 +115,13 @@ mod tests {
 }
 
 #[cfg(windows)]
-pub(crate) fn send_line(endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
     use std::io::Write;
     // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the timeout
-    // invariant is enforced solely by the watchdog's hard exit. We must NOT enter
-    // the ERROR_PIPE_BUSY retry loop watchdog-less, or the retry is unbounded.
-    // The daemon's 1MiB pipe in-buffer covers the shim's capped stdin plus the
-    // stamps, so a write that gets through open() never stalls on quota.
-    if !spawn_timeout_watchdog() {
-        return;
-    }
+    // invariant is enforced solely by the watchdog's hard exit — which is why the
+    // `TimeBound` is a parameter: the ERROR_PIPE_BUSY retry below is unbounded
+    // without it. The daemon's 1MiB pipe in-buffer covers the shim's capped stdin
+    // plus the stamps, so a write that gets through open() never stalls on quota.
     const ERROR_PIPE_BUSY: i32 = windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32;
     const PIPE_BUSY_RETRY_BACKOFF_MS: u64 = 10;
     loop {

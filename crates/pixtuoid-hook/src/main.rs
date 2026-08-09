@@ -82,6 +82,12 @@ fn main() -> Result<()> {
         }
     };
 
+    // Everything past here is OUR work on CC's clock — `cli_pid` walks a process
+    // snapshot on Windows — so the bound is armed first (see `arm_watchdog`).
+    let Some(bound) = transport::arm_watchdog() else {
+        return Ok(());
+    };
+
     if let Value::Object(map) = &mut payload {
         // Source precedence: the `--source <name>` argv flag (the Windows install
         // form) wins over the `PIXTUOID_SOURCE` env var (the Unix env-prefix
@@ -95,20 +101,22 @@ fn main() -> Result<()> {
     // subprocess wait — see transport.rs.
     let mut line = serde_json::to_vec(&payload).unwrap_or_default();
     line.push(b'\n');
-    transport::send_line(&socket, &line);
+    transport::send_line(&bound, &socket, &line);
     Ok(())
 }
 
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
 /// The `std::env` reads live here so `env_payload_from` stays testable without
-/// mutating process-global env.
+/// mutating process-global env. `_pid` is deliberately absent — `enrich_payload`
+/// is the ONE place that stamps it, so a Windows ancestor walk cannot run twice
+/// per hook, and it runs inside the time bound rather than ahead of it.
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), so the shim's own cwd is the reliable fallback.
     let cwd_fallback = std::env::current_dir()
         .ok()
         .map(|p| p.to_string_lossy().into_owned());
-    env_payload_from(event, cwd_fallback, cli_pid(), |k| std::env::var(k).ok())
+    env_payload_from(event, cwd_fallback, |k| std::env::var(k).ok())
 }
 
 /// Per-field byte cap on env-mode values. The stdin arm enforces `STDIN_CAP`
@@ -136,14 +144,10 @@ fn cap_env_field(mut val: String) -> String {
 fn env_payload_from(
     event: &str,
     cwd_fallback: Option<String>,
-    pid: Option<u32>,
     get: impl Fn(&str) -> Option<String>,
 ) -> serde_json::Map<String, Value> {
     let mut map = serde_json::Map::new();
     map.insert("event".into(), Value::from(event));
-    if let Some(pid) = pid {
-        map.insert("_pid".into(), Value::from(pid));
-    }
     // cwd is the AgentId KEY (the decoder drops a cwd-less event), and
     // DEEPSEEK_WORKSPACE is UNSET for a fresh `codewhale` launched without `-C`
     // until the workspace resolves — so `session_start` would otherwise never
@@ -218,9 +222,10 @@ fn enrich_payload(
             map.insert("_pixtuoid_source".into(), Value::from(src));
         }
     }
-    // `_pid` is deliberately NOT shim-owned: opencode's plugin and CodeWhale's
-    // env-mode supply their own, more authoritative than what `cli_pid` can
-    // resolve, so an inbound value is KEPT and the shim only fills the gap.
+    // `_pid` is deliberately NOT shim-owned: the opencode and OpenClaw plugins
+    // pipe their OWN `process.pid`, which beats anything `cli_pid` can infer
+    // from the process tree, so an inbound value is KEPT and the shim only
+    // fills the gap. This is also the ONE site that stamps it.
     if let Some(pid) = pid {
         map.entry("_pid").or_insert_with(|| Value::from(pid));
     }

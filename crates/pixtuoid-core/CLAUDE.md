@@ -280,12 +280,18 @@ there rather than inert. A plugin-stamped pid (opencode's `process.pid`) still
 wins where it exists — the peek needs no exit-watch, whose backend is absent on
 Windows/pre-5.3 Linux, which is also why an abrupt exit can't set `exiting_at`
 on those platforms and the click-time marker re-read is the guard that carries
-it. The skip list is by NAME, so a runner interposing some OTHER shell still
-stamps a transient pid — and that degrades to exactly the pre-#528 behaviour
-rather than a wrong window, because the pid is dead by click time and the marker
-re-read refuses it. The one residual the guard CANNOT catch is a parent that
-exits and has its pid recycled inside the shim's own sub-200ms run: the marker
-is then stamped from the impostor and matches itself.
+it. Two limits are worth stating exactly, because the obvious phrasing of each
+is wrong. The skip list is by NAME, so a runner interposing some OTHER shell
+still stamps a transient pid — that degrades to the pre-#528 behaviour rather
+than a wrong window, but the thing that saves it is the WALK, not the marker: a
+dead pid owns no window, so `focusable` is false and there is nothing to
+activate. Do NOT restate that as "the marker refuses it" — Windows documents a
+process HANDLE as valid after termination, so a marker read is not a liveness
+proof there the way a macOS/Linux one is; the guard this arm actually earns is
+the RECYCLED-pid half (a reused pid belongs to a process with its own creation
+time). The residual neither half catches is a parent that exits and has its pid
+recycled inside the shim's own sub-200ms run: the marker is then stamped from
+the impostor and matches itself.
 
 ## Known sharp edges (don't be surprised by these)
 

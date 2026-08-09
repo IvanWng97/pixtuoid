@@ -173,18 +173,25 @@ fn env_payload_folds_codewhale_env_into_the_envelope() {
     ]
     .into_iter()
     .collect();
-    let map = env_payload_from("tool_call_before", None, Some(4321), |k| {
+    let map = env_payload_from("tool_call_before", None, |k| {
         env.get(k).map(|s| s.to_string())
     });
     assert_eq!(map["event"], json!("tool_call_before"));
     assert_eq!(map["cwd"], json!("/repo"));
     assert_eq!(map["tool"], json!("exec_shell"));
     assert_eq!(map["tool_args"], json!(r#"{"command":"ls -la"}"#));
-    assert_eq!(
-        map["_pid"],
-        json!(4321),
-        "CodeWhale's pid is stamped for the liveness watch"
-    );
+}
+
+/// env-mode's envelope still carries `_pid` — via the ONE stamping site, which
+/// is what keeps a Windows ancestor walk from running twice per hook. Composed
+/// rather than asserted on `env_payload_from` alone: that fn stamping its own
+/// pid is exactly the duplicate this pins against.
+#[test]
+fn env_mode_gets_its_pid_from_the_single_enrich_site() {
+    let mut map = env_payload_from("tool_call_before", None, |_| None);
+    assert!(!map.contains_key("_pid"), "not stamped at envelope build");
+    enrich_payload(&mut map, None, 0, Some(4321));
+    assert_eq!(map["_pid"], json!(4321), "stamped once, by enrich_payload");
 }
 
 #[test]
@@ -193,9 +200,7 @@ fn env_payload_omits_missing_and_empty_env() {
         [("DEEPSEEK_WORKSPACE", "/repo"), ("DEEPSEEK_TOOL_NAME", "")]
             .into_iter()
             .collect();
-    let map = env_payload_from("session_start", None, None, |k| {
-        env.get(k).map(|s| s.to_string())
-    });
+    let map = env_payload_from("session_start", None, |k| env.get(k).map(|s| s.to_string()));
     assert_eq!(map["cwd"], json!("/repo"));
     assert!(
         !map.contains_key("tool"),
@@ -205,7 +210,10 @@ fn env_payload_omits_missing_and_empty_env() {
         !map.contains_key("tool_args"),
         "absent tool_args must be omitted"
     );
-    assert!(!map.contains_key("_pid"), "no pid → no _pid");
+    assert!(
+        !map.contains_key("_pid"),
+        "enrich_payload alone stamps _pid"
+    );
     assert_eq!(map.len(), 2, "exactly event + cwd");
 }
 
@@ -219,7 +227,7 @@ fn env_payload_caps_oversized_fields_at_a_char_boundary() {
     ]
     .into_iter()
     .collect();
-    let map = env_payload_from("tool_call_before", None, None, |k| env.get(k).cloned());
+    let map = env_payload_from("tool_call_before", None, |k| env.get(k).cloned());
     let args = map["tool_args"].as_str().unwrap();
     assert!(
         args.len() <= ENV_FIELD_CAP,
@@ -270,7 +278,7 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
         [("DEEPSEEK_TOOL_NAME", "exec_shell".to_string())]
             .into_iter()
             .collect();
-    let map = env_payload_from("session_start", Some("/proj/here".to_string()), None, |k| {
+    let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
         no_ws.get(k).cloned()
     });
     assert_eq!(
@@ -282,7 +290,7 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
     let ws: std::collections::HashMap<&str, String> = [("DEEPSEEK_WORKSPACE", "/ws".to_string())]
         .into_iter()
         .collect();
-    let map = env_payload_from("session_start", Some("/proj/here".to_string()), None, |k| {
+    let map = env_payload_from("session_start", Some("/proj/here".to_string()), |k| {
         ws.get(k).cloned()
     });
     assert_eq!(
@@ -291,7 +299,7 @@ fn env_payload_falls_back_to_cwd_when_workspace_unset() {
         "DEEPSEEK_WORKSPACE wins over the fallback"
     );
 
-    let map = env_payload_from("session_start", None, None, |_| None);
+    let map = env_payload_from("session_start", None, |_| None);
     assert!(
         !map.contains_key("cwd"),
         "no workspace and no cwd fallback → no cwd field"
