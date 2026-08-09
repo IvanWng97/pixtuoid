@@ -270,8 +270,6 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
-/// Dispatch one Drawable's paint; character-attached effects paint inline so
-/// they ride along with the character in z-order.
 /// How far a desk sprite's top row rises above `desk.y` — the monitor bezel
 /// standing proud of the desk back, which is also why the screen's first row is
 /// exactly one below the blit anchor.
@@ -294,6 +292,8 @@ fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
     }
 }
 
+/// Dispatch one Drawable's paint; character-attached effects paint inline so
+/// they ride along with the character in z-order.
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     // Re-bound to the original names so the arms below are untouched.
     let buf = &mut *c.buf;

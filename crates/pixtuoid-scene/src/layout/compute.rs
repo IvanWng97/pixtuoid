@@ -1158,8 +1158,6 @@ impl FloorGeometry {
     }
 }
 
-/// Pod-grid desk placement: full pods, partial columns at right edge,
-/// partial row at bottom edge.
 /// Which way a desk on pod row `r` seats its occupant.
 ///
 /// A pod is 2x2, and its two rows face EACH OTHER across the inner gap — the
@@ -1175,6 +1173,8 @@ fn pod_row_facing(r: u16) -> Facing {
     }
 }
 
+/// Pod-grid desk placement: full pods, partial columns at right edge,
+/// partial row at bottom edge.
 pub(super) fn compute_pod_desks(
     max_desks: Option<usize>,
     cubicle_band: &Bounds,
@@ -1584,5 +1584,47 @@ mod tests {
             FloorVariant::Dense.mid_x_pct(),
             "a Dense floor that KEEPS both meeting rooms keeps its own column"
         );
+    }
+
+    /// A y-band is advertised as floor a free-standing piece may stand on, so no
+    /// row of one may be ground a desk already blocks.
+    ///
+    /// Cross-checks two independent derivations — `compute_pod_desks`' desk
+    /// positions against `inter_pod_y_bands`' arithmetic — rather than restating
+    /// the band formula, which a test can only copy. Pricing the band off the
+    /// pod's SLOT pitch (`stride_y - INTER_POD_AISLE_Y`) instead of its blocked
+    /// ground puts `DESK_GROUND_H - DESK_H` rows of desk inside every band.
+    #[test]
+    fn no_inter_pod_band_row_is_ground_a_desk_blocks() {
+        let band = super::Bounds {
+            x: 0,
+            y: 0,
+            width: 400,
+            height: 400,
+        };
+        let pod_h =
+            super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
+        let grid = super::PodGrid {
+            cols: 2,
+            rows: 3,
+            stride_x: super::POD_SIDE * super::DESK_W
+                + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_X
+                + super::INTER_POD_AISLE_X,
+            stride_y: pod_h + super::INTER_POD_AISLE_Y,
+            couch_to_desk_extra: 0,
+        };
+        let (desks, _) = super::compute_pod_desks(None, &band, grid);
+        assert!(!desks.is_empty(), "the fixture grid must place desks");
+        let bands = grid.inter_pod_y_bands(&band);
+        assert!(!bands.is_empty(), "a 3-row grid has bands between its rows");
+        for &(start, end) in &bands {
+            for d in &desks {
+                let (g0, g1) = (d.y, d.y + super::decor::DESK_GROUND_H);
+                assert!(
+                    start >= g1 || end <= g0,
+                    "band {start}..{end} overlaps desk {d:?}'s ground rows {g0}..{g1}"
+                );
+            }
+        }
     }
 }

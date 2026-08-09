@@ -361,9 +361,6 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     }
 }
 
-/// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
-/// deliberately NOT here — it is a different painter with its own strength +
-/// anchor, and the order (pools THEN halo) is load-bearing for byte-identity.
 /// How much of the ceiling pools' NIGHT gain each kind keeps.
 ///
 /// The desk tubes go nearly out after dark. An office working late kills the
@@ -377,6 +374,9 @@ const DESK_POOL_NIGHT_KEEP: f32 = 0.18;
 /// Night-gain retention for the pantry and corridor pools — unchanged.
 const SHARED_POOL_NIGHT_KEEP: f32 = 1.0;
 
+/// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
+/// deliberately NOT here — it is a different painter with its own strength +
+/// anchor, and the order (pools THEN halo) is load-bearing for byte-identity.
 fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = (Ellipse, f32)> + '_ {
     // Half-extents (a fluorescent tube's lit footprint) per pool kind.
     const DESK_POOL_HALF: (u16, u16) = (10, 5);

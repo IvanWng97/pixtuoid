@@ -88,21 +88,39 @@ def selftest() -> int:
         )
         # BOTH directions for the doc-run rule: one run past DOC_RUN_MAX (split by
         # a blank line, which does not end a doc comment), one at the limit, and a
-        # `////` banner rustc does not treat as a doc comment.
-        long_doc = "".join(f"/// l{n}\n" for n in range(DOC_RUN_MAX // 2))
-        long_doc += "\n" + "".join(
-            f"/// m{n}\n" for n in range(DOC_RUN_MAX - DOC_RUN_MAX // 2 + 1)
-        )
+        # `////` banner rustc does not treat as a doc comment. Lengths are
+        # LITERAL: a fixture derived from DOC_RUN_MAX moves with the constant, so
+        # retuning it left the whole rule passing against itself.
+        if DOC_RUN_MAX != 10:
+            fails.append(
+                f"DOC_RUN_MAX is {DOC_RUN_MAX}, but these fixtures pin 10 — retune both together"
+            )
+        long_doc = "".join(f"/// l{n}\n" for n in range(5))
+        long_doc += "\n" + "".join(f"/// m{n}\n" for n in range(6))
         (repo / "src" / "docs.rs").write_text(long_doc + "pub const A: u8 = 0;\n")
         (repo / "src" / "docs_ok.rs").write_text(
-            "".join(f"/// l{n}\n" for n in range(DOC_RUN_MAX)) + "pub const B: u8 = 0;\n"
+            "".join(f"/// l{n}\n" for n in range(10)) + "pub const B: u8 = 0;\n"
         )
         (repo / "src" / "banner.rs").write_text(
-            "".join(f"//// l{n}\n" for n in range(DOC_RUN_MAX + 4)) + "pub const C: u8 = 0;\n"
+            "".join(f"//// l{n}\n" for n in range(14)) + "pub const C: u8 = 0;\n"
         )
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
         subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
-        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
+        # The re-parent rule needs these two in the BASE for their doc owner to
+        # have changed: `moved.rs` wedges a const in (fires), `renamed.rs`
+        # renames the documented fn (must not).
+        (repo / "src" / "moved.rs").write_text("/// Doc for the fn.\nfn owner() {}\n")
+        (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn before() {}\n")
+        # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
+        # commit or the diff-scoped checks above see an empty diff.
+        subprocess.run(
+            [*git, "add", "src/moved.rs", "src/renamed.rs"], cwd=repo, check=True
+        )
+        subprocess.run([*git, "commit", "-qm", "base"], cwd=repo, check=True)
+        (repo / "src" / "moved.rs").write_text(
+            "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
+        )
+        (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn after() {}\n")
         subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
         subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
 
@@ -139,6 +157,13 @@ def selftest() -> int:
             if path in flagged:
                 fails.append(f"{why}: {path} must NOT fire")
 
+        # The re-parent rule, BOTH directions.
+        reparented = {f for f, _, _, _ in reparented_doc_hits("HEAD~1", False, str(repo))}
+        if "src/moved.rs" not in reparented:
+            fails.append(f"a doc block wedged off its fn must fire: {sorted(reparented)}")
+        if "src/renamed.rs" in reparented:
+            fails.append("a renamed fn keeping its doc must NOT fire: src/renamed.rs")
+
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
@@ -174,7 +199,7 @@ def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
         run_start = None
         run_len = 0
 
-        def close(run_start: int | None, run_len: int, end: int) -> None:
+        def close(run_start: int | None, run_len: int) -> None:
             # Anchor on the run's FIRST line, like the ast-grep path: flagging a
             # whole pre-existing block because one line inside it was touched is
             # what sends an author to trim a legitimate WHY.
@@ -189,9 +214,81 @@ def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
             elif t == "" and run_start:
                 continue  # a blank line splits the TEXT, not the doc comment
             else:
-                close(run_start, run_len, i)
+                close(run_start, run_len)
                 run_start, run_len = None, 0
-        close(run_start, run_len, len(src) + 1)
+        close(run_start, run_len)
+    return out
+
+
+ITEM = re.compile(
+    r"^\s*(?:pub(?:\([^)]*\))?\s+)?(?:const\s+|async\s+|unsafe\s+|extern\s+\"[^\"]*\"\s+)*"
+    r"(fn|struct|enum|trait|impl|type|const|static|mod|macro_rules!)\s+([A-Za-z0-9_]+)"
+)
+
+
+def doc_owners(src: str) -> dict[str, str]:
+    """Map each `///` block's FIRST line → the `kind name` it documents."""
+    out: dict[str, str] = {}
+    block: list[str] = []
+    for raw in src.splitlines():
+        t = raw.strip()
+        if t.startswith("///"):
+            block.append(t)
+        elif t.startswith("#[") or t == "":
+            continue  # attributes and blank lines do not end a doc block
+        else:
+            if block and (m := ITEM.match(raw)):
+                out.setdefault(block[0], f"{m.group(1)} {m.group(2)}")
+            block = []
+    return out
+
+
+def reparented_doc_hits(
+    base: str, worktree: bool, cwd: str | None = None
+) -> list[tuple[str, str, str, str]]:
+    """Doc blocks that changed OWNER, as (file, first_line, old_owner, new_owner).
+
+    Inserting an item between an existing `///` block and what it documented
+    re-homes the block onto the newcomer, and nothing else sees it: both sides
+    compile, rustdoc renders, and the diff shows only the insertion.
+
+    A hit also requires the old owner to still EXIST in the new file, which is
+    what separates an accidental detachment from a plain rename.
+    """
+    rev = base if worktree else f"{base}...HEAD"
+    files = subprocess.run(
+        ["git", "diff", "--name-only", rev, "--", "*.rs"],
+        capture_output=True, text=True, check=True, cwd=cwd,
+    ).stdout.split()
+
+    def at(ref: str | None, path: str) -> str:
+        if ref is None:
+            try:
+                return open(os.path.join(cwd or ".", path), errors="ignore").read()
+            except OSError:
+                return ""
+        r = subprocess.run(
+            ["git", "show", f"{ref}:{path}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=cwd,
+        )
+        return r.stdout if r.returncode == 0 else ""
+
+    out = []
+    for path in files:
+        old = doc_owners(at(base, path))
+        new_src = at(None if worktree else "HEAD", path)
+        new = doc_owners(new_src)
+        still_there = {o for o in new.values()} | {
+            f"{m.group(1)} {m.group(2)}"
+            for line in new_src.splitlines()
+            if (m := ITEM.match(line))
+        }
+        for doc, owner in old.items():
+            if doc in new and new[doc] != owner and owner in still_there:
+                out.append((path, doc, owner, new[doc]))
     return out
 
 
@@ -238,7 +335,18 @@ def main() -> int:
                 f"(max {DOC_RUN_MAX}) — every sentence must carry new information"
             )
 
-    if not new_hits and not docs:
+    moved = reparented_doc_hits(base, worktree)
+    for f, doc, old_owner, new_owner in moved:
+        print(f"comment-lint: {f} — doc block re-homed from `{old_owner}` to `{new_owner}`")
+        print(f"    {doc}")
+        if github:
+            print(
+                f"::warning file={f}::this doc block documented `{old_owner}` on "
+                f"{base} and now sits on `{new_owner}` — move it back, or give the "
+                f"newcomer its own"
+            )
+
+    if not new_hits and not docs and not moved:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
         return 0
     if not new_hits:

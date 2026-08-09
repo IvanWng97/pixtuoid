@@ -25,11 +25,20 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (41, 160),
     (48, 60),
     (50, 80),
+    // The only size here that reaches the #566 connectivity guard, so every
+    // invariant in this file gets one layout whose decor the guard degraded.
+    // Fires on 5 of the 12 seeds.
+    (59, 148),
     (64, 130),
     (96, 60),
     (96, 70),
     (96, 100),
     (96, 115),
+    // The only size here with a partial BOTTOM row — and a partial COLUMN beside
+    // it — on all 12 seeds; that branch of `compute_pod_desks` ran in none of the
+    // layouts this grid used to visit. The height matters: 117x88 has the row too,
+    // but its south approach is walled off, so the facing demotion erases it.
+    (117, 146),
     (120, 96),
     (128, 80),
     (128, 100),
@@ -693,13 +702,6 @@ fn every_wander_destination_is_routable_from_its_desk() {
     });
 }
 
-/// The COARSE twin of [`assert_walkable_connected`]. That one is a 4-connected
-/// PIXEL flood, but the router runs on the 4×4 grid, so a ≤3px channel is
-/// pixel-connected and coarse-IMPASSABLE — the office reads as ONE region at
-/// pixel granularity and TWO at router granularity. When that happens,
-/// `desk_approach_cell` returns its no-valid-approach sentinel and every leg for
-/// the severed desks degrades to a straight `door→chair` line through furniture.
-///
 /// `desk_facings` is parallel to `home_desks`, and NOTHING in the type system
 /// says so — the two are separate vecs precisely to spare 74 position-only read
 /// sites. A short `desk_facings` makes `desk_facing()` silently return its
@@ -716,6 +718,13 @@ fn assert_every_desk_has_a_facing(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     );
 }
 
+/// The COARSE twin of [`assert_walkable_connected`]. That one is a 4-connected
+/// PIXEL flood, but the router runs on the 4×4 grid, so a ≤3px channel is
+/// pixel-connected and coarse-IMPASSABLE — the office reads as ONE region at
+/// pixel granularity and TWO at router granularity. When that happens,
+/// `desk_approach_cell` returns its no-valid-approach sentinel and every leg for
+/// the severed desks degrades to a straight `door→chair` line through furniture.
+///
 /// A free fn, not a closure, because THREE sweeps need it: the placement seed
 /// axis, the production floor seeds, and the step-1 `NARROW_BAND` width scan.
 fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &SceneLayout) {
@@ -749,6 +758,43 @@ fn every_home_desk_approach_is_routable_from_the_door() {
 fn every_desk_has_a_facing() {
     sweep(assert_every_desk_has_a_facing);
     sweep_production_floors(assert_every_desk_has_a_facing);
+}
+
+/// A back-turned desk exists only to face a viewer-facing one across the pod's
+/// inner gap, so every North desk must have a South desk in its own column
+/// exactly `DESK_H + INTRA_POD_GAP_Y` above it.
+///
+/// Stated as the PAIRING rather than as `pod_row_facing`'s formula, which a test
+/// could only restate — and it was that formula's two partial-bottom-row call
+/// sites that were unpinned.
+fn assert_back_turned_desks_face_a_partner(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    let south: std::collections::HashSet<Point> = l
+        .home_desks
+        .iter()
+        .zip(&l.desk_facings)
+        .filter(|(_, &f)| f == Facing::South)
+        .map(|(&d, _)| d)
+        .collect();
+    for (&d, &f) in l.home_desks.iter().zip(&l.desk_facings) {
+        if f != Facing::North {
+            continue;
+        }
+        let partner = Point {
+            x: d.x,
+            y: d.y.saturating_sub(DESK_H + INTRA_POD_GAP_Y),
+        };
+        assert!(
+            south.contains(&partner),
+            "{w}x{h} seed {seed}: back-turned desk {d:?} has no viewer-facing desk at \
+             {partner:?} — it turns its back on empty floor instead of on a pod partner"
+        );
+    }
+}
+
+#[test]
+fn back_turned_desks_face_a_partner_across_the_pod_gap() {
+    sweep(assert_back_turned_desks_face_a_partner);
+    sweep_production_floors(assert_back_turned_desks_face_a_partner);
 }
 
 #[test]
@@ -797,12 +843,18 @@ const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=76;
 
 /// Step-1 width sweep across the degradation band, running BOTH connectivity
 /// predicates at that resolution — the discrete `SWEEP_SIZES` grid can't cover
-/// every width, and a sealed pocket at a width it skips ships silently. Heights
-/// span the tall floors where the aisle-seal manifests.
+/// every width, and a sealed pocket at a width it skips ships silently.
+///
+/// 148 is the load-bearing height, and it is the ONLY one here that reaches the
+/// #566 guard: the aisle-seal manifests in three narrow height windows (146-151,
+/// 166-172, 208-214) and 148 is the one every sealing width shares. The other
+/// heights sweep geometry the seal never occurs at — the scan swept width 59 at
+/// step 1 from the day it was written and still never fired a rung, because its
+/// height axis missed all three windows.
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {
-        for &h in &[80u16, 100, 120, 160] {
+        for &h in &[80u16, 100, 120, 148, 160] {
             for seed in SWEEP_SEEDS {
                 if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
                     assert_walkable_connected(w, h, seed, &l);
@@ -858,29 +910,58 @@ fn pod_y_extents(l: &SceneLayout) -> Vec<(u16, u16)> {
     pods
 }
 
+fn assert_no_free_standing_piece_inside_a_pod(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    let pods = pod_y_extents(l);
+    for d in &l.wall_decor {
+        let Some((g, gs)) = furniture_def(d.kind.furniture()).ground_rect(Anchor::TopLeft, d.pos)
+        else {
+            continue; // wall-hung: no ground contact, nothing to wedge into a pod
+        };
+        for &(top, bottom) in &pods {
+            assert!(
+                g.y >= bottom || g.y + gs.h <= top,
+                "{w}x{h} seed {seed}: {:?}'s ground rows {}..{} fall inside the pod \
+                 spanning {top}..{bottom} — free-standing furniture belongs in the \
+                 aisles BETWEEN pods, never in a pod's own desk rows or intra-pod gap",
+                d.kind,
+                g.y,
+                g.y + gs.h
+            );
+        }
+    }
+}
+
 #[test]
 fn free_standing_furniture_never_stands_inside_a_pod() {
-    sweep(|w, h, seed, l| {
-        let pods = pod_y_extents(l);
-        for d in &l.wall_decor {
-            let Some((g, gs)) =
-                furniture_def(d.kind.furniture()).ground_rect(Anchor::TopLeft, d.pos)
-            else {
-                continue; // wall-hung: no ground contact, nothing to wedge into a pod
-            };
-            for &(top, bottom) in &pods {
-                assert!(
-                    g.y >= bottom || g.y + gs.h <= top,
-                    "{w}x{h} seed {seed}: {:?}'s ground rows {}..{} fall inside the pod \
-                     spanning {top}..{bottom} — free-standing furniture belongs in the \
-                     aisles BETWEEN pods, never in a pod's own desk rows or intra-pod gap",
-                    d.kind,
-                    g.y,
-                    g.y + gs.h
-                );
-            }
-        }
-    });
+    sweep(assert_no_free_standing_piece_inside_a_pod);
+    sweep_production_floors(assert_no_free_standing_piece_inside_a_pod);
+}
+
+/// A floor with two pod rows has an aisle between them, so the board must land —
+/// its absence there means the snap failed, not that there was nowhere to stand.
+///
+/// `snap_inter_pod_ground_y` answers `None` by design and the caller drops the
+/// board with no trace, so a snap that began failing everywhere would surface
+/// only as one fewer whiteboard. Single-pod-row floors stay legitimately bare.
+fn assert_the_whiteboard_lands_when_an_aisle_exists(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    let has_side_rooms = !l.meeting_rooms.is_empty() || l.pantry.is_some();
+    if !has_side_rooms || pod_y_extents(l).len() < 2 {
+        return;
+    }
+    assert!(
+        l.wall_decor
+            .iter()
+            .any(|d| matches!(d.kind, super::WallDecor::Whiteboard)),
+        "{w}x{h} seed {seed}: {} pod rows leave an inter-pod aisle, but no whiteboard \
+         was placed — the snap dropped it silently",
+        pod_y_extents(l).len()
+    );
+}
+
+#[test]
+fn the_whiteboard_lands_whenever_an_inter_pod_aisle_exists() {
+    sweep(assert_the_whiteboard_lands_when_an_aisle_exists);
+    sweep_production_floors(assert_the_whiteboard_lands_when_an_aisle_exists);
 }
 
 #[test]
@@ -1202,44 +1283,5 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         "{} violations (first 6):\n{}",
         v.len(),
         v[..v.len().min(6)].join("\n")
-    );
-}
-
-#[test]
-fn the_connectivity_guard_still_has_a_subject_to_catch() {
-    // The #566 guard's only live exercise used to be the free-standing whiteboard
-    // sealing the west aisle. Snapping the board into an inter-pod aisle retired
-    // that — and with it the whole `severed()` branch, so all four rungs now ship
-    // unexecuted and three separate inversions of them pass the suite.
-    //
-    // So this pins the guard's SUBJECT rather than a rung: at the size that used
-    // to seal, SOME board position still severs the office. It scans instead of
-    // hardcoding one, because a hardcoded anchor is what put the board in a pod to
-    // begin with. If nothing severs any more, the guard protects nothing and the
-    // honest move is to retire it, not to leave four dead rungs reading as cover.
-    let (w, h, seed) = (32u16, 120u16, 3u64);
-    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("32x120 lays out");
-    let dt = l.door_threshold.expect("door threshold");
-    assert!(
-        super::compute::unreachable_walkable_cells(&l.walkable, dt).is_empty(),
-        "the shipped layout must be whole — that is what the guard no longer has to fix"
-    );
-
-    let def = furniture_def(WallDecor::Whiteboard.furniture());
-    let fp = def
-        .footprint
-        .expect("the whiteboard has a ground footprint");
-    let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
-    let sealer = (l.cubicle_band.y..band_bottom).find(|&y| {
-        let mut m = l.walkable.clone();
-        m.mark_blocked(l.cubicle_band.x, y, fp.w, fp.h, 0);
-        !super::compute::unreachable_walkable_cells(&m, dt).is_empty()
-    });
-    assert!(
-        sealer.is_some(),
-        "no {}x{} board row in the {w}x{h} seed {seed} cubicle band severs the office any more \
-         — the #566 guard has lost its subject; re-derive a sealing case or retire the rungs",
-        fp.w,
-        fp.h
     );
 }
