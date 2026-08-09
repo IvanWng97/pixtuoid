@@ -529,12 +529,18 @@ mod tests {
 
         // MEASURED buffers for the default 360×240 logical window. `office_scale`
         // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
+        //
+        // The CAPACITIES are a function of `DESK_H` (it prices `pod_stride_y`),
+        // so deepening the desk re-measures them; the buffer sizes are window
+        // geometry and do not move. Deepening it by one row cost 2× exactly one
+        // pod row (30 → 24) and left every other factor untouched — re-measure
+        // rather than nudge, the rounding makes these unguessable.
         let measured = [
             (1.00_f64, (360u32, 240u32), 70usize),
             (1.25, (225, 150), 24),
             (1.50, (270, 180), 35),
             (1.75, (315, 210), 48),
-            (2.00, (240, 160), 30),
+            (2.00, (240, 160), 24),
             (3.00, (270, 180), 35),
         ];
         for (sf, want_buf, want_floor0) in measured {

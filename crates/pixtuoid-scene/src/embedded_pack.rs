@@ -524,6 +524,49 @@ mod tests {
         );
     }
 
+    /// A facing does not change how big a desk IS.
+    ///
+    /// `desk_north` lifts the monitor and is therefore taller, but from
+    /// `desk.y` down it must be the SAME desk: same surface depth, same front
+    /// edge, same legs. Checked on the frame COLUMNS the monitor never covers —
+    /// the middle legitimately differs, since that is where one variant has a
+    /// screen and the other has bare surface.
+    ///
+    /// This exists because I shipped a `desk_north` two rows deeper than every
+    /// other desk in the room and recorded it as an acceptable overhang. It was
+    /// visible immediately to the owner and to nothing in the suite.
+    #[test]
+    fn both_desk_variants_are_the_same_desk_below_the_monitor() {
+        let pack = test_default_pack();
+        let frame = |n: &str| {
+            pack.animation(n)
+                .and_then(|a| a.frames.first())
+                .unwrap_or_else(|| panic!("the embedded pack ships {n}"))
+        };
+        let (base, north) = (frame("desk"), frame("desk_north"));
+        assert_eq!(base.width(), north.width(), "a facing never changes width");
+        // Both blit so their BOTTOM rows coincide, so the taller one's extra
+        // rows are all above — the same derivation the painter makes.
+        let lift = north
+            .height()
+            .checked_sub(base.height())
+            .expect("the raised variant is the taller one");
+        // `desk.y` is one row into the base sprite (its top row is the bezel).
+        const BASE_DESK_Y_ROW: u16 = 1;
+        let edges = [0, 1, base.width() - 2, base.width() - 1];
+        for x in edges {
+            for dy in 0..(base.height() - BASE_DESK_Y_ROW) {
+                let b = base.get(x, BASE_DESK_Y_ROW + dy);
+                let n = north.get(x, BASE_DESK_Y_ROW + lift + dy);
+                assert_eq!(
+                    b, n,
+                    "column {x} differs at desk.y+{dy}: the two variants must be \
+                     the same desk below the monitor"
+                );
+            }
+        }
+    }
+
     // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the
     // `.sprite` asset rows: a `DESK_W` edit moves `visual.w` but NOT the asset,
     // silently desyncing render vs mask/occlusion/collision.

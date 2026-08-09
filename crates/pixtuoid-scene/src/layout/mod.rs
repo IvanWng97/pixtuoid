@@ -251,7 +251,14 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 pub const DESK_W: u16 = 10;
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
-pub const DESK_H: u16 = 5;
+///
+/// This is the desk's SIZE, so the art follows it: `visual.h` is `DESK_H + 2`,
+/// and all three desk sprites (`desk`, `desk_north`, and the `desk@4x` density
+/// variant at 4x every row) must carry the matching surface depth or the pack
+/// validator's density check fires. Widening it also widens `pod_stride_y`, so
+/// a taller desk fits FEWER pod rows on a given terminal — the cost is desk
+/// capacity, not just pixels.
+pub const DESK_H: u16 = 6;
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
 /// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
 /// walker passes BEHIND the monitor and is occluded by the desk's own y-sort

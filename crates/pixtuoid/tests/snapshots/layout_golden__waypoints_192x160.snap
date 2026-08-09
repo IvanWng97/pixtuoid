@@ -42,7 +42,7 @@ expression: l.waypoints
     Waypoint {
         pos: Point {
             x: 132,
-            y: 93,
+            y: 95,
         },
         kind: PhoneBooth,
         facing: South,

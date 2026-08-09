@@ -625,19 +625,23 @@ fn paint_desk_lamp(buf: &mut RgbBuffer, desk: Point, strength: f32, theme: &crat
     }
     let warm = theme.lighting.desk_lamp;
     // The shade reads as the SOURCE, so it is brighter than the pool it casts.
-    let shade = blend_rgb(
-        warm,
-        Rgb {
-            r: 255,
-            g: 255,
-            b: 255,
-        },
-        0.45,
-    );
+    // BOTH tones derive from the lamp's OWN light, so the fixture is one
+    // material at two exposures and needs no second theme role. An earlier
+    // revision reached for `furniture.paper_shade` for the stem purely because
+    // it was a dark colour within reach — the token tower's shading, on a lamp.
+    const WHITE: Rgb = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+    // The shade reads as the SOURCE, so it is brighter than the pool it casts.
+    let shade = blend_rgb(warm, WHITE, 0.45);
+    let stem = blend_rgb(warm, BLACK, 0.72);
     let (lx, ly) = (desk.x, desk.y);
     buf.put_checked(lx, ly, shade);
     buf.put_checked(lx + 1, ly, shade);
-    buf.put_checked(lx + 1, ly + 1, theme.furniture.paper_shade);
+    buf.put_checked(lx + 1, ly + 1, stem);
     /// Reach of one task lamp. A desk is 14 wide, so a floor-lamp-sized pool
     /// would wash the neighbouring workstations and undo the point of the
     /// ceiling pools going out.

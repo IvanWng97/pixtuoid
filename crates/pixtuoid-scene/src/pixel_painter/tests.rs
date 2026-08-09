@@ -1024,12 +1024,28 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     }
 }
 
+/// The geometry table's desk height must match the ART's, or the z-key sorts on
+/// a south row the sprite does not actually reach.
+///
+/// This used to assert the literal `7` while calling itself `(DESK_H+2)`, so it
+/// was pinning a NUMBER, not a relationship — deepening the desk by a row moved
+/// both sides and it failed for the wrong reason. Against the sprite it is a
+/// real constraint: `desk` blits at `desk.y - 1` (its top row is the bezel,
+/// which overhangs north), so the rows it covers from `desk.y` down are
+/// `height - 1`, and that is what `visual.h` prices.
 #[test]
 fn desk_z_key_is_the_visual_south() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let art = pack
+        .animation("desk")
+        .and_then(|a| a.frames.first())
+        .expect("the embedded pack ships a desk");
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
-        7,
-        "desk z-key offset (DESK_H+2)"
+        art.height() - 1,
+        "the desk's visual height must equal the rows its sprite covers from \
+         desk.y down (sprite {} rows, blitted one above desk.y)",
+        art.height()
     );
 }
 
