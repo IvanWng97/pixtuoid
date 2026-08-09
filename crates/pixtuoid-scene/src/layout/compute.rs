@@ -1020,12 +1020,9 @@ impl PodGrid {
     /// band holds a single pod row.
     ///
     /// Deliberately NOT "every strip no pod occupies": the north margin and the
-    /// south remainder are pod-free too, and both are already spoken for — the
-    /// lounge cluster and the door's approach live there, so a piece snapped into
-    /// one lands on the couch or seals the threshold. Between two pod rows is the
-    /// only strip that is free by construction. Full-width is what makes the band
-    /// sufficient on its own: it clears every pod at once, so a caller placing
-    /// inside one never has to reason about x.
+    /// south remainder are pod-free too and both are spoken for — the lounge and
+    /// the door's approach — so a piece snapped there lands on the couch or seals
+    /// the threshold.
     fn inter_pod_y_bands(self, cubicle_band: &Bounds) -> Vec<(u16, u16)> {
         // NOT `stride_y - INTER_POD_AISLE_Y`: that is the pod's SLOT pitch, and a
         // desk's blocked ground runs to `DESK_GROUND_H` below its corner — past the

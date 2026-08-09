@@ -601,17 +601,10 @@ fn paint_desk_coffee(
     }
 }
 
-/// Office-chair back peeking out below a back-turned occupant.
+/// Office-chair back, crossing a back-turned occupant's lower torso.
 ///
 /// Only a BACK-TURNED seat draws one, and that falls out of the geometry rather
-/// than being a rule: a far-seated occupant faces the viewer, so their chair is
-/// BEHIND them and invisible. The room ends up with chairs exactly where a chair
-/// would actually be seen.
-///
-/// Deliberately a peek, not a seat: the occupant is already grounded by the desk
-/// in front of them, and a back tall enough to cover the torso swallows the
-/// figure into a dark block instead — the mistake the cutaway profile already
-/// recorded against its own `CHAIR_BACK_H`.
+/// than a rule: a viewer-facing occupant has their chair behind them, invisible.
 fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
     let c = theme.furniture.chair_trim;
     // A lit TOP EDGE, because the body alone disappears: `chair_trim` is darker

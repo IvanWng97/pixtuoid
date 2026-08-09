@@ -116,6 +116,39 @@ def selftest() -> int:
     return 0
 
 
+DOC_RUN_MAX = 10
+"""Longest NEW `///`/`//!` run allowed. 94.4% of the tree's existing runs are <= 8
+and the longest legitimate one is 35, so this flags only the top few percent —
+and diff-scoped, so those existing ones are grandfathered. A new block past it is
+not banned, it is made deliberate."""
+
+
+def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
+    """New `///`/`//!` runs longer than DOC_RUN_MAX, as (file, start_line, len).
+
+    The ast-grep rules deliberately exclude doc comments, so nothing else in this
+    script can see the place most bloat lands.
+    """
+    out = []
+    for f, lines in added.items():
+        if not f.endswith(".rs") or not lines:
+            continue
+        try:
+            src = open(f, errors="ignore").read().splitlines()
+        except OSError:
+            continue
+        run_start = None
+        for i, raw in enumerate(src, start=1):
+            if re.match(r"\s*(///|//!)", raw):
+                run_start = run_start or i
+                continue
+            if run_start and i - run_start > DOC_RUN_MAX:
+                if any(n in lines for n in range(run_start, i)):
+                    out.append((f, run_start, i - run_start))
+            run_start = None
+    return out
+
+
 def main() -> int:
     if "--selftest" in sys.argv[1:]:
         return selftest()
@@ -149,9 +182,15 @@ def main() -> int:
         if ln in added.get(f, ()):  # noqa: SIM118 — set membership
             new_hits.append((f, ln, h["text"].strip().splitlines()[0], h["message"]))
 
-    if not new_hits:
+    docs = doc_run_hits(added)
+    for f, ln, n in docs:
+        print(f"comment-lint: {f}:{ln} — new {n}-line doc-comment run (max {DOC_RUN_MAX})")
+
+    if not new_hits and not docs:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
         return 0
+    if not new_hits:
+        return 1 if gate else 0
 
     github = "--github" in sys.argv[1:]
     # A long run yields overlapping ast-grep windows, so this counts flagged

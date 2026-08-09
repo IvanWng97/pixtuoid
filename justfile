@@ -522,7 +522,8 @@ mutants *args:
     cargo mutants --in-diff target/mutants.diff {{ args }}
 
 # Comment-slop advisory: flag NEW runs of 3+ consecutive line comments (Rust
-# `//`, Python `#`) inside a function body (the repo's "fn-body comments ≤2
+# `//`, Python `#`) inside a function body, AND new `///`/`//!` runs past
+# `DOC_RUN_MAX` (the ast-grep regexes exclude doc comments, where most bloat lands) (the repo's "fn-body comments ≤2
 # lines" convention — pr-review.prompt.md's comment-value factor). DIFF-SCOPED
 # like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
 # `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
@@ -530,7 +531,7 @@ mutants *args:
 # `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
 # Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
 [group('meta')]
-[doc('Advisory: flag NEW 3+-consecutive-comment runs in a fn body (diff-scoped)')]
+[doc('Advisory: flag NEW comment runs — fn-body `//` and over-long `///` (diff-scoped)')]
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
 

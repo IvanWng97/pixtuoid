@@ -755,25 +755,11 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames.get(idx).or_else(|| anim.frames.first())
 }
 
-/// Where this placement's chair back goes, or `None` when none is visible.
-///
-/// Gated on the desk's own facing: only a back-turned occupant has their chair
-/// between themselves and the viewer. `CHAIR_BACK_TOP_DY` clears the TALLEST
-/// seated frame — `typing_back` runs 11 rows from `desk.y` against
-/// `seated_back`'s 10 — so the chair can never cover the typing hands, which
-/// are the one moving part a back-turned agent has left.
 /// One chair per NORTH-facing home desk, occupied or not — the office keeps its
 /// furniture when a session ends.
 ///
-/// The chair belongs to the DESK, not to whoever is in it. Owning it from the
-/// occupant made the draw order free (paint it right after that character) but
-/// tied a fixture's existence to a session's lifetime, and slid it sideways
-/// under a sitter still gliding into the seat. The z key buys the same order
-/// honestly: a seated character's own key reduces to
-/// `desk_walk_anchor_facing(desk, facing).y` — `seated_anchor_facing` subtracts
-/// `WALKING_Y_OFF` from the walk anchor and the sim adds it straight back — so
-/// the chair TIES with its occupant, and this pass runs after
-/// `enqueue_characters` where a stable sort resolves that tie chair-last.
+/// Keyed to TIE with its occupant and enqueued after `enqueue_characters` so the
+/// stable sort paints it over them; `SHARP-EDGES.md` has why that tie holds.
 fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>) {
     /// Where the chair starts, deliberately OVER the occupant rather than below
     /// them: the chair paints after the character, so an offset that clears the
@@ -781,8 +767,8 @@ fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>
     /// Here the backrest crosses the lower torso instead, which is what reads as
     /// leaning back into a seat.
     const CHAIR_BACK_TOP_DY: u16 = 6;
-    for &desk in &ctx.layout.home_desks {
-        let facing = ctx.layout.desk_facing_at(desk);
+    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
+        let facing = ctx.layout.desk_facing(FloorLocalDeskIndex(i));
         if facing != crate::layout::Facing::North {
             continue;
         }

@@ -839,7 +839,6 @@ fn paint_character(
 ) -> Option<CutawayLabel> {
     let c = frame.characters.get(idx)?;
     let agent = frame.agents.get(c.agent_idx)?;
-    // Re-project a desk-seated pose; everyone else keeps the sim's anchor.
     let at = cutaway_anchor(c);
 
     // The SAME recolored sprite the classic painter blits — per-agent hair,
@@ -1193,9 +1192,8 @@ mod tests {
     /// face, so the ratified "head over the surface" reading falls out of the
     /// shared convention — the desk needs no divergence of its own.
     ///
-    /// The classic sim seats an occupant at `desk.y + 4`, which the cutaway
-    /// re-projects to `desk.y`; both values are exercised so a regression to
-    /// the classic projection reds here rather than only in a render.
+    /// Both a near- and a far-side seat are exercised, so re-introducing a
+    /// desk-row override reds here rather than only in a render.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();

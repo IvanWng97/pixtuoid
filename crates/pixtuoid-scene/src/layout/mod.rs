@@ -328,15 +328,11 @@ pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
 ///
-/// Sized against what actually OCCUPIES the gap, which is nothing: the far-seated
-/// row's occupant sits NORTH of its desk and the back-turned row's sits SOUTH of
-/// its own, so the strip between the two desks is floor no one stands on and no
-/// route needs — an office aisle nobody walks down. This also prices
-/// `pod_stride_y`, so tightening it is the desk-CAPACITY lever, not just spacing.
-///
-/// Keep it EVEN. Desk rows step by `DESK_H + this`, and the half-block painter
-/// packs two pixel rows per terminal cell, so an odd step lands a pod's two rows
-/// on opposite sub-cell parities.
+/// Nothing OCCUPIES the gap — both rows' occupants sit outside it — so it is
+/// floor no one walks. It prices `pod_stride_y`, making it the desk-CAPACITY
+/// lever, not just spacing. Keep it EVEN: rows step by `DESK_H + this`, and the
+/// half-block painter packs two pixel rows per cell, so an odd step splits a
+/// pod's two rows across sub-cell parities.
 pub const INTRA_POD_GAP_Y: u16 = 6;
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
