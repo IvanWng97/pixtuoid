@@ -164,13 +164,10 @@ impl Drop for UndeliveredEvents {
 /// session whose `SessionStart` predates the daemon (opencode never re-emits
 /// `session.created`). Activity/Waiting/End never register a new slot.
 ///
-/// This match is on event SHAPE, so unlike [`patch_identity_pids`] the bind is
-/// NOT `FocusChannel`-gated — sound today because every platform with an
-/// `ExitWatch` backend gets its pid from `sh -c`'s EXEC, i.e. the CLI itself.
-/// Windows does not: `cli_pid` walks the tree past an interposed shell, a pid
-/// the stamp gate deliberately withholds from the transcript family. So a
-/// Windows `ExitWatch` backend must gate this bind on `accepts_stamp()` — until
-/// one exists there is nothing to gate, which is why it is a note, not a guard.
+/// Matches on event SHAPE, so unlike [`patch_identity_pids`] this is NOT
+/// `FocusChannel`-gated — sound only while every platform with an `ExitWatch`
+/// backend takes its pid from an exec'd parent. A Windows backend would need
+/// this bind gated on `accepts_stamp()`; there is nothing to gate until then.
 fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
     match ev {
         AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {

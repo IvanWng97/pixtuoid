@@ -107,9 +107,7 @@ fn main() -> Result<()> {
 
 /// CodeWhale env-mode: synthesize the hook envelope from `DEEPSEEK_*` env vars.
 /// The `std::env` reads live here so `env_payload_from` stays testable without
-/// mutating process-global env. `_pid` is deliberately absent — `enrich_payload`
-/// is the ONE place that stamps it, so a Windows ancestor walk cannot run twice
-/// per hook, and it runs inside the time bound rather than ahead of it.
+/// mutating process-global env. No `_pid`: `enrich_payload` is the one stamper.
 fn env_payload(event: &str) -> serde_json::Map<String, Value> {
     // CodeWhale runs the hook with current_dir = its working dir (= the
     // workspace), so the shim's own cwd is the reliable fallback.
@@ -222,11 +220,8 @@ fn enrich_payload(
             map.insert("_pixtuoid_source".into(), Value::from(src));
         }
     }
-    // `_pid` is deliberately NOT shim-owned: the opencode and OpenClaw plugins
-    // stamp `process.pid` from INSIDE the CLI, which beats any ancestor walk, so
-    // an inbound value is KEPT and the shim only fills the gap. Resolving is
-    // LAZY because filling that gap is a process-snapshot walk on Windows — a
-    // plugin-stamped payload must not pay for a value it already has.
+    // The opencode/OpenClaw plugins stamp `process.pid` from inside the CLI —
+    // keep theirs, and stay LAZY so they never pay for the Windows snapshot.
     if !map.contains_key("_pid") {
         if let Some(pid) = resolve_pid() {
             map.insert("_pid".into(), Value::from(pid));

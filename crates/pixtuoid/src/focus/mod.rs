@@ -81,11 +81,9 @@ pub(crate) struct FocusPaths<'a> {
 /// → None. Two click-time recycle guards on the cached path: an EXITING slot
 /// refuses outright (its process is going or gone), and a cached start marker
 /// must match the kernel's CURRENT marker for that pid — a mismatch means the
-/// pid was recycled by an unrelated process after an abrupt death, and a missing
-/// current read means the process is gone (on unix — a Windows marker outlives
-/// the process while any handle to it is open). A cache stamped WITHOUT a
-/// marker skips the identity check entirely: rare now that every supported OS
-/// can read one, but it means an unreadable marker yields an UNGUARDED pid.
+/// pid was recycled after an abrupt death (a missing read means gone on unix;
+/// a Windows marker outlives the process while a handle is open). A cache
+/// stamped WITHOUT a marker skips the check — an unguarded pid.
 pub(crate) fn resolve_pid(
     slot: &AgentSlot,
     paths: &FocusPaths<'_>,
@@ -430,10 +428,8 @@ mod tests {
 
 /// Live dogfood (manual, `--ignored`): walks THIS test process's own ancestor
 /// chain with the real OS table and activates the terminal app it finds. On
-/// Windows it is the only reachable exercise of `activate_os`, but it reaches
-/// the AttachThreadInput retry ONLY if another window holds focus when it
-/// fires — run from the hosting terminal, the first unattached attempt already
-/// wins. Alt-tab away after launching it.
+/// Windows, alt-tab away after launching: run from the hosting terminal the
+/// first unattached attempt wins and the AttachThreadInput retry never runs.
 #[cfg(all(test, any(target_os = "macos", windows)))]
 mod live_dogfood {
     use super::*;

@@ -2,16 +2,11 @@
 //! `EnumWindows`/`GetWindowThreadProcessId` for the focusable test +
 //! `SetForegroundWindow` for activation. Zero permissions.
 //!
-//! A console app does not own its host window — conhost/WindowsTerminal does —
-//! and the click asking for the jump is an input event THAT process received,
-//! not ours. So for a console TUI none of the conditions the system grants
-//! `SetForegroundWindow` on normally hold, and it refuses: per its Remarks an application "cannot force
-//! a window to the foreground while the user is working with another window.
-//! Instead, Windows flashes the taskbar button". [`activate_os`] therefore
-//! borrows the foreground thread's input state (`AttachThreadInput`), which
-//! satisfies the "calling process received the last input event" condition for
-//! as long as the attachment lasts. Two documented bypasses are deliberately
-//! NOT taken — see the binary guide's foreground-lock sharp edge.
+//! A console app owns no window and never receives the click, so
+//! `SetForegroundWindow` normally refuses it and flashes the taskbar instead.
+//! [`activate_os`] borrows the foreground thread's input state to get the right.
+//! Why not the better-known bypasses, and what the attach costs: the binary
+//! guide's foreground-lock sharp edge.
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, FALSE, HWND, INVALID_HANDLE_VALUE, LPARAM, TRUE,
@@ -30,10 +25,8 @@ use super::ProcessTable;
 pub(crate) struct OsProcessTable;
 
 impl ProcessTable for OsProcessTable {
-    /// Re-snapshots per hop because `ancestor_walk` asks one pid at a time. The
-    /// shim's `cli_pid::process_snapshot` reads the same table once for a whole
-    /// walk; the copies are deliberate (it cannot depend on this crate) — fix a
-    /// Toolhelp32 bug in BOTH.
+    /// Re-snapshots per hop (`ancestor_walk` asks one pid at a time). The shim's
+    /// `cli_pid::process_snapshot` is the deliberate second copy — fix in BOTH.
     fn ppid(&self, pid: i32) -> Option<i32> {
         // SAFETY: Toolhelp32 snapshot enumeration per its documented protocol;
         // the entry struct is plain-old-data and owned by us.
@@ -94,9 +87,8 @@ fn top_level_window_of(pid: i32) -> Option<HWND> {
 }
 
 /// Bring `pid`'s top-level window to the foreground; `false` on a denial.
-/// Tries unattached first — that is the whole story when we ARE the foreground
-/// process (the `floating` window painter) — then borrows the foreground
-/// thread's input state for one retry.
+/// Unattached first (all the `floating` painter needs — it IS the foreground
+/// process), then one retry under a borrowed input state.
 pub(crate) fn activate_os(pid: i32) -> bool {
     let Some(hwnd) = top_level_window_of(pid) else {
         return false;
@@ -118,11 +110,9 @@ pub(crate) fn activate_os(pid: i32) -> bool {
     raise(hwnd)
 }
 
-/// One activation attempt, judged by OBSERVATION rather than the BOOL: MSDN
-/// documents zero on refusal but says nothing about the flash-only outcome, and
-/// the call sets no error, so asking who the foreground window IS afterwards is
-/// the only check that separates a real raise from a flash. A wrong `false`
-/// costs one extra attempt.
+/// One attempt, judged by OBSERVATION: MSDN says nothing about the flash-only
+/// outcome and the call sets no error, so only the foreground window afterwards
+/// separates a raise from a flash. A wrong `false` costs one extra attempt.
 fn raise(hwnd: HWND) -> bool {
     // SAFETY: hwnd is a live window handle from the enumeration above;
     // GetForegroundWindow takes no arguments.
@@ -132,10 +122,8 @@ fn raise(hwnd: HWND) -> bool {
     }
 }
 
-/// The thread whose input state is worth borrowing — the one owning the current
-/// foreground window. `None` when there is no foreground window (nothing to
-/// borrow from, and with no foreground process there is no lock to beat) or
-/// when it is our own thread (a self-attach is rejected by definition).
+/// The thread owning the foreground window. `None` when there is none (nothing
+/// to borrow, no lock to beat) or when it is ours (a self-attach is rejected).
 fn foreground_input_thread() -> Option<u32> {
     // SAFETY: both take no arguments; `owner` is our own out-param and `fg` is
     // whatever handle the system reports, which the null check screens.
@@ -151,10 +139,8 @@ fn foreground_input_thread() -> Option<u32> {
     (thread != 0 && thread != me).then_some(thread)
 }
 
-/// An input attachment that undoes itself. `AttachThreadInput` serializes both
-/// threads' input processing until it is called again with `FALSE`, so the
-/// detach rides `Drop` — an early return must not be able to leave the terminal
-/// sharing our input queue.
+/// Self-undoing input attachment: it serializes both threads' input until
+/// detached, so `Drop` owns that rather than an early return.
 struct AttachedInput(u32);
 
 impl AttachedInput {
@@ -175,13 +161,9 @@ impl Drop for AttachedInput {
     }
 }
 
-/// Give this thread a message queue, without which `AttachThreadInput` fails
-/// outright — and a console TUI is exactly the thread that may not have one,
-/// since threads are created without a queue and the system only mints it at
-/// the first USER call. The docs disagree on which calls count (the
-/// `AttachThreadInput` page says USER *or GDI*, the message-queue page says
-/// only "specific user functions"), so prime it explicitly rather than trust
-/// the `EnumWindows` above to have done it.
+/// `AttachThreadInput` fails outright without a message queue, and a console
+/// thread may never have minted one. MSDN disagrees with itself on which calls
+/// mint it, so prime it rather than trust the `EnumWindows` above.
 fn ensure_message_queue() {
     // SAFETY: all-zero bytes are a valid MSG; PeekMessage writes only that
     // buffer, and a null hwnd with PM_NOREMOVE is the documented no-op probe.

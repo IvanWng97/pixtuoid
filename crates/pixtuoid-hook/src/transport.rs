@@ -6,22 +6,16 @@ use std::time::Duration;
 
 pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
 
-/// Proof that the time bound is armed. [`send_line`] takes one, so reaching a
-/// send — or the pid walk before it — with no watchdog running is a compile
-/// error rather than a rule someone has to remember.
+/// Proof the time bound is armed: [`send_line`] takes one, so an unbounded send
+/// is a compile error rather than a rule to remember.
 pub(crate) struct TimeBound(());
 
-/// Arm the shim's hard time bound: a thread that exits the process after
-/// `WRITE_TIMEOUT`, so nothing after this point can block CC
-/// (exit(0)-on-timeout IS the contract). Uses `Builder::spawn`, not
-/// `thread::spawn`, so OS thread exhaustion degrades to dropping the event
-/// instead of an abort.
+/// Arm the shim's hard time bound — exit(0)-on-timeout IS the contract.
+/// `Builder::spawn` so thread exhaustion drops the event instead of aborting.
 ///
-/// Arm it before the shim's own OS work, not just the send: on Windows
-/// `cli_pid` walks a Toolhelp32 snapshot, which an AV/EDR filter can slow
-/// arbitrarily while the CLI waits on this child (#882). Reading stdin stays
-/// OUTSIDE the bound deliberately — that is the CLI writing to US, and a large
-/// slow payload should arrive, not be cut into a dropped event.
+/// Armed before the shim's own OS work, not just the send (#882). Reading stdin
+/// stays OUTSIDE it: that is the CLI writing to us, and a large slow payload
+/// should arrive rather than be cut into a dropped event.
 pub(crate) fn arm_watchdog() -> Option<TimeBound> {
     std::thread::Builder::new()
         .spawn(|| {

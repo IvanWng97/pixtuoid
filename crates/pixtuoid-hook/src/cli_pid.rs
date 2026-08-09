@@ -1,36 +1,15 @@
-//! The spawning agent CLI's pid — the `_pid` field of the hook envelope, which
-//! feeds the daemon's liveness watch and the TUI's focus-jump.
+//! The spawning agent CLI's pid, for the hook envelope's `_pid`.
 //!
-//! On Unix that is plain `getppid`: a runner either direct-execs the shim
-//! (Hermes, grok) or shells it through `sh -c`, which EXECs the command —
-//! either way the shim's parent IS the CLI.
+//! Unix: `getppid` — the runner execs the shim, directly or through `sh -c`, so
+//! the parent IS the CLI. Windows: several runners interpose a `cmd.exe /C`
+//! that dies with the shim, so a raw ppid names a corpse (#528); walk past it
+//! instead. Residuals are in `pixtuoid-core/CLAUDE.md`'s focus-jump section.
 //!
-//! Codex's and Reasonix's own hook runners shell via `cmd.exe /C` — that is
-//! upstream's doing, not ours; `install::hook_cmd` writes the BARE form
-//! precisely BECAUSE cmd will parse it — and a `subprocess` / `exec.Command`
-//! shell call compiles to the same thing for the rest. The
-//! interposed cmd.exe exits the moment the shim does, so a raw ppid names a
-//! dead, soon-recycled process, which is why Windows used to send no pid at all
-//! (#528). The channel here is an ancestor WALK instead: over ONE process
-//! snapshot, skip the shells a hook runner interposes and stamp the first
-//! ancestor that is the CLI itself.
-//!
-//! The list can stay short because being wrong degrades rather than misfires. A
-//! runner interposing some OTHER shell leaves us stamping that transient pid,
-//! and a dead pid owns no window, so the focus walk finds nothing to activate —
-//! the pre-#528 silent no-op, not a wrong window. Over-skipping needs a CLI that
-//! runs AS one of the listed shells; no shim-stamp source does today, and a
-//! `pwsh`-hosted one would land on the terminal, which the focus walk would
-//! have reached anyway.
-//!
-//! The walk and its vocabulary compile on EVERY platform (the `hook_cmd`
-//! precedent) so the decision unit-tests on the machine this is developed on;
-//! only the snapshot FFI is `cfg(windows)`, hence the module-wide dead-code
-//! allowance off Windows.
+//! The walk compiles everywhere so it unit-tests off Windows; only the snapshot
+//! FFI is `cfg(windows)`, hence the dead-code allowance.
 #![cfg_attr(not(windows), allow(dead_code))]
 
-/// One process-table row — the walk's whole input, so it reads a snapshot
-/// rather than the OS once per hop.
+/// One process-table row — the walk's whole input.
 struct ProcRow {
     pid: u32,
     parent: u32,
@@ -38,19 +17,13 @@ struct ProcRow {
     exe: String,
 }
 
-/// The shells a Windows hook runner interposes between the CLI and the shim.
-/// A CLI shipped as a `.cmd`/`.bat` wrapper adds another of the same.
-///
-/// By NAME because the snapshot carries nothing structural to key on: the
-/// semantic signal (an ancestor whose command line holds OUR exe path) needs
-/// `NtQueryInformationProcess` plus a cross-process read, and "skip an ancestor
-/// created within N ms of us" — cheap now that `GetProcessTimes` sits next door
-/// — skips the CLI itself at session_start, when it is milliseconds old.
+/// By NAME because the snapshot carries nothing structural: matching the
+/// ancestor's command line needs `NtQueryInformationProcess`, and "created
+/// within N ms of us" skips the CLI itself at session_start.
 const INTERPOSER_SHELLS: &[&str] = &["cmd.exe", "powershell.exe", "pwsh.exe"];
 
-/// Hop ceiling for the walk. A real chain interposes one shell, two with a
-/// `.cmd` wrapper — this is the terminator for a corrupt or racing snapshot
-/// (whose rows can form a cycle), not a tuning knob.
+/// Terminator for a cyclic/corrupt snapshot, not a tuning knob (a real chain
+/// interposes one shell, two with a `.cmd` wrapper).
 const MAX_HOPS: usize = 8;
 
 fn is_interposer(exe: &str) -> bool {
@@ -59,10 +32,9 @@ fn is_interposer(exe: &str) -> bool {
         .any(|shell| exe.eq_ignore_ascii_case(shell))
 }
 
-/// Walk up from `start` (the shim) to the first ancestor that isn't an
-/// interposed shell. `None` when the chain leaves the snapshot — an exited
-/// parent is absent from it, though a RECYCLED pid is present and the walk
-/// cannot tell — or outruns [`MAX_HOPS`].
+/// First ancestor of `start` that isn't an interposed shell. `None` when the
+/// chain leaves the snapshot or outruns [`MAX_HOPS`]. An exited parent is
+/// absent from it; a RECYCLED one is present and indistinguishable.
 fn first_cli_ancestor(start: u32, rows: &[ProcRow]) -> Option<u32> {
     let row_of = |pid: u32| rows.iter().find(|r| r.pid == pid);
     let mut pid = start;
@@ -84,21 +56,16 @@ pub(crate) fn cli_pid() -> Option<u32> {
     u32::try_from(unsafe { libc::getppid() }).ok()
 }
 
-/// Slice of the send bound the walk may spend. Derived from `WRITE_TIMEOUT`
-/// rather than named separately so the two cannot drift: the walk is the one
-/// step another process can make slow (an AV/EDR filter hooks Toolhelp32), and
-/// it must not eat the budget the ENVELOPE needs. Losing `_pid` costs a focus
-/// jump; losing the envelope costs the sprite, since for a mid-attached session
-/// the hook is the only proof of life.
+/// The walk's own slice of the send bound — an AV/EDR filter can make a
+/// Toolhelp32 snapshot slow, and losing `_pid` must not cost the ENVELOPE.
+/// Derived so the two cannot drift.
 #[cfg(windows)]
 const WALK_BUDGET: std::time::Duration = crate::transport::WRITE_TIMEOUT.checked_div(4).unwrap();
 
 #[cfg(windows)]
 pub(crate) fn cli_pid() -> Option<u32> {
     let (tx, rx) = std::sync::mpsc::channel();
-    // Off-thread so a stalled snapshot is ABANDONED rather than waited on; the
-    // orphan dies with the process. A spawn failure degrades to no pid, like
-    // the watchdog's own `Builder::spawn`.
+    // Off-thread so a stalled snapshot is abandoned, not waited on.
     std::thread::Builder::new()
         .spawn(move || {
             let _ = tx.send(walk_now());
@@ -121,17 +88,11 @@ pub(crate) fn cli_pid() -> Option<u32> {
     None
 }
 
-/// Every live process as `(pid, parent, image name)`, from ONE Toolhelp32
-/// snapshot — a point-in-time view, so the whole walk sees one consistent tree
-/// instead of racing a fresh snapshot per hop. Empty when it cannot be opened
-/// or walked at all; a mid-enumeration failure truncates it instead, which the
-/// walk reads the same way — no answer.
+/// Every live process, from ONE snapshot so the walk sees a consistent tree.
+/// Empty or truncated on failure; the walk reads both as no answer.
 ///
-/// A SECOND Toolhelp32 enumeration on purpose: `focus::windows::OsProcessTable`
-/// reads the same table, but this shim stays dependency-light (invariant #5) so
-/// sharing would cost a crate. They differ deliberately — that one answers one
-/// pid per call and re-snapshots per hop; this one snapshots once for the whole
-/// walk. Fix a Toolhelp32 bug in BOTH.
+/// A second Toolhelp32 reader on purpose — `focus::windows::OsProcessTable` is
+/// the other, and the shim can't depend on that crate. Fix bugs in BOTH.
 #[cfg(windows)]
 fn process_snapshot() -> Vec<ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -186,8 +147,6 @@ mod tests {
         }
     }
 
-    /// The exec-form chain (Hermes, and CC's Windows install): the CLI spawns
-    /// the shim directly, so the parent already IS the answer.
     #[test]
     fn a_direct_parent_that_is_not_a_shell_is_the_cli() {
         let rows = [
@@ -210,9 +169,7 @@ mod tests {
         assert_eq!(first_cli_ancestor(300, &rows), Some(200));
     }
 
-    /// A CLI installed as a `.cmd` wrapper stacks a second shell, and the
-    /// PowerShell runner spells its shell differently. Casing is the filesystem's
-    /// to choose, not ours.
+    /// A `.cmd` wrapper stacks a second shell; casing is the filesystem's.
     #[test]
     fn every_interposer_spelling_and_a_stacked_pair_are_skipped() {
         let rows = [
@@ -229,8 +186,7 @@ mod tests {
         );
     }
 
-    /// A parent that exited leaves no row, and the shim must stamp nothing
-    /// rather than a pid that may already belong to someone else.
+    /// An exited parent leaves no row — stamp nothing, not someone else's pid.
     #[test]
     fn a_parent_missing_from_the_snapshot_is_no_answer() {
         let rows = [row(300, 250, "pixtuoid-hook.exe")];
@@ -253,9 +209,7 @@ mod tests {
         assert_eq!(first_cli_ancestor(300, &cycle), None);
     }
 
-    /// The real resolver, against the real process table: this test binary was
-    /// spawned by the harness, not through a shell, so it must name a pid that
-    /// is neither ours nor the root.
+    /// The real resolver against the real process table.
     #[test]
     fn the_live_resolver_names_a_real_ancestor() {
         let pid = cli_pid().expect("this process has a live parent");

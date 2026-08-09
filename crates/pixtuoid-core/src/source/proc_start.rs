@@ -6,10 +6,8 @@
 //! boot-time/ticks-per-sec conversion), Windows the creation `FILETIME`. The
 //! units DIFFER per OS: compare two markers from the SAME machine for equality,
 //! never across hosts and never as wall-clock. `None` on any failure (EPERM,
-//! unsupported OS, and on unix a pid that is gone) — callers treat a missing
-//! marker as "no identity check available", never an error. A `Some` is NOT
-//! proof of life on Windows: a terminated pid still reads while any handle to
-//! it is open.
+//! unsupported OS, and on unix a gone pid) — callers treat that as "no identity
+//! check available", never an error. A `Some` is NOT proof of life on Windows.
 
 /// Opaque start marker for `pid`, or `None` when unreadable/unsupported.
 pub fn pid_start_marker(pid: i32) -> Option<u64> {
@@ -59,10 +57,8 @@ fn imp(pid: i32) -> Option<u64> {
     };
 
     let pid = u32::try_from(pid).ok()?;
-    // QUERY_LIMITED_INFORMATION over QUERY_INFORMATION: the lesser right
-    // GetProcessTimes accepts, and the one MSDN does NOT list among those a
-    // protected process refuses.
-    // SAFETY: all arguments are by-value; the null check screens the handle.
+    // SAFETY: all arguments by-value; the null check screens the handle.
+    // LIMITED is the lesser right GetProcessTimes accepts.
     let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid) };
     if handle.is_null() {
         return None;
@@ -97,9 +93,8 @@ fn imp(_pid: i32) -> Option<u64> {
 mod tests {
     use super::*;
 
-    /// A child that outlives the assertions. `ping` is the Windows sleep that
-    /// survives the harness: `timeout` refuses a redirected stdin and `waitfor`
-    /// is not on every SKU.
+    /// A child that outlives the assertions. `ping` because Windows `timeout`
+    /// refuses a redirected stdin and `waitfor` is not on every SKU.
     fn spawn_sleeper() -> std::process::Child {
         #[cfg(windows)]
         let mut cmd = {
@@ -129,11 +124,8 @@ mod tests {
         child.wait().expect("reap the child");
     }
 
-    /// Unix-only. Windows documents a process HANDLE as valid after termination
-    /// and `std::process::Child` holds one past `wait()`, so the same read there
-    /// would be asserting std's handle lifetime rather than a kernel guarantee.
-    /// Nothing depends on the dead-pid read; the guard that matters is the
-    /// recycled-pid one, where a reused pid carries its own creation time.
+    /// Unix-only: a Windows handle stays valid after termination and `Child`
+    /// holds one, so this would assert std's handle lifetime, not the kernel's.
     #[cfg(unix)]
     #[test]
     fn marker_is_none_after_the_process_dies() {
@@ -150,15 +142,9 @@ mod tests {
         assert!(pid_start_marker(std::process::id() as i32).is_some());
     }
 
-    /// The marker must DISTINGUISH incarnations — the property the recycle
-    /// guard rests on. Every other Windows assertion here survives an `imp`
-    /// that returns a constant, so without this one that platform has no teeth
-    /// at all (the dies-with-the-process test is unix-only).
-    ///
-    /// Windows-only because it needs sub-second resolution: macOS's marker is
-    /// epoch SECONDS and Linux's is ~10ms ticks, so a child spawned inside the
-    /// test would routinely read identical there. The 100ns creation FILETIME
-    /// cannot collide.
+    /// The teeth: every other Windows assertion survives an `imp` returning a
+    /// constant. Windows-only — macOS's epoch-SECONDS marker would collide for
+    /// a child spawned inside the same test.
     #[cfg(windows)]
     #[test]
     fn two_live_processes_have_different_markers() {
