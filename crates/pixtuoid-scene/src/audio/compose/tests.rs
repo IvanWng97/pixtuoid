@@ -197,12 +197,22 @@ fn every_seed_is_well_formed_night() {
 fn assert_well_formed(s: &GeneratedScore, seed: u64) {
     let loop_s = s.loop_secs();
     let bar_s = s.bar_s();
-    for &(at, _, vel) in s.sparkle.iter().chain(s.keys.iter()) {
+    for &(at, _, vel) in s.sparkle.iter().chain(s.keys.iter()).chain(s.bass.iter()) {
         assert!(
             at >= 0.0 && at < loop_s,
             "seed {seed}: event at {at} outside loop {loop_s}"
         );
         assert!(vel > 0.0 && vel <= 1.0, "seed {seed}: velocity {vel}");
+    }
+    assert!(
+        s.bass.len() >= GEN_LOOP_BARS,
+        "seed {seed}: the bass must anchor every bar's ONE"
+    );
+    for &(at, note, _) in &s.bass {
+        assert!(
+            (26..=38).contains(&note),
+            "seed {seed}: bass note {note} at {at}s out of the sub window"
+        );
     }
     for &(at, _, gain) in &s.drums {
         assert!(

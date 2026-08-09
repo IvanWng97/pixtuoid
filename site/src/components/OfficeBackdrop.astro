@@ -679,7 +679,7 @@ const officeDriverUrl = asset('office-driver.js');
     let audioBooting = false; // warmup pump in flight (ignore re-clicks)
     let audioUnavailable = false; // WebAudio failed (no device / locked down) — ♩ disabled
     let restoreArmed = false; // the remembered-pref restore listeners attach ONCE
-    let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
+    let loopGains = []; // 7 GainNodes (LoopStem::ALL order: 0=Pad … 6=Rain)
     let loopSources = [];
     let oneShotBufs = {}; // pool wire → [AudioBuffer]
     let audioSR = 44100; // engine sample rate, read ONCE at upload (see below)
@@ -706,7 +706,7 @@ const officeDriverUrl = asset('office-driver.js');
       audioSR = office.audio_sample_rate(); // read once, before any view is taken
       loopGains = [];
       loopSources = [];
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 7; i++) {
         const g = audioCtx.createGain();
         g.gain.value = 0;
         g.connect(audioCtx.destination);
@@ -732,10 +732,10 @@ const officeDriverUrl = asset('office-driver.js');
         }
       }
     }
-    // A mood-track swap replaces the 5 TRACK-stem loop buffers (0..4) in place;
-    // rain (5) is weather, untouched.
+    // A mood-track swap replaces the 6 TRACK-stem loop buffers (0..5) in place;
+    // rain (6) is weather, untouched.
     function audioSwapLoops() {
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < 6; i++) {
         const s = audioCtx.createBufferSource();
         s.buffer = audioLoopBuffer(i);
         s.loop = true;
@@ -768,7 +768,7 @@ const officeDriverUrl = asset('office-driver.js');
         const now = audioCtx.currentTime;
         // The mixer already crossfades, so a short setTargetAtTime just
         // de-zippers the ~30fps steps.
-        for (let i = 0; i < 6; i++) {
+        for (let i = 0; i < 7; i++) {
           loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
         }
         if (cmd.swapped) audioSwapLoops();

@@ -52,8 +52,13 @@ pub struct GeneratedScore {
     pub(super) sparkle: Vec<(f32, u8, f32)>,
     pub(super) keys: Vec<(f32, u8, f32)>,
     pub(super) drums: Vec<(f32, DrumKind, f32)>,
+    /// The bass LANE's event list — root/5th/leading-tone only, in the sub
+    /// window. The generated night pad renders its chords WITHOUT a baked sub
+    /// (`sub_gain` 0.0) because this lane owns that register now.
+    pub(super) bass: Vec<(f32, u8, f32)>,
     /// The sub-bass floor per template bar — ALWAYS derived (cheap), so no
-    /// Option and no fallback; only the night renderer reads it.
+    /// Option and no fallback; only the FROZEN night-pad anchor's core still
+    /// consumes it (the generated sub rides the `bass` lane).
     pub(super) bass_roots: [u8; 4],
     /// Night only: kick timestamps for the texture's baked duck (empty for day).
     pub(super) kick_times: Vec<f32>,
@@ -821,6 +826,63 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
     (out, kicks)
 }
 
+/// Fold a pitch class into the ratified sub window (26..=38) — the ONE
+/// bass-register authority; `bass_roots` and the bass lane both fold through it.
+fn sub_note(pc: u8) -> u8 {
+    let mut b = 24 + (pc % 12);
+    while b < 26 {
+        b += 12;
+    }
+    while b > 38 {
+        b -= 12;
+    }
+    b
+}
+
+/// The bass lane: root-anchored and sparse — the ONE on every bar, an optional
+/// answer on the kick2 side, and (day) an occasional leading-tone pickup into
+/// the next bar. Root/5th/leading-tone only: the sub register carries the
+/// floor, not a melody, and every note lags the beat a touch so the kick keeps
+/// the transient.
+fn bass_events(
+    rng: &mut NoiseStream,
+    bar_roots: &[u8; 8],
+    beat_s: f32,
+    mood: Mood,
+) -> Vec<(f32, u8, f32)> {
+    let bar_s = beat_s * super::score::BEATS_PER_BAR;
+    // night's answer sits on beat 2 (the old baked sub's half-note pulse); day's
+    // rides the kick2 side of the bar
+    let (answer_p, answer_beat, fifth_p, pickup_p, vel_base) = match mood {
+        Mood::Day => (0.55, 2.5, 0.4, 0.25, 0.62),
+        Mood::Night => (0.7, 2.0, 0.2, 0.0, 0.55),
+    };
+    let mut out = Vec::new();
+    for bar in 0..GEN_LOOP_BARS {
+        let b0 = bar as f32 * bar_s;
+        let root = sub_note(bar_roots[bar]);
+        let at = b0 + 0.014 + 0.010 * rng.unit();
+        out.push((at, root, vel_base + 0.08 * rng.unit()));
+        if chance(rng, answer_p) {
+            let note = if chance(rng, fifth_p) {
+                sub_note(bar_roots[bar] + 7)
+            } else {
+                root
+            };
+            let at = b0 + answer_beat * beat_s + 0.014 + 0.010 * rng.unit();
+            out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
+        }
+        if chance(rng, pickup_p) {
+            // approach the NEXT bar's root by its leading-tone pc, folded so the
+            // pickup can't leave the sub window
+            let next_pc = bar_roots[(bar + 1) % GEN_LOOP_BARS];
+            let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
+            out.push((at, sub_note(next_pc + 11), 0.34 + 0.06 * rng.unit()));
+        }
+    }
+    out
+}
+
 fn keys_events(
     rng: &mut NoiseStream,
     bar_chords: &[[u8; 4]; 8],
@@ -911,16 +973,12 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
 
     let mut bass_roots = [0u8; 4];
     for (i, &pc) in roots_pc.iter().enumerate() {
-        // place the root pc in the ratified sub window (26..=38)
-        let mut b = 24 + pc;
-        while b < 26 {
-            b += 12;
-        }
-        while b > 38 {
-            b -= 12;
-        }
-        bass_roots[i] = b;
+        bass_roots[i] = sub_note(pc);
     }
+
+    // the LAST musical draw block, kept just ahead of the voice draw so the
+    // voice stays the stream's tail
+    let bass = bass_events(&mut rng, &bar_roots, beat_s, mood);
 
     // drawn AFTER every musical draw, so a voice-registry change can never
     // silently recompose an already-blessed seed's notes; ONE unit draw per
@@ -953,6 +1011,7 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         sparkle,
         keys,
         drums,
+        bass,
         bass_roots,
         kick_times: if mood == Mood::Night {
             kicks

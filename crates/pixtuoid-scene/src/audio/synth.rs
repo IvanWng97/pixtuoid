@@ -487,6 +487,28 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     buf
 }
 
+/// The bass voice: a sine fundamental with tanh-grown odd harmonics (the sub
+/// carries the power, the harmonics carry audibility on small speakers), a
+/// soft attack so the kick keeps the transient, and a plateau-then-release
+/// envelope — a held floor note, not a pluck.
+fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+    let n = n_samples(dur_s);
+    let f = midi_freq(midi as f32);
+    let tau = std::f32::consts::TAU;
+    let env = env_ar(n, 0.03, dur_s * 0.35);
+    let drive = 1.1 + 1.6 * vel;
+    let norm = drive.tanh();
+    (0..n)
+        .map(|i| {
+            let t = i as f32 / SR;
+            // the note settles slightly after the onset, like a damped string
+            let body = 0.75 + 0.25 * (-t * 2.0).exp();
+            let sig = ((tau * f * t).sin() * drive).tanh() / norm;
+            sig * env(i) * body * vel
+        })
+        .collect()
+}
+
 /// The kalimba lead voice: a plucked TINE — a cantilever bar, so its overtones
 /// are inharmonic (modes near 1 : 5.9 : 16.5, nothing like a string's 1:2:3)
 /// and die much faster than the fundamental, plus a soft thump off the
@@ -561,8 +583,14 @@ fn night_bar_s() -> f32 {
     score::night_beat_s() * score::BEATS_PER_BAR
 }
 
+/// The FROZEN night pad's baked sub level. The ratified v4 take renders chords
+/// + the sub-bass floor in ONE buffer; GENERATED takes pass `sub_gain` 0.0
+/// instead because their sub rides the separate bass lane (lane 5).
+#[cfg(test)]
+const NIGHT_PAD_SUB_GAIN: f32 = 3.2;
+
 /// Night pad: chords + the SUB-BASS floor in ONE buffer, so the harmonic floor
-/// moves as one — no separate bass stem.
+/// moves as one — the FROZEN anchor predates the bass stem and keeps its pins.
 #[cfg(test)]
 pub fn night_pad() -> Vec<f32> {
     night_pad_core(
@@ -570,6 +598,7 @@ pub fn night_pad() -> Vec<f32> {
         &score::NIGHT_BASS_ROOTS,
         night_bar_s(),
         score::NIGHT_LOOP_BARS,
+        NIGHT_PAD_SUB_GAIN,
     )
 }
 
@@ -578,6 +607,7 @@ fn night_pad_core(
     bass_roots: &[u8; 4],
     bar_s: f32,
     loop_bars: usize,
+    sub_gain: f32,
 ) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(bar_s * loop_bars as f32)];
@@ -609,7 +639,10 @@ fn night_pad_core(
             let bass: Vec<f32> = (0..hn)
                 .map(|i| {
                     let t = i as f32 / SR;
-                    ((tau * fb * t).sin() + 0.15 * (tau * 2.0 * fb * t).sin()) * env(i) * g * 3.2
+                    ((tau * fb * t).sin() + 0.15 * (tau * 2.0 * fb * t).sin())
+                        * env(i)
+                        * g
+                        * sub_gain
                 })
                 .collect();
             place(&mut sig, &bass, half as f32 * bar_s / 2.0, 1.0);
@@ -865,7 +898,7 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
 /// The per-`(mood, lane)` render recipe — the ONE authority both the [`gen_bed`]
 /// arms and the frozen `#[cfg(test)]` delegations read, so the frozen
 /// fingerprint pins transitively guard the params that actually ship. The triple
-/// is that lane's core-call args IN ORDER: sparkle/keys (lanes 1,2) =
+/// is that lane's core-call args IN ORDER: sparkle/keys/bass (lanes 1,2,5) =
 /// `(dur_s, cutoff_hz, peak)`; drums (lane 3) = `(cutoff_hz, drive, peak)`.
 /// Pad/texture lanes (0,4) read the `(0.0, 0.0, 0.0)` fallback and ignore it.
 fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
@@ -873,16 +906,18 @@ fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
         (Mood::Day, 1) => (2.0, 3200.0, 0.6),
         (Mood::Day, 2) => (0.9, 2400.0, 0.8),
         (Mood::Day, 3) => (7500.0, 2.2, 0.85),
+        (Mood::Day, 5) => (1.8, 900.0, 0.8),
         (Mood::Night, 1) => (2.2, 2800.0, 0.5),
         (Mood::Night, 2) => (1.1, 2000.0, 0.7),
         (Mood::Night, 3) => (6000.0, 2.0, 0.8),
+        (Mood::Night, 5) => (2.0, 700.0, 0.8),
         _ => (0.0, 0.0, 0.0),
     }
 }
 
 /// One lane of a generated take (`bank::TRACK_STEMS` order: pad, sparkle, keys,
-/// drums, texture) — the CHUNKED build unit the wasm driver spreads across ticks,
-/// because a full five-bed build in one rAF tick hitches the page. An
+/// drums, texture, bass) — the CHUNKED build unit the wasm driver spreads across
+/// ticks, because a full six-bed build in one rAF tick hitches the page. An
 /// out-of-range lane returns silence rather than panicking.
 pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Vec<f32> {
     let loop_s = score.loop_secs();
@@ -899,11 +934,13 @@ pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Ve
         (Mood::Day, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
         (Mood::Day, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
         (Mood::Day, 4) => texture_bed(rng),
+        // the generated night pad renders NO baked sub — lane 5 owns that register
         (Mood::Night, 0) => night_pad_core(
             &score.bar_chords,
             &score.bass_roots,
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
+            0.0,
         ),
         (Mood::Night, 1) => {
             events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
@@ -911,14 +948,17 @@ pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Ve
         (Mood::Night, 2) => events_stem_core(loop_s, &score.keys, r0, r1, r2),
         (Mood::Night, 3) => drums_core(loop_s, &score.drums, r0, r1, r2, rng),
         (Mood::Night, 4) => night_texture_core(loop_s, &score.kick_times, rng),
+        (Mood::Day | Mood::Night, 5) => {
+            events_stem_voiced(loop_s, &score.bass, r0, r1, r2, bass_note)
+        }
         _ => Vec::new(),
     };
     brighten(&mut bed);
     bed
 }
 
-/// Synthesize a generated take's five beds in `bank::TRACK_STEMS` order.
-pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 5] {
+/// Synthesize a generated take's six beds in `bank::TRACK_STEMS` order.
+pub fn gen_beds(score: &GeneratedScore, rng: &mut NoiseStream) -> [Vec<f32>; 6] {
     std::array::from_fn(|lane| gen_bed(score, lane, rng))
 }
 
@@ -933,9 +973,11 @@ mod tests {
         assert_eq!(lane_recipe(Mood::Day, 1), (2.0, 3200.0, 0.6));
         assert_eq!(lane_recipe(Mood::Day, 2), (0.9, 2400.0, 0.8));
         assert_eq!(lane_recipe(Mood::Day, 3), (7500.0, 2.2, 0.85));
+        assert_eq!(lane_recipe(Mood::Day, 5), (1.8, 900.0, 0.8));
         assert_eq!(lane_recipe(Mood::Night, 1), (2.2, 2800.0, 0.5));
         assert_eq!(lane_recipe(Mood::Night, 2), (1.1, 2000.0, 0.7));
         assert_eq!(lane_recipe(Mood::Night, 3), (6000.0, 2.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Night, 5), (2.0, 700.0, 0.8));
     }
 
     #[test]
@@ -1265,8 +1307,9 @@ mod tests {
                         "{mood:?} seed {seed} bed {i}: NaN/over-peak"
                     );
                 }
-                for (i, bed) in beds.iter().enumerate().take(4) {
-                    assert_eq!(bed.len(), n, "{mood:?} seed {seed} bed {i} length");
+                // every musical lane phase-locks; only texture (4) runs free by day
+                for i in [0usize, 1, 2, 3, 5] {
+                    assert_eq!(beds[i].len(), n, "{mood:?} seed {seed} bed {i} length");
                 }
                 match mood {
                     Mood::Day => assert_eq!(beds[4].len(), BED_LOOP_SAMPLES),
@@ -1277,6 +1320,11 @@ mod tests {
                 assert!(
                     low > 0.2 && low > mid * 0.8,
                     "{mood:?} seed {seed}: drums lost the kick floor ({low:.3}/{mid:.3})"
+                );
+                let sub = band_energy_share(&beds[5], 31.0, 125.0);
+                assert!(
+                    sub > 0.35 && sub > band_energy_share(&beds[5], 250.0, 1000.0),
+                    "{mood:?} seed {seed}: the bass lane must own the sub ({sub:.3})"
                 );
             }
         }

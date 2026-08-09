@@ -377,7 +377,7 @@ mod tests {
     #[test]
     fn commands_json_is_parseable_and_pool_wire_round_trips() {
         let cmd = TickCommands {
-            gains: [0.1, 0.2, 0.0, 0.0, 0.0, 0.35],
+            gains: [0.1, 0.2, 0.0, 0.0, 0.0, 0.0, 0.35],
             plays: vec![
                 PlayCmd {
                     pool: OneShotPool::Keystroke,
@@ -394,8 +394,8 @@ mod tests {
         };
         let json = commands_json(&cmd);
         let v: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
-        assert_eq!(v["gains"].as_array().unwrap().len(), 6);
-        assert_eq!(v["gains"][5].as_f64().unwrap(), 0.35);
+        assert_eq!(v["gains"].as_array().unwrap().len(), 7);
+        assert_eq!(v["gains"][6].as_f64().unwrap(), 0.35);
         assert_eq!(v["plays"][0][0], 0, "keystroke wire = 0");
         assert_eq!(v["plays"][0][1], 7, "keystroke index");
         assert_eq!(v["plays"][1][0], 3, "printer wire = 3");
@@ -410,17 +410,17 @@ mod tests {
     fn warmup_builds_bank_rain_then_one_bed_per_step_then_is_ready() {
         let mut d = WebAudioDriver::new(TrackId::GenDay(0));
         assert!(!d.is_ready());
-        assert_eq!(d.warmup_step(), 6);
+        assert_eq!(d.warmup_step(), 7);
         assert!(!d.oneshot_buffer(OneShotPool::DoorChime, 0).is_empty());
-        assert_eq!(d.warmup_step(), 5);
-        assert!(!d.loop_buffer(5).is_empty(), "rain bed (stem 5) ready");
-        for remaining in (0..5).rev() {
+        assert_eq!(d.warmup_step(), 6);
+        assert!(!d.loop_buffer(6).is_empty(), "rain bed (stem 6) ready");
+        for remaining in (0..6).rev() {
             assert!(!d.is_ready(), "not ready before the last bed");
             assert_eq!(d.warmup_step(), remaining);
         }
         assert!(d.is_ready());
         assert_eq!(d.warmup_step(), 0, "warmup is idempotent once ready");
-        for i in 0..6 {
+        for i in 0..7 {
             assert!(!d.loop_buffer(i).is_empty(), "loop stem {i} has a bed");
         }
         for i in 0..bank::KEYSTROKE_POOL {
@@ -535,7 +535,7 @@ mod tests {
             let cmd = d.tick(now, night.clone());
             if cmd.swap.is_some() {
                 swapped_seen = true;
-                for g in &cmd.gains[0..5] {
+                for g in &cmd.gains[0..TRACK_STEMS.len()] {
                     assert!(*g <= 1e-4, "track stems held silent through the swap");
                 }
                 break;
@@ -718,7 +718,7 @@ mod tests {
         assert_eq!(
             swap - commit,
             TRACK_STEMS.len() - 1,
-            "five beds, one per tick"
+            "the beds land one per tick"
         );
         assert_eq!(d.track, TrackId::GenNight(7));
         assert!(d.pending.is_none(), "the stage is consumed by the swap");
