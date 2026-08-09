@@ -628,19 +628,23 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
         },
         RIM_LIFT,
     );
-    // The shape is a MASK, not a rectangle with insets. A flat slab below the
-    // occupant reads as a plank lying on the floor behind them; what says
-    // "sitting IN a chair" is the back rising on either SIDE of the body. The
-    // two top rows are those flanks — they sit beside the character (whose 8 px
-    // occupy the middle), so they cost nothing and are never occluded by it.
+    // The shape is a MASK, not a rectangle with insets: what says "sitting IN a
+    // chair" is the arms rising on either SIDE of the body, which is what the top
+    // two rows are. They are flush with the character's own 8 px rather than
+    // beside it, so they CLIP its outer columns — the arms passing in front of
+    // the shoulders, which is also why the chair paints after the character.
+    //
+    // Row 2 spans the full width on purpose. Notched to `.######.` the arms met
+    // the back only diagonally, and a one-pixel gap does not read as relief at
+    // this scale — it reads as the arms being detached from the chair.
     //
     // `#` paints, `.` skips. Row 2 carries the lit rim.
     const CHAIR: [&[u8; CHAIR_BACK_W as usize]; CHAIR_BACK_H as usize] = [
-        b"#........#",
-        b"#........#",
-        b".########.",
-        b"##########",
-        b".########.",
+        b"#......#",
+        b"#......#",
+        b"########",
+        b"########",
+        b".######.",
     ];
     /// Which row of `CHAIR` catches the light — the back's top edge, not the
     /// flanks above it.
@@ -659,9 +663,9 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
 /// Rows the chair spans: two flanks beside the occupant, then a three-row back
 /// below them.
 const CHAIR_BACK_H: u16 = 5;
-/// Chair-back width — a little wider than the 8 px character, so it reads as
-/// something they are sitting IN rather than a shadow under them.
-const CHAIR_BACK_W: u16 = 10;
+/// Chair-back width — flush with the 8 px character, so the back reads as the
+/// seat they are IN rather than a wider ledge behind them.
+const CHAIR_BACK_W: u16 = 8;
 
 /// Task lamp on the desk's west wing, plus its warm pool.
 ///

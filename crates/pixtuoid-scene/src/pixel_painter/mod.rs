@@ -763,13 +763,14 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// `seated_back`'s 10 — so the chair can never cover the typing hands, which
 /// are the one moving part a back-turned agent has left.
 fn chair_back_for(p: &CharacterPlacement, layout: &Layout) -> Option<Point> {
-    /// Where the chair starts. Its first TWO rows are flanks that straddle the
-    /// occupant, so this sits two rows ABOVE the tallest seated back-view frame
-    /// (`typing_back`, 11 rows from `desk.y`) — the back proper still lands
-    /// clear of the typing hands.
-    const CHAIR_BACK_TOP_DY: u16 = 9;
-    /// Centres the 10 px chair on the 8 px character.
-    const CHAIR_BACK_DX: u16 = 1;
+    /// Where the chair starts, deliberately OVER the occupant rather than below
+    /// them: the chair paints after the character, so an offset that clears the
+    /// sprite entirely wastes that order and leaves a detached slab at their feet.
+    /// Here the backrest crosses the lower torso instead, which is what reads as
+    /// leaning back into a seat.
+    const CHAIR_BACK_TOP_DY: u16 = 6;
+    /// The chair is the character's own width, so it shares their column.
+    const CHAIR_BACK_DX: u16 = 0;
     let desk = p.seat_desk?;
     if layout.desk_facing_at(desk) != crate::layout::Facing::North {
         return None;
