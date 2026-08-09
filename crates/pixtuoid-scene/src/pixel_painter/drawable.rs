@@ -84,6 +84,11 @@ pub(super) enum DrawableKind<'a> {
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
+        /// Top-left of this occupant's office-chair back, or `None` when no
+        /// chair is visible from here. Painted straight AFTER the character:
+        /// the chair belongs to exactly one of them, so tying it to that one
+        /// makes the draw order correct by construction rather than by z-key.
+        chair_back: Option<Point>,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
     /// in z-order. `use_large` picks the detailed 32×10 kitchen sprite vs. the
@@ -361,6 +366,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             sleep_z_seed,
             waiting_bubble,
             walking_dust_frame,
+            chair_back,
         } => {
             if let Some(dust_frame) = walking_dust_frame {
                 paint_walking_dust(buf, *anchor, *dust_frame, theme);
@@ -373,6 +379,9 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
             if *waiting_bubble {
                 paint_waiting_bubble(buf, *anchor, theme);
+            }
+            if let Some(chair) = chair_back {
+                paint_chair_back(buf, *chair, theme);
             }
         }
         DrawableKind::WaypointPantry { pos, use_large } => {
@@ -590,6 +599,48 @@ fn paint_desk_coffee(
         paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
     }
 }
+
+/// Office-chair back peeking out below a back-turned occupant.
+///
+/// Only a BACK-TURNED seat draws one, and that falls out of the geometry rather
+/// than being a rule: a far-seated occupant faces the viewer, so their chair is
+/// BEHIND them and invisible. The room ends up with chairs exactly where a chair
+/// would actually be seen.
+///
+/// Deliberately a peek, not a seat: the occupant is already grounded by the desk
+/// in front of them, and a back tall enough to cover the torso swallows the
+/// figure into a dark block instead — the mistake the cutaway profile already
+/// recorded against its own `CHAIR_BACK_H`.
+fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
+    let c = theme.furniture.chair_trim;
+    // A lit TOP EDGE, because the body alone disappears: `chair_trim` is darker
+    // than the night floor in half the themes (tokyo-night 28,30,44 against a
+    // 44,47,61 carpet), so a flat block reads as a hole rather than a chair.
+    // The rim is SHAPE — it survives the half-block squash, which a one-pixel
+    // interior detail would not.
+    const RIM_LIFT: f32 = 0.30;
+    let rim = blend_rgb(
+        c,
+        Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        },
+        RIM_LIFT,
+    );
+    for dy in 0..CHAIR_BACK_H {
+        let row = if dy == 0 { rim } else { c };
+        for dx in 0..CHAIR_BACK_W {
+            buf.put_checked(top_left.x + dx, top_left.y + dy, row);
+        }
+    }
+}
+
+/// Rows of chair back visible below the occupant.
+const CHAIR_BACK_H: u16 = 3;
+/// Chair-back width — a little wider than the 8 px character, so it reads as
+/// something they are sitting IN rather than a shadow under them.
+const CHAIR_BACK_W: u16 = 10;
 
 /// Task lamp on the desk's west wing, plus its warm pool.
 ///

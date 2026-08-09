@@ -742,6 +742,7 @@ fn enqueue_characters<'a>(
                 sleep_z_seed: p.sleep_z_seed,
                 waiting_bubble: p.waiting_bubble,
                 walking_dust_frame: p.walking_dust_frame,
+                chair_back: chair_back_for(p, ctx.layout),
             },
         });
     }
@@ -752,6 +753,28 @@ fn enqueue_characters<'a>(
 /// otherwise vanish the sprite. `None` only for a genuinely empty animation.
 pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames.get(idx).or_else(|| anim.frames.first())
+}
+
+/// Where this placement's chair back goes, or `None` when none is visible.
+///
+/// Gated on the desk's own facing: only a back-turned occupant has their chair
+/// between themselves and the viewer. `CHAIR_BACK_TOP_DY` clears the TALLEST
+/// seated frame — `typing_back` runs 11 rows from `desk.y` against
+/// `seated_back`'s 10 — so the chair can never cover the typing hands, which
+/// are the one moving part a back-turned agent has left.
+fn chair_back_for(p: &CharacterPlacement, layout: &Layout) -> Option<Point> {
+    /// First row below every seated back-view frame.
+    const CHAIR_BACK_TOP_DY: u16 = 11;
+    /// Centres the 10 px chair on the 8 px character.
+    const CHAIR_BACK_DX: u16 = 1;
+    let desk = p.seat_desk?;
+    if layout.desk_facing_at(desk) != crate::layout::Facing::North {
+        return None;
+    }
+    Some(Point {
+        x: p.anchor.x.saturating_sub(CHAIR_BACK_DX),
+        y: desk.y + CHAIR_BACK_TOP_DY,
+    })
 }
 
 /// Desk cubicles — each carries its divider + cabinet + screen glow. The desk
