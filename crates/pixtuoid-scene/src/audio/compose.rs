@@ -106,7 +106,7 @@ const F_MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 10];
 
 /// The day grammar — every chord tone is in the template's scale unless the
 /// row sets `chromatic`.
-const DAY_PROGRESSIONS: [Progression; 8] = [
+const DAY_PROGRESSIONS: [Progression; 10] = [
     // royal road: Fmaj7 G7 Em7 Am7
     Progression {
         chords: [
@@ -204,10 +204,34 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: true,
     },
+    // rhythm-changes turnaround: Cmaj7 A7 Dm7 G7 — the A7's C# leans into Dm
+    Progression {
+        chords: [
+            [48, 52, 55, 59],
+            [49, 55, 57, 64],
+            [50, 53, 57, 60],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [0, 9, 2, 7],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
+    },
+    // full jazz turnaround: Em7 A7 Dm7 G7 — iii-VI7-ii-V, the long way home
+    Progression {
+        chords: [
+            [52, 55, 59, 62],
+            [55, 57, 61, 64],
+            [50, 53, 57, 60],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [4, 9, 2, 7],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
+    },
 ];
 
 /// The night grammar — minor-leaning, root-position, the sleepy register.
-const NIGHT_PROGRESSIONS: [Progression; 4] = [
+const NIGHT_PROGRESSIONS: [Progression; 8] = [
     // Am7 Fmaj7 Cmaj7 Em7
     Progression {
         chords: [
@@ -253,6 +277,54 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
             [48, 52, 55, 59],
         ],
         roots_pc: [9, 4, 5, 0],
+        scale_pcs: C_MAJOR,
+        chromatic: false,
+    },
+    // late round: Gm7 C7 Fmaj7 Dm7 — a ii-V that lands and settles on the vi
+    Progression {
+        chords: [
+            [55, 58, 62, 65],
+            [48, 52, 55, 58],
+            [53, 57, 60, 64],
+            [50, 53, 57, 60],
+        ],
+        roots_pc: [7, 0, 5, 2],
+        scale_pcs: F_MAJOR,
+        chromatic: false,
+    },
+    // half-lit stairs: Dm7 Em7♭5 Fmaj7 B♭maj7 — a stepwise climb that never cadences
+    Progression {
+        chords: [
+            [50, 53, 57, 60],
+            [52, 55, 58, 62],
+            [53, 57, 60, 64],
+            [58, 62, 65, 69],
+        ],
+        roots_pc: [2, 4, 5, 10],
+        scale_pcs: F_MAJOR,
+        chromatic: false,
+    },
+    // minor turnaround: Dm7 B♭maj7 Gm7 A7 — harmonic-minor color, the C# pulls home
+    Progression {
+        chords: [
+            [50, 53, 57, 60],
+            [58, 62, 65, 69],
+            [55, 58, 62, 65],
+            [57, 61, 64, 67],
+        ],
+        roots_pc: [2, 10, 7, 9],
+        scale_pcs: F_MAJOR,
+        chromatic: true,
+    },
+    // slow orbit: Am7 Dm7 Fmaj7 G7 — vi-ii-IV-V, drifting without landing
+    Progression {
+        chords: [
+            [57, 60, 64, 67],
+            [50, 53, 57, 60],
+            [53, 57, 60, 64],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [9, 2, 5, 7],
         scale_pcs: C_MAJOR,
         chromatic: false,
     },
