@@ -2,24 +2,32 @@
 # (`layout.desk_facings`), and the fallback for every seated pose whose own back
 # view the pack does not ship.
 #
-# Two rows carry SKIN on purpose: the nape at row 5 and the hands at row 9.
-# The first revision was six solid rows of hair over four of shirt, and it read
-# as a BALL rather than a person — the front view spends only 2 rows on hair and
-# 4 on a face, so the two silhouettes had nothing in common at a glance. Worse,
-# it left skin at ZERO: per-agent identity is hair + skin (`agent_id`-seeded)
-# while the outfit is cwd-seeded and therefore SHARED across a repo's agents, so
-# a room of back-turned workers from one project became indistinguishable. The
-# nape and hands put that axis back without inventing a face we cannot see.
+# The HEAD keeps the front view's six rows. That proportion is not a bug to fix:
+# `seated.sprite` spends the same six on hair + face, so both silhouettes are one
+# head over one torso. An earlier revision of this file claimed the six rows made
+# it "read as a ball" and added a NECK to break them up — wrong twice over. The
+# front view has no neck at all (its chin row meets the shoulders directly), so
+# it invented an organ the pack's own language does not use, and at 2 px wide it
+# was the sub-pixel detail this art scale cannot render anyway.
 #
-# Hands sit exactly where `seated.sprite` puts them (row 9, both edges), so the
-# front and back views read as the same person at the same desk.
+# What actually differs from the front is INTERNAL STRUCTURE: a face carries
+# eyes, a mouth and a hairline, while the back of a head is one flat colour. If
+# that ever needs breaking up, the lever is SHADING (an `n` band low on the
+# skull) — shape, which reads at half-block — not another feature.
+#
+# The hands ARE kept: `.SBBBBS.` is row 9 of `seated.sprite` verbatim, so the two
+# views read as the same person, and they carry the only skin a back view can
+# honestly show. That matters because per-agent identity is hair + skin
+# (`agent_id`-seeded) while the outfit is cwd-seeded and SHARED across a repo's
+# agents — but two pixels is all this angle affords, and losing the rest is a
+# property of facing away, not a defect to engineer around.
 @frame 0
 . n H H H H n .
 n H H H H H H n
 H H H H H H H H
 H H H H H H H H
 . H H H H H H .
-. . n S S n . .
+. n H H H H n .
 . B B B B B B .
 B B B B B B B B
 B B B B B B B B
