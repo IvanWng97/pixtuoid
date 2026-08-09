@@ -4,8 +4,8 @@
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
 //! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
 //! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid` —
-//! CodeWhale's Unix hooks run under `sh -c`, which EXEC's the command, so the
-//! shim's `getppid()` IS the CLI), [`ExitWatch`] emits a `SessionEnd` the moment
+//! `getppid` on Unix, where the runner execs the shim; on Windows a walk past
+//! the interposed shell), [`ExitWatch`] emits a `SessionEnd` the moment
 //! that pid dies. Fed ONLY from the hook decode path, so it is inert for sources
 //! whose payloads carry no `_pid`.
 //!
