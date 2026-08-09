@@ -7,15 +7,25 @@
 # WHY a second sprite rather than a taller shared one: a back-turned occupant
 # is anchored at `desk.y` and y-sorts IN FRONT of their desk, so on the base
 # sprite their head lands exactly on rows 2-3 -- the screen -- and covers it.
-# Here the monitor stands tall enough that both screen rows sit at `desk.y-2`
-# and `desk.y-1`, clear of the head, so the screen and its tool-coloured glow
-# are visible on precisely the desks whose occupant is looking at one. A
+# Here the monitor stands tall enough that its UPPER screen row sits at
+# `desk.y-1`, clear of the head, so the screen and its tool-coloured glow are
+# visible on precisely the desks whose occupant is looking at one. A
 # far-seated desk keeps `desk.sprite`: its occupant is BEHIND the monitor, so a
 # raised screen would show a display nobody in the scene can see.
 #
-# THREE extra rows, not four: the screen rows must clear `desk.y` and nothing
-# more, so `blit_y = desk.y - 4` is the LOWEST lift that works and the sprite
-# height falls out of it.
+# TWO extra rows, so `blit_y = desk.y - 3`. One MORE row was the first version:
+# it put BOTH screen rows above `desk.y` and therefore both clear of the head,
+# which reads better on an occupied desk but leaves the monitor visibly floating
+# a row off the wood on an empty one. Owner picked the lower monitor
+# (facing north 的电脑可以整体往下移动1px吗), so the lower screen row now lands
+# INSIDE the surface band at `desk.y+0` and an occupant's hair covers it —
+# a deliberate trade of screen area for a monitor that sits on its desk.
+#
+# That lower row therefore carries flanking WOOD, exactly as every screen row of
+# `desk.sprite` does: a monitor row inside the surface band has desk either side
+# of it. Only the rows ABOVE the band are transparent-flanked. Get this wrong in
+# either direction and the two desks stop being the same size — which shipped
+# once (facing south 4px vs facing north 6px, then 7px).
 #
 # The desk SURFACE runs up behind the screen rows rather than stopping under
 # them, so the monitor is drawn standing IN the desk rather than perched at its
@@ -40,9 +50,8 @@
 . . . M M M M M M M M . . .
 . . . M M M M M M M M . . .
 . . . M j j j j j j M . . .
-. . . M j j j j j j M . . .
+D D D M j j j j j j M D D D
 D D D D n n n n n n D D D D
-D D D D D D D D D D D D D D
 D D D D D D D D D D D D D D
 D D D D D D D D D D D D D D
 D D D D D D D D D D D D D D
