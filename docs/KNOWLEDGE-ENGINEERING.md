@@ -77,7 +77,7 @@ found LLM-generated context files *reduced* agent success in 5 of 8 settings
 while raising cost ~20%; the converged practice is a ~100–300 line **map,
 not a manual**. **Counter:** size budgets, citation tracking (a sharp edge
 no review has cited across **two consecutive censuses** is a demotion
-candidate — counted against the **full** `CLAUDE.md` sharp-edge set so a
+candidate — counted against the **full** `SHARP-EDGES.md` edge set so a
 topic-concentrated review window can't manufacture false staleness; each edge
 had a stable slug the ledger cited as `[edge:<slug>]`, kept in lockstep with
 the guides mechanically so the census leg was a script run, not a hand-count (#386)), periodic

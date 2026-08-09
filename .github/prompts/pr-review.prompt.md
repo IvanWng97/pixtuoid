@@ -148,7 +148,7 @@ given change/tree, say so, don't skip it.
   diff that a reader could infer from the code is the smell. Even a LEGITIMATE WHY
   must be right-sized + right-placed: **fn-body comments ≤2 lines**, a longer
   rationale relocated onto the DECLARATION it explains (a `const`/fn/module doc
-  can carry a ≈25-word rationale) or a `CLAUDE.md` sharp edge, and any present-tense
+  can carry a ≈25-word rationale) or a `SHARP-EDGES.md` entry, and any present-tense
   code-state assertion moved into a test — the comment keeps only `pinned by
   <test>`. A ≥3-line `//` run wedged inside a fn body is the flag); and comment-vs-ITSELF — apply CLAUDE.md's comment test #2 and report `N sentences, M ideas` with the cut; manifest-bridge (a
   `site/src/*.json` / generated schema vs its Rust source of truth).
@@ -225,7 +225,8 @@ Both briefs MUST carry, verbatim or equivalent:
 1. **Reasoning before verdict** — for every finding, state the trace/evidence
    FIRST, then the claim.
 2. **Negative space** — do NOT flag: behavior documented as a sharp edge in
-   any `CLAUDE.md` (read the nested file for the crate under review first),
+   the crate's `SHARP-EDGES.md` (or, where no sibling exists — tests/, Raycast, site's inline edges — that guide's own sharp-edges section) — its `CLAUDE.md` indexes them one line each,
+   and the index alone is NOT the entry: open the full text before judging,
    theoretical risks requiring unlikely preconditions, absence of
    defense-in-depth where a primary defense exists, pure style, and
    existence/version claims about external artifacts (GH Action tags, crate
@@ -236,7 +237,7 @@ Both briefs MUST carry, verbatim or equivalent:
    `checkout@v6` case). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Sharp-edge check** — match familiar-smelling claims against the
-   per-crate `CLAUDE.md` "Known sharp edges" (the live, maintained record of
+   per-crate `SHARP-EDGES.md` — or the guide's inline section where no sibling exists — (the live, maintained record of
    deliberate-design refutations; premise-anchored: same seam ≠ same claim).
 5. **Verdict** — exactly one of APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES.
 
@@ -506,12 +507,13 @@ history:
 
 Process notes for the orchestrator: dispatch both in parallel, in the
 worktree, background; verify every MEDIUM+ finding's premise yourself before
-coding a fix (reviewers have incomplete design context — check sharp edges
-first); fold accepted findings into ONE review-round commit, recording any
+coding a fix (reviewers have incomplete design context — check the crate's
+`SHARP-EDGES.md`, not just its index line, first); fold accepted findings into
+ONE review-round commit, recording any
 reviewer-flagged plan-misses as `plan-miss:` lines in that commit's message.
 Before merging, drive every reviewer/bot finding to exactly one terminal
 state IN THE PR THREAD — FIXED, REFUTED-with-trace (if it's deliberate
-design, cite or ADD the relevant per-crate `CLAUDE.md` sharp edge), or
+design, cite or ADD the relevant per-crate `SHARP-EDGES.md` entry), or
 ISSUE-FILED (no-deferral rule applies: only big/refactor work defers).
 "Acknowledged, no action" is not a state: #40's ignored migration finding
 became a 0.4.1 release-blocker (#46); two more drop
@@ -585,7 +587,7 @@ and the fan-out change. Shape (prescribed; degradable to sequential/parallel
        - **deep-modules** — shallow-module / deepening-opportunity scan.
 3. **Verify — adversarially, default REFUTE.** Each finding gets an independent
    skeptic prompted to refute it: read the cited code + callers, check it against
-   the per-crate `CLAUDE.md` "Known sharp edges" (a documented sharp edge → REFUTE
+   the per-crate `SHARP-EDGES.md` (a documented sharp edge → REFUTE
    and cite it), and construct a concrete repro (inputs/state → wrong outcome) or
    refute. A slightly-off `file:line` is not grounds to refute a real defect —
    locate the real line. (Unbiased candidate recall first, verification second:

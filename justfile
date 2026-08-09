@@ -306,6 +306,7 @@ lint:
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
+    run guides  just gen-guides-check     & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1159,6 +1160,22 @@ compare-selftest:
     # any python3 with Pillow answers the question this recipe asks.
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
+
+# The guides' index blocks are generated projections of their sibling files —
+# the WHY lives in scripts/gen-guides.py's docstring. Edit the SIBLING, run
+# `gen-guides`; `-check` gates drift in `lint` + CI's hygiene job.
+[group('gen')]
+[doc('Regenerate guide index blocks from SHARP-EDGES/LAYOUT/WHERE-TO-LOOK siblings')]
+gen-guides:
+    python3 scripts/gen-guides.py
+
+[group('gen')]
+[doc('Fail if a guide index block drifted from its sibling (runs in lint)')]
+gen-guides-check:
+    # Negative controls FIRST (the ast-grep-test idiom): a generator whose own
+    # fires/does-not-fire contract broke reports a clean pass on garbage.
+    python3 scripts/gen-guides.py --selftest
+    python3 scripts/gen-guides.py --check
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job

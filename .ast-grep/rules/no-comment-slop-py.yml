@@ -5,7 +5,7 @@
 id: no-comment-slop-py
 language: Python
 severity: warning
-message: "3+ consecutive comment lines in a function body — trim to a WHY (≤2 lines), or move the rationale to the docstring / a CLAUDE.md sharp edge. A fact a test could pin belongs in the test."
+message: "3+ consecutive comment lines in a function body — trim to a WHY (≤2 lines), or move the rationale to the docstring / a SHARP-EDGES.md entry. A fact a test could pin belongs in the test."
 rule:
   kind: comment
   inside:

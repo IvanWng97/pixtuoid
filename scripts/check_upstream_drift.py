@@ -21,7 +21,7 @@ Exit codes:
      a human) -> open a tracking issue
   2  could not check (network/HTTP error) -> transient, do NOT alarm
 
-See crates/pixtuoid-core/CLAUDE.md "Keeping the decode mapping current".
+See crates/pixtuoid-core/UPSTREAM-DRIFT.md (indexed from that crate's CLAUDE.md).
 """
 
 from __future__ import annotations
