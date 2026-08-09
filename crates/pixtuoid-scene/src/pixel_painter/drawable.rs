@@ -628,16 +628,37 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
         },
         RIM_LIFT,
     );
-    for dy in 0..CHAIR_BACK_H {
-        let row = if dy == 0 { rim } else { c };
-        for dx in 0..CHAIR_BACK_W {
-            buf.put_checked(top_left.x + dx, top_left.y + dy, row);
+    // The shape is a MASK, not a rectangle with insets. A flat slab below the
+    // occupant reads as a plank lying on the floor behind them; what says
+    // "sitting IN a chair" is the back rising on either SIDE of the body. The
+    // two top rows are those flanks — they sit beside the character (whose 8 px
+    // occupy the middle), so they cost nothing and are never occluded by it.
+    //
+    // `#` paints, `.` skips. Row 2 carries the lit rim.
+    const CHAIR: [&[u8; CHAIR_BACK_W as usize]; CHAIR_BACK_H as usize] = [
+        b"#........#",
+        b"#........#",
+        b".########.",
+        b"##########",
+        b".########.",
+    ];
+    /// Which row of `CHAIR` catches the light — the back's top edge, not the
+    /// flanks above it.
+    const RIM_ROW: usize = 2;
+    for (dy, row) in CHAIR.iter().enumerate() {
+        for (dx, cell) in row.iter().enumerate() {
+            if *cell != b'#' {
+                continue;
+            }
+            let tone = if dy == RIM_ROW { rim } else { c };
+            buf.put_checked(top_left.x + dx as u16, top_left.y + dy as u16, tone);
         }
     }
 }
 
-/// Rows of chair back visible below the occupant.
-const CHAIR_BACK_H: u16 = 3;
+/// Rows the chair spans: two flanks beside the occupant, then a three-row back
+/// below them.
+const CHAIR_BACK_H: u16 = 5;
 /// Chair-back width — a little wider than the 8 px character, so it reads as
 /// something they are sitting IN rather than a shadow under them.
 const CHAIR_BACK_W: u16 = 10;

@@ -763,8 +763,11 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 /// `seated_back`'s 10 — so the chair can never cover the typing hands, which
 /// are the one moving part a back-turned agent has left.
 fn chair_back_for(p: &CharacterPlacement, layout: &Layout) -> Option<Point> {
-    /// First row below every seated back-view frame.
-    const CHAIR_BACK_TOP_DY: u16 = 11;
+    /// Where the chair starts. Its first TWO rows are flanks that straddle the
+    /// occupant, so this sits two rows ABOVE the tallest seated back-view frame
+    /// (`typing_back`, 11 rows from `desk.y`) — the back proper still lands
+    /// clear of the typing hands.
+    const CHAIR_BACK_TOP_DY: u16 = 9;
     /// Centres the 10 px chair on the 8 px character.
     const CHAIR_BACK_DX: u16 = 1;
     let desk = p.seat_desk?;

@@ -57,7 +57,18 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             return last;
         }
     }
-    snap_point_to_walkable(&layout.walkable, last).unwrap_or(last)
+    // LAST RESORT, and it must still be walkable. Returning `last` here hands
+    // back a point the loop just REJECTED — a creature then rests inside a desk.
+    // It is reachable in dense layouts: every draw is uniform over the whole
+    // buffer, so raising obstacle density raises the chance all TARGET_TRIES
+    // miss, and `snap_point_to_walkable` can fail too. Tightening
+    // INTRA_POD_GAP_Y surfaced it, non-monotonically (6 and 8 happened to be
+    // clean, 5 and 7 were not) — which is the signature of luck, not of a bound.
+    // The door threshold is walkable by construction, so it is the one fallback
+    // that cannot reproduce the bug.
+    snap_point_to_walkable(&layout.walkable, last)
+        .or(layout.door_threshold)
+        .unwrap_or(last)
 }
 
 /// A centre-anchored sprite's `(w, h)`, or `(0, 0)` when the pack lacks the
@@ -88,6 +99,32 @@ fn clamp_sprite_inside(p: Point, (fw, fh): (u16, u16), layout: &Layout) -> Point
         x: axis(p.x, layout.walkable.width(), fw),
         y: axis(p.y, layout.walkable.height(), fh),
     }
+}
+
+/// Place a centre-anchored creature: fit its sprite inside the buffer, then make
+/// sure the result is still somewhere it could stand.
+///
+/// [`clamp_sprite_inside`] alone is not enough, and that is the whole bug this
+/// exists for: it moves the point to fit the SPRITE with no idea what is under
+/// the result, so a creature nudged in from an edge lands inside a desk — after
+/// `walkable_target` and `snap_point_to_walkable` both did their jobs correctly.
+/// It surfaced non-monotonically while tightening `INTRA_POD_GAP_Y` (6 and 8
+/// clean, 5 and 7 not), which is the signature of "does this particular point
+/// land near an edge", not of a bound being exceeded.
+///
+/// The pet AND the mascot both ride it, so the fix belongs at the shared seam
+/// rather than at either call site — the same reason the roaming toolkit is
+/// shared in the first place.
+fn place_creature(p: Point, extent: (u16, u16), layout: &Layout) -> Point {
+    let clamped = clamp_sprite_inside(p, extent, layout);
+    if layout.walkable.is_walkable(clamped.x, clamped.y) {
+        return clamped;
+    }
+    // Re-clamp after snapping: the snap is free to move the point back out past
+    // the edge the clamp just pulled it in from.
+    snap_point_to_walkable(&layout.walkable, clamped)
+        .map(|s| clamp_sprite_inside(s, extent, layout))
+        .unwrap_or(clamped)
 }
 
 /// Pet roaming the whole office: each 40s cycle picks a destination, walks there
@@ -129,7 +166,7 @@ pub(crate) fn pet_position(
         let pos = walk_between(layout, prev, dest, t);
         let anim = kind.walk_anim();
         return Some((
-            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            place_creature(pos, sprite_extent(pack, anim), layout),
             flip,
             anim,
             frame_idx,
@@ -145,7 +182,7 @@ pub(crate) fn pet_position(
         kind.sit_anim()
     };
     Some((
-        clamp_sprite_inside(rest_pos, sprite_extent(pack, anim), layout),
+        place_creature(rest_pos, sprite_extent(pack, anim), layout),
         false,
         anim,
         0,
@@ -353,7 +390,7 @@ pub(crate) fn mascot_position(
     let home = mascot_home(layout)?;
     let anchor = |pos: Point, anim: &'static str, frame_idx: usize| {
         (
-            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            place_creature(pos, sprite_extent(pack, anim), layout),
             anim,
             frame_idx,
         )
