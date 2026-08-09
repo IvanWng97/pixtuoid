@@ -778,7 +778,6 @@ fn enqueue_desk_cubicles<'a>(
     // assumed — an earlier revision of this comment claimed daylight was
     // untouched, and the pixel diff said otherwise.
     const SCREEN_IDLE_MAX: f32 = 0.55;
-    let screen_idle = SCREEN_IDLE_MAX * darkness;
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
@@ -795,7 +794,15 @@ fn enqueue_desk_cubicles<'a>(
         let occupant = agents
             .iter()
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
+        // A screen lights only where the room can SEE one. A far-seated desk
+        // puts its occupant BEHIND the monitor, so what faces the viewer is the
+        // machine's back — `desk.sprite` draws it that way — and a glow there
+        // would be light leaking out of a case. Both the tool glow and the
+        // standby tint gate on the same fact, or the desk contradicts itself.
+        let facing = ctx.layout.desk_facing(local);
+        let shows_screen = facing == crate::layout::Facing::North;
         let screen_glow = occupant
+            .filter(|_| shows_screen)
             .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))
             .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
         let has_coffee = occupant.is_some_and(|a| ctx.coffee.contains_key(&a.agent_id));
@@ -812,11 +819,15 @@ fn enqueue_desk_cubicles<'a>(
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                facing: ctx.layout.desk_facing(local),
+                facing,
                 divider_x,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
-                screen_idle,
+                screen_idle: if shows_screen {
+                    SCREEN_IDLE_MAX * darkness
+                } else {
+                    0.0
+                },
                 has_coffee,
                 coffee_steam,
                 token_tier,
