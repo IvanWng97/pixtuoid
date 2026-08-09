@@ -15,6 +15,7 @@ use crate::layout::{
     desk_walk_anchor_facing, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
 };
 use crate::motion::MotionState;
+use pixtuoid_core::state::FloorLocalDeskIndex;
 
 const BLOCKED: Rgb = Rgb {
     r: 220,
@@ -131,8 +132,8 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     // desk's top-left corner, or the east side never shows — the corner scan
     // can't clear the desk body.
     let desk_def = furniture_def(Furniture::Desk);
-    for desk in &layout.home_desks {
-        let chair = desk_walk_anchor_facing(*desk, layout.desk_facing_at(*desk));
+    for (i, desk) in layout.home_desks.iter().enumerate() {
+        let chair = desk_walk_anchor_facing(*desk, layout.desk_facing(FloorLocalDeskIndex(i)));
         // APPROACH first, SEAT last. The blobs are 3x3 and the approach cell can
         // sit ONE pixel off the chair (a far seat lands on the very edge of the
         // desk's routing pad), so whichever is painted second wins the chair

@@ -809,6 +809,11 @@ pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 /// ONE pixel once passed for a side swap.
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
+// A north seat's walk anchor must clear `WALKING_Y_OFF`, or `seated_anchor_facing`'s
+// `saturating_sub` clamps and the desk chair's z-key tie with its occupant breaks —
+// the chair then paints UNDER them with every render test green.
+const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
+
 /// Where an agent walks to/from for its home `desk`, given which way that desk
 /// seats its occupant.
 ///

@@ -1204,25 +1204,3 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         v[..v.len().min(6)].join("\n")
     );
 }
-
-#[test]
-fn a_desk_walk_anchor_never_saturates_the_seated_z_key() {
-    // The desk chair keys on `desk_walk_anchor_facing(..).y` because a seated
-    // character's own key reduces to it — `seated_anchor_facing` subtracts
-    // `WALKING_Y_OFF` and the sim adds it straight back. That cancellation is
-    // NOT unconditional: the subtraction saturates, so a walk anchor within
-    // `WALKING_Y_OFF` of the top clamps to 0 and the character's key comes back
-    // as `WALKING_Y_OFF` instead. The chair would then key BELOW its occupant
-    // and paint under them, with every render test still green.
-    sweep(|w, h, seed, l| {
-        for &d in &l.home_desks {
-            let y = super::desk_walk_anchor_facing(d, l.desk_facing_at(d)).y;
-            assert!(
-                y >= WALKING_Y_OFF,
-                "{w}x{h} seed {seed}: desk {d:?} walk anchor y={y} is inside \
-                 WALKING_Y_OFF ({WALKING_Y_OFF}) — the seated z-key cancellation \
-                 the desk chair relies on has saturated"
-            );
-        }
-    });
-}
