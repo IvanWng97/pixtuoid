@@ -244,7 +244,7 @@ src/
 │                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
 │                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
 │                       is inert everywhere, so callers never cfg; AssetBank = the ONE-SHOT pools, TrackBeds =
-│                       the five TRACK-OWNED loop buffers (rain registers separately at spawn — weather is
+│                       the six TRACK-OWNED loop buffers (rain registers separately at spawn — weather is
 │                       track-independent) HANDED OFF at registration/swap and dropped — RodioSink copies each
 │                       into its own SamplesBuffer, so retaining them would double the bed RAM. Synthesis
 │                       at spawn on a fixed seed, MEASURED ~2s release / >10s debug on M-series: frames
@@ -334,12 +334,13 @@ src/
 │                       block (600s — a new song every 10 minutes, owner-tuned for short agent
 │                       sessions) and the block id change is an ordinary track switch); the
 │                       engine's TrackSwitch holds the
-│                       five TRACK_STEMS at 0, and when they reach silence `tick` returns `swap: Some(to)` →
+│                       six TRACK_STEMS at 0, and when they reach silence `tick` returns `swap: Some(to)` →
 │                       run_loop synthesizes that track's TrackBeds under the silence (~2s) and swap_loop's
 │                       them (RodioSink drops+recreates the Player at gain 0), then ramps back — LATCHED per
 │                       cycle (boundary flapping can't thrash synths); rain is weather, never swapped. Track beds register on the FIRST frame (it names the
 │                       right mood — booting Day at night would synth a track just to fade it away).
-│                       The night MOOD keeps the Lofi Girl anchor (sub-bass floor in the pad,
+│                       The night MOOD keeps the Lofi Girl anchor (sub-bass floor on the dedicated
+│                       bass lane — the frozen v4 anchor alone still bakes it into its pad —
 │                       kick+hat-only groove, duck-baked texture, phase-locked) — now COMPOSED
 │                       per track-epoch by scene's compose.rs rather than replayed from the frozen v4
 │                       take; bus glue is deliberately NOT runtime (rodio has no insert) — the

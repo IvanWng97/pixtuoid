@@ -23,7 +23,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   every item in it is `pub(super)`, so a `pub mod` would only publish an empty path. The binary keeps only
 │                   the DEVICE shell (sink/spawn/run_loop — the clock, mute/volume atomics, bed BUILD,
 │                   sink forwarding). mod.rs MODEL — the sound twin of overlay/board: StemLevels
-│                   (owner-ratified tier gains: empty/moderate/busy × pad/sparkle/keys/drums/texture/rain/typing;
+│                   (owner-ratified tier gains: empty/moderate/busy × pad/sparkle/keys/drums/texture/bass/rain/typing;
 │                   rain scales on pixel_painter::precipitation_level) + OneShot events + AudioCueTracker
 │                   (cross-frame edge emitter: door chime capped 1/frame, printer/vending off the SAME
 │                   occupancy edges as the #567 anims; the elevator-ding + audio-glug cues were
@@ -31,7 +31,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   NO audio deps in this crate (the rodio/cpal ban is in `just arch`);
 │                   the binary's audio/ gateway is the consumer, WebAudio can ride the same model later.
 │                   Since Phase 2 (musical stems) every StemLevels lane is AUDIBLE — the binary
-│                   synthesizes the frozen lofi compositions at startup and loops all six beds.
+│                   synthesizes the frozen lofi compositions at startup and loops all seven beds.
 │                   ALL-GENERATIVE SOUNDTRACK (owner decision — all music is generated at
 │                   runtime): TrackId {GenDay(seed), GenNight(seed)} + pure select_track(is_day,
 │                   precip, track_epoch) ride AudioFrame — night hours (the SAME
@@ -46,8 +46,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   cores the generator renders through — don't delete them as dead code.
 │                   compose.rs — the theory-constrained COMPOSER (generative lofi): pure
 │                   compose(mood, seed) -> GeneratedScore over a vetted progression grammar
-│                   (8 day templates — 6 diatonic + 2 owner-adopted chromatic (V7/vi, borrowed
-│                   iv) — + 4 night, ×transpose), melody rules (strong-beat chord
+│                   (10 day templates — 6 diatonic + 4 chromatic (V7/vi, borrowed iv, two A7
+│                   jazz turnarounds) — + 8 night, ×transpose), melody rules (strong-beat chord
 │                   tones / diatonic passing / bounded resolved leaps / two-phrase form with
 │                   peak + loop-closing resolution), humanized groove templates; synth::gen_beds
 │                   renders it through the SAME cores the frozen takes use (day_pad_core/
@@ -56,7 +56,8 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   STATISTICAL: examples/lofi_audition renders N seeds for a blind owner
 │                   batch (--solo <lane> isolates a stem); the seed-sweep property suite
 │                   (compose/tests.rs) pins the rules. compose::LeadVoice is the
-│                   INSTRUMENT registry (EpVel + Pluck): lanes are busy-ness roles,
+│                   INSTRUMENT registry (EpVel + Pluck + Kalimba + Vibraphone, mood-pooled):
+│                   lanes are busy-ness roles,
 │                   instruments are timbres within a lane — synth::lead_voice_fn is the
 │                   one dispatch; the voice draw sits LAST in the seed stream so adding
 │                   voices never redraws a blessed seed's notes. The add-an-instrument
