@@ -327,7 +327,15 @@ pub const POD_SIDE: u16 = 2;
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
-pub const INTRA_POD_GAP_Y: u16 = 12;
+///
+/// Sized against what actually OCCUPIES the gap, which is nothing: the far-seated
+/// row's occupant sits NORTH of its desk and the back-turned row's sits SOUTH of
+/// its own, so the strip between the two desks is floor no one stands on and no
+/// route needs — an office aisle nobody walks down. At 12 it measured seven dead
+/// rows (row 0's desk ends at `P+7`, row 1's art starts at `P+15`). This also
+/// prices `pod_stride_y`, so tightening it is the desk-CAPACITY lever, not just
+/// spacing.
+pub const INTRA_POD_GAP_Y: u16 = 8;
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
 /// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,

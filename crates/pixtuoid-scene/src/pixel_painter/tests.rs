@@ -2939,7 +2939,15 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     let mut owned = OwnedSimStores::new();
     let mut stores = owned.stores();
     let mut max_on_sofa = 0usize;
-    for step in 0..6_000u64 {
+    // A BUDGET, not part of the assertion. Three agents sharing one sofa is
+    // reached by random wander, so the step count only bounds how long we wait
+    // for the hash to line them up — and that depends on the geometry, since a
+    // desk's position sets each agent's wander origin and therefore its route.
+    // Tightening INTRA_POD_GAP_Y moved it past 6_000 while the BEHAVIOUR was
+    // unchanged (60_000 reached three immediately), so the old number was
+    // measuring the layout, not the claim. The loop breaks the moment it sees
+    // three, so a generous bound costs nothing on the passing path.
+    for step in 0..60_000u64 {
         let now = now0 + Duration::from_millis(250 * step);
         let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
         let n = frame
