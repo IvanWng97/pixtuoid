@@ -171,6 +171,7 @@ mod tests {
                 keys: 0.5,
                 drums: 0.5,
                 texture: 0.4,
+                bass: 0.6,
                 rain: 0.0,
                 typing: 0.8,
             },
@@ -291,7 +292,7 @@ mod tests {
             let cmd = e.tick(0.05, Some(busy_frame(TrackId::GenNight(0))));
             if let Some(to) = cmd.swap {
                 swap_track = Some(to);
-                for g in &cmd.gains[0..5] {
+                for g in &cmd.gains[0..crate::audio::bank::TRACK_STEMS.len()] {
                     assert!(*g <= 1e-6, "track stems held silent through the swap");
                 }
                 break;

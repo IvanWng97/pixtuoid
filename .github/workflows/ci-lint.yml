@@ -112,6 +112,7 @@ jobs:
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
+      - run: just gen-guides-check
 
   msrv:
     name: msrv

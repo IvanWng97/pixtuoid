@@ -60,32 +60,59 @@ fn every_day_template_chord_carries_a_third_and_seventh() {
 }
 
 #[test]
-fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
-    let mut saw = (false, false);
+fn lead_voice_pools_are_mood_curated() {
+    let mut day_saw = (false, false, false);
+    let mut night_saw = (false, false);
     for seed in 0..SWEEP {
         match compose(Mood::Day, seed).lead_voice {
-            LeadVoice::EpVel => saw.0 = true,
-            LeadVoice::Pluck => saw.1 = true,
+            LeadVoice::EpVel => day_saw.0 = true,
+            LeadVoice::Pluck => day_saw.1 = true,
+            LeadVoice::Kalimba => day_saw.2 = true,
+            LeadVoice::Vibraphone => panic!("seed {seed}: vibraphone is night-pool only"),
         }
-        assert_eq!(
-            compose(Mood::Night, seed).lead_voice,
-            LeadVoice::EpVel,
-            "seed {seed}: night must keep the EP lead"
-        );
+        match compose(Mood::Night, seed).lead_voice {
+            LeadVoice::EpVel => night_saw.0 = true,
+            LeadVoice::Vibraphone => night_saw.1 = true,
+            v => panic!("seed {seed}: night drew the day-pool {v:?}"),
+        }
     }
-    assert!(saw.0 && saw.1, "both day lead voices must appear: {saw:?}");
+    assert!(
+        day_saw.0 && day_saw.1 && day_saw.2,
+        "all three day lead voices must appear: {day_saw:?}"
+    );
+    assert!(
+        night_saw.0 && night_saw.1,
+        "both night lead voices must appear: {night_saw:?}"
+    );
 }
 
 #[test]
-fn day_lead_voice_distribution_tracks_the_draw_weight() {
-    // p(Pluck)=0.35 ⇒ ~140 of 400; the band is ±3.5σ, so a biased or misplaced
-    // draw fails but an unlucky sample does not
-    let plucks = (0..400)
-        .filter(|&s| compose(Mood::Day, s).lead_voice == LeadVoice::Pluck)
-        .count();
+fn lead_voice_distribution_tracks_the_draw_weights() {
+    // day p(Pluck)=0.35 / p(Kalimba)=0.25, night p(Vibraphone)=0.35; each band
+    // is ±3.5σ over 400 seeds, so a biased or misplaced draw fails but an
+    // unlucky sample does not
+    let (mut plucks, mut kalimbas, mut vibes) = (0usize, 0usize, 0usize);
+    for s in 0..400 {
+        match compose(Mood::Day, s).lead_voice {
+            LeadVoice::Pluck => plucks += 1,
+            LeadVoice::Kalimba => kalimbas += 1,
+            _ => {}
+        }
+        if compose(Mood::Night, s).lead_voice == LeadVoice::Vibraphone {
+            vibes += 1;
+        }
+    }
     assert!(
         (107..=173).contains(&plucks),
         "pluck drew {plucks}/400 vs p=0.35"
+    );
+    assert!(
+        (70..=130).contains(&kalimbas),
+        "kalimba drew {kalimbas}/400 vs p=0.25"
+    );
+    assert!(
+        (107..=173).contains(&vibes),
+        "vibe drew {vibes}/400 vs p=0.35"
     );
 }
 
@@ -148,16 +175,6 @@ fn every_seed_is_well_formed_night() {
         let mut kt = s.kick_times.clone();
         kt.sort_by(f32::total_cmp);
         assert_eq!(kicks, kt, "seed {seed}: kick_times desynced from drums");
-        for &b in &s.bass_roots {
-            assert!(
-                (26..=38).contains(&b),
-                "seed {seed}: bass {b} out of window"
-            );
-            assert!(
-                s.scale_pcs.contains(&(b % 12)),
-                "seed {seed}: bass pc off-scale"
-            );
-        }
         for &(_, note, _) in &s.sparkle {
             assert!(
                 (NIGHT_LEAD_LO..=NIGHT_LEAD_HI).contains(&note),
@@ -170,12 +187,40 @@ fn every_seed_is_well_formed_night() {
 fn assert_well_formed(s: &GeneratedScore, seed: u64) {
     let loop_s = s.loop_secs();
     let bar_s = s.bar_s();
-    for &(at, _, vel) in s.sparkle.iter().chain(s.keys.iter()) {
+    for &(at, _, vel) in s.sparkle.iter().chain(s.keys.iter()).chain(s.bass.iter()) {
         assert!(
             at >= 0.0 && at < loop_s,
             "seed {seed}: event at {at} outside loop {loop_s}"
         );
         assert!(vel > 0.0 && vel <= 1.0, "seed {seed}: velocity {vel}");
+    }
+    assert!(
+        s.bass.len() >= GEN_LOOP_BARS,
+        "seed {seed}: the bass must anchor every bar's ONE"
+    );
+    for &(at, note, _) in &s.bass {
+        // 25 admits the leading-tone pickup one step under the root window
+        assert!(
+            (25..=38).contains(&note),
+            "seed {seed}: bass note {note} at {at}s out of the sub window"
+        );
+        // closed vocabulary: root/5th/pickup — anything else is a wrong join
+        let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
+        let root = super::sub_note(s.bar_roots[bar]);
+        let fifth = super::sub_note(s.bar_roots[bar] + 7);
+        let mut allowed = vec![root, fifth];
+        if bar + 1 < GEN_LOOP_BARS {
+            allowed.push(super::sub_note(s.bar_roots[bar + 1]) - 1);
+        }
+        assert!(
+            allowed.contains(&note),
+            "seed {seed}: bass note {note} in bar {bar} is not root/5th/pickup {allowed:?}"
+        );
+        // place() clips at the loop end — no onset may ring into the seam
+        assert!(
+            at < loop_s - 1.4 * (bar_s / 4.0),
+            "seed {seed}: bass onset {at}s rings into the loop seam"
+        );
     }
     for &(at, _, gain) in &s.drums {
         assert!(

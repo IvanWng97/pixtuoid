@@ -6,8 +6,10 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the nested
 `crates/*/CLAUDE.md` for the crate you touch). It holds the architecture
-invariants, "known sharp edges", and conventions that are load-bearing here —
-many things that look like bugs are documented, intentional design.
+invariants and conventions that are load-bearing here, and indexes each crate's
+"known sharp edges" — whose full text lives in that crate's `SHARP-EDGES.md`.
+Many things that look like bugs are documented, intentional design, so read the
+entry and not just its index line.
 
 ## Build & test
 
@@ -202,8 +204,8 @@ loads; this is the per-step detail.
    shallow one = AI-slop?). Cut slop in small, verified steps; a big-radius
    refactor is fine when the deepening earns it. (`codebase-design` /
    `improve-codebase-architecture` drive the deepening lens; this repo keeps its
-   domain record + decisions-not-to-relitigate in nested `CLAUDE.md` + "Known
-   sharp edges", NOT a `CONTEXT.md`/`docs/adr/` — map onto those, don't scaffold
+   domain record + decisions-not-to-relitigate in nested `CLAUDE.md` +
+   `SHARP-EDGES.md`, NOT a `CONTEXT.md`/`docs/adr/` — map onto those, don't scaffold
    competing docs.)
 4. **Spec** — synthesize the grilled decisions into `docs/superpowers/specs/`
    (LOCAL, git-ignored — the working design record, not the tracker). Also

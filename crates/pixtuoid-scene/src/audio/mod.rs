@@ -61,6 +61,9 @@ const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
 // Boosted far past the Phase-0 ratification: the hiss+crackle layer was
 // inaudible at the ratified level.
 const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
+// Never zero (the floor used to ride inside the night pad); the curve RISES
+// where the pad's falls — the lane must hold up once drums+keys+typing enter.
+const BASS_GAIN: [f32; 3] = [0.60, 0.70, 0.75];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 
 /// Target mix levels (0..=1) for every stem, derived once per frame. `typing`
@@ -73,6 +76,7 @@ pub struct StemLevels {
     pub keys: f32,
     pub drums: f32,
     pub texture: f32,
+    pub bass: f32,
     pub rain: f32,
     pub typing: f32,
 }
@@ -313,6 +317,7 @@ pub fn stem_levels(counts: &StateCounts, precipitation: f32) -> StemLevels {
         keys: KEYS_GAIN[t],
         drums: DRUMS_GAIN[t],
         texture: TEXTURE_GAIN[t],
+        bass: BASS_GAIN[t],
         rain: RAIN_GAIN * precipitation.clamp(0.0, 1.0),
         typing: TYPING_GAIN[t],
     }
@@ -409,13 +414,14 @@ mod tests {
             keys: 0.5,
             drums: 0.6,
             texture: 0.2,
+            bass: 0.5,
             rain: 0.7,
             typing: 0.8,
         };
         s.silence_track_stems();
         assert_eq!(
-            (s.pad, s.sparkle, s.keys, s.drums, s.texture),
-            (0.0, 0.0, 0.0, 0.0, 0.0)
+            (s.pad, s.sparkle, s.keys, s.drums, s.texture, s.bass),
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         );
         assert_eq!(
             (s.rain, s.typing),
@@ -452,6 +458,8 @@ mod tests {
         let busy = stem_levels(&counts(BUSY_ACTIVE_MIN), 0.0);
         assert_eq!(busy.drums, DRUMS_GAIN[2]);
         assert_eq!(busy.typing, TYPING_GAIN[2]);
+        assert_eq!(empty.bass, BASS_GAIN[0], "the floor never empties");
+        assert_eq!(busy.bass, BASS_GAIN[2]);
     }
 
     #[test]

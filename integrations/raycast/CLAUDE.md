@@ -43,7 +43,7 @@ the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machin
 token plus an optional failure-detail field, split from the old folded
 `failed: <msg>` form back when this in-repo copy was the only consumer — see
 the sharp edge below and the wire-shape sharp edge in
-`crates/pixtuoid/CLAUDE.md`.)
+`crates/pixtuoid/SHARP-EDGES.md`.)
 
 ## Sharp edges (don't be surprised by these)
 

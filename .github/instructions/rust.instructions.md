@@ -7,8 +7,10 @@ description: "Rust coding standards for the pixtuoid workspace"
 
 These apply to all Rust in this Cargo workspace. The authoritative source is the
 root `CLAUDE.md` and the nested `crates/*/CLAUDE.md` — read those for the
-architecture invariants and the "known sharp edges" (many things that look like a
-bug are documented, load-bearing design). This file is the condensed
+architecture invariants, and the crate's `SHARP-EDGES.md` sibling (nested guides like `src/tui/` have their own) for the
+"known sharp edges" its `CLAUDE.md` indexes (many things that look like a
+bug are documented, load-bearing design — and the index line is not the
+entry). This file is the condensed
 coding-standard slice.
 
 ## Errors & panics

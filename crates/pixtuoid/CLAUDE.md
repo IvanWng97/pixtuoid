@@ -16,504 +16,60 @@ painter is the SIBLING crate `pixtuoid-web`. Cross-cutting rules: workspace
 
 ## Layout
 
+Annotated tree in [`LAYOUT.md`](LAYOUT.md) — grep it for a filename.
+
+<!-- layout:start · generated from LAYOUT.md by `just gen-guides` — edit the tree there, not this skeleton -->
 ```
 src/
-├── main.rs             entry point — arg-parse + dispatch + env glue ONLY (color/truecolor
-│                       preflights, build_run_config, warn_broken_installs; config/install
-│                       failure eprintlns pre-altscreen). The crash hook, logging bootstrap,
-│                       and sources-CLI presenters are BIN-CRATE modules it declares
-│                       (crash.rs / logging.rs / sources_cli.rs — pub(crate), same src/ dir
-│                       as the lib but NOT in lib.rs; all three codecov-excluded like main.rs)
-├── crash.rs            install_crash_hook — panic hook → terminal restore, timestamped
-│                       backtrace appended to ~/.cache/pixtuoid/crash.log, pre-filled GitHub
-│                       issue URL (percent-encode / char-boundary-truncate helpers unit-tested)
-├── logging.rs          log routing (#157): logging::init installs the ONE tracing subscriber —
-│                       TUI/floating mode ALWAYS file-logs at a warn floor
-│                       ($PIXTUOID_LOG > $XDG_STATE_HOME/pixtuoid/log > ~/.cache/pixtuoid/log,
-│                       one-deep rotation at 5MB by APPENDING .old; RUST_LOG, --log-level
-│                       debug|trace, or $PIXTUOID_LOG raise verbosity — plain --log-level info
-│                       is indistinguishable from the default and floors to warn); non-TUI
-│                       modes log to stderr; log_file_path is the shared path authority
-│                       (doctor dispatch + sources_cli + RunConfig.log_path read it).
-│                       `open_private_append` is the ONE opener this log AND crash.rs's
-│                       crash.log share: 0600 file under a 0700 dir on Unix (they carry
-│                       transcript paths / AgentIds / at debug the agent's own tool
-│                       commands — the settings.json rationale applies verbatim), with a
-│                       best-effort fchmod so an older version's 0644 sink is tightened.
-│                       The two mechanisms are SEPARATELY callable on purpose:
-│                       create_owner_only_append (the race-free create-time mode) and
-│                       install::io::tighten_to_owner_only (the upgrade fchmod, shared
-│                       with the lock sidecar — one definition of the 0600 policy). Folded
-│                       into one opener, reverting EITHER half was invisible to both mode
-│                       tests, because the fchmod repaired what the create mode failed to set
-├── cli.rs              clap subcommands (run / floating / validate-pack / init-pack / doctor / sources / connect /
-│                       disconnect / setup / completions / man). The OLD install-hooks/uninstall-hooks CLI stays deleted
-│                       (#284 removed the interactive ORCHESTRATION — plan_targets/interactive_pick); `connect <ids>`/
-│                       `disconnect <ids>`/`sources [set <ids>]` are the SCRIPTABLE surface (Raycast/automation), a second
-│                       presenter over crate::sources (see the scriptable-vs-interactive sharp edge); `setup [--yes]` is
-│                       the headless onboarding twin (dry-run preview / apply); the in-TUI Sources panel (`s`) remains the
-│                       INTERACTIVE one. `completions <shell>` (clap_complete) + hidden `man` (clap_mangen) emit to stdout
-│                       from the SAME derived Cli tree as `--help` (homebrew `generate_completions_from_executable` / `man`
-│                       capture them); main.rs dispatches both as plain arms (tracing → stderr, so stdout stays clean). Every
-│                       PathBuf arg carries `value_hint` so completions path-complete (currently six: the four
-│                       flattened SourceArgs flags + validate-pack's dir + init-pack's dest). Presenters live in
-│                       sources_cli.rs (run_sources_list/run_sources_set/run_change/run_setup, codecov-excluded like doctor::run)
-├── term.rs             truecolor preflight — does NOT guess from a $TERM name allowlist; ASKS the terminal (#397).
-│                       `query_truecolor(timeout)` (the IO seam, cfg(unix), codecov-excluded): opens `/dev/tty`,
-│                       raw-modes it (RAII `TermiosRestore`), writes the DECRQSS probe (`ESC[48;2;1;2;3m ESC P$qm ESC\\
-│                       ESC[0m` — set unlikely 24-bit bg in the SEMICOLON form crossterm emits, query SGR back, reset),
-│                       reads the reply via `libc::select` (NOT poll — macOS `poll()` returns POLLNVAL on tty/pty fds,
-│                       found by PTY dogfood) until the `ESC\\`/BEL terminator or the budget, then `parse_decrqss_truecolor`
-│                       (PURE, unit-tested):
-│                       Some(true)=our RGB triple echoed back, Some(false)=valid-but-downsampled, None=`0$r`/empty/timeout.
-│                       The pure policy pieces: `warn_zone(cmd_is_run_tui, is_tty, colorterm, suppress_env)` (the cheap
-│                       pre-gate — only QUERY when this holds; truth-table tested) + `colorterm_is_truecolor` (an explicit
-│                       positive that SKIPS the round-trip — the terminal declaring itself, not a guess) +
-│                       `truecolor_warn_suppressed($PIXTUOID_NO_TRUECOLOR_WARN`, truthy `1`/`true`/`yes`/`on`) +
-│                       `terminal_diagnostic_row(term, colorterm, probe)` (the `doctor` `terminal:` line; names HOW it was
-│                       determined — COLORTERM / terminal query / downsamples / unknown). main.rs WARN-ONLY (never gates on
-│                       Unix): `warn_zone(..) && query_truecolor(..) != Some(true)`, env/tty reads INLINED at the excluded
-│                       call site. `doctor` runs the query ONLY when stdout is a tty (piped `doctor > file` neither emits
-│                       escape codes nor probes — also why the test harness, output captured, never probes). Windows
-│                       hard-gates VT separately (tui/mod); `query_truecolor` is a `None` stub there. `floating` is exempt
-│                       (softbuffer = real RGB px). **Sharp edges:** a truecolor terminal that doesn't answer DECRQSS (rare)
-│                       false-positives → the escape hatch covers it; a very-laggy reply past the 100ms budget could leak a
-│                       few bytes to the TUI's stdin (accepted, rare). The query is the authority — there is NO $TERM/
-│                       $TERM_PROGRAM allowlist to keep current (deleted on purpose; that was the "magic variable" smell).
-│                       SEPARATE axis (color ON/OFF, not depth): `color_preflight(no_color, clicolor_force, term)` →
-│                       `ColorPreflight` {Proceed / ForceColor / RefuseNoColor / RefuseDumbTerm}. The office is 24-bit with
-│                       NO legible monochrome fallback, so when color is disabled we REFUSE the canvas + explain (mirrors the
-│                       Windows VT hard-gate) instead of rendering block-soup. Precedence: `$TERM=dumb` first (can't render
-│                       escapes at all — a force can't fix it), then NON-EMPTY `$NO_COLOR` (crossterm strips our SGR to a bare
-│                       reset — VERIFIED empirically) UNLESS `$CLICOLOR_FORCE` (bixense `!= 0`) overrides it (precedence →
-│                       `ForceColor`; main.rs MUST call `crossterm::style::force_color_output(true)` itself — crossterm
-│                       honors `$NO_COLOR` but NOT `$CLICOLOR_FORCE`, also verified). Empty `$NO_COLOR` is ignored (matches
-│                       crossterm — the thing that strips); `$FORCE_COLOR`/`$CLICOLOR` are deliberately NOT read (crossterm
-│                       keys only on `$NO_COLOR`, so they'd no-op the render). Gated to the `run` TUI only (--headless/doctor/sources are plain
-│                       text; floating = softbuffer). `color_status_row(pf)` is the `doctor` color line (reuses the SAME
-│                       policy so the diagnostic matches `run`; doctor also SKIPS the DECRQSS probe under `$TERM=dumb`).
-│                       **Sharp edge:** tmux (#4034) doesn't implement DECRQSS, so a truecolor tmux can false-positive the
-│                       depth warn — `$PIXTUOID_NO_TRUECOLOR_WARN=1` covers it (tmux usually sets `$COLORTERM`, skipping the
-│                       query entirely anyway).
-├── setup.rs            first-run detection for onboarding: the PURE `is_first_run(cfg, path, load_degraded)` —
-│                       `!load_degraded && (!path.exists() || cfg.sources.is_empty())`; a degraded load (malformed
-│                       config, main passes `!cfg_warnings.is_empty()`) is NEVER a first run — don't replay
-│                       onboarding over a real config. Matches resolve_connected's plain default (empty [sources] =
-│                       nothing connected since 0.12.0), so onboarding IS the re-connect path for a pre-0.8 upgrader
-│                       whose config predates the flags; unit-tested. `pub`
-│                       because main.rs (a separate crate) computes RunConfig.first_run from it. The cinematic overlay
-│                       lives in tui/welcome + widgets/welcome; the headless `setup [--yes]` presenter is sources_cli::run_setup
-├── sources.rs          the TUI-free source-control CORE (detect/connect/disconnect/reconcile_to/status + the
-│                       SourceStatus AND OutcomeRow serde DTOs = the two Raycast --json wire contracts, each pinned
-│                       by a byte-shape test + a committed-schema golden → `just gen-contract`; OutcomeRow is
-│                       {id, outcome, message?} — a bare token + optional failure detail, see the sharp edge below). connect/disconnect
-│                       are the PERSISTED half (save the [sources] flag + install/uninstall hooks + rollback) — the
-│                       in-TUI panel (tui::connect_source/disconnect_source) delegates here and adds the one live-gate
-│                       line (connected.set) a separate CLI process can't; reconcile_to = the declarative `sources set`
-│                       (connected set = exactly the args). `apply_choices(cfg, &[(id,bool)])` = the onboarding apply
-│                       (connect checked / disconnect unchecked), SCOPED to the ids passed so an unlisted source's
-│                       flag is never written (the reason it's NOT the declarative reconcile_to); shares
-│                       `apply_one` with reconcile_to. OWNS the source-status MODEL relocated from tui::connection
-│                       (ConnState/ConnectionRow/build_rows*, re-exported back so the panel/harness are unchanged)
-│                       + the folded-hook-removal VOCABULARY both presenters read back: the machine
-│                       HOOK_REMOVAL_FAILED_PREFIX (`sources set`'s token) and its human twin
-│                       HOOK_REMOVAL_FAILED_PHRASE (`pub` — main.rs's `disconnect` arm is a separate crate)
-├── sources_cli.rs      the scriptable sources-CLI PRESENTERS over crate::sources (a bin-crate SIBLING of
-│                       sources.rs — the core stays presenter-free): run_setup / run_sources_list /
-│                       run_sources_set / the shared connect/disconnect run_change (+ emit_outcomes →
-│                       Vec<OutcomeRow>, the `--json` batch envelope pinned by
-│                       `outcome_envelope_is_the_id_outcome_raycast_contract`)
-├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis (connected? hooks
-│                       installed? installed `<cli> --version` vs the registry's verified_version
-│                       anchor → skew flag; + decode-drift counts scanned from the warn-floor log's
-│                       `pixtuoid::drift` breadcrumbs). Pure scan_log_for_source/format_doctor_row/
-│                       parse_version/version_status (tested; scan vs REAL fmt output); sanitizes
-│                       untrusted sampled names (R0615-06). verified_version lives on SourceDescriptor.
-│                       `read_log` is the ONE log-read authority both readers share (doctor's
-│                       report + sources_cli's `health`): a MISSING log is the ordinary
-│                       no-run-yet "no drift", every other error class returns a warning so
-│                       an unreadable log can't read as a clean bill of health. That warning
-│                       interpolates a `PIXTUOID_LOG`/`XDG_STATE_HOME` path and its two readers
-│                       print to DIFFERENT terminals (doctor's stdout, sources_cli's tracing →
-│                       raw stderr), so it is strip_control_chars'd where it is MINTED, not
-│                       per presenter (R0615-06 — sanitizing per presenter is how the twin leaked).
-│                       drifted_sources/footer_warning (also pure, tested) feed the LIVE footer nudge —
-│                       run_tui throttle-scans the same log (≤15s) → ⚠ decode drift footer (see tui guide).
-│                       **THE unified source-HEALTH module** (#309 health-consolidation): `SourceDiagnostics`
-│                       { install: Option<SchemaVerifyResult>, drift } + `diagnose(src, log, cfg)` (install
-│                       soundness via install::verify_target + drift scan) + `summary()` (⚠ install-broken
-│                       > decode-drift) is the ONE rollup the Sources panel detail, the boot preflight
-│                       (main.rs), AND `run` (the CLI report) all read — surfaces can't drift apart. Version
-│                       skew stays report-ONLY (the <cli> --version probe is too costly for the interactive
-│                       panel-open; advisory). doctor=health PROVIDER, ConnState=connection lifecycle it
-│                       ANNOTATES (sub-state, not overlap). + the #526 focus-jump block (`focus_section`,
-│                       pure + registry-bucketed: activation backend per OS — linux via the pure
-│                       `linux_activation_backend` over the SAME env markers focus/linux.rs keys on —
-│                       + CC/Codex probe-root presence via `source::cc_registry_dir` / codex
-│                       default_paths; report-only, NO TUI notice — user-cut)
-├── focus/              FOCUS-JUMP (click a sprite / dashboard `f` → the agent's terminal APP comes to the
-│                       foreground; spec docs/superpowers/specs/2026-07-10). mod.rs: focus_slot (the ONE
-│                       painter-agnostic dispatch entry — tui click/`f` today, the floating trigger later) →
-│                       resolve_pid (slot.pid for stamp-channel sources — a `PidIdentity` (pid + kernel start
-│                       marker) riding each hook Identity — else the registry `FocusChannel::TranscriptProbe`
-│                       gate + the CC/Codex point queries `source::{cc,codex}_pid_for_session`, recycle-guarded;
-│                       probe fns stay HERE, lockstep-tested against the registry enum — wasm const-table
-│                       boundary; TWO click-time guards on the cached path: an EXITING slot is REFUSED,
-│                       and the start marker is re-read via ProcessTable::start_time — mismatch/gone = recycled
-│                       pid, refused, #527) + ancestor_walk (PURE over an
-│                       injected ProcessTable, cycle-guarded, stops at pid≤1 — mock-table unit tests; KNOWN
-│                       common miss #538: tmux/screen/zellij servers are daemonized → walk dead-ends at pid 1) +
-│                       focus_agent (the ONE orchestration entry; activation injected so dispatch tests never
-│                       touch the OS). Per-OS glue (codecov-ignored, winit-class): macos.rs `/bin/ps -o ppid=`
-│                       per hop (NOT proc_pidinfo — it EPERMs at the setuid-root `login` in terminal chains;
-│                       live-dogfood-caught) + NSRunningApplication activate (objc2-app-kit pinned to winit's
-│                       stack, zero TCC); windows.rs Toolhelp32 + EnumWindows/SetForegroundWindow, retried
-│                       once under an AttachThreadInput borrow of the foreground thread's input state
-│                       (#528 — see the foreground-lock sharp edge); linux.rs /proc walk + ONE channel per env:
-│                       sway/hyprland IPC by env marker (focusable asks the compositor tree for pid ownership,
-│                       so the walk surfaces the terminal, not the agent) else EWMH _NET_ACTIVE_WINDOW via
-│                       x11rb — i3 rides EWMH, NOT swaymsg (GNOME Wayland fails closed). ONE failure rule: every
-│                       miss = tracing::debug + silent no-op — no fallback tiers, no info UI (user-directed).
-│                       App-level only in v1 (no tab/pane precision — backlog). Windows shim-family sources
-│                       now resolve a pid too (#528): the shim walks past its transient cmd.exe parent
-│                       (pixtuoid-hook's cli_pid) and `pid_start_marker` reads a creation FILETIME there, so
-│                       the #527 click-time recycle guard is live on Windows rather than inert.
-├── config/             AppConfig persistence (~/.config/pixtuoid/config.toml), XDG-aware
-├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize — all unit-tested;
-│                       ConnectedSources = the live `Arc<Mutex<HashSet<String>>>` connected-set,
-│                       seeded from config::resolve_connected, mutated by the Sources panel toggle,
-│                       read by the reducer task — recovers via into_inner on lock poison),
-│                       driver.rs (tokio task wiring: source ── (Transport, AgentEvent) ──► reducer ──►
-│                       renderer, compute_boot_capacities terminal-size query, Ctrl-C loop —
-│                       untestable async glue, codecov-ignored, #103; exception: headless_loop
-│                       takes its ctrl_c future as an injected seam, so its signal arms — incl.
-│                       the registration-failure disarm — are unit-tested. The CONNECTION-GATE DECISION
-│                       lives in the sibling `runtime::gate` module (`event_source` + `apply_gated_event` +
-│                       `apply_gated_presence` [the daemon-presence twin] + `reconcile_sweep_tick` — covered AND
-│                       mutation-tested, so a gate/reconcile drift reds a test, NOT hidden in this coverage-excluded
-│                       shell; the tests drive the REAL fns, not a hand-copied mirror — #741/#751), DRIVEN by
-│                       reducer_task (the presence arm keeps only `ew.watch` + publish): every incoming event is dropped
-│                       if its source (resolved by the pure `event_source` off SessionStart/Identity, else the
-│                       slot) is not in the connected-set; every sweep tick RECONCILES the scene toward the set via
-│                       (idempotent) `Reducer::reconcile_connected(&cur)` — which evicts every slot whose
-│                       source is the COMPLEMENT of the connected snapshot (NOT a registered-source list), so a
-│                       panel disconnect walks characters out gracefully + live (no restart), the JSONL watcher
-│                       still running can't keep a disconnected source visible, AND a blank-source slot that
-│                       slipped the per-event gate is swept too. Stateless on purpose (no prev-set bookkeeping).
-│                       LIVENESS-LADDER INTERACTIONS (all benign — a disconnect is an explicit user toggle, the
-│                       same authority class as a SessionEnd, NOT content-driven lifecycle): a disconnected source
-│                       is evicted by THIS 1-Hz reconcile, NOT the minutes-scale stale-sweep; reconcile's
-│                       write-once `mark_exiting` is honored by the probe ladder (ProofOfLife/vouch SKIP exiting
-│                       slots + never create/resurrect them — core sharp edge), so a vouched-but-disconnected
-│                       source still exits; `cascade_exit` is source-agnostic (parent_id BFS) so a disconnect of
-│                       a delegating parent takes its whole subtree while a DIFFERENT connected source's subtree
-│                       is untouched. Reconnect = a fresh `SessionStart` resurrects-in-place once the old slot GCs.
-│                       `build_source_set` is the ONE source-construction site: it mints the HookRouter (the
-│                       Source that owns the shared hook socket — every CLI's hooks ride it), the transcript
-│                       watchers (CC/Antigravity/Codex/Copilot/omp/grok), and the ONE shared ChildEndUnclaims handle (#246)
-│                       — handed to the HookRouter (hook-tee PRODUCER) + ClaudeCodeSource & CodexSource & GrokSource (watcher
-│                       CONSUMERS). Daemon presence (OpenClaw) rides a source-tagged sibling channel into
-│                       SceneState::daemons; reducer_task's presence/sweep arms are registry-driven
-│                       (daemon_sources()) so N daemons need no driver edit),
-│                       pipeline.rs (#714 — `spawn_pipeline(socket_path, roots…, connected, boot_caps)
-│                       -> Pipeline {scene_rx, health_rx, floor_caps, _source_handles}`: the ONE
-│                       source→reducer spine BOTH painters boot through — presence chan + exit watch →
-│                       build_source_set → event/scene/health chans → floor-caps atomics → reducer_task
-│                       + SourceManager::spawn_with_health; was hand-mirrored across run_async and
-│                       floating::run. boot_caps / socket_path / ConnectedSources stay CALLER-side (the
-│                       documented divergences: TUI measures the terminal, floating its window pixels;
-│                       both need socket/connected after boot). Needs an ambient tokio context
-│                       (run_async's block_on / floating's rt.enter) — the RUNTIME is what keeps the
-│                       spawned tasks alive (a dropped tokio JoinHandle DETACHES, never stops);
-│                       `_source_handles` is an inert anchor for future abort/join.
-│                       codecov-excluded + mutants-excluded like driver.rs)
-├── init_pack.rs        extracts the embedded skeleton pack to a target dir for `init-pack`
-├── validate.rs         the `validate-pack` presenter; pack.name/version are UNTRUSTED TOML strings (can
-│                       embed ESC/OSC via \u escapes), so every printed line routes through
-│                       strip_control_chars (same egress rule as the headless summary + doctor)
+├── main.rs             entry point — arg-parse + dispatch + env glue ONLY …
+├── crash.rs            install_crash_hook — panic hook → terminal restore …
+├── logging.rs          log routing (#157): logging::init installs the ONE tracing …
+├── cli.rs              clap subcommands (run / floating / validate-pack / …
+├── term.rs             truecolor preflight — does NOT guess from a $TERM name …
+├── setup.rs            first-run detection for onboarding: the PURE …
+├── sources.rs          the TUI-free source-control CORE …
+├── sources_cli.rs      the scriptable sources-CLI PRESENTERS over crate::sources …
+├── doctor.rs           `pixtuoid doctor` — read-only source self-diagnosis …
+├── focus/              FOCUS-JUMP (click a sprite / dashboard `f` → the agent's …
+├── config/             AppConfig persistence (~/.config/pixtuoid/config.toml) …
+├── runtime/            mod.rs (RunConfig, boot-capacity math, headless summarize …
+├── init_pack.rs        extracts the embedded skeleton pack to a target dir for …
+├── validate.rs         the `validate-pack` presenter; pack.name/version are …
 ├── version.rs          pure version-popup boot logic
-├── aa_text.rs          THE anti-aliased text rasterizer — every rasterized text surface rides it: the floating
-│                       window's badges/board AND the snapshot example's terminal-cell text + --proof panel
-│                       (the old 8×8 `pixtuoid_scene::font` + its font8x8 dep were DELETED — no bitmap stand-in
-│                       anywhere). ONE face BY DESIGN: **Monaspace Neon** (GitHub Next, OFL) — the brand mono
-│                       across the whole project (the site's `--font-mono` is the same family via
-│                       @fontsource/monaspace-neon). Chosen over JetBrains Mono because it natively covers the
-│                       office's FULL symbol vocabulary `★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤` — JBM lacks all of those (verified;
-│                       JetBrainsMono NERD Font does NOT help: its patches are all Private Use Area, a real
-│                       terminal shows such symbols via system-font fallback), which had forced an interim
-│                       JuliaMono-subset fallback face, then an interim JBM-native vocabulary (`✶ ◔ ◆ █ ░ └`)
-│                       — both retired the same day Monaspace landed. `◷`/`▤` replaced the emoji-only `⏱`/`📁`
-│                       tooltip prefixes. The `office_symbol_vocabulary_is_fully_covered` test is the gate: a
-│                       NEW render glyph must be Monaspace-covered or the vocabulary changes — never a second
-│                       face. Exposes has_glyph / text_width / line_height / blend_channel (the ONE
-│                       coverage-blend curve all three surfaces wrap) / draw_text_at(s, x, top_y, px,
-│                       put(x,y,coverage)) — a surface-agnostic coverage callback the caller blends
-│                       (offscreen.rs `blend_xrgb`, snapshot `blend_px`/`mix_rgb`). Binary-only (ab_glyph is a
-│                       runtime dep of THIS crate, not pixtuoid-scene — the engine stays font-impl-free; the
-│                       OTF/CFF outlines rasterize fine through ab_glyph). The wasm/site painter does its own
-│                       AA via DOM spans, not this. Snapshot cell text renders at CELL_FONT_PX=14.7 (Monaspace
-│                       advance 7.96 ≤ the 8px cell; line_height rounds to the 16px cell — test-pinned).
-├── audio/              ambient office sound (#633) — THE one consumer of pixtuoid_scene::audio's model and
-│                       the only owner of rodio/cpal (behind the default-on `audio` cargo feature; Linux
-│                       PREBUILTS ship without it — ALSA can't link into musl/cross builds — so Linux audio
-│                       is from-source). mod.rs (AudioHandle: clone-cheap try_send gateway — disabled handle
-│                       is inert everywhere, so callers never cfg; AssetBank = the ONE-SHOT pools, TrackBeds =
-│                       the five TRACK-OWNED loop buffers (rain registers separately at spawn — weather is
-│                       track-independent) HANDED OFF at registration/swap and dropped — RodioSink copies each
-│                       into its own SamplesBuffer, so retaining them would double the bed RAM. Synthesis
-│                       at spawn on a fixed seed, MEASURED ~2s release / >10s debug on M-series: frames
-│                       try_sent in that window drop harmlessly (levels re-send every render frame) and MUTE
-│                       rides an AtomicBool on the handle — NOT the droppable frame channel — so an m/p press
-│                       mid-window can never be lost; run_loop = the device-agnostic thread body; rain at spawn,
-│                       track beds on the first frame). The PURE synth stack (dsp/score/synth/mixer) AND the
-│                       per-tick `AudioEngine` MOVED to `pixtuoid_scene::audio` (web-audio #633) so the native
-│                       gateway here AND the wasm WebAudio painter run the SAME mixing/crossfade/scheduling —
-│                       the binary imports `pixtuoid_scene::audio::{AudioEngine, dsp, synth, MAX_DT_S}`;
-│                       AssetBank/TrackBeds + the device half stay HERE. `run_loop` is now a THIN SHELL over
-│                       `AudioEngine`: the clamped-dt clock, the mute/volume atomics (`engine.set_muted/
-│                       set_master`), the caller-side bed BUILD (on `TickCommands.swap`), and forwarding each
-│                       tick's `{gains, plays}` to the sink (`bank.sample(pool, index)` resolves a play). The
-│                       old `resync_after_stall` is GONE — the engine owns the (clamped) clock so a build stall
-│                       can't burst the schedulers; only a post-build channel drain remains (`merge_backlog_levels`
-│                       on the first frame keeps its events but adopts the backlog's freshest levels). Only
-│                       sink.rs (AudioSink seam: NullSink for CI/no-device, RodioSink = rodio 0.22 Player
-│                       glue, codecov-excluded winit-class) + spawn/run_loop remain binary-side behind the
-│                       `audio` feature (the rodio dep). Audio NEVER blocks render: bounded channel,
-│                       drop-on-backpressure. TUI feeds one AudioFrame per rendered frame, composed by the
-│                       office-shared AudioObserver (pixtuoid_scene::floor, in PerOffice) via
-│                       self.office.audio.frame(..) — runs every frame, only DELIVERY is mute-gated; m toggles
-│                       mute. Audio is
-│                       FLOOR-SCOPED (owner call): stems + door/appliance cues come from the floor
-│                       being VIEWED (per_floor_counts + floor_idx-filtered ids; tracker re-primes on
-│                       floor switch); rain stays global (weather, not agent activity). No elevator
-│                       ding (owner-cut). Floating has FULL cue parity (#633 close-out): stems + door +
-│                       appliance one-shots, scoped to its rendered floor — composed via
-│                       `FloorSession::audio_frame()` through the SAME office-shared AudioObserver (backed by
-│                       the session's private last_occupied + last_layout), floor-reprime automatic.
-│                       [audio] config: ONE switch `muted` default TRUE (owner-cut the redundant enabled
-│                       knob; `m` = the whole opt-in, persisted via save_audio_muted) + volume clamped [0,1];
-│                       the system LAZY-SPAWNS on the first unmute (muted = zero cost: no device/thread/
-│                       buffers) — run_tui swaps the fresh handle into the renderer; floating boot-spawns
-│                       iff !muted AND has the SAME m/+/- runtime keys. TEARDOWN-ON-QUIT (the "music keeps
-│                       playing after quit / killall coreaudiod" bug): the device runs on a spawned thread
-│                       whose RodioSink Drop closes the OS output — detached, that Drop RACES process exit
-│                       and on macOS strands CoreAudio (cpal's stream is !Send so it CAN'T live on the main
-│                       thread lowfi-style — the device MUST stay off-thread, so the fix is to JOIN it, not
-│                       relocate it). RAII owns this: **`AudioController` boot-spawns the device thread in
-│                       `new()` and JOINs it in `impl Drop`** (via `AudioHandle::shutdown` — drop the sole
-│                       sender → run_loop returns → bounded join by SHUTDOWN_JOIN_TIMEOUT, which must exceed
-│                       a release synth build since run_loop is blind to the closed channel mid-build). Each
-│                       painter holds ONE controller (TUI a run_tui local; floating a FloatingApp field),
-│                       built AFTER that painter's fallible `?` boot steps — so no thread predates its
-│                       Drop-owner and the compiler runs the teardown on EVERY exit (q/Ctrl-C/terminate/error/`?`;
-│                       a release `panic=abort` is the one exit it skips), no hand-wired call to forget. Drop FLUSHES a pending debounced volume
-│                       BEFORE the join, so a nudge-then-Ctrl-C persists too (#752, was `q`-branch-only). The join is bounded because
-│                       CoreAudio device-close can itself block. The mute/volume TRANSITION is
-│                       ONE authority — `audio::apply_audio_action(&mut AudioUi, action, paused, spawn)`
-│                       (audio/mod.rs, unit-tested); the PERSIST protocol around it (mute-save-now, volume
-│                       debounce→flash-expiry, exit-flush) is a SECOND authority BOTH painters OWN —
-│                       `audio::AudioController` (new/apply/tick/set_paused/volume_flash/handle, exit-flush now
-│                       folded into Drop;
-│                       `now` injected → the debounce/flash is unit-tested). The TUI keeps ONE controller (was
-│                       5 loop locals + a deleted `run_audio_action`); floating keeps one (was its own
-│                       volume_flash/volume_dirty/flush_volume). BOTH painters now render the shared
-│                       `pixtuoid_scene::footer` model, so the `♩`/`♩ N%` audio state lives in the footer's
-│                       right suffix on BOTH — TUI-consistent (silent when muted; no separate overlay). Only
-│                       the KEY→action decode is painter-specific: crossterm dispatch in
-│                       tui/mod.rs, winit in floating/input.rs (the pure key-map, `m`/`+`=/`-`_, lowercase
-│                       m only; winit's repeat flag swallows a held m — the TUI's crossterm path lacks it).
-│                       window.rs stays thin winit glue; lazy spawn + persistence identical; audio feedback is
-│                       the footer band's `♩`/`♩ N%` suffix (offscreen::paint_footer_into_surface — the
-│                       standalone volume_flash overlay was retired when the footer landed). The KeyboardInput arm
-│                       gates `is_synthetic: false` (winit replays held keys on focus-gain, X11/Windows —
-│                       the focus-replay twin of the TUI's should_dispatch_key). Footer shows ♩ iff
-│                       enabled && !effective-muted (m OR pause); onboarding carries the one-line m hint.
-│                       +/- nudge volume (audio::VOLUME_STEP, THE shared step both painters read — audio/ is
-│                       the sibling painters' one shared home, same for VOLUME_FLASH_MS + the transition
-│                       fn; an AtomicU32-bits sibling of the mute atomic; mixer folds it per tick; persisted;
-│                       footer flashes `♩ N%` ~1s — the lowfi volume-timer pattern; + from muted unmutes).
-│                       RodioSink::open silences stderr around device open on Unix (ALSA prints raw lines;
-│                       lazy spawn = mid-altscreen open, one line corrupts the TUI — lowfi issue #1).
-│                       Volume→amplitude is mixer::master_amp = user² × BUS_TRIM(0.35): a squared perceptual
-│                       curve under an ambient bus trim (dogfood: untrimmed linear was "too loud even at
-│                       5%") — the ONE mapping site; the footer keeps showing the user's linear percent.
-│                       Volume persist is DEBOUNCED to the ~1s flash expiry + the quit path (+/- is a
-│                       repeatable key — per-repeat ConfigLock rounds were the bot MEDIUM); the +/- arm
-│                       re-attempts the lazy spawn whenever unmuted-but-disabled ('+' is never a dead key).
-│                       An EMPTY office now plays the quiet pad+sparkle+texture "radio on" floor (the
-│                       ratified demo_1) — Phase 1's empty-silent behavior ended when the music landed.
-│                       MOOD TRACKS (#644; ALL-GENERATIVE 2026-07-20): TrackId {GenDay(seed),
-│                       GenNight(seed)} rides AudioFrame (scene's select_track over the
-│                       lighting's OWN sun window + precipitation; seed = the audio::track_epoch
-│                       block (600s — a new song every 10 minutes, owner-tuned for short agent
-│                       sessions) and the block id change is an ordinary track switch); the
-│                       engine's TrackSwitch holds the
-│                       five TRACK_STEMS at 0, and when they reach silence `tick` returns `swap: Some(to)` →
-│                       run_loop synthesizes that track's TrackBeds under the silence (~2s) and swap_loop's
-│                       them (RodioSink drops+recreates the Player at gain 0), then ramps back — LATCHED per
-│                       cycle (boundary flapping can't thrash synths); rain is weather, never swapped. Track beds register on the FIRST frame (it names the
-│                       right mood — booting Day at night would synth a track just to fade it away).
-│                       The night MOOD keeps the Lofi Girl anchor (sub-bass floor in the pad,
-│                       kick+hat-only groove, duck-baked texture, phase-locked) — now COMPOSED
-│                       per track-epoch by scene's compose.rs rather than replayed from the frozen v4
-│                       take; bus glue is deliberately NOT runtime (rodio has no insert) — the
-│                       listen gate renders the honest no-glue approximation.
-├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE bundled face; vendored VERBATIM
-│                       from githubnext/monaspace v1.400 static — unmodified, so the OFL Reserved-Font-Name
-│                       clause is never triggered)
-├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + opencode + Cursor + Hermes + OpenClaw + grok + Kimi) hook install via the `Target` registry:
-│                       mod.rs (install_target/uninstall_target = structured core → InstallReport/UninstallReport,
-│                         driven SOLELY by the in-TUI Sources panel's connect/disconnect (no CLI orchestration —
-│                         plan_targets/interactive_pick/run_install/run_uninstall + inquire were deleted with the
-│                         install-hooks CLI); has_hooks(t, cfg) is `pub(crate)` — its callers are doctor (diagnose's verify
-│                         gate + run's per-source hooks_installed report row) and the onboarding-skip freeze
-│                         (`sources::skip_freeze`, which probes it to keep a pre-0.12 upgrader's hooks); 0.12.0 dropped
-│                         resolve_connected's install-state migrate inference),
-│                       target.rs (Target trait + TARGETS = [CLAUDE, CODEX, REASONIX, CODEWHALE, OPENCODE, CURSOR, HERMES, OPENCLAW, GROK, KIMI];
-│                         each Target carries a `verify_schema` fn-ptr — the #309 install-soundness check, per-source
-│                         format-local like merge_install/uninstall),
-│                       verify.rs (the READ-ONLY #309 install-schema verifier: SchemaParse/SchemaVerifyResult/ShimRef +
-│                         shared read helpers shell_shim_ref (4 shell targets) / flat_json_verify (reasonix+cursor) /
-│                         assemble; the two baked code templates keep their placeholder quoted so both files
-│                         remain valid source before rendering (default-setup CodeQL parses them);
-│                         install::verify_target(t, config) = the I/O wrapper that reads the config +
-│                         calls verify_schema + stats the shim + (for `extra_artifacts` targets like OpenClaw)
-│                         stats each wholly-owned plugin file for existence — a missing one is a HARD break, the
-│                         silent-dead class the config check is blind to (#332; paths are hook-path-independent so a
-│                         placeholder arg yields the install locations without resolving the binary). ONLY call when has_hooks(t, cfg) — the load-bearing gate
-│                         (an uninstalled config verifies "broken"; a disconnect removes hooks → has_hooks=false →
-│                         never called → never a false broken)),
-│                       merge.rs (the install-WRITE shared helpers, split OUT of verify.rs so the read/write
-│                         halves live apart: parse_json_or_empty/parse_toml_or_empty (empty ⇒ {}), hook_path_str
-│                         (the ONE non-UTF-8-path rejector), bake_hook_path (opencode/openclaw plugin templater),
-│                         and flat_json_merge_install/uninstall — the sentinel-keyed per-event merge Reasonix/Cursor/
-│                         Claude ride (the entry SHAPE rides in the caller's make_entry closure, so Claude's nested
-│                         entry fits the same core)),
-│                       claude.rs / codex.rs / reasonix.rs / codewhale.rs / opencode.rs (+ bundled opencode_plugin.ts) /
-│                         cursor.rs / hermes.rs (hook-only, GLOBAL ~/.hermes/config.yaml) / openclaw.rs (+ bundled openclaw_plugin.js —
-│                         its plugin stamps the resolved `gatewayPort` on every forwarded hook (the mascot's
-│                         instance identity) and returns an EXPLICIT `{outcome:"pass"}` from the awaited
-│                         `before_agent_run` gate; contract-tested for real by scripts/openclaw-plugin.test.mjs
-│                         under `just npm-check`) / grok.rs / kimi.rs (GLOBAL `<KIMI_CODE_HOME>/config.toml`,
-│                         default `~/.kimi-code/config.toml`) (per-target hook_command + config path;
-│                         claude.rs: Unix = bare shell-form, Windows = exec-form absolute .exe;
-│                         reasonix = GLOBAL ~/.reasonix/settings.json, FLAT {match,command,timeout-ms}
-│                         entries — project-scope is trust-gated; match omitted = every tool;
-│                         codewhale = ~/.codewhale/config.toml [hooks] (enabled=true) + a `hooks` array of
-│                         {event, command} entries. Env-mode events (session/tool/end) bake ` --event <name>`
-│                         (CodeWhale sets no event env var; shim builds from DEEPSEEK_*); the subagent observer
-│                         events (subagent_spawn/complete) use the PLAIN stdin-forward command (no --event) —
-│                         CodeWhale pipes a full JSON payload with the child agent_id. `_pixtuoid` sentinel idempotency.
-│                         opencode = a TS PLUGIN (the FIRST install target that writes CODE, not a config block):
-│                         opencode auto-discovers `<config>/plugins/*.ts` (plural, canonical), so we DROP `<opencode-config>/plugins/pixtuoid.ts`
-│                         (no opencode.jsonc edit). The plugin (bundled `opencode_plugin.ts`, shim abs-path baked in
-│                         JSON-escaped) pipes lifecycle/tool/permission
-│                         EventV2 to the shim on stdin; merge_install
-│                         renders the whole file (it's wholly ours), uninstall writes a sentinel-free no-op stub
-│                         (write-only orchestrator can't delete), detect on the `@pixtuoid-opencode-plugin` sentinel),
-│                       hook_cmd/ (mod.rs / unix.rs / windows.rs — the shared per-platform hook-command builders,
-│                         incl. `windows::windows_bare_hook_command`'s 8.3 short-name / cmd-unsafe-path guard),
-│                       io.rs (resolve_symlink + the ONE config-write authority: ConfigLock —
-│                         an RAII advisory-lock guard taken BEFORE the read and held across
-│                         read+merge+backup+write (lost-update TOCTOU); its pinned symlink
-│                         resolution is the ONE identity for the whole round — read/backup/
-│                         remove_backup go through ConfigLock::read/::backup_once/::remove_backup,
-│                         never a re-resolve of the link — and ConfigLock::write_atomic
-│                         (fsync + atomic rename, PRESERVES the target's Unix mode / creates new
-│                         files 0600 — settings.json can carry API keys; Windows: rename wrapped
-│                         in 3×50ms retry for sharing-violation tolerance). write_config_atomic
-│                         = lock_config + write_atomic for single-shot writers; NEVER re-call it
-│                         while holding a ConfigLock — same-process flock self-deadlocks. The
-│                         .lock file is deliberately never unlinked, and even a no-op
-│                         re-install creates it: the lock must be taken BEFORE the read
-│                         that detects "nothing changed"; open_lock_sidecar creates it
-│                         0600 + O_NOFOLLOW — BOTH halves of the hook socket-lock's parity,
-│                         since flock(2) grants an exclusive lock through a read-only fd,
-│                         so a 0644 sidecar lets a co-located user wedge every install AND
-│                         every config save — and lock_config then tighten_to_owner_only's
-│                         an upgrader's pre-existing 0644 one. owner_only_create /
-│                         tighten_to_owner_only are the ONE definition of that 0600 policy
-│                         (create_hardened_tmp + logging's sinks read it too), kept as two
-│                         SEPARATE fns so each half has its own test — see the logging entry.)
-├── floating/           `pixtuoid floating` — the frameless, always-on-top DESKTOP WINDOW (winit + softbuffer,
-│                       binary-only; pixtuoid-core stays window-free, invariant #1). ALL floating-only source
-│                       lives here: mod.rs (run + PipelineBoot/LivePipeline: boots the SAME
-│                       `runtime::pipeline::spawn_pipeline` spine as the TUI (#714 — the old hand-mirrored
-│                       wiring is gone; only the window seed, socket resolution and ConnectedSources stay
-│                       local), but from `window::resumed` — `run` has only the LOGICAL [floating] config
-│                       size and the seed needs the REAL window's PHYSICAL px (#803) — spawned on
-│                       a bg runtime, NEVER block_on [winit owns the main thread]; an EventLoopProxy bridges
-│                       scene changes → redraw), offscreen.rs (OfficeRenderer — owns one
-│                       pixtuoid_scene::floor::FloorSession, the scene-owned painter session over the shared
-│                       render_floor seam (#423; eviction is structural — render() runs it); moved here from tui/ as it's floating-only; the testable unit;
-│                       also OfficeRenderer::{labels + paint_labels_into_surface, board + paint_wall_board_into_surface}
-│                       — agent name badges from the shared pixtuoid_scene::overlay model AND the neon wall board
-│                       from pixtuoid_scene::board, both rendered as anti-aliased Monaspace Neon via crate::aa_text
-│                       (NOT the old 8px pixtuoid_scene::font — that pixelated), blitted at NATIVE surface res
-│                       POST-upscale with a near-black drop-shadow so the crisp caption reads over the chunky office;
-│                       ALSO the whole window→capacity chain, kept here because window.rs is measured by neither
-│                       codecov nor cargo-mutants: window_buffer_geometry (window→office-buffer projection) →
-│                       floor_caps_for_buffer (the ONE per-floor derivation) → boot_capacities_for_window (the
-│                       resumed seed) and sync_floor_caps (the per-redraw store + its resize memo)),
-│                       window.rs (FloatingApp ApplicationHandler: renders the office at a DOWNSCALED buffer
-│                       [~window/SCALE, OFFICE_TARGET_H≈180] then nearest-neighbor UPSCALES into the surface —
-│                       a 1:1 blit renders 8×12 sprites unreadably tiny; ~30fps tick WHILE agents OR a live gateway
-│                       daemon (the OpenClaw lobster — a time-driven wandering mascot in scene.daemons, Idle/Busy/
-│                       Degraded) are present, else a ~1fps IDLE_AMBIENT tick (keeps the clock/weather/pet alive
-│                       without burning CPU on an empty office — was a full 0fps freeze; the tick itself lives in
-│                       cadence.rs, and the redraw REQUEST is gated on the same deadline as the wait — see below);
-│                       restored [floating] position is validated against
-│                       the live monitors (off-every-screen → OS-default placement, not unrecoverable off-screen);
-│                       left-press drag / corner resize; m/+/- audio keys (the pure half in input.rs — see
-│                       the audio/ entry); persists [floating] geometry (+ any pending volume) on close;
-│                       calls offscreen::sync_floor_caps each redraw so floor_caps track the rendered layout's
-│                       home-desk count and no agent is stranded off-screen (the memo that decides WHETHER to
-│                       republish lives with the publish, not here — this file is measured by nothing);
-│                       macOS Accessory + shadow, #[cfg(windows)] skip-taskbar; opacity = honest v1
-│                       no-op, winit has none + softbuffer is opaque → wgpu/native deferred),
-│                       geometry.rs (the pure window/monitor rect math extracted OUT of window.rs so it's
-│                       unit-testable: window_visible_on_monitors = the off-screen-recovery AABB overlap +
-│                       empty-monitor-list guard; near_resize_corner = the drag-vs-resize hit-test),
-│                       input.rs (the PURE winit key → audio::AudioAction map; the mute/volume TRANSITION
-│                       itself is shared with the TUI in audio::apply_audio_action — see the audio/ entry),
-│                       cadence.rs (the PURE animation throttle + both FPS constants: `FrameClock::poll(now,
-│                       office_idle) -> (paint, deadline)`. `about_to_wait` runs on EVERY event-loop iteration,
-│                       so the redraw REQUEST — not just the `ControlFlow::WaitUntil` beside it — has to be gated
-│                       on the deadline: an unconditional `request_redraw()` there leaves winit a pending redraw
-│                       whenever it reaches its wait, so `WaitUntil` never sleeps and BOTH cadences collapse to
-│                       max-rate. That was the shipped behavior until it was MEASURED: 100.6% of one core with an
-│                       empty office and 100.5% with agents, vs 0.5% / 13.2% once the request is gated).
-│                       **mod.rs + window.rs are codecov-IGNORED** (winit `EventLoop`/`ApplicationHandler` +
-│                       tokio glue, the floating twin of driver.rs — need a real display); the floating crate's
-│                       TESTED surface is offscreen.rs (render seam) + geometry.rs (rect math) + input.rs
-│                       (audio keys) + cadence.rs (the throttle). Visual check:
-│                       `examples/floating_snapshot.rs` (the floating twin of the `snapshot` example).
-└── tui/                ratatui App + TuiRenderer (inherent `render` flush) — the half-block flush + widgets +
-                        event loop, a thin painter over the pixtuoid-scene crate (the engine is its own crate now) — see src/tui/CLAUDE.md
+├── aa_text.rs          THE anti-aliased text rasterizer — every rasterized text …
+├── audio/              ambient office sound (#633) — THE one consumer of …
+├── fonts/              MonaspaceNeon-SemiBold.otf + OFL-Monaspace.txt (the ONE …
+├── install/            multi-target (Claude + Codex + Reasonix + CodeWhale + …
+├── floating/           `pixtuoid floating` — the frameless, always-on-top DESKTOP …
+└── tui/                ratatui App + TuiRenderer (inherent `render` flush) — the …
 
-sprites/                character/environment packs (NOT under pixtuoid-hook; the DEFAULT pack moved OUT to
-│                       crates/pixtuoid-scene/sprites/default/ — scene include_str!s it via its own build.rs):
-├── robot/              proof-of-concept TV-head robot pack (loadable via --pack-dir)
-└── skeleton/           template pack for custom sprite creation (embedded via init_pack; extracted via init-pack)
+sprites/                character/environment packs (NOT under pixtuoid-hook; the …
+├── robot/              proof-of-concept TV-head robot pack (loadable via …
+└── skeleton/           template pack for custom sprite creation (embedded via …
 ```
+<!-- layout:end -->
 
 ## Known sharp edges (don't be surprised by these)
 
-- **Windows focus-jump borrows the foreground thread's input state, and the two BETTER-KNOWN bypasses are refused on purpose.** `SetForegroundWindow` grants the caller nothing here: a console TUI does not own its host window, so the click that asked for the jump is an input event WindowsTerminal/conhost received, and of MSDN's six granting conditions the four that could apply here (be the foreground process, be started by it, have received the last input event, no foreground window at all) all fail — the system flashes the taskbar button instead. The other two (the foreground lock time-out has expired; either process is being debugged) are why `activate_os` still tries UNATTACHED first, along with the `floating` painter, which IS the foreground process and needs none of this. `focus::windows::activate_os` therefore attaches to the foreground window's thread (`AttachThreadInput`) for one retry, which satisfies the last-input condition while attached. Three details are load-bearing, not decoration: (1) **the message-queue prime is not optional** — `AttachThreadInput` "fails if either of the specified threads does not have a message queue", threads are created WITHOUT one, and MSDN contradicts itself on which calls mint it (the `AttachThreadInput` page says USER *or GDI*, "About Messages and Message Queues" says only "specific user functions"), so a console thread is exactly the one that might not have it and `ensure_message_queue`'s `PeekMessageW` settles the ambiguity rather than trusting the `EnumWindows` above; (2) **the verdict is `GetForegroundWindow`, not the BOOL** — MSDN documents zero on refusal but says nothing about the flash-only outcome, and the call sets no error, so only observing the foreground window afterwards separates a real raise from a flash; (3) **the detach rides `Drop`**, because a leaked attachment leaves the terminal's input processing serialized with ours. Two further consequences are documented rather than fixed: **restoring a minimized target survives a denial** — `IsIconic` → `ShowWindow(SW_RESTORE)` runs before either attempt, because `SetForegroundWindow` on an iconic window can make it foreground and leave it an icon, so a doubly-refused jump leaves the terminal restored but unfocused, the one place a focus miss is not a *pure* no-op (the alternative is a jump that appears to do nothing in the commonest minimized case); and `AttachThreadInput` **resets `GetKeyState`/`GetKeyboardState` for both threads**, which is assessed harmless only because a console TUI reads input through `ReadConsoleInput` and never those. REFUSED alternatives: the **synthetic ALT keypress** (`SendInput`, the one the internet calls 100% reliable) works by making Windows itself grant the right, but it injects a real global input event — an ALT tap lands in whatever app the user is actually typing in and can pop its menu bar, so a focus-jump would have a side effect on a third party's window; and **`AllocConsole`/`FreeConsole`** is not merely inelegant here but destructive — `FreeConsole` detaches the console the TUI is drawing into. `SPI_SETFOREGROUNDLOCKTIMEOUT` is a global user setting and never ours to write. If the attach path proves insufficient in live Windows dogfood, the honest next step is the app-level UX question (should a denied jump say something?), not a louder bypass — the ONE failure rule says a miss is a silent no-op.
-- **`--graphics off` answers TWO questions at once, and the second one is the cutaway's — but it is a `doctor` flag, and NOTHING paints the cutaway yet.** Read those two facts before reasoning about the module. (a) The flag is on `doctor` ONLY (`cli.rs`), deliberately: `run` paints classic unconditionally today, and a `--graphics` on `run` that `run` silently ignored would be worse than no flag. (b) `render_cutaway`'s only caller in the tree is `examples/cutaway_snapshot` — so `graphics::resolve` reports a CAPABILITY, and the `graphics:` row says "not yet wired to `run`" in as many words. When the profile does reach a painter, the same flag moves to `run` and the conflation below binds for real. THE CONFLATION: `graphics::GraphicsMode` gates terminal image protocols (kitty/iTerm2/SIXEL), but `resolve` also uses it to decide the PROFILE — so "don't use terminal graphics" and "don't draw the cutaway" are one switch. They are not the same question: the cutaway needs real PIXELS PER LOGICAL UNIT, not a protocol, and `floating` (softbuffer) plus `pixtuoid-web` (canvas) already have those — both render small and upscale deliberately, for the chunky look, not for want of resolution. So the day either of them wants the cutaway, the switch that turns it on lives inside the TERMINAL's capability module. Left conflated (splitting now would ship a `--profile` flag no painter reads); the two questions come apart the moment a second surface adopts it. The scale ARITHMETIC is already split correctly: the pack half is `RenderScale::fit` in the engine, so only the profile DECISION is still terminal-shaped.
-- **Capacity GROWTH strands an already-allocated overflow agent, and the HUD keeps counting it — render-conservatively, count-completely.** An agent's floor placement is stored twice in different time frames: `AgentSlot.floor_idx` is frozen at allocation (`state/mod.rs`: *Immutable for the agent's lifetime*), while `SceneState::floor_of`/`floor_range` recompute the desk→floor mapping from the CURRENT `floor_capacities`. Those capacities only grow (`fetch_max`), and growing floor 0's capacity raises floor 1's cumulative offset past an agent allocated under the old offsets. `build_floor_scene` then filters it IN by the frozen `floor_idx` but drops it at `desk_index.0 < offset` (pinned by `build_floor_scene_skips_agent_below_grown_offset`), so it renders on NO floor for the rest of its life — `fetch_max` never restores the old offset. Meanwhile `board::per_floor_counts` and `floor::num_floors` deliberately keep counting it, so the footer's cross-floor `▲F{n}` waiting alarm can never lose a blocked agent and `PageDown` still reaches the floor. That asymmetry is the intended trade, NOT a bug to "harmonize": deriving the render filter from `floor_of(desk_index)` instead is exactly the capacity-driven migration `build_floor_scene`'s own doc forbids and the #36 fix closed, and deriving the counts from the render is what `board.rs`'s *don't derive one from the other* rule forbids. The real fix is to stop storing the placement twice (one `DeskPlacement { floor, local }` minted at allocation), which is a cross-crate reshape of a `pixtuoid-core` public type — not a local patch.
-- **Terminal cell aspect drives sprite design.** The half-block ▀ technique assumes ~1:2 cell aspect. Sprites larger than ~16×16 px break on terminals with taller cells (Ghostty default, large Fira Code). The bundled **character** sprites max at **8×12 px** (e.g. `standing`/`walking_*`), safely under the ~16×16 threshold; static environment art (door 16×14, pantry 32×10) is wider but isn't an animated half-block agent. A PNG-loader experiment hit this wall and was deleted in favor of hand-drawn `.sprite` art.
-- **`--max-desks` has no hard default.** It's `Option<usize>` (hidden flag / `max-desks` config key) — when absent, per-floor capacity is auto-computed from terminal size at boot. `FALLBACK_DESKS = 16` (`runtime/mod.rs`) is used only in headless mode or when the terminal-size query errors. The auto path clamps each floor to its real layout capacity; if you add an explicit-cap boot path, clamp it the same way (don't seed the floor-capacity atomics above the layout's real capacity — `fetch_max` only grows, so an over-seed leaves agents assigned to non-existent desks until the terminal grows). **`max-desks` applies to `run` (TUI) only, NOT `floating`** — the desktop window seeds capacity purely from its window-pixel size (`floating::offscreen::boot_capacities_for_window` at boot + `floating::offscreen::sync_floor_caps` per redraw, both deriving buffer dims from the shared `offscreen::window_buffer_geometry` and their per-floor capacities from the shared `offscreen::floor_caps_for_buffer`, so the seed can't drift from the redraw at all; `the_first_redraws_publish_agrees_with_the_boot_seed` drives BOTH real functions end-to-end, so a re-divergence reds instead of quietly falsifying this claim — the seed is taken in `resumed` off the REAL `window.inner_size()`, and `window_buffer_geometry` takes a `PhysicalSize<u32>` so handing it the LOGICAL `[floating]` config size is a compile error rather than a silent HiDPI over-seed (#803); the TUI's footer-subtracting, `office_scale`-ignorant `runtime::boot_capacities_for` is deliberately NOT reused here — it over-seeds) and never reads `RunConfig.desk_cap`, so a `max-desks` config value is silently ignored there (a `max-desks = 0` still emits its `resolve_desk_cap` warning during `build_run_config`, so only the legitimate positive-cap case is silent). The monotone `fetch_max` growth rule is TUI-only — `floating::offscreen::sync_floor_caps` deliberately uses `store`: the window's pixel size is exact and authoritative per redraw, so a shrink LOWERS capacity (excess agents go invisible-but-alive); don't "harmonize" it to `fetch_max`. That publish lives in `offscreen.rs`, NOT beside its `window::redraw` call site, and it OWNS its resize memo (`last: &mut Option<(u16, u16)>`, returning whether it recomputed) rather than being wrapped in an `if` there — `window.rs` is excluded from BOTH `codecov.yml` and `.cargo/mutants.toml`, so a decision left there is measured by nothing at all, and that includes the guard deciding whether the publish runs (inverting it freezes admission at the boot seed while every test stays green). Same bundling as the TUI's `FloorCapacitySweep`, and for the same second reason: `floor_capacity` runs a full per-floor layout compute, so this must not run per frame. Pinned by `a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max` + `the_resize_memo_publishes_on_a_change_and_skips_a_repeat` (#827).
-- **The floating pipeline boots in `resumed`, NOT in `floating::run` — the window has to exist before the desk capacity can be seeded.** `run` could offer only the `[floating]` config size, which is LOGICAL by design (`persist_geometry` saves `inner_size().to_logical(..)`, `resumed` restores a `LogicalSize`, so the config stays HiDPI-stable), while the seed needs the PHYSICAL px `window.inner_size()` hands the redraw — so on any HiDPI display it described a window the redraw never measures (the default 360×240 logical seeded floor 0 at **70** where the real buffer at 2× holds **30**). There is no fix at that call site: winit 0.30 exposes `primary_monitor` only on `ActiveEventLoop`, which does not exist until `run_app` is driving, and `office_scale` ROUNDS so no conservative logical-side seed is sound either — measured buffers for 360×240 logical are 360×240 / 225×150 / 270×180 / 315×210 / 240×160 / 270×180 at 1× / 1.25× / 1.5× / 1.75× / 2× / 3×, i.e. **not monotone** in the scale factor (floor-0 desks 70 / 24 / 35 / 48 / 30 / 35). So `FloatingApp` holds a `PipelineBoot` until `resumed` takes it (`boot.spawn(window.inner_size())`), past the window/surface failure arms. (1) The hook socket now binds AFTER window + surface creation instead of before the event loop — single-digit-to-tens of ms on desktop (`resumed` fires right after `NewEvents(Init)`); a hook landing inside that window fails to connect and the shim exits 0 silently, which is its documented never-block contract, and in exchange a window-creation failure no longer leaves a bound socket and a live source set behind. (2) `about_to_wait` fires before `resumed`, so it guards on `live` and reads `None` as an idle office (with no pipeline nothing can be animating, so the AMBIENT tick is right). `redraw` cannot reach that state: `resumed` sets `live` BEFORE `self.window`, and `redraw`'s window guard runs first — its `live` guard is belt-and-braces, and the ORDER of those three assignments is what makes it so; don't reorder them. The unit is enforced by the TYPE (`PhysicalSize<u32>`), not by review, because `resumed` lives in codecov-excluded winit glue; do NOT paper that over with an injected size-provider whose only caller is a test. The old `cap == 0 → FALLBACK_DESKS` clause is GONE — `sync_floor_caps` `store`s the honest 0, so a fallback was the last boot-vs-steady-state divergence and it pointed the wrong way (16 phantom desks where the redraw reports none). Pinned by `the_boot_seed_tracks_the_physical_window_not_the_logical_config` (crosses logical→physical via winit's own `to_physical` at six scale factors — the old test fed the SAME numbers to both sides and structurally could not see a units mismatch) + `an_unlayoutable_window_seeds_zero_not_a_fallback`.
-- **Re-install is a SEMANTIC no-op, and backups APPEND their suffix.** `MergeOutcome.changed = merged != doc` (`install/claude.rs`) compares the *parsed/merged* config, NOT bytes — so a second connect (or a disconnect of an absent hook) detects "nothing changed", skips the write, and preserves the user's hand-formatting + skips backup churn. And `backup_once` names backups via `sibling()` = `format!("{}.{}", path, "pixtuoid.bak")` which **appends** — deliberately NOT `with_extension`, which would truncate `config.local.toml` → `config.local.pixtuoid.bak` (losing `.toml`). So a multi-dot config keeps its full name (`config.local.toml.pixtuoid.bak`). Both pinned by tests in `install/io.rs`.
-- **Daemon presence is ANNOUNCE-only, so a gateway pixtuoid never heard announce is invisible until its next activity — a documented residual, NOT a bug to "fix" with a poll.** `gateway_start` fires once per gateway PROCESS start, which neither `connect` nor a pixtuoid restart can cause. Two journeys therefore start with no lobster: connecting while the gateway already runs, and restarting pixtuoid under a running gateway. It is NOT permanent — `apply_presence` creates an instance on ANY proof-of-life delta, and the plugin stamps `_pid` on every forwarded hook, so the mascot appears on the gateway's next `session_start`/`before_agent_run`/`agent_end`; an IDLE gateway is the only one that stays unseen, and for however long it stays idle. Three things make this the honest resting point rather than a hole: the panel's zero-instance cell says `no gateway seen` (an observation, not the verdict "not running"), `connect` prints the restart step, and `verify_schema` notes a `reload.mode` that will never apply our write. Announcing at plugin `register` was proposed and DEFERRED, not rejected: it only helps the plugins-hot-reload path (a gateway restart replays `gateway_start` anyway), and it needs a `portObserved` guard plus a delay so it cannot double-announce a real boot — its own change, with its own timing tests. A liveness POLL (asking the gateway's port) is a different mechanism entirely and out of scope for a presence lane whose whole design is push.
-- **Connecting OpenClaw is NOT the last step — a RUNNING gateway must restart, and the presenters say so.** Upstream's own reload plan marks `plugins.load` (exactly the key our merge writes) `kind: "restart"` — verified in the shipped 2026.7.1 bundle (`dist/config-reload-plan-*.js`), and OpenClaw's own `config patch` prints the same advice. So a gateway that is already running keeps serving WITHOUT our plugin: `connect` legitimately reports success while no lobster appears. The step rides ONE per-target field, `Target.post_install_hint` (compile-forced across all 10 targets, `None` for every target whose hooks take effect on the CLI's next run), stamped onto `InstallReport` by `install_target` so the two presenters cannot disagree — the Sources panel appends it to its connect line, and the CLI prints it as a `↳` line in HUMAN output only. It is deliberately NOT in `--json`: that envelope is the frozen `{id, outcome, message?}` Raycast contract where `message` means FAILURE, so an advisory there would change the field's meaning. Pinned by `only_openclaw_declares_a_post_install_step_and_it_names_the_restart`.
-- **`connect openclaw` binds ONE OpenClaw state dir — and that ONE install covers EVERY gateway of that profile, however many.** profile↔gateway is **1:N**, not 1:1 (verified live): `openclaw gateway run --port <p>` overrides the config's `gateway.port`, so one state dir can host N concurrent gateways — the config value is merely the default for a run that passes no flag. The only catch is STARTUP: two `gateway run`s racing to boot from one state dir collide on its startup-migration lease ("startup migrations are already running for this state directory") and one dies; started SEQUENTIALLY both live, and pixtuoid renders `daemons=[openclaw@18811:idle, openclaw@18822:idle]` off a SINGLE `connect`. So the cheapest multi-gateway setup needs no profile work at all. **This is also the airtight reason profile can't be the mascot's identity**: two gateways of ONE profile share its name AND its config, so the profile cannot distinguish them — the port can. A named PROFILE is a second `connect`, deliberately not auto-discovered: OpenClaw's `--profile <name>` isolates a whole parallel install (config + credentials + plugins) under the SIBLING dir `~/.openclaw-<name>` (`--dev` → `~/.openclaw-dev`). Upstream resolves that dir WITHOUT ever reading `OPENCLAW_PROFILE` — `config/paths.ts::resolveStateDir` (@ `29ca6322`) consults only `OPENCLAW_STATE_DIR` → `OPENCLAW_HOME`/OS-home, and `isNamedProfile` is a messaging predicate with no callers in the resolvers (verified live: exporting `OPENCLAW_PROFILE=x` changes neither the resolved config nor creates a dir; the CLI FLAG selects the dir). So pixtuoid installs into exactly the dir that env resolves, and a gateway launched under another profile reads a config with no `plugins.entries.pixtuoid` → **no lobster, with a GREEN `doctor`** (which verified the dir it DID bind). Binding a second profile is `OPENCLAW_STATE_DIR=~/.openclaw-work pixtuoid connect openclaw` — the override we already mirror. Auto-discovering `~/.openclaw-*` and writing the plugin into each was considered and DEFERRED: it turns one `connect` into N surprise config writes for profiles the user never pointed us at, and profile dirs are commonly vestigial scaffolding (a `state/` dir and nothing else — such a profile can't run a gateway at all, since `gateway run` refuses a config without `gateway.mode`). Note this is an INSTALL-side gap only: profile is NOT the mascot's identity (the resolved PORT is — see the core guide's daemon-identity sharp edge), so two BOUND profiles already render as two independent lobsters with no further work. If profile-aware install is ever wanted, the honest first step is a read-only `doctor` note for a sibling dir that has a runnable config but no plugin — not a widened write.
-- **OpenClaw's config is JSON5, so pixtuoid REFUSES to rewrite a non-strict document instead of "fixing" it.** OpenClaw parses `openclaw.json` with `JSON5.parse` unconditionally, so comments / trailing commas / single quotes / unquoted keys are all LEGAL on disk (its own writer emits strict JSON, so they appear only when a human put them there — exactly the users a third-party installer meets). Our read→merge→write round-trip goes through `serde_json`, which cannot represent any of that: parsing it would silently DELETE their comments on the next `connect`. So `openclaw::parse_for_merge` bails with the reason + OpenClaw's own owner commands (`openclaw plugins install --link <dir>` + `enable`), and — the other half — `verify_schema` reports that as a soft NOTE, never a hard break: a hard "reconnect openclaw" verdict was advice that *could not succeed*, since the merge refuses the same document by design. The other fail-closed facts it surfaces come from upstream's own compiled logic (read out of the shipped 2026.7.1 bundle: `plugins.enabled` gates everything, then `allow.length === 0 || allow.includes(id)`, then `deny.delete(id)` removes). **Id matching is TRIM-only and CASE-SENSITIVE** — `normalizePluginIdWithLookup` lowercases only to build an ALIAS-LOOKUP KEY and returns the `trimmed` original when no alias matches, so `"Pixtuoid"` is a DIFFERENT id from ours. A revision of this arc briefly compared case-insensitively and that was a regression both ways (a `"Pixtuoid"` allowlist made install skip the join → plugin `disabled` upstream with a green `doctor`; a `"Pixtuoid"` deny made `doctor` claim a break over a loaded plugin), so don't restore it without re-reading that fn: a curated `plugins.allow` that omits `pixtuoid`, or a `plugins.deny` that names it, are HARD issues (the plugin never loads however enabled its entry is); an EMPTY `allow: []` is **no restriction** (every plugin permitted), so install neither joins it nor reports it — the earlier "your own no-plugins switch" reading was backwards; `plugins.enabled = false` IS such a switch, so it is a NOTE we never flip (the CodeWhale `enabled = false` precedent); and a `$include` ANYWHERE in the document is a NOTE (the effective `plugins` block may live in a file we don't read). Uninstall UN-JOINS exactly the id it added and nothing else — a dangling `pixtuoid` is not inert (a live `openclaw plugins list` reports it as a "stale config entry") — but it NEVER writes an empty list: `["pixtuoid"]` → `[]` would turn a fail-closed key into no restriction, i.e. an uninstall that leaves the config MORE permissive than we found it. The guard tests the RESULT, not the input length: `["pixtuoid", " pixtuoid "]` is two entries that are both ours (upstream trims), which a pre-count guard let empty. Pinned by `uninstall_never_empties_the_allowlist_even_when_every_entry_is_ours`. **Nor by DELEGATING the write to OpenClaw's own CLI** — measured, not assumed (2026.7.1): `openclaw config patch --stdin` is a real non-interactive, schema-validating merge API (`config file` / `config get` / `config set` / `--dry-run --json` too, and it usefully REFUSES a `plugins.load.paths` entry whose dir is absent or whose manifest lacks `configSchema`), but its "Patch config from a JSON5 object" describes the PATCH INPUT, not the target file: it re-serialized a commented `openclaw.json` as strict JSON, **dropping the comment and the trailing comma** and stamping its own `meta.lastTouchedAt`. There is no preserve flag. So upstream's own writer is exactly as lossy as ours would be, and our REFUSAL protects the user MORE than delegating would — while a delegated write would also cost a subprocess in the install path, require `openclaw` on PATH (killing the documented "connect a not-yet-installed CLI" pre-provisioning), and force a strategy split into the `Target` contract all 10 targets share. Adjudicated and rejected on evidence; don't re-propose it without re-measuring that comment round-trip. Do NOT "solve" the JSON5 half by adding a JSON5 parser and re-serializing strict either: that trades a loud refusal for silent comment loss (pinned by `merge_refuses_a_json5_document_instead_of_dropping_its_comments`, whose fixture is VALID JSON5 — a merely-broken-JSON fixture would pass under exactly that "fix"). `serde_json`'s `preserve_order` feature is enabled on THIS crate only, NOT workspace-wide (the WHY — and why `pixtuoid-web` must not pay indexmap's wasm code size — is in its `Cargo.toml`), for the related reason: every JSON config merge keeps the user's key order instead of alphabetising their hand-authored file. `Value` equality stays order-INDEPENDENT either way, so the semantic-no-op detection (`merged != doc`, the re-install-is-a-no-op sharp edge above) behaves identically with the feature on — pinned by `install::tests::json_value_equality_ignores_key_order_under_preserve_order`.
-- **Two surfaces bind a source, ONE core.** `crate::sources::{connect,disconnect}` (persist the `[sources]` flag + install/uninstall hooks + rollback) is the single seam; it has TWO presenters: (1) the **interactive** in-TUI Sources panel (`s` → `tui::connect_source`/`disconnect_source`, which delegate to the core and add the one live-gate line `connected.set` so a running office walks characters in/out NOW), and (2) the **scriptable** CLI (`pixtuoid connect/disconnect/sources [set]`, Raycast/automation/onboarding — NO live set; a running instance reflects it on next launch). This is NOT a re-litigation of #284 (which deleted the install-hooks CLI's interactive *orchestration*); it's a second presenter over the structured core (R0618-01). The CLI is persist-only by design — the live `ConnectedSources` is in-process, so a separate CLI process can't touch a running office. `connect` ERRs + rolls the flag back on install failure; `disconnect` reserves `Err` for the persist-abort and folds a hook-removal failure into the `Ok` outcome (`DisconnectOutcome::HookRemovalFailed` — the gate still closes, the flag is false; BOTH presenters surface it: the panel as `{name}: disconnected, but hook removal failed — {reason}` (via `tui::connection::format_failure`), the CLI as `disconnected (hook removal failed: …)` / `sources set` as a `hooks not removed: …` token — never a silent clean "disconnected"). `ConnectOutcome`/`DisconnectOutcome` carry the `Install/UninstallReport` so the panel renders rich notes while the CLI maps to a wire token. **The CLI honors the explicit id without the panel's `NoCli` guard** — `connect`/`sources set` install for any registered id even if that CLI isn't installed yet (pre-provisioning for automation; `detect()` returns only PRESENT CLIs so onboarding offers only installed ones), whereas the interactive panel refuses an absent CLI. The status MODEL (`ConnState`/`ConnectionRow`/`build_rows`) lives in `sources` (re-exported by `tui::connection`), so `sources::status` (the `SourceStatus` `--json` Raycast contract) doesn't depend on the painter.
-- **`OutcomeRow` is `{id, outcome, message?}` — a bare machine token + a SEPARATE optional detail field.** The `--json` batch envelope (`connect`/`disconnect`/`sources set`) split the old folded `failed: <msg>` string into `outcome: "failed"` + `message: "<msg>"` (present exactly on failure, OMITTED — not null — on success) on the ASSUMPTION that the in-repo Raycast extension — which ships atomically with the binary — was still the ONLY consumer. **It was not.** The last `ray publish` marker (`__raycast_latest_publish_ext/pixtuoid__` → b870d8ba, 2026-06-19) PREDATES the split (e21ec7f0, 2026-07-02), so the break shipped to the store: the copy users have installed still prefix-strips `failed: <msg>` and renders a bare `failed` toast with the reason dropped, until a republish. The drift gate is the schema→codegen chain: `OutcomeRow` (schemars) → the committed `integrations/raycast/contract/outcome-row.schema.json` golden (`outcome_row_schema_matches_the_committed_contract`, regen via `just gen-contract`) → the generated Raycast TS type (`gen:contract`) → `tsc`; the exact bytes are pinned by `outcome_row_json_shape_is_the_raycast_contract` + the envelope test in `sources_cli.rs`, and the TOKEN set (`connected`/`disconnected`/`no_op`/`failed`) by `change_outcome_wire_tokens_are_stable`. `OutcomeRow::new` is the ONE outcome→row authority (both emitting surfaces route through it). **Treat the wire as PUBLISHED from here on — the extension is on the store** (`raycast.com/IvanWng97/pixtuoid`): installed copies parse the wire independently of the binary's version, so any further wire change needs a version handshake / deliberate coupled migration — never another flag-day edit like this one was.
-- **Code-artifact targets: install writes ⊆ verify checks, CONTENT included (#387).** A `Target` ships CODE (not just a config block) two ways — opencode's TS plugin IS its `config_path` (so `verify_schema` over the config content covers it), and OpenClaw's JS plugin is a separate `extra_artifacts` DIR (so `install::verify_target` STATs each declared artifact for existence — a missing one is a HARD `doctor` break, #332, the silent-dead class the config-level check is blind to). **Existence is not enough for the artifact that BAKES the shim path**: `pixtuoid-hook` moving (a cargo→brew reinstall) leaves the plugin loading fine while every forward fails inside a plugin that swallows spawn errors by design — a dead mascot with a GREEN doctor, observed live. So the artifact whose INTENDED render carries `verify::BAKED_HOOK_MARKER` is read back and its baked path stat'd through the SAME `check_shim_binary` an embedded hook command uses (`verify::baked_hook_path`, the one extractor opencode's `verify_schema` also calls). Pinned generically by `verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target`. `install_target`'s ENTIRE code-write surface is exactly those two paths, and BOTH are verify-covered. **The invariant for a future 3rd code-artifact target:** any NEW code-shipping path you add to `install_target` MUST gain a matching check in `verify_target`, or `doctor` reports the source HEALTHY while the runtime can't load it. Pinned generically by `verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target` (it loops EVERY `extra_artifacts` target, so a future one is auto-guarded — don't special-case OpenClaw back into it).
-- **`doctor`'s `<cli> --version` probes are NOT side-effect-free on the other side, so they are GATED on presence.** `doctor` writes nothing itself, but several agent CLIs bootstrap their own state dir on ANY invocation — an unconditional sweep in a pristine `HOME` created ~365 entries (`~/.grok/`, `~/.hermes/`, `~/.config/opencode`, `~/.local/{share,state}/opencode`, `~/.codex/tmp`, `~/Library/Caches/copilot`). Those are exactly the dirs `presence_probe`/`detect_installed` key on, so the diagnostic MANUFACTURED the state it reports: `cli_present` flipped false→true, and the natural `doctor` → `setup --yes` order then installed hooks into CLIs `setup --yes` alone had just declined to touch (it also silently defeated HOME-isolated e2e runs). `doctor::may_probe_version(connected, cli_detected)` now gates the spawn on the source being CONNECTED or its target probing PRESENT — a CLI that already wrote its own state cannot be perturbed into existence by one more `--version`, so the observer effect is gone BY CONSTRUCTION rather than by a promise. Two consequences to expect, both deliberate: an installed-but-never-run CLI the user hasn't connected reports `version unknown` instead of its real version (an honest answer — pixtuoid has no evidence it is there); and for a source that IS present/connected, the probed CLI may still touch its own state (an update-check stamp), which is the accepted residual — `doctor` is read-only about PIXTUOID's artifacts, not about a third party's. Pinned by `run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of` (a fake `opencode` on PATH in an isolated HOME whose mere spawn leaves a marker) plus the pure `version_probe_is_gated_on_evidence_the_user_runs_that_cli`.
+Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
+
+<!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` — edit the entry there, not this line -->
+- **Windows focus-jump borrows the foreground thread's input state, and the two BETTER-KNOWN bypasses are refused on purpose.** `SetForegroundWindow` grants the caller nothing here: a console TUI does not own its host …
+- **`--graphics off` answers TWO questions at once, and the second one is the cutaway's — but it is a `doctor` flag, and NOTHING paints the cutaway yet.** Read those two facts before reasoning about the module. (a) The flag is on `doctor` ONLY …
+- **Capacity GROWTH strands an already-allocated overflow agent, and the HUD keeps counting it — render-conservatively, count-completely.** An agent's floor placement is stored twice in different time frames: `AgentSlot.floor_idx` is …
+- **Terminal cell aspect drives sprite design.** The half-block ▀ technique assumes ~1:2 cell aspect. Sprites larger than ~16×16 px break on …
+- **`--max-desks` has no hard default.** It's `Option<usize>` (hidden flag / `max-desks` config key) — when absent, per-floor capacity is …
+- **The floating pipeline boots in `resumed`, NOT in `floating::run` — the window has to exist before the desk capacity can be seeded.** `run` could offer only the `[floating]` config size, which is LOGICAL by design …
+- **Re-install is a SEMANTIC no-op, and backups APPEND their suffix.** `MergeOutcome.changed = merged != doc` (`install/claude.rs`) compares the *parsed/merged* …
+- **Daemon presence is ANNOUNCE-only, so a gateway pixtuoid never heard announce is invisible until its next activity — a documented residual, NOT a bug to "fix" with a poll.** `gateway_start` fires once per gateway PROCESS start, which neither `connect` nor a pixtuoid …
+- **Connecting OpenClaw is NOT the last step — a RUNNING gateway must restart, and the presenters say so.** Upstream's own reload plan marks `plugins.load` (exactly the key our merge writes) …
+- **`connect openclaw` binds ONE OpenClaw state dir — and that ONE install covers EVERY gateway of that profile, however many.** profile↔gateway is **1:N**, not 1:1 (verified live): `openclaw gateway run --port <p>` overrides …
+- **OpenClaw's config is JSON5, so pixtuoid REFUSES to rewrite a non-strict document instead of "fixing" it.** OpenClaw parses `openclaw.json` with `JSON5.parse` unconditionally, so comments / trailing …
+- **Two surfaces bind a source, ONE core.** `crate::sources::{connect,disconnect}` (persist the `[sources]` flag + install/uninstall hooks + …
+- **`OutcomeRow` is `{id, outcome, message?}` — a bare machine token + a SEPARATE optional detail field.** The `--json` batch envelope (`connect`/`disconnect`/`sources set`) split the old folded …
+- **Code-artifact targets: install writes ⊆ verify checks, CONTENT included (#387).** A `Target` ships CODE (not just a config block) two ways — opencode's TS plugin IS its …
+- **`doctor`'s `<cli> --version` probes are NOT side-effect-free on the other side, so they are GATED on presence.** `doctor` writes nothing itself, but several agent CLIs bootstrap their own state dir on ANY …
+<!-- edges:end -->
 
 ## Where to look
 
@@ -521,6 +77,7 @@ Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
 pays for the entry it needs instead of all of them. Grep it for the
 question:
 
+<!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - How do hooks get installed?
 - How does the default character pack get into the binary?
 - How do custom sprite packs work?
@@ -528,4 +85,5 @@ question:
 - Where do runtime errors / config warnings surface?
 - How does config persistence work?
 - How do multi-floor offices work?
+<!-- lookup:end -->
 

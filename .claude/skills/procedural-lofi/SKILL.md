@@ -131,10 +131,10 @@ Port the numpy synth to your runtime language reading the frozen tables. Key eng
 - **Keep the sub band clear.** The sub-bass register must belong to the bass alone or the
   low end turns to mud. Two ways to get there: the textbook one is to high-pass every
   non-bass stem ~140 Hz (LOFI-BIBLE §4); the cheaper one this project used is to *voice the
-  other stems out of that register in the first place* (mid-register EP plucks, and a day
-  track with no sub content at all) so there's nothing to filter. Either way, keep ONE
-  texture stem carrying all the "medium" noise — per-stem hiss *stacks* (four stems each
-  with a little = +6 dB of mud); texture sits 25–35 dB below the music.
+  other stems out of that register in the first place* (mid-register EP plucks; the sub
+  register belongs to the bass lane alone) so there's nothing to filter. Either way, keep ONE
+  texture stem carrying all the "medium" noise — per-stem hiss *stacks* (every musical stem
+  adding a little sums to real mud); texture sits 25–35 dB below the music.
 - **Perceptual volume.** Map a user volume slider as `amplitude = user²` (loudness is
   logarithmic). Linear volume feels "still too loud at 5%" — the classic trap.
 
@@ -213,7 +213,8 @@ every taste axis is a data table or named const with ONE home:
    physics-first then tuned by ear/fingerprint (Phase 1-2 of this skill still apply).
 2. Add a `compose::LeadVoice` variant + its arm in `synth::lead_voice_fn` (the ONE dispatch).
 3. Give it a draw weight at the END of `compose()` — the voice draw is deliberately LAST in
-   the seed stream so new voices never redraw an already-blessed seed's notes.
+   the seed stream so new voices never redraw an already-blessed seed's notes (one banded
+   unit-draw per mood — re-weight the bands rather than adding draws).
 4. Extend the distribution property test; run the compose suite (fast — no synthesis).
 5. Render a batch (`cargo run --release -p pixtuoid-scene --example lofi_audition -- --seeds N`;
    `--solo sparkle` isolates the lane) → owner listens → tighten or ship.
