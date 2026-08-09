@@ -26,6 +26,7 @@ Parent guides: binary [`../../CLAUDE.md`](../../CLAUDE.md); workspace
 
 Annotated tree in [`LAYOUT.md`](LAYOUT.md) — grep it for a filename.
 
+<!-- layout:start · generated from LAYOUT.md by `just gen-guides` — edit the tree there, not this skeleton -->
 ```
 tui/
 ├── renderer.rs     draw_scene<B: Backend> orchestrator (DrawCtx struct …
@@ -38,19 +39,22 @@ tui/
 ├── dashboard/      agent-dashboard PURE model (no ratatui): mod.rs …
 └── welcome/        first-run onboarding PURE model (no ratatui): mod.rs …
 ```
+<!-- layout:end -->
 
 ## Known sharp edges (don't be surprised by these)
 
 Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
-- `draw_scene` is called through `TuiRenderer`
-- The 6 borderless popups share ONE geometry authority — `panel::PanelGeometry`.
-- The board's ★ Star click target is `wall_board::star_hit_rect`, the same phantom-launch class
-- The CLICK ladder (`tui/mod.rs`) and the HOVER ladder (`renderer.rs`) share the `agent > coffee > pet` ordering AND the underlying hit-tests, but a unified `resolve_pointer_hit(...) -> PointerHit` enum is NOT worth hoisting.
-- Every modal overlay paints on EVERY frame — including the footer-only ones.
-- Every crossterm key event passes `should_dispatch_key` first
-- The `w` walkable/approach/route debug overlay is dev-only
-- `run_tui` is the `block_on` ROOT future, not a tokio worker.
+<!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` — edit the entry there, not this line -->
+- **`draw_scene` is called through `TuiRenderer`** (its inherent `render` flush), which owns the cross-frame state (per-floor `FloorCtx` …
+- **The 6 borderless popups share ONE geometry authority — `panel::PanelGeometry`.** `compute(bounds, content_w, content_rows, title, scale) → outer()/inner()/cell_rect()` is PURE …
+- **The board's ★ Star click target is `wall_board::star_hit_rect`, the same phantom-launch class** — it derives the precise `★ Star` span from the SAME board geometry the L1 painter uses …
+- **The CLICK ladder (`tui/mod.rs`) and the HOVER ladder (`renderer.rs`) share the `agent > coffee > pet` ordering AND the underlying hit-tests, but a unified `resolve_pointer_hit(...) -> PointerHit` enum is NOT worth hoisting.** Both resolve the agent through the SAME live-sprite `hit_test_agent` (the click via the thin …
+- **Every modal overlay paints on EVERY frame — including the footer-only ones.** The office needs a 32×31 terminal (`layout::compute_with_seed`'s `MIN_LAYOUT_W/H` over a …
+- **Every crossterm key event passes `should_dispatch_key` first** (`tui/mod.rs`): Windows delivers Press AND Release (and Repeat) per keystroke, so only …
+- **The `w` walkable/approach/route debug overlay is dev-only** — its dispatch arm is `#[cfg(debug_assertions)]`-gated, so release builds silently ignore `w`. …
+- **`run_tui` is the `block_on` ROOT future, not a tokio worker.** `driver.rs` builds `new_multi_thread` and does inline `rt.block_on(run_async)`, which `.await`s …
+<!-- edges:end -->
 
 ## Where to look
 
@@ -58,6 +62,7 @@ Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
 pays for the entry it needs instead of all of them. Grep it for the
 question:
 
+<!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - How is the office rendered (pixel pass → terminal)?
 - How does the neon wall board work?
 - How does the theme PICKER UI work?
@@ -73,6 +78,7 @@ question:
 - How do furniture hover tooltips work?
 - How does the pet tooltip / click-to-pet work?
 - How does multi-floor navigation work (the painter side)?
+<!-- lookup:end -->
 
 ## When refactoring
 

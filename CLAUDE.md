@@ -45,8 +45,10 @@ bulk lives in siblings that are **not** auto-loaded — you must open them. Each
 guide indexes `LAYOUT.md` (the annotated module tree), `SHARP-EDGES.md` (the full
 WHY per edge), and `WHERE-TO-LOOK.md` ("how does X work?"), plus
 `UPSTREAM-DRIFT.md` in core and `SINGLE-SOURCED.md` in site. **Every index line
-is the sibling entry's own opening phrase, verbatim — grep that phrase to land on
-the full text.** So: before changing a module whose annotation you haven't read,
+is the sibling entry's own opening text, verbatim — grep any of it to land on
+the full entry — because the marked index blocks are GENERATED from the
+siblings** (`just gen-guides`; drift fails `lint`): edit the SIBLING entry,
+never the block. So: before changing a module whose annotation you haven't read,
 and ALWAYS before "fixing" something an index line names, open the sibling. An
 index line is enough to recognize a trap, never enough to justify a change.
 And a nested `CLAUDE.md` is re-read only when you next touch a file in its tree:
