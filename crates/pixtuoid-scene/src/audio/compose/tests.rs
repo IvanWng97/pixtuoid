@@ -209,8 +209,9 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
         "seed {seed}: the bass must anchor every bar's ONE"
     );
     for &(at, note, _) in &s.bass {
+        // 25 admits the leading-tone pickup one step under the root window
         assert!(
-            (26..=38).contains(&note),
+            (25..=38).contains(&note),
             "seed {seed}: bass note {note} at {at}s out of the sub window"
         );
     }

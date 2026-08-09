@@ -290,7 +290,10 @@ fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
     let warped = crate::audio::dsp::warp_resample(buf, &[(0.7, 0.0025), (8.0, 0.0006)]);
     let t = drive.tanh();
     let sat: Vec<f32> = warped.iter().map(|&x| (x * drive).tanh() / t).collect();
-    let bump = bandpass(&sat, 80.0, 120.0);
+    // 60-120: widened down from 80-120 per LOFI-BIBLE §4 — tape head-bump sits
+    // at 15ips≈60Hz, and the bass lane's fundamentals (36-73Hz) were landing
+    // under the old bump's floor
+    let bump = bandpass(&sat, 60.0, 120.0);
     let bumped: Vec<f32> = sat.iter().zip(&bump).map(|(&x, &b)| x + 0.35 * b).collect();
     lowpass(&bumped, 6500.0)
 }
@@ -495,7 +498,9 @@ fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
     let f = midi_freq(midi as f32);
     let tau = std::f32::consts::TAU;
-    let env = env_ar(n, 0.03, dur_s * 0.35);
+    // release covers half the note: a sub tail crossing the barline under the
+    // NEXT bar's root is two fundamentals beating in the 40Hz register (mud)
+    let env = env_ar(n, 0.03, dur_s * 0.5);
     let drive = 1.1 + 1.6 * vel;
     let norm = drive.tanh();
     (0..n)
@@ -906,11 +911,11 @@ fn lane_recipe(mood: Mood, lane: usize) -> (f32, f32, f32) {
         (Mood::Day, 1) => (2.0, 3200.0, 0.6),
         (Mood::Day, 2) => (0.9, 2400.0, 0.8),
         (Mood::Day, 3) => (7500.0, 2.2, 0.85),
-        (Mood::Day, 5) => (1.8, 900.0, 0.8),
+        (Mood::Day, 5) => (1.5, 900.0, 0.8),
         (Mood::Night, 1) => (2.2, 2800.0, 0.5),
         (Mood::Night, 2) => (1.1, 2000.0, 0.7),
         (Mood::Night, 3) => (6000.0, 2.0, 0.8),
-        (Mood::Night, 5) => (2.0, 700.0, 0.8),
+        (Mood::Night, 5) => (1.7, 700.0, 0.8),
         _ => (0.0, 0.0, 0.0),
     }
 }
@@ -973,11 +978,11 @@ mod tests {
         assert_eq!(lane_recipe(Mood::Day, 1), (2.0, 3200.0, 0.6));
         assert_eq!(lane_recipe(Mood::Day, 2), (0.9, 2400.0, 0.8));
         assert_eq!(lane_recipe(Mood::Day, 3), (7500.0, 2.2, 0.85));
-        assert_eq!(lane_recipe(Mood::Day, 5), (1.8, 900.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Day, 5), (1.5, 900.0, 0.8));
         assert_eq!(lane_recipe(Mood::Night, 1), (2.2, 2800.0, 0.5));
         assert_eq!(lane_recipe(Mood::Night, 2), (1.1, 2000.0, 0.7));
         assert_eq!(lane_recipe(Mood::Night, 3), (6000.0, 2.0, 0.8));
-        assert_eq!(lane_recipe(Mood::Night, 5), (2.0, 700.0, 0.8));
+        assert_eq!(lane_recipe(Mood::Night, 5), (1.7, 700.0, 0.8));
     }
 
     #[test]
@@ -1135,7 +1140,9 @@ mod tests {
                 0.10,
                 &[
                     (31.0, 62.0, 0.538),
-                    (62.0, 125.0, 0.191),
+                    // 0.191 under the 80-120 bump; re-measured when lofi_post
+                    // widened to 60-120 (LOFI-BIBLE §4) and re-LISTEN-gated
+                    (62.0, 125.0, 0.299),
                     (125.0, 250.0, 0.172),
                 ],
             ),

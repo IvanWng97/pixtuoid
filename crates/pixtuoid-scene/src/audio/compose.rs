@@ -873,11 +873,13 @@ fn bass_events(
             out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
         }
         if chance(rng, pickup_p) {
-            // approach the NEXT bar's root by its leading-tone pc, folded so the
-            // pickup can't leave the sub window
-            let next_pc = bar_roots[(bar + 1) % GEN_LOOP_BARS];
+            // approach the NEXT bar's FOLDED root from the literal semitone
+            // below (may dip one step under the root window — folding the
+            // leading-tone PC instead once rendered C#2→D1, an 11-semitone drop
+            // that reads as two unrelated rumbles, not an approach)
+            let next = sub_note(bar_roots[(bar + 1) % GEN_LOOP_BARS]);
             let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
-            out.push((at, sub_note(next_pc + 11), 0.34 + 0.06 * rng.unit()));
+            out.push((at, next - 1, 0.34 + 0.06 * rng.unit()));
         }
     }
     out
