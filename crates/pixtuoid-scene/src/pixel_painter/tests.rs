@@ -724,9 +724,10 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
         Point { x: 7, y: 5 }, // near-origin: saturating_sub edge
     ] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            // BOTH facings: the no-arrival-pop identity is what lets a desk seat
-            // its occupant on either side, so pinning it at `South` alone would
-            // leave the back-turned seat free to drift.
+            // Both facings, but only the X axis has teeth here: on Y both sides
+            // reduce to the same `saturating_sub(WALKING_Y_OFF)`, so facing
+            // cancels. A back seat drifting in Y is caught by
+            // `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
             for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
                 assert_eq!(
                     walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),

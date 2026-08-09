@@ -1012,13 +1012,22 @@ fn every_north_facing_desk_keeps_its_chair_with_nobody_in_it() {
         "no north-facing desk in the fixture — the test has no subject"
     );
     let buf = session.buf();
-    // A band generous enough not to re-pin the chair's exact offset: the point
-    // is that SOME chair is at this desk, not where its rows start.
-    const SEARCH_H: u16 = 16;
+    // Pinned to the OCCUPANT's own column and the rows the chair crosses. A
+    // generous 16-row band let the chair slide 5 rows south (a detached slab at
+    // their feet) and 5 px west of the sitter -- both forbidden by the painter's
+    // own docs, both green under the old window.
+    const CHAIR_W: u16 = 8;
+    const CHAIR_H: u16 = 5;
+    const CHAIR_TOP_DY: u16 = 6;
     for d in north {
-        let found = (d.y..d.y + SEARCH_H).any(|y| {
-            (d.x..d.x + crate::layout::DESK_W).any(|x| buf.get(x, y) == theme.furniture.chair_trim)
+        let seat =
+            crate::pixel_painter::seated_anchor_for(d, CHAIR_W, crate::layout::Facing::North);
+        let found = (d.y + CHAIR_TOP_DY..d.y + CHAIR_TOP_DY + CHAIR_H).any(|y| {
+            (seat.x..seat.x + CHAIR_W).any(|x| buf.get(x, y) == theme.furniture.chair_trim)
         });
-        assert!(found, "north-facing desk {d:?} rendered with no chair");
+        assert!(
+            found,
+            "north desk {d:?}: no chair in its occupant's own column"
+        );
     }
 }

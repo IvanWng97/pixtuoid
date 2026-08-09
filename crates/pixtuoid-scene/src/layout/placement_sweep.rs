@@ -1204,3 +1204,42 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         v[..v.len().min(6)].join("\n")
     );
 }
+
+#[test]
+fn the_connectivity_guard_still_has_a_subject_to_catch() {
+    // The #566 guard's only live exercise used to be the free-standing whiteboard
+    // sealing the west aisle. Snapping the board into an inter-pod aisle retired
+    // that — and with it the whole `severed()` branch, so all four rungs now ship
+    // unexecuted and three separate inversions of them pass the suite.
+    //
+    // So this pins the guard's SUBJECT rather than a rung: at the size that used
+    // to seal, SOME board position still severs the office. It scans instead of
+    // hardcoding one, because a hardcoded anchor is what put the board in a pod to
+    // begin with. If nothing severs any more, the guard protects nothing and the
+    // honest move is to retire it, not to leave four dead rungs reading as cover.
+    let (w, h, seed) = (32u16, 120u16, 3u64);
+    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("32x120 lays out");
+    let dt = l.door_threshold.expect("door threshold");
+    assert!(
+        super::compute::unreachable_walkable_cells(&l.walkable, dt).is_empty(),
+        "the shipped layout must be whole — that is what the guard no longer has to fix"
+    );
+
+    let def = furniture_def(WallDecor::Whiteboard.furniture());
+    let fp = def
+        .footprint
+        .expect("the whiteboard has a ground footprint");
+    let band_bottom = l.cubicle_band.y + l.cubicle_band.height;
+    let sealer = (l.cubicle_band.y..band_bottom).find(|&y| {
+        let mut m = l.walkable.clone();
+        m.mark_blocked(l.cubicle_band.x, y, fp.w, fp.h, 0);
+        !super::compute::unreachable_walkable_cells(&m, dt).is_empty()
+    });
+    assert!(
+        sealer.is_some(),
+        "no {}x{} board row in the {w}x{h} seed {seed} cubicle band severs the office any more \
+         — the #566 guard has lost its subject; re-derive a sealing case or retire the rungs",
+        fp.w,
+        fp.h
+    );
+}
