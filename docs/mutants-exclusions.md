@@ -97,6 +97,16 @@ its sole caller collapses both spellings one line later:
 call site in the tree. The grok OVERRIDE that makes the seam matter is pinned
 separately by the `with_cwd_deriver` test.
 
+**`omp.rs` — `||` vs `&&` in `parse_omp_env_line`.** The first statement mirrors
+upstream `parseEnvLine`'s own: `if trimmed.is_empty() || trimmed.starts_with('#')`.
+Under `&&` the guard is always false — an empty string cannot start with `#` — so
+every input it would have skipped falls through, and each is still rejected one
+line down: a comment head fails `is_valid_env_name`, a blank line has no `=`. The
+guard stays because it mirrors upstream, not because it is load-bearing here.
+Verified with `cargo mutants --list` against `--config /dev/null`: the file has
+128 mutants, the row removes exactly 1, and it is that `||` — the fn's only
+disjunction, so the row cannot bury a killable neighbour.
+
 ## The #828 triage (2026-08): 77 survivors, 58 real
 
 A full re-run of `source/**` + `state/**` (minus `hook/`, `jsonl/`) scored

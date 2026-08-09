@@ -29,6 +29,11 @@ exclude_re = [
     'compute\.rs.*plant_ground_in_bounds',                      # targeted retain == clear-all in range
     'liveness\.rs.*replace > with >= in ProbeSnapshot::bind_pid',  # writes the value already there
     'jsonl/mod\.rs.*replace no_cwd_from_path ->',               # sole caller collapses both spellings
+    # The empty-vs-comment early return in omp's dotenv line parser. `&&` is
+    # always false (an empty string cannot start with `#`), and every input it
+    # would have skipped is still rejected downstream — a comment head fails
+    # `is_valid_env_name`, a blank line has no `=`. Kept for upstream fidelity.
+    'omp\.rs.*replace \|\| with && in parse_omp_env_line',
     # Untestable glue inside otherwise-mutated files: ZERO test call sites, so
     # nothing exists that could kill them. Delete a name the moment a test reaches it.
     'tui/mod\.rs.*(run_tui|focus_clicked_agent|setup_terminal|teardown_terminal|resolve_version_popup)',

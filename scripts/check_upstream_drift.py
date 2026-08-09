@@ -394,6 +394,35 @@ OMP_DIRS_ENV_VARS = {
     "PI_CODING_AGENT_DIR",
     "XDG_DATA_HOME",
 }
+# The `.env` OVERLAY that can move that same sessions dir. It is the ORDERING
+# that is load-bearing: those files reach `process.env` only AFTER dirs.ts froze
+# its resolver, so the post-load `refreshDirsFromEnv()` is what lets them move
+# the sessions dir at all — lose it and OUR overlay becomes the divergence,
+# honoring a file omp stopped reading. The value is the Rust half mirroring it.
+OMP_ENV_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/utils/src/env.ts"
+# Split by ROLE, because the two halves send a maintainer to different code and
+# a shared message would name the wrong requirement for one of them.
+# `parseEnvFile` itself is the ANCHOR, so its rename lands as a blind probe
+# rather than a rename line.
+#
+# The LOCATE-and-ORDER half: which dirs the files come from, and the rebuild
+# that lets them reach the sessions dir at all.
+OMP_ENV_LOCATORS = {
+    "refreshDirsFromEnv": "with_omp_dotenv",
+    "getAgentDir": "with_omp_dotenv",
+    "getConfigRootDir": "with_omp_dotenv",
+}
+# The line-PARSE half: what one `.env` line means once the file is found.
+OMP_ENV_PARSERS = {
+    "parseEnvLine": "parse_omp_env_line",
+    "isValidEnvName": "is_valid_env_name",
+    "isSafeEnvValue": "parse_omp_env_line",
+}
+# `.env` is the filename we look for under each of omp's dirs; `OMP_` is the
+# alias prefix that makes an `OMP_CODING_AGENT_DIR` reach the resolver as
+# `PI_CODING_AGENT_DIR` (its `PI_` twin is built in a template literal, so only
+# this half is quoted in the source and checkable as a literal).
+OMP_ENV_LITERALS = {".env", "OMP_"}
 OMP_ASK_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
 )
@@ -444,6 +473,7 @@ ANCHORS: dict[str, Anchor] = {
     # Owns the agentDir + XDG resolution; the profile / config-dir-name helpers
     # are its collaborators in the same file.
     OMP_DIRS_URL: Anchor(r"class DirResolver", "the `DirResolver` class"),
+    OMP_ENV_URL: Anchor(r"export function parseEnvFile", "`parseEnvFile`"),
     # identity-grade: co-located, not owning. A union head or page title.
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -674,24 +704,38 @@ def rust_const_str_array(rel_path: str, const_name: str) -> set[str]:
     return got
 
 
-def strip_rust_comments(body: str) -> str:
-    """Remove Rust comments, PRESERVING string literals and honouring nesting.
+def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
+    """Remove `//` and `/* */` comments, PRESERVING string literals.
 
     A scanner rather than a pair of `re.sub`s, because both regex approaches drop
-    a REAL registered event and so fail SILENTLY OPEN — the watcher stops checking
+    a REAL depended name and so fail SILENTLY OPEN — the watcher stops checking
     a name and nothing says so:
 
     - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
       every later entry on that line with it;
     - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
       leaves its tail behind and re-admits words from inside it.
+
+    The two languages disagree on exactly two axes, both passed in rather than
+    sniffed, because guessing either one fails SILENTLY OPEN too:
+
+    - `nested`: Rust NESTS block comments, TypeScript ends at the first `*/`.
+      Nesting a TS file would swallow the real code after that `*/`.
+    - `quotes`: which characters open a string. TS needs all three — its own
+      dotenv quote-detector spells `'"'`, a lone double quote inside a
+      single-quoted string, and tracking `"` alone desynchronises the scanner
+      from there to end of file (pinned by
+      `test_ts_comment_strip_survives_a_quote_detector_line`). Rust must NOT
+      track `'`, where an apostrophe is far more often a lifetime (`&'a str`)
+      than a string, and `'` + the next `'` would swallow the code between two
+      lifetimes (pinned by `test_rust_comment_strip_is_not_confused_by_lifetimes`).
     """
     out: list[str] = []
     i, n, depth = 0, len(body), 0
     while i < n:
         pair = body[i : i + 2]
         if depth:
-            if pair == "/*":
+            if nested and pair == "/*":
                 depth += 1
                 i += 2
             elif pair == "*/":
@@ -708,13 +752,14 @@ def strip_rust_comments(body: str) -> str:
             nl = body.find("\n", i)
             i = n if nl < 0 else nl
             continue
-        if body[i] == '"':
+        quote = body[i]
+        if quote in quotes:
             j = i + 1
             while j < n:
                 if body[j] == "\\":
                     j += 2
                     continue
-                if body[j] == '"':
+                if body[j] == quote:
                     j += 1
                     break
                 j += 1
@@ -724,6 +769,23 @@ def strip_rust_comments(body: str) -> str:
         out.append(body[i])
         i += 1
     return "".join(out)
+
+
+def strip_rust_comments(body: str) -> str:
+    """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
+    the only string opener — an apostrophe here is usually a lifetime."""
+    return _strip_c_style_comments(body, nested=True, quotes='"')
+
+
+def strip_ts_comments(body: str) -> str:
+    """[`_strip_c_style_comments`] for TypeScript: non-nesting block comments,
+    and all three string openers.
+
+    Used so a PRESENCE sweep reads CODE only: `env.ts` names `parseEnvLine` and
+    its siblings in its OWN JSDoc, so a rename that leaves a stale `{@link …}`
+    behind would otherwise stay silent.
+    """
+    return _strip_c_style_comments(body, nested=False, quotes="\"'`")
 
 
 def rust_block_after(src: str, anchor_re: str) -> str | None:
@@ -1683,6 +1745,43 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"packages/utils/src/dirs.ts — omp now resolves its sessions dir some "
                         f"other way, so the watcher polls a directory it never writes to "
                         f"(an empty office, no error)."
+                    )
+
+        env_ts = fetch_anchored(OMP_ENV_URL, "omp env", report)
+        if env_ts is not None:
+            # Comment-STRIPPED: env.ts names these very functions in its own
+            # JSDoc, so a rename leaving a stale `{@link …}` must not read as
+            # "still there".
+            code = strip_ts_comments(env_ts)
+            for fn, mirror in sorted(OMP_ENV_LOCATORS.items()):
+                if fn not in code:
+                    report.add_breaking(
+                        f"omp dotenv locator `{fn}` is GONE from utils/env.ts — "
+                        f"upstream reshaped WHERE the `.env` files are read from "
+                        f"or WHEN the dir resolver is rebuilt, so `{mirror}` in "
+                        f"source/omp.rs is now the divergence: we would overlay a "
+                        f"file omp stopped reading and watch a directory it "
+                        f"abandoned. Re-read the load order and repin "
+                        f"OMP_ENV_LOCATORS."
+                    )
+            for fn, mirror in sorted(OMP_ENV_PARSERS.items()):
+                if fn not in code:
+                    report.add_breaking(
+                        f"omp dotenv parser `{fn}` is GONE from utils/env.ts — "
+                        f"upstream reshaped what one `.env` LINE means, so "
+                        f"`{mirror}` in source/omp.rs now reads a value omp does "
+                        f"not: a mis-parsed directory var resolves a path omp "
+                        f"never writes to. Re-read the line semantics and repin "
+                        f"OMP_ENV_PARSERS."
+                    )
+            for lit in sorted(OMP_ENV_LITERALS):
+                if f'"{lit}"' not in code:
+                    report.add_breaking(
+                        f"omp dotenv literal `{lit}` is GONE from utils/env.ts — "
+                        f"renamed; `with_omp_dotenv` in source/omp.rs reads the "
+                        f"wrong filename or drops the OMP_→PI_ alias, so a user "
+                        f"who configures omp through a file gets an EMPTY office, "
+                        f"silently. Repin OMP_ENV_LITERALS."
                     )
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
