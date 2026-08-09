@@ -249,16 +249,41 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Rows of desk SURFACE, counted from `desk.y` down — how DEEP a desk is, and
+/// the one number every desk sprite is cut to.
+///
+/// Every desk in the office is this deep whichever way it faces:
+/// `desk.sprite` and `desk_north.sprite` differ only in where the MONITOR sits
+/// above the surface, never in the surface itself. They are hand-authored, so
+/// nothing in the format stops them drifting apart — and they did, twice
+/// (4 vs 6 rows, then 4 vs 7) before this had a name. The pack test cuts BOTH
+/// against this constant rather than against each other: two sprites agreeing
+/// is not the same as two sprites being the size we chose.
+pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
+/// The desk's front edge below the surface — one row of shadow across the full
+/// width.
+pub(crate) const DESK_FRONT_ROWS: u16 = 1;
+/// Leg rows below the front edge (shadow at both ends, carpet between).
+pub(crate) const DESK_LEG_ROWS: u16 = 2;
+
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
 ///
-/// This is the desk's SIZE, so the art follows it: `visual.h` is `DESK_H + 2`,
-/// and all three desk sprites (`desk`, `desk_north`, and the `desk@4x` density
-/// variant at 4x every row) must carry the matching surface depth or the pack
-/// validator's density check fires. Widening it also widens `pod_stride_y`, so
-/// a taller desk fits FEWER pod rows on a given terminal — the cost is desk
-/// capacity, not just pixels.
+/// Kept as its own constant because it means something the art does not — the
+/// pitch `pod_stride_y` prices — but BOUND to the art below, so the two can
+/// never disagree. Widening the desk fits FEWER pod rows on a given terminal:
+/// the cost of a deeper desk is capacity, not just pixels.
 pub const DESK_H: u16 = 6;
+
+// The desk's visual box is exactly surface + front edge + legs. Binding the
+// pitch to the art at COMPILE time is what makes `DESK_SURFACE_ROWS` a single
+// source of truth rather than a second opinion: deepen the surface without
+// re-pricing the slot (or the reverse) and this fails to build, instead of
+// shipping a desk whose z-sort and pod spacing disagree with its own pixels.
+const _: () = assert!(
+    DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
+    "DESK_H must price exactly the rows the desk art draws: surface + front + legs"
+);
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
 /// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
 /// walker passes BEHIND the monitor and is occluded by the desk's own y-sort

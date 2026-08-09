@@ -566,33 +566,37 @@ mod tests {
             }
         }
 
-        // ...and the SURFACE DEPTH over the WHOLE sprite, which the loop above
-        // is blind to: it starts at `desk.y`, so wood the raised variant grows
-        // ABOVE that row is invisible to it. Exactly that shipped once — the
-        // flanking wood was left beside the lifted screen rows, making this desk
-        // seven rows deep against every other desk's five, and the loop stayed
-        // green.
+        // ...and the SURFACE DEPTH of EACH, against the constant that declares
+        // it — not against each other. Two sprites agreeing is not the same as
+        // two sprites being the size we chose, and this check is the only thing
+        // holding hand-authored art to `DESK_SURFACE_ROWS`.
+        //
+        // The column loop above is blind here: it starts at `desk.y`, so wood a
+        // variant grows ABOVE that row is invisible to it. Exactly that shipped
+        // once — flanking wood left beside the lifted screen rows made this desk
+        // seven rows deep against every other desk's five, with the suite green.
         //
         // Count rows carrying the SURFACE COLOUR, sampled from the base sprite
-        // rather than named: a first attempt counted opaque rows instead, which
-        // is identical either way (a screen row is opaque with or without wood
-        // beside it) and passed its own negative control.
+        // rather than named. A first attempt counted OPAQUE rows, which is
+        // identical with or without flanking wood (a screen row is opaque either
+        // way) and passed its own negative control.
         let wood = base
             .get(0, BASE_DESK_Y_ROW)
             .expect("the desk's west edge at desk.y is surface");
         let surface_rows = |f: &pixtuoid_core::sprite::Frame| {
             (0..f.height())
                 .filter(|&y| (0..f.width()).any(|x| f.get(x, y) == Some(wood)))
-                .count()
+                .count() as u16
         };
-        assert_eq!(
-            surface_rows(north),
-            surface_rows(base),
-            "the raised variant may only add MONITOR rows — its surface is {} \
-             rows deep against the base's {}",
-            surface_rows(north),
-            surface_rows(base)
-        );
+        for (name, art) in [("desk", base), ("desk_north", north)] {
+            assert_eq!(
+                surface_rows(art),
+                crate::layout::DESK_SURFACE_ROWS,
+                "{name} draws {} rows of surface; DESK_SURFACE_ROWS declares {}",
+                surface_rows(art),
+                crate::layout::DESK_SURFACE_ROWS
+            );
+        }
     }
 
     // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the
