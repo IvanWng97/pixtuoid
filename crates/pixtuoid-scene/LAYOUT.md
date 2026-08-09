@@ -56,7 +56,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   STATISTICAL: examples/lofi_audition renders N seeds for a blind owner
 │                   batch (--solo <lane> isolates a stem); the seed-sweep property suite
 │                   (compose/tests.rs) pins the rules. compose::LeadVoice is the
-│                   INSTRUMENT registry (EpVel + Pluck + Kalimba + Vibraphone, mood-pooled):
+│                   LEAD-instrument registry (EpVel + Pluck + Kalimba + Vibraphone, mood-pooled):
 │                   lanes are busy-ness roles,
 │                   instruments are timbres within a lane — synth::lead_voice_fn is the
 │                   one dispatch; the voice draw sits LAST in the seed stream so adding

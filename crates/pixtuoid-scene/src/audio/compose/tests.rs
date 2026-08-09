@@ -175,16 +175,6 @@ fn every_seed_is_well_formed_night() {
         let mut kt = s.kick_times.clone();
         kt.sort_by(f32::total_cmp);
         assert_eq!(kicks, kt, "seed {seed}: kick_times desynced from drums");
-        for &b in &s.bass_roots {
-            assert!(
-                (26..=38).contains(&b),
-                "seed {seed}: bass {b} out of window"
-            );
-            assert!(
-                s.scale_pcs.contains(&(b % 12)),
-                "seed {seed}: bass pc off-scale"
-            );
-        }
         for &(_, note, _) in &s.sparkle {
             assert!(
                 (NIGHT_LEAD_LO..=NIGHT_LEAD_HI).contains(&note),
@@ -213,6 +203,23 @@ fn assert_well_formed(s: &GeneratedScore, seed: u64) {
         assert!(
             (25..=38).contains(&note),
             "seed {seed}: bass note {note} at {at}s out of the sub window"
+        );
+        // closed vocabulary: root/5th/pickup — anything else is a wrong join
+        let bar = ((at / bar_s) as usize).min(GEN_LOOP_BARS - 1);
+        let root = super::sub_note(s.bar_roots[bar]);
+        let fifth = super::sub_note(s.bar_roots[bar] + 7);
+        let mut allowed = vec![root, fifth];
+        if bar + 1 < GEN_LOOP_BARS {
+            allowed.push(super::sub_note(s.bar_roots[bar + 1]) - 1);
+        }
+        assert!(
+            allowed.contains(&note),
+            "seed {seed}: bass note {note} in bar {bar} is not root/5th/pickup {allowed:?}"
+        );
+        // place() clips at the loop end — no onset may ring into the seam
+        assert!(
+            at < loop_s - 1.4 * (bar_s / 4.0),
+            "seed {seed}: bass onset {at}s rings into the loop seam"
         );
     }
     for &(at, _, gain) in &s.drums {

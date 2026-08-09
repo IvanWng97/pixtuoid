@@ -52,14 +52,10 @@ pub struct GeneratedScore {
     pub(super) sparkle: Vec<(f32, u8, f32)>,
     pub(super) keys: Vec<(f32, u8, f32)>,
     pub(super) drums: Vec<(f32, DrumKind, f32)>,
-    /// The bass LANE's event list — root/5th/leading-tone only, in the sub
-    /// window. The generated night pad renders its chords WITHOUT a baked sub
-    /// (`sub_gain` 0.0) because this lane owns that register now.
+    /// The bass LANE's events — root/5th/leading-tone in the sub window (the
+    /// day pickup dips one step under); this lane owns the register the night
+    /// pad no longer bakes.
     pub(super) bass: Vec<(f32, u8, f32)>,
-    /// The sub-bass floor per template bar — ALWAYS derived (cheap), so no
-    /// Option and no fallback; only the FROZEN night-pad anchor's core still
-    /// consumes it (the generated sub rides the `bass` lane).
-    pub(super) bass_roots: [u8; 4],
     /// Night only: kick timestamps for the texture's baked duck (empty for day).
     pub(super) kick_times: Vec<f32>,
     /// Which instrument sings the lead.
@@ -70,7 +66,7 @@ pub struct GeneratedScore {
     /// Harmonic root per timeline bar — voicings may be inversions, so this is
     /// not `chord[0]`.
     pub(super) bar_roots: [u8; 8],
-    /// The TEMPLATE's roots (night's sub-bass floor reads these).
+    /// The TEMPLATE's roots — the timeline + day turnaround derive from these.
     pub(super) roots_pc: [u8; 4],
 }
 
@@ -826,24 +822,20 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
     (out, kicks)
 }
 
-/// Fold a pitch class into the ratified sub window (26..=38) — the ONE
-/// bass-register authority; `bass_roots` and the bass lane both fold through it.
+/// Fold a pitch class into the sub window (lands in 26..=37) — the ONE
+/// bass-register authority.
 fn sub_note(pc: u8) -> u8 {
-    let mut b = 24 + (pc % 12);
-    while b < 26 {
-        b += 12;
+    let b = 24 + (pc % 12);
+    if b < 26 {
+        b + 12
+    } else {
+        b
     }
-    while b > 38 {
-        b -= 12;
-    }
-    b
 }
 
-/// The bass lane: root-anchored and sparse — the ONE on every bar, an optional
-/// answer on the kick2 side, and (day) an occasional leading-tone pickup into
-/// the next bar. Root/5th/leading-tone only: the sub register carries the
-/// floor, not a melody, and every note lags the beat a touch so the kick keeps
-/// the transient.
+/// The bass lane: the ONE on every bar, an optional answer, an occasional day
+/// pickup — root/5th/leading-tone only (a floor, not a melody), every note
+/// lagging the beat so the kick keeps the transient.
 fn bass_events(
     rng: &mut NoiseStream,
     bar_roots: &[u8; 8],
@@ -851,8 +843,8 @@ fn bass_events(
     mood: Mood,
 ) -> Vec<(f32, u8, f32)> {
     let bar_s = beat_s * super::score::BEATS_PER_BAR;
-    // night's answer sits on beat 2 (the old baked sub's half-note pulse); day's
-    // rides the kick2 side of the bar
+    // night answers on beat 2 (the old baked sub's pulse); night's pickup_p 0.0
+    // still DRAWS — deleting the branch would shift every later night draw
     let (answer_p, answer_beat, fifth_p, pickup_p, vel_base) = match mood {
         Mood::Day => (0.55, 2.5, 0.4, 0.25, 0.62),
         Mood::Night => (0.7, 2.0, 0.2, 0.0, 0.55),
@@ -872,12 +864,10 @@ fn bass_events(
             let at = b0 + answer_beat * beat_s + 0.014 + 0.010 * rng.unit();
             out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
         }
-        if chance(rng, pickup_p) {
-            // approach the NEXT bar's FOLDED root from the literal semitone
-            // below (may dip one step under the root window — folding the
-            // leading-tone PC instead once rendered C#2→D1, an 11-semitone drop
-            // that reads as two unrelated rumbles, not an approach)
-            let next = sub_note(bar_roots[(bar + 1) % GEN_LOOP_BARS]);
+        if chance(rng, pickup_p) && bar + 1 < GEN_LOOP_BARS {
+            // literal semitone below the folded next root (pc-folding rendered an
+            // 11-semitone drop); no last-bar pickup — place() clips at the seam
+            let next = sub_note(bar_roots[bar + 1]);
             let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
             out.push((at, next - 1, 0.34 + 0.06 * rng.unit()));
         }
@@ -973,18 +963,12 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         Mood::Night => night_drums(&mut rng, beat_s),
     };
 
-    let mut bass_roots = [0u8; 4];
-    for (i, &pc) in roots_pc.iter().enumerate() {
-        bass_roots[i] = sub_note(pc);
-    }
-
-    // the LAST musical draw block, kept just ahead of the voice draw so the
-    // voice stays the stream's tail
+    // the last musical draws; the voice draw stays the stream's tail
     let bass = bass_events(&mut rng, &bar_roots, beat_s, mood);
 
     // drawn AFTER every musical draw, so a voice-registry change can never
-    // silently recompose an already-blessed seed's notes; ONE unit draw per
-    // mood, banded, so growing a pool re-weights without lengthening the stream
+    // silently recompose an already-blessed seed's notes; ONE banded unit draw
+    // per mood, so growing a pool re-weights without lengthening the stream
     let lead_voice = match mood {
         Mood::Day => {
             let r = rng.unit();
@@ -997,7 +981,8 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
             }
         }
         Mood::Night => {
-            if chance(&mut rng, 0.35) {
+            let r = rng.unit();
+            if r < 0.35 {
                 LeadVoice::Vibraphone
             } else {
                 LeadVoice::EpVel
@@ -1014,7 +999,6 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         keys,
         drums,
         bass,
-        bass_roots,
         kick_times: if mood == Mood::Night {
             kicks
         } else {

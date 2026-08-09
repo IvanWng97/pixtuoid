@@ -61,8 +61,8 @@ const DRUMS_GAIN: [f32; 3] = [0.0, 0.35, 0.60];
 // Boosted far past the Phase-0 ratification: the hiss+crackle layer was
 // inaudible at the ratified level.
 const TEXTURE_GAIN: [f32; 3] = [0.78, 0.84, 0.78];
-// Present at EVERY tier (like the pad): the night floor used to be baked into
-// the pad at PAD_GAIN, so an empty office must not lose it.
+// Never zero (the floor used to ride inside the night pad); the curve RISES
+// where the pad's falls — the lane must hold up once drums+keys+typing enter.
 const BASS_GAIN: [f32; 3] = [0.60, 0.70, 0.75];
 const TYPING_GAIN: [f32; 3] = [0.0, 0.50, 0.80];
 

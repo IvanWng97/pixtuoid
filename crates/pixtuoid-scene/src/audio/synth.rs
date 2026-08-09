@@ -284,15 +284,14 @@ fn bar_s() -> f32 {
 }
 
 /// The lofi master chain, applied per MUSICAL stem (texture/rain skip it — they
-/// ARE the medium). No hiss here: per-stem hiss STACKS across the four stems, so
-/// the medium noise is `texture_bed`'s job, exactly once.
+/// ARE the medium). No hiss here: per-stem hiss STACKS across the musical
+/// stems, so the medium noise is `texture_bed`'s job, exactly once.
 fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
     let warped = crate::audio::dsp::warp_resample(buf, &[(0.7, 0.0025), (8.0, 0.0006)]);
     let t = drive.tanh();
     let sat: Vec<f32> = warped.iter().map(|&x| (x * drive).tanh() / t).collect();
-    // 60-120: widened down from 80-120 per LOFI-BIBLE §4 — tape head-bump sits
-    // at 15ips≈60Hz, and the bass lane's fundamentals (36-73Hz) were landing
-    // under the old bump's floor
+    // widened from 80-120: tape 15ips head-bump ≈ 60Hz, and the bass lane's
+    // fundamentals sat under the old floor (LOFI-BIBLE §4)
     let bump = bandpass(&sat, 60.0, 120.0);
     let bumped: Vec<f32> = sat.iter().zip(&bump).map(|(&x, &b)| x + 0.35 * b).collect();
     lowpass(&bumped, 6500.0)
@@ -490,16 +489,13 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     buf
 }
 
-/// The bass voice: a sine fundamental with tanh-grown odd harmonics (the sub
-/// carries the power, the harmonics carry audibility on small speakers), a
-/// soft attack so the kick keeps the transient, and a plateau-then-release
-/// envelope — a held floor note, not a pluck.
+/// The bass voice: sine + vel-keyed tanh harmonics, soft attack so the kick
+/// keeps the transient, held-note plateau envelope.
 fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
     let f = midi_freq(midi as f32);
     let tau = std::f32::consts::TAU;
-    // release covers half the note: a sub tail crossing the barline under the
-    // NEXT bar's root is two fundamentals beating in the 40Hz register (mud)
+    // half-note release: a sub tail crossing into the next root reads as mud
     let env = env_ar(n, 0.03, dur_s * 0.5);
     let drive = 1.1 + 1.6 * vel;
     let norm = drive.tanh();
@@ -514,17 +510,15 @@ fn bass_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
         .collect()
 }
 
-/// The kalimba lead voice: a plucked TINE — a cantilever bar, so its overtones
-/// are inharmonic (modes near 1 : 5.9 : 16.5, nothing like a string's 1:2:3)
-/// and die much faster than the fundamental, plus a soft thump off the
-/// resonator body.
+/// The kalimba lead voice: a plucked tine — inharmonic cantilever modes near
+/// 1 : 5.9 : 16.5, fast-dying overtones, a resonator-body thump.
 fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
     let f = midi_freq(midi as f32);
     let tau = std::f32::consts::TAU;
     // higher tines die faster; the vel BITS jitter decay per note, not an rng,
     // so identical inputs still render identical buffers (the purity contract)
-    let pitch_k = 1.0 + (midi as f32 - 72.0) * 0.025;
+    let pitch_k = (1.0 + (midi as f32 - 72.0) * 0.025).max(0.2); // d stays positive below midi 32
     let breath = 0.9 + 0.2 * (vel * 91.7).fract();
     let d = 2.6 * pitch_k * breath;
     let mut buf: Vec<f32> = (0..n)
@@ -549,9 +543,8 @@ fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     buf
 }
 
-/// The vibraphone lead voice: a struck aluminum bar TUNED to double-octave
-/// partials (1 : 4 : ~9.8 — a mallet spectrum, not a string), ringing long,
-/// with the rotating-fan tremolo baked into the note.
+/// The vibraphone lead voice: a struck bar tuned to 1 : 4 : ~9.8 partials,
+/// long ring, the rotating-fan tremolo baked in.
 fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     let n = n_samples(dur_s);
     let f = midi_freq(midi as f32);
@@ -600,27 +593,24 @@ const NIGHT_PAD_SUB_GAIN: f32 = 3.2;
 pub fn night_pad() -> Vec<f32> {
     night_pad_core(
         &score::NIGHT_CHORDS,
-        &score::NIGHT_BASS_ROOTS,
         night_bar_s(),
         score::NIGHT_LOOP_BARS,
-        NIGHT_PAD_SUB_GAIN,
+        Some((&score::NIGHT_BASS_ROOTS, NIGHT_PAD_SUB_GAIN)),
     )
 }
 
+/// `sub`: `Some((roots, gain))` bakes the FROZEN v4 anchor's sub floor into
+/// the pad buffer; `None` = a generated take — its sub rides the bass lane.
 fn night_pad_core(
     chords: &[[u8; 4]],
-    bass_roots: &[u8; 4],
     bar_s: f32,
     loop_bars: usize,
-    sub_gain: f32,
+    sub: Option<(&[u8; 4], f32)>,
 ) -> Vec<f32> {
     let tau = std::f32::consts::TAU;
     let mut buf = vec![0.0f32; n_samples(bar_s * loop_bars as f32)];
     for bar in 0..loop_bars {
-        let (chord, root) = (
-            chords[bar % chords.len()],
-            bass_roots[bar % bass_roots.len()],
-        );
+        let chord = chords[bar % chords.len()];
         let dur = bar_s + 1.2;
         let nd = n_samples(dur);
         let mut sig = vec![0.0f32; nd];
@@ -635,22 +625,24 @@ fn night_pad_core(
                 *slot += tone * env(j) * 0.8;
             }
         }
-        let fb = midi_freq(root as f32);
-        for half in 0..2 {
-            let hdur = bar_s / 2.0 + 0.4;
-            let hn = n_samples(hdur);
-            let env = env_ar(hn, 0.06, 0.9);
-            let g = if half == 0 { 1.0 } else { 0.7 };
-            let bass: Vec<f32> = (0..hn)
-                .map(|i| {
-                    let t = i as f32 / SR;
-                    ((tau * fb * t).sin() + 0.15 * (tau * 2.0 * fb * t).sin())
-                        * env(i)
-                        * g
-                        * sub_gain
-                })
-                .collect();
-            place(&mut sig, &bass, half as f32 * bar_s / 2.0, 1.0);
+        if let Some((bass_roots, sub_gain)) = sub {
+            let fb = midi_freq(bass_roots[bar % bass_roots.len()] as f32);
+            for half in 0..2 {
+                let hdur = bar_s / 2.0 + 0.4;
+                let hn = n_samples(hdur);
+                let env = env_ar(hn, 0.06, 0.9);
+                let g = if half == 0 { 1.0 } else { 0.7 };
+                let bass: Vec<f32> = (0..hn)
+                    .map(|i| {
+                        let t = i as f32 / SR;
+                        ((tau * fb * t).sin() + 0.15 * (tau * 2.0 * fb * t).sin())
+                            * env(i)
+                            * g
+                            * sub_gain
+                    })
+                    .collect();
+                place(&mut sig, &bass, half as f32 * bar_s / 2.0, 1.0);
+            }
         }
         place(&mut buf, &sig, bar as f32 * bar_s, 1.0);
     }
@@ -942,10 +934,9 @@ pub fn gen_bed(score: &GeneratedScore, lane: usize, rng: &mut NoiseStream) -> Ve
         // the generated night pad renders NO baked sub — lane 5 owns that register
         (Mood::Night, 0) => night_pad_core(
             &score.bar_chords,
-            &score.bass_roots,
             score.bar_s(),
             super::compose::GEN_LOOP_BARS,
-            0.0,
+            None,
         ),
         (Mood::Night, 1) => {
             events_stem_voiced(loop_s, &score.sparkle, r0, r1, r2, lead_voice_fn(score))
@@ -1115,6 +1106,13 @@ mod tests {
             bump_out > bump_in * 1.3,
             "head bump must lift 80-120Hz: {bump_in:.4} -> {bump_out:.4}"
         );
+        // only this reds on a revert to the old 80-120 floor
+        let low_in = band_energy_share(&noise, 60.0, 80.0);
+        let low_out = band_energy_share(&posted_n, 60.0, 80.0);
+        assert!(
+            low_out > low_in * 1.3,
+            "head bump must reach down to 60Hz: {low_in:.4} -> {low_out:.4}"
+        );
         let top = band_energy_share(&posted_n, 7000.0, 12000.0);
         assert!(top < 0.001, "HF must die past the 6.5k rolloff: {top:.5}");
     }
@@ -1140,8 +1138,8 @@ mod tests {
                 0.10,
                 &[
                     (31.0, 62.0, 0.538),
-                    // 0.191 under the 80-120 bump; re-measured when lofi_post
-                    // widened to 60-120 (LOFI-BIBLE §4) and re-LISTEN-gated
+                    // moved by lofi_post's bump widening to 60-120 (LOFI-BIBLE
+                    // §4); re-LISTEN-gated, not curve-fitted
                     (62.0, 125.0, 0.299),
                     (125.0, 250.0, 0.172),
                 ],
