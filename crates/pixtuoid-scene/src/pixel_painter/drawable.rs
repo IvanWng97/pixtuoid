@@ -335,26 +335,29 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 .and_then(|n| pack.animation(n))
                 .or_else(|| pack.animation("desk"))
                 .and_then(|a| a.frames.first());
-            let mut screen_top = desk.y;
+            // The effects address the monitor by the sprite's OWN row numbering,
+            // so this is the blit origin — not a row offset into it. Passing
+            // `top + DESK_BEZEL_RAISE` here is what used to leave the sprite's
+            // first casing row unlit, capping every glow with a dark bar.
+            let mut sprite_top = desk.y;
             if let Some(frame) = art {
-                let top = desk
+                sprite_top = desk
                     .y
                     .saturating_sub(DESK_BEZEL_RAISE + frame.height().saturating_sub(base_h));
-                blit_frame(frame, desk.x, top, buf);
-                screen_top = top + DESK_BEZEL_RAISE;
+                blit_frame(frame, desk.x, sprite_top, buf);
             }
             paint_desk_lamp(buf, *desk, *screen_idle, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
-                screen_top,
+                sprite_top,
                 theme.effects.monitor_idle,
                 *screen_idle,
             );
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, screen_top, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
             }
         }
         DrawableKind::Character {

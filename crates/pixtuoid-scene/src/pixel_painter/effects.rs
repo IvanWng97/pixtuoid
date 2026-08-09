@@ -24,7 +24,7 @@ use crate::theme::Theme;
 pub(super) fn paint_screen_idle(
     buf: &mut RgbBuffer,
     desk_x: u16,
-    screen_top: u16,
+    sprite_top: u16,
     tint: Rgb,
     strength: f32,
 ) {
@@ -32,8 +32,8 @@ pub(super) fn paint_screen_idle(
         return;
     }
     for dx in SCREEN_GLASS_COLS {
-        for dy in 1..=2 {
-            blend_pixel(buf, desk_x + dx, screen_top + dy, tint, strength);
+        for dy in SCREEN_GLASS_ROWS {
+            blend_pixel(buf, desk_x + dx, sprite_top + dy, tint, strength);
         }
     }
 }
@@ -43,18 +43,41 @@ pub(super) fn paint_screen_idle(
 /// active glow so the two can never light different pixels.
 const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 
+/// The monitor's CASING rows, offset from the desk sprite's TOP row — both `M`
+/// rows above the glass in `desk.sprite` / `desk_north.sprite`. A lit screen
+/// lights the whole casing: lighting only the lower row left the sprite's top
+/// row at its raw dark `M`, reading as a black bar capping the glow.
+const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
+/// The glass rows, offset from the same sprite top as [`SCREEN_CASING_ROWS`].
+const SCREEN_GLASS_ROWS: std::ops::RangeInclusive<u16> = 2..=3;
+/// The bezel row UNDER the glass — the sprite's `n` shadow row.
+const SCREEN_CHIN_ROW: u16 = 4;
+
 /// `screen_top` is the buffer row of the monitor's first frame row, NOT
 /// `desk.y`: a raised-monitor desk variant puts the screen several rows higher,
 /// and the caller derives this from the blit anchor so the two cannot disagree.
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
-    screen_top: u16,
+    sprite_top: u16,
     now: SystemTime,
     tint: Rgb,
     theme: &Theme,
 ) {
-    let frame_lit = theme.effects.monitor_frame_lit;
+    // The casing carries the screen's colour, not just its light: a lit bezel in
+    // the theme's own cool grey read as a metal plate capping the glow. Blended
+    // toward the tool tint the whole monitor reads as one lit unit — and the
+    // casing becomes a second surface the tool colour rides, so a row of desks
+    // separates by tool at twice the area.
+    //
+    // 0.35 keeps a step between casing and glass; at 0.50 the two merge and the
+    // monitor loses its top edge. The effect is NOT hue-uniform, because
+    // `monitor_frame_lit` is itself cool: a cool tint keeps most of its
+    // saturation here, a warm one is half neutralised. That asymmetry is the
+    // theme colour's, not this blend's — neutralising it means retuning
+    // `monitor_frame_lit`, which the chin row shares.
+    const CASING_TINT: f32 = 0.35;
+    let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
     let glow = tint;
     let white = Rgb {
         r: 255,
@@ -64,24 +87,30 @@ pub(super) fn paint_screen_glow(
     let glow_bright = blend_rgb(tint, white, 0.4);
     let scanline = blend_rgb(tint, white, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
-        buf.put_checked(desk_x + dx, screen_top + dy, c);
+        buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };
-    for dx in 3..=10 {
-        put(buf, dx, 0, frame_lit);
+    for dy in SCREEN_CASING_ROWS {
+        for dx in 3..=10 {
+            put(buf, dx, dy, frame_lit);
+        }
+    }
+    // The glass is two rows and they are lit differently — the upper catches the
+    // brighter wash — so this reads the range's ends rather than iterating it.
+    let (glass_upper, glass_lower) = (*SCREEN_GLASS_ROWS.start(), *SCREEN_GLASS_ROWS.end());
+    for dx in SCREEN_GLASS_COLS {
+        put(buf, dx, glass_upper, glow_bright);
+        put(buf, dx, glass_lower, glow);
     }
     for dx in SCREEN_GLASS_COLS {
-        put(buf, dx, 1, glow_bright);
-        put(buf, dx, 2, glow);
-    }
-    for dx in SCREEN_GLASS_COLS {
-        put(buf, dx, 3, frame_lit);
+        put(buf, dx, SCREEN_CHIN_ROW, frame_lit);
     }
     const SCANLINE_STEP_MS: u64 = 120;
     let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / SCANLINE_STEP_MS) as u16 + desk_x;
     let scan_col = 4 + (phase % 6);
-    put(buf, scan_col, 1, scanline);
-    put(buf, scan_col, 2, scanline);
+    for dy in SCREEN_GLASS_ROWS {
+        put(buf, scan_col, dy, scanline);
+    }
 }
 
 pub(super) fn paint_sleep_z(
