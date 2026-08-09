@@ -107,9 +107,18 @@ def layout_block(sib: pathlib.Path) -> list[str]:
             skeleton.append(ln.rstrip())
     notes = []
     for para in re.split(r"\n\s*\n", "\n".join(lines[fence[1] + 1 :])):
-        m = BOLD_LEAD.match(" ".join(x.strip() for x in para.strip().splitlines()))
-        if m:
-            notes.append(f"- {m.group(1)}{clip(m.group(2), GIST_BUDGET)}".rstrip())
+        joined = " ".join(x.strip() for x in para.strip().splitlines())
+        if not joined:
+            continue
+        m = BOLD_LEAD.match(joined)
+        if not m:
+            # A silently-dropped note defeats the index (a `> `-quoted paragraph
+            # shipped invisible this way); an unindexable one is the AUTHOR's bug.
+            sys.exit(
+                f"{sib}: post-fence paragraph has no bold lead, so it cannot be "
+                f"indexed — bold its opening phrase: {joined[:60]}…"
+            )
+        notes.append(f"- {m.group(1)}{clip(m.group(2), GIST_BUDGET)}".rstrip())
     return ["```"] + skeleton + ["```"] + ([""] + notes if notes else [])
 
 
@@ -163,15 +172,14 @@ def assert_verbatim(guide: pathlib.Path, sib: pathlib.Path, built: list[str]) ->
             )
 
 
-def main() -> int:
-    check = "--check" in sys.argv[1:]
+def run(root: pathlib.Path, check: bool, quiet: bool = False) -> int:
     tracked = subprocess.run(
-        ["git", "-C", str(ROOT), "ls-files", "*CLAUDE.md"],
+        ["git", "-C", str(root), "ls-files", "*CLAUDE.md"],
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
     drifted = []
     for rel in tracked:
-        guide = ROOT / rel
+        guide = root / rel
         if not any(START.match(ln) for ln in guide.read_text().splitlines()):
             continue
         new = regenerate(guide)
@@ -184,9 +192,101 @@ def main() -> int:
             print(f"{rel}: index block drifted — `just gen-guides` REBUILDS the block FROM the sibling,\n"
                   f"  discarding any hand-edit inside it; put the change in the SIBLING first")
         return 1
-    verb = "would rewrite" if check else "rewrote"
-    print(f"gen-guides: {verb} {len(drifted)} guide(s)" if drifted else "gen-guides: all index blocks current ✓")
+    if not quiet:
+        verb = "would rewrite" if check else "rewrote"
+        print(f"gen-guides: {verb} {len(drifted)} guide(s)" if drifted else "gen-guides: all index blocks current ✓")
     return 0
+
+
+def selftest() -> int:
+    """Negative-control every failure arm on a throwaway repo — a generator whose
+    own fires/does-not-fire contract broke rewrites blocks with garbage quietly."""
+    import tempfile
+
+    fails: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = pathlib.Path(tmp) / "repo"
+        (repo / "crate").mkdir(parents=True)
+        git = ["git", "-C", str(repo)]
+        subprocess.run([*git, "init", "-q"], check=True)
+
+        def stage(rel: str, body: str) -> None:
+            (repo / rel).write_text(body)
+            subprocess.run([*git, "add", "-A"], check=True, capture_output=True)
+
+        def gen(check: bool) -> int:
+            try:
+                return run(repo, check, quiet=True)
+            except SystemExit as e:  # sys.exit from a builder/assert arm
+                return 1 if e.code else 0
+
+        guide = (
+            "# g\n\n## Layout\n\n"
+            "<!-- layout:start · generated from LAYOUT.md by `just gen-guides` — x -->\n"
+            "<!-- layout:end -->\n\n## Known sharp edges\n\n"
+            "<!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` — x -->\n"
+            "<!-- edges:end -->\n\n## Where to look\n\n"
+            "<!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — x -->\n"
+            "<!-- lookup:end -->\n"
+        )
+        layout = "# l\n\n```\nsrc/\n├── a.rs   does the thing, at length beyond any budget anyone set, truly beyond it\n```\n\n**A note.** body\n"
+        edges = "# e\n\n- **Edge one.** the full text\n"
+        lookup = '# w\n\n- "How does it work?" → the answer\n'
+        stage("crate/CLAUDE.md", guide)
+        stage("crate/LAYOUT.md", layout)
+        stage("crate/SHARP-EDGES.md", edges)
+        stage("crate/WHERE-TO-LOOK.md", lookup)
+
+        if gen(False) != 0:
+            fails.append("a well-formed fixture must generate")
+        first = (repo / "crate/CLAUDE.md").read_text()
+        if gen(False) != 0 or (repo / "crate/CLAUDE.md").read_text() != first:
+            fails.append("generation must be idempotent")
+        if "- How does it work?" not in first or "- **Edge one.**" not in first or "├── a.rs" not in first:
+            fails.append("all three block kinds must emit")
+        if gen(True) != 0:
+            fails.append("--check must pass right after generation")
+
+        stage("crate/CLAUDE.md", first.replace("- **Edge one.** the full text", "- **Edge one.** EDITED"))
+        if gen(True) != 1:
+            fails.append("a hand-edited index line must red --check")
+        gen(False)
+
+        stage("crate/SHARP-EDGES.md", edges.replace("Edge one", "Edge ONE"))
+        if gen(True) != 1:
+            fails.append("a sibling edit must red --check")
+        gen(False)
+
+        stage("crate/WHERE-TO-LOOK.md", lookup.replace("How does it work?", "How does it REALLY work?"))
+        if gen(True) != 1:
+            fails.append("lookup drift must red --check (the lookup-only-skip regression)")
+        gen(False)
+
+        stage("crate/SHARP-EDGES.md", "# e\n\n- **Edge one.** the full\ntext wrapped hard\n")
+        if gen(False) != 1:
+            fails.append("a hard-wrapped sibling entry must FAIL generation (assert_verbatim)")
+        stage("crate/SHARP-EDGES.md", edges)
+
+        stage("crate/LAYOUT.md", layout + "\n> **Quoted note.** silently droppable?\n")
+        if gen(False) != 1:
+            fails.append("an unindexable post-fence paragraph must FAIL generation, not vanish")
+        stage("crate/LAYOUT.md", layout)
+        if gen(False) != 0 or gen(True) != 0:
+            fails.append("fixture must return to green after the controls")
+
+    if fails:
+        print("gen-guides selftest FAILED:")
+        for f in fails:
+            print(f"  - {f}")
+        return 1
+    print("gen-guides selftest: all 10 controls passed")
+    return 0
+
+
+def main() -> int:
+    if "--selftest" in sys.argv[1:]:
+        return selftest()
+    return run(ROOT, "--check" in sys.argv[1:])
 
 
 if __name__ == "__main__":

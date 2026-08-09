@@ -385,46 +385,6 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     tests.rs (sibling unit suite, extracted from mod.rs)
 ```
 
-> Furniture drawables y-sort via `layout::z_sort_row` (the south base row, tied to the mask's
-> `anchored_top_left` so the sprite and its blocked ground can't drift); `center_pin_south_offset` remains
-> only as the offset primitive for shadow/halo placement. See `layout::placement`.
+**Furniture drawables y-sort via `layout::z_sort_row`.** (the south base row, tied to the mask's `anchored_top_left` so the sprite and its blocked ground can't drift); `center_pin_south_offset` remains only as the offset primitive for shadow/halo placement. See `layout::placement`.
 
-> **`floor::render_floor` is the shared headless frame seam (#423), and
-> `floor::FloorSession` is the owned painter session over it.** One
-> compiler-owned "scene → RgbBuffer" frame: prologue (buffer sizing, layout,
-> router zone), the pixel pass (itself two-phase: `sim_step` → paint, see
-> `pixel_painter/sim.rs` above), and the bookkeeping epilogue (`CoffeeState`
-> carrier persistence + the door-anim clamp). It also single-sources the
-> label-overlay (`overlay`) and wall-board (`board`) derivations: `render`
-> captures the frame's `Layout` internally so `overlay` builds against the SAME
-> geometry the sprite pass used — a mismatched layout/route pair is
-> unrepresentable, not merely discouraged, and the web + floating painters drop
-> their duplicated `last_layout` capture. The persistent bundle every
-> painter used to hand-roll — {FloorCtx, RgbBuffer, CoffeeState, chitchat} +
-> the dual `evict_missing` protocol — is now the `FloorSession` type
-> (`PerFloor` + `PerOffice` halves): each painter drifted on exactly that
-> convention once (the floating window never evicted — a slow leak; the web
-> hero shipped without eviction — the loop-2 teleport), so `render()` runs the
-> dual eviction itself and a painter can no longer forget it. Its scene MUST
-> be the FULL live scene — eviction against a PROJECTED scene would wipe every
-> other floor's state, which is why `render_floor` itself still never evicts
-> (the caller-side rule; the session IS the caller for single-floor painters).
-> Consumers: the desktop window (`floating::offscreen::OfficeRenderer`) and
-> the web hero (`pixtuoid-web::Office`) each own one `FloorSession`; the TUI
-> composes the halves (`Vec<PerFloor>` + one `PerOffice` — coffee/chitchat are
-> office-wide so a cup survives floor navigation) and stays on `render_floor`
-> directly for the floor-slide (`TuiRenderer::render_transition`, which
-> renders projected scenes). `FloorSession::observe` is the headless twin —
-> eviction + prologue + `sim_step` + epilogue with NO pixel buffer (the
-> sim/paint split's observation seam; `SimFrame`/`CharacterPlacement`/
-> `CharacterGlow` are pub for its callers, `sim_step`/`SimStores` stay
-> crate-internal). The ONE deliberate raw-`render_to_rgb_buffer` consumer is
-> `tui::renderer::draw_scene` (the terminal half-block flush): it needs the
-> full `PixelPassResult` (pet/mascot positions, chitchat bubbles) and holds
-> only immutable coffee borrows mid-flush, routing its bookkeeping through the
-> pub `frame_epilogue` seam (the same `CoffeeState`/door-anim step the session
-> runs — no longer hand-copied, closing the #423 drift class). A FOURTH painter starts
-> from `FloorSession`, not by re-rolling the bundle. The terminal flush +
-> widgets + footer live in the binary's `tui/`; the chunky-upscale blit is the
-> binary's `floating/`; the RGBA blit to canvas is `pixtuoid-web`'s. Keep
-> `pixtuoid-scene` flush-free.
+**`floor::render_floor` is the shared headless frame seam (#423), and `floor::FloorSession` is the owned painter session over it.** One compiler-owned "scene → RgbBuffer" frame: prologue (buffer sizing, layout, router zone), the pixel pass (itself two-phase: `sim_step` → paint, see `pixel_painter/sim.rs` above), and the bookkeeping epilogue (`CoffeeState` carrier persistence + the door-anim clamp). It also single-sources the label-overlay (`overlay`) and wall-board (`board`) derivations: `render` captures the frame's `Layout` internally so `overlay` builds against the SAME geometry the sprite pass used — a mismatched layout/route pair is unrepresentable, not merely discouraged, and the web + floating painters drop their duplicated `last_layout` capture. The persistent bundle every painter used to hand-roll — {FloorCtx, RgbBuffer, CoffeeState, chitchat} + the dual `evict_missing` protocol — is now the `FloorSession` type (`PerFloor` + `PerOffice` halves): each painter drifted on exactly that convention once (the floating window never evicted — a slow leak; the web hero shipped without eviction — the loop-2 teleport), so `render()` runs the dual eviction itself and a painter can no longer forget it. Its scene MUST be the FULL live scene — eviction against a PROJECTED scene would wipe every other floor's state, which is why `render_floor` itself still never evicts (the caller-side rule; the session IS the caller for single-floor painters). Consumers: the desktop window (`floating::offscreen::OfficeRenderer`) and the web hero (`pixtuoid-web::Office`) each own one `FloorSession`; the TUI composes the halves (`Vec<PerFloor>` + one `PerOffice` — coffee/chitchat are office-wide so a cup survives floor navigation) and stays on `render_floor` directly for the floor-slide (`TuiRenderer::render_transition`, which renders projected scenes). `FloorSession::observe` is the headless twin — eviction + prologue + `sim_step` + epilogue with NO pixel buffer (the sim/paint split's observation seam; `SimFrame`/`CharacterPlacement`/ `CharacterGlow` are pub for its callers, `sim_step`/`SimStores` stay crate-internal). The ONE deliberate raw-`render_to_rgb_buffer` consumer is `tui::renderer::draw_scene` (the terminal half-block flush): it needs the full `PixelPassResult` (pet/mascot positions, chitchat bubbles) and holds only immutable coffee borrows mid-flush, routing its bookkeeping through the pub `frame_epilogue` seam (the same `CoffeeState`/door-anim step the session runs — no longer hand-copied, closing the #423 drift class). A FOURTH painter starts from `FloorSession`, not by re-rolling the bundle. The terminal flush + widgets + footer live in the binary's `tui/`; the chunky-upscale blit is the binary's `floating/`; the RGBA blit to canvas is `pixtuoid-web`'s. Keep `pixtuoid-scene` flush-free.
