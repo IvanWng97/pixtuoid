@@ -583,9 +583,9 @@ fn night_bar_s() -> f32 {
     score::night_beat_s() * score::BEATS_PER_BAR
 }
 
-/// The FROZEN night pad's baked sub level. The ratified v4 take renders chords
-/// + the sub-bass floor in ONE buffer; GENERATED takes pass `sub_gain` 0.0
-/// instead because their sub rides the separate bass lane (lane 5).
+/// The FROZEN night pad's baked sub level. The ratified v4 take renders the
+/// chords and the sub-bass floor in ONE buffer; GENERATED takes pass
+/// `sub_gain` 0.0 instead because their sub rides the separate bass lane (5).
 #[cfg(test)]
 const NIGHT_PAD_SUB_GAIN: f32 = 3.2;
 

@@ -16,3 +16,5 @@ __pycache__/
 lcov.info
 mutants.out/
 mutants.out.old/
+# lofi_audition listen-gate renders (17MB+ each, never committed)
+/audio-demos/
