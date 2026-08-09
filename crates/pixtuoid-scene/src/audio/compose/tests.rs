@@ -60,32 +60,59 @@ fn every_day_template_chord_carries_a_third_and_seventh() {
 }
 
 #[test]
-fn lead_voice_varies_by_day_and_night_keeps_the_ep() {
-    let mut saw = (false, false);
+fn lead_voice_pools_are_mood_curated() {
+    let mut day_saw = (false, false, false);
+    let mut night_saw = (false, false);
     for seed in 0..SWEEP {
         match compose(Mood::Day, seed).lead_voice {
-            LeadVoice::EpVel => saw.0 = true,
-            LeadVoice::Pluck => saw.1 = true,
+            LeadVoice::EpVel => day_saw.0 = true,
+            LeadVoice::Pluck => day_saw.1 = true,
+            LeadVoice::Kalimba => day_saw.2 = true,
+            LeadVoice::Vibraphone => panic!("seed {seed}: vibraphone is night-pool only"),
         }
-        assert_eq!(
-            compose(Mood::Night, seed).lead_voice,
-            LeadVoice::EpVel,
-            "seed {seed}: night must keep the EP lead"
-        );
+        match compose(Mood::Night, seed).lead_voice {
+            LeadVoice::EpVel => night_saw.0 = true,
+            LeadVoice::Vibraphone => night_saw.1 = true,
+            v => panic!("seed {seed}: night drew the day-pool {v:?}"),
+        }
     }
-    assert!(saw.0 && saw.1, "both day lead voices must appear: {saw:?}");
+    assert!(
+        day_saw.0 && day_saw.1 && day_saw.2,
+        "all three day lead voices must appear: {day_saw:?}"
+    );
+    assert!(
+        night_saw.0 && night_saw.1,
+        "both night lead voices must appear: {night_saw:?}"
+    );
 }
 
 #[test]
-fn day_lead_voice_distribution_tracks_the_draw_weight() {
-    // p(Pluck)=0.35 ⇒ ~140 of 400; the band is ±3.5σ, so a biased or misplaced
-    // draw fails but an unlucky sample does not
-    let plucks = (0..400)
-        .filter(|&s| compose(Mood::Day, s).lead_voice == LeadVoice::Pluck)
-        .count();
+fn lead_voice_distribution_tracks_the_draw_weights() {
+    // day p(Pluck)=0.35 / p(Kalimba)=0.25, night p(Vibraphone)=0.35; each band
+    // is ±3.5σ over 400 seeds, so a biased or misplaced draw fails but an
+    // unlucky sample does not
+    let (mut plucks, mut kalimbas, mut vibes) = (0usize, 0usize, 0usize);
+    for s in 0..400 {
+        match compose(Mood::Day, s).lead_voice {
+            LeadVoice::Pluck => plucks += 1,
+            LeadVoice::Kalimba => kalimbas += 1,
+            _ => {}
+        }
+        if compose(Mood::Night, s).lead_voice == LeadVoice::Vibraphone {
+            vibes += 1;
+        }
+    }
     assert!(
         (107..=173).contains(&plucks),
         "pluck drew {plucks}/400 vs p=0.35"
+    );
+    assert!(
+        (70..=130).contains(&kalimbas),
+        "kalimba drew {kalimbas}/400 vs p=0.25"
+    );
+    assert!(
+        (107..=173).contains(&vibes),
+        "vibe drew {vibes}/400 vs p=0.35"
     );
 }
 

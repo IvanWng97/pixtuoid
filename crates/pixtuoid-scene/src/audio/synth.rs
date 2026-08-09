@@ -487,6 +487,75 @@ fn pluck_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
     buf
 }
 
+/// The kalimba lead voice: a plucked TINE — a cantilever bar, so its overtones
+/// are inharmonic (modes near 1 : 5.9 : 16.5, nothing like a string's 1:2:3)
+/// and die much faster than the fundamental, plus a soft thump off the
+/// resonator body.
+fn kalimba_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+    let n = n_samples(dur_s);
+    let f = midi_freq(midi as f32);
+    let tau = std::f32::consts::TAU;
+    // higher tines die faster; the vel BITS jitter decay per note, not an rng,
+    // so identical inputs still render identical buffers (the purity contract)
+    let pitch_k = 1.0 + (midi as f32 - 72.0) * 0.025;
+    let breath = 0.9 + 0.2 * (vel * 91.7).fract();
+    let d = 2.6 * pitch_k * breath;
+    let mut buf: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / SR;
+            let attack = (t / 0.002).min(1.0);
+            let sig = (tau * f * t).sin() * (-t * d).exp()
+                + 0.20 * (tau * 5.9 * f * t).sin() * (-t * (d * 5.0 + 14.0)).exp()
+                + 0.08 * (tau * 16.5 * f * t).sin() * (-t * 40.0).exp();
+            sig * attack * vel
+        })
+        .collect();
+    let pn = n_samples(0.010);
+    let mut prng = NoiseStream::new(0x4B41_4C49 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
+    let thump = bandpass(&raw, 120.0, 700.0);
+    for (i, &v) in thump.iter().enumerate() {
+        if let Some(slot) = buf.get_mut(i) {
+            *slot += v * (-(i as f32 / SR) * 350.0).exp() * 0.12 * vel;
+        }
+    }
+    buf
+}
+
+/// The vibraphone lead voice: a struck aluminum bar TUNED to double-octave
+/// partials (1 : 4 : ~9.8 — a mallet spectrum, not a string), ringing long,
+/// with the rotating-fan tremolo baked into the note.
+fn vibe_note(midi: u8, dur_s: f32, vel: f32) -> Vec<f32> {
+    let n = n_samples(dur_s);
+    let f = midi_freq(midi as f32);
+    let tau = std::f32::consts::TAU;
+    let pitch_k = 1.0 + (midi as f32 - 69.0) * 0.015;
+    let d = 1.3 * pitch_k;
+    // the vel BITS detune the fan rate per note (purity contract, as above)
+    let trem_hz = 4.2 + 0.8 * (vel * 53.1).fract();
+    let mut buf: Vec<f32> = (0..n)
+        .map(|i| {
+            let t = i as f32 / SR;
+            let attack = (t / 0.008).min(1.0);
+            let trem = 1.0 - 0.175 * (1.0 - (tau * trem_hz * t).cos());
+            let sig = (tau * f * t).sin() * (-t * d).exp()
+                + (0.15 + 0.20 * vel) * (tau * 4.0 * f * t).sin() * (-t * (d * 3.0 + 2.0)).exp()
+                + 0.06 * (tau * 9.8 * f * t).sin() * (-t * 18.0).exp();
+            sig * attack * trem * vel
+        })
+        .collect();
+    let pn = n_samples(0.008);
+    let mut prng = NoiseStream::new(0x5649_4245 ^ ((midi as u64) << 32) ^ vel.to_bits() as u64);
+    let raw: Vec<f32> = (0..pn).map(|_| prng.norm()).collect();
+    let mallet = bandpass(&raw, 600.0, 1800.0);
+    for (i, &v) in mallet.iter().enumerate() {
+        if let Some(slot) = buf.get_mut(i) {
+            *slot += v * (-(i as f32 / SR) * 500.0).exp() * 0.06 * vel;
+        }
+    }
+    buf
+}
+
 #[cfg(test)]
 fn night_bar_s() -> f32 {
     score::night_beat_s() * score::BEATS_PER_BAR
@@ -788,6 +857,8 @@ fn lead_voice_fn(score: &GeneratedScore) -> fn(u8, f32, f32) -> Vec<f32> {
     match score.lead_voice {
         LeadVoice::EpVel => ep_pluck_vel,
         LeadVoice::Pluck => pluck_note,
+        LeadVoice::Kalimba => kalimba_note,
+        LeadVoice::Vibraphone => vibe_note,
     }
 }
 
@@ -865,6 +936,31 @@ mod tests {
         assert_eq!(lane_recipe(Mood::Night, 1), (2.2, 2800.0, 0.5));
         assert_eq!(lane_recipe(Mood::Night, 2), (1.1, 2000.0, 0.7));
         assert_eq!(lane_recipe(Mood::Night, 3), (6000.0, 2.0, 0.8));
+    }
+
+    #[test]
+    fn new_lead_voices_are_pure_finite_and_keep_their_decay_character() {
+        let rms = |s: &[f32]| (s.iter().map(|v| v * v).sum::<f32>() / s.len() as f32).sqrt();
+        let tail_ratio = |b: &[f32]| {
+            let q = b.len() / 4;
+            rms(&b[b.len() - q..]) / rms(&b[..q]).max(1e-9)
+        };
+        let (kal, vib) = (kalimba_note(72, 2.0, 0.5), vibe_note(72, 2.0, 0.5));
+        for (name, buf) in [("kalimba", &kal), ("vibe", &vib)] {
+            assert_eq!(buf.len(), n_samples(2.0), "{name}: wrong note length");
+            assert!(buf.iter().all(|v| v.is_finite()), "{name}: non-finite");
+            assert!(rms(buf) > 1e-4, "{name}: silent note");
+        }
+        // purity contract: identical inputs render identical buffers
+        assert_eq!(kal, kalimba_note(72, 2.0, 0.5));
+        assert_eq!(vib, vibe_note(72, 2.0, 0.5));
+        // the tine dies fast, the bar rings — that ordering IS the two timbres
+        assert!(
+            tail_ratio(&vib) > 2.0 * tail_ratio(&kal),
+            "vibe tail {} must ring well past the kalimba tail {}",
+            tail_ratio(&vib),
+            tail_ratio(&kal)
+        );
     }
 
     #[test]

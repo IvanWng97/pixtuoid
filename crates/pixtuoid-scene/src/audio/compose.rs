@@ -31,6 +31,12 @@ pub(crate) enum LeadVoice {
     EpVel,
     /// Plucked-string lead ("nylon" family).
     Pluck,
+    /// Plucked-tine lead (day pool) — inharmonic cantilever overtones + a
+    /// resonator-body thump.
+    Kalimba,
+    /// Struck-bar lead (night pool) — double-octave tuned partials with the
+    /// fan tremolo baked in.
+    Vibraphone,
 }
 
 /// A generated 8-bar composition — the runtime-sized twin of the frozen
@@ -82,6 +88,8 @@ impl GeneratedScore {
         match self.lead_voice {
             LeadVoice::EpVel => "ep",
             LeadVoice::Pluck => "pluck",
+            LeadVoice::Kalimba => "kalimba",
+            LeadVoice::Vibraphone => "vibe",
         }
     }
 }
@@ -915,11 +923,26 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
     }
 
     // drawn AFTER every musical draw, so a voice-registry change can never
-    // silently recompose an already-blessed seed's notes
-    let lead_voice = if mood == Mood::Day && chance(&mut rng, 0.35) {
-        LeadVoice::Pluck
-    } else {
-        LeadVoice::EpVel
+    // silently recompose an already-blessed seed's notes; ONE unit draw per
+    // mood, banded, so growing a pool re-weights without lengthening the stream
+    let lead_voice = match mood {
+        Mood::Day => {
+            let r = rng.unit();
+            if r < 0.35 {
+                LeadVoice::Pluck
+            } else if r < 0.60 {
+                LeadVoice::Kalimba
+            } else {
+                LeadVoice::EpVel
+            }
+        }
+        Mood::Night => {
+            if chance(&mut rng, 0.35) {
+                LeadVoice::Vibraphone
+            } else {
+                LeadVoice::EpVel
+            }
+        }
     };
 
     GeneratedScore {
