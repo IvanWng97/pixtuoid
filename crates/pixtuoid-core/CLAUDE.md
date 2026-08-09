@@ -5,7 +5,7 @@ are forbidden here — see workspace invariant #1). Owns the source/decoder seam
 the reducer/state machine, sprite parsing, and the shared grid/walkability
 vocabulary. The sim geometry (layout, pose derivation, walk physics) lives in
 `pixtuoid-scene` — the engine owns its geometry; only the coherence-bound
-`walkable.rs` stays here (see sharp edges). The scene engine (`pixtuoid-scene`)
+`walkable.rs` stays here (see [`SHARP-EDGES.md`](SHARP-EDGES.md)). The scene engine (`pixtuoid-scene`)
 and the binary (`pixtuoid`) sit on top of this. See the workspace
 [`CLAUDE.md`](../../CLAUDE.md) for cross-cutting rules.
 

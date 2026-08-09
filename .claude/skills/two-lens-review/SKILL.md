@@ -65,8 +65,9 @@ silently dropped).
    (PR #455's a11y lens stubbed under an APPROVE-WITH-NITS aggregate; its re-run
    caught a real AA failure). Then for every MEDIUM+ finding, **verify the
    premise yourself before coding a fix** — reviewers have incomplete design
-   context; check the crate's sharp edges first, and if a finding is deliberate
-   design, REFUTE it by citing (or ADDING) the relevant `CLAUDE.md` sharp edge.
+   context; read the crate's `SHARP-EDGES.md` entry first (its `CLAUDE.md` only
+   INDEXES them — the index line is not the entry), and if a finding is
+   deliberate design, REFUTE it by citing (or ADDING) that entry.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.
 5. **Disposition sweep** (shared, below).
@@ -110,8 +111,8 @@ lens); defer only genuinely big/refactor work to issues.
 ## Disposition sweep (both scopes)
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
-**FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate `CLAUDE.md`
-sharp edge — that keeps the next agent's context accurate) · **ISSUE-FILED**
+**FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate
+`SHARP-EDGES.md` entry — that keeps the next agent's context accurate) · **ISSUE-FILED**
 (no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
 state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
 thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge

@@ -96,7 +96,7 @@ review in #198), NOT a replacement for the judgement below:
 
 - Every file:line you cite MUST be from a file you actually read with the Read tool
 - Do not invent line numbers. If you can't find the exact line, describe the location
-- If you're unsure whether something is a bug or intentional, check "Known sharp edges" in CLAUDE.md before filing
+- If you're unsure whether something is a bug or intentional, read the crate's `SHARP-EDGES.md` before filing — its `CLAUDE.md` only indexes those entries one line each, and the index line is not the entry
 - Verify your premise before each finding: does the code actually do what you think it does?
 - Never claim an external artifact (GH Action tag, crate release, sibling
   repo/tap) "does not exist" or "is the wrong version" from memory — training

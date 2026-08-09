@@ -6,7 +6,8 @@ checkout without `core.symlinks` materializes it as a one-line pointer — read
 this file.)
 This is the **workspace-level map** — conventions, invariants, and rules that
 apply everywhere. **Module-level detail and the crate-specific "sharp edges"
-live in nested `CLAUDE.md` files**, auto-loaded when you touch those trees:
+are indexed in nested `CLAUDE.md` files**, auto-loaded when you touch those
+trees (their full text lives in siblings — see below):
 
 - [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — the headless lib: sources, reducer/state, sprites, the grid/walkable vocabulary.
   - [`crates/pixtuoid-core/tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md) — the integration-test layout (9 test binaries: five grouped + four flat, three of them publish-excluded; parity twins) + add-a-CLI test steps.
@@ -36,8 +37,8 @@ tag-is-a-publish rule) are in
 [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 **Read the nested guide for the crate you're editing.** Many things that look
-like a bug are documented, load-bearing design — the "Known sharp edges"
-section in each nested file (indexed below) explains why.
+like a bug are documented, load-bearing design — each crate's `SHARP-EDGES.md`
+explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 
 **Two things about how these files load.** A nested `CLAUDE.md` is an INDEX; its
 bulk lives in siblings that are **not** auto-loaded — you must open them. Each

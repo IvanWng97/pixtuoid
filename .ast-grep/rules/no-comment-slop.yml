@@ -1,6 +1,6 @@
 # Flags a run of 3+ CONSECUTIVE plain `//` comments inside a function body — the
 # repo's "fn-body comments <=2 lines" convention. A longer WHY belongs on the
-# DECLARATION it explains or a CLAUDE.md sharp edge.
+# DECLARATION it explains or a SHARP-EDGES.md entry.
 # Deliberately narrow: `///`/`//!` docs are excluded by the regex, only runs inside
 # a `function_item` count, and the comments must be immediately consecutive.
 # ADVISORY only — run diff-scoped (`just comment-lint`), never a merge gate; the
@@ -10,7 +10,7 @@
 id: no-comment-slop
 language: Rust
 severity: warning
-message: "3+ consecutive line comments in a function body — trim to a WHY (≤2 lines), or move the rationale to the declaration doc / a CLAUDE.md sharp edge. A fact a test could pin belongs in the test."
+message: "3+ consecutive line comments in a function body — trim to a WHY (≤2 lines), or move the rationale to the declaration doc / a SHARP-EDGES.md entry. A fact a test could pin belongs in the test."
 rule:
   kind: line_comment
   regex: '^//($|[^/!])'

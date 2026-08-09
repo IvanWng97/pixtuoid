@@ -306,6 +306,7 @@ lint:
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
+    run guides  just guide-index          & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1159,6 +1160,20 @@ compare-selftest:
     # any python3 with Pillow answers the question this recipe asks.
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
+
+# Gate the crate guides' index↔sibling contract: every `SHARP-EDGES.md` entry has
+# an index line in its `CLAUDE.md`, every index line still greps to its entry, and
+# no OTHER doc points an agent at `CLAUDE.md` for text that now lives in the
+# sibling. That last arm is why this exists — the split left 15 such pointers, and
+# a review that refutes a finding by citing a sharp edge it never opened is the
+# cost. `--selftest` negative-controls all three arms. Gated via `lint`.
+[group('meta')]
+[doc("Gate the guides' sharp-edge index ↔ SHARP-EDGES.md contract")]
+guide-index:
+    # Negative controls FIRST (the `ast-grep-test` idiom): a gate whose own
+    # fires/does-not-fire contract broke reports a clean pass on nothing.
+    python3 scripts/guide-index.py --selftest
+    python3 scripts/guide-index.py
 
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job
