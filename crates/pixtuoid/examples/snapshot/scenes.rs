@@ -166,7 +166,39 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
         "gallery exemplars must span all four tiers"
     );
     use std::time::Duration as D;
-    let agents: [(&str, ActivityState, D); 12] = [
+    // (label, state, since_event, since_entry).
+    //
+    // The two times are SEPARATE and both load-bearing, which the old single
+    // `age` could not express — it set `created_at == last_event_at`, and
+    // `in_thinking_window` gates on `last_event_at > created_at`, so NO agent
+    // could ever reach `SeatedThinking` however the age was tuned. The same
+    // single value also left every tool-running agent inside
+    // `ENTRY_ANIMATION_MS` (4 s), so `SeatedTyping` never rendered either.
+    // Between them the gallery never once showed a desk actually being WORKED
+    // at — the product's two central poses, and the screen glow that rides
+    // them, were invisible to every rendered doc image.
+    //
+    // `since_entry` > 4 s puts an agent past its entry walk; `since_entry` >
+    // `since_event` makes it count as having been active. The walkers below
+    // keep a short `since_entry` deliberately: the entry walk is what gives the
+    // gallery its motion.
+    let agents: [(&str, ActivityState, D, D); 12] = [
+        // Desk 0 is a FAR-seated desk, so this one also demonstrates the
+        // screen staying dark behind a monitor the room only sees the back of.
+        (
+            "thinking",
+            ActivityState::Idle,
+            D::from_secs(5),
+            D::from_secs(90),
+        ),
+        (
+            "waiting",
+            ActivityState::Waiting {
+                reason: "permission?".into(),
+            },
+            D::from_secs(10),
+            D::from_secs(30),
+        ),
         (
             "working",
             ActivityState::Active {
@@ -175,18 +207,26 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Edit,
             },
             D::from_millis(0),
+            D::from_secs(6),
         ),
         (
-            "waiting",
-            ActivityState::Waiting {
-                reason: "permission?".into(),
-            },
-            D::from_secs(10),
+            "idle-a",
+            ActivityState::Idle,
+            D::from_secs(300),
+            D::from_secs(300),
+        ), // 5 min — wander/sleep cycle
+        (
+            "idle-b",
+            ActivityState::Idle,
+            D::from_secs(301),
+            D::from_secs(301),
         ),
-        ("thinking", ActivityState::Idle, D::from_secs(5)), // 5s ago — within thinking window
-        ("idle-a", ActivityState::Idle, D::from_secs(300)), // 5 min — wander/sleep cycle
-        ("idle-b", ActivityState::Idle, D::from_secs(301)),
-        ("idle-c", ActivityState::Idle, D::from_secs(303)),
+        (
+            "idle-c",
+            ActivityState::Idle,
+            D::from_secs(303),
+            D::from_secs(303),
+        ),
         (
             "couch-act",
             ActivityState::Active {
@@ -195,12 +235,14 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Read,
             },
             D::from_millis(140),
+            D::from_millis(140),
         ),
         (
             "couch-bk",
             ActivityState::Waiting {
                 reason: "review".into(),
             },
+            D::from_millis(0),
             D::from_millis(0),
         ),
         (
@@ -211,8 +253,14 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Bash,
             },
             D::from_millis(140),
+            D::from_millis(140),
         ),
-        ("floor-idle", ActivityState::Idle, D::from_millis(2_000)),
+        (
+            "floor-idle",
+            ActivityState::Idle,
+            D::from_millis(2_000),
+            D::from_millis(2_000),
+        ),
         (
             "floor-act2",
             ActivityState::Active {
@@ -221,12 +269,18 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Search,
             },
             D::from_millis(280),
+            D::from_millis(280),
         ),
-        ("floor-idle2", ActivityState::Idle, D::from_millis(3_000)),
+        (
+            "floor-idle2",
+            ActivityState::Idle,
+            D::from_millis(3_000),
+            D::from_millis(3_000),
+        ),
     ];
     const DEMO_REPOS: [&str; 3] = ["/demo/api", "/demo/web", "/demo/infra"];
     for i in desks {
-        let (key, state, age) = &agents[i % agents.len()];
+        let (key, state, since_event, since_entry) = &agents[i % agents.len()];
         // Keys must be unique across the full desk range so each desk slot gets its
         // own AgentId — suffixed once the archetypes cycle.
         let unique_key = if i < agents.len() {
@@ -245,9 +299,9 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 cwd: std::sync::Arc::from(PathBuf::from(cwd_str).as_path()),
                 label: unique_key.as_str().into(),
                 state: state.clone(),
-                state_started_at: now - *age,
-                created_at: now - *age,
-                last_event_at: now - *age,
+                state_started_at: now - *since_event,
+                created_at: now - *since_entry,
+                last_event_at: now - *since_event,
                 exiting_at: None,
                 pending_idle_at: None,
 
