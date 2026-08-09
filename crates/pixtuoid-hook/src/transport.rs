@@ -4,7 +4,10 @@
 
 use std::time::Duration;
 
-pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(200);
+/// The send bound in millis — the authoritative number, so a derived budget
+/// (`cli_pid::WALK_BUDGET`) divides an integer instead of an `Option<Duration>`.
+pub(crate) const WRITE_TIMEOUT_MS: u64 = 200;
+pub(crate) const WRITE_TIMEOUT: Duration = Duration::from_millis(WRITE_TIMEOUT_MS);
 
 /// Proof the time bound is armed: [`send_line`] takes one, so an unbounded send
 /// is a compile error rather than a rule to remember.

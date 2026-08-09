@@ -60,7 +60,8 @@ pub(crate) fn cli_pid() -> Option<u32> {
 /// Toolhelp32 snapshot slow, and losing `_pid` must not cost the ENVELOPE.
 /// Derived so the two cannot drift.
 #[cfg(windows)]
-const WALK_BUDGET: std::time::Duration = crate::transport::WRITE_TIMEOUT.checked_div(4).unwrap();
+const WALK_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(crate::transport::WRITE_TIMEOUT_MS / 4);
 
 #[cfg(windows)]
 pub(crate) fn cli_pid() -> Option<u32> {
