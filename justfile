@@ -1161,11 +1161,9 @@ compare-selftest:
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
 
-# The nested guides' index blocks (sharp-edge index, layout skeleton,
-# where-to-look questions) are PROJECTIONS of their sibling files. Two
-# hand-maintained copies of one fact is the latent-drift bug the magic-number
-# rule names, so the blocks are generated — the gen-readme twin: edit the
-# SIBLING, run `gen-guides`, and `-check` gates drift in `lint`.
+# The guides' index blocks are generated projections of their sibling files —
+# the WHY lives in scripts/gen-guides.py's docstring. Edit the SIBLING, run
+# `gen-guides`; `-check` gates drift in `lint` + CI's hygiene job.
 [group('gen')]
 [doc('Regenerate guide index blocks from SHARP-EDGES/LAYOUT/WHERE-TO-LOOK siblings')]
 gen-guides:

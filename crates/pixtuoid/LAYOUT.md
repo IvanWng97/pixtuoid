@@ -92,7 +92,7 @@ src/
 ├── sources.rs          the TUI-free source-control CORE (detect/connect/disconnect/reconcile_to/status + the
 │                       SourceStatus AND OutcomeRow serde DTOs = the two Raycast --json wire contracts, each pinned
 │                       by a byte-shape test + a committed-schema golden → `just gen-contract`; OutcomeRow is
-│                       {id, outcome, message?} — a bare token + optional failure detail, see SHARP-EDGES.md's entry below). connect/disconnect
+│                       {id, outcome, message?} — a bare token + optional failure detail, see SHARP-EDGES.md's entry). connect/disconnect
 │                       are the PERSISTED half (save the [sources] flag + install/uninstall hooks + rollback) — the
 │                       in-TUI panel (tui::connect_source/disconnect_source) delegates here and adds the one live-gate
 │                       line (connected.set) a separate CLI process can't; reconcile_to = the declarative `sources set`

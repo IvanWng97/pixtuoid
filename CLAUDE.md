@@ -40,21 +40,22 @@ tag-is-a-publish rule) are in
 like a bug are documented, load-bearing design — each crate's `SHARP-EDGES.md`
 explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 
-**Two things about how these files load.** A nested `CLAUDE.md` is an INDEX; its
-bulk lives in siblings that are **not** auto-loaded — you must open them. Each
-guide indexes `LAYOUT.md` (the annotated module tree), `SHARP-EDGES.md` (the full
-WHY per edge), and `WHERE-TO-LOOK.md` ("how does X work?"), plus
-`UPSTREAM-DRIFT.md` in core and `SINGLE-SOURCED.md` in site. **Every index line
+**How these files load.** A nested `CLAUDE.md` is an INDEX; its bulk lives in
+siblings that are **not** auto-loaded — you must open them. The four Rust
+guides (core, scene, binary, tui) index `LAYOUT.md` (the annotated module
+tree), `SHARP-EDGES.md` (the full WHY per edge), and `WHERE-TO-LOOK.md` ("how
+does X work?"); core adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
+plain pointers. The `tests/` and Raycast guides are small enough to keep their
+sharp edges INLINE — nothing to open there. **Every index line
 is the sibling entry's own opening text, verbatim — grep any of it to land on
 the full entry — because the marked index blocks are GENERATED from the
 siblings** (`just gen-guides`; drift fails `lint`): edit the SIBLING entry,
 never the block. So: before changing a module whose annotation you haven't read,
-and ALWAYS before "fixing" something an index line names, open the sibling. An
-index line is enough to recognize a trap, never enough to justify a change.
-And a nested `CLAUDE.md` is re-read only when you next touch a file in its tree:
-unlike this root file, it is **not** re-injected after a `/compact`, so on a long
-arc re-open one file from the crate before trusting your memory of its sharp
-edges.
+and ALWAYS before "fixing" something an index line names, open the sibling.
+And a nested `CLAUDE.md` is re-read only when you next touch a file in its
+tree — unlike this root file, it is **not** re-injected after a `/compact`, and
+what it carries is the INDEX. So on a long arc, re-open the crate's
+`SHARP-EDGES.md` itself, not just a source file.
 
 ## What this is
 
@@ -249,7 +250,7 @@ and `procedural-lofi`.
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` + `shfmt` any `.sh` you touch — run `just shfmt-fix` to format (both gated by `just lint` + the CI `hygiene` job). **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
-- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant per-crate `CLAUDE.md` "Known sharp edges" entry — or add one in the same change. That keeps the context accurate for the next agent (the real payoff).
+- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant entry in that crate's `SHARP-EDGES.md` (or its guide's inline sharp-edges section where no sibling exists) — or add one in the same change. That keeps the context accurate for the next agent (the real payoff).
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
 - **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).
@@ -278,8 +279,8 @@ a class of trap**, for when you don't yet know where to look.
 - **`pixtuoid`** ([index](crates/pixtuoid/CLAUDE.md) · [full](crates/pixtuoid/SHARP-EDGES.md)) — install/verify and runtime wiring: config rewriting (incl. OpenClaw's JSON5 refusal), desk-capacity growth, the floating-window boot order, `doctor`'s probes, the daemon announce-only model.
   - the **`tui`** painter ([index](crates/pixtuoid/src/tui/CLAUDE.md) · [full](crates/pixtuoid/src/tui/SHARP-EDGES.md)) — the terminal flush: popup geometry, the click/hover hit-test ladders, key dispatch, overlay repaint.
 
-**Terminal cell aspect drives sprite design** (~16×16 px ceiling; the bundled
-pack maxes at 8×12) — the one constraint that binds the render path end to end.
+**Terminal cell aspect drives sprite design** — the one constraint that binds
+the render path end to end; the numbers live in `crates/pixtuoid/SHARP-EDGES.md`.
 
 ## Things NOT to do
 

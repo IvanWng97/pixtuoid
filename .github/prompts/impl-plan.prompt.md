@@ -67,7 +67,8 @@ Every section gets an answer; "n/a" counts only with a reason.
    BOTH sides of every window/threshold, with offsets derived from the
    constant under test (pitfall 4).
 6. **Sharp edges** — read the `SHARP-EDGES.md` (indexed one line each in the
-   crate's `CLAUDE.md`; the index line is not the entry) for
+   crate's `CLAUDE.md`; the index line is not the entry — tests/, Raycast and
+   site keep their edges inline in the guide instead) for
    every crate touched and list the ones that constrain this design — they
    are the documented hazards exactly where you are about to work, the live
    and maintained record of what looks like a bug but is deliberate.

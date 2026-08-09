@@ -11,11 +11,12 @@ blocks are marked and regenerated instead — the gen-readme idiom:
     <!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` ... -->
     <!-- edges:end -->
 
-Every emitted line is a VERBATIM prefix of sibling text (clipping retreats past
-unbalanced markdown), so grepping any line lands on its full entry. Prose
-elsewhere points at these files BY NAME, and the names are unique in the tree —
-`grep -rl SHARP-EDGES.md` finds every pointer when the layout next changes;
-that greppability, not a checker, is the drift defense for prose.
+Every emitted line is a verbatim prefix of its sibling entry — ASSERTED at
+generation time (main()'s post-condition), not assumed — so grepping an index
+line lands on the full entry. Prose that points at a sibling BY NAME is
+findable with `grep -rl SHARP-EDGES.md`; prose that points at the GUIDE
+instead ("see CLAUDE.md's sharp edges" — some Rust doc-comments still do)
+resolves only via the index line, and nothing catches a new one.
 
 Usage: gen-guides.py [--check]   (--check: write nothing, exit 1 on drift)
 """
@@ -32,13 +33,17 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 START = re.compile(r"^<!-- (edges|layout|lookup):start · generated from (\S+) ")
 END = {kind: f"<!-- {kind}:end -->" for kind in ("edges", "layout", "lookup")}
 TREE_ENTRY = re.compile(r"^[│ ]*[├└]── ")
-TREE_SPLIT = re.compile(r"^(.*?[^ ]) {2,}(\S.*)$")
-BOLD_LEAD = re.compile(r"^\*\*(.+?)\*\*\s*(.*)$", re.S)
+# A long filename squeezes the annotation column to ONE space; keying the split on
+# a 2+-space run shipped that row unclipped AND unmarked. Glyph rows split on 1+.
+TREE_SPLIT = re.compile(r"^([│ ]*[├└]── \S+|\S[^ ]*) +(\S.*)$")
+# Group 1 keeps the lead's own trailing separator: re-synthesizing a " " between
+# lead and gist emitted `** ,` for a comma-followed lead — not verbatim, ungreppable.
+BOLD_LEAD = re.compile(r"^(\*\*.+?\*\*\s*)(.*)$", re.S)
 # The question, then optionally a parenthetical aside, then the → answer arm.
 QUESTION = re.compile(r'^- "(.+?)"[^→]*→')
 
 # Chars of sibling text an index line carries before deferring to the sibling —
-# enough for the entry's claim, small enough that 25 entries stay an index.
+# enough for the entry's claim, small enough that a couple dozen entries stay an index.
 GIST_BUDGET = 96
 TREE_BUDGET = 58  # annotation kept per skeleton entry (narrower: the KEY is the filename)
 
@@ -81,7 +86,7 @@ def edges_block(sib: pathlib.Path) -> list[str]:
     for e in bullet_entries(sib.read_text()):
         m = BOLD_LEAD.match(e)
         if m:
-            lines.append(f"- **{m.group(1)}** {clip(m.group(2), GIST_BUDGET)}".rstrip())
+            lines.append(f"- {m.group(1)}{clip(m.group(2), GIST_BUDGET)}".rstrip())
         else:
             lines.append(f"- {clip(e, GIST_BUDGET)}")
     return lines
@@ -104,7 +109,7 @@ def layout_block(sib: pathlib.Path) -> list[str]:
     for para in re.split(r"\n\s*\n", "\n".join(lines[fence[1] + 1 :])):
         m = BOLD_LEAD.match(" ".join(x.strip() for x in para.strip().splitlines()))
         if m:
-            notes.append(f"- **{m.group(1)}** {clip(m.group(2), GIST_BUDGET)}".rstrip())
+            notes.append(f"- {m.group(1)}{clip(m.group(2), GIST_BUDGET)}".rstrip())
     return ["```"] + skeleton + ["```"] + ([""] + notes if notes else [])
 
 
@@ -127,12 +132,35 @@ def regenerate(guide: pathlib.Path) -> str:
             sib = guide.parent / sib_name
             if not sib.exists():
                 sys.exit(f"{guide}: marker names missing sibling {sib_name}")
+            if END[kind] not in src[i:]:
+                sys.exit(f"{guide}: `{END[kind]}` is missing — restore the pair; the block regenerates between it")
             close = src.index(END[kind], i)
-            out.extend(BUILDERS[kind](sib))
+            built = BUILDERS[kind](sib)
+            assert_verbatim(guide, sib, built)
+            out.extend(built)
             out.append(END[kind])
             i = close
         i += 1
     return "\n".join(out) + "\n"
+
+
+def assert_verbatim(guide: pathlib.Path, sib: pathlib.Path, built: list[str]) -> None:
+    """--check compares the block to the generator; it cannot see the property the
+    index exists FOR. Assert it here, or a rewrapped sibling breaks grep silently."""
+    raw = sib.read_text()
+    for ln in built:
+        if ln.startswith("- "):
+            probe = ln[2:]
+        elif TREE_ENTRY.match(ln) and (m := TREE_SPLIT.match(ln)):
+            probe = m.group(2)
+        else:
+            continue
+        probe = probe[:-2].rstrip() if probe.endswith(" …") else probe
+        if probe and probe not in raw:
+            sys.exit(
+                f"{guide.name}: index line is not verbatim in {sib.name} — "
+                f"unwrap the sibling entry to one line, or fix the builder: {probe[:60]}…"
+            )
 
 
 def main() -> int:
@@ -144,7 +172,7 @@ def main() -> int:
     drifted = []
     for rel in tracked:
         guide = ROOT / rel
-        if "<!-- edges:start" not in guide.read_text() and "layout:start" not in guide.read_text():
+        if not any(START.match(ln) for ln in guide.read_text().splitlines()):
             continue
         new = regenerate(guide)
         if new != guide.read_text():
@@ -153,7 +181,8 @@ def main() -> int:
                 guide.write_text(new)
     if check and drifted:
         for rel in drifted:
-            print(f"{rel}: index block drifted — edit the SIBLING, then run `just gen-guides`")
+            print(f"{rel}: index block drifted — `just gen-guides` REBUILDS the block FROM the sibling,\n"
+                  f"  discarding any hand-edit inside it; put the change in the SIBLING first")
         return 1
     verb = "would rewrite" if check else "rewrote"
     print(f"gen-guides: {verb} {len(drifted)} guide(s)" if drifted else "gen-guides: all index blocks current ✓")

@@ -225,8 +225,8 @@ Both briefs MUST carry, verbatim or equivalent:
 1. **Reasoning before verdict** — for every finding, state the trace/evidence
    FIRST, then the claim.
 2. **Negative space** — do NOT flag: behavior documented as a sharp edge in
-   the crate's `SHARP-EDGES.md` (its `CLAUDE.md` indexes them one line each —
-   the index alone is NOT the entry; open the sibling before judging),
+   the crate's `SHARP-EDGES.md` (or, where no sibling exists — tests/, Raycast, site's inline edges — that guide's own sharp-edges section) — its `CLAUDE.md` indexes them one line each,
+   and the index alone is NOT the entry: open the full text before judging,
    theoretical risks requiring unlikely preconditions, absence of
    defense-in-depth where a primary defense exists, pure style, and
    existence/version claims about external artifacts (GH Action tags, crate
@@ -237,7 +237,7 @@ Both briefs MUST carry, verbatim or equivalent:
    `checkout@v6` case). Both existed.
 3. **Integer confidence 0–100 + `file:line`** on every finding.
 4. **Sharp-edge check** — match familiar-smelling claims against the
-   per-crate `SHARP-EDGES.md` (the live, maintained record of
+   per-crate `SHARP-EDGES.md` — or the guide's inline section where no sibling exists — (the live, maintained record of
    deliberate-design refutations; premise-anchored: same seam ≠ same claim).
 5. **Verdict** — exactly one of APPROVE / APPROVE-WITH-NITS / REQUEST-CHANGES.
 

@@ -31,7 +31,7 @@ Otherwise review the exact diff and the surrounding trusted-base code for:
 Only report verified findings with a concrete attack or invariant-breaking
 sequence. Do not report style, naming, documentation, performance, or
 speculative defense-in-depth concerns where a primary defense already holds.
-Check the relevant entry in the crate's `SHARP-EDGES.md` before reporting.
+Check the relevant entry in the crate's `SHARP-EDGES.md` (or the guide's inline sharp-edges section where no sibling exists) before reporting.
 
 Severity:
 

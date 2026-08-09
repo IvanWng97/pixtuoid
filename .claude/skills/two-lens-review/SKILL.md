@@ -66,7 +66,8 @@ silently dropped).
    caught a real AA failure). Then for every MEDIUM+ finding, **verify the
    premise yourself before coding a fix** — reviewers have incomplete design
    context; read the crate's `SHARP-EDGES.md` entry first (its `CLAUDE.md` only
-   INDEXES them — the index line is not the entry), and if a finding is
+   INDEXES them — the index line is not the entry; tests/, Raycast and site
+   keep theirs inline in the guide), and if a finding is
    deliberate design, REFUTE it by citing (or ADDING) that entry.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.
@@ -112,7 +113,7 @@ lens); defer only genuinely big/refactor work to issues.
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
 **FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate
-`SHARP-EDGES.md` entry — that keeps the next agent's context accurate) · **ISSUE-FILED**
+`SHARP-EDGES.md` entry, or the guide's inline section where no sibling exists — that keeps the next agent's context accurate) · **ISSUE-FILED**
 (no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
 state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
 thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
