@@ -377,17 +377,12 @@ impl SceneLayout {
         self.home_desks.get(i.0).copied()
     }
 
-    /// Which way desk `i`'s occupant faces — the ONE authority both painters and
-    /// the approach/walk geometry read, so a seat can never be rendered on a
-    /// different side than it is routed to.
-    ///
     /// Which way the desk AT `pos` seats its occupant.
     ///
-    /// A position lookup rather than an index one because most callers hold the
-    /// desk `Point` and never its index — threading an index to each would widen
-    /// half a dozen signatures to carry what this can recover. Desk positions are
-    /// unique and there are at most a couple dozen per floor, so the scan is
-    /// cheaper than the allocation any map would need.
+    /// A position lookup for callers holding only a `Point` (`pose`'s approach
+    /// cells). It is O(desks) — a caller iterating `home_desks`, or one that
+    /// already resolved an index, reads [`Self::desk_facing`] instead; a large
+    /// buffer lays out four figures of desks.
     pub fn desk_facing_at(&self, pos: Point) -> Facing {
         self.home_desks
             .iter()
@@ -395,6 +390,10 @@ impl SceneLayout {
             .map_or(Facing::South, |i| self.desk_facing(FloorLocalDeskIndex(i)))
     }
 
+    /// Which way desk `i`'s occupant faces — the ONE authority both painters and
+    /// the approach/walk geometry read, so a seat can never be rendered on a
+    /// different side than it is routed to.
+    ///
     /// Falls back to `South` for an out-of-range index rather than `Option`: every
     /// caller already holds a desk it resolved, and the classic-facing default is
     /// the safe answer for a desk the parallel vec somehow missed.

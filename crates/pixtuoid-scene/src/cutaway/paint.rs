@@ -1192,8 +1192,8 @@ mod tests {
     /// face, so the ratified "head over the surface" reading falls out of the
     /// shared convention — the desk needs no divergence of its own.
     ///
-    /// Both a near- and a far-side seat are exercised, so re-introducing a
-    /// desk-row override reds here rather than only in a render.
+    /// One seat, near-side. The both-sides case is
+    /// `both_profiles_seat_an_occupant_on_the_side_the_layout_chose`.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();

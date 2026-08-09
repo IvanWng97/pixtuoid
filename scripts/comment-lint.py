@@ -14,6 +14,7 @@ Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--selftest]
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import re
 import shutil
@@ -85,6 +86,20 @@ def selftest() -> int:
         (repo / "src" / "keep.rs").write_text(
             "fn f() -> u8 {\n    // one\n    // two\n    // three\n    1\n}\n"
         )
+        # BOTH directions for the doc-run rule: one run past DOC_RUN_MAX (split by
+        # a blank line, which does not end a doc comment), one at the limit, and a
+        # `////` banner rustc does not treat as a doc comment.
+        long_doc = "".join(f"/// l{n}\n" for n in range(DOC_RUN_MAX // 2))
+        long_doc += "\n" + "".join(
+            f"/// m{n}\n" for n in range(DOC_RUN_MAX - DOC_RUN_MAX // 2 + 1)
+        )
+        (repo / "src" / "docs.rs").write_text(long_doc + "pub const A: u8 = 0;\n")
+        (repo / "src" / "docs_ok.rs").write_text(
+            "".join(f"/// l{n}\n" for n in range(DOC_RUN_MAX)) + "pub const B: u8 = 0;\n"
+        )
+        (repo / "src" / "banner.rs").write_text(
+            "".join(f"//// l{n}\n" for n in range(DOC_RUN_MAX + 4)) + "pub const C: u8 = 0;\n"
+        )
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
         subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
@@ -107,6 +122,23 @@ def selftest() -> int:
             if not added.get(path):
                 fails.append(f"the pathspec drops {path}: {sorted(added)}")
 
+        # The doc-run rule, BOTH directions — a gate that has only ever been seen
+        # to pass is not known to work.
+        cwd = os.getcwd()
+        try:
+            os.chdir(repo)
+            flagged = {f for f, _, _ in doc_run_hits(added)}
+        finally:
+            os.chdir(cwd)
+        if "src/docs.rs" not in flagged:
+            fails.append(f"a >{DOC_RUN_MAX}-line doc run must fire: {sorted(flagged)}")
+        for path, why in (
+            ("src/docs_ok.rs", f"a {DOC_RUN_MAX}-line run is at the limit, not over"),
+            ("src/banner.rs", "`////` is an ordinary comment to rustc"),
+        ):
+            if path in flagged:
+                fails.append(f"{why}: {path} must NOT fire")
+
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
@@ -127,7 +159,9 @@ def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
     """New `///`/`//!` runs longer than DOC_RUN_MAX, as (file, start_line, len).
 
     The ast-grep rules deliberately exclude doc comments, so nothing else in this
-    script can see the place most bloat lands.
+    script can see the place most bloat lands. `////` is NOT a doc comment to
+    rustc, and a blank line does not end one, so both are handled here or the
+    check is a one-keystroke bypass.
     """
     out = []
     for f, lines in added.items():
@@ -138,14 +172,26 @@ def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
         except OSError:
             continue
         run_start = None
+        run_len = 0
+
+        def close(run_start: int | None, run_len: int, end: int) -> None:
+            # Anchor on the run's FIRST line, like the ast-grep path: flagging a
+            # whole pre-existing block because one line inside it was touched is
+            # what sends an author to trim a legitimate WHY.
+            if run_start and run_len > DOC_RUN_MAX and run_start in lines:
+                out.append((f, run_start, run_len))
+
         for i, raw in enumerate(src, start=1):
-            if re.match(r"\s*(///|//!)", raw):
+            t = raw.strip()
+            if re.match(r"(///|//!)($|[^/])", t):
                 run_start = run_start or i
-                continue
-            if run_start and i - run_start > DOC_RUN_MAX:
-                if any(n in lines for n in range(run_start, i)):
-                    out.append((f, run_start, i - run_start))
-            run_start = None
+                run_len += 1
+            elif t == "" and run_start:
+                continue  # a blank line splits the TEXT, not the doc comment
+            else:
+                close(run_start, run_len, i)
+                run_start, run_len = None, 0
+        close(run_start, run_len, len(src) + 1)
     return out
 
 
@@ -166,11 +212,11 @@ def main() -> int:
 
     # Fail SOFT if ast-grep isn't installed — this is an advisory, so a dev without
     # it gets a hint, never a traceback that reads like the tool is broken.
-    if shutil.which("ast-grep") is None:
-        print("comment-lint: ast-grep not found — run `just setup-tools` (advisory skipped)")
-        return 0
+    docs_only = shutil.which("ast-grep") is None
+    if docs_only:
+        print("comment-lint: ast-grep not found — run `just setup-tools` (`//` rules skipped)")
 
-    hits = scan_hits()
+    hits = [] if docs_only else scan_hits()
 
     new_hits = []
     for h in hits:
@@ -183,8 +229,14 @@ def main() -> int:
             new_hits.append((f, ln, h["text"].strip().splitlines()[0], h["message"]))
 
     docs = doc_run_hits(added)
+    github = "--github" in sys.argv[1:]
     for f, ln, n in docs:
         print(f"comment-lint: {f}:{ln} — new {n}-line doc-comment run (max {DOC_RUN_MAX})")
+        if github:
+            print(
+                f"::warning file={f},line={ln}::{n}-line doc comment "
+                f"(max {DOC_RUN_MAX}) — every sentence must carry new information"
+            )
 
     if not new_hits and not docs:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
@@ -192,7 +244,6 @@ def main() -> int:
     if not new_hits:
         return 1 if gate else 0
 
-    github = "--github" in sys.argv[1:]
     # A long run yields overlapping ast-grep windows, so this counts flagged
     # LINES, not distinct runs.
     print(f"comment-lint: {len(new_hits)} new comment-slop finding(s) in a fn body")

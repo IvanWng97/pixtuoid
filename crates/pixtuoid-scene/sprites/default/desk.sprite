@@ -7,8 +7,9 @@
 # on an even 14-px top).
 # Row 0 is the raised monitor bezel that RISES 1px above the desk back
 # (blitted at desk.y-1, see DeskCubicle in drawable.rs) so the screen reads
-# as a standing display. Its monitor block is all `M`: a viewer-facing seat
-# never shows a screen, so no glow is painted here. The sprite is
+# as a standing display. Its glass rows carry `M`, not `j`: a viewer-facing seat
+# never shows a screen. A glow IS painted here when a pack ships no `desk_north`
+# and this becomes a north desk's fallback art, so the row roles still hold. The sprite is
 # DESK_W + 4 = 14 px wide == the FurnitureDef visual.w AND the blocked-ground
 # width (footprint is (DESK_W+4) x DESK_FOOT_H, a shallow south strip,
 # ground_y: End -- the monitor + surface overhang NORTH = walk-behind,

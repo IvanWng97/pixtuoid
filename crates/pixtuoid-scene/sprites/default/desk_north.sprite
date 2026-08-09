@@ -41,7 +41,8 @@
 #
 # The monitor block's ROW ROLES are load-bearing, not tidiness: from this
 # sprite's own top row, 0-1 are casing, 2-3 glass, 4 the chin, and
-# `effects::{paint_screen_glow,paint_screen_idle}` light exactly those
+# `effects::paint_screen_glow` lights all three (`paint_screen_idle` the glass
+# rows only)
 # (`SCREEN_CASING_ROWS`/`SCREEN_GLASS_ROWS`/`SCREEN_CHIN_ROW`, cols 3..=10 and
 # 4..=9). Reshuffling them, or dropping a casing row to save height, lights the
 # wrong pixels. `desk.sprite` satisfies the same roles from ITS top row; the two

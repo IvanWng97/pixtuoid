@@ -265,8 +265,8 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
             // default cell simply never recognised those chairs — the settle
             // silently lost its seat view. The z-key follows the same anchor, so
             // it cannot disagree with where the sprite lands.
-            layout.home_desks.iter().find_map(|&desk| {
-                let facing = layout.desk_facing_at(desk);
+            layout.home_desks.iter().enumerate().find_map(|(i, &desk)| {
+                let facing = layout.desk_facing(FloorLocalDeskIndex(i));
                 (crate::layout::desk_walk_anchor_facing(desk, facing) == cell).then(|| {
                     let view = if facing == crate::layout::Facing::North {
                         SeatView::Back
