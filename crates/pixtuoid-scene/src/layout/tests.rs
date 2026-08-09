@@ -330,12 +330,15 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // `'partial_y` loop MID-ROW. A smaller num_agents caps in the earlier full-pod
     // phase instead and never reaches it.
     //
-    // They are a function of `DESK_H` (it prices `pod_stride_y`), so deepening
-    // the desk moves them: 88x120 used to hold 8 and now holds 6, duplicating
-    // the 88x108 case, so 88x125 takes over the cap-8 slot. The other two still
-    // qualify unchanged. Re-derive with the same predicate — bottom row of 2,
+    // They are a function of BOTH terms `pod_stride_y` prices — `DESK_H` and
+    // `INTRA_POD_GAP_Y` — so either one moves them, and the caps below are the
+    // SETUP that reaches the mid-row break, never the property under test.
+    // Deepening the desk shrank capacity (88x120 fell from 8 to 6, duplicating
+    // 88x108, so 88x125 took the cap-8 slot); tightening the gap to 6 gave it
+    // back and then some, so the three slots slide down the height axis to keep
+    // the SAME three caps. Re-derive with the same predicate — bottom row of 2,
     // and the cap-1 / cap split — rather than nudging the numbers until green.
-    for (w, h, cap) in [(88u16, 108u16, 6usize), (88, 125, 8), (88, 175, 10)] {
+    for (w, h, cap) in [(88u16, 100u16, 6usize), (88, 125, 8), (88, 160, 10)] {
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(
             full.home_desks.len(),

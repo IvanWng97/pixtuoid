@@ -13,11 +13,11 @@ expression: l.home_desks
     },
     Point {
         x: 64,
-        y: 76,
+        y: 74,
     },
     Point {
         x: 86,
-        y: 76,
+        y: 74,
     },
     Point {
         x: 116,
@@ -29,10 +29,10 @@ expression: l.home_desks
     },
     Point {
         x: 116,
-        y: 76,
+        y: 74,
     },
     Point {
         x: 138,
-        y: 76,
+        y: 74,
     },
 ]

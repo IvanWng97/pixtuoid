@@ -41,8 +41,17 @@ expression: l.waypoints
     },
     Waypoint {
         pos: Point {
+            x: 120,
+            y: 143,
+        },
+        kind: PhoneBooth,
+        facing: South,
+        room_id: None,
+    },
+    Waypoint {
+        pos: Point {
             x: 94,
-            y: 91,
+            y: 89,
         },
         kind: StandingDesk,
         facing: South,
