@@ -339,8 +339,8 @@ impl Office {
     }
 
     /// Zero-copy pointer/length into the looping bed samples for stem `idx`
-    /// (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
-    /// reports `swapped`.
+    /// (0=Pad … 6=Rain, `LoopStem::ALL` order). RE-READ after warmup completes
+    /// AND whenever a tick reports `swapped`.
     pub fn audio_loop_ptr(&self, idx: usize) -> *const f32 {
         self.audio
             .as_ref()
@@ -367,15 +367,15 @@ impl Office {
 
     /// Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
     /// same as `step`) and return the JS glue commands as JSON:
-    /// `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
+    /// `{"gains":[g0..g6],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
     /// ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
     /// re-reads the loop buffers.
     pub fn audio_tick(&mut self, now_ms: f64) -> String {
         let Some(now) = self.last_now else {
-            return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         };
         if self.audio.as_ref().map(|a| a.is_ready()) != Some(true) {
-            return r#"{"gains":[0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
+            return r#"{"gains":[0,0,0,0,0,0,0],"plays":[],"swapped":false}"#.to_string();
         }
         // The shared observer composes the whole AudioFrame, single-sourced with
         // the desktop painters. Single-floor hero → floor 0.

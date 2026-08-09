@@ -13,16 +13,20 @@ pub enum LoopStem {
     Keys,
     Drums,
     Texture,
+    Bass,
     Rain,
 }
 
 impl LoopStem {
-    pub const ALL: [LoopStem; 6] = [
+    /// `Rain` MUST stay last: the wasm adoption wire slots beds by
+    /// `idx < TRACK_STEMS.len()` and rain at exactly `TRACK_STEMS.len()`.
+    pub const ALL: [LoopStem; 7] = [
         LoopStem::Pad,
         LoopStem::Sparkle,
         LoopStem::Keys,
         LoopStem::Drums,
         LoopStem::Texture,
+        LoopStem::Bass,
         LoopStem::Rain,
     ];
 
@@ -33,6 +37,7 @@ impl LoopStem {
             LoopStem::Keys => s.keys,
             LoopStem::Drums => s.drums,
             LoopStem::Texture => s.texture,
+            LoopStem::Bass => s.bass,
             LoopStem::Rain => s.rain,
         }
     }
@@ -44,6 +49,7 @@ impl LoopStem {
             LoopStem::Keys => &mut s.keys,
             LoopStem::Drums => &mut s.drums,
             LoopStem::Texture => &mut s.texture,
+            LoopStem::Bass => &mut s.bass,
             LoopStem::Rain => &mut s.rain,
         }
     }

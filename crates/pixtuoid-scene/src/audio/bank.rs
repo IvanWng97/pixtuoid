@@ -23,14 +23,15 @@ pub const ONE_SHOT_GAIN: f32 = 0.5;
 /// peaks under 1.0, so drops ride at the rain level itself.
 pub const DROP_GAIN: f32 = 0.9;
 
-/// The five TRACK-OWNED loop stems, in registration order. Rain is not here —
+/// The six TRACK-OWNED loop stems, in registration order. Rain is not here —
 /// it is weather, shared by every mood track.
-pub const TRACK_STEMS: [LoopStem; 5] = [
+pub const TRACK_STEMS: [LoopStem; 6] = [
     LoopStem::Pad,
     LoopStem::Sparkle,
     LoopStem::Keys,
     LoopStem::Drums,
     LoopStem::Texture,
+    LoopStem::Bass,
 ];
 
 /// Which one-shot pool a play draws from — the ONE vocabulary both backends
@@ -122,7 +123,7 @@ impl AssetBank {
 }
 
 /// One mood track's loop beds — built per [`TrackId`], registered (or swapped
-/// in) with the sink, then DROPPED. The four musical beds and the NIGHT texture
+/// in) with the sink, then DROPPED. The five musical beds and the NIGHT texture
 /// share ONE sample count (phase-locked); the DAY texture keeps its
 /// free-running power-of-two length.
 pub struct TrackBeds {
@@ -189,7 +190,12 @@ mod tests {
         );
         assert_eq!(rain.len(), 1 << 19, "rain = the noise-bed loop");
         let n = day.bed_slice(LoopStem::Pad).len();
-        for stem in [LoopStem::Sparkle, LoopStem::Keys, LoopStem::Drums] {
+        for stem in [
+            LoopStem::Sparkle,
+            LoopStem::Keys,
+            LoopStem::Drums,
+            LoopStem::Bass,
+        ] {
             assert_eq!(day.bed_slice(stem).len(), n, "musical beds phase-lock");
         }
         let c = |s| dsp::centroid_hz(day.bed_slice(s));

@@ -115,6 +115,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 - **An EXCLUSIVE spot is single-occupancy, enforced where the destination is CHOSEN — not where it's drawn.** `waypoint_index_for_cycle(id, cycle_n, n)` is occupancy-BLIND (a pure hash of agent × cycle), so …
 - **Two narrow-band connectivity guards keep the office ONE region (#566), both graceful DECOR degradation — not bugs.** (1) The lounge couch's east seat can seal the elevator `door_threshold`'s own column when the …
 - **Every wander destination is filtered by `ReachSet`, but the ±4px `jitter_dest` perturbation is applied AFTER that filter — a small residual.** `pick_aimless_dest` now requires `is_walkable(p) && reachable.reaches(p)` (the same conjunct …
+- **The GENERATED night pad renders NO sub-bass — lane 5 (the BASS stem) owns that register; only the frozen v4 night-pad anchor still bakes its sub into the pad.** `night_pad_core` takes `sub: Option<(&[u8; 4], f32)>`: the `#[cfg(test)]` anchor passes …
 <!-- edges:end -->
 
 ## Where to look
@@ -150,6 +151,7 @@ question:
 - What is the elastic wander timeline?
 - How do multi-floor offices work (the per-floor engine state)?
 - How does the gateway mascot (the OpenClaw lobster) work?
+- How does the lofi soundtrack get composed and rendered (and how do I add an instrument / a stem)?
 <!-- lookup:end -->
 
 ## When refactoring

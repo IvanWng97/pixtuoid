@@ -36,8 +36,8 @@ export class Office {
     audio_loop_len(idx: number): number;
     /**
      * Zero-copy pointer/length into the looping bed samples for stem `idx`
-     * (0=Pad … 5=Rain). RE-READ after warmup completes AND whenever a tick
-     * reports `swapped`.
+     * (0=Pad … 6=Rain, `LoopStem::ALL` order). RE-READ after warmup completes
+     * AND whenever a tick reports `swapped`.
      */
     audio_loop_ptr(idx: number): number;
     audio_oneshot_len(pool: number, idx: number): number;
@@ -55,7 +55,7 @@ export class Office {
     /**
      * Advance the audio one tick at `now_ms` (the site's pause-shifted clock,
      * same as `step`) and return the JS glue commands as JSON:
-     * `{"gains":[g0..g5],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
+     * `{"gains":[g0..g6],"plays":[[poolWire,idx,gain],…],"swapped":bool}` — JS
      * ramps each GainNode to its gain, spawns the one-shots, and on `swapped`
      * re-reads the loop buffers.
      */

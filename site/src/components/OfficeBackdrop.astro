@@ -679,7 +679,9 @@ const officeDriverUrl = asset('office-driver.js');
     let audioBooting = false; // warmup pump in flight (ignore re-clicks)
     let audioUnavailable = false; // WebAudio failed (no device / locked down) — ♩ disabled
     let restoreArmed = false; // the remembered-pref restore listeners attach ONCE
-    let loopGains = []; // 6 GainNodes (LoopStem::ALL order: 0=Pad … 5=Rain)
+    const LOOP_STEM_COUNT = 7; // LoopStem::ALL.len() — 0=Pad … 6=Rain
+    const TRACK_STEM_COUNT = 6; // bank::TRACK_STEMS.len() — a swap replaces these; rain is weather
+    let loopGains = []; // LOOP_STEM_COUNT GainNodes in LoopStem::ALL order
     let loopSources = [];
     let oneShotBufs = {}; // pool wire → [AudioBuffer]
     let audioSR = 44100; // engine sample rate, read ONCE at upload (see below)
@@ -706,7 +708,7 @@ const officeDriverUrl = asset('office-driver.js');
       audioSR = office.audio_sample_rate(); // read once, before any view is taken
       loopGains = [];
       loopSources = [];
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < LOOP_STEM_COUNT; i++) {
         const g = audioCtx.createGain();
         g.gain.value = 0;
         g.connect(audioCtx.destination);
@@ -732,10 +734,10 @@ const officeDriverUrl = asset('office-driver.js');
         }
       }
     }
-    // A mood-track swap replaces the 5 TRACK-stem loop buffers (0..4) in place;
-    // rain (5) is weather, untouched.
+    // A mood-track swap replaces the TRACK-stem loop buffers in place; rain
+    // (the last stem) is weather, untouched.
     function audioSwapLoops() {
-      for (let i = 0; i < 5; i++) {
+      for (let i = 0; i < TRACK_STEM_COUNT; i++) {
         const s = audioCtx.createBufferSource();
         s.buffer = audioLoopBuffer(i);
         s.loop = true;
@@ -768,7 +770,8 @@ const officeDriverUrl = asset('office-driver.js');
         const now = audioCtx.currentTime;
         // The mixer already crossfades, so a short setTargetAtTime just
         // de-zippers the ~30fps steps.
-        for (let i = 0; i < 6; i++) {
+        // the wire itself is the width authority here
+        for (let i = 0; i < cmd.gains.length; i++) {
           loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
         }
         if (cmd.swapped) audioSwapLoops();

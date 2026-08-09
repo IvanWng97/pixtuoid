@@ -31,6 +31,12 @@ pub(crate) enum LeadVoice {
     EpVel,
     /// Plucked-string lead ("nylon" family).
     Pluck,
+    /// Plucked-tine lead (day pool) — inharmonic cantilever overtones + a
+    /// resonator-body thump.
+    Kalimba,
+    /// Struck-bar lead (night pool) — double-octave tuned partials with the
+    /// fan tremolo baked in.
+    Vibraphone,
 }
 
 /// A generated 8-bar composition — the runtime-sized twin of the frozen
@@ -46,9 +52,10 @@ pub struct GeneratedScore {
     pub(super) sparkle: Vec<(f32, u8, f32)>,
     pub(super) keys: Vec<(f32, u8, f32)>,
     pub(super) drums: Vec<(f32, DrumKind, f32)>,
-    /// The sub-bass floor per template bar — ALWAYS derived (cheap), so no
-    /// Option and no fallback; only the night renderer reads it.
-    pub(super) bass_roots: [u8; 4],
+    /// The bass LANE's events — root/5th/leading-tone in the sub window (the
+    /// day pickup dips one step under); this lane owns the register the night
+    /// pad no longer bakes.
+    pub(super) bass: Vec<(f32, u8, f32)>,
     /// Night only: kick timestamps for the texture's baked duck (empty for day).
     pub(super) kick_times: Vec<f32>,
     /// Which instrument sings the lead.
@@ -59,7 +66,7 @@ pub struct GeneratedScore {
     /// Harmonic root per timeline bar — voicings may be inversions, so this is
     /// not `chord[0]`.
     pub(super) bar_roots: [u8; 8],
-    /// The TEMPLATE's roots (night's sub-bass floor reads these).
+    /// The TEMPLATE's roots — the timeline + day turnaround derive from these.
     pub(super) roots_pc: [u8; 4],
 }
 
@@ -82,6 +89,8 @@ impl GeneratedScore {
         match self.lead_voice {
             LeadVoice::EpVel => "ep",
             LeadVoice::Pluck => "pluck",
+            LeadVoice::Kalimba => "kalimba",
+            LeadVoice::Vibraphone => "vibe",
         }
     }
 }
@@ -106,7 +115,7 @@ const F_MAJOR: [u8; 7] = [0, 2, 4, 5, 7, 9, 10];
 
 /// The day grammar — every chord tone is in the template's scale unless the
 /// row sets `chromatic`.
-const DAY_PROGRESSIONS: [Progression; 8] = [
+const DAY_PROGRESSIONS: [Progression; 10] = [
     // royal road: Fmaj7 G7 Em7 Am7
     Progression {
         chords: [
@@ -204,10 +213,34 @@ const DAY_PROGRESSIONS: [Progression; 8] = [
         scale_pcs: C_MAJOR,
         chromatic: true,
     },
+    // rhythm-changes turnaround: Cmaj7 A7 Dm7 G7 — the A7's C# leans into Dm
+    Progression {
+        chords: [
+            [48, 52, 55, 59],
+            [49, 55, 57, 64],
+            [50, 53, 57, 60],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [0, 9, 2, 7],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
+    },
+    // full jazz turnaround: Em7 A7 Dm7 G7 — iii-VI7-ii-V, the long way home
+    Progression {
+        chords: [
+            [52, 55, 59, 62],
+            [55, 57, 61, 64],
+            [50, 53, 57, 60],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [4, 9, 2, 7],
+        scale_pcs: C_MAJOR,
+        chromatic: true,
+    },
 ];
 
 /// The night grammar — minor-leaning, root-position, the sleepy register.
-const NIGHT_PROGRESSIONS: [Progression; 4] = [
+const NIGHT_PROGRESSIONS: [Progression; 8] = [
     // Am7 Fmaj7 Cmaj7 Em7
     Progression {
         chords: [
@@ -253,6 +286,54 @@ const NIGHT_PROGRESSIONS: [Progression; 4] = [
             [48, 52, 55, 59],
         ],
         roots_pc: [9, 4, 5, 0],
+        scale_pcs: C_MAJOR,
+        chromatic: false,
+    },
+    // late round: Gm7 C7 Fmaj7 Dm7 — a ii-V that lands and settles on the vi
+    Progression {
+        chords: [
+            [55, 58, 62, 65],
+            [48, 52, 55, 58],
+            [53, 57, 60, 64],
+            [50, 53, 57, 60],
+        ],
+        roots_pc: [7, 0, 5, 2],
+        scale_pcs: F_MAJOR,
+        chromatic: false,
+    },
+    // half-lit stairs: Dm7 Em7♭5 Fmaj7 B♭maj7 — a stepwise climb that never cadences
+    Progression {
+        chords: [
+            [50, 53, 57, 60],
+            [52, 55, 58, 62],
+            [53, 57, 60, 64],
+            [58, 62, 65, 69],
+        ],
+        roots_pc: [2, 4, 5, 10],
+        scale_pcs: F_MAJOR,
+        chromatic: false,
+    },
+    // minor turnaround: Dm7 B♭maj7 Gm7 A7 — harmonic-minor color, the C# pulls home
+    Progression {
+        chords: [
+            [50, 53, 57, 60],
+            [58, 62, 65, 69],
+            [55, 58, 62, 65],
+            [57, 61, 64, 67],
+        ],
+        roots_pc: [2, 10, 7, 9],
+        scale_pcs: F_MAJOR,
+        chromatic: true,
+    },
+    // slow orbit: Am7 Dm7 Fmaj7 G7 — vi-ii-IV-V, drifting without landing
+    Progression {
+        chords: [
+            [57, 60, 64, 67],
+            [50, 53, 57, 60],
+            [53, 57, 60, 64],
+            [55, 59, 62, 65],
+        ],
+        roots_pc: [9, 2, 5, 7],
         scale_pcs: C_MAJOR,
         chromatic: false,
     },
@@ -741,6 +822,59 @@ fn night_drums(rng: &mut NoiseStream, beat_s: f32) -> (Vec<(f32, DrumKind, f32)>
     (out, kicks)
 }
 
+/// Fold a pitch class into the sub window (lands in 26..=37) — the ONE
+/// bass-register authority.
+fn sub_note(pc: u8) -> u8 {
+    let b = 24 + (pc % 12);
+    if b < 26 {
+        b + 12
+    } else {
+        b
+    }
+}
+
+/// The bass lane: the ONE on every bar, an optional answer, an occasional day
+/// pickup — root/5th/leading-tone only (a floor, not a melody), every note
+/// lagging the beat so the kick keeps the transient.
+fn bass_events(
+    rng: &mut NoiseStream,
+    bar_roots: &[u8; 8],
+    beat_s: f32,
+    mood: Mood,
+) -> Vec<(f32, u8, f32)> {
+    let bar_s = beat_s * super::score::BEATS_PER_BAR;
+    // night answers on beat 2 (the old baked sub's pulse); night's pickup_p 0.0
+    // still DRAWS — deleting the branch would shift every later night draw
+    let (answer_p, answer_beat, fifth_p, pickup_p, vel_base) = match mood {
+        Mood::Day => (0.55, 2.5, 0.4, 0.25, 0.62),
+        Mood::Night => (0.7, 2.0, 0.2, 0.0, 0.55),
+    };
+    let mut out = Vec::new();
+    for bar in 0..GEN_LOOP_BARS {
+        let b0 = bar as f32 * bar_s;
+        let root = sub_note(bar_roots[bar]);
+        let at = b0 + 0.014 + 0.010 * rng.unit();
+        out.push((at, root, vel_base + 0.08 * rng.unit()));
+        if chance(rng, answer_p) {
+            let note = if chance(rng, fifth_p) {
+                sub_note(bar_roots[bar] + 7)
+            } else {
+                root
+            };
+            let at = b0 + answer_beat * beat_s + 0.014 + 0.010 * rng.unit();
+            out.push((at, note, vel_base - 0.14 + 0.08 * rng.unit()));
+        }
+        if chance(rng, pickup_p) && bar + 1 < GEN_LOOP_BARS {
+            // literal semitone below the folded next root (pc-folding rendered an
+            // 11-semitone drop); no last-bar pickup — place() clips at the seam
+            let next = sub_note(bar_roots[bar + 1]);
+            let at = b0 + 3.5 * beat_s + 0.012 + 0.008 * rng.unit();
+            out.push((at, next - 1, 0.34 + 0.06 * rng.unit()));
+        }
+    }
+    out
+}
+
 fn keys_events(
     rng: &mut NoiseStream,
     bar_chords: &[[u8; 4]; 8],
@@ -829,25 +963,31 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         Mood::Night => night_drums(&mut rng, beat_s),
     };
 
-    let mut bass_roots = [0u8; 4];
-    for (i, &pc) in roots_pc.iter().enumerate() {
-        // place the root pc in the ratified sub window (26..=38)
-        let mut b = 24 + pc;
-        while b < 26 {
-            b += 12;
-        }
-        while b > 38 {
-            b -= 12;
-        }
-        bass_roots[i] = b;
-    }
+    // the last musical draws; the voice draw stays the stream's tail
+    let bass = bass_events(&mut rng, &bar_roots, beat_s, mood);
 
     // drawn AFTER every musical draw, so a voice-registry change can never
-    // silently recompose an already-blessed seed's notes
-    let lead_voice = if mood == Mood::Day && chance(&mut rng, 0.35) {
-        LeadVoice::Pluck
-    } else {
-        LeadVoice::EpVel
+    // silently recompose an already-blessed seed's notes; ONE banded unit draw
+    // per mood, so growing a pool re-weights without lengthening the stream
+    let lead_voice = match mood {
+        Mood::Day => {
+            let r = rng.unit();
+            if r < 0.35 {
+                LeadVoice::Pluck
+            } else if r < 0.60 {
+                LeadVoice::Kalimba
+            } else {
+                LeadVoice::EpVel
+            }
+        }
+        Mood::Night => {
+            let r = rng.unit();
+            if r < 0.35 {
+                LeadVoice::Vibraphone
+            } else {
+                LeadVoice::EpVel
+            }
+        }
     };
 
     GeneratedScore {
@@ -858,7 +998,7 @@ pub fn compose(mood: Mood, seed: u64) -> GeneratedScore {
         sparkle,
         keys,
         drums,
-        bass_roots,
+        bass,
         kick_times: if mood == Mood::Night {
             kicks
         } else {
