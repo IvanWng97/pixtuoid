@@ -171,6 +171,11 @@ pub static CYBERPUNK: Theme = Theme {
             g: 200,
             b: 255,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 168,
+            b: 92,
+        },
         night_tint: Rgb { r: 8, g: 6, b: 18 },
         sun_core: Rgb {
             r: 255,

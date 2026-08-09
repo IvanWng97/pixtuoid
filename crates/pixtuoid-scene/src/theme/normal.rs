@@ -183,6 +183,11 @@ pub static NORMAL: Theme = Theme {
             g: 210,
             b: 130,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 210,
+            b: 130,
+        },
         night_tint: Rgb {
             r: 18,
             g: 22,

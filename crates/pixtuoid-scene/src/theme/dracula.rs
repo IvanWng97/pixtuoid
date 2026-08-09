@@ -183,6 +183,11 @@ pub static DRACULA: Theme = Theme {
             g: 121,
             b: 198,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 202,
+            b: 140,
+        },
         night_tint: Rgb {
             r: 25,
             g: 15,

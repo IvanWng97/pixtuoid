@@ -184,6 +184,11 @@ pub static GRUVBOX: Theme = Theme {
             g: 128,
             b: 25,
         },
+        desk_lamp: Rgb {
+            r: 254,
+            g: 190,
+            b: 100,
+        },
         night_tint: Rgb {
             r: 18,
             g: 18,

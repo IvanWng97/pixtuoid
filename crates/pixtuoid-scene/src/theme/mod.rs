@@ -129,6 +129,12 @@ pub struct LightingColors {
     pub ceiling_pool: Rgb,
     /// Lounge floor-lamp glow halo.
     pub floor_lamp_halo: Rgb,
+    /// Per-desk task-lamp light. WARM in every theme, deliberately unlike
+    /// [`Self::floor_lamp_halo`], which is each theme's own accent and is cool
+    /// in half of them. This one's whole job is the two-temperature night read
+    /// — warm task light against cold screen glass — so a cool value here
+    /// silently removes the contrast it exists to create.
+    pub desk_lamp: Rgb,
     /// Night-time interior darkening tint.
     pub night_tint: Rgb,
     /// The sun disc's core color — the halo ring reuses this SAME hue at lower

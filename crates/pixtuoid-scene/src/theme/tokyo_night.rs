@@ -183,6 +183,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 162,
             b: 247,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 190,
+            b: 120,
+        },
         night_tint: Rgb {
             r: 10,
             g: 12,

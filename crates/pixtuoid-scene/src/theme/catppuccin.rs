@@ -184,6 +184,11 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 226,
             b: 175,
         },
+        desk_lamp: Rgb {
+            r: 249,
+            g: 226,
+            b: 175,
+        },
         night_tint: Rgb {
             r: 17,
             g: 17,

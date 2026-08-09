@@ -99,16 +99,40 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
     strength: f32,
     theme: &Theme,
 ) {
-    let warm = theme.lighting.floor_lamp_halo;
+    /// The lounge floor lamp's reach — a room-corner fixture, so it is much
+    /// wider than a desk lamp's pool.
     const RADIUS: u16 = 11;
+    paint_warm_halo(
+        buf,
+        cx,
+        cy,
+        RADIUS,
+        strength,
+        theme.lighting.floor_lamp_halo,
+    );
+}
+
+/// A warm radial pool falling off linearly to `radius`.
+///
+/// Extracted so the lounge floor lamp and the per-desk task lamps light the
+/// room by the SAME falloff — two hand-rolled distance loops would drift the
+/// first time either is retuned, and they are meant to read as the same kind
+/// of light at different scales.
+pub(in crate::pixel_painter) fn paint_warm_halo(
+    buf: &mut RgbBuffer,
+    cx: u16,
+    cy: u16,
+    radius: u16,
+    strength: f32,
+    warm: Rgb,
+) {
+    let radius = radius.max(1);
     if strength <= 0.0 {
         return;
     }
-    let min_x = cx.saturating_sub(RADIUS);
-    let max_x = (cx + RADIUS).min(buf.width());
-    let min_y = cy.saturating_sub(RADIUS);
-    let max_y = (cy + RADIUS).min(buf.height());
-    let r2max = (RADIUS as f32) * (RADIUS as f32);
+    let (min_x, max_x) = (cx.saturating_sub(radius), (cx + radius).min(buf.width()));
+    let (min_y, max_y) = (cy.saturating_sub(radius), (cy + radius).min(buf.height()));
+    let r2max = (radius as f32) * (radius as f32);
     for y in min_y..max_y {
         for x in min_x..max_x {
             let dx = x as f32 - cx as f32;

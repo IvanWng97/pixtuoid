@@ -10,6 +10,9 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
+
+use super::background::paint_warm_halo;
+use super::palette::blend_rgb;
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -351,6 +354,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 blit_frame(frame, desk.x, top, buf);
                 screen_top = top + DESK_BEZEL_RAISE;
             }
+            paint_desk_lamp(buf, *desk, *screen_idle, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -602,6 +606,54 @@ fn paint_desk_coffee(
     if coffee_steam {
         paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
     }
+}
+
+/// Task lamp on the desk's west wing, plus its warm pool.
+///
+/// The WEST wing because the other two are taken: the coffee cup sits at
+/// `dx 2..3` and the token tower at `dx 11..13`, both conditional, while a lamp
+/// is permanent — so it takes the one strip that is always free.
+///
+/// `strength` is the interior darkness. The office's whole night read is a
+/// two-temperature one — cold screen glass against warm task light — and with
+/// only the screens lit it was monochrome blue. The FIXTURE is three pixels: at
+/// half-block scale a lamp is not a silhouette anyone can identify, it is the
+/// bright point a pool comes from, and drawing more of it just adds noise.
+fn paint_desk_lamp(buf: &mut RgbBuffer, desk: Point, strength: f32, theme: &crate::theme::Theme) {
+    if strength <= 0.0 {
+        return;
+    }
+    let warm = theme.lighting.desk_lamp;
+    // The shade reads as the SOURCE, so it is brighter than the pool it casts.
+    let shade = blend_rgb(
+        warm,
+        Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        },
+        0.45,
+    );
+    let (lx, ly) = (desk.x, desk.y);
+    buf.put_checked(lx, ly, shade);
+    buf.put_checked(lx + 1, ly, shade);
+    buf.put_checked(lx + 1, ly + 1, theme.furniture.paper_shade);
+    /// Reach of one task lamp. A desk is 14 wide, so a floor-lamp-sized pool
+    /// would wash the neighbouring workstations and undo the point of the
+    /// ceiling pools going out.
+    const DESK_LAMP_RADIUS: u16 = 5;
+    /// Peak pool strength, against the screen tint's own scale. Lower on
+    /// purpose: the screens are the subject and the lamps are the counterpoint,
+    /// and at parity the warm pool washed the desk's west half out entirely.
+    const DESK_LAMP_MAX: f32 = 0.42;
+    paint_warm_halo(
+        buf,
+        lx + 1,
+        ly + 1,
+        DESK_LAMP_RADIUS,
+        strength * DESK_LAMP_MAX,
+        warm,
+    );
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
