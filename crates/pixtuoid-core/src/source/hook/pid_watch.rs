@@ -3,27 +3,15 @@
 //! A hook-only source has no tailable transcript and therefore none of the JSONL
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
 //! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
-//! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid` —
-//! `getppid` on Unix, where the runner execs the shim; on Windows a walk past
-//! the interposed shell), [`ExitWatch`] emits a `SessionEnd` the moment
-//! that pid dies. Fed ONLY from the hook decode path, so it is inert for sources
-//! whose payloads carry no `_pid`.
+//! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid`, an
+//! ancestor walk past the runner's interposed shell), [`ExitWatch`] emits a
+//! `SessionEnd` the moment that pid dies. Fed ONLY from the hook decode path,
+//! so it is inert for sources whose payloads carry no `_pid`.
 //!
-//! A wrong pid is NOT self-healing — it walks the sprite out on every hook and
-//! the next event walks it back in, for the whole session (#896). So the watch
-//! arms only on the SECOND sighting of a `(pid, agent)` pair: a runner that
-//! wraps the hook in a per-invocation process reports a FRESH pid every time
-//! and so never reaches two, while the CLI's own pid rides every event of the
-//! session. That is a property of the wrapper's nature, not of its name, so it
-//! holds for wrappers the shim's interposer walk
-//! (`pixtuoid-hook/src/cli_pid.rs`) has never heard of.
-//!
-//! The cost lands only where there is nothing better: a TRANSCRIPT-bearing
-//! source resolves its pid from the CLI's own registry
-//! (`jsonl::liveness::ProbeSnapshot`, its own exit watch) and binds here once,
-//! at `SessionStart`, so it never arms — losing a redundant copy of a signal it
-//! already has. The five hook-ONLY sources re-emit `Identity` on every activity
-//! event, so their second sighting is one tool call away.
+//! A wrong pid is NOT self-healing: acting on the first sighting walked the
+//! sprite out on every hook for a whole session (#896). So the watch arms only
+//! on the SECOND sighting of a `(pid, agent)` pair — this crate's
+//! `SHARP-EDGES.md` has why that costs nothing and what it buys.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -163,9 +151,8 @@ mod tests {
         );
     }
 
-    /// #896: a runner that wraps every hook in its own short-lived process
-    /// reports a FRESH pid each time, so no pairing ever repeats and nothing is
-    /// ever armed — the session cannot be ended by a pid that was never the CLI.
+    /// #896: a per-invocation wrapper reports a FRESH pid each hook, so no
+    /// pairing ever repeats and nothing is ever armed.
     #[test]
     fn a_fresh_pid_per_hook_never_becomes_a_repeat() {
         let pids: PidMap = Mutex::new(HashMap::new());
@@ -206,8 +193,7 @@ mod tests {
         );
     }
 
-    /// The #896 guard end to end: one sighting, then that pid dies — exactly
-    /// what a per-invocation wrapper shell does — and the session survives.
+    /// The #896 guard end to end: one sighting, then that pid dies.
     #[tokio::test]
     async fn a_once_seen_pid_dying_ends_nothing() {
         let (tx, mut rx) = tokio::sync::mpsc::channel(8);

@@ -1,26 +1,19 @@
 //! The spawning agent CLI's pid, for the hook envelope's `_pid`.
 //!
-//! A runner that interposes a shell between the CLI and the shim makes the raw
-//! parent a corpse-to-be, not the CLI: Windows sees a `cmd.exe /C` (#528), and
-//! on Unix a runner whose wrapper still has work to do after ours — Cursor
-//! `eval`s the hook mid-script and then dumps shell state (#896) — cannot
-//! exec-replace that shell with us, so it outlives nothing and dies in
-//! milliseconds. A wrong `_pid` is worse than none: `HookPidWatch` ends the
-//! session when it dies, so the sprite walks out on every hook. Walk past the
-//! shell instead. Residuals are in `pixtuoid-core/CLAUDE.md`'s focus-jump
-//! section.
+//! A runner that interposes a shell makes the raw parent a corpse-to-be: a
+//! `cmd.exe /C` on Windows (#528), and on Unix any wrapper with work left after
+//! ours, which therefore cannot exec-replace itself with us — Cursor `eval`s
+//! the hook mid-script and then dumps shell state (#896). That pid dies in
+//! milliseconds, and `HookPidWatch` ends the session when it does. Residuals
+//! are in `pixtuoid-core/CLAUDE.md`'s focus-jump section.
 //!
-//! The walk is shared; only how a row is READ is per-OS — one Toolhelp32
-//! snapshot on Windows, a per-pid `libproc`/`/proc` read on Unix, hand-rolled
-//! rather than delegated to `sysinfo` because this runs on EVERY tool call of
-//! every agent inside the shim's send bound. A Unix with neither reader keeps
-//! the bare `getppid`, and its walk items are then dead.
+//! Only the row READ is per-OS, hand-rolled rather than `sysinfo` because this
+//! runs on every tool call of every agent inside the shim's send bound.
 #![cfg_attr(
     not(any(windows, target_os = "macos", target_os = "linux")),
     allow(dead_code)
 )]
 
-/// One process-table row — the walk's whole input.
 #[derive(Clone)]
 struct ProcRow {
     parent: u32,
@@ -30,9 +23,8 @@ struct ProcRow {
 
 /// By NAME because a process table carries nothing structural: matching the
 /// ancestor's command line needs `NtQueryInformationProcess`, and "created
-/// within N ms of us" skips the CLI itself at session_start. Both spellings
-/// live in one list — no Unix CLI is named `cmd.exe` and none of the Unix
-/// shells is a Windows image name.
+/// within N ms of us" skips the CLI itself at session_start. One cross-OS list
+/// because no spelling here collides with a real CLI on the other OS.
 const INTERPOSER_SHELLS: &[&str] = &[
     "cmd.exe",
     "powershell.exe",
@@ -55,11 +47,10 @@ fn is_interposer(exe: &str) -> bool {
         .any(|shell| exe.eq_ignore_ascii_case(shell))
 }
 
-/// First ancestor of `start` that isn't an interposed shell, per a `row_of`
-/// that answers `None` for any pid it can't read. `None` when the chain leaves
-/// the table, reaches the reaper (a parent of `1` means ours already exited),
-/// or outruns [`MAX_HOPS`]. An exited parent is absent; a RECYCLED one is
-/// present and indistinguishable.
+/// First ancestor of `start` that isn't an interposed shell. A parent of `1`
+/// means ours already exited, so it is no answer rather than the CLI. An exited
+/// parent is absent from `row_of`; a RECYCLED one is present and
+/// indistinguishable.
 fn first_cli_ancestor(start: u32, row_of: impl Fn(u32) -> Option<ProcRow>) -> Option<u32> {
     let mut pid = start;
     for _ in 0..MAX_HOPS {
@@ -143,7 +134,6 @@ fn comm_name(raw: &[libc::c_char]) -> String {
 
 /// The walk's own slice of the send bound — an AV/EDR filter can make a
 /// Toolhelp32 snapshot slow, and losing `_pid` must not cost the ENVELOPE.
-/// Derived so the two cannot drift.
 #[cfg(windows)]
 const WALK_BUDGET: std::time::Duration =
     std::time::Duration::from_millis(crate::transport::WRITE_TIMEOUT_MS / 4);
@@ -179,11 +169,9 @@ pub(crate) fn cli_pid() -> Option<u32> {
 /// Empty or truncated on failure; the walk reads both as no answer.
 ///
 /// A second Toolhelp32 reader on purpose — `focus::windows::OsProcessTable` is
-/// the other, and the shim can't depend on that crate. Fix bugs in BOTH. The
-/// unix readers above have the same twins (`focus::{linux,macos}`), which walk
-/// the OTHER direction — CLI up to its terminal — and so answer a different
-/// permission question: `focus::macos` shells out to `ps` because the chain
-/// crosses the setuid-root `login`.
+/// the other, and the shim can't depend on that crate. Fix bugs in BOTH. Its
+/// unix twins (`focus::{linux,macos}`) walk the opposite direction, past the
+/// setuid-root `login`, so they do not share these readers' permissions.
 #[cfg(windows)]
 fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
@@ -271,9 +259,7 @@ mod tests {
         assert_eq!(first_cli_ancestor(300, rows), Some(200));
     }
 
-    /// #896's chain: Cursor `eval`s the hook inside a `$SHELL -c` wrapper that
-    /// must outlive it to dump shell state, so the shell CANNOT exec us and its
-    /// pid dies milliseconds later.
+    /// #896: the wrapper Cursor `eval`s the hook inside cannot exec us.
     #[test]
     fn the_transient_unix_wrapper_shell_is_skipped_for_the_cli_above_it() {
         for shell in ["zsh", "bash", "sh", "dash", "ksh", "fish"] {
@@ -348,8 +334,6 @@ mod tests {
         assert_eq!(first_cli_ancestor(300, table(&cycle)), None);
     }
 
-    /// The per-OS row reader against the real process table — the half the
-    /// fake-table tests cannot cover.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_live_row_reader_agrees_with_getppid() {
