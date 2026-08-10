@@ -309,8 +309,8 @@ pub const INTRA_POD_GAP_Y: u16 = 6;
 pub const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
-/// `every_home_desk_has_a_reachable_north_approach`: the seat's north approach
-/// cell collides with the desk in the row above.
+/// `every_home_desk_has_a_reachable_approach_on_its_own_far_side`: the seat's
+/// far-side approach cell collides with the desk in the row above.
 pub const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {

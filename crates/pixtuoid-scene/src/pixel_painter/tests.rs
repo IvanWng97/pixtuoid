@@ -3456,3 +3456,26 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
         (x1, y1)
     );
 }
+
+/// The crown's own pixels, on a BLANK buffer — the burn tier also tints the
+/// sprite over this exact box, so no full-pass diff can isolate the crown.
+#[test]
+fn paint_flame_crown_draws_its_pattern() {
+    const BG: Rgb = Rgb { r: 9, g: 9, b: 9 };
+    let mut buf = RgbBuffer::filled(40, 40, BG);
+    let anchor = Point { x: 12, y: 20 };
+    const W: u16 = 8;
+    super::effects::paint_flame_crown(&mut buf, anchor, W, SystemTime::UNIX_EPOCH);
+    let painted: Vec<(u16, u16)> = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != BG)
+        .collect();
+    assert!(!painted.is_empty(), "the crown must paint");
+    let cx = anchor.x + W / 2;
+    for &(x, y) in &painted {
+        assert!(
+            (cx - 2..=cx + 1).contains(&x) && (anchor.y - 2..=anchor.y).contains(&y),
+            "the crown painted outside its own box at ({x}, {y})"
+        );
+    }
+}

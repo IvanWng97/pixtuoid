@@ -322,7 +322,7 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
     cx < cell_w && cy < cell_h && cell_walkable(mask, &OccupancyOverlay::new(), cx, cy)
 }
 
-/// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
+/// Snap a pixel-space `Point` into the nearest walkable coarse CELL on
 /// the STATIC mask. `None` when the grid is degenerate or no walkable cell exists
 /// within `MAX_SNAP_RADIUS`. Distinct from `find_path`'s internal snapping, whose
 /// `reconstruct` overwrites the polyline endpoints with the RAW `from`/`to` — a

@@ -12,7 +12,7 @@ use pixtuoid_core::{AgentId, SceneState};
 
 use super::palette::blend_pixel;
 use crate::layout::{
-    desk_walk_anchor_facing, furniture_def, Facing, Furniture, Layout, Point, Size, WaypointKind,
+    desk_walk_anchor_facing, furniture_def, Furniture, Layout, Point, Size, WaypointKind,
 };
 use crate::motion::MotionState;
 use pixtuoid_core::state::FloorLocalDeskIndex;
@@ -133,10 +133,14 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     // can't clear the desk body.
     let desk_def = furniture_def(Furniture::Desk);
     for (i, desk) in layout.home_desks.iter().enumerate() {
-        let chair = desk_walk_anchor_facing(*desk, layout.desk_facing(FloorLocalDeskIndex(i)));
+        let facing = layout.desk_facing(FloorLocalDeskIndex(i));
+        let chair = desk_walk_anchor_facing(*desk, facing);
         // SEAT last: the 3x3 blobs overlap when the approach cell lands a pixel off the chair.
         for (dx, dy) in DIRS {
-            if !desk_def.approach.allows(Facing::South, (dx, dy)) {
+            // The desk's OWN facing, as production reads it — a fixed South here
+            // mirrors the blobs on every back-turned desk, and this overlay is
+            // what the next reader reaches for to check that very geometry.
+            if !desk_def.approach.allows(facing, (dx, dy)) {
                 continue;
             }
             if let Some(c) = first_reachable_on_side(layout, chair, dx, dy) {

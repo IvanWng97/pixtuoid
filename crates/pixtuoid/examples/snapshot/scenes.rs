@@ -700,21 +700,25 @@ pub(crate) fn anim_scene(
     } else {
         0
     };
-    if let Some(&i) = target_idxs.first().filter(|_| target != "desk") {
-        let p = l.waypoints[i].pos;
-        eprintln!(
-            "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",
-            p.x,
-            p.y,
-            target_idxs.len()
-        );
-    } else {
-        panic!(
-            "ANIM target={target}{}: no matching waypoint at {buf_w}x{buf_h} seed \
-             {floor_seed}. Staging a DIFFERENT waypoint here is what let three \
-             captures in one review claim a pose they never rendered.",
-            want_facing.map_or(String::new(), |f| format!(" facing {f:?}"))
-        );
+    // `desk` resolved above against `home_desks` and aborts there on no-match;
+    // it has no waypoint, so falling into the arms below reads as unmatched.
+    if target != "desk" {
+        if let Some(&i) = target_idxs.first() {
+            let p = l.waypoints[i].pos;
+            eprintln!(
+                "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",
+                p.x,
+                p.y,
+                target_idxs.len()
+            );
+        } else {
+            panic!(
+                "ANIM target={target}{}: no matching waypoint at {buf_w}x{buf_h} seed \
+                 {floor_seed}. Staging a DIFFERENT waypoint here is what let three \
+                 captures in one review claim a pose they never rendered.",
+                want_facing.map_or(String::new(), |f| format!(" facing {f:?}"))
+            );
+        }
     }
 
     // Brute-force an agent whose cycle-0 trip lands on the target.

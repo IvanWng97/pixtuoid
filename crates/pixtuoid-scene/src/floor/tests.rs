@@ -621,7 +621,7 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
     let mut coffee = CoffeeState::new();
     let mut chitchat = HashMap::new();
-    render_floor(
+    let layout = render_floor(
         &mut fctx,
         &mut buf,
         &mut coffee,
@@ -669,14 +669,18 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         },
     )
     .expect("layout");
+    // What this pins is that model/effort REACH the painter through projection
+    // and the sim/paint hop — not that the crown itself drew. The burn tier also
+    // tints the sprite over the crown's own pixels, so no scoping of this diff
+    // can isolate the crown; `paint_flame_crown_draws_its_pattern` owns that half.
     let differing = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != buf2.get(x, y))
         .count();
     assert!(
         differing > 0,
-        "the flame crown must change the frame — a top-tier agent rendered \
-         byte-identical to a model-less one"
+        "a top-tier agent rendered byte-identical to a model-less one — \
+         slot.model/effort were dropped before the painter"
     );
 }
 
@@ -1061,7 +1065,8 @@ fn the_foreground_layer_is_lit_by_the_clock() {
         .expect("layout");
         buf
     };
-    // 1970-01-01 noon and midnight UTC — the clock the sky model reads.
+    // Twelve hours apart. The sky model reads LOCAL time, so which of these is
+    // noon depends on $TZ — the assertion is on the two differing, not on which.
     let (noon, night) = (render(12 * 3600), render(0));
     let (w, h) = (noon.width(), noon.height());
     let (mut same, mut total) = (0u32, 0u32);
