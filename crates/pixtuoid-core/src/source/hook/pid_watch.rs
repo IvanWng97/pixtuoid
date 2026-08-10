@@ -10,7 +10,7 @@
 //!
 //! A wrong pid is NOT self-healing: acting on the first sighting walked the
 //! sprite out on every hook for a whole session (#896). So the watch arms only
-//! on the SECOND sighting of a `(pid, agent)` pair — this crate's
+//! when an agent reports the SAME pid twice in a row — this crate's
 //! `SHARP-EDGES.md` has why that costs nothing and what it buys.
 
 use std::collections::{HashMap, HashSet};
@@ -79,9 +79,9 @@ impl HookPidWatch {
         Some(this)
     }
 
-    /// Bind `agent_id` to `pid`, arming the exit watch once the pair repeats
-    /// (idempotent). Callers must note at most once per hook PAYLOAD, or a
-    /// multi-event batch would confirm its own pid.
+    /// Bind `agent_id` to `pid`, arming the exit watch once that agent repeats
+    /// the pid back-to-back (idempotent). Callers must note at most once per
+    /// hook PAYLOAD, or a multi-event batch would confirm its own pid.
     pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
         if self.lock().sight(pid, agent_id) {
             self.exit.watch(pid);
@@ -190,6 +190,24 @@ mod tests {
             1,
             "only the LATEST candidate is kept — one entry per agent, not per hook"
         );
+    }
+
+    /// Corroboration is CONSECUTIVE, not "seen twice ever": an interleaved pid
+    /// replaces the candidate. So recycling a pid somewhere in a session cannot
+    /// arm a wrapper — the OS would have to hand out the same pid on two
+    /// back-to-back spawns for one agent.
+    #[test]
+    fn an_interleaved_pid_resets_the_corroboration() {
+        let mut b = Bindings::default();
+        let a = AgentId::from_parts("cursor", "sess-A");
+        assert!(!b.sight(100, a));
+        assert!(!b.sight(200, a), "a different pid replaces the candidate");
+        assert!(
+            !b.sight(100, a),
+            "100 was seen before, but not CONSECUTIVELY — it must not arm"
+        );
+        assert!(b.armed.is_empty(), "a recycled pid must not arm a wrapper");
+        assert!(b.sight(100, a), "back-to-back 100 is real corroboration");
     }
 
     /// Two agents behind one wrapper pid still bound by AGENT, not by sighting.
