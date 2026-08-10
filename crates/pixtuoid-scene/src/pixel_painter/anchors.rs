@@ -26,7 +26,7 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 /// `y` is the walk anchor lifted by the sprite height, which IS the identity
 /// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)` — the settle relies
 /// on — so a facing that moves the seat moves both together. This used to be a
-/// bare `desk.y - 8` that happened to agree with `desk_walk_anchor`'s `+4`, held
+/// bare `desk.y - 8` that happened to agree with `desk_walk_anchor_facing`'s `+4`, held
 /// in step only by a test.
 pub(super) fn seated_anchor_facing(
     desk: Point,

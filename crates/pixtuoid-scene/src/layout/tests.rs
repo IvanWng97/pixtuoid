@@ -493,7 +493,7 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
                 let a = desk_walk_anchor_facing(*d, crate::layout::Facing::South);
                 assert!(
                     a.x < l.buf_w && a.y < l.buf_h,
-                    "{w}x70 seed {seed}: desk_walk_anchor {a:?} is off-buffer ({}x{})",
+                    "{w}x70 seed {seed}: desk_walk_anchor_facing {a:?} is off-buffer ({}x{})",
                     l.buf_w,
                     l.buf_h
                 );

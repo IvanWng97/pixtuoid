@@ -1,8 +1,8 @@
 # 14x11 top-down desk for a NORTH-facing seat -- one whose occupant sits on
 # the NEAR side with their back to the viewer (`layout.desk_facings`, read by
 # `desk_facing_at`). Same 14 px width and same BOTTOM THREE rows as
-# `desk.sprite` (front edge + legs); the three extra rows are all above, which
-# is the entire point.
+# `desk.sprite` (front edge + legs); the two extra rows are all above, which
+# is the entire point. (Three is the BLIT offset below, not a row count.)
 #
 # WHY a second sprite rather than a taller shared one: a back-turned occupant
 # is anchored at `desk.y` and y-sorts IN FRONT of their desk, so on the base

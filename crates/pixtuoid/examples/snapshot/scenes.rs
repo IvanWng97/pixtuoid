@@ -689,10 +689,28 @@ pub(crate) fn anim_scene(
         .map(|(i, _)| i)
         .collect();
 
-    if target == "desk" {
-        if let Some(d) = l.home_desks.first() {
-            eprintln!("ANIM target=desk buf_pos≈({}, {}) [home desk 0]", d.x, d.y);
+    // Which home desk to stage. `--anim-facing` picks one seated that way, so
+    // the back-turned pose is reachable at all; desk 0 is always viewer-facing.
+    let desk_idx = if target == "desk" {
+        let pick = (0..l.home_desks.len()).find(|&i| {
+            want_facing
+                .is_none_or(|f| l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)) == f)
+        });
+        match pick {
+            Some(i) => {
+                let d = l.home_desks[i];
+                eprintln!("ANIM target=desk buf_pos≈({}, {}) [home desk {i}]", d.x, d.y);
+                i
+            }
+            None => panic!(
+                "no home desk faces {:?} at {buf_w}x{buf_h} seed {floor_seed} — staging                  another one would render a pose you did not ask for",
+                want_facing.expect("a None filter matches desk 0")
+            ),
         }
+    } else {
+        0
+    };
+    if target == "desk" {
     } else if let Some(&i) = target_idxs.first() {
         let p = l.waypoints[i].pos;
         eprintln!(
@@ -702,8 +720,11 @@ pub(crate) fn anim_scene(
             target_idxs.len()
         );
     } else {
-        eprintln!(
-            "ANIM target={target}: no matching waypoint at {buf_w}x{buf_h} seed {floor_seed}"
+        panic!(
+            "ANIM target={target}{}: no matching waypoint at {buf_w}x{buf_h} seed \
+             {floor_seed}. Staging a DIFFERENT waypoint here is what let three \
+             captures in one review claim a pose they never rendered.",
+            want_facing.map_or(String::new(), |f| format!(" facing {f:?}"))
         );
     }
 
@@ -717,7 +738,9 @@ pub(crate) fn anim_scene(
                 && (target == "desk"
                     || (n > 0 && target_idxs.contains(&waypoint_index_for_cycle(id, 0, n))))
         })
-        .unwrap_or_else(|| format!("/anim/{target}_fallback.jsonl"));
+        .unwrap_or_else(|| {
+            panic!("no agent id in 40k trips lands on {target} at seed {floor_seed}")
+        });
 
     let id = AgentId::from_transcript_path(&path);
     // The agent's ACTUAL cycle-0 target — NOT the first matching waypoint above,
@@ -754,7 +777,7 @@ pub(crate) fn anim_scene(
             last_event_at: now,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: GlobalDeskIndex(0),
+            desk_index: GlobalDeskIndex(desk_idx),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,

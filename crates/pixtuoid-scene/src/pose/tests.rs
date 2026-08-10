@@ -1753,7 +1753,7 @@ fn desk_entry_routes_around_the_desk_then_settles_onto_the_chair() {
 fn wander_legs_approach_the_desk_via_an_allowed_side_not_through_the_front() {
     // `find_path` snaps a blocked goal to the NEAREST walkable coarse cell, which
     // for the south-facing chair is the SOUTH (corridor) side — so aiming a leg at
-    // `desk_walk_anchor` walks the agent up THROUGH the desk front.
+    // `desk_walk_anchor_facing` walks the agent up THROUGH the desk front.
     use crate::pathfind::AStarRouter;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let l = layout();

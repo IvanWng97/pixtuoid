@@ -876,7 +876,7 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         },
         // waypoint render (`== walking_anchor`): S == pos.
         Furniture::IslandStand => pos,
-        // desk render is `seated_anchor`; its inverse is `desk_walk_anchor`.
+        // desk render is `seated_anchor`; its inverse is `desk_walk_anchor_facing`.
         Furniture::Desk => desk_walk_anchor_facing(pos, crate::layout::Facing::South),
         // The early return handled every obstacle kind. A FUTURE occupies_pos seat
         // that forgets its arm here must fail loud, not silently settle the

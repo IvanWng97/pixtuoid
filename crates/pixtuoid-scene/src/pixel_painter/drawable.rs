@@ -606,8 +606,8 @@ fn paint_desk_coffee(
 
 /// Office-chair back, crossing a back-turned occupant's lower torso.
 ///
-/// Only a BACK-TURNED seat draws one, and that falls out of the geometry rather
-/// than a rule: a viewer-facing occupant has their chair behind them, invisible.
+/// Only a BACK-TURNED seat draws one — `enqueue_desk_chairs` skips the rest,
+/// because a viewer-facing occupant has their chair behind them, invisible.
 fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
     let c = theme.furniture.chair_trim;
     // A lit TOP EDGE, because the body alone disappears: `chair_trim` is darker
@@ -685,7 +685,6 @@ pub(super) fn paint_desk_lamp(
         return;
     }
     let warm = theme.lighting.desk_lamp;
-    // The shade reads as the SOURCE, so it is brighter than the pool it casts.
     // BOTH tones derive from the lamp's OWN light, so the fixture is one
     // material at two exposures and needs no second theme role. An earlier
     // revision reached for `furniture.paper_shade` for the stem purely because

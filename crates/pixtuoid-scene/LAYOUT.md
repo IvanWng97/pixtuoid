@@ -89,7 +89,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                         [MeetingSofaBody/MeetingTable/KitchenIsland/FloorLamp/LoungeSideTable].
 │                         Only PLANT_FOOTPRINT [6×3, shared by the TWO 6px-pot plants: Ficus + Tall;
 │                         Flower (2×2) and Succulent (3×2) carry their own shallow south-anchored pot
-│                         strips] + DESK_APPROACH/desk_walk_anchor
+│                         strips] + DESK_APPROACH/desk_walk_anchor_facing
 │                         live alongside; walls use the linear WALL_THICK_H/V [owned by rooms::walls, not this table]),
 │                       placement.rs (Anchor {Center,TopLeft} + anchored_top_left + z_sort_row — the ONE
 │                         convention for WHERE a box sits relative to its `pos` [footprint origin = sprite
