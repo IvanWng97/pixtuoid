@@ -3372,3 +3372,87 @@ fn a_lamp_casting_no_pool_is_not_drawn_lit() {
         bright.get(desk.x, desk.y)
     );
 }
+
+/// Asserted on the DRAWABLE list, not on pixels: a chair's rect is lit by the
+/// desk's ceiling pool, which this branch made facing-dependent, so contrasting
+/// a north desk's rect against a south one measures the pool as much as the
+/// chair — it passes with no chair drawn.
+#[test]
+fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
+    for seed in 0..8u64 {
+        let layout =
+            Layout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
+                .expect("240x160 lays out");
+        let mut drawables = Vec::new();
+        super::enqueue_desk_chairs(&layout, &mut drawables);
+        // Keyed on the FULL position: desks in one pod column share an x, so an
+        // x-only key silently folds a wrongly-chaired south desk onto its
+        // north neighbour and the assertion cannot see it.
+        let seated: std::collections::BTreeSet<(u16, u16)> = drawables
+            .iter()
+            .map(|d| match d.kind {
+                super::DrawableKind::DeskChair { pos, .. } => (pos.x, pos.y),
+                _ => panic!("enqueue_desk_chairs pushed a non-chair drawable"),
+            })
+            .collect();
+        let want: std::collections::BTreeSet<(u16, u16)> = layout
+            .home_desks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(*i))
+                    == crate::layout::Facing::North
+            })
+            .map(|(_, &d)| {
+                (
+                    super::anchors::seated_anchor_facing(
+                        d,
+                        super::drawable::DESK_CHAIR_BACK_W,
+                        crate::layout::Facing::North,
+                    )
+                    .x,
+                    d.y + 6,
+                )
+            })
+            .collect();
+        assert!(!want.is_empty(), "seed {seed}: fixture has no north desk");
+        assert_eq!(
+            seated, want,
+            "seed {seed}: one chair per north desk, at the seat"
+        );
+    }
+}
+
+/// The painter half of the chair, on a BLANK buffer: no floor, no ceiling pool,
+/// no hour — so the only thing that can move these pixels is the chair itself.
+#[test]
+fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
+    const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    let mut buf = RgbBuffer::filled(64, 32, BG);
+    let at = Point { x: 20, y: 10 };
+    super::drawable::paint_chair_back(&mut buf, at, crate::theme::theme_by_name("normal").unwrap());
+    let painted: Vec<(u16, u16)> = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != BG)
+        .collect();
+    assert!(!painted.is_empty(), "the chair must paint something");
+    let (x0, x1) = (
+        painted.iter().map(|p| p.0).min().unwrap(),
+        painted.iter().map(|p| p.0).max().unwrap(),
+    );
+    let (y0, y1) = (
+        painted.iter().map(|p| p.1).min().unwrap(),
+        painted.iter().map(|p| p.1).max().unwrap(),
+    );
+    assert_eq!(
+        (x0, y0),
+        (at.x, at.y),
+        "the mask must start at the requested top-left"
+    );
+    assert!(
+        x1 < at.x + super::drawable::DESK_CHAIR_BACK_W && y1 < at.y + 8,
+        "the chair painted outside its own box: {:?}..{:?}",
+        (x0, y0),
+        (x1, y1)
+    );
+}

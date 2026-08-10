@@ -656,7 +656,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
-    enqueue_desk_chairs(ctx, &mut drawables);
+    enqueue_desk_chairs(ctx.layout, &mut drawables);
 
     // V before H: at an inside corner the vertical's stitched `y_bot` ties the
     // horizontal's south-base anchor, and inserting V first keeps H winning
@@ -759,11 +759,11 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them (`SHARP-EDGES.md`).
-fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>) {
+fn enqueue_desk_chairs<'a>(layout: &Layout, drawables: &mut Vec<Drawable<'a>>) {
     /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
     const CHAIR_BACK_TOP_DY: u16 = 6;
-    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
-        let facing = ctx.layout.desk_facing(FloorLocalDeskIndex(i));
+    for (i, &desk) in layout.home_desks.iter().enumerate() {
+        let facing = layout.desk_facing(FloorLocalDeskIndex(i));
         if facing != crate::layout::Facing::North {
             continue;
         }

@@ -585,7 +585,7 @@ fn paint_desk_coffee(
 }
 
 /// Office-chair back, crossing a back-turned occupant's lower torso.
-fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
+pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
     let c = theme.furniture.chair_trim;
     // A lit TOP EDGE: `chair_trim` is darker than some themes' night floor, so a flat block reads as a hole.
     const RIM_LIFT: f32 = 0.30;
