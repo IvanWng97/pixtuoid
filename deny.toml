@@ -1,3 +1,10 @@
+# Every caller inherits the widened graph here: `just deny` (local + ci-lint) and
+# audit.yml's action, which passes --all-features itself. Without it the graph is
+# default-features-only, so a dep behind a non-default feature leaves the
+# bans/licenses/sources gate while advisories still see it.
+[graph]
+all-features = true
+
 [advisories]
 # Otherwise a stale `ignore` entry only warns, so a shipped upstream fix would rot
 # behind a green run. Needs cargo-deny 0.20.2 (what cargo-deny-action@v2.1.1 pins);

@@ -47,12 +47,11 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Pin the patch release: floating v2 briefly changed argument handling.
-      - uses: EmbarkStudios/cargo-deny-action@v2.1.1
-        with:
-          # Advisories run daily in audit.yml. Keep this list synchronized with
-          # the justfile `deny` recipe.
-          command: check bans licenses sources
+      # No setup-cargo-just: nothing compiles here, so the runner's preinstalled
+      # cargo is enough — but cargo-deny DOES shell out to `cargo metadata`.
+      - uses: taiki-e/install-action@cargo-deny
+      - uses: extractions/setup-just@v4
+      - run: just deny
 
   machete:
     name: unused deps

@@ -237,8 +237,7 @@ machete:
 
 # License + supply-chain gate (bans/licenses/sources). Advisories are NOT here:
 # they're owned by the daily audit.yml (`check advisories`) so an overnight
-# RustSec advisory can't block a push of unchanged code. Keep this list in sync
-# with the ci-lint.yml `deny` job's `command:`.
+# RustSec advisory can't block a push of unchanged code.
 [group('rust')]
 deny:
     cargo deny check bans licenses sources
@@ -687,7 +686,7 @@ site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
-[doc('Site static tier: audit → format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
+[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build → check:docs → audit (site CI runs e2e + lighthouse before the audit)')]
 site-check:
     npm --prefix site run verify
 
