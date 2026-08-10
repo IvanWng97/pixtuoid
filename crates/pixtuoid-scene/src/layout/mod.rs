@@ -243,6 +243,7 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
 pub(crate) const DESK_LEG_ROWS: u16 = 2;
@@ -298,7 +299,8 @@ pub const POD_SIDE: u16 = 2;
 /// reads as its own workstation, not a merged blob.
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
-/// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
+/// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Keep it EVEN: rows step by
+/// `DESK_H + this`, so an odd step splits the pod across half-block parities.
 pub const INTRA_POD_GAP_Y: u16 = 6;
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND

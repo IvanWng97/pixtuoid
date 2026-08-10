@@ -25,8 +25,8 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
-/// A COPY of `desk_north.sprite`'s extra height ([`build_overlay`] takes no `Pack`), rounded UP to
-/// an even row count — a half-block painter halves it, and an odd lift rounds back onto the screen.
+/// A lower bound on `desk_north.sprite`'s extra height, not a copy of it. Keep
+/// EVEN: a half-block painter halves it, and an odd lift rounds onto the screen.
 const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
 
 /// Activity-derived label tone — backend-agnostic.
@@ -391,7 +391,7 @@ mod tests {
         assert_eq!(a.len(), 4);
     }
 
-    /// The one copied number in this file, checked against the art it copies.
+    /// Pins the lift against the art it cannot read: clearance, and evenness.
     #[test]
     fn desk_north_art_fits_under_the_label_lift() {
         let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");

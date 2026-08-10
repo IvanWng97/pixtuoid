@@ -184,8 +184,9 @@ pub(in crate::pixel_painter) struct TimeOfDayLook {
     pub(in crate::pixel_painter) spill_strength: f32,
     pub(in crate::pixel_painter) spill_slant: f32,
     pub(in crate::pixel_painter) darkness: f32,
-    /// The cast this hour + weather puts on a LIT OBJECT, as `(tint, strength)`.
-    pub(in crate::pixel_painter) object_wash: (Rgb, f32),
+    /// The cast this hour + weather puts on a LIT OBJECT: the cool night term
+    /// then the warm day one, applied in order like the floor's two overlays.
+    pub(in crate::pixel_painter) object_wash: [(Rgb, f32); 2],
 }
 
 pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme) -> TimeOfDayLook {
@@ -226,14 +227,16 @@ pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme)
     // Below the floor's own share: a sprite carries art contrast a full-strength pass would swallow.
     const OBJECT_WASH_SHARE: f32 = 0.55;
     let darkness = 1.0 - exterior;
-    let object_wash = if interior >= darkness {
-        (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE)
-    } else {
+    // SUPERPOSED, never chosen between: the floor runs both overlays every frame,
+    // so picking one arm on `interior >= darkness` stepped every object 16-27 luma
+    // in the frame that crossed it while the floor slid smoothly under them.
+    let object_wash = [
         (
             theme.lighting.night_tint,
             darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
-        )
-    };
+        ),
+        (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
+    ];
 
     TimeOfDayLook {
         glass_a,
@@ -325,20 +328,23 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
     blend_floor_band(buf, top_y, bottom_y, theme.lighting.night_tint, s);
 }
 
-/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
-/// and the model's only positive day term (without it a clear noon leaves the
-/// floor at its plain brownish base). Sun enters regardless of occupancy, so —
-/// unlike the dim — this is NOT scaled by the empty-floor boost.
-/// THE dials for the interior's day/night swing — the floor overlays and `object_wash` all derive from these.
+/// How far a fully dark hour dims the interior.
 pub(in crate::pixel_painter) const NIGHT_FLOOR_DIM: f32 = 0.45;
+
+/// How far a fully lit hour lifts it.
 pub(in crate::pixel_painter) const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
 
+/// Pale warm midday sunlight — theme-agnostic, since daylight is daylight.
 const SUN_TINT: Rgb = Rgb {
     r: 255,
     g: 246,
     b: 224,
 };
 
+/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
+/// and the model's only positive day term (without it a clear noon leaves the
+/// floor at its plain brownish base). Sun enters regardless of occupancy, so —
+/// unlike the dim — this is NOT scaled by the empty-floor boost.
 pub(in crate::pixel_painter) fn daylight_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,

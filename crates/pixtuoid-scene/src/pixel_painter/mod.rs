@@ -97,25 +97,20 @@ pub fn seated_anchor_for(
     anchors::seated_anchor_facing(desk, sprite_w, facing)
 }
 
-// The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
-// footer tool colour matches the sprite's monitor glow exactly.
+// The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
+// footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
+// the two match in HUE, not byte-for-byte.
 pub use palette::tool_glow_for_kind;
 
-/// Does a painted pixel still read as `want` after the foreground wash? The wash
-/// defeats equality; channel RATIOS survive it, but roles within `CHROMA_TOL` blur.
-#[doc(hidden)]
-pub fn reads_as(painted: Rgb, want: Rgb) -> bool {
-    /// Half the smallest gap between two roles this is asked to tell apart.
-    const CHROMA_TOL: f32 = 0.025;
-    let sum = |c: Rgb| (f32::from(c.r) + f32::from(c.g) + f32::from(c.b)).max(1.0);
-    let (ps, ws) = (sum(painted), sum(want));
-    [
-        (f32::from(painted.r), f32::from(want.r)),
-        (f32::from(painted.g), f32::from(want.g)),
-        (f32::from(painted.b), f32::from(want.b)),
-    ]
-    .iter()
-    .all(|(p, w)| (p / ps - w / ws).abs() <= CHROMA_TOL)
+/// Composes the hour's two object terms in the floor overlays' own order.
+fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
+    wash.into_iter().fold(painted, |c, (tint, a)| {
+        if a > 0.0 {
+            palette::blend_rgb(c, tint, a)
+        } else {
+            c
+        }
+    })
 }
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
@@ -690,15 +685,11 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
-    let (wash_tint, wash) = look.object_wash;
-    if wash > 0.0 {
-        for y in 0..ctx.buf.height() {
-            for x in 0..ctx.buf.width() {
-                let painted = ctx.buf.get(x, y);
-                if painted != pre_foreground.get(x, y) {
-                    ctx.buf
-                        .put(x, y, palette::blend_rgb(painted, wash_tint, wash));
-                }
+    for y in 0..ctx.buf.height() {
+        for x in 0..ctx.buf.width() {
+            let painted = ctx.buf.get(x, y);
+            if painted != pre_foreground.get(x, y) {
+                ctx.buf.put(x, y, wash_object(painted, look.object_wash));
             }
         }
     }

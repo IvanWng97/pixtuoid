@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
-"""Diff-scoped advisory for the ast-grep comment-slop rules.
+"""Diff-scoped comment checks, reporting only on lines a PR added or changed.
 
 The whole-repo scan is dominated by pre-existing, mostly legitimate hits, so a
-whole-repo gate is wrong; this reports ONLY hits on lines a PR added or changed.
+whole-repo gate is wrong.
 
-Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--selftest]
+Four arms. Three need only git and python and BLOCK under `--gate`: an over-long
+new `///`/`//!` run, a doc block re-homed onto a different item, and the diff's
+narrative-prose share. The fourth wraps the ast-grep rules and is advisory
+everywhere — it needs an npm install, which must never sit inside `ci-gate`.
+
+Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--github] [--selftest]
   BASE_REF     git ref to diff against (default: origin/main)
-  --gate       exit 1 if any new-code hit is found (default: advisory, exit 0)
+  --gate       exit 1 on the three deterministic arms (default: exit 0 always)
   --worktree   diff the WORKING TREE vs BASE, not the committed BASE...HEAD range
-  --selftest   pin this driver's pathspec + hidden-dir scan on a throwaway repo
+  --github     emit ::warning:: annotations onto the PR diff
+  --selftest   pin every arm, both directions, on a throwaway repo
 """
 
 from __future__ import annotations
@@ -193,39 +199,50 @@ def selftest() -> int:
         if "src/twins.rs" in reparented:
             fails.append("two blocks sharing an opening line must NOT fire: src/twins.rs")
 
-        # The prose-share rule, BOTH directions — a ratio gate that has only been
-        # seen under one mix is not known to discriminate.
-        (repo / "src" / "prosey.rs").write_text(
-            "".join(f"// n{n}\n" for n in range(4)) + "fn a() {}\nfn b() {}\n"
-        )
-        (repo / "src" / "lean.rs").write_text(
-            "// one\n" + "".join(f"fn f{n}() {{}}\n" for n in range(19))
-        )
-        subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
-        subprocess.run([*git, "commit", "-qm", "prose"], cwd=repo, check=True, env=env)
-        cwd2 = os.getcwd()
-        try:
-            os.chdir(repo)
-            over_prose, _ = prose_share("HEAD~1", worktree=False)
-            lean_only = subprocess.run(
-                ["git", "diff", "--unified=0", "HEAD~1", "--", "src/lean.rs"],
-                capture_output=True, text=True, check=True, env=env,
-            ).stdout
-        finally:
-            os.chdir(cwd2)
-        if over_prose * 100 <= (over_prose + 2) * PROSE_MAX_PCT:
-            fails.append(f"a 4-prose/2-code file must exceed {PROSE_MAX_PCT}%")
-        lean_prose = sum(
-            1 for ln in lean_only.splitlines()
-            if ln.startswith("+") and not ln.startswith("+++") and ln[1:].strip().startswith("//")
-        )
-        lean_code = sum(
-            1 for ln in lean_only.splitlines()
-            if ln.startswith("+") and not ln.startswith("+++")
-            and ln[1:].strip() and not ln[1:].strip().startswith("//")
-        )
-        if lean_prose * 100 > (lean_prose + lean_code) * PROSE_MAX_PCT:
-            fails.append(f"a 1-prose/19-code file must NOT exceed {PROSE_MAX_PCT}%")
+        # The prose-share rule. Each fixture is its OWN commit so the real
+        # `prose_share` measures it — a hand-rolled per-file recount would pass
+        # while the production classifier changed underneath it.
+        # LITERAL 20, like the DOC_RUN_MAX fixtures above: derived from the
+        # constant, the fixture moves with it and the rule passes against itself.
+        if PROSE_MIN_CODE != 20:
+            fails.append(
+                f"PROSE_MIN_CODE is {PROSE_MIN_CODE}, but these fixtures pin 20 — retune both"
+            )
+        code_floor = "".join(f"fn f{n}() {{}}\n" for n in range(20))
+
+        def prose_case(name: str, body: str) -> tuple[int, int]:
+            (repo / "src" / f"{name}.rs").write_text(body)
+            subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
+            subprocess.run([*git, "commit", "-qm", name], cwd=repo, check=True, env=env)
+            cwd2 = os.getcwd()
+            try:
+                os.chdir(repo)
+                return prose_share("HEAD~1", worktree=False)
+            finally:
+                os.chdir(cwd2)
+
+        def over(p: int, c: int) -> bool:
+            return c >= PROSE_MIN_CODE and p * 100 > (p + c) * PROSE_MAX_PCT
+
+        for name, body, want, why in (
+            ("prosey", "".join(f"// n{n}\n" for n in range(9)) + code_floor,
+             True, f"9 narrative lines over {PROSE_MIN_CODE} code must exceed"),
+            ("lean", "// one\n" + code_floor,
+             False, f"1 narrative line over {PROSE_MIN_CODE} code must NOT exceed"),
+            # `///` is REQUIRED by `missing_docs`; charging for it would set two
+            # gates against each other.
+            ("docsonly", "".join(f"/// d{n}\n" for n in range(9)) + code_floor,
+             False, "doc comments must not count as prose"),
+            # The `////` bypass's twin: block prose classified as code would hide
+            # itself AND pad the denominator.
+            ("blocky", "/*\n" + "".join(f" * n{n}\n" for n in range(7)) + " */\n" + code_floor,
+             True, "`/* */` prose must count as prose"),
+            ("tiny", "// one\n// two\nfn a() {}\nfn b() {}\n",
+             False, f"under {PROSE_MIN_CODE} code lines the ratio must not be judged"),
+        ):
+            p, c = prose_case(name, body)
+            if over(p, c) is not want:
+                fails.append(f"{why}: got {p} prose / {c} code")
 
         # Which arms BLOCK, both directions. Without this the ast-grep arm can
         # silently become a hard gate on a machine that happens to have it.
@@ -327,22 +344,30 @@ def doc_owners(src: str) -> dict[str, str]:
 
 
 PROSE_MAX_PCT = 15
-"""Ceiling on a diff's PROSE share of its new Rust lines (comments + doc / all).
+"""Ceiling on NARRATIVE prose as a share of a diff's new Rust lines.
 
-The tree sits at 13.1%, so this is the rate the codebase already sustains rather
-than a target invented here. The other two checks bound a single BLOCK; neither
-sees the shape that actually accumulates — short runs, everywhere. A branch that
-shipped 40.1% prose in its production code passed both with room to spare.
+Calibrate against the FLOW rate (added prose per added code) that this measures,
+never the whole-tree stock — the stock is dominated by old code and runs 2-3x
+lower, so a ceiling set from it flags almost every merge.
+
+`///` and `//!` count as NEITHER, like blank lines: `missing_docs` REQUIRES a doc
+on every published `pub` item, so charging for one sets two gates against each
+other. Counting them as code instead lets a doc-heavy diff buy prose allowance.
 
 Rust only: the `.py` here and the site's TS answer to different conventions.
 """
 
+PROSE_MIN_CODE = 20
+"""Added code lines below which the ratio is not judged — a handful of lines is
+all-or-nothing, and would fail on arithmetic rather than on slop."""
+
 
 def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int, int]:
-    """`(prose, code)` line counts among the diff's ADDED Rust lines.
+    """`(narrative_prose, code)` line counts among the diff's ADDED Rust lines.
 
-    Blank lines count as neither. Test files are included: a test's prose rots
-    the same way, and exempting them just moves the prose there.
+    Blank lines and doc comments count as neither (see [`PROSE_MAX_PCT`]). Test
+    files are included: a test's prose rots the same way, and exempting them just
+    moves the prose there.
     """
     rev = base if worktree else f"{base}...HEAD"
     diff = subprocess.run(
@@ -350,11 +375,22 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
         capture_output=True, text=True, check=True, cwd=cwd, env=git_env(),
     ).stdout
     prose = code = 0
+    in_block = False
     for line in diff.splitlines():
         if not line.startswith("+") or line.startswith("+++"):
             continue
         t = line[1:].strip()
-        if t.startswith("//"):
+        # `/* */` counted as code would BOTH hide the prose and inflate the
+        # denominator — the one-keystroke bypass `doc_run_hits` guards against.
+        if in_block:
+            prose += 1
+            in_block = "*/" not in t
+        elif t.startswith("/*"):
+            prose += 1
+            in_block = "*/" not in t
+        elif t.startswith("///") or t.startswith("//!"):
+            continue
+        elif t.startswith("//"):
             prose += 1
         elif t:
             code += 1
@@ -465,12 +501,12 @@ def main() -> int:
             )
 
     prose, code = prose_share(base, worktree)
-    over_prose = prose * 100 > (prose + code) * PROSE_MAX_PCT if prose + code else False
+    over_prose = code >= PROSE_MIN_CODE and prose * 100 > (prose + code) * PROSE_MAX_PCT
     if over_prose:
         pct = 100 * prose / (prose + code)
         print(
-            f"comment-lint: {pct:.1f}% of this diff's new Rust lines are prose "
-            f"({prose} prose / {code} code, max {PROSE_MAX_PCT}%)"
+            f"comment-lint: {pct:.1f}% of this diff's new Rust lines are narrative "
+            f"prose ({prose} prose / {code} code, max {PROSE_MAX_PCT}%; doc comments exempt)"
         )
         if "--github" in sys.argv[1:]:
             print(
