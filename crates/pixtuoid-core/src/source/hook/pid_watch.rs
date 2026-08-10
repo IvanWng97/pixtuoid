@@ -9,9 +9,21 @@
 //! that pid dies. Fed ONLY from the hook decode path, so it is inert for sources
 //! whose payloads carry no `_pid`.
 //!
-//! Self-healing: if the supplied pid is ever wrong (a shell that forks instead of
-//! exec's), the false `SessionEnd` just walks the sprite out and the CLI's next
-//! hook event walks it back in.
+//! A wrong pid is NOT self-healing — it walks the sprite out on every hook and
+//! the next event walks it back in, for the whole session (#896). So the watch
+//! arms only on the SECOND sighting of a `(pid, agent)` pair: a runner that
+//! wraps the hook in a per-invocation process reports a FRESH pid every time
+//! and so never reaches two, while the CLI's own pid rides every event of the
+//! session. That is a property of the wrapper's nature, not of its name, so it
+//! holds for wrappers the shim's interposer walk
+//! (`pixtuoid-hook/src/cli_pid.rs`) has never heard of.
+//!
+//! The cost lands only where there is nothing better: a TRANSCRIPT-bearing
+//! source resolves its pid from the CLI's own registry
+//! (`jsonl::liveness::ProbeSnapshot`, its own exit watch) and binds here once,
+//! at `SessionStart`, so it never arms — losing a redundant copy of a signal it
+//! already has. The five hook-ONLY sources re-emit `Identity` on every activity
+//! event, so their second sighting is one tool call away.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
@@ -63,10 +75,13 @@ impl HookPidWatch {
         Some(this)
     }
 
-    /// Bind `agent_id` to `pid` and start watching the pid (idempotent).
+    /// Bind `agent_id` to `pid`, arming the exit watch once the pair repeats
+    /// (idempotent). Callers must note at most once per hook PAYLOAD, or a
+    /// multi-event batch would confirm its own pid.
     pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
-        note_pid(&self.pids, pid, agent_id);
-        self.exit.watch(pid);
+        if note_pid(&self.pids, pid, agent_id) {
+            self.exit.watch(pid);
+        }
     }
 
     fn take(&self, pid: i32) -> Vec<AgentId> {
@@ -77,13 +92,15 @@ impl HookPidWatch {
 type PidMap = Mutex<HashMap<i32, HashSet<AgentId>>>;
 
 /// Registry ops, split from the [`ExitWatch`] side so they're unit-testable
-/// without spawning the platform watcher thread.
-fn note_pid(pids: &PidMap, pid: i32, agent_id: AgentId) {
-    pids.lock()
+/// without spawning the platform watcher thread. Returns whether this pairing
+/// was already on file — the repeat sighting that arms the watch.
+fn note_pid(pids: &PidMap, pid: i32, agent_id: AgentId) -> bool {
+    !pids
+        .lock()
         .unwrap_or_else(|e| e.into_inner())
         .entry(pid)
         .or_default()
-        .insert(agent_id);
+        .insert(agent_id)
 }
 
 /// Remove `pid`'s entry and return the agents bound to it. The removal keeps the
@@ -134,16 +151,31 @@ mod tests {
     }
 
     #[test]
-    fn note_is_idempotent_per_agent() {
+    fn note_is_idempotent_per_agent_and_reports_the_repeat() {
         let pids: PidMap = Mutex::new(HashMap::new());
         let a = AgentId::from_parts("codewhale", "/ws");
-        note_pid(&pids, 7, a);
-        note_pid(&pids, 7, a);
+        assert!(!note_pid(&pids, 7, a), "a first sighting is not a repeat");
+        assert!(note_pid(&pids, 7, a), "the second sighting is the repeat");
         assert_eq!(
             take_pid(&pids, 7).len(),
             1,
             "a re-noted (pid, agent) is deduped"
         );
+    }
+
+    /// #896: a runner that wraps every hook in its own short-lived process
+    /// reports a FRESH pid each time, so no pairing ever repeats and nothing is
+    /// ever armed — the session cannot be ended by a pid that was never the CLI.
+    #[test]
+    fn a_fresh_pid_per_hook_never_becomes_a_repeat() {
+        let pids: PidMap = Mutex::new(HashMap::new());
+        let agent = AgentId::from_parts("cursor", "sess-A");
+        for wrapper_pid in [4808, 5379, 8924, 9869, 13594] {
+            assert!(
+                !note_pid(&pids, wrapper_pid, agent),
+                "wrapper pid {wrapper_pid} must never read as corroborated"
+            );
+        }
     }
 
     #[tokio::test]
@@ -159,6 +191,7 @@ mod tests {
         let pid = i32::try_from(child.id()).expect("pid fits i32");
         let agent = AgentId::from_parts("codewhale", "/ws");
         watch.note(pid, agent);
+        watch.note(pid, agent); // the CLI's pid rides every hook event
         child.kill().expect("kill the watched child");
         let _ = child.wait();
 
@@ -170,6 +203,31 @@ mod tests {
         assert!(
             matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false } if agent_id == agent),
             "the bound agent must be ended when its pid dies, got {ev:?}"
+        );
+    }
+
+    /// The #896 guard end to end: one sighting, then that pid dies — exactly
+    /// what a per-invocation wrapper shell does — and the session survives.
+    #[tokio::test]
+    async fn a_once_seen_pid_dying_ends_nothing() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+        let Some(watch) = HookPidWatch::spawn(tx) else {
+            return; // no exit-watch backend on this platform — nothing to assert
+        };
+        let mut wrapper = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a stand-in wrapper shell");
+        let pid = i32::try_from(wrapper.id()).expect("pid fits i32");
+        watch.note(pid, AgentId::from_parts("cursor", "sess-A"));
+        wrapper.kill().expect("kill the wrapper");
+        let _ = wrapper.wait();
+
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+                .await
+                .is_err(),
+            "an uncorroborated pid's death must not end the session"
         );
     }
 }

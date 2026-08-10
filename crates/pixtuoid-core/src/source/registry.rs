@@ -636,7 +636,8 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         }),
         caps: SourceCaps {
             // `sessionEnd` fires on clean completion — best-effort counts.
-            // Abrupt exits (no PID exposed) fall to the stale-sweep.
+            // An abrupt exit rides the shim-stamped pid, which reaches the CLI
+            // only because the walk skips Cursor's wrapper shell (#896).
             has_exit_signal: true,
             // Each `cursor-agent` invocation is a NEW session_id, so a swept
             // session never walks back in.

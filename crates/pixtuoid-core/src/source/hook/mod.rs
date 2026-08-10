@@ -165,9 +165,8 @@ impl Drop for UndeliveredEvents {
 /// `session.created`). Activity/Waiting/End never register a new slot.
 ///
 /// Matches on event SHAPE, so unlike [`patch_identity_pids`] this is NOT
-/// `FocusChannel`-gated — sound only while every platform with an `ExitWatch`
-/// backend takes its pid from an exec'd parent. A Windows backend would need
-/// this bind gated on `accepts_stamp()`; there is nothing to gate until then.
+/// `FocusChannel`-gated: a pid the shim misresolved cannot end a session here
+/// anyway, because [`HookPidWatch::note`] arms only on a repeat sighting.
 fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
     match ev {
         AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {
@@ -271,10 +270,14 @@ pub(crate) async fn handle_conn(
                     // real identity before the activity event applies.
                     Ok(evs) => {
                         if let (Some(pid), Some(watch)) = (pid, pid_watch.as_ref()) {
-                            for ev in &evs {
-                                if let Some(agent_id) = pid_bind_target(ev) {
-                                    watch.note(pid, agent_id);
-                                }
+                            // ONE sighting per payload: `note` arms on a repeat,
+                            // and a batch must not be its own corroboration.
+                            for agent_id in evs
+                                .iter()
+                                .filter_map(pid_bind_target)
+                                .collect::<std::collections::BTreeSet<_>>()
+                            {
+                                watch.note(pid, agent_id);
                             }
                         }
                         let mut evs = evs;
@@ -642,22 +645,15 @@ mod tests {
 
         let (mut client, server) = tokio::io::duplex(4096);
         let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        // TWO payloads: the CLI's own pid rides every hook event, and that
+        // repeat is what arms the watch (#896).
         let line = format!(
             "{{\"_pixtuoid_source\":\"codewhale\",\"event\":\"session_start\",\
-             \"cwd\":\"/repo\",\"_pid\":{pid}}}\n"
+             \"cwd\":\"/repo\",\"_pid\":{pid}}}\n\
+             {{\"_pixtuoid_source\":\"codewhale\",\"event\":\"tool_call_before\",\
+             \"cwd\":\"/repo\",\"tool\":\"read_file\",\"_pid\":{pid}}}\n"
         );
         client.write_all(line.as_bytes()).await.unwrap();
-
-        // Drain the SessionStart so it doesn't race the SessionEnd on the channel.
-        let ev = match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
-            Ok(Some((_, ev))) => ev,
-            other => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("expected the SessionStart from the payload, got {other:?}");
-            }
-        };
-        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
 
         drop(client);
         task.await.unwrap();
@@ -665,14 +661,68 @@ mod tests {
         child.kill().expect("kill the watched child");
         let _ = child.wait();
         let expected = AgentId::from_parts("codewhale", "/repo");
-        let (transport, ev) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("a SessionEnd within 5s of the watched pid dying")
-            .expect("channel still open");
-        assert_eq!(transport, Transport::Hook);
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            // The decoded payloads land first; the pid's death arrives behind them.
+            loop {
+                match rx.recv().await {
+                    Some((transport, AgentEvent::SessionEnd { agent_id, as_child })) => {
+                        return Some((transport, agent_id, as_child))
+                    }
+                    Some(_) => continue,
+                    None => return None,
+                }
+            }
+        })
+        .await
+        .expect("a SessionEnd within 5s of the watched pid dying")
+        .expect("channel still open");
+        assert_eq!(
+            end,
+            (Transport::Hook, expected, false),
+            "the payload-bound agent must end when its pid dies"
+        );
+    }
+
+    /// The #896 shape at this seam: ONE payload, whose batch is an `Identity` +
+    /// an activity event carrying the same `_pid`. A batch must not corroborate
+    /// its own pid, so that pid dying ends nothing.
+    #[tokio::test]
+    async fn handle_conn_batch_does_not_corroborate_its_own_pid() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
+            return; // no exit-watch backend on this platform — nothing to assert
+        };
+        let mut wrapper = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a stand-in wrapper shell");
+        let pid = wrapper.id();
+
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        let line = format!(
+            "{{\"_pixtuoid_source\":\"cursor\",\"hook_event_name\":\"preToolUse\",\
+             \"session_id\":\"sess-A\",\"workspace_roots\":[\"/repo\"],\
+             \"tool_name\":\"Read\",\"_pid\":{pid}}}\n"
+        );
+        client.write_all(line.as_bytes()).await.unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        wrapper.kill().expect("kill the wrapper");
+        let _ = wrapper.wait();
+        let ends = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while let Some((_, ev)) = rx.recv().await {
+                if matches!(ev, AgentEvent::SessionEnd { .. }) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
         assert!(
-            matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false } if agent_id == expected),
-            "the payload-bound agent must end when its pid dies, got {ev:?}"
+            matches!(ends, Err(_) | Ok(false)),
+            "a single payload's pid must not end the session when it dies"
         );
     }
 

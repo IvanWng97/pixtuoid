@@ -1,26 +1,49 @@
 //! The spawning agent CLI's pid, for the hook envelope's `_pid`.
 //!
-//! Unix: `getppid` — the runner execs the shim, directly or through `sh -c`, so
-//! the parent IS the CLI. Windows: several runners interpose a `cmd.exe /C`
-//! that dies with the shim, so a raw ppid names a corpse (#528); walk past it
-//! instead. Residuals are in `pixtuoid-core/CLAUDE.md`'s focus-jump section.
+//! A runner that interposes a shell between the CLI and the shim makes the raw
+//! parent a corpse-to-be, not the CLI: Windows sees a `cmd.exe /C` (#528), and
+//! on Unix a runner whose wrapper still has work to do after ours — Cursor
+//! `eval`s the hook mid-script and then dumps shell state (#896) — cannot
+//! exec-replace that shell with us, so it outlives nothing and dies in
+//! milliseconds. A wrong `_pid` is worse than none: `HookPidWatch` ends the
+//! session when it dies, so the sprite walks out on every hook. Walk past the
+//! shell instead. Residuals are in `pixtuoid-core/CLAUDE.md`'s focus-jump
+//! section.
 //!
-//! The walk compiles everywhere so it unit-tests off Windows; only the snapshot
-//! FFI is `cfg(windows)`, hence the dead-code allowance.
-#![cfg_attr(not(windows), allow(dead_code))]
+//! The walk is shared; only how a row is READ is per-OS — one Toolhelp32
+//! snapshot on Windows, a per-pid `libproc`/`/proc` read on Unix, hand-rolled
+//! rather than delegated to `sysinfo` because this runs on EVERY tool call of
+//! every agent inside the shim's send bound. A Unix with neither reader keeps
+//! the bare `getppid`, and its walk items are then dead.
+#![cfg_attr(
+    not(any(windows, target_os = "macos", target_os = "linux")),
+    allow(dead_code)
+)]
 
 /// One process-table row — the walk's whole input.
+#[derive(Clone)]
 struct ProcRow {
-    pid: u32,
     parent: u32,
-    /// The image NAME with no directory (Toolhelp32's `szExeFile`).
+    /// The image NAME with no directory (Toolhelp32's `szExeFile`, Unix `comm`).
     exe: String,
 }
 
-/// By NAME because the snapshot carries nothing structural: matching the
+/// By NAME because a process table carries nothing structural: matching the
 /// ancestor's command line needs `NtQueryInformationProcess`, and "created
-/// within N ms of us" skips the CLI itself at session_start.
-const INTERPOSER_SHELLS: &[&str] = &["cmd.exe", "powershell.exe", "pwsh.exe"];
+/// within N ms of us" skips the CLI itself at session_start. Both spellings
+/// live in one list — no Unix CLI is named `cmd.exe` and none of the Unix
+/// shells is a Windows image name.
+const INTERPOSER_SHELLS: &[&str] = &[
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "sh",
+    "bash",
+    "zsh",
+    "dash",
+    "ksh",
+    "fish",
+];
 
 /// Terminator for a cyclic/corrupt snapshot, not a tuning knob (a real chain
 /// interposes one shell, two with a `.cmd` wrapper).
@@ -32,16 +55,19 @@ fn is_interposer(exe: &str) -> bool {
         .any(|shell| exe.eq_ignore_ascii_case(shell))
 }
 
-/// First ancestor of `start` that isn't an interposed shell. `None` when the
-/// chain leaves the snapshot or outruns [`MAX_HOPS`]. An exited parent is
-/// absent from it; a RECYCLED one is present and indistinguishable.
-fn first_cli_ancestor(start: u32, rows: &[ProcRow]) -> Option<u32> {
-    let row_of = |pid: u32| rows.iter().find(|r| r.pid == pid);
+/// First ancestor of `start` that isn't an interposed shell, per a `row_of`
+/// that answers `None` for any pid it can't read. `None` when the chain leaves
+/// the table, reaches the reaper (a parent of `1` means ours already exited),
+/// or outruns [`MAX_HOPS`]. An exited parent is absent; a RECYCLED one is
+/// present and indistinguishable.
+fn first_cli_ancestor(start: u32, row_of: impl Fn(u32) -> Option<ProcRow>) -> Option<u32> {
     let mut pid = start;
     for _ in 0..MAX_HOPS {
         let parent = row_of(pid)?.parent;
-        let parent_row = row_of(parent)?;
-        if !is_interposer(&parent_row.exe) {
+        if parent <= 1 {
+            return None;
+        }
+        if !is_interposer(&row_of(parent)?.exe) {
             return Some(parent);
         }
         pid = parent;
@@ -50,10 +76,69 @@ fn first_cli_ancestor(start: u32, rows: &[ProcRow]) -> Option<u32> {
 }
 
 /// The CLI's pid, or `None` where this OS gives no trustworthy answer.
-#[cfg(unix)]
+#[cfg(all(unix, any(target_os = "macos", target_os = "linux")))]
+pub(crate) fn cli_pid() -> Option<u32> {
+    first_cli_ancestor(std::process::id(), proc_row)
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
 pub(crate) fn cli_pid() -> Option<u32> {
     // Safety: getppid takes no args and is infallible.
     u32::try_from(unsafe { libc::getppid() }).ok()
+}
+
+/// `/proc/<pid>/stat`: `comm` is field 2, parenthesized and free to contain
+/// both spaces and `)`, so it ends at the LAST one; `ppid` is field 4.
+#[cfg(target_os = "linux")]
+fn proc_row(pid: u32) -> Option<ProcRow> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    let exe = stat.get(stat.find('(')? + 1..close)?.to_string();
+    let parent = stat
+        .get(close + 1..)?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    Some(ProcRow { parent, exe })
+}
+
+/// `proc_pidinfo` reports how many bytes it wrote, and a dead pid writes none —
+/// a short answer is the liveness check, not the return code's sign.
+#[cfg(target_os = "macos")]
+fn proc_row(pid: u32) -> Option<ProcRow> {
+    let size = libc::c_int::try_from(std::mem::size_of::<libc::proc_bsdshortinfo>()).ok()?;
+    let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+    // Safety: the flavor matches the out-param type, and the kernel writes at
+    // most `size` bytes into the owned `info`.
+    let written = unsafe {
+        libc::proc_pidinfo(
+            libc::c_int::try_from(pid).ok()?,
+            libc::PROC_PIDT_SHORTBSDINFO,
+            0,
+            std::ptr::from_mut(&mut info).cast(),
+            size,
+        )
+    };
+    if written != size {
+        return None;
+    }
+    Some(ProcRow {
+        parent: info.pbsi_ppid,
+        exe: comm_name(&info.pbsi_comm),
+    })
+}
+
+/// `pbsi_comm` is a fixed 16-byte field the kernel leaves UNTERMINATED at
+/// exactly that length, so the array bound — not a NUL — ends the name.
+#[cfg(target_os = "macos")]
+fn comm_name(raw: &[libc::c_char]) -> String {
+    let bytes: Vec<u8> = raw
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as u8)
+        .collect();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 /// The walk's own slice of the send bound — an AV/EDR filter can make a
@@ -81,7 +166,8 @@ fn walk_now() -> Option<u32> {
 
     // Safety: GetCurrentProcessId takes no args and cannot fail.
     let me = unsafe { GetCurrentProcessId() };
-    first_cli_ancestor(me, &process_snapshot())
+    let rows = process_snapshot();
+    first_cli_ancestor(me, |pid| rows.get(&pid).cloned())
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -95,14 +181,14 @@ pub(crate) fn cli_pid() -> Option<u32> {
 /// A second Toolhelp32 reader on purpose — `focus::windows::OsProcessTable` is
 /// the other, and the shim can't depend on that crate. Fix bugs in BOTH.
 #[cfg(windows)]
-fn process_snapshot() -> Vec<ProcRow> {
+fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
         TH32CS_SNAPPROCESS,
     };
 
-    let mut rows = Vec::new();
+    let mut rows = std::collections::HashMap::new();
     // Safety: the entry is plain-old-data we own, sized as the API requires,
     // and the snapshot handle is closed on the one exit path below.
     unsafe {
@@ -114,11 +200,13 @@ fn process_snapshot() -> Vec<ProcRow> {
         entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
         if Process32FirstW(snap, &mut entry) != 0 {
             loop {
-                rows.push(ProcRow {
-                    pid: entry.th32ProcessID,
-                    parent: entry.th32ParentProcessID,
-                    exe: exe_name(&entry.szExeFile),
-                });
+                rows.insert(
+                    entry.th32ProcessID,
+                    ProcRow {
+                        parent: entry.th32ParentProcessID,
+                        exe: exe_name(&entry.szExeFile),
+                    },
+                );
                 if Process32NextW(snap, &mut entry) == 0 {
                     break;
                 }
@@ -140,48 +228,77 @@ fn exe_name(raw: &[u16]) -> String {
 mod tests {
     use super::*;
 
-    fn row(pid: u32, parent: u32, exe: &str) -> ProcRow {
-        ProcRow {
-            pid,
-            parent,
-            exe: exe.into(),
-        }
+    /// A fake process table as the walk consumes one: pid → (parent, exe).
+    fn table(rows: &[(u32, u32, &str)]) -> impl Fn(u32) -> Option<ProcRow> {
+        let rows: std::collections::HashMap<u32, ProcRow> = rows
+            .iter()
+            .map(|&(pid, parent, exe)| {
+                (
+                    pid,
+                    ProcRow {
+                        parent,
+                        exe: exe.into(),
+                    },
+                )
+            })
+            .collect();
+        move |pid| rows.get(&pid).cloned()
     }
 
     #[test]
     fn a_direct_parent_that_is_not_a_shell_is_the_cli() {
-        let rows = [
-            row(300, 200, "pixtuoid-hook.exe"),
-            row(200, 100, "codex.exe"),
-            row(100, 1, "WindowsTerminal.exe"),
-        ];
-        assert_eq!(first_cli_ancestor(300, &rows), Some(200));
+        let rows = table(&[
+            (300, 200, "pixtuoid-hook.exe"),
+            (200, 100, "codex.exe"),
+            (100, 50, "WindowsTerminal.exe"),
+        ]);
+        assert_eq!(first_cli_ancestor(300, rows), Some(200));
     }
 
     /// The `cmd.exe /C` form — the trap this module exists for.
     #[test]
     fn the_transient_cmd_parent_is_skipped_for_the_cli_above_it() {
-        let rows = [
-            row(300, 250, "pixtuoid-hook.exe"),
-            row(250, 200, "cmd.exe"),
-            row(200, 100, "codex.exe"),
-            row(100, 1, "WindowsTerminal.exe"),
-        ];
-        assert_eq!(first_cli_ancestor(300, &rows), Some(200));
+        let rows = table(&[
+            (300, 250, "pixtuoid-hook.exe"),
+            (250, 200, "cmd.exe"),
+            (200, 100, "codex.exe"),
+            (100, 50, "WindowsTerminal.exe"),
+        ]);
+        assert_eq!(first_cli_ancestor(300, rows), Some(200));
+    }
+
+    /// #896's chain: Cursor `eval`s the hook inside a `$SHELL -c` wrapper that
+    /// must outlive it to dump shell state, so the shell CANNOT exec us and its
+    /// pid dies milliseconds later.
+    #[test]
+    fn the_transient_unix_wrapper_shell_is_skipped_for_the_cli_above_it() {
+        for shell in ["zsh", "bash", "sh", "dash", "ksh", "fish"] {
+            let rows = table(&[
+                (300, 250, "pixtuoid-hook"),
+                (250, 200, shell),
+                (200, 100, "cursor-agent"),
+                (100, 50, "zsh"),
+            ]);
+            assert_eq!(
+                first_cli_ancestor(300, rows),
+                Some(200),
+                "{shell} wrapper must resolve to the CLI, not the wrapper"
+            );
+        }
     }
 
     /// A `.cmd` wrapper stacks a second shell; casing is the filesystem's.
     #[test]
     fn every_interposer_spelling_and_a_stacked_pair_are_skipped() {
-        let rows = [
-            row(300, 260, "pixtuoid-hook.exe"),
-            row(260, 250, "CMD.EXE"),
-            row(250, 200, "PowerShell.exe"),
-            row(200, 100, "node.exe"),
-            row(100, 1, "WindowsTerminal.exe"),
-        ];
+        let rows = table(&[
+            (300, 260, "pixtuoid-hook.exe"),
+            (260, 250, "CMD.EXE"),
+            (250, 200, "PowerShell.exe"),
+            (200, 100, "node.exe"),
+            (100, 50, "WindowsTerminal.exe"),
+        ]);
         assert_eq!(
-            first_cli_ancestor(300, &rows),
+            first_cli_ancestor(300, rows),
             Some(200),
             "node.exe is the CLI — an interpreter name must not read as a shell"
         );
@@ -190,31 +307,69 @@ mod tests {
     /// An exited parent leaves no row — stamp nothing, not someone else's pid.
     #[test]
     fn a_parent_missing_from_the_snapshot_is_no_answer() {
-        let rows = [row(300, 250, "pixtuoid-hook.exe")];
-        assert_eq!(first_cli_ancestor(300, &rows), None);
         assert_eq!(
-            first_cli_ancestor(999, &rows),
+            first_cli_ancestor(300, table(&[(300, 250, "pixtuoid-hook.exe")])),
+            None
+        );
+        assert_eq!(
+            first_cli_ancestor(999, table(&[(300, 250, "pixtuoid-hook.exe")])),
             None,
             "our own row missing is no answer either"
         );
     }
 
+    /// Reparented to the reaper: `1` (or Windows' `0`) is nobody's agent CLI.
+    #[test]
+    fn a_reaper_parent_is_no_answer() {
+        for reaper in [0, 1] {
+            assert_eq!(
+                first_cli_ancestor(
+                    300,
+                    table(&[(300, reaper, "pixtuoid-hook"), (reaper, 0, "init")])
+                ),
+                None,
+                "a parent of {reaper} must not be stamped as the CLI"
+            );
+        }
+    }
+
     #[test]
     fn a_chain_of_nothing_but_shells_runs_out_rather_than_looping() {
-        let all_shells: Vec<ProcRow> = (0..MAX_HOPS as u32 + 2)
-            .map(|i| row(i, i + 1, "cmd.exe"))
+        let all_shells: Vec<(u32, u32, &str)> = (2..MAX_HOPS as u32 + 4)
+            .map(|i| (i, i + 1, "cmd.exe"))
             .collect();
-        assert_eq!(first_cli_ancestor(0, &all_shells), None);
+        assert_eq!(first_cli_ancestor(2, table(&all_shells)), None);
 
-        let cycle = [row(300, 250, "cmd.exe"), row(250, 300, "cmd.exe")];
-        assert_eq!(first_cli_ancestor(300, &cycle), None);
+        let cycle = [(300, 250, "cmd.exe"), (250, 300, "cmd.exe")];
+        assert_eq!(first_cli_ancestor(300, table(&cycle)), None);
+    }
+
+    /// The per-OS row reader against the real process table — the half the
+    /// fake-table tests cannot cover.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_live_row_reader_agrees_with_getppid() {
+        let me = proc_row(std::process::id()).expect("our own row is readable");
+        // Safety: getppid takes no args and is infallible.
+        let ppid = u32::try_from(unsafe { libc::getppid() }).expect("ppid fits u32");
+        assert_eq!(me.parent, ppid, "the reader's ppid must be the kernel's");
+        assert!(!me.exe.is_empty(), "a live process has a name");
+
+        let mut dead = std::process::Command::new("true")
+            .spawn()
+            .expect("spawn a child to reap");
+        dead.wait().expect("reap it");
+        assert!(
+            proc_row(dead.id()).is_none(),
+            "a reaped pid must read as no row, not a stale one"
+        );
     }
 
     /// The real resolver against the real process table.
     #[test]
     fn the_live_resolver_names_a_real_ancestor() {
-        let pid = cli_pid().expect("this process has a live parent");
+        let pid = cli_pid().expect("this process has a live ancestor");
         assert_ne!(pid, std::process::id(), "never our own pid");
-        assert_ne!(pid, 0);
+        assert!(pid > 1, "never the reaper");
     }
 }
