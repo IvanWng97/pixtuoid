@@ -94,6 +94,19 @@ test_indexed_step_selection_supports_named_steps if {
 	[count(matches), matches[0].index, matches[1].index] == [2, 1, 2]
 }
 
+test_codeql_rust_setup_cannot_use_rolling_stable if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_setup_step_name,
+			"if": rust_matrix_condition,
+			"run": "rustup component add rust-src rust-analyzer --toolchain stable",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path]) in violations
+}
+
 test_codeql_extraction_health_cannot_be_masked_as_success if {
 	fixture := {"documents": [{
 		"path": codeql_workflow_path,
@@ -264,6 +277,25 @@ test_codeql_language_set_is_exact if {
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path]) in violations
+}
+
+test_missing_codeql_semantic_inputs_are_rejected if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [{
+			"name": rust_setup_step_name,
+			"if": rust_matrix_condition,
+			"run": "rustup component add rust-src --toolchain stable\ntest -s \"$rust_source/std/src/lib.rs\"\n",
+		}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path]) in violations
+	sprintf("%s must install the declared MSRV before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must derive CodeQL's sysroot from the declared MSRV", [codeql_workflow_path]) in violations
+	sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified sysroot to the Rust extractor", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified rust-src path to the Rust extractor", [codeql_workflow_path]) in violations
+	sprintf("%s must pass the verified proc-macro server to the Rust extractor", [codeql_workflow_path]) in violations
 }
 
 test_codecov_flags_forwarding_is_pinned if {
@@ -1380,6 +1412,42 @@ test_codeql_init_hardcoding_a_language_is_denied if {
 
 # init snapshots the workspace, so anything staged after it is invisible to the
 # extractor while the job still reports a successful analysis.
+test_codeql_init_before_its_inputs_is_denied if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "github/codeql-action/init@v4"},
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
+}
+
+test_codeql_init_after_its_inputs_is_accepted if {
+	fixture := {"documents": [{
+		"path": codeql_workflow_path,
+		"contents": {"jobs": {"analyze": {"steps": [
+			{"uses": "actions/checkout@v7"},
+			{
+				"name": rust_setup_step_name,
+				"if": rust_matrix_condition,
+				"run": "prepare",
+			},
+			{"uses": "github/codeql-action/init@v4"},
+		]}}},
+	}]}
+	violations := deny with input as fixture
+	not sprintf("%s must check out before CodeQL init", [codeql_workflow_path]) in violations
+	not sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path]) in violations
+}
+
 codeql_pull_request_message := sprintf("%s must analyze every pull request: keep on.pull_request present and unfiltered", [codeql_workflow_path])
 
 test_codeql_dropping_the_pull_request_trigger_is_denied if {

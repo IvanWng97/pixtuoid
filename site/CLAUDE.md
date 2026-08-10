@@ -216,8 +216,10 @@ reproducible in the production-browser suite; Google's pinned `web-vitals`
 package owns the canonical CLS calculation, while the test owns only this
 repository's delayed-font scenario and budget.
 
-`site-check` starts with `npm audit --audit-level=low`; the PR and Pages
-workflows run the same audit after `npm ci`. The npm generation is part of the
+`site-check` ends with `npm audit --audit-level=low`, and site.yml runs it in the
+same last position: the audit resolves advisories LIVE, so at step one someone
+else's publish short-circuits every check below it (#847/#849). `pages.yml`
+deliberately keeps it FIRST — that workflow ships. The npm generation is part of the
 toolchain: `packageManager` pins CI to npm 12.0.1, `engines.npm` +
 `engine-strict=true` reject older local clients, and both workflows upgrade the
 older npm bundled with Node 26 before install. npm install scripts are

@@ -1,9 +1,3 @@
-# Admission test for a new rule: name the bug it catches in which CI still
-# reports GREEN. Three shapes qualify — a check that silently degrades while
-# still passing, a job whose removal makes the gate greener, and a cross-file
-# invariant no single file can see. A rule whose violation would already turn a
-# job RED is a change-detector: it fires on every legitimate edit and can never
-# catch a defect. Prefer an existing zizmor audit over a rule written here.
 package main
 
 import rego.v1
@@ -65,6 +59,7 @@ claude_model_step_name := "Run read-only Claude review"
 claude_publish_step_name := "Publish validated Claude review"
 trusted_default_ref := "${{ github.event.repository.default_branch }}"
 codeql_workflow_path := ".github/workflows/codeql.yml"
+rust_setup_step_name := "Prepare Rust semantic analysis"
 rust_health_step_name := "Verify Rust extraction health"
 rust_matrix_condition := "${{ matrix.language == 'rust' }}"
 codeql_analyze_step_id := "analyze"
@@ -381,6 +376,15 @@ steps_using_action(steps, action) := [entry |
 codeql_steps_using(action) := steps_using_action(codeql_steps, action)
 
 codeql_named_steps(name) := indexed_steps_matching(codeql_steps, "name", name)
+
+rust_setup_steps := [entry |
+	some index, step in codeql_steps
+	object.get(step, "name", "") == rust_setup_step_name
+	object.get(step, "if", "") == rust_matrix_condition
+	run := object.get(step, "run", "")
+	is_string(run)
+	entry := {"index": index, "value": step, "run": run}
+]
 
 rust_health_steps := [entry |
 	some index, step in codeql_steps
@@ -1317,8 +1321,136 @@ deny contains msg if {
 }
 
 deny contains msg if {
+	object.get(codeql, ["permissions", "actions"], null) != "read"
+	msg := sprintf("%s must grant actions: read", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql, ["permissions", "contents"], null) != "read"
+	msg := sprintf("%s must grant contents: read", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql, ["permissions", "packages"], null) != "read"
+	msg := sprintf("%s must grant packages: read", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql, ["permissions", "security-events"], null) != "write"
+	msg := sprintf("%s must grant security-events: write", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql, ["concurrency", "group"], null) != "codeql-${{ github.ref }}"
+	msg := sprintf("%s must group concurrency by ref", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql, ["concurrency", "cancel-in-progress"], null) != "${{ github.event_name == 'pull_request' }}"
+	msg := sprintf("%s must cancel only superseded pull-request runs", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql_job, "runs-on", null) != "ubuntu-latest"
+	msg := sprintf("%s analyze job must use ubuntu-latest", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql_job, "timeout-minutes", null) != 30
+	msg := sprintf("%s analyze job must keep timeout-minutes: 30", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	object.get(codeql_job, ["strategy", "fail-fast"], null) != false
+	msg := sprintf("%s analyze matrix must keep fail-fast: false", [codeql_workflow_path])
+}
+
+deny contains msg if {
 	object.get(codeql_job, ["strategy", "matrix", "language"], null) != ["actions", "javascript-typescript", "python", "rust"]
 	msg := sprintf("%s must analyze actions, JavaScript/TypeScript, Python, and Rust", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(codeql_steps_using("actions/checkout@v7")) != 1
+	msg := sprintf("%s must check out the repository exactly once", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(codeql_steps_using("github/codeql-action/init@v4")) != 1
+	msg := sprintf("%s must initialize CodeQL v4 exactly once", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(codeql_steps_using("github/codeql-action/analyze@v4")) != 1
+	msg := sprintf("%s must analyze with CodeQL v4 exactly once", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) != 1
+	msg := sprintf("%s must contain one Rust semantic-input setup step", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "cargo metadata --no-deps --format-version 1")
+	msg := sprintf("%s must derive one workspace MSRV with cargo metadata", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "rustup toolchain install \"$workspace_msrv\"")
+	msg := sprintf("%s must install the declared MSRV before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "rustup run \"$workspace_msrv\" rustc --print sysroot")
+	msg := sprintf("%s must derive CodeQL's sysroot from the declared MSRV", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "test -s \"$rust_source/std/src/lib.rs\"")
+	msg := sprintf("%s must verify rust-src before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "test -x \"$proc_macro_server\"")
+	msg := sprintf("%s must verify the sysroot proc-macro server before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT=$rust_sysroot")
+	msg := sprintf("%s must pass the verified sysroot to the Rust extractor", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT_SRC=$rust_source")
+	msg := sprintf("%s must pass the verified rust-src path to the Rust extractor", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_PROC_MACRO_SERVER=$proc_macro_server")
+	msg := sprintf("%s must pass the verified proc-macro server to the Rust extractor", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	run := rust_setup_steps[0].run
+	not contains(run, "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true")
+	msg := sprintf("%s must enable CodeQL cargo_all_targets", [codeql_workflow_path])
 }
 
 deny contains msg if {
@@ -1372,4 +1504,21 @@ deny contains msg if {
 	run := rust_health_steps[0].run
 	not rust_health_summary_is_quantified(run)
 	msg := sprintf("%s Rust extraction-health gate must write a quantified job summary", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	checkout_steps := codeql_steps_using("actions/checkout@v7")
+	count(checkout_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
+	count(init_steps) == 1
+	checkout_steps[0].index >= init_steps[0].index
+	msg := sprintf("%s must check out before CodeQL init", [codeql_workflow_path])
+}
+
+deny contains msg if {
+	count(rust_setup_steps) == 1
+	init_steps := codeql_steps_using("github/codeql-action/init@v4")
+	count(init_steps) == 1
+	rust_setup_steps[0].index >= init_steps[0].index
+	msg := sprintf("%s must prepare Rust before CodeQL init", [codeql_workflow_path])
 }
