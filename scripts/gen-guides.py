@@ -275,8 +275,7 @@ def selftest() -> int:
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 
-    # Run LAST: it re-enters this selftest as a child, so a leak here cannot
-    # corrupt the fixture above it.
+    # Outside the fixture block: this spawns the whole selftest again.
     if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
         fails.append(leak)
 

@@ -109,8 +109,7 @@ def selftest() -> int:
             if not added.get(path):
                 fails.append(f"the pathspec drops {path}: {sorted(added)}")
 
-    # Run LAST: it re-enters this selftest as a child. This fixture COMMITS, so a
-    # leak here rewrites the ambient repo's HEAD, not just its index.
+    # Outside the fixture block: this spawns the whole selftest again.
     if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
         fails.append(leak)
 

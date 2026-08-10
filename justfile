@@ -1204,11 +1204,10 @@ ast-grep-test:
 comment-lint-selftest:
     python3 scripts/comment-lint.py --selftest
 
-# A git hook exports the repo-local GIT_* vars and they OUTRANK `git -C`/`cwd=`,
-# so a script driving a throwaway repo drives the REAL one instead. This pins the
-# scrub AND sweeps scripts/ for anything spawning git outside `gitenv.git()` — the
-# recurrence gate, because the two known instances were found only after one of
-# them ate a developer's index. Runs in `lint`; CI enumerates it separately.
+# The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
+# sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
+# gate, because one of these leaks ate a developer's index before anyone noticed.
+# Runs in `lint`; CI's hygiene job enumerates it separately.
 [group('meta')]
 [doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
 gitenv-selftest:
