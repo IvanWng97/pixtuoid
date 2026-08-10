@@ -437,7 +437,6 @@ pub(in crate::pixel_painter) fn moon_phase(now: SystemTime) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
@@ -513,34 +512,23 @@ mod tests {
         }
     }
 
-    /// Local hour `h`, minute `m` on a fixed date — TZ-independent because the
-    /// code under test decodes the input back into `chrono::Local`.
+    use crate::localclock::{at_hour_min, on_day};
+
+    /// Local `h:m` on the reference day — `localclock` owns the construction.
     fn at_hour(h: u32, m: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, 1, h, m, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        at_hour_min(h, m)
     }
 
     /// Local 02:00 (always night) on a given January day. Weather varies by day
     /// at a fixed hour, so searching days finds different weathers/moon phases.
     fn night_on(day: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, day, 2, 0, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        on_day(day, 2)
     }
 
     /// Local midnight on a given January day — near the night arc's apex, so
     /// it's close to the brightest instant of that night.
     fn midnight_on(day: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, day, 0, 0, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        on_day(day, 0)
     }
 
     #[test]

@@ -2104,11 +2104,9 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     );
 }
 
-/// `seat_desk` is the whole of "one simulation, two projections": the cutaway
-/// re-anchors a desk-seated body and cannot recover the desk from `anchor`,
-/// which is already projected FOR CLASSIC. Its polarity had no test at all —
-/// the classic painter never reads the field, so flipping an arm to `None`
-/// would break the second profile while every existing assertion stayed green.
+/// The cutaway reads `seat_desk` for its chair and its suppressed contact
+/// shadow; the classic painter never reads it. So flipping an arm to `None`
+/// breaks the second profile while every classic assertion stays green.
 ///
 /// Driven through the real `sim_step` rather than by constructing a placement,
 /// so it pins what the sim DECIDES, not what a fixture was handed.

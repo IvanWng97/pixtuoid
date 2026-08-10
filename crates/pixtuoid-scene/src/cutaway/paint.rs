@@ -680,9 +680,9 @@ fn paint_desk(
 ) {
     let s = scale.get();
     let x = scale.to_buffer(lx);
-    // The SAME anchor the classic painter uses, including its 1px raise for the
-    // monitor bezel — read from there rather than re-derived, so the two
-    // profiles cannot place the same desk differently.
+    // The bezel raise for the BASE desk art. Classic lifts a `desk_north` by its
+    // extra height on top of this, and the cutaway always blits `desk` — an art
+    // difference, which is the cutaway's own to close, not a seat-side one.
     let top_y = scale.to_buffer(ly.saturating_sub(1));
 
     let Some((art, blit_at)) = densest_art(pack, "desk", scale) else {

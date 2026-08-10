@@ -789,7 +789,10 @@ pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
 /// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
-/// — `seated_anchor` derives from this offset, so the two cannot drift.
+/// — the agent settles onto its seat with no arrival pop. Only the Y half
+/// derives from this const; the X half is a SECOND formula that agrees by
+/// arithmetic, not by construction. The identity is locked by
+/// `desk_walk_anchor_settles_exactly_on_the_seat` in `pixel_painter/tests.rs`.
 pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 

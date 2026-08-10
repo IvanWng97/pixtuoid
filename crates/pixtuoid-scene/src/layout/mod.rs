@@ -299,8 +299,9 @@ pub const POD_SIDE: u16 = 2;
 /// reads as its own workstation, not a merged blob.
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
-/// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Keep it EVEN: rows step by
-/// `DESK_H + this`, so an odd step splits the pod across half-block parities.
+/// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Rows step by
+/// `DESK_H + this`, and that STEP must stay EVEN or the pod's two rows land on
+/// different half-block parities — so retuning either side needs both checked.
 pub const INTRA_POD_GAP_Y: u16 = 6;
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND

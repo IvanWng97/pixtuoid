@@ -747,9 +747,17 @@ pub(crate) fn anim_scene(
             wp.kind, wp.facing, wp.pos.x, wp.pos.y
         );
     }
-    // Fresh agent at `now` for a clean Seated start; the GIF pre-rolls `skip_ms`
-    // past the seated dwell so capture begins right as it walks out.
-    let skip_ms = seated_dwell_ms(id).saturating_sub(1_000);
+    // Fresh agent at `now` for a clean Seated start. `desk` is the one target
+    // whose SUBJECT is the seat, so it pre-rolls to the dwell's MIDPOINT and
+    // holds the pose; every other target is about the trip, so it pre-rolls to
+    // just before the walk-out. At `dwell - 1s` the desk clip spent 29% of its
+    // frames seated and the rest on an agent standing in an aisle.
+    let dwell = seated_dwell_ms(id);
+    let skip_ms = if target == "desk" {
+        dwell / 2
+    } else {
+        dwell.saturating_sub(1_000)
+    };
     eprintln!(
         "ANIM agent seated_dwell={}ms → pre-roll skip={skip_ms}ms",
         seated_dwell_ms(id)

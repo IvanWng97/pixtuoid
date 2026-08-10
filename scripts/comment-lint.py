@@ -231,6 +231,27 @@ def selftest() -> int:
             if over(p, c) is not want:
                 fails.append(f"{why}: got {p} prose / {c} code")
 
+        # An OPEN `/*` whose `*/` is CONTEXT, then a second file of plain code.
+        # Named so the block-opener sorts FIRST: `git diff` walks paths in order,
+        # and a plain-code file ahead of it is counted before the block opens,
+        # which is how the first version of this fixture passed unfixed.
+        # `--unified=0` hands the walker non-contiguous added lines, so without a
+        # reset at each header the open block charges the rest of the DIFF —
+        # including another file's code — as prose. The `blocky` case above
+        # cannot catch it: it adds the `/*` and the `*/` together.
+        (repo / "src" / "a_openblock.rs").write_text("*/\nfn kept() {}\n")
+        gitenv.git(*ident, "add", "-A", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-qm", "openblock-base", cwd=repo, check=True)
+        (repo / "src" / "a_openblock.rs").write_text(
+            "/*\n" + "".join(f" * n{n}\n" for n in range(3)) + "*/\nfn kept() {}\n"
+        )
+        (repo / "src" / "b_after.rs").write_text(code_floor)
+        p, c = prose_case("leak", "")
+        if p != 4 or c < 20:
+            fails.append(
+                f"an unterminated `/*` must not leak past the file header: got {p} prose / {c} code"
+            )
+
         # Which arms BLOCK, both directions. Without this the ast-grep arm can
         # silently become a hard gate on a machine that happens to have it.
         if gate_fails(True, [], [], False):
@@ -259,10 +280,9 @@ def selftest() -> int:
 
 
 DOC_RUN_MAX = 10
-"""Longest NEW `///`/`//!` run allowed. 94.4% of the tree's existing runs are <= 8
-and the longest legitimate one is 35, so this flags only the top few percent —
-and diff-scoped, so those existing ones are grandfathered. A new block past it is
-not banned, it is made deliberate."""
+"""Longest NEW `///`/`//!` run allowed — above the tree's own long tail, whose
+longest legitimate run is 35. Diff-scoped, so existing runs are grandfathered,
+and a new block past it is not banned, only made deliberate."""
 
 
 def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
@@ -367,7 +387,13 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
     prose = code = 0
     in_block = False
     for line in diff.splitlines():
-        if not line.startswith("+") or line.startswith("+++"):
+        # A file or hunk header closes any open block. `--unified=0` makes the
+        # added lines non-contiguous, so a `/*` whose `*/` is CONTEXT would
+        # otherwise charge every later added line in the whole diff as prose.
+        if line.startswith("+++") or line.startswith("@@"):
+            in_block = False
+            continue
+        if not line.startswith("+"):
             continue
         t = line[1:].strip()
         # `/* */` counted as code would BOTH hide the prose and inflate the

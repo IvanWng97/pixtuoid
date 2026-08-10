@@ -25,8 +25,9 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
-/// A lower bound on `desk_north.sprite`'s extra height, not a copy of it. Keep
-/// EVEN: a half-block painter halves it, and an odd lift rounds onto the screen.
+/// At least `desk_north.sprite`'s extra height, with headroom — not a copy of
+/// it. Keep EVEN: a half-block painter halves it, and an odd lift rounds onto
+/// the screen.
 const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
 
 /// Activity-derived label tone — backend-agnostic.

@@ -584,12 +584,12 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         .saturating_sub(3)
         .max(NEON_PANEL_X + NEON_PANEL_W + 1);
     paint_clock(ctx.buf, clock_x, 1, ctx.now, ctx.theme);
-    // These sit on the floor but overwrite it, so the floor overlays above never
-    // reach them, and they land in the drawable snapshot below so the object wash
-    // does not either — the corridor runner stayed full-daylight tan in a dimmed
-    // office, the brightest thing in the room. Washed as their own group so the
+    // These overwrite the floor, so the overlays above cannot reach them, and
+    // they paint before the drawable snapshot, so that pass cannot either — the
+    // corridor runner used to stay full-daylight tan in a dimmed office, the
+    // brightest thing in the room. Hence their own group, which also keeps the
     // EMITTERS painted above (ceiling pools, floor-lamp halo) and the self-lit
-    // wall fixtures (neon panel, clock) stay out of it.
+    // wall fixtures (neon panel, clock) out of it.
     let pre_floor_fixtures = ctx.buf.clone();
     if let Some(corridor) = ctx.layout.corridor {
         paint_corridor_runner(ctx.buf, corridor, ctx.theme);

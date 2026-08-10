@@ -580,8 +580,6 @@ fn transition_escapes_a_backward_clock_step() {
     );
 }
 
-/// The set of distinct colours painted inside a rect.
-///
 #[test]
 fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
@@ -1015,10 +1013,10 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // chairs, partitions — carried no time-of-day term at all. Measured at the
     // whole LAYER rather than one piece: the paint loop is the shared seam, so a
     // new DrawableKind inherits this without touching the test.
-    let render = |secs: u64| {
+    use crate::localclock::at_hour;
+    let render = |now: SystemTime| {
         let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme");
-        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
         let scene = make_scene(6, 8);
         let mut fctx = FloorCtx::new();
         let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
@@ -1044,26 +1042,37 @@ fn the_foreground_layer_is_lit_by_the_clock() {
         .expect("layout");
         buf
     };
-    // Twelve hours apart. The sky model reads LOCAL time, so which of these is
-    // noon depends on $TZ — the assertion is on the two differing, not on which.
-    let (noon, night) = (render(12 * 3600), render(0));
+    let (noon, night) = (render(at_hour(12)), render(at_hour(2)));
     let (w, h) = (noon.width(), noon.height());
-    let (mut same, mut total) = (0u32, 0u32);
+    let frozen = |x: u16, y: u16| noon.get(x, y) == night.get(x, y);
+    // CLUSTERED, not counted. Two different blends can round to one u8, so a few
+    // scattered matches are arithmetic — a painter left outside the clock instead
+    // freezes a whole PIECE, and every pixel of it has a frozen neighbour. A
+    // count needs a threshold, and a threshold is what let the corridor runner
+    // and the pantry mats pass at 8.3% under a 12% ceiling.
+    let mut clustered = Vec::new();
     for y in (h * 30 / 100)..(h * 92 / 100) {
         for x in 0..w {
-            total += 1;
-            if noon.get(x, y) == night.get(x, y) {
-                same += 1;
+            if frozen(x, y)
+                && [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|(dx, dy)| {
+                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                        (0..w as i32).contains(&nx)
+                            && (0..h as i32).contains(&ny)
+                            && frozen(nx as u16, ny as u16)
+                    })
+            {
+                clustered.push((x, y));
             }
         }
     }
-    let frozen = 100.0 * f64::from(same) / f64::from(total);
-    // ZERO, not a tolerance: every interior pixel now takes an hour term, so any
-    // margin here would just re-admit a whole frozen class (the corridor runner
-    // and the pantry mats sat under a 12% ceiling at 8.3% and read as passing).
-    assert_eq!(
-        same, 0,
-        "{frozen:.1}% of the interior is byte-identical at noon and midnight — a \
-         painter is running outside the clock"
+    assert!(
+        clustered.is_empty(),
+        "{} interior pixels are byte-identical at noon and midnight AND adjacent \
+         to another such pixel — a painter is running outside the clock, first at \
+         {:?}",
+        clustered.len(),
+        clustered.first()
     );
 }
