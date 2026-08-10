@@ -139,6 +139,9 @@ def bypass_sweep(where: pathlib.Path = SCRIPTS) -> list[str]:
 def selftest() -> int:
     """Negative-control the scrub, the sweep, and the control — each must FAIL on cue."""
     fails: list[str] = []
+    # `lint` runs this from the developer's checkout, and an untracked stray fails
+    # no gate — which is how #893's `PHANTOM.md` shipped. Cheap recurrence guard.
+    entered_cwd = set(os.listdir("."))
 
     if offenders := bypass_sweep():
         fails.append(f"these bypass `gitenv.git()` and can be relocated by a hook: {offenders}")
@@ -208,6 +211,9 @@ def selftest() -> int:
             clean_env.cache_clear()
         if snap() != before:
             fails.append("`git()` must not let an ambient GIT_DIR relocate a `-C` call")
+
+    if strays := sorted(set(os.listdir(".")) - entered_cwd):
+        fails.append(f"the selftest must not write into the caller's cwd (created {strays})")
 
     if fails:
         print("gitenv selftest FAILED:")
