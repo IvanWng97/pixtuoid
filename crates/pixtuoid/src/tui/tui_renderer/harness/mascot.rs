@@ -256,6 +256,48 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
     );
 }
 
+/// The differential's own control: the metric every probe in this file reads has
+/// to be SIGNAL. Two identical scenes must differ in zero cells, or a render that
+/// churns between calls would satisfy `> 0` with no mascot drawn at all — the
+/// failure the colour probes were rewritten into and had to be rewritten out of.
+#[test]
+fn the_mascot_differential_is_signal_not_render_churn() {
+    let mut r = build(160, 80, vec![]);
+    assert_eq!(
+        diff_cells(&mut r, &no_presence(), &no_presence(), t0()).len(),
+        0,
+        "two renders of the SAME scene must be byte-identical"
+    );
+
+    // And a real mascot's cells stay a mascot-sized blob rather than scattering
+    // across the office, which is what "the diff IS the lobster" claims.
+    let up = gateway_scene(
+        pixtuoid_core::state::DaemonLiveness::UP,
+        t0() - Duration::from_secs(20),
+        t0(),
+        0,
+    );
+    let cells = mascot_cells(&mut r, &up, t0());
+    assert!(!cells.is_empty(), "the fixture must paint a mascot");
+    let (xs, ys): (Vec<_>, Vec<_>) = cells.iter().copied().unzip();
+    let (w, h) = (
+        xs.iter().max().unwrap() - xs.iter().min().unwrap() + 1,
+        ys.iter().max().unwrap() - ys.iter().min().unwrap() + 1,
+    );
+    // Bounded by the PACK's own lobster frame, not a transcribed size.
+    let pk = pack();
+    let frame = &pk
+        .animation("lobster_walk")
+        .expect("the pack ships the lobster")
+        .frames[0];
+    let (sw, sh) = (frame.width(), frame.height());
+    assert!(
+        w <= sw * 2 && h <= sh * 2,
+        "the differing cells span {w}x{h}, over twice the {sw}x{sh} lobster — \
+         the diff is catching something besides the mascot"
+    );
+}
+
 #[test]
 fn gateway_mascot_present_when_up() {
     // entered_at well in the past ⇒ steady wander (past the walk-in).

@@ -882,6 +882,28 @@ mod vocabulary_tests {
         }
     }
 
+    /// `waypoint_target("desk") == None` above says desk is the callers' special
+    /// case; this DRIVES the caller. Without it the desk arm fell through to the
+    /// no-match `panic!` and every `--anim desk` aborted for a whole branch —
+    /// `--anim` is in neither the justfile nor media.json, so nothing else looks.
+    #[test]
+    fn anim_scene_stages_every_target_it_advertises() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        for (target, facing) in [
+            ("desk", None),
+            ("desk", Some("north")),
+            ("desk", Some("south")),
+            ("couch", None),
+        ] {
+            let (scene, _) = anim_scene(now, target, 192, 80, 0, facing);
+            assert!(
+                !scene.agents.is_empty(),
+                "--anim {target}{} staged no agent",
+                facing.map_or(String::new(), |f| format!(" --anim-facing {f}"))
+            );
+        }
+    }
+
     #[test]
     fn anim_and_crop_share_one_waypoint_vocabulary() {
         use pixtuoid_scene::layout::WaypointKind as K;
