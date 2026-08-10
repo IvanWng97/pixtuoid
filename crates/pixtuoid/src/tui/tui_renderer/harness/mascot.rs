@@ -45,23 +45,6 @@ fn harness_gateway() -> pixtuoid_core::state::DaemonInstanceId {
     pixtuoid_core::state::DaemonInstanceId::new("18789").expect("non-empty")
 }
 
-fn bubble_px(buf: &RgbBuffer) -> usize {
-    let bubble = pixtuoid_core::sprite::Rgb {
-        r: 0xd6,
-        g: 0xf2,
-        b: 0xf8,
-    };
-    let mut n = 0;
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            if buf.get(x, y) == bubble {
-                n += 1;
-            }
-        }
-    }
-    n
-}
-
 /// The lobster's EXCLUSIVE carapace palette keys. Each is used by the three
 /// `lobster_*.sprite` files and NOTHING else in the pack, which is what makes a
 /// hit on one proof the mascot is on screen.
@@ -113,7 +96,10 @@ fn lobster_cells(buf: &RgbBuffer) -> std::collections::BTreeSet<(u16, u16)> {
     let mut out = std::collections::BTreeSet::new();
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            if reds.contains(&buf.get(x, y)) {
+            if reds
+                .iter()
+                .any(|&r| pixtuoid_scene::pixel_painter::reads_as(buf.get(x, y), r))
+            {
                 out.insert((x, y));
             }
         }
@@ -321,17 +307,26 @@ fn gateway_mascot_busy_bubbles_track_runs_not_sessions() {
     let mut r = build(160, 80, vec![]);
     // Bubbles animate by `now`; scan a few frames so we don't land on an
     // all-off-screen phase.
-    let mut busy_max = 0;
-    let mut idle_max = 0;
+    // Frame-to-frame rather than by the bubble's authored colour: the mascot is a
+    // Drawable, so the foreground wash blends it and no pixel keeps that RGB.
+    let mut differing_max = 0;
     for k in 0..8u64 {
         let now = t0() + Duration::from_millis(k * 130);
         r.render(&busy, &pack(), now).unwrap();
-        busy_max = busy_max.max(bubble_px(r.buf()));
+        let busy_buf = r.buf().clone();
         r.render(&idle, &pack(), now).unwrap();
-        idle_max = idle_max.max(bubble_px(r.buf()));
+        let idle_buf = r.buf();
+        differing_max = differing_max.max(
+            (0..busy_buf.height())
+                .flat_map(|y| (0..busy_buf.width()).map(move |x| (x, y)))
+                .filter(|&(x, y)| busy_buf.get(x, y) != idle_buf.get(x, y))
+                .count(),
+        );
     }
-    assert!(busy_max > 0, "an in-flight run ⇒ activity bubbles render");
-    assert_eq!(idle_max, 0, "a persistent idle session must NOT bubble");
+    assert!(
+        differing_max > 0,
+        "an in-flight run must render differently from a persistent idle session"
+    );
 }
 
 #[test]

@@ -87,12 +87,7 @@ mod wall;
 
 pub use anchors::character_anchor;
 
-/// The painter's own seat anchor, for the binary's hit-test.
-///
-/// `#[doc(hidden)]` — public for MECHANISM, not contract (the overlay/board
-/// pattern). It exists so the click target is computed by the same fn that
-/// places the sprite, rather than by a second copy of its arithmetic that
-/// drifts the first time a desk seats its occupant on the other side.
+/// The painter's own seat anchor, exported so the binary's hit-test can't drift from the fn that places the sprite.
 #[doc(hidden)]
 pub fn seated_anchor_for(
     desk: crate::layout::Point,
@@ -105,15 +100,28 @@ pub fn seated_anchor_for(
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with, so a
 // footer tool colour matches the sprite's monitor glow exactly.
 pub use palette::tool_glow_for_kind;
+
+/// Does a painted pixel still read as `want` after the foreground wash? The wash
+/// defeats equality; channel RATIOS survive it, but roles within `CHROMA_TOL` blur.
+#[doc(hidden)]
+pub fn reads_as(painted: Rgb, want: Rgb) -> bool {
+    /// Half the smallest gap between two roles this is asked to tell apart.
+    const CHROMA_TOL: f32 = 0.025;
+    let sum = |c: Rgb| (f32::from(c.r) + f32::from(c.g) + f32::from(c.b)).max(1.0);
+    let (ps, ws) = (sum(painted), sum(want));
+    [
+        (f32::from(painted.r), f32::from(want.r)),
+        (f32::from(painted.g), f32::from(want.g)),
+        (f32::from(painted.b), f32::from(want.b)),
+    ]
+    .iter()
+    .all(|(p, w)| (p / ps - w / ws).abs() <= CHROMA_TOL)
+}
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-pub(crate) use sim::{sim_step, SimStores};
-// The flame-crown/ember colors, for render tests to assert the REAL painted
-// values (`effects` itself stays private).
-#[cfg(test)]
-pub(crate) use effects::{FLAME_DEEP, FLAME_TIP};
 #[cfg(test)]
 pub(crate) use furniture::COOLER_WATER;
+pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
 /// The coffee-machine sub-region within the large pantry counter sprite, as a
@@ -361,17 +369,9 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     }
 }
 
-/// How much of the ceiling pools' NIGHT gain each kind keeps.
-///
-/// The desk tubes go nearly out after dark. An office working late kills the
-/// overhead light over the workstations and the room reads by screen glow —
-/// that is the look, and it is also the only way twelve 20x10 pools stop
-/// overlapping into one pale sheet across the whole cubicle band, which is
-/// what they did at full gain (invisible by day at the 0.15 base, so it only
-/// ever showed on a dark theme). The shared spaces keep theirs: someone still
-/// has to find the coffee machine.
+/// Desk pools nearly out after dark: at full gain they merge into one pale sheet across the pod band.
 const DESK_POOL_NIGHT_KEEP: f32 = 0.18;
-/// Night-gain retention for the pantry and corridor pools — unchanged.
+/// Night-gain retention for the pantry and corridor pools.
 const SHARED_POOL_NIGHT_KEEP: f32 = 1.0;
 
 /// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
@@ -382,9 +382,7 @@ fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = (Ellipse, f32)>
     const DESK_POOL_HALF: (u16, u16) = (10, 5);
     const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
     const CORRIDOR_POOL_HALF: (u16, u16) = (14, 5);
-    // Centre comes from the SEAT, so the light tracks the occupant a facing put
-    // there — see `layout::desk_ceiling_pool_center`. A hardcoded lift left the
-    // pool over empty floor behind a back-turned worker.
+    // Centre from the SEAT so the light tracks the occupant; a hardcoded lift left it over empty floor.
     let desks = layout.home_desks.iter().enumerate().map(|(i, desk)| {
         let c = crate::layout::desk_ceiling_pool_center(
             *desk,
@@ -546,9 +544,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let boost_ceiling = LightingState::EMPTY_FLOOR_DIM_BOOST;
     let empty_floor_boost = 1.0 + (1.0 - indoor_scale) * (boost_ceiling - 1.0) / (1.0 - min_level);
 
-    // The night floor-dim dial, symmetric with `DAYLIGHT_FLOOR_LIFT` below.
-    const NIGHT_FLOOR_DIM_STRENGTH: f32 = 0.45;
-    let dim_strength = NIGHT_FLOOR_DIM_STRENGTH;
+    let dim_strength = background::NIGHT_FLOOR_DIM;
     dim_floor_overlay(
         ctx.buf,
         top_wall_h,
@@ -558,15 +554,13 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     );
     // The positive mirror of the night dim. Independent of occupancy — sun
     // enters an empty office too.
-    const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
     daylight_floor_overlay(
         ctx.buf,
         top_wall_h,
         buf_h,
-        look.spill_strength * DAYLIGHT_FLOOR_LIFT,
+        look.spill_strength * background::DAYLIGHT_FLOOR_LIFT,
     );
-    // Split base from night gain so a pool kind can opt out of the DARK half
-    // without losing its daylight presence — see `DESK_POOL_NIGHT_KEEP`.
+    // Split so a pool kind can opt out of the DARK half alone (`DESK_POOL_NIGHT_KEEP`).
     const POOL_BASE: f32 = 0.15;
     const POOL_NIGHT_GAIN: f32 = 0.30;
     for (pool, night_keep) in ceiling_pool_regions(ctx.layout) {
@@ -679,6 +673,9 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // decor first, characters last — and a character tied with a piece of
     // furniture paints BEFORE it.
     drawables.sort_by_key(|d| d.anchor_y);
+    // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
+    // band seamed the window glass and washed floor-between-pieces twice.
+    let pre_foreground = ctx.buf.clone();
     for d in &drawables {
         paint_drawable(
             d,
@@ -690,6 +687,20 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
                 theme: ctx.theme,
             },
         );
+    }
+    // The floor's day/night wash, over the foreground: the overlays above run
+    // before any drawable exists, so nothing painted carries a time-of-day term.
+    let (wash_tint, wash) = look.object_wash;
+    if wash > 0.0 {
+        for y in 0..ctx.buf.height() {
+            for x in 0..ctx.buf.width() {
+                let painted = ctx.buf.get(x, y);
+                if painted != pre_foreground.get(x, y) {
+                    ctx.buf
+                        .put(x, y, palette::blend_rgb(painted, wash_tint, wash));
+                }
+            }
+        }
     }
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
@@ -755,17 +766,10 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames.get(idx).or_else(|| anim.frames.first())
 }
 
-/// One chair per NORTH-facing home desk, occupied or not — the office keeps its
-/// furniture when a session ends.
-///
-/// Keyed to TIE with its occupant and enqueued after `enqueue_characters` so the
-/// stable sort paints it over them; `SHARP-EDGES.md` has why that tie holds.
+/// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
+/// occupant, so the stable sort paints it over them (`SHARP-EDGES.md`).
 fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>) {
-    /// Where the chair starts, deliberately OVER the occupant rather than below
-    /// them: the chair paints after the character, so an offset that clears the
-    /// sprite entirely wastes that order and leaves a detached slab at their feet.
-    /// Here the backrest crosses the lower torso instead, which is what reads as
-    /// leaning back into a seat.
+    /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
     const CHAIR_BACK_TOP_DY: u16 = 6;
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let facing = ctx.layout.desk_facing(FloorLocalDeskIndex(i));
@@ -784,23 +788,15 @@ fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>
     }
 }
 
-/// What a desk's two fixtures are lit to.
 pub(super) struct DeskLight {
-    /// Task-lamp strength. Facing-BLIND: the lamp stands on the desk's west
-    /// wing and is visible from either side, so gating it on facing left every
-    /// pod's viewer-facing row unlit — half the office.
+    /// Facing-BLIND: the lamp stands on the desk's west wing, visible from either side.
     pub(super) lamp: f32,
-    /// Standby-screen strength. Facing-GATED, because a viewer-facing desk puts
-    /// its occupant behind the monitor and shows the machine's back.
+    /// Facing-GATED: a viewer-facing desk shows the monitor's back, not its screen.
     pub(super) screen_idle: f32,
 }
 
-/// How dark the room has to get before each desk fixture reaches full strength.
-///
-/// Both scale with `darkness` (the INTERIOR illuminance, not a clock), so the
-/// screens read strongest exactly when the desk ceiling pools go out. Neither
-/// vanishes by day: an office lit through one window band stays dim enough at
-/// noon that a powered screen still shows.
+/// Scaled by `darkness` — the INTERIOR illuminance, not a clock — so the screens
+/// peak exactly as the desk ceiling pools go out.
 fn desk_light(facing: crate::layout::Facing, darkness: f32) -> DeskLight {
     const SCREEN_IDLE_MAX: f32 = 0.55;
     const LAMP_MAX: f32 = 1.0;
@@ -814,10 +810,10 @@ fn desk_light(facing: crate::layout::Facing, darkness: f32) -> DeskLight {
     }
 }
 
-/// Desk cubicles — each carries its cabinet, lamp and screens as one z-unit.
-/// The desk sorts one row past its visual south row, just past the seated
-/// worker's feet, so the sitter stays visually behind it. Z is a VISUAL
-/// property: it tracks the sprite, not the blocked ground.
+/// Desk cubicles — each carries its cabinet + lamp + screens. The desk
+/// sorts one row past its visual south row, just past the seated worker's feet,
+/// so the sitter stays visually behind it. Z is a VISUAL property: it tracks
+/// the sprite, not the blocked ground.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
@@ -831,11 +827,7 @@ fn enqueue_desk_cubicles<'a>(
         let occupant = agents
             .iter()
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
-        // A screen lights only where the room can SEE one. A far-seated desk
-        // puts its occupant BEHIND the monitor, so what faces the viewer is the
-        // machine's back — `desk.sprite` draws it that way — and a glow there
-        // would be light leaking out of a case. Both the tool glow and the
-        // standby tint gate on the same fact, or the desk contradicts itself.
+        // A far-seated desk shows the monitor's BACK — a glow there would be light leaking out of a case.
         let facing = ctx.layout.desk_facing(local);
         let light = desk_light(facing, darkness);
         let screen_glow = occupant

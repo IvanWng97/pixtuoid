@@ -20,6 +20,7 @@ pub(super) use lighting::{
 pub(super) use sky::{
     beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
     sun_on_wall, time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
+    DAYLIGHT_FLOOR_LIFT, NIGHT_FLOOR_DIM,
 };
 
 use std::time::SystemTime;

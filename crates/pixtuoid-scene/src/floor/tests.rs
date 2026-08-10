@@ -580,6 +580,29 @@ fn transition_escapes_a_backward_clock_step() {
     );
 }
 
+/// The set of distinct colours painted inside a rect.
+///
+/// A full-pass test cannot compare against a theme colour by equality: the
+/// foreground's day/night wash blends every drawable, so the exact RGB a painter
+/// wrote never reaches the buffer. Callers compare two such sets — the same rect
+/// on a desk that should have the piece against one that should not — so neither
+/// side has to predict what the wash will do.
+fn palette_in(
+    buf: &pixtuoid_core::sprite::RgbBuffer,
+    x0: u16,
+    y0: u16,
+    w: u16,
+    h: u16,
+) -> std::collections::HashSet<(u8, u8, u8)> {
+    (y0..(y0 + h).min(buf.height()))
+        .flat_map(|y| (x0..(x0 + w).min(buf.width())).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            let c = buf.get(x, y);
+            (c.r, c.g, c.b)
+        })
+        .collect()
+}
+
 #[test]
 fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
@@ -616,16 +639,45 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         },
     )
     .expect("layout");
-    let ember = crate::pixel_painter::FLAME_DEEP;
-    let tip = crate::pixel_painter::FLAME_TIP;
-    let count = |c| {
-        (0..buf.height())
-            .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
-            .filter(|&(x, y)| buf.get(x, y) == c)
-            .count()
-    };
-    assert!(count(ember) > 0, "ember hair must survive the full pass");
-    assert!(count(tip) > 0, "flame tips must survive the full pass");
+    // Against the SAME scene with the crown's inputs cleared: the foreground's
+    // day/night wash blends every drawable, so the crown's authored RGB never
+    // reaches the buffer and an equality probe pins nothing. What must survive
+    // the full pass is that the crown CHANGES the frame.
+    let mut plain = scene.clone();
+    let slot = plain.agents.values_mut().next().expect("one agent");
+    slot.model = None;
+    slot.effort = None;
+    let mut fctx2 = FloorCtx::new();
+    let mut buf2 = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+    let mut coffee2 = CoffeeState::new();
+    let mut chitchat2 = HashMap::new();
+    render_floor(
+        &mut fctx2,
+        &mut buf2,
+        &mut coffee2,
+        &mut chitchat2,
+        FrameInputs {
+            scene: &plain,
+            pack: &pack,
+            theme,
+            now,
+            size: Size { w: 192, h: 160 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        },
+    )
+    .expect("layout");
+    let differing = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != buf2.get(x, y))
+        .count();
+    assert!(
+        differing > 0,
+        "the flame crown must change the frame — a top-tier agent rendered \
+         byte-identical to a model-less one"
+    );
 }
 
 #[test]
@@ -1019,15 +1071,91 @@ fn every_north_facing_desk_keeps_its_chair_with_nobody_in_it() {
     const CHAIR_W: u16 = 8;
     const CHAIR_H: u16 = 5;
     const CHAIR_TOP_DY: u16 = 6;
+    let south: Vec<_> = layout
+        .home_desks
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| {
+            layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(*i))
+                != crate::layout::Facing::North
+        })
+        .map(|(_, &d)| d)
+        .collect();
+    let chairless = south
+        .first()
+        .map(|&d| {
+            let seat =
+                crate::pixel_painter::seated_anchor_for(d, CHAIR_W, crate::layout::Facing::North);
+            palette_in(buf, seat.x, d.y + CHAIR_TOP_DY, CHAIR_W, CHAIR_H)
+        })
+        .expect("the fixture has a south-facing desk to contrast against");
     for d in north {
         let seat =
             crate::pixel_painter::seated_anchor_for(d, CHAIR_W, crate::layout::Facing::North);
-        let found = (d.y + CHAIR_TOP_DY..d.y + CHAIR_TOP_DY + CHAIR_H).any(|y| {
-            (seat.x..seat.x + CHAIR_W).any(|x| buf.get(x, y) == theme.furniture.chair_trim)
-        });
+        // Compared against the SAME rect on a SOUTH-facing desk, which by
+        // contract has no chair — same wash, same furniture, same rows, so the
+        // only difference is the chair itself.
+        let here = palette_in(buf, seat.x, d.y + CHAIR_TOP_DY, CHAIR_W, CHAIR_H);
         assert!(
-            found,
-            "north desk {d:?}: no chair in its occupant's own column"
+            here != chairless,
+            "north desk {d:?}: its occupant's column is byte-identical to a \
+             south desk's, which has no chair — none was painted"
         );
     }
+}
+
+#[test]
+fn the_foreground_layer_is_lit_by_the_clock() {
+    // The day/night overlays sweep the floor band BEFORE the drawables paint, so
+    // every enqueued piece — desks, appliances, plants, wall decor, characters,
+    // chairs, partitions — carried no time-of-day term at all. Measured at the
+    // whole LAYER rather than one piece: the paint loop is the shared seam, so a
+    // new DrawableKind inherits this without touching the test.
+    let render = |secs: u64| {
+        let pack = crate::embedded_pack::test_default_pack();
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(secs);
+        let scene = make_scene(6, 8);
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        render_floor(
+            &mut fctx,
+            &mut buf,
+            &mut coffee,
+            &mut chitchat,
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 192, h: 160 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        buf
+    };
+    // 1970-01-01 noon and midnight UTC — the clock the sky model reads.
+    let (noon, night) = (render(12 * 3600), render(0));
+    let (w, h) = (noon.width(), noon.height());
+    let (mut same, mut total) = (0u32, 0u32);
+    for y in (h * 30 / 100)..(h * 92 / 100) {
+        for x in 0..w {
+            total += 1;
+            if noon.get(x, y) == night.get(x, y) {
+                same += 1;
+            }
+        }
+    }
+    let frozen = 100.0 * f64::from(same) / f64::from(total);
+    assert!(
+        frozen < 12.0,
+        "{frozen:.1}% of the interior is byte-identical at noon and midnight — the \
+         foreground layer is not lit by the clock"
+    );
 }

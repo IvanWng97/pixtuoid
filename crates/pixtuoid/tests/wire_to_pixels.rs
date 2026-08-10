@@ -413,7 +413,10 @@ fn lobster_px(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
     let mut n = 0;
     for y in 0..buf.height() {
         for x in 0..buf.width() {
-            if reds.contains(&buf.get(x, y)) {
+            if reds
+                .iter()
+                .any(|&r| pixtuoid_scene::pixel_painter::reads_as(buf.get(x, y), r))
+            {
                 n += 1;
             }
         }

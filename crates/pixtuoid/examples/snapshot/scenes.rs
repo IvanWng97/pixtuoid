@@ -166,22 +166,8 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
         "gallery exemplars must span all four tiers"
     );
     use std::time::Duration as D;
-    // (label, state, since_event, since_entry).
-    //
-    // The two times are SEPARATE and both load-bearing, which the old single
-    // `age` could not express — it set `created_at == last_event_at`, and
-    // `in_thinking_window` gates on `last_event_at > created_at`, so NO agent
-    // could ever reach `SeatedThinking` however the age was tuned. The same
-    // single value also left every tool-running agent inside
-    // `ENTRY_ANIMATION_MS` (4 s), so `SeatedTyping` never rendered either.
-    // Between them the gallery never once showed a desk actually being WORKED
-    // at — the product's two central poses, and the screen glow that rides
-    // them, were invisible to every rendered doc image.
-    //
-    // `since_entry` > 4 s puts an agent past its entry walk; `since_entry` >
-    // `since_event` makes it count as having been active. The walkers below
-    // keep a short `since_entry` deliberately: the entry walk is what gives the
-    // gallery its motion.
+    // (label, state, since_event, since_entry) — the two must DIFFER, or
+    // `in_thinking_window` and `ENTRY_ANIMATION_MS` between them bar both seated poses.
     let agents: [(&str, ActivityState, D, D); 12] = [
         // Desk 0 is a FAR-seated desk, so this one also demonstrates the
         // screen staying dark behind a monitor the room only sees the back of.
@@ -699,19 +685,22 @@ pub(crate) fn anim_scene(
         match pick {
             Some(i) => {
                 let d = l.home_desks[i];
-                eprintln!("ANIM target=desk buf_pos≈({}, {}) [home desk {i}]", d.x, d.y);
+                eprintln!(
+                    "ANIM target=desk buf_pos≈({}, {}) [home desk {i}]",
+                    d.x, d.y
+                );
                 i
             }
             None => panic!(
-                "no home desk faces {:?} at {buf_w}x{buf_h} seed {floor_seed} — staging                  another one would render a pose you did not ask for",
+                "no home desk faces {:?} at {buf_w}x{buf_h} seed {floor_seed} — staging \
+                 another one would render a pose you did not ask for",
                 want_facing.expect("a None filter matches desk 0")
             ),
         }
     } else {
         0
     };
-    if target == "desk" {
-    } else if let Some(&i) = target_idxs.first() {
+    if let Some(&i) = target_idxs.first().filter(|_| target != "desk") {
         let p = l.waypoints[i].pos;
         eprintln!(
             "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",

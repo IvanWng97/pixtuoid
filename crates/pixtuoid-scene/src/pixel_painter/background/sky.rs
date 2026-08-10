@@ -184,6 +184,8 @@ pub(in crate::pixel_painter) struct TimeOfDayLook {
     pub(in crate::pixel_painter) spill_strength: f32,
     pub(in crate::pixel_painter) spill_slant: f32,
     pub(in crate::pixel_painter) darkness: f32,
+    /// The cast this hour + weather puts on a LIT OBJECT, as `(tint, strength)`.
+    pub(in crate::pixel_painter) object_wash: (Rgb, f32),
 }
 
 pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme) -> TimeOfDayLook {
@@ -221,12 +223,25 @@ pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme)
         Body::Moon => (0.0, 0.0),
     };
 
+    // Below the floor's own share: a sprite carries art contrast a full-strength pass would swallow.
+    const OBJECT_WASH_SHARE: f32 = 0.55;
+    let darkness = 1.0 - exterior;
+    let object_wash = if interior >= darkness {
+        (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE)
+    } else {
+        (
+            theme.lighting.night_tint,
+            darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
+        )
+    };
+
     TimeOfDayLook {
         glass_a,
         glass_b,
         spill_strength,
         spill_slant,
-        darkness: 1.0 - exterior,
+        darkness,
+        object_wash,
     }
 }
 
@@ -314,18 +329,22 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
 /// and the model's only positive day term (without it a clear noon leaves the
 /// floor at its plain brownish base). Sun enters regardless of occupancy, so —
 /// unlike the dim — this is NOT scaled by the empty-floor boost.
+/// THE dials for the interior's day/night swing — the floor overlays and `object_wash` all derive from these.
+pub(in crate::pixel_painter) const NIGHT_FLOOR_DIM: f32 = 0.45;
+pub(in crate::pixel_painter) const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
+
+const SUN_TINT: Rgb = Rgb {
+    r: 255,
+    g: 246,
+    b: 224,
+};
+
 pub(in crate::pixel_painter) fn daylight_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,
     bottom_y: u16,
     strength: f32,
 ) {
-    // Pale warm midday sunlight — theme-agnostic, since daylight is daylight.
-    const SUN_TINT: Rgb = Rgb {
-        r: 255,
-        g: 246,
-        b: 224,
-    };
     let s = strength.clamp(0.0, 0.40);
     blend_floor_band(buf, top_y, bottom_y, SUN_TINT, s);
 }

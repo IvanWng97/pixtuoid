@@ -241,6 +241,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         spill_strength: 0.8,
         spill_slant: 0.0,
         darkness: 0.2,
+        // Strength 0 — this fixture exercises the spill path, not the wash.
+        object_wash: (theme.lighting.night_tint, 0.0),
     };
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
