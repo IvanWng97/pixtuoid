@@ -64,11 +64,7 @@ pub(crate) fn hit_test_from_tui(
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // Through the painter's OWN seat anchor, not a second copy of its
-        // arithmetic: this used to re-derive `desk.y - 8`, which silently stopped
-        // matching the moment a desk could seat its occupant on the south side —
-        // the agent rendered where the painter put them and was hit-testable
-        // where this thought they were.
+        // The painter's OWN anchor: a south-facing desk seats off `desk.y - 8`.
         let a = pixtuoid_scene::pixel_painter::seated_anchor_for(
             desk,
             SPRITE_W,

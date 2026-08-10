@@ -127,11 +127,7 @@ pub struct LightingColors {
     pub ceiling_pool: Rgb,
     /// Lounge floor-lamp glow halo.
     pub floor_lamp_halo: Rgb,
-    /// Per-desk task-lamp light. WARM in every theme, deliberately unlike
-    /// [`Self::floor_lamp_halo`], which is each theme's own accent and is cool
-    /// in half of them. This one's whole job is the two-temperature night read
-    /// — warm task light against cold screen glass — so a cool value here
-    /// silently removes the contrast it exists to create.
+    /// Per-desk task-lamp light — WARM in every theme, or the night's warm-against-cold read is lost.
     pub desk_lamp: Rgb,
     /// Night-time interior darkening tint.
     pub night_tint: Rgb,
@@ -187,9 +183,7 @@ pub struct FurnitureColors {
 pub struct EffectColors {
     /// Lit monitor bezel on an active screen.
     pub monitor_frame_lit: Rgb,
-    /// A powered-but-quiet screen — every desk after dark, whether or not
-    /// anyone is at it. Distinct from [`Self::monitor_frame_lit`], which is the
-    /// BEZEL of a screen actively running a tool.
+    /// A powered-but-quiet screen's glass, on every desk after dark whether or not anyone is at it.
     pub monitor_idle: Rgb,
     /// Floating "z" of a sleeping agent.
     pub sleep_z: Rgb,

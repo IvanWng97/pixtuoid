@@ -134,10 +134,7 @@ fn paint_approach(buf: &mut RgbBuffer, layout: &Layout) {
     let desk_def = furniture_def(Furniture::Desk);
     for (i, desk) in layout.home_desks.iter().enumerate() {
         let chair = desk_walk_anchor_facing(*desk, layout.desk_facing(FloorLocalDeskIndex(i)));
-        // APPROACH first, SEAT last. The blobs are 3x3 and the approach cell can
-        // sit ONE pixel off the chair (a far seat lands on the very edge of the
-        // desk's routing pad), so whichever is painted second wins the chair
-        // cell — and the seat is the marker worth keeping.
+        // SEAT last: the 3x3 blobs overlap when the approach cell lands a pixel off the chair.
         for (dx, dy) in DIRS {
             if !desk_def.approach.allows(Facing::South, (dx, dy)) {
                 continue;

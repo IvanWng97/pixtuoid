@@ -806,22 +806,8 @@ fn paint_wall_decor(
     );
 }
 
-/// The row the cutaway paints `c` at.
-///
-/// Deliberately the sim's own anchor, with NO re-projection for a desk-seated
-/// pose. This used to force every occupant onto the desk's own row, because
-/// back then the sim seated everyone on the FAR side and the ratified reference
-/// wanted them near. The seat side is now a per-desk layout fact
-/// (`layout.desk_facings`, read through `seated_anchor_facing`), so an override
-/// here would make the two profiles disagree about which side of their desk half
-/// the office sits on — the one thing "one simulation, two projections" cannot
-/// mean. The near-side anchor the override hardcoded is exactly what the layout
-/// now produces for a back-turned desk, so nothing was lost; a viewer-facing
-/// desk gains the raise it always had in classic, and both gain the breath bob
-/// the hardcoded row used to flatten.
-///
-/// `seat_desk` still earns its place — the chair and the suppressed contact
-/// shadow both key on it. It is only the ANCHOR that stopped diverging.
+/// NO re-projection: the seat side is a per-desk layout fact, so an override here would make the two
+/// profiles disagree about which side of its desk half the office sits on.
 fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout::Point {
     c.anchor
 }
@@ -1191,9 +1177,6 @@ mod tests {
     /// it actually blits. The occupant's chair lands south of the desk's front
     /// face, so the ratified "head over the surface" reading falls out of the
     /// shared convention — the desk needs no divergence of its own.
-    ///
-    /// One seat, near-side. The both-sides case is
-    /// `both_profiles_seat_an_occupant_on_the_side_the_layout_chose`.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();
@@ -1294,15 +1277,6 @@ mod tests {
     }
 
     /// The seat side is the LAYOUT's to decide, and both profiles read it.
-    ///
-    /// The cutaway used to re-project every desk-seated pose onto the desk's own
-    /// row, because back then the sim seated everyone on the far side and this
-    /// profile wanted them near. Now that a pod's two rows genuinely sit on
-    /// opposite sides, that override would put half the office on a different
-    /// side of its desk in each profile — the one thing "one simulation, two
-    /// projections" cannot mean. The row it hardcoded is exactly what the shared
-    /// anchor produces for a back-turned desk, which is why the override could be
-    /// deleted rather than made facing-aware.
     #[test]
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
         use crate::layout::{Facing, CHARACTER_SPRITE_W};
@@ -1369,9 +1343,6 @@ mod tests {
         crate::embedded_pack::load_sprite_pack(None).expect("the embedded pack loads")
     }
 
-    /// Where a BACK-TURNED desk seats its occupant — the shared anchor, not a
-    /// cutaway-local one, which is the whole point of these sort tests: they
-    /// check depth against the row the sim actually hands this profile.
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
         crate::pixel_painter::seated_anchor_for(
             desk,

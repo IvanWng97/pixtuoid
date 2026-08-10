@@ -1624,26 +1624,11 @@ fn entry_walk_coordinates_are_continuous() {
 
 /// Whether a chair is BLOCKED follows from where the facing puts it relative to
 /// the desk's stamped ground — it is not a property every chair has.
-///
-/// This assertion used to read `!is_walkable(chair)` unconditionally, which held
-/// only because every desk seated its occupant on the far side: that chair lands
-/// inside the desk's `OBSTACLE_PAD_PX` routing pad with ONE pixel of slack. A
-/// near-side chair sits past the desk's south base, on open floor. The
-/// difference is behavioural — A\* aimed at a BLOCKED goal snaps to the nearest
-/// walkable cell (possibly the monitor side), which is the whole reason
-/// [`desk_leg_endpoint`] routes to an approach cell and glides — so the pad's
-/// coverage is pinned against the same table `mask.rs` stamps from, on both axes,
-/// rather than as a boolean that silently means "far seat".
-///
-/// The other two assertions are cheap contract nets, not discoveries:
-/// `first_reachable_on_side` only ever returns a walkable cell at distance ≥ 1,
-/// so they hold by construction unless that contract changes.
 #[test]
 fn desk_approach_cell_is_never_inside_the_blocked_desk() {
     use crate::layout::{furniture_def, Facing, Furniture, OBSTACLE_PAD_PX};
     let l = layout();
-    // The ONE table `mask::stamp_ground` reads — the aligns resolve the blocked
-    // rect inside the visual box, so this can't drift when the sprite is resized.
+    // The ONE table `mask::stamp_ground` reads, so this can't drift when the sprite is resized.
     let def = furniture_def(Furniture::Desk);
     let fp = def.footprint.expect("the desk carries a static footprint");
     let (gx, gy) = (
@@ -1658,8 +1643,6 @@ fn desk_approach_cell_is_never_inside_the_blocked_desk() {
             facings.push(facing);
         }
         let chair = desk_walk_anchor_facing(desk, facing);
-        // The blocked ground + routing pad, on BOTH axes, so an east/west seat is
-        // judged by the same rect a north/south one is.
         let (x0, y0) = (desk.x + gx, desk.y + gy);
         let in_pad = (x0.saturating_sub(OBSTACLE_PAD_PX)..x0 + fp.w + OBSTACLE_PAD_PX)
             .contains(&chair.x)

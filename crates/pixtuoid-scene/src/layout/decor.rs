@@ -788,39 +788,17 @@ pub const WALKING_Y_OFF: u16 = 12;
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
-/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)` — the agent settles
-/// exactly onto its seat with no arrival pop, just clear of the desk obstacle.
-///
-/// That identity is now STRUCTURAL: `seated_anchor` derives itself from this
-/// offset rather than restating the difference, so the two cannot drift. It used
-/// to be two independent literals held together by a test.
+/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
+/// — `seated_anchor` derives from this offset, so the two cannot drift.
 pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
-/// The walk-anchor offset for a desk whose occupant sits NORTH of it, facing the
-/// viewer — the only arrangement the office had before desks carried a facing.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
-/// The walk-anchor offset for a desk whose occupant sits on the NEAR side, back
-/// to the viewer.
-///
-/// DERIVED, not chosen: at `WALKING_Y_OFF` the occupant's sprite TOP lands on the
-/// desk's own row, so they overlap the desk body's lower half and their z-key —
-/// which is this chair row — puts them in front of it. That is a statable
-/// geometric fact; a free constant here is how a value that moved the occupant
-/// ONE pixel once passed for a side swap.
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
-// A north seat's walk anchor must clear `WALKING_Y_OFF`, or `seated_anchor_facing`'s
-// `saturating_sub` clamps and the desk chair's z-key tie with its occupant breaks —
-// the chair then paints UNDER them with every render test green.
+// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the chair paints UNDER its occupant.
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
-/// Where an agent walks to/from for its home `desk`, given which way that desk
-/// seats its occupant.
-///
-/// Desks are only ever laid out along the N-S axis, so `East`/`West` are not
-/// reachable; they take the viewer-facing arrangement rather than a panic,
-/// because a layout bug should render a slightly wrong office, not kill the
-/// render thread.
+/// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
 pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     let y_off = match facing {
         Facing::North => DESK_WALK_Y_OFF_BACK,
@@ -832,21 +810,7 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
     }
 }
 
-/// Where a desk's ceiling tube pools its light, given which way that desk seats
-/// its occupant.
-///
-/// Derived from the SEAT, not the desk origin: the pool exists to light the
-/// WORKSTATION, and which side of the desk that is became a per-desk fact the
-/// day desks grew a facing. It resolves to the occupant's own vertical middle —
-/// the walk anchor is their feet, so half a standing height above it is their
-/// centre.
-///
-/// For a viewer-facing seat that is `desk.y - 2`, byte-identical to the
-/// hardcoded north lift it replaced, so the historical look is untouched. A
-/// back-turned seat moves the light SOUTH onto the person instead of leaving it
-/// over the empty floor behind them, which is what it had been doing since the
-/// pod grew a second facing. East/west follows for free, on both axes, because
-/// the walk anchor is already a function of facing — no second site to remember.
+/// Where a desk's ceiling tube pools its light — derived from the SEAT, not the desk origin, since the facing places the workstation.
 pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
     let walk = desk_walk_anchor_facing(desk, facing);
     Point {
@@ -1296,14 +1260,9 @@ mod tests {
         }
     }
 
-    /// The claim the doc comment makes, proven rather than asserted in prose:
-    /// deriving the pool from the seat reproduces the hardcoded north lift
-    /// EXACTLY for a viewer-facing desk, so no existing render moved — while a
-    /// back-turned desk's light finally follows its occupant south instead of
-    /// staying over the empty floor behind them.
     #[test]
     fn the_desk_light_follows_the_seat_and_leaves_a_far_seat_where_it_was() {
-        // The lift and centring the pool used before it read the facing.
+        // The lift the pool hardcoded before it read the facing.
         const HISTORICAL_CY_LIFT: u16 = 2;
         let desk = Point { x: 40, y: 30 };
 

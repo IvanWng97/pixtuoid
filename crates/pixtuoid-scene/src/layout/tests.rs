@@ -329,15 +329,6 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
     // `'partial_y` loop MID-ROW. A smaller num_agents caps in the earlier full-pod
     // phase instead and never reaches it.
-    //
-    // They are a function of BOTH terms `pod_stride_y` prices — `DESK_H` and
-    // `INTRA_POD_GAP_Y` — so either one moves them, and the caps below are the
-    // SETUP that reaches the mid-row break, never the property under test.
-    // Deepening the desk shrank capacity (88x120 fell from 8 to 6, duplicating
-    // 88x108, so 88x125 took the cap-8 slot); tightening the gap to 6 gave it
-    // back and then some, so the three slots slide down the height axis to keep
-    // the SAME three caps. Re-derive with the same predicate — bottom row of 2,
-    // and the cap-1 / cap split — rather than nudging the numbers until green.
     for (w, h, cap) in [(88u16, 100u16, 6usize), (88, 125, 8), (88, 160, 10)] {
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(
@@ -546,23 +537,13 @@ fn compute_places_all_waypoint_kinds() {
 #[test]
 fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
     // A pod's back row faces the front row across the thin INTRA_POD_GAP_Y, whose
-    // edge cell sits in a coarse routing cell that straddles the desk and is
-    // ReachSet-rejected — only the deeper reachable-aware scan finds it. Probing
-    // from far off the desk's FAR side makes `approach_point` prefer that side
-    // whenever it has a reachable cell, so landing there proves the scan got in.
-    //
-    // The far side follows the desk's own facing: a viewer-facing desk seats its
-    // occupant to the north, a back-turned one to the south. Reading it from the
-    // layout rather than assuming `South` is what keeps this test measuring
-    // production — asserting a NORTH approach for every desk stopped being true
-    // the moment a pod's back row turned around.
+    // edge cell sits in a ReachSet-rejected coarse cell straddling the desk — only
+    // the deeper reachable-aware scan finds it, and only a far-side probe prefers it.
     use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
-        // Without this the whole loop is vacuous: feeding it one facing makes the
-        // chair, the probe and the assertion agree under ANY assumption, so it
-        // passes on an all-`South` layout that never exercises the tight side at
-        // all. This is the one line that ties it to what `compute` actually built.
+        // Without this the loop is vacuous: chair, probe and assertion agree under
+        // any single facing, so an all-`South` layout would pass it untouched.
         assert!(
             l.desk_facings.contains(&Facing::North),
             "{w}x{h}: no desk faces north — the pod back row never turned around, \
@@ -595,11 +576,7 @@ fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
                 a, chair,
                 "desk {desk:?} ({facing:?}): no reachable approach"
             );
-            // The contract is the ROTATED approach set, not one specific side:
-            // E/W stay allowed either way, so a west cell at the chair's own row
-            // is a legitimate answer. What must never happen is an approach on
-            // the side the occupant sits on — that is the walk-through-the-desk
-            // path `DESK_APPROACH` excludes.
+            // The contract is the ROTATED approach set: an E/W cell at the chair's row is legitimate.
             match facing {
                 Facing::North => assert!(
                     a.y >= chair.y,

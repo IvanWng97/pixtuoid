@@ -381,8 +381,7 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
 ];
 
 /// Character animation names a pack MAY omit — the renderer degrades
-/// gracefully (`side_seated` and `seated_back` both fall back to the front
-/// `seated` pose).
+/// gracefully (`side_seated`/`seated_back` fall back to the front `seated`).
 pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
     "walking_coffee",
     "side_seated",

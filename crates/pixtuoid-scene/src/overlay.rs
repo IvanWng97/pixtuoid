@@ -25,20 +25,8 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
-/// Buffer rows a badge rises by when its agent sits at a desk that raises its
-/// monitor above their head.
-///
-/// A badge anchors on the sprite TOP, which for a back-turned seat is the head
-/// at `desk.y` — exactly where `desk_north.sprite` puts the screen. Without this
-/// the label paints over the display the raised art exists to reveal.
-///
-/// It is a COPY of that sprite's extra height rather than a derivation:
-/// [`build_overlay`] takes no `Pack` (three painters share the signature and two
-/// of them have no reason to hold one), so the height difference is not
-/// reachable here. Rounded UP to an even number of rows because a half-block
-/// painter divides this by two to get a cell — an odd lift can round back onto
-/// the screen. `desk_north_art_fits_under_the_label_lift` pins both properties
-/// against the embedded pack, which is what keeps the copies honest.
+/// A COPY of `desk_north.sprite`'s extra height ([`build_overlay`] takes no `Pack`), rounded UP to
+/// an even row count — a half-block painter halves it, and an odd lift rounds back onto the screen.
 const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
 
 /// Activity-derived label tone — backend-agnostic.
@@ -81,12 +69,8 @@ pub struct LabelElement {
     pub hovered: bool,
 }
 
-/// Raise a badge clear of a raised monitor, when this agent is the one sitting
-/// under it.
-///
-/// Gated on the anchor MATCHING the desk's seated anchor rather than on the pose:
-/// the same agent walking past their own desk gets the same `Facing::North` from
-/// the layout, and lifting their badge mid-corridor would detach it from them.
+/// Gated on the anchor MATCHING the desk's seated anchor, not on the pose: an agent walking past
+/// their own desk still reads `Facing::North`, and lifting their badge mid-corridor detaches it.
 fn lift_over_raised_monitor(
     anchor: Point,
     agent: &pixtuoid_core::AgentSlot,
@@ -408,11 +392,6 @@ mod tests {
     }
 
     /// The one copied number in this file, checked against the art it copies.
-    ///
-    /// Two properties, both load-bearing: the lift must COVER the raised art's
-    /// extra height (or the badge still lands on the screen), and it must be
-    /// EVEN, because a half-block painter divides the anchor by two to get a
-    /// terminal cell and an odd lift can round straight back down onto it.
     #[test]
     fn desk_north_art_fits_under_the_label_lift() {
         let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");

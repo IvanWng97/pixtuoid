@@ -220,7 +220,7 @@ impl SeatView {
     /// (`sim::resolve_characters`) AND its label twin
     /// (`anchors::character_anchor`) derive the anchor from, so the badge can
     /// never float above the sitter. The home-DESK sitter is NOT covered here —
-    /// it anchors via `seated_anchor_facing(desk, w, layout.desk_facing_at(desk))`.
+    /// it anchors via `seated_anchor_facing(desk, w, facing)`.
     pub(super) fn waypoint_render_anchor(self, stand: Point, sprite_w: u16) -> (Point, u16) {
         // UPRIGHT height REUSES the offset `waypoint_anchor` subtracts, so the
         // obstacle z-key `anchor.y + sprite_h` recovers the feet row BY
@@ -259,12 +259,6 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
             })
         })
         .or_else(|| {
-            // The desk arm reads the desk's OWN facing rather than
-            // `seated_foot_cell`'s viewer-facing default: a back-turned desk
-            // seats its occupant a different distance south, and matching on the
-            // default cell simply never recognised those chairs — the settle
-            // silently lost its seat view. The z-key follows the same anchor, so
-            // it cannot disagree with where the sprite lands.
             layout.home_desks.iter().enumerate().find_map(|(i, &desk)| {
                 let facing = layout.desk_facing(FloorLocalDeskIndex(i));
                 (crate::layout::desk_walk_anchor_facing(desk, facing) == cell).then(|| {
@@ -273,12 +267,7 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
                     } else {
                         SeatView::Front
                     };
-                    // The z-key IS the chair row, derived from the chair rather
-                    // than the desk so it moves with the seat: a viewer-facing
-                    // chair keeps a key below the desk furniture's, so that
-                    // sitter and its sit-down glide sort BEHIND the monitor; a
-                    // back-turned chair is further south and its key follows,
-                    // which is what puts that occupant IN FRONT of their desk.
+                    // The z-key IS the chair row: a viewer-facing sitter therefore sorts BEHIND the monitor, a back-turned one IN FRONT.
                     (view, cell.y)
                 })
             })

@@ -10,30 +10,12 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-/// The back view a desk occupant is drawn in when their desk seats them facing
-/// away from the viewer.
 const SEATED_BACK: &str = "seated_back";
 
-/// The back view of each seated pose that ships one.
-///
-/// A TABLE, not a `format!("{anim}_back")`, because `CharacterPlacement.anim_name`
-/// is `&'static str` and a formatted name cannot be. Adding a pose's back view is
-/// this row plus its sprite; nothing else changes.
+/// A table, not `format!("{anim}_back")`, because `anim_name` is `&'static str`.
 const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing", "typing_back")];
 
-/// Which animation a desk occupant is drawn in, given the way their desk seats
-/// them.
-///
-/// Three rungs, and the middle one is why this is not a bare lookup: a pose with
-/// its OWN back view keeps its animation (a back-turned typist still types), a
-/// pose without one falls back to the STILL back view rather than showing a
-/// face — an occupant with their back to the room must never render front-on —
-/// and a pack with no back art at all keeps its front frames, the same per-piece
-/// degrade `side_seated` already gets.
-///
-/// The fallback rung is a real cost, not a formality: a back-turned sleeper
-/// currently renders as a still sitter, losing the head-down read. It buys the
-/// invariant that orientation is never wrong, which is the more visible error.
+/// A pose with no back view of its own falls back to the still one rather than showing a face.
 fn seated_anim(anim: &'static str, facing: crate::layout::Facing, pack: &Pack) -> &'static str {
     if facing != crate::layout::Facing::North {
         return anim;
@@ -114,16 +96,7 @@ pub struct CharacterPlacement {
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing).
     ///
-    /// The desk is carried because `anchor` is already PROJECTED and a second
-    /// profile cannot recover the desk from it — it needs the desk to draw the
-    /// things that belong to a workstation rather than to a body. The cutaway
-    /// keys its chair and its suppressed contact shadow on this.
-    ///
-    /// It is deliberately NOT how a profile decides which side of the desk the
-    /// occupant sits on: that is `layout.desk_facings`, and both profiles read it
-    /// through `seated_anchor_facing`, so `anchor` already carries the answer.
-    /// The cutaway re-projected onto the desk's own row until a pod's two rows
-    /// started facing opposite ways and the override began contradicting the sim.
+    /// The occupant's desk, carried because `anchor` is already PROJECTED and cannot yield it back.
     pub seat_desk: Option<Point>,
 }
 

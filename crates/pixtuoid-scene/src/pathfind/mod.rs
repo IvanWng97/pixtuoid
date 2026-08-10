@@ -335,15 +335,7 @@ pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     if mask.is_walkable(centre.x, centre.y) {
         return Some(centre);
     }
-    // The snap works on the COARSE grid, where a cell counts as walkable at
-    // `COARSE_CELL_WALKABLE_MIN` of its 16 pixels open — so its CENTRE can be
-    // one of the blocked ones, and this returned a point that fails the very
-    // predicate its name promises. Callers believed it: the office pet took the
-    // result as its rest pose and sat inside a desk.
-    //
-    // Surfaced while tightening `INTRA_POD_GAP_Y`, non-monotonically (6 and 8
-    // clean, 5 and 7 not) — denser obstacles make a half-blocked cell the
-    // nearest one more often, but the defect predates any of it.
+    // A cell passes at `COARSE_CELL_WALKABLE_MIN` open pixels, so its centre can be a blocked one.
     let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
     (y0..y0 + COARSE_CELL_SIZE)
         .flat_map(|y| (x0..x0 + COARSE_CELL_SIZE).map(move |x| Point { x, y }))

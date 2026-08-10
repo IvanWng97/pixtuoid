@@ -112,9 +112,8 @@ const EXIT_BUDGET_MARGIN_MS: u64 = 300;
 /// degenerate layout where every allowed side is walled off.
 pub(crate) fn desk_approach_cell(desk: Point, layout: &Layout) -> Option<Point> {
     use crate::layout::{desk_walk_anchor_facing, Furniture};
-    // The desk's OWN facing, not a constant: `ApproachSides` is canonical
-    // (facing-South) and rotated by this, so a back-turned desk is approached
-    // from its south front instead of walled off there.
+    // The desk's OWN facing, not a constant: `ApproachSides` is canonical (facing-South) and
+    // rotated by it, so a back-turned desk is approached from its south front, not walled off there.
     let facing = layout.desk_facing_at(desk);
     let chair = desk_walk_anchor_facing(desk, facing);
     let cell = layout.approach_point(Furniture::Desk, chair, chair, facing);

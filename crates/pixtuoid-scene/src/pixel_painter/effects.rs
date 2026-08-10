@@ -8,19 +8,7 @@ use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
-/// A powered-but-quiet screen, painted on EVERY desk rather than only occupied
-/// ones.
-///
-/// The office reads by screen light after dark — that is the whole reason the
-/// desk ceiling pools dim (`DESK_POOL_NIGHT_KEEP`) — and a grid of black
-/// rectangles reads as "everyone went home", not as "nobody is at this desk
-/// right now". The caller scales `strength` by the interior darkness, so this
-/// is strongest where the room needs it and faintest in full daylight; see
-/// there for why it does not go to zero by day.
-///
-/// Deliberately NOT [`paint_screen_glow`] at low alpha: that one lights the
-/// BEZEL and runs a scanline, both of which say "a tool is running here". A
-/// standby screen must not claim activity, so it tints the glass only.
+/// Standby tint on EVERY desk's glass — a grid of black rectangles reads as "everyone went home".
 pub(super) fn paint_screen_idle(
     buf: &mut RgbBuffer,
     desk_x: u16,
@@ -38,24 +26,15 @@ pub(super) fn paint_screen_idle(
     }
 }
 
-/// The screen's GLASS columns, offset from the desk sprite's left edge — the
-/// `j` cells between the bezel's frame columns. Shared by the idle tint and the
-/// active glow so the two can never light different pixels.
+/// Glass columns offset from the desk sprite's left edge — shared so idle and glow can't diverge.
 const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 
-/// The monitor's CASING rows, offset from the desk sprite's TOP row — both `M`
-/// rows above the glass in `desk.sprite` / `desk_north.sprite`. A lit screen
-/// lights the whole casing: lighting only the lower row left the sprite's top
-/// row at its raw dark `M`, reading as a black bar capping the glow.
+/// Casing rows offset from the sprite TOP; lighting only the lower one leaves a black bar capping the glow.
 const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
-/// The glass rows, offset from the same sprite top as [`SCREEN_CASING_ROWS`].
 const SCREEN_GLASS_ROWS: std::ops::RangeInclusive<u16> = 2..=3;
-/// The bezel row UNDER the glass — the sprite's `n` shadow row.
 const SCREEN_CHIN_ROW: u16 = 4;
 
-/// `screen_top` is the buffer row of the monitor's first frame row, NOT
-/// `desk.y`: a raised-monitor desk variant puts the screen several rows higher,
-/// and the caller derives this from the blit anchor so the two cannot disagree.
+/// `sprite_top` is the monitor's first frame row, NOT `desk.y` — a raised monitor sits rows higher.
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
@@ -64,18 +43,7 @@ pub(super) fn paint_screen_glow(
     tint: Rgb,
     theme: &Theme,
 ) {
-    // The casing carries the screen's colour, not just its light: a lit bezel in
-    // the theme's own cool grey read as a metal plate capping the glow. Blended
-    // toward the tool tint the whole monitor reads as one lit unit — and the
-    // casing becomes a second surface the tool colour rides, so a row of desks
-    // separates by tool at twice the area.
-    //
-    // 0.35 keeps a step between casing and glass; at 0.50 the two merge and the
-    // monitor loses its top edge. The effect is NOT hue-uniform, because
-    // `monitor_frame_lit` is itself cool: a cool tint keeps most of its
-    // saturation here, a warm one is half neutralised. That asymmetry is the
-    // theme colour's, not this blend's — neutralising it means retuning
-    // `monitor_frame_lit`, which the chin row shares.
+    // Untinted, the theme's cool `monitor_frame_lit` read as a metal plate capping the glow.
     const CASING_TINT: f32 = 0.35;
     let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
     let glow = tint;
@@ -94,8 +62,6 @@ pub(super) fn paint_screen_glow(
             put(buf, dx, dy, frame_lit);
         }
     }
-    // The glass is two rows and they are lit differently — the upper catches the
-    // brighter wash — so this reads the range's ends rather than iterating it.
     let (glass_upper, glass_lower) = (*SCREEN_GLASS_ROWS.start(), *SCREEN_GLASS_ROWS.end());
     for dx in SCREEN_GLASS_COLS {
         put(buf, dx, glass_upper, glow_bright);

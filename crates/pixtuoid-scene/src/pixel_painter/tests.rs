@@ -724,10 +724,8 @@ fn desk_walk_anchor_settles_exactly_on_the_seat() {
         Point { x: 7, y: 5 }, // near-origin: saturating_sub edge
     ] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            // Both facings, but only the X axis has teeth here: on Y both sides
-            // reduce to the same `saturating_sub(WALKING_Y_OFF)`, so facing
-            // cancels. A back seat drifting in Y is caught by
-            // `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
+            // Only X has teeth — on Y both facings reduce to the same `saturating_sub`.
+            // Y drift: `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
             for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
                 assert_eq!(
                     walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),
@@ -880,9 +878,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
-    // The view follows the desk's own facing — a back-turned desk settles as
-    // `Back`. Pinning `Front` unconditionally would assert the pre-facing world
-    // and pass only while every desk happened to face the viewer.
+    // Pinning `Front` unconditionally would assert the pre-facing world.
     let want_view = if l.desk_facing_at(desk) == crate::layout::Facing::North {
         SeatView::Back
     } else {
@@ -894,11 +890,7 @@ fn settle_seat_view_recognizes_the_home_desk() {
         "the desk chair {chair:?} must settle as {want_view:?} at its own chair row"
     );
     // `seated_foot_cell` is facing-BLIND — it takes a kind and a position, so its
-    // desk arm can only answer for the viewer-facing seat. `settle_seat_view` no
-    // longer routes desks through it for exactly that reason; the remaining desk
-    // caller is none, and the waypoint callers are unaffected. Pinned at the
-    // default so the limitation is visible rather than inferred from a
-    // coincidence.
+    // desk arm can only answer for the viewer-facing seat.
     assert_eq!(
         crate::layout::seated_foot_cell(Furniture::Desk, desk),
         Some(crate::layout::desk_walk_anchor_facing(
@@ -1026,14 +1018,8 @@ fn desk_occupant_always_sorts_behind_its_desk() {
 }
 
 /// The geometry table's desk height must match the ART's, or the z-key sorts on
-/// a south row the sprite does not actually reach.
-///
-/// This used to assert the literal `7` while calling itself `(DESK_H+2)`, so it
-/// was pinning a NUMBER, not a relationship — deepening the desk by a row moved
-/// both sides and it failed for the wrong reason. Against the sprite it is a
-/// real constraint: `desk` blits at `desk.y - 1` (its top row is the bezel,
-/// which overhangs north), so the rows it covers from `desk.y` down are
-/// `height - 1`, and that is what `visual.h` prices.
+/// a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
+/// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
 fn desk_z_key_is_the_visual_south() {
     let pack = crate::embedded_pack::test_default_pack();
@@ -2940,14 +2926,8 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     let mut owned = OwnedSimStores::new();
     let mut stores = owned.stores();
     let mut max_on_sofa = 0usize;
-    // A BUDGET, not part of the assertion. Three agents sharing one sofa is
-    // reached by random wander, so the step count only bounds how long we wait
-    // for the hash to line them up — and that depends on the geometry, since a
-    // desk's position sets each agent's wander origin and therefore its route.
-    // Tightening INTRA_POD_GAP_Y moved it past 6_000 while the BEHAVIOUR was
-    // unchanged (60_000 reached three immediately), so the old number was
-    // measuring the layout, not the claim. The loop breaks the moment it sees
-    // three, so a generous bound costs nothing on the passing path.
+    // A BUDGET, not part of the assertion: three-on-a-sofa is reached by random
+    // wander, whose route rides live desk positions.
     for step in 0..60_000u64 {
         let now = now0 + Duration::from_millis(250 * step);
         let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
@@ -3112,8 +3092,7 @@ fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
     );
     let mut desk_rows = std::collections::HashSet::new();
     for (i, ((pool, keep), desk)) in pools.iter().zip(&l.home_desks).enumerate() {
-        // Derived from the ONE authority rather than restating its arithmetic —
-        // `decor`'s own test pins what that authority computes.
+        // Derived from the ONE authority rather than restating its arithmetic.
         let want = crate::layout::desk_ceiling_pool_center(
             *desk,
             l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
@@ -3123,9 +3102,7 @@ fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
         assert!(*keep < 1.0, "a desk tube dims after dark");
         desk_rows.insert(pool.cy as i32 - desk.y as i32);
     }
-    // The point of routing through the authority: the offset is NOT one constant
-    // any more. A layout seating both sides must produce two distinct lifts, or
-    // the assertion above is satisfied by a facing-blind implementation.
+    // Negative control: with one lift, a facing-blind impl passes the loop above.
     assert!(
         desk_rows.len() >= 2,
         "this layout seats both sides, so its desk lights must sit at two \
@@ -3354,10 +3331,8 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
 #[test]
 fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     use crate::layout::Facing;
-    // A lamp is a FIXTURE on the desk, not a property of the screen: it stands on
-    // the west wing and is visible from either side. The standby screen is the
-    // one that gates on facing, because a viewer-facing desk shows the machine's
-    // back.
+    // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
+    // standby SCREEN is the one that gates on facing.
     for darkness in [0.0_f32, 0.5, 1.0] {
         let north = super::desk_light(Facing::North, darkness);
         let south = super::desk_light(Facing::South, darkness);
@@ -3378,9 +3353,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 
 #[test]
 fn a_lamp_casting_no_pool_is_not_drawn_lit() {
-    // The fixture pixels used fixed tones while only the POOL scaled with
-    // strength, so at noon a lamp rendered fully on while contributing 0.00 to
-    // the desk. Whatever the fixture reads as, it must track the light it casts.
+    // Whatever the fixture reads as, it must track the light it casts.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let desk = Point { x: 20, y: 14 };
     let bg = Rgb { r: 9, g: 9, b: 9 };

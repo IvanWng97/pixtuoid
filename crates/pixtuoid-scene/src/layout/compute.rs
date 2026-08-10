@@ -446,12 +446,8 @@ pub(super) fn compute_with_seed(
             return true;
         }
         let reach = ReachSet::from_mask(mask, conn_seed);
-        // Judged at `Facing::South` for EVERY desk, whatever the pod grid seated
-        // it as — South is the universal fallback the demotion pass below retreats
-        // an unreachable desk to, so proving the south seat reachable proves no
-        // decor arrangement can strand a workstation. Judging each desk by its own
-        // facing instead would degrade decor to rescue a seat the layout is free
-        // to abandon, and would still leave the fallback unproven.
+        // Judged at `Facing::South` for EVERY desk: South is where the demotion pass below
+        // retreats, so a reachable south seat proves no decor arrangement strands a desk.
         home_desks.iter().any(|&d| {
             let chair = desk_walk_anchor_facing(d, crate::layout::Facing::South);
             approach_point(
@@ -479,13 +475,8 @@ pub(super) fn compute_with_seed(
         // the pocket".
         plants.retain(|p| !plant_ground_in_bounds(p, &cubicle_aisle));
         walkable = build_mask(&plants, &wall_decor);
-        // Next rung — a wall decor that TOUCHES THE FLOOR is the only kind that can
-        // seal a lane, so drop those before the drastic clear-all-plants: losing one
-        // board beats losing every plant. Selected by footprint rather than by kind
-        // because the kind that used to seal (the free-standing whiteboard) now
-        // stands in an inter-pod aisle, where a walker rounds it either way — this
-        // rung is a net for the NEXT footprint-bearing wall decor, and no swept
-        // size reaches it today.
+        // Next rung — only a wall decor that TOUCHES THE FLOOR can seal a lane, so drop
+        // those (by footprint, not by kind) before the drastic clear-all-plants.
         if severed(&walkable) {
             wall_decor.retain(|d| furniture_def(d.kind.furniture()).footprint.is_none());
             walkable = build_mask(&plants, &wall_decor);
@@ -519,22 +510,15 @@ pub(super) fn compute_with_seed(
             fish_tank,
         });
 
-    // A back-turned desk is approached from its SOUTH front, and at a narrow band
-    // that side can be walled off — the desk then has no reachable approach at
-    // all and every leg to it straight-lines through the desk body. Demote those
-    // to the viewer-facing seat rather than dropping the desk: the office loses a
-    // little of the pod read, never a workstation. The same graceful-degradation
-    // rung the lounge and the scatter plants already take.
-    //
-    // Safe to do AFTER the mask: a desk's blocked ground is its body, which is
-    // the same whichever way its occupant sits, so nothing needs rebuilding.
+    // A narrow band can wall off a back-turned desk's SOUTH front, leaving it with no
+    // reachable approach; demote rather than drop. Safe after the mask: a desk's blocked
+    // ground is its body whichever way its occupant sits.
     let desk_facings: Vec<Facing> = home_desks
         .iter()
         .zip(&desk_facings)
         .map(|(&desk, &facing)| {
             if facing == Facing::North && {
-                // `approach_point` returns the probed cell itself as its
-                // "no allowed+reachable side" sentinel.
+                // `approach_point` returns the probed cell itself as its "no side" sentinel.
                 let chair = desk_walk_anchor_facing(desk, facing);
                 approach_point(
                     Furniture::Desk,
@@ -672,11 +656,8 @@ fn place_wall_decor(
         },
     });
     if has_side_rooms {
-        // `usable_h / 3` is a hint, not a slot: it knows nothing of the desk grid,
-        // so on its own it drops the board wherever the fraction lands — a desk
-        // row, or the intra-pod gap, where the wheel strip plugs the west lane the
-        // pod's own occupants walk. Snapping to the nearest pod-free band puts it
-        // in an aisle instead, and keeps it there as `INTRA_POD_GAP_Y` tightens.
+        // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
+        // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
         let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
         let hint = Point {
             x: mid_x + 3,
@@ -1015,21 +996,12 @@ impl PodGrid {
         (x, y)
     }
 
-    /// The full-width y-bands BETWEEN consecutive pod rows — the only floor a
-    /// free-standing piece may stand on, returned north-to-south. Empty when the
-    /// band holds a single pod row.
-    ///
-    /// Deliberately NOT "every strip no pod occupies": the north margin and the
-    /// south remainder are pod-free too and both are spoken for — the lounge and
-    /// the door's approach — so a piece snapped there lands on the couch or seals
-    /// the threshold. Full-width is what lets a y-band answer on its own: it
-    /// clears every pod at once, so a caller placing inside one never reasons
-    /// about x.
+    /// The full-width y-bands BETWEEN consecutive pod rows, north-to-south — the only
+    /// floor a free-standing piece may stand on. NOT "every pod-free strip": the north
+    /// margin and south remainder hold the lounge and the door's approach.
     fn inter_pod_y_bands(self, cubicle_band: &Bounds) -> Vec<(u16, u16)> {
-        // NOT `stride_y - INTER_POD_AISLE_Y`: that is the pod's SLOT pitch, and a
-        // desk's blocked ground runs to `DESK_GROUND_H` below its corner — past the
-        // last slot row. Pricing the slot leaves the overhang rows looking free and
-        // parks the piece on the south desk's own ground strip.
+        // NOT `stride_y - INTER_POD_AISLE_Y`: that prices the SLOT, and a desk's blocked
+        // ground runs to `DESK_GROUND_H` below its corner, so the overhang rows look free.
         let pod_h = (POD_SIDE - 1) * (DESK_H + INTRA_POD_GAP_Y) + DESK_GROUND_H;
         (0..self.rows.saturating_sub(1))
             .map(|pod_r| {
@@ -1040,13 +1012,9 @@ impl PodGrid {
             .collect()
     }
 
-    /// Top row for a ground strip `h` px tall, centred in whichever inter-pod
-    /// aisle sits closest to `desired` — or `None` when no aisle can hold it.
-    ///
-    /// Centring is not cosmetic: it is what keeps the strip from sealing the lane
-    /// it stands in. A piece flush against a pod leaves its whole clearance on one
-    /// side; centred in an [`INTER_POD_AISLE_Y`] aisle it leaves a walkable margin
-    /// north AND south, so a walker can round either end.
+    /// Top row for a ground strip `h` px tall, centred in the inter-pod aisle nearest
+    /// `desired` — `None` when no aisle can hold it. Centred, not flush: flush against a
+    /// pod the strip piles all its clearance on one side and can seal the lane.
     fn snap_inter_pod_ground_y(self, cubicle_band: &Bounds, desired: u16, h: u16) -> Option<u16> {
         let distance_to = |(start, end): (u16, u16)| (start + (end - start) / 2).abs_diff(desired);
         let (start, end) = self
@@ -1158,13 +1126,8 @@ impl FloorGeometry {
     }
 }
 
-/// Which way a desk on pod row `r` seats its occupant.
-///
-/// A pod is 2x2, and its two rows face EACH OTHER across the inner gap — the
-/// arrangement a real open-plan pod has, with both rows' monitors meeting back
-/// to back down the middle. Row 0 keeps the viewer-facing seat; row 1 turns
-/// around. A partial bottom row is the next pod's row 0, so it faces the viewer
-/// like any other top row.
+/// Which way a desk on pod row `r` seats its occupant — a pod's two rows face EACH
+/// OTHER across the inner gap. A partial bottom row is the next pod's row 0.
 fn pod_row_facing(r: u16) -> Facing {
     if r == 0 {
         Facing::South
@@ -1586,14 +1549,8 @@ mod tests {
         );
     }
 
-    /// A y-band is advertised as floor a free-standing piece may stand on, so no
-    /// row of one may be ground a desk already blocks.
-    ///
-    /// Cross-checks two independent derivations — `compute_pod_desks`' desk
-    /// positions against `inter_pod_y_bands`' arithmetic — rather than restating
-    /// the band formula, which a test can only copy. Pricing the band off the
-    /// pod's SLOT pitch (`stride_y - INTER_POD_AISLE_Y`) instead of its blocked
-    /// ground puts `DESK_GROUND_H - DESK_H` rows of desk inside every band.
+    /// Cross-checked against `compute_pod_desks`' own positions, not the band formula a
+    /// test could only copy.
     #[test]
     fn no_inter_pod_band_row_is_ground_a_desk_blocks() {
         let band = super::Bounds {

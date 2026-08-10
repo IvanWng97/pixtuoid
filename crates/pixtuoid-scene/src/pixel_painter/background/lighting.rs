@@ -99,8 +99,7 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
     strength: f32,
     theme: &Theme,
 ) {
-    /// The lounge floor lamp's reach — a room-corner fixture, so it is much
-    /// wider than a desk lamp's pool.
+    /// A room-corner fixture, so much wider than a desk lamp's pool.
     const RADIUS: u16 = 11;
     paint_warm_halo(
         buf,
@@ -112,12 +111,7 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
     );
 }
 
-/// A warm radial pool falling off linearly to `radius`.
-///
-/// Extracted so the lounge floor lamp and the per-desk task lamps light the
-/// room by the SAME falloff — two hand-rolled distance loops would drift the
-/// first time either is retuned, and they are meant to read as the same kind
-/// of light at different scales.
+/// Shared so the floor lamp and the desk lamps cannot drift to different falloffs.
 pub(in crate::pixel_painter) fn paint_warm_halo(
     buf: &mut RgbBuffer,
     cx: u16,

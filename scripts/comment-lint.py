@@ -25,6 +25,18 @@ import tempfile
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
 
+def git_env() -> dict[str, str]:
+    """`os.environ` with every `GIT_*` dropped.
+
+    A git hook exports `GIT_DIR`/`GIT_INDEX_FILE`, and those OVERRIDE both `-C`
+    and `cwd` — so under `pre-push` a call meant for a throwaway repo runs
+    against the developer's own. Reproduced: the selftest put two commits and
+    fourteen fixture files into an ambient repository. Every git call in this
+    file goes through here.
+    """
+    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+
+
 def added_lines_by_file(
     base: str, worktree: bool, cwd: str | None = None
 ) -> dict[str, set[int]]:
@@ -38,6 +50,7 @@ def added_lines_by_file(
         text=True,
         check=True,
         cwd=cwd,
+        env=git_env(),
     ).stdout
     added: dict[str, set[int]] = {}
     cur: str | None = None
@@ -64,6 +77,7 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
         text=True,
         check=True,
         cwd=cwd,
+        env=git_env(),
     ).stdout
     return json.loads(out)
 
@@ -105,7 +119,8 @@ def selftest() -> int:
             "".join(f"//// l{n}\n" for n in range(14)) + "pub const C: u8 = 0;\n"
         )
         git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
-        subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
+        env = git_env()
+        subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True, env=env)
         # The re-parent rule needs these two in the BASE for their doc owner to
         # have changed: `moved.rs` wedges a const in (fires), `renamed.rs`
         # renames the documented fn (must not).
@@ -115,10 +130,8 @@ def selftest() -> int:
         (repo / "src" / "twins.rs").write_text(twins)
         # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
         # commit or the diff-scoped checks above see an empty diff.
-        subprocess.run(
-            [*git, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs"], cwd=repo, check=True
-        )
-        subprocess.run([*git, "commit", "-qm", "base"], cwd=repo, check=True)
+        subprocess.run([*git, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs"], cwd=repo, check=True, env=env)
+        subprocess.run([*git, "commit", "-qm", "base"], cwd=repo, check=True, env=env)
         (repo / "src" / "moved.rs").write_text(
             "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
         )
@@ -129,17 +142,23 @@ def selftest() -> int:
             "/// Shared opening line.\n/// Two.\nfn b() {}\n\n"
             "/// Shared opening line.\n/// One.\nfn a() {}\n"
         )
-        subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
-        subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
+        subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True, env=env)
 
-        scanned = {h["file"] for h in scan_hits(cwd=str(repo))}
-        for path, why in (
-            ("src/plain.py", "a .py in the tree is scanned"),
-            (".claude/skills/hidden.py", "a .py under a DOT-DIR is scanned (--no-ignore hidden)"),
-            ("src/keep.rs", "Rust coverage is unchanged"),
-        ):
-            if path not in scanned:
-                fails.append(f"{why}: {path} missing from {sorted(scanned)}")
+        # Only this arm needs ast-grep, so skipping it lets the gate run in the
+        # PROTECTED ci-lint group; the advisory job that owns ast-grep still runs
+        # the full selftest.
+        if shutil.which("ast-grep") is None:
+            print("comment-lint selftest: ast-grep absent — SKIPPED the scan-pathspec arm")
+        else:
+            scanned = {h["file"] for h in scan_hits(cwd=str(repo))}
+            for path, why in (
+                ("src/plain.py", "a .py in the tree is scanned"),
+                (".claude/skills/hidden.py", "a .py under a DOT-DIR is scanned (--no-ignore hidden)"),
+                ("src/keep.rs", "Rust coverage is unchanged"),
+            ):
+                if path not in scanned:
+                    fails.append(f"{why}: {path} missing from {sorted(scanned)}")
 
         # Driven through the REAL reader, not a second copy of the extension list,
         # which would pass while the production pathspec changed underneath it.
@@ -173,6 +192,55 @@ def selftest() -> int:
             fails.append("a renamed fn keeping its doc must NOT fire: src/renamed.rs")
         if "src/twins.rs" in reparented:
             fails.append("two blocks sharing an opening line must NOT fire: src/twins.rs")
+
+        # The prose-share rule, BOTH directions — a ratio gate that has only been
+        # seen under one mix is not known to discriminate.
+        (repo / "src" / "prosey.rs").write_text(
+            "".join(f"// n{n}\n" for n in range(4)) + "fn a() {}\nfn b() {}\n"
+        )
+        (repo / "src" / "lean.rs").write_text(
+            "// one\n" + "".join(f"fn f{n}() {{}}\n" for n in range(19))
+        )
+        subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
+        subprocess.run([*git, "commit", "-qm", "prose"], cwd=repo, check=True, env=env)
+        cwd2 = os.getcwd()
+        try:
+            os.chdir(repo)
+            over_prose, _ = prose_share("HEAD~1", worktree=False)
+            lean_only = subprocess.run(
+                ["git", "diff", "--unified=0", "HEAD~1", "--", "src/lean.rs"],
+                capture_output=True, text=True, check=True, env=env,
+            ).stdout
+        finally:
+            os.chdir(cwd2)
+        if over_prose * 100 <= (over_prose + 2) * PROSE_MAX_PCT:
+            fails.append(f"a 4-prose/2-code file must exceed {PROSE_MAX_PCT}%")
+        lean_prose = sum(
+            1 for ln in lean_only.splitlines()
+            if ln.startswith("+") and not ln.startswith("+++") and ln[1:].strip().startswith("//")
+        )
+        lean_code = sum(
+            1 for ln in lean_only.splitlines()
+            if ln.startswith("+") and not ln.startswith("+++")
+            and ln[1:].strip() and not ln[1:].strip().startswith("//")
+        )
+        if lean_prose * 100 > (lean_prose + lean_code) * PROSE_MAX_PCT:
+            fails.append(f"a 1-prose/19-code file must NOT exceed {PROSE_MAX_PCT}%")
+
+        # Which arms BLOCK, both directions. Without this the ast-grep arm can
+        # silently become a hard gate on a machine that happens to have it.
+        if gate_fails(True, [], [], False):
+            fails.append("nothing found must not fail the gate")
+        if gate_fails(False, ["d"], ["m"], True):
+            fails.append("without --gate nothing may fail")
+        for arm, args in (
+            ("doc-run", (["d"], [], False)),
+            ("re-parent", ([], ["m"], False)),
+            ("prose", ([], [], True)),
+        ):
+            if not gate_fails(True, *args):
+                fails.append(f"the {arm} arm must block under --gate")
+
 
     if fails:
         print("comment-lint selftest FAILED:")
@@ -258,6 +326,41 @@ def doc_owners(src: str) -> dict[str, str]:
     return out
 
 
+PROSE_MAX_PCT = 15
+"""Ceiling on a diff's PROSE share of its new Rust lines (comments + doc / all).
+
+The tree sits at 13.1%, so this is the rate the codebase already sustains rather
+than a target invented here. The other two checks bound a single BLOCK; neither
+sees the shape that actually accumulates — short runs, everywhere. A branch that
+shipped 40.1% prose in its production code passed both with room to spare.
+
+Rust only: the `.py` here and the site's TS answer to different conventions.
+"""
+
+
+def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int, int]:
+    """`(prose, code)` line counts among the diff's ADDED Rust lines.
+
+    Blank lines count as neither. Test files are included: a test's prose rots
+    the same way, and exempting them just moves the prose there.
+    """
+    rev = base if worktree else f"{base}...HEAD"
+    diff = subprocess.run(
+        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs"],
+        capture_output=True, text=True, check=True, cwd=cwd, env=git_env(),
+    ).stdout
+    prose = code = 0
+    for line in diff.splitlines():
+        if not line.startswith("+") or line.startswith("+++"):
+            continue
+        t = line[1:].strip()
+        if t.startswith("//"):
+            prose += 1
+        elif t:
+            code += 1
+    return prose, code
+
+
 def reparented_doc_hits(
     base: str, worktree: bool, cwd: str | None = None
 ) -> list[tuple[str, str, str, str]]:
@@ -273,7 +376,7 @@ def reparented_doc_hits(
     rev = base if worktree else f"{base}...HEAD"
     files = subprocess.run(
         ["git", "diff", "--name-only", rev, "--", "*.rs"],
-        capture_output=True, text=True, check=True, cwd=cwd,
+        capture_output=True, text=True, check=True, cwd=cwd, env=git_env(),
     ).stdout.split()
 
     def at(ref: str | None, path: str) -> str:
@@ -288,6 +391,7 @@ def reparented_doc_hits(
             text=True,
             check=False,
             cwd=cwd,
+            env=git_env(),
         )
         return r.stdout if r.returncode == 0 else ""
 
@@ -305,6 +409,16 @@ def reparented_doc_hits(
             if doc in new and new[doc] != owner and owner in still_there:
                 out.append((path, doc, owner, new[doc]))
     return out
+
+
+def gate_fails(gate: bool, docs: list, moved: list, over_prose: bool) -> bool:
+    """Whether `--gate` should exit non-zero — the ast-grep arm deliberately absent.
+
+    That arm needs an npm install, so it runs only in advisory `ci-supplemental`;
+    letting it block locally would make `just lint` stricter than the CI job that
+    shares its recipe.
+    """
+    return gate and (bool(docs) or bool(moved) or over_prose)
 
 
 def main() -> int:
@@ -350,6 +464,21 @@ def main() -> int:
                 f"(max {DOC_RUN_MAX}) — every sentence must carry new information"
             )
 
+    prose, code = prose_share(base, worktree)
+    over_prose = prose * 100 > (prose + code) * PROSE_MAX_PCT if prose + code else False
+    if over_prose:
+        pct = 100 * prose / (prose + code)
+        print(
+            f"comment-lint: {pct:.1f}% of this diff's new Rust lines are prose "
+            f"({prose} prose / {code} code, max {PROSE_MAX_PCT}%)"
+        )
+        if "--github" in sys.argv[1:]:
+            print(
+                f"::warning::{pct:.1f}% prose in new Rust ({prose}/{prose + code}, "
+                f"max {PROSE_MAX_PCT}%) — cut restated WHAT, migration traces and "
+                f"unmeasured numbers, not legitimate WHY"
+            )
+
     moved = reparented_doc_hits(base, worktree)
     for f, doc, old_owner, new_owner in moved:
         print(f"comment-lint: {f} — doc block re-homed from `{old_owner}` to `{new_owner}`")
@@ -361,11 +490,12 @@ def main() -> int:
                 f"newcomer its own"
             )
 
-    if not new_hits and not docs and not moved:
+    blocking = gate_fails(gate, docs, moved, over_prose)
+    if not new_hits and not docs and not moved and not over_prose:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
         return 0
     if not new_hits:
-        return 1 if gate else 0
+        return 1 if blocking else 0
 
     # A long run yields overlapping ast-grep windows, so this counts flagged
     # LINES, not distinct runs.
@@ -376,7 +506,7 @@ def main() -> int:
         if github:
             # GitHub Actions annotation — inline on the PR diff.
             print(f"::warning file={f},line={ln}::{msg}")
-    return 1 if gate else 0
+    return 1 if blocking else 0
 
 
 if __name__ == "__main__":

@@ -164,13 +164,7 @@ pub struct SceneLayout {
     /// Per-agent home-desk anchor positions, indexed floor-locally (read via
     /// [`Self::home_desk`]).
     pub home_desks: Vec<Point>,
-    /// Which way each home desk's occupant faces, parallel to [`Self::home_desks`]
-    /// (read via [`Self::desk_facing`]).
-    ///
-    /// A SEPARATE vec rather than a field on the desk: `home_desks` is read at 74
-    /// sites that care only about the position, and widening it would churn every
-    /// one of them for a fact three of them need. The two are kept in lockstep by
-    /// construction — `compute_pod_desks` emits them together.
+    /// Facing per home desk, parallel to [`Self::home_desks`].
     pub desk_facings: Vec<Facing>,
     /// Named stops (lounge seats, appliances, meeting slots) agents walk to.
     pub waypoints: Vec<Waypoint>,
@@ -249,37 +243,14 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
-/// Rows of desk SURFACE, counted from `desk.y` down — how DEEP a desk is, and
-/// the one number every desk sprite is cut to.
-///
-/// Every desk in the office is this deep whichever way it faces:
-/// `desk.sprite` and `desk_north.sprite` differ only in where the MONITOR sits
-/// above the surface, never in the surface itself. They are hand-authored, so
-/// nothing in the format stops them drifting apart — and they did, twice
-/// (4 vs 6 rows, then 4 vs 7) before this had a name. The pack test cuts BOTH
-/// against this constant rather than against each other: two sprites agreeing
-/// is not the same as two sprites being the size we chose.
 pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
-/// The desk's front edge below the surface — one row of shadow across the full
-/// width.
 pub(crate) const DESK_FRONT_ROWS: u16 = 1;
-/// Leg rows below the front edge (shadow at both ends, carpet between).
 pub(crate) const DESK_LEG_ROWS: u16 = 2;
 
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
-///
-/// Kept as its own constant because it means something the art does not — the
-/// pitch `pod_stride_y` prices — but BOUND to the art below, so the two can
-/// never disagree. Widening the desk fits FEWER pod rows on a given terminal:
-/// the cost of a deeper desk is capacity, not just pixels.
 pub const DESK_H: u16 = 6;
 
-// The desk's visual box is exactly surface + front edge + legs. Binding the
-// pitch to the art at COMPILE time is what makes `DESK_SURFACE_ROWS` a single
-// source of truth rather than a second opinion: deepen the surface without
-// re-pricing the slot (or the reverse) and this fails to build, instead of
-// shipping a desk whose z-sort and pod spacing disagree with its own pixels.
 const _: () = assert!(
     DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
     "the desk's VISUAL height (DESK_H + 2) must equal the rows its art draws: \
@@ -328,12 +299,6 @@ pub const POD_SIDE: u16 = 2;
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
 /// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
-///
-/// Nothing OCCUPIES the gap — both rows' occupants sit outside it — so it is
-/// floor no one walks. It prices `pod_stride_y`, making it the desk-CAPACITY
-/// lever, not just spacing. Keep it EVEN: rows step by `DESK_H + this`, and the
-/// half-block painter packs two pixel rows per cell, so an odd step splits a
-/// pod's two rows across sub-cell parities.
 pub const INTRA_POD_GAP_Y: u16 = 6;
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
@@ -378,12 +343,7 @@ impl SceneLayout {
         self.home_desks.get(i.0).copied()
     }
 
-    /// Which way the desk AT `pos` seats its occupant.
-    ///
-    /// A position lookup for callers holding only a `Point` (`pose`'s approach
-    /// cells). It is O(desks) — a caller iterating `home_desks`, or one that
-    /// already resolved an index, reads [`Self::desk_facing`] instead; a large
-    /// buffer lays out four figures of desks.
+    /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
     pub fn desk_facing_at(&self, pos: Point) -> Facing {
         self.home_desks
             .iter()
@@ -391,13 +351,8 @@ impl SceneLayout {
             .map_or(Facing::South, |i| self.desk_facing(FloorLocalDeskIndex(i)))
     }
 
-    /// Which way desk `i`'s occupant faces — the ONE authority both painters and
-    /// the approach/walk geometry read, so a seat can never be rendered on a
-    /// different side than it is routed to.
-    ///
-    /// Falls back to `South` for an out-of-range index rather than `Option`: every
-    /// caller already holds a desk it resolved, and the classic-facing default is
-    /// the safe answer for a desk the parallel vec somehow missed.
+    /// Which way desk `i`'s occupant faces — the ONE authority painters and the
+    /// approach/walk geometry share, so a seat is never drawn off its routed side.
     pub fn desk_facing(&self, i: FloorLocalDeskIndex) -> Facing {
         self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }

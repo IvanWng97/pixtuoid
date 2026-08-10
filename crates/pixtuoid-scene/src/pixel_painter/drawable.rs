@@ -55,16 +55,11 @@ pub(super) enum DrawableKind<'a> {
     /// bottom-edge row.
     DeskCubicle {
         desk: Point,
-        /// Which way this desk seats its occupant — it picks the art. A
-        /// back-turned seat gets the raised-monitor variant so the sitter's head
-        /// does not land on the screen.
+        /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
         facing: crate::layout::Facing,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
-        /// Task-lamp strength, already scaled by darkness. Set on every desk.
         lamp: f32,
-        /// Standby-screen strength, already scaled by darkness. Zero on a
-        /// viewer-facing desk, which shows the monitor's back.
         screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
@@ -87,9 +82,7 @@ pub(super) enum DrawableKind<'a> {
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
     },
-    /// A home desk's office chair — one per NORTH-facing desk whether or not
-    /// anyone is in it. Keyed to TIE with that seat's occupant and enqueued
-    /// after the characters, so the stable sort paints it over them.
+    /// Office chair, keyed to TIE with its seat's occupant so it paints over them.
     DeskChair {
         pos: Point,
     },
@@ -272,19 +265,11 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
-/// How far a desk sprite's top row rises above `desk.y` — the monitor bezel
-/// standing proud of the desk back, which is also why the screen's first row is
-/// exactly one below the blit anchor.
+/// The monitor bezel standing proud of the desk back, above `desk.y`.
 const DESK_BEZEL_RAISE: u16 = 1;
 
-/// The desk art for a seat facing `facing`, or `None` to use the base `desk`.
-///
-/// Only a back-turned seat needs its own: its occupant is anchored at `desk.y`
-/// and y-sorts in FRONT of the desk, so on the base art their head covers the
-/// screen outright. Every other facing seats them behind the monitor, where the
-/// base art is already right — and a raised screen would be showing a display
-/// nobody in the scene is looking at. An east/west seat lands here as one more
-/// arm plus its sprite.
+/// The desk art for a seat facing `facing`, or `None` for the base `desk`. Only a
+/// back-turned seat needs its own — its occupant y-sorts in FRONT and covers the screen.
 fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
     match facing {
         crate::layout::Facing::North => Some("desk_north"),
@@ -330,18 +315,13 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 .animation("desk")
                 .and_then(|a| a.frames.first())
                 .map_or(0, |f| f.height());
-            // A taller variant keeps the BASE sprite's bottom row, so its extra
-            // rows all land above `desk.y` — derived from the two heights rather
-            // than restated as an offset that would drift the day the art
-            // changes. Falls back to `desk` for a pack that ships no variant.
+            // A taller variant keeps the BASE sprite's bottom row; its extra rows land above `desk.y`.
             let art = desk_sprite_name(*facing)
                 .and_then(|n| pack.animation(n))
                 .or_else(|| pack.animation("desk"))
                 .and_then(|a| a.frames.first());
-            // The effects address the monitor by the sprite's OWN row numbering,
-            // so this is the blit origin — not a row offset into it. Passing
-            // `top + DESK_BEZEL_RAISE` here is what used to leave the sprite's
-            // first casing row unlit, capping every glow with a dark bar.
+            // The effects address the monitor by the sprite's OWN row numbering, so this is
+            // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
             if let Some(frame) = art {
                 sprite_top = desk
@@ -605,16 +585,9 @@ fn paint_desk_coffee(
 }
 
 /// Office-chair back, crossing a back-turned occupant's lower torso.
-///
-/// Only a BACK-TURNED seat draws one — `enqueue_desk_chairs` skips the rest,
-/// because a viewer-facing occupant has their chair behind them, invisible.
 fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
     let c = theme.furniture.chair_trim;
-    // A lit TOP EDGE, because the body alone disappears: `chair_trim` is darker
-    // than the night floor in half the themes (tokyo-night 28,30,44 against a
-    // 44,47,61 carpet), so a flat block reads as a hole rather than a chair.
-    // The rim is SHAPE — it survives the half-block squash, which a one-pixel
-    // interior detail would not.
+    // A lit TOP EDGE: `chair_trim` is darker than some themes' night floor, so a flat block reads as a hole.
     const RIM_LIFT: f32 = 0.30;
     let rim = blend_rgb(
         c,
@@ -625,17 +598,8 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
         },
         RIM_LIFT,
     );
-    // The shape is a MASK, not a rectangle with insets: what says "sitting IN a
-    // chair" is the arms rising on either SIDE of the body, which is what the top
-    // two rows are. They are flush with the character's own 8 px rather than
-    // beside it, so they CLIP its outer columns — the arms passing in front of
-    // the shoulders, which is also why the chair paints after the character.
-    //
-    // Row 2 spans the full width on purpose. Notched to `.######.` the arms met
-    // the back only diagonally, and a one-pixel gap does not read as relief at
-    // this scale — it reads as the arms being detached from the chair.
-    //
-    // `#` paints, `.` skips. Row 2 carries the lit rim.
+    // `#` paints, `.` skips. The arms sit flush with the character's own 8 px and CLIP
+    // it; row 2 spans full width because a notch leaves the arms reading as detached.
     const CHAIR: [&[u8; DESK_CHAIR_BACK_W as usize]; DESK_CHAIR_BACK_H as usize] = [
         b"#......#",
         b"#......#",
@@ -643,8 +607,7 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
         b"########",
         b".######.",
     ];
-    /// Which row of `CHAIR` catches the light — the back's top edge, not the
-    /// flanks above it.
+    /// Which row of `CHAIR` catches the light — the back's top edge, not the flanks.
     const RIM_ROW: usize = 2;
     for (dy, row) in CHAIR.iter().enumerate() {
         for (dx, cell) in row.iter().enumerate() {
@@ -657,24 +620,13 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
     }
 }
 
-/// Rows the chair spans: two flanks beside the occupant, then a three-row back
-/// below them.
+/// Rows the chair spans: two flanks beside the occupant, then a three-row back.
 const DESK_CHAIR_BACK_H: u16 = 5;
-/// Chair-back width — flush with the 8 px character, so the back reads as the
-/// seat they are IN rather than a wider ledge behind them.
+/// Chair-back width — flush with the 8 px character it frames.
 pub(super) const DESK_CHAIR_BACK_W: u16 = 8;
 
-/// Task lamp on the desk's west wing, plus its warm pool.
-///
-/// The WEST wing because the other two are taken: the coffee cup sits at
-/// `dx 2..3` and the token tower at `dx 11..13`, both conditional, while a lamp
-/// is permanent — so it takes the one strip that is always free.
-///
-/// `strength` is the interior darkness. The office's whole night read is a
-/// two-temperature one — cold screen glass against warm task light — and with
-/// only the screens lit it was monochrome blue. The FIXTURE is three pixels: at
-/// half-block scale a lamp is not a silhouette anyone can identify, it is the
-/// bright point a pool comes from, and drawing more of it just adds noise.
+/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
+/// two), plus its warm pool; `strength` is the interior darkness.
 pub(super) fn paint_desk_lamp(
     buf: &mut RgbBuffer,
     desk: Point,
@@ -685,35 +637,24 @@ pub(super) fn paint_desk_lamp(
         return;
     }
     let warm = theme.lighting.desk_lamp;
-    // BOTH tones derive from the lamp's OWN light, so the fixture is one
-    // material at two exposures and needs no second theme role. An earlier
-    // revision reached for `furniture.paper_shade` for the stem purely because
-    // it was a dark colour within reach — the token tower's shading, on a lamp.
     const WHITE: Rgb = Rgb {
         r: 255,
         g: 255,
         b: 255,
     };
     const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
-    // The fixture tracks the light it CASTS. Fixed tones rendered a lamp fully
-    // on at a strength whose pool rounds to nothing, and the halo then blended
-    // the shade DARKER as strength rose — brightness ran backwards.
+    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
     const OFF: f32 = 0.80;
     let unlit = blend_rgb(warm, BLACK, OFF);
-    // The shade reads as the SOURCE, so it is brighter than the pool it casts.
     let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
     let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
     let (lx, ly) = (desk.x, desk.y);
     buf.put_checked(lx, ly, shade);
     buf.put_checked(lx + 1, ly, shade);
     buf.put_checked(lx + 1, ly + 1, stem);
-    /// Reach of one task lamp. A desk is 14 wide, so a floor-lamp-sized pool
-    /// would wash the neighbouring workstations and undo the point of the
-    /// ceiling pools going out.
+    /// A desk is 14 wide, so a larger pool washes the neighbouring workstations.
     const DESK_LAMP_RADIUS: u16 = 5;
-    /// Peak pool strength, against the screen tint's own scale. Lower on
-    /// purpose: the screens are the subject and the lamps are the counterpoint,
-    /// and at parity the warm pool washed the desk's west half out entirely.
+    /// Kept below the screen tint's own scale — at parity the pool washes the desk's west half out.
     const DESK_LAMP_MAX: f32 = 0.42;
     paint_warm_halo(
         buf,

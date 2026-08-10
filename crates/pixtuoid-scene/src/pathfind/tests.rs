@@ -847,17 +847,11 @@ fn octile_cost_is_the_shared_diag_straight_formula() {
 #[test]
 fn snap_lands_on_an_open_pixel_when_the_cell_centre_itself_is_blocked() {
     // The coarse grid calls a cell walkable at `COARSE_CELL_WALKABLE_MIN` of its
-    // 16 px open, so the cell it snaps to can have a BLOCKED centre. Returning
-    // that centre is what put the office pet inside a desk.
-    //
-    // Built by hand rather than found in a layout: the existing snap test probes
-    // a point whose cell centre happens to be open, so it passes with or without
-    // the scan.
+    // 16 px open, so the cell it snaps to can have a BLOCKED centre.
     let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(64, 64);
     let cell = (4u16, 4u16);
     let centre = cell_center(cell.0, cell.1);
-    // Block a 2x2 around the centre only: 12 of the cell's 16 px stay open, so
-    // it is still walkable to the coarse grid while its centre is not.
+    // 2x2 leaves 12 of the cell's 16 px open — walkable to the coarse grid, centre blocked.
     mask.mark_blocked(centre.x, centre.y, 2, 2, 0);
     assert!(
         !mask.is_walkable(centre.x, centre.y),

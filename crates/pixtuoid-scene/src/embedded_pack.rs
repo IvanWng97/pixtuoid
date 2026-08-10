@@ -526,17 +526,8 @@ mod tests {
         );
     }
 
-    /// A facing does not change how big a desk IS.
-    ///
-    /// `desk_north` lifts the monitor and is therefore taller, but from
-    /// `desk.y` down it must be the SAME desk: same surface depth, same front
-    /// edge, same legs. Checked on the frame COLUMNS the monitor never covers —
-    /// the middle legitimately differs, since that is where one variant has a
-    /// screen and the other has bare surface.
-    ///
-    /// This exists because I shipped a `desk_north` two rows deeper than every
-    /// other desk in the room and recorded it as an acceptable overhang. It was
-    /// visible immediately to the owner and to nothing in the suite.
+    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`.
+    /// Checked on the edge COLUMNS the monitor never covers — the middle legitimately differs.
     #[test]
     fn both_desk_variants_are_the_same_desk_below_the_monitor() {
         let pack = test_default_pack();
@@ -547,8 +538,7 @@ mod tests {
         };
         let (base, north) = (frame("desk"), frame("desk_north"));
         assert_eq!(base.width(), north.width(), "a facing never changes width");
-        // Both blit so their BOTTOM rows coincide, so the taller one's extra
-        // rows are all above — the same derivation the painter makes.
+        // Both blit so their BOTTOM rows coincide, so the taller one's extra rows are all above.
         let lift = north
             .height()
             .checked_sub(base.height())
@@ -568,20 +558,8 @@ mod tests {
             }
         }
 
-        // ...and the SURFACE DEPTH of EACH, against the constant that declares
-        // it — not against each other. Two sprites agreeing is not the same as
-        // two sprites being the size we chose, and this check is the only thing
-        // holding hand-authored art to `DESK_SURFACE_ROWS`.
-        //
-        // The column loop above is blind here: it starts at `desk.y`, so wood a
-        // variant grows ABOVE that row is invisible to it. Exactly that shipped
-        // once — flanking wood left beside the lifted screen rows made this desk
-        // seven rows deep against every other desk's five, with the suite green.
-        //
-        // Count rows carrying the SURFACE COLOUR, sampled from the base sprite
-        // rather than named. A first attempt counted OPAQUE rows, which is
-        // identical with or without flanking wood (a screen row is opaque either
-        // way) and passed its own negative control.
+        // The column loop above starts at `desk.y`, so wood a variant grows ABOVE that row is
+        // invisible to it; counting OPAQUE rows would miss it too (a screen row is opaque either way).
         let wood = base
             .get(0, BASE_DESK_Y_ROW)
             .expect("the desk's west edge at desk.y is surface");

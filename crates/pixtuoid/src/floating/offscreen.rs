@@ -529,14 +529,6 @@ mod tests {
 
         // MEASURED buffers for the default 360×240 logical window. `office_scale`
         // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
-        //
-        // The CAPACITIES are a function of BOTH terms `pod_stride_y` prices —
-        // `DESK_H` and `INTRA_POD_GAP_Y` — so either one re-measures them; the
-        // buffer sizes are window geometry and do not move. Which factors shift
-        // is not predictable from the constant: deepening the desk by one row
-        // touched only 2× (30 → 24), while tightening the gap to 6 moved 1×,
-        // 1.25× and 1.75× and left 1.5×, 2× and 3× exactly where they were.
-        // Re-measure rather than nudge — the rounding makes these unguessable.
         let measured = [
             (1.00_f64, (360u32, 240u32), 80usize),
             (1.25, (225, 150), 30),
@@ -987,12 +979,7 @@ mod tests {
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
         let mut heard = Vec::new();
-        // A BUDGET, not part of the assertion — the same kind the sofa-seating
-        // test carries. An agent reaches the appliance strip by random wander,
-        // and the route depends on desk POSITIONS, so a layout change moves how
-        // long the wait is without touching the behaviour: tightening
-        // INTRA_POD_GAP_Y pushed it past 900 while 9_000 still fired at once.
-        // The loop breaks on the first cue, so the bound is free when passing.
+        // A BUDGET, not part of the assertion: the wait rides random wander over live desk positions.
         for step in 0..9_000u64 {
             let now = now0 + std::time::Duration::from_secs(2 * step);
             // 192x160: tall enough that the corridor hosts BOTH appliances

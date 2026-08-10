@@ -307,6 +307,7 @@ lint:
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
+    run prose   just comment-lint-gate    & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1204,6 +1205,15 @@ ast-grep-test:
 [doc('Self-test the comment-lint driver (pathspec + hidden-dir scan)')]
 comment-lint-selftest:
     python3 scripts/comment-lint.py --selftest
+
+# The comment checks as a GATE, for `lint`. The CI job stays advisory (it
+# annotates a PR); this is the local arm that fails a push — an advisory nobody
+# is required to read let a 40%-prose branch through nine preflights.
+[group('meta')]
+[doc('Gate the comment checks: selftest, then --gate against origin/main')]
+comment-lint-gate:
+    python3 scripts/comment-lint.py --selftest
+    python3 scripts/comment-lint.py origin/main --gate
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing
