@@ -28,9 +28,11 @@
 //!   idle stale-sweep.
 //! - Exit profile: `sessionEnd` FIRES on clean completion → `has_exit_signal:
 //!   true`. `stop` is turn-end and did NOT fire under `-p` (kept mapped for
-//!   interactive turns). An abrupt exit rides the shim's `_pid`, which names
-//!   `cursor-agent` only because the walk skips the `$SHELL -c` wrapper Cursor
-//!   `eval`s every hook inside (#896) — see this crate's `SHARP-EDGES.md`.
+//!   interactive turns). An abrupt exit rides the shim's `_pid` BEST-EFFORT:
+//!   the walk skips the `$SHELL -c` wrapper Cursor `eval`s every hook inside,
+//!   but some hooks arrive through a different non-shell ancestor, so the pid is
+//!   not stable across every event and corroboration often withholds the arm
+//!   (#896) — see this crate's `SHARP-EDGES.md`.
 //! - A per-session JSONL transcript DOES exist
 //!   (`~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`) —
 //!   the seam if a watcher is ever wanted (its stem == our `session_id` key).
