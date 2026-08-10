@@ -21,6 +21,8 @@ import subprocess
 import sys
 import tempfile
 
+import gitenv
+
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
 
@@ -31,8 +33,8 @@ def added_lines_by_file(
     # `base...HEAD` is the merge-base range (the PR's own commits); bare `base`
     # also folds in uncommitted working-tree edits.
     rev = base if worktree else f"{base}...HEAD"
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC],
+    diff = gitenv.git(
+        "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC,
         capture_output=True,
         text=True,
         check=True,
@@ -85,11 +87,11 @@ def selftest() -> int:
         (repo / "src" / "keep.rs").write_text(
             "fn f() -> u8 {\n    // one\n    // two\n    // three\n    1\n}\n"
         )
-        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
-        subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True)
-        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "base"], cwd=repo, check=True)
-        subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
-        subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
+        ident = ("-c", "user.email=t@t", "-c", "user.name=t")
+        gitenv.git(*ident, "init", "-q", "-b", "main", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-q", "--allow-empty", "-m", "base", cwd=repo, check=True)
+        gitenv.git(*ident, "add", "-A", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-qm", "fixture", cwd=repo, check=True)
 
         scanned = {h["file"] for h in scan_hits(cwd=str(repo))}
         for path, why in (
@@ -106,6 +108,11 @@ def selftest() -> int:
         for path in ("src/plain.py", ".claude/skills/hidden.py", "src/keep.rs"):
             if not added.get(path):
                 fails.append(f"the pathspec drops {path}: {sorted(added)}")
+
+    # Run LAST: it re-enters this selftest as a child. This fixture COMMITS, so a
+    # leak here rewrites the ambient repo's HEAD, not just its index.
+    if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
+        fails.append(leak)
 
     if fails:
         print("comment-lint selftest FAILED:")

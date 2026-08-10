@@ -306,6 +306,7 @@ lint:
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
+    run gitenv  just gitenv-selftest      & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1202,6 +1203,16 @@ ast-grep-test:
 [doc('Self-test the comment-lint driver (pathspec + hidden-dir scan)')]
 comment-lint-selftest:
     python3 scripts/comment-lint.py --selftest
+
+# A git hook exports the repo-local GIT_* vars and they OUTRANK `git -C`/`cwd=`,
+# so a script driving a throwaway repo drives the REAL one instead. This pins the
+# scrub AND sweeps scripts/ for anything spawning git outside `gitenv.git()` — the
+# recurrence gate, because the two known instances were found only after one of
+# them ate a developer's index. Runs in `lint`; CI enumerates it separately.
+[group('meta')]
+[doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
+gitenv-selftest:
+    python3 scripts/gitenv.py --selftest
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing

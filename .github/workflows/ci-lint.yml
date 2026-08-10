@@ -112,6 +112,7 @@ jobs:
       - run: just links
       - run: just drift-selftest
       - run: just gen-guides-check
+      - run: just gitenv-selftest
 
   msrv:
     name: msrv
