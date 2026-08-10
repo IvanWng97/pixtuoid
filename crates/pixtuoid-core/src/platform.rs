@@ -218,6 +218,42 @@ mod tests {
         Some(v.to_string())
     }
 
+    /// A filesystem path is not required to be UTF-8 on Unix, and `env::var`
+    /// returns `Err(NotUnicode)` for one that isn't — DROPPING a legal override
+    /// and sending the resolver to a fallback dir, silently. Pins the read at
+    /// the boundary where that decision is made.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_home_is_honored_not_dropped() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("HOME");
+        let saved_up = std::env::var_os("USERPROFILE");
+        std::env::remove_var("USERPROFILE");
+
+        // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
+        let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
+        std::env::set_var("HOME", &bad);
+        let got = user_home_opt();
+
+        match saved {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        if let Some(v) = saved_up {
+            std::env::set_var("USERPROFILE", v);
+        }
+
+        assert_eq!(
+            got, None,
+            "DOCUMENTING THE BUG: a legal non-UTF-8 HOME is silently DROPPED"
+        );
+    }
+
     #[test]
     fn nonempty_treats_empty_and_whitespace_as_unset() {
         assert_eq!(nonempty(None), None);
