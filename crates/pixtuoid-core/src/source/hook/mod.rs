@@ -191,7 +191,7 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 ///
 /// The gate is the registry's [`FocusChannel`] capability, shared with
 /// `focus::resolve_pid`. `TranscriptProbe` sources (CC/Codex) are skipped: the
-/// shim's resolved pid is their hook-command's parent, not necessarily the CLI,
+/// shim's resolved pid is the nearest non-shell ancestor, not necessarily the CLI,
 /// and a stamped stale pid would shadow the probe's recycle guard in
 /// `resolve_pid`. The kernel start marker (#527, so the
 /// click-time guard can refuse a recycled pid) is read LAZILY on the first

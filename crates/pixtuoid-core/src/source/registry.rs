@@ -175,17 +175,18 @@ pub struct Transcript {
 /// doctor report bucketing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FocusChannel {
-    /// The shim RESOLVES the CLI's pid into `_pid` — `getppid` on Unix, where a
-    /// runner either direct-execs the shim or `sh -c`s it (which EXECs), so the
-    /// parent IS the CLI; on Windows an ancestor walk past the transient
-    /// `cmd /C` parent (`pixtuoid-hook`'s `cli_pid`).
+    /// The shim RESOLVES the CLI's pid into `_pid` by walking past the runner's
+    /// interposed shell (`pixtuoid-hook`'s `cli_pid`) — a `cmd /C` on Windows, a
+    /// `$SHELL -c` wrapper on Unix, which need NOT exec-replace itself with the
+    /// shim (#896). An unrecognised wrapper resolves to a pid that is not the
+    /// CLI, so `HookPidWatch` corroborates before acting on one.
     ShimStamp,
     /// The source's own runtime stamps `_pid` — cross-platform, and survives
     /// even where the shim sends nothing.
     PluginStamp,
     /// Pid resolves through a recycle-guarded liveness probe at CLICK time; hook
-    /// stamps are never trusted (the shim resolves its hook-command's parent,
-    /// not necessarily the CLI). The probe fn itself lives in the binary.
+    /// stamps are never trusted (the shim resolves the nearest non-shell
+    /// ancestor, not necessarily the CLI). The probe fn itself lives in the binary.
     TranscriptProbe,
     /// No pid channel — a focus click silently no-ops (the ONE failure rule).
     Unsupported,
@@ -671,7 +672,9 @@ const HERMES: SourceDescriptor = SourceDescriptor {
         }),
         caps: SourceCaps {
             // `on_session_end` fires on clean completion — best-effort counts.
-            // Abrupt exits (no PID in the payload) fall to the stale-sweep.
+            // The payload carries no pid, but the shim stamps one, so an abrupt
+            // exit rides it — falling to the stale-sweep only when the runner's
+            // wrapper is one `cli_pid`'s walk does not recognise.
             has_exit_signal: true,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.
@@ -727,7 +730,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
         },
         // First-party pid registry (`active_sessions.json`: session_id → pid,
         // recycle-guarded by `opened_at`) answers focus clicks; a shim stamp
-        // would shadow it with an unguarded getppid (#527).
+        // would shadow it with an ancestor walk carrying no such guard (#527).
         focus: FocusChannel::TranscriptProbe,
     },
 };
