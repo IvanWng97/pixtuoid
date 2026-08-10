@@ -6,7 +6,7 @@
 //! hook events silently never arrive; if you move this file, fix that `#[path]`
 //! rather than dropping the parity pin.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 /// A PATH-valued env var read as BYTES. `env::var` errs on a value that is not
 /// UTF-8 — legal for a Unix socket path — and would silently send the shim to a
@@ -70,7 +70,7 @@ pub(crate) fn default_windows_pipe_name() -> String {
 /// explicit-override branches are systemd's / the user's trust decision, not
 /// ours to police (an override may legitimately point at a cross-uid daemon).
 #[cfg(unix)]
-pub(crate) fn owned_tmp_socket_dir(endpoint: &Path) -> Option<PathBuf> {
+pub(crate) fn owned_tmp_socket_dir(endpoint: &std::path::Path) -> Option<PathBuf> {
     // Safety: getuid is always safe on Unix.
     let uid = unsafe { libc::getuid() };
     let owned = PathBuf::from(format!("/tmp/pixtuoid-{uid}"));

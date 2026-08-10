@@ -420,25 +420,43 @@ fn default_socket_path_branches_windows() {
     let prior_user = std::env::var("USERNAME").ok();
 
     std::env::set_var("PIXTUOID_SOCKET", r"\\.\pipe\explicit");
-    assert_eq!(default_socket_path(), r"\\.\pipe\explicit");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\explicit")
+    );
 
     // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
     std::env::set_var("PIXTUOID_SOCKET", "");
     std::env::set_var("USERNAME", "ada");
-    assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
+    );
     std::env::set_var("PIXTUOID_SOCKET", "   ");
-    assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
+    );
 
     std::env::remove_var("PIXTUOID_SOCKET");
     std::env::set_var("USERNAME", "ada");
-    assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-ada");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\pixtuoid-ada")
+    );
 
     // DOMAIN\user form is sanitized (backslashes are illegal in pipe names).
     std::env::set_var("USERNAME", r"CORP\alice");
-    assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-CORP-alice");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\pixtuoid-CORP-alice")
+    );
 
     std::env::remove_var("USERNAME");
-    assert_eq!(default_socket_path(), r"\\.\pipe\pixtuoid-default");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new(r"\\.\pipe\pixtuoid-default")
+    );
 
     match prior_socket {
         Some(v) => std::env::set_var("PIXTUOID_SOCKET", v),
