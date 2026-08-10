@@ -23,6 +23,7 @@ Usage: gen-guides.py [--check]   (--check: write nothing, exit 1 on drift)
 
 from __future__ import annotations
 
+import os
 import pathlib
 import re
 import subprocess
@@ -274,16 +275,70 @@ def selftest() -> int:
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 
+        # The ambient-git control, run LAST so a leak cannot corrupt the fixture
+        # above it. `outer` stands in for the developer's real repo: with GIT_DIR
+        # exported (what any hook does) an unscrubbed `git -C <tmp> add` stages
+        # into IT instead, and the damage outlives the run.
+        outer = pathlib.Path(tmp) / "outer"
+        (outer / "sub").mkdir(parents=True)
+        (outer / "sub" / "kept.md").write_text("# kept\n")
+        outer_git = ["git", "-C", str(outer)]
+        subprocess.run([*outer_git, "init", "-q"], check=True)
+        subprocess.run([*outer_git, "add", "-A"], check=True, capture_output=True)
+        before = subprocess.run(
+            [*outer_git, "ls-files"], capture_output=True, text=True, check=True
+        ).stdout
+
+        leaky = pathlib.Path(tmp) / "leaky"
+        leaky.mkdir()
+        (leaky / "PHANTOM.md").write_text("# phantom\n")
+        saved = os.environ.get("GIT_DIR")
+        os.environ["GIT_DIR"] = str(outer / ".git")
+        try:
+            drop_ambient_git_env()
+            leaky_git = ["git", "-C", str(leaky)]
+            subprocess.run([*leaky_git, "init", "-q"], check=True)
+            subprocess.run([*leaky_git, "add", "-A"], check=True, capture_output=True)
+        finally:
+            if saved is None:
+                os.environ.pop("GIT_DIR", None)
+            else:
+                os.environ["GIT_DIR"] = saved
+        after = subprocess.run(
+            [*outer_git, "ls-files"], capture_output=True, text=True, check=True
+        ).stdout
+        if after != before:
+            fails.append(
+                "an inherited GIT_DIR must not let a throwaway `git add` reach the "
+                f"outer index (it now holds {after.split() or '<empty>'})"
+            )
+
     if fails:
         print("gen-guides selftest FAILED:")
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("gen-guides selftest: all 10 controls passed")
+    print("gen-guides selftest: all 11 controls passed")
     return 0
 
 
+def drop_ambient_git_env() -> None:
+    """Drop inherited `GIT_*` so every git call here is located by `-C` alone.
+
+    Under a HOOK (pre-push runs `just lint`) git exports `GIT_DIR` /
+    `GIT_INDEX_FILE`, and those OUTRANK `-C <dir>`: the selftest's throwaway
+    `git add` then lands in the REAL index, leaving it holding one phantom
+    `crate/CLAUDE.md`. That poisons `git ls-files` for every later run — the
+    `--check` arm then dies on a path that was never on disk — and it PERSISTS
+    until someone re-reads the tree, so a developer's index stays broken after
+    the push that broke it. Nothing here ever wants an ambient git context.
+    """
+    for var in [k for k in os.environ if k.startswith("GIT_")]:
+        del os.environ[var]
+
+
 def main() -> int:
+    drop_ambient_git_env()
     if "--selftest" in sys.argv[1:]:
         return selftest()
     return run(ROOT, "--check" in sys.argv[1:])
