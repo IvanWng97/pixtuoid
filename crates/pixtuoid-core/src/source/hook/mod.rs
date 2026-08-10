@@ -164,16 +164,25 @@ impl Drop for UndeliveredEvents {
 /// session whose `SessionStart` predates the daemon (opencode never re-emits
 /// `session.created`). Activity/Waiting/End never register a new slot.
 ///
-/// Matches on event SHAPE, so unlike [`patch_identity_pids`] this is NOT
-/// `FocusChannel`-gated: a pid the shim misresolved cannot end a session here
-/// anyway, because [`HookPidWatch::note`] arms only on a repeat sighting.
+/// Gated on the SAME `FocusChannel` capability as [`patch_identity_pids`] — one
+/// fact ("is this source's `_pid` trustworthy") with two consumers. A
+/// `TranscriptProbe` source is excluded on its own terms: its pid comes from the
+/// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
+/// binding here only offers a second, weaker answer — and, binding once per
+/// session, it would strand an uncorroborated candidate that nothing evicts.
 fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
-    match ev {
-        AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {
-            Some(*agent_id)
+    let (agent_id, source) = match ev {
+        AgentEvent::SessionStart {
+            agent_id, source, ..
         }
-        _ => None,
-    }
+        | AgentEvent::Identity {
+            agent_id, source, ..
+        } => (agent_id, source),
+        _ => return None,
+    };
+    crate::source::registry::descriptor_for(source)
+        .is_some_and(|d| d.focus_channel().accepts_stamp())
+        .then_some(*agent_id)
 }
 
 /// Stamp the connection's peeked `_pid` onto every `Identity` event of a decoded
@@ -367,6 +376,27 @@ mod tests {
             assert!(
                 matches!(evs[0], AgentEvent::Identity { pid: Some(p), .. } if p.pid == i32::MAX && p.started.is_none()),
                 "{source} Identity must be stamped"
+            );
+        }
+    }
+
+    /// A `TranscriptProbe` source is excluded: its `_pid` is declared untrusted,
+    /// and it has an authoritative pid of its own.
+    #[test]
+    fn pid_bind_target_skips_a_source_whose_stamp_is_untrusted() {
+        for source in ["claude-code", "codex"] {
+            let id = AgentId::from_parts(source, "s");
+            let ev = AgentEvent::SessionStart {
+                agent_id: id,
+                source: source.into(),
+                session_id: "s".into(),
+                cwd: "/r".into(),
+                parent_id: None,
+            };
+            assert_eq!(
+                pid_bind_target(&ev),
+                None,
+                "{source} declares its shim stamp untrusted; it must not bind"
             );
         }
     }

@@ -25,7 +25,21 @@ use crate::AgentId;
 #[derive(Clone)]
 pub(crate) struct HookPidWatch {
     exit: Arc<ExitWatch>,
-    pids: Arc<Mutex<HashMap<i32, HashSet<AgentId>>>>,
+    bindings: Arc<Mutex<Bindings>>,
+}
+
+/// The two halves of a sighting, in ONE lock so they cannot contradict: a pid is
+/// either a candidate or armed, never both.
+#[derive(Default)]
+struct Bindings {
+    /// Armed pid → the agents ended when it dies. Drained by [`Bindings::take`],
+    /// so it holds only pids the exit watch is actually watching.
+    armed: HashMap<i32, HashSet<AgentId>>,
+    /// The ONE uncorroborated sighting per agent. A runner whose wrapper pid is
+    /// fresh every hook never corroborates, and nothing would ever evict those —
+    /// only the exit watch removes entries, and it never sees them — so keying
+    /// by AGENT bounds this at one per live session instead of one per tool call.
+    candidate: HashMap<AgentId, i32>,
 }
 
 impl HookPidWatch {
@@ -36,8 +50,10 @@ impl HookPidWatch {
     pub(crate) fn spawn(tx: TaggedSender) -> Option<Self> {
         let (exit_tx, mut exit_rx) = tokio::sync::mpsc::unbounded_channel::<i32>();
         let exit = Arc::new(ExitWatch::spawn(exit_tx)?);
-        let pids: Arc<Mutex<HashMap<i32, HashSet<AgentId>>>> = Arc::new(Mutex::new(HashMap::new()));
-        let this = Self { exit, pids };
+        let this = Self {
+            exit,
+            bindings: Arc::new(Mutex::new(Bindings::default())),
+        };
         let drain = this.clone();
         tokio::spawn(async move {
             while let Some(dead) = exit_rx.recv().await {
@@ -67,39 +83,43 @@ impl HookPidWatch {
     /// (idempotent). Callers must note at most once per hook PAYLOAD, or a
     /// multi-event batch would confirm its own pid.
     pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
-        if note_pid(&self.pids, pid, agent_id) {
+        if self.lock().sight(pid, agent_id) {
             self.exit.watch(pid);
         }
     }
 
     fn take(&self, pid: i32) -> Vec<AgentId> {
-        take_pid(&self.pids, pid)
+        self.lock().take(pid)
+    }
+
+    fn lock(&self) -> std::sync::MutexGuard<'_, Bindings> {
+        self.bindings.lock().unwrap_or_else(|e| e.into_inner())
     }
 }
 
-type PidMap = Mutex<HashMap<i32, HashSet<AgentId>>>;
+/// Split from the [`ExitWatch`] side so it is unit-testable without spawning the
+/// platform watcher thread.
+impl Bindings {
+    /// Record a sighting; `true` when it CORROBORATES this agent's previous one,
+    /// which is what arms the watch. A different pid for the same agent replaces
+    /// the candidate rather than joining it.
+    fn sight(&mut self, pid: i32, agent_id: AgentId) -> bool {
+        if self.armed.get(&pid).is_some_and(|a| a.contains(&agent_id)) {
+            return false;
+        }
+        if self.candidate.insert(agent_id, pid) != Some(pid) {
+            return false;
+        }
+        self.candidate.remove(&agent_id);
+        self.armed.entry(pid).or_default().insert(agent_id);
+        true
+    }
 
-/// Registry ops, split from the [`ExitWatch`] side so they're unit-testable
-/// without spawning the platform watcher thread. Returns whether this pairing
-/// was already on file — the repeat sighting that arms the watch.
-fn note_pid(pids: &PidMap, pid: i32, agent_id: AgentId) -> bool {
-    !pids
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .entry(pid)
-        .or_default()
-        .insert(agent_id)
-}
-
-/// Remove `pid`'s entry and return the agents bound to it. The removal keeps the
-/// map from accumulating across CLI launches.
-fn take_pid(pids: &PidMap, pid: i32) -> Vec<AgentId> {
-    pids.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .remove(&pid)
-        .into_iter()
-        .flatten()
-        .collect()
+    /// Remove `pid`'s entry and return the agents bound to it. The removal keeps
+    /// the map from accumulating across CLI launches.
+    fn take(&mut self, pid: i32) -> Vec<AgentId> {
+        self.armed.remove(&pid).into_iter().flatten().collect()
+    }
 }
 
 #[cfg(test)]
@@ -113,56 +133,83 @@ mod tests {
         assert!(HookPidWatch::spawn(tx).is_some());
     }
 
+    /// Two sightings each, so both agents are ARMED on the shared pid.
     #[test]
-    fn note_binds_agents_to_a_pid_and_take_removes_them_once() {
-        let pids: PidMap = Mutex::new(HashMap::new());
+    fn take_returns_every_agent_armed_on_a_pid_and_only_once() {
+        let mut b = Bindings::default();
         let a1 = AgentId::from_parts("codewhale", "/ws");
         let a2 = AgentId::from_parts("codewhale", "agent-child");
-        note_pid(&pids, 4242, a1);
-        note_pid(&pids, 4242, a2);
-        note_pid(&pids, 99, AgentId::from_parts("codewhale", "/other"));
+        let other = AgentId::from_parts("codewhale", "/other");
+        for _ in 0..2 {
+            b.sight(4242, a1);
+            b.sight(4242, a2);
+            b.sight(99, other);
+        }
 
-        let mut taken = take_pid(&pids, 4242);
+        let mut taken = b.take(4242);
         taken.sort_unstable();
         let mut expected = vec![a1, a2];
         expected.sort_unstable();
         assert_eq!(
             taken, expected,
-            "both agents bound to the pid are ended on its death"
+            "both agents armed on the pid are ended on its death"
         );
 
         assert!(
-            take_pid(&pids, 4242).is_empty(),
+            b.take(4242).is_empty(),
             "the entry is removed on the first take"
         );
-        assert_eq!(take_pid(&pids, 99).len(), 1);
+        assert_eq!(b.take(99).len(), 1);
     }
 
     #[test]
-    fn note_is_idempotent_per_agent_and_reports_the_repeat() {
-        let pids: PidMap = Mutex::new(HashMap::new());
+    fn the_second_sighting_arms_and_further_ones_do_not_rearm() {
+        let mut b = Bindings::default();
         let a = AgentId::from_parts("codewhale", "/ws");
-        assert!(!note_pid(&pids, 7, a), "a first sighting is not a repeat");
-        assert!(note_pid(&pids, 7, a), "the second sighting is the repeat");
-        assert_eq!(
-            take_pid(&pids, 7).len(),
-            1,
-            "a re-noted (pid, agent) is deduped"
-        );
+        assert!(!b.sight(7, a), "a first sighting is not a repeat");
+        assert!(b.sight(7, a), "the second sighting is the repeat");
+        assert!(!b.sight(7, a), "an already-armed pairing must not re-arm");
+        assert_eq!(b.take(7).len(), 1, "a re-sighted (pid, agent) is deduped");
     }
 
     /// #896: a per-invocation wrapper reports a FRESH pid each hook, so no
     /// pairing ever repeats and nothing is ever armed.
     #[test]
-    fn a_fresh_pid_per_hook_never_becomes_a_repeat() {
-        let pids: PidMap = Mutex::new(HashMap::new());
+    fn a_fresh_pid_per_hook_never_arms_and_never_accumulates() {
+        let mut b = Bindings::default();
         let agent = AgentId::from_parts("cursor", "sess-A");
         for wrapper_pid in [4808, 5379, 8924, 9869, 13594] {
             assert!(
-                !note_pid(&pids, wrapper_pid, agent),
+                !b.sight(wrapper_pid, agent),
                 "wrapper pid {wrapper_pid} must never read as corroborated"
             );
         }
+        assert!(b.armed.is_empty(), "nothing may be armed");
+        assert_eq!(
+            b.candidate.len(),
+            1,
+            "only the LATEST candidate is kept — one entry per agent, not per hook"
+        );
+    }
+
+    /// Two agents behind one wrapper pid still bound by AGENT, not by sighting.
+    #[test]
+    fn candidates_are_bounded_by_live_agents() {
+        let mut b = Bindings::default();
+        for hook in 0..50 {
+            for n in 0..3 {
+                b.sight(
+                    10_000 + hook,
+                    AgentId::from_parts("cursor", &format!("s{n}")),
+                );
+            }
+        }
+        assert!(b.armed.is_empty());
+        assert_eq!(
+            b.candidate.len(),
+            3,
+            "one candidate per agent, 150 sightings"
+        );
     }
 
     #[tokio::test]

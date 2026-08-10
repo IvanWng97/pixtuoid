@@ -83,7 +83,7 @@ fn main() -> Result<()> {
     };
 
     // Everything past here is OUR work on CC's clock — `cli_pid` walks a process
-    // snapshot on Windows — so the bound is armed first (see `arm_watchdog`).
+    // table on every platform — so the bound is armed first (see `arm_watchdog`).
     let Some(bound) = transport::arm_watchdog() else {
         return Ok(());
     };

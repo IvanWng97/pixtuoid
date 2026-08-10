@@ -66,14 +66,33 @@ fn first_cli_ancestor(start: u32, row_of: impl Fn(u32) -> Option<ProcRow>) -> Op
     None
 }
 
-/// The CLI's pid, or `None` where this OS gives no trustworthy answer.
-#[cfg(all(unix, any(target_os = "macos", target_os = "linux")))]
+/// The walk's own slice of the send bound. `arm_watchdog` is already running and
+/// hard-exits at the FULL bound, so an unbudgeted walk costs the ENVELOPE, not
+/// just `_pid` — and a process table can stall on either OS (an AV/EDR filter
+/// over Toolhelp32; a throttled or contended procfs). Derived so the two cannot
+/// drift.
+const WALK_BUDGET: std::time::Duration =
+    std::time::Duration::from_millis(crate::transport::WRITE_TIMEOUT_MS / 4);
+
+/// The CLI's pid, or `None` where this OS gives no trustworthy answer IN TIME —
+/// the walk runs off-thread so a stalled table is abandoned, not waited on.
 pub(crate) fn cli_pid() -> Option<u32> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::Builder::new()
+        .spawn(move || {
+            let _ = tx.send(walk_now());
+        })
+        .ok()?;
+    rx.recv_timeout(WALK_BUDGET).ok().flatten()
+}
+
+#[cfg(all(unix, any(target_os = "macos", target_os = "linux")))]
+fn walk_now() -> Option<u32> {
     first_cli_ancestor(std::process::id(), proc_row)
 }
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
-pub(crate) fn cli_pid() -> Option<u32> {
+fn walk_now() -> Option<u32> {
     // Safety: getppid takes no args and is infallible.
     u32::try_from(unsafe { libc::getppid() }).ok()
 }
@@ -132,24 +151,6 @@ fn comm_name(raw: &[libc::c_char]) -> String {
     String::from_utf8_lossy(&bytes).into_owned()
 }
 
-/// The walk's own slice of the send bound — an AV/EDR filter can make a
-/// Toolhelp32 snapshot slow, and losing `_pid` must not cost the ENVELOPE.
-#[cfg(windows)]
-const WALK_BUDGET: std::time::Duration =
-    std::time::Duration::from_millis(crate::transport::WRITE_TIMEOUT_MS / 4);
-
-#[cfg(windows)]
-pub(crate) fn cli_pid() -> Option<u32> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    // Off-thread so a stalled snapshot is abandoned, not waited on.
-    std::thread::Builder::new()
-        .spawn(move || {
-            let _ = tx.send(walk_now());
-        })
-        .ok()?;
-    rx.recv_timeout(WALK_BUDGET).ok().flatten()
-}
-
 #[cfg(windows)]
 fn walk_now() -> Option<u32> {
     use windows_sys::Win32::System::Threading::GetCurrentProcessId;
@@ -161,7 +162,7 @@ fn walk_now() -> Option<u32> {
 }
 
 #[cfg(not(any(unix, windows)))]
-pub(crate) fn cli_pid() -> Option<u32> {
+fn walk_now() -> Option<u32> {
     None
 }
 
