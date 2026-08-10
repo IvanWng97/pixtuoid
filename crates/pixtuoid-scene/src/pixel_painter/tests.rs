@@ -3350,3 +3350,52 @@ fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
         );
     }
 }
+
+#[test]
+fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
+    use crate::layout::Facing;
+    // A lamp is a FIXTURE on the desk, not a property of the screen: it stands on
+    // the west wing and is visible from either side. The standby screen is the
+    // one that gates on facing, because a viewer-facing desk shows the machine's
+    // back.
+    for darkness in [0.0_f32, 0.5, 1.0] {
+        let north = super::desk_light(Facing::North, darkness);
+        let south = super::desk_light(Facing::South, darkness);
+        assert_eq!(
+            north.lamp, south.lamp,
+            "the lamp may not depend on facing (darkness {darkness})"
+        );
+        assert!(
+            south.screen_idle == 0.0 && north.screen_idle >= south.screen_idle,
+            "only a back-turned desk shows its screen (darkness {darkness})"
+        );
+    }
+    assert!(
+        super::desk_light(Facing::South, 1.0).lamp > 0.0,
+        "a viewer-facing desk must still light its lamp after dark"
+    );
+}
+
+#[test]
+fn a_lamp_casting_no_pool_is_not_drawn_lit() {
+    // The fixture pixels used fixed tones while only the POOL scaled with
+    // strength, so at noon a lamp rendered fully on while contributing 0.00 to
+    // the desk. Whatever the fixture reads as, it must track the light it casts.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let desk = Point { x: 20, y: 14 };
+    let bg = Rgb { r: 9, g: 9, b: 9 };
+    let render = |strength: f32| {
+        let mut buf = RgbBuffer::filled(60, 40, bg);
+        super::drawable::paint_desk_lamp(&mut buf, desk, strength, theme);
+        buf
+    };
+    let (dim, bright) = (render(0.05), render(1.0));
+    let lum = |c: Rgb| 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
+    assert!(
+        lum(dim.get(desk.x, desk.y)) < lum(bright.get(desk.x, desk.y)),
+        "a barely-lit lamp must not paint the same shade as a fully-lit one: \
+         {:?} vs {:?}",
+        dim.get(desk.x, desk.y),
+        bright.get(desk.x, desk.y)
+    );
+}

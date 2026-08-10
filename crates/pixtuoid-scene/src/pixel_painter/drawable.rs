@@ -61,8 +61,10 @@ pub(super) enum DrawableKind<'a> {
         facing: crate::layout::Facing,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
-        /// Standby-screen strength, already scaled by darkness — 0 by day.
-        /// Painted on EVERY desk, under any `screen_glow`.
+        /// Task-lamp strength, already scaled by darkness. Set on every desk.
+        lamp: f32,
+        /// Standby-screen strength, already scaled by darkness. Zero on a
+        /// viewer-facing desk, which shows the monitor's back.
         screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
@@ -305,6 +307,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             facing,
             has_cabinet,
             screen_glow,
+            lamp,
             screen_idle,
             has_coffee,
             coffee_steam,
@@ -346,7 +349,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                     .saturating_sub(DESK_BEZEL_RAISE + frame.height().saturating_sub(base_h));
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, *desk, *screen_idle, theme);
+            paint_desk_lamp(buf, *desk, *lamp, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
@@ -672,7 +675,12 @@ pub(super) const CHAIR_BACK_W: u16 = 8;
 /// only the screens lit it was monochrome blue. The FIXTURE is three pixels: at
 /// half-block scale a lamp is not a silhouette anyone can identify, it is the
 /// bright point a pool comes from, and drawing more of it just adds noise.
-fn paint_desk_lamp(buf: &mut RgbBuffer, desk: Point, strength: f32, theme: &crate::theme::Theme) {
+pub(super) fn paint_desk_lamp(
+    buf: &mut RgbBuffer,
+    desk: Point,
+    strength: f32,
+    theme: &crate::theme::Theme,
+) {
     if strength <= 0.0 {
         return;
     }
@@ -688,9 +696,14 @@ fn paint_desk_lamp(buf: &mut RgbBuffer, desk: Point, strength: f32, theme: &crat
         b: 255,
     };
     const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+    // The fixture tracks the light it CASTS. Fixed tones rendered a lamp fully
+    // on at a strength whose pool rounds to nothing, and the halo then blended
+    // the shade DARKER as strength rose — brightness ran backwards.
+    const OFF: f32 = 0.80;
+    let unlit = blend_rgb(warm, BLACK, OFF);
     // The shade reads as the SOURCE, so it is brighter than the pool it casts.
-    let shade = blend_rgb(warm, WHITE, 0.45);
-    let stem = blend_rgb(warm, BLACK, 0.72);
+    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
+    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
     let (lx, ly) = (desk.x, desk.y);
     buf.put_checked(lx, ly, shade);
     buf.put_checked(lx + 1, ly, shade);
@@ -818,6 +831,7 @@ mod tests {
                 facing: crate::layout::Facing::South,
                 has_cabinet: false,
                 screen_glow: None,
+                lamp: 0.0,
                 screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,
@@ -1009,6 +1023,7 @@ mod tests {
                 facing: crate::layout::Facing::South,
                 has_cabinet: true,
                 screen_glow: None,
+                lamp: 0.0,
                 screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,

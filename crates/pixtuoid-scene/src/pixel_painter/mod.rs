@@ -784,14 +784,40 @@ fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>
     }
 }
 
-/// Desk cubicles — each carries its divider + cabinet + screen glow. The desk
-/// sorts one row past its visual south row, just past the seated worker's feet,
-/// so the sitter stays visually behind it. Z is a VISUAL property: it tracks
-/// the sprite, not the blocked ground.
+/// What a desk's two fixtures are lit to.
+pub(super) struct DeskLight {
+    /// Task-lamp strength. Facing-BLIND: the lamp stands on the desk's west
+    /// wing and is visible from either side, so gating it on facing left every
+    /// pod's viewer-facing row unlit — half the office.
+    pub(super) lamp: f32,
+    /// Standby-screen strength. Facing-GATED, because a viewer-facing desk puts
+    /// its occupant behind the monitor and shows the machine's back.
+    pub(super) screen_idle: f32,
+}
+
+/// How dark the room has to get before each desk fixture reaches full strength.
 ///
-/// `home_desks` is the authority for whether a pod divider exists: the band
-/// clamp in `compute_pod_desks` drops a pod's second column when it wouldn't
-/// fit, so pitch arithmetic here would be a second, drifting copy of that rule.
+/// Both scale with `darkness` (the INTERIOR illuminance, not a clock), so the
+/// screens read strongest exactly when the desk ceiling pools go out. Neither
+/// vanishes by day: an office lit through one window band stays dim enough at
+/// noon that a powered screen still shows.
+fn desk_light(facing: crate::layout::Facing, darkness: f32) -> DeskLight {
+    const SCREEN_IDLE_MAX: f32 = 0.55;
+    const LAMP_MAX: f32 = 1.0;
+    DeskLight {
+        lamp: LAMP_MAX * darkness,
+        screen_idle: if facing == crate::layout::Facing::North {
+            SCREEN_IDLE_MAX * darkness
+        } else {
+            0.0
+        },
+    }
+}
+
+/// Desk cubicles — each carries its cabinet, lamp and screens as one z-unit.
+/// The desk sorts one row past its visual south row, just past the seated
+/// worker's feet, so the sitter stays visually behind it. Z is a VISUAL
+/// property: it tracks the sprite, not the blocked ground.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
@@ -799,15 +825,6 @@ fn enqueue_desk_cubicles<'a>(
     darkness: f32,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    // Peak standby tint, scaled by `darkness` — the INTERIOR illuminance, NOT a
-    // clock. The screens therefore read strongest exactly when the room needs
-    // them (the desk ceiling pools go out after dark) and fade as daylight fills
-    // it. They do NOT vanish by day: an office lit through one window band stays
-    // dim enough at noon that a powered screen still shows, which is true of the
-    // real thing too. Checked against a pre-change noon render rather than
-    // assumed — an earlier revision of this comment claimed daylight was
-    // untouched, and the pixel diff said otherwise.
-    const SCREEN_IDLE_MAX: f32 = 0.55;
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
@@ -820,9 +837,9 @@ fn enqueue_desk_cubicles<'a>(
         // would be light leaking out of a case. Both the tool glow and the
         // standby tint gate on the same fact, or the desk contradicts itself.
         let facing = ctx.layout.desk_facing(local);
-        let shows_screen = facing == crate::layout::Facing::North;
+        let light = desk_light(facing, darkness);
         let screen_glow = occupant
-            .filter(|_| shows_screen)
+            .filter(|_| facing == crate::layout::Facing::North)
             .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))
             .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
         let has_coffee = occupant.is_some_and(|a| ctx.coffee.contains_key(&a.agent_id));
@@ -842,11 +859,8 @@ fn enqueue_desk_cubicles<'a>(
                 facing,
                 has_cabinet: i % 2 == 0,
                 screen_glow,
-                screen_idle: if shows_screen {
-                    SCREEN_IDLE_MAX * darkness
-                } else {
-                    0.0
-                },
+                lamp: light.lamp,
+                screen_idle: light.screen_idle,
                 has_coffee,
                 coffee_steam,
                 token_tier,

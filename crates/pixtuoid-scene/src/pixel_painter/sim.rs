@@ -14,22 +14,7 @@ use std::time::SystemTime;
 /// away from the viewer.
 const SEATED_BACK: &str = "seated_back";
 
-/// Which animation a desk occupant is drawn in, given the way their desk seats
-/// them.
-///
-/// EVERY seated pose takes the back view on a back-turned desk, not just the
-/// still one. The still pose is the only back view the pack ships, so a typist
-/// loses their keyboard flicker — deliberately, because the alternative renders
-/// a body sitting with its back to us wearing a FACE, which is what four desks
-/// of the office did. An earlier revision kept the front frames for exactly that
-/// animation, decided while the two seats were ONE pixel apart and the
-/// substitution was invisible either way; the seat has since moved a full
-/// sprite-height, so that trade no longer holds.
-///
-/// A pack without `seated_back` keeps its front frames — the same per-piece
-/// degrade a custom pack already gets for `side_seated`, never an invisible
-/// sitter. A per-pose back view lands as its sprite plus one arm here.
-/// The back view of a seated pose, or `None` where the pack has no distinct one.
+/// The back view of each seated pose that ships one.
 ///
 /// A TABLE, not a `format!("{anim}_back")`, because `CharacterPlacement.anim_name`
 /// is `&'static str` and a formatted name cannot be. Adding a pose's back view is

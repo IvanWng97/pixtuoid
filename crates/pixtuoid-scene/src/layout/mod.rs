@@ -282,7 +282,8 @@ pub const DESK_H: u16 = 6;
 // shipping a desk whose z-sort and pod spacing disagree with its own pixels.
 const _: () = assert!(
     DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
-    "DESK_H must price exactly the rows the desk art draws: surface + front + legs"
+    "the desk's VISUAL height (DESK_H + 2) must equal the rows its art draws: \
+     surface + front + legs"
 );
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
 /// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
