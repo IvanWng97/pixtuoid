@@ -18,6 +18,12 @@ scrub lives in `git()` and `bypass_sweep()` fails the build for any git argv in
 `scripts/**/*.py` that does not go through it. Python only, by decision rather
 than oversight: nothing in `scripts/*.sh` or `*.mjs` spawns git at all, and the
 class that bit us twice was the Python tools that drive throwaway repos.
+
+Only `comment-lint`'s selftest still builds one — its pathspec control has to
+drive a real `git diff`. `gen-guides` injects `tracked_guides` instead, so its
+fixture is a plain directory that cannot reach an index at all. Removing the
+precondition is why the controls below are this small: with `git()` the only
+path, there is no per-`main()` call left to forget.
 """
 
 from __future__ import annotations
@@ -34,16 +40,10 @@ from typing import Any
 SCRIPTS = pathlib.Path(__file__).resolve().parent
 SELF = pathlib.Path(__file__).resolve()
 
-# Set on the child in `ambient_git_control` so the child's own control is a no-op.
-INNER_ENV = "PIXTUOID_GITENV_INNER"
-
 # Callables that spawn a process, for the `shell=True` / `os.system` string form.
 SPAWNERS = frozenset(
     {"run", "Popen", "call", "check_call", "check_output", "system", "getoutput"}
 )
-
-# A hung child would hang `lint` inside a backgrounded `run` with no diagnostic.
-CHILD_TIMEOUT_S = 120
 
 
 @functools.cache
@@ -136,60 +136,12 @@ def bypass_sweep(where: pathlib.Path = SCRIPTS) -> list[str]:
     return out
 
 
-def ambient_git_control(script: pathlib.Path) -> str | None:
-    """Fail-message if `script --selftest` reaches the repo an ambient `GIT_DIR` names.
-
-    It SPAWNS the entry point rather than calling the scrub in-process, because
-    losing the scrub is the regression and an in-process control walks straight
-    past it. The snapshots go through `_harness_git` aimed positively at `outer`:
-    routing them through `git()` would let a broken `git()` redirect BOTH to the
-    same wrong index, where they match and the control passes mid-corruption.
-    """
-    if os.environ.get(INNER_ENV):
-        return None
-    with tempfile.TemporaryDirectory() as tmp:
-        outer = pathlib.Path(tmp) / "outer"
-        (outer / "sub").mkdir(parents=True)
-        (outer / "sub" / "kept.md").write_text("# kept\n")
-        at_outer = _at(outer)
-        _harness_git("init", "-q", env=at_outer, check=True, capture_output=True)
-        _harness_git("add", "-A", env=at_outer, check=True, capture_output=True)
-
-        def snap() -> str:
-            return _harness_git(
-                "ls-files", env=at_outer, capture_output=True, text=True, check=True
-            ).stdout
-
-        before = snap()
-        try:
-            child = subprocess.run(
-                [sys.executable, str(script), "--selftest"],
-                env={**_hook_env(outer), INNER_ENV: "1"},
-                capture_output=True,
-                text=True,
-                timeout=CHILD_TIMEOUT_S,
-            )
-        except subprocess.TimeoutExpired:
-            return f"`{script.name} --selftest` hung under the control (>{CHILD_TIMEOUT_S}s)"
-        after = snap()
-    # A child that died before its git calls leaks nothing, so the index check
-    # alone would read that as a pass.
-    if child.returncode != 0:
-        return (
-            f"`{script.name} --selftest` did not run under the control "
-            f"(exit {child.returncode}): {child.stderr.strip()[-300:]}"
-        )
-    if after != before:
-        return (
-            f"an inherited GIT_DIR must not let `{script.name} --selftest` reach the "
-            f"outer index (it now holds {after.split() or '<empty>'})"
-        )
-    return None
-
-
 def selftest() -> int:
     """Negative-control the scrub, the sweep, and the control — each must FAIL on cue."""
     fails: list[str] = []
+    # `lint` runs this from the developer's checkout, and an untracked stray fails
+    # no gate — which is how #893's `PHANTOM.md` shipped. Cheap recurrence guard.
+    entered_cwd = set(os.listdir("."))
 
     if offenders := bypass_sweep():
         fails.append(f"these bypass `gitenv.git()` and can be relocated by a hook: {offenders}")
@@ -232,7 +184,11 @@ def selftest() -> int:
                 "ls-files", env=at_victim, capture_output=True, text=True, check=True
             ).stdout
 
-        before = snap()
+        # Assert the CONTENT, not just before==after: if the harness ever reads the
+        # wrong repo — e.g. someone folds `_harness_git` into `git()` and loses the
+        # aim — a self-comparison matches trivially and the control goes vacuous.
+        if (before := snap()) != "sub/kept.md\n":
+            fails.append(f"the control's own fixture must be the repo it reads (got {before!r})")
 
         leaky = pathlib.Path(tmp) / "leaky"
         leaky.mkdir()
@@ -256,32 +212,8 @@ def selftest() -> int:
         if snap() != before:
             fails.append("`git()` must not let an ambient GIT_DIR relocate a `-C` call")
 
-        # Both directions on `ambient_git_control` itself — it is the only pin on
-        # gen-guides' and comment-lint's entry points, and nothing else tests it.
-        probes = pathlib.Path(tmp) / "probes"
-        probes.mkdir()
-        # A probe writes relative to the CALLER's cwd unless told otherwise, and
-        # `--selftest` runs from the developer's checkout via `lint`.
-        littered = set(os.listdir("."))
-        clean = probes / "clean_child.py"
-        clean.write_text("import sys\nsys.exit(0)\n")
-        if (msg := ambient_git_control(clean)) is not None:
-            fails.append(f"the control must PASS a child that touches nothing: {msg}")
-        leaker = probes / "leaky_child.py"
-        leaker.write_text(
-            "import pathlib, subprocess\n"
-            "d = pathlib.Path(__file__).parent\n"
-            "(d / 'PHANTOM.md').write_text('x')\n"
-            "subprocess.run(['git', '-C', str(d), 'add', '-A'])\n"
-        )
-        if ambient_git_control(leaker) is None:
-            fails.append("the control must FIRE on a child that stages into the ambient repo")
-        dier = probes / "dying_child.py"
-        dier.write_text("import sys\nsys.exit(3)\n")
-        if ambient_git_control(dier) is None:
-            fails.append("the control must FIRE on a child that never reached its git calls")
-        if strays := sorted(set(os.listdir(".")) - littered):
-            fails.append(f"the selftest must not write into the caller's cwd (created {strays})")
+    if strays := sorted(set(os.listdir(".")) - entered_cwd):
+        fails.append(f"the selftest must not write into the caller's cwd (created {strays})")
 
     if fails:
         print("gitenv selftest FAILED:")
