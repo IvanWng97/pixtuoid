@@ -3,9 +3,11 @@
 //! A runner that interposes a shell makes the raw parent a corpse-to-be: a
 //! `cmd.exe /C` on Windows (#528), and on Unix any wrapper with work left after
 //! ours, which therefore cannot exec-replace itself with us — Cursor `eval`s
-//! the hook mid-script and then dumps shell state (#896). That pid dies in
-//! milliseconds, and `HookPidWatch` ends the session when it does. Residuals
-//! are in `pixtuoid-core/CLAUDE.md`'s focus-jump section.
+//! the hook mid-script and then dumps shell state (#896), so stamping it would
+//! aim focus-jump at a corpse. (Ending a SESSION on a bad pid is separately
+//! guarded — see `HookPidWatch`'s corroboration entry in
+//! `pixtuoid-core/SHARP-EDGES.md`.) Residuals are in
+//! `pixtuoid-core/CLAUDE.md`'s focus-jump section.
 //!
 //! Only the row READ is per-OS, hand-rolled rather than `sysinfo` because this
 //! runs on every tool call of every agent inside the shim's send bound.
@@ -21,9 +23,9 @@ struct ProcRow {
     exe: String,
 }
 
-/// By NAME because a process table carries nothing structural: matching the
+/// By NAME because a process table carries nothing structural: on Windows the
 /// ancestor's command line needs `NtQueryInformationProcess`, and "created
-/// within N ms of us" skips the CLI itself at session_start. Bare STEMS, since
+/// within N ms of us" skips the CLI itself at session_start on every OS. Bare STEMS, since
 /// the same shell is `bash` under a Unix `comm` and `bash.exe` in a Toolhelp32
 /// snapshot (Git-Bash/MSYS2 put the latter on Windows). `busybox` is here
 /// because Alpine's `/bin/sh` IS busybox and `comm` reports the real image.
@@ -54,8 +56,8 @@ fn is_interposer(exe: &str) -> bool {
         .any(|shell| stem.eq_ignore_ascii_case(shell))
 }
 
-/// First ancestor of `start` that isn't an interposed shell. A parent of `1`
-/// means ours already exited, so it is no answer rather than the CLI. An exited
+/// First ancestor of `start` that isn't an interposed shell. A parent of `0` or
+/// `1` is the reaper, nobody's agent CLI, so it is no answer. An exited
 /// parent is absent from `row_of`; a RECYCLED one is present and
 /// indistinguishable.
 fn first_cli_ancestor(start: u32, row_of: impl Fn(u32) -> Option<ProcRow>) -> Option<u32> {
@@ -76,8 +78,7 @@ fn first_cli_ancestor(start: u32, row_of: impl Fn(u32) -> Option<ProcRow>) -> Op
 /// The walk's own slice of the send bound. `arm_watchdog` is already running and
 /// hard-exits at the FULL bound, so an unbudgeted walk costs the ENVELOPE, not
 /// just `_pid` — and a process table can stall on either OS (an AV/EDR filter
-/// over Toolhelp32; a throttled or contended procfs). Derived so the two cannot
-/// drift.
+/// over Toolhelp32; a throttled or contended procfs).
 const WALK_BUDGET: std::time::Duration =
     std::time::Duration::from_millis(crate::transport::WRITE_TIMEOUT_MS / 4);
 
@@ -104,11 +105,17 @@ fn walk_now() -> Option<u32> {
     u32::try_from(unsafe { libc::getppid() }).ok()
 }
 
-/// `/proc/<pid>/stat`: `comm` is field 2, parenthesized and free to contain
-/// both spaces and `)`, so it ends at the LAST one; `ppid` is field 4.
 #[cfg(target_os = "linux")]
 fn proc_row(pid: u32) -> Option<ProcRow> {
-    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    parse_stat(&std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?)
+}
+
+/// `/proc/<pid>/stat`: `comm` is field 2, parenthesized and free to contain both
+/// spaces and `)`, so it ends at the LAST one; `ppid` is field 4. Split from the
+/// READ, and compiled everywhere, so a hostile row is table-testable off Linux —
+/// this is the crate's only parser over bytes we do not control.
+#[cfg(any(target_os = "linux", test))]
+fn parse_stat(stat: &str) -> Option<ProcRow> {
     let close = stat.rfind(')')?;
     let exe = stat.get(stat.find('(')? + 1..close)?.to_string();
     let parent = stat
@@ -221,7 +228,7 @@ fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
 #[cfg(windows)]
 fn exe_name(raw: &[u16]) -> String {
     let end = raw.iter().position(|&c| c == 0).unwrap_or(raw.len());
-    String::from_utf16_lossy(&raw[..end])
+    String::from_utf16_lossy(raw.get(..end).unwrap_or(raw))
 }
 
 #[cfg(test)]
@@ -243,6 +250,43 @@ mod tests {
             })
             .collect();
         move |pid| rows.get(&pid).cloned()
+    }
+
+    /// The only parser over bytes we do not control. `panic = "abort"` makes an
+    /// out-of-bounds slice here a SIGABRT the agent CLI sees, and the walk now
+    /// runs off-thread where a panic would be INVISIBLE to the suite — so the
+    /// hostile rows are pinned directly rather than through `proc_row`'s read.
+    #[test]
+    fn a_hostile_stat_row_is_no_answer_not_a_panic() {
+        for row in [
+            "",
+            ")",
+            "(",
+            ")(",                             // a '(' AFTER the last ')' — reversed range
+            "1 (comm) S",                     // truncated before ppid
+            "1 (comm S 2 3",                  // unclosed comm
+            "1 comm) S 2 3",                  // unopened comm
+            "1 () S 2 3",                     // empty comm
+            "1 (a) b) S 2 3",                 // ')' inside comm
+            "1 (x) S notanumber 3",           // non-numeric ppid
+            "1 (x) S -5 3",                   // negative ppid
+            "1 (x) S 99999999999999999999 3", // ppid overflows u32
+            "\u{0}\u{0}\u{0}",
+            "1 (🦀 crab) S 42 3",
+        ] {
+            let _ = parse_stat(row); // must not panic
+        }
+        assert_eq!(
+            parse_stat("42 (zsh) S 7 42 42 0").map(|r| (r.parent, r.exe)),
+            Some((7, "zsh".to_string())),
+            "the well-formed row still parses"
+        );
+        assert_eq!(
+            parse_stat("42 (weird ) name) S 7 42").map(|r| (r.parent, r.exe)),
+            Some((7, "weird ) name".to_string())),
+            "comm ends at the LAST ')', so a ')' inside the name survives"
+        );
+        assert!(parse_stat(")(").is_none(), "a reversed range is no answer");
     }
 
     #[test]

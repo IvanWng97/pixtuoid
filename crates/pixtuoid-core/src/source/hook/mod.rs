@@ -165,12 +165,11 @@ impl Drop for UndeliveredEvents {
 /// session whose `SessionStart` predates the daemon (opencode never re-emits
 /// `session.created`). Activity/Waiting/End never register a new slot.
 ///
-/// Gated on the SAME `FocusChannel` capability as [`patch_identity_pids`] — one
-/// fact ("is this source's `_pid` trustworthy") with two consumers. A
+/// Dispatches on the SAME `FocusChannel` capability as [`patch_identity_pids`] —
+/// one fact ("is this source's `_pid` trustworthy") with two consumers. A
 /// `TranscriptProbe` source is excluded on its own terms: its pid comes from the
 /// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
-/// binding here only offers a second, weaker answer — and, binding once per
-/// session, it would strand an uncorroborated candidate that nothing evicts.
+/// binding here would only offer a second, weaker answer.
 fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
     use crate::source::registry::FocusChannel;
     let (agent_id, source) = match ev {

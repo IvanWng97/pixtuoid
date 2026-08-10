@@ -4,7 +4,8 @@
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
 //! `session_end` hook on a CLEAN quit, so an abrupt exit ghosts the sprite until
 //! the 10–30 min stale-sweep. When the shim can stamp the CLI's pid (`_pid`, an
-//! ancestor walk past the runner's interposed shell), [`ExitWatch`] emits a
+//! ancestor walk past the runner's interposed shell where the OS allows one),
+//! [`ExitWatch`] emits a
 //! `SessionEnd` the moment that pid dies. Fed ONLY from the hook decode path,
 //! so it is inert for sources whose payloads carry no `_pid`.
 //!
@@ -111,7 +112,8 @@ impl Bindings {
     /// `corroborate` asks for a second, consecutive sighting before arming —
     /// right for a shim-resolved pid, which is a guess about which ancestor is
     /// the CLI, and wrong for a source that stamps its OWN `process.pid`: that
-    /// is a fact, and a session may report it only once.
+    /// is a fact, and a session may report it only once. A different pid demotes
+    /// an armed agent back to a candidate.
     fn sight(&mut self, pid: i32, agent_id: AgentId, corroborate: bool) -> bool {
         match self.by_agent.get(&agent_id) {
             Some(Sighting::Armed(p)) if *p == pid => return true,
