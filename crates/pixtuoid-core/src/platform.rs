@@ -162,6 +162,9 @@ fn resolve_home_first(
 /// on any host — the runtime `cfg!(target_os)` if-else couldn't test its
 /// non-host arms. Pass `std::env::consts::OS` for `os`; `home` is the
 /// already-resolved user home used for the relative fallbacks.
+///
+/// `appdata`/`xdg` must ALREADY be blank-filtered — [`path_env`] owns that, so a
+/// blank `PathBuf` handed in here is taken as a real path.
 pub fn resolve_user_config_dir(
     os: &str,
     appdata: Option<PathBuf>,
@@ -520,7 +523,7 @@ mod tests {
     }
 
     #[test]
-    fn codex_home_falls_back_to_dot_codex_when_env_unset_empty_or_missing_dir() {
+    fn codex_home_falls_back_to_dot_codex_when_env_unset_or_missing_dir() {
         let expected = PathBuf::from("/home/u").join(".codex");
         assert_eq!(resolve_codex_home(None, PathBuf::from("/home/u")), expected);
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-missing-xyz");

@@ -411,6 +411,27 @@ mod tests {
     }
 
     /// Pinned against a live probe of hermes 2026.8.3, the STRIP included.
+    /// `hermes_home` must read through the TRIMMING twin: upstream applies
+    /// `os.environ.get(K, "").strip()`, so a padded override IS the stripped
+    /// path. Nothing else pins that binding — swap `path_env_trimmed` for
+    /// `path_env` in `hermes_home()` and every other test still passes.
+    #[test]
+    fn hermes_home_strips_a_padded_env_override_like_upstream() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("HERMES_HOME");
+
+        std::env::set_var("HERMES_HOME", "  /custom/hm  ");
+        let got = hermes_home();
+
+        match saved {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        assert_eq!(got, Some(PathBuf::from("/custom/hm")));
+    }
+
     #[test]
     fn hermes_home_takes_the_env_value_then_falls_back_to_dot_hermes() {
         let unix = |env: Option<&str>| {

@@ -1172,7 +1172,7 @@ mod tests {
         assert_eq!(
             resolve_omp_sessions_dir(&env(Some(""), None, None), true, &exists("/xdg/omp")),
             home_default,
-            "an empty XDG_DATA_HOME is unset"
+            "a blank XDG_DATA_HOME never yields an ABSOLUTE xdg root, so the probe misses"
         );
     }
 

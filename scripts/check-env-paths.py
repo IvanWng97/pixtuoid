@@ -41,6 +41,9 @@ PATH_NAME = re.compile(
 SKIP_DIRS = ("/tests/", "/target/", "/.claude/worktrees/")
 SKIP_FILES = ("tests.rs", "build.rs")
 
+TEST_ATTR = re.compile(r"^\s*#\[cfg\(test\)\]")
+MOD_DECL = re.compile(r"^\s*(pub(\(\w+\))?\s+)?mod\s")
+
 
 def offenders(root: Path) -> list[tuple[Path, int, str]]:
     hits: list[tuple[Path, int, str]] = []
@@ -48,13 +51,31 @@ def offenders(root: Path) -> list[tuple[Path, int, str]]:
         posix = rs.as_posix()
         if any(d in posix for d in SKIP_DIRS) or rs.name in SKIP_FILES:
             continue
-        in_tests = False
-        for n, line in enumerate(rs.read_text(encoding="utf-8").splitlines(), 1):
-            # Everything after `#[cfg(test)]` in a file is test scaffolding; the
-            # modules are always last, so a one-way flag is enough.
-            if "#[cfg(test)]" in line:
-                in_tests = True
-            if in_tests or line.lstrip().startswith("//"):
+        lines = rs.read_text(encoding="utf-8").splitlines()
+        # Skip only the BODY of a `#[cfg(test)] mod`, tracked by brace depth. A
+        # one-way "everything after the first #[cfg(test)]" flag looked simpler
+        # and was catastrophically wrong: a mid-file `#[cfg(test)] const` (or the
+        # string appearing inside a `//!` doc comment) blinded the rest of the
+        # file — 44% of the scanned tree, including install/openclaw.rs, which is
+        # a config-PATH resolver and exactly this gate's target class.
+        depth = 0
+        pending_attr = False
+        for n, line in enumerate(lines, 1):
+            stripped = line.lstrip()
+            if depth:
+                depth += line.count("{") - line.count("}")
+                continue
+            if TEST_ATTR.match(line):
+                pending_attr = True
+                continue
+            if pending_attr:
+                # Only a MODULE swallows a block; any other `#[cfg(test)]` item
+                # is one declaration and the file keeps being scanned.
+                if MOD_DECL.match(line) and "{" in line:
+                    depth = line.count("{") - line.count("}")
+                pending_attr = False
+                continue
+            if stripped.startswith("//"):
                 continue
             m = PATH_NAME.search(line)
             if m:
@@ -62,8 +83,51 @@ def offenders(root: Path) -> list[tuple[Path, int, str]]:
     return hits
 
 
+def walk_selftest() -> list[str]:
+    """Negative-control the WALK, not just the regex.
+
+    The regex half can be green while `offenders()` scans nothing — a one-way
+    `#[cfg(test)]` flag once hid 44% of the tree behind a doc-comment mention.
+    So plant a tree and assert on what the walker actually returns.
+    """
+    import tempfile
+
+    fixture = {
+        # a real violation, after a mid-file `#[cfg(test)] const` and a doc
+        # comment that merely MENTIONS the attribute — both used to blind it
+        "crates/a/src/lib.rs": (
+            "//! see #[cfg(test)] below\n"
+            "#[cfg(test)]\n"
+            "const SENTINEL: u8 = 1;\n"
+            "fn f() { let _ = std::env::var(\"CODEX_HOME\"); }\n"
+        ),
+        # inside a `#[cfg(test)] mod` — legitimately skipped
+        "crates/b/src/lib.rs": (
+            "#[cfg(test)]\nmod tests {\n"
+            "    fn t() { let _ = std::env::var(\"HOME\"); }\n}\n"
+        ),
+        # skip-listed filename
+        "crates/c/src/tests.rs": 'fn t() { std::env::var("HOME"); }\n',
+    }
+    fails: list[str] = []
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        for rel, body in fixture.items():
+            f = root / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body, encoding="utf-8")
+        got = {(str(p), var) for p, _n, var in offenders(root)}
+    if ("crates/a/src/lib.rs", "CODEX_HOME") not in got:
+        fails.append("walk: missed a violation after a mid-file #[cfg(test)] item")
+    if any(p == "crates/b/src/lib.rs" for p, _ in got):
+        fails.append("walk: fired inside a #[cfg(test)] mod body")
+    if any(p == "crates/c/src/tests.rs" for p, _ in got):
+        fails.append("walk: fired in a skip-listed file")
+    return fails
+
+
 def selftest() -> int:
-    """Prove the checker can FAIL, and that it stays quiet on the right forms."""
+    """Prove the checker can FAIL — both halves: the regex AND the walk."""
     fires = [
         'let h = std::env::var("HOME").ok();',
         'if let Ok(d) = std::env::var("XDG_RUNTIME_DIR") {',
@@ -84,9 +148,15 @@ def selftest() -> int:
         print(f"SELFTEST FAIL: should have fired on: {s}", file=sys.stderr)
     for s in noisy:
         print(f"SELFTEST FAIL: should have stayed silent on: {s}", file=sys.stderr)
-    if bad or noisy:
+    walk = walk_selftest()
+    for f in walk:
+        print(f"SELFTEST FAIL: {f}", file=sys.stderr)
+    if bad or noisy or walk:
         return 1
-    print(f"env-paths selftest: {len(fires)} fire + {len(silent)} silent cases ✓")
+    print(
+        f"env-paths selftest: {len(fires)} fire + {len(silent)} silent regex cases, "
+        "3 walk cases ✓"
+    )
     return 0
 
 
