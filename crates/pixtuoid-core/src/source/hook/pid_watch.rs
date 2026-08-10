@@ -8,12 +8,13 @@
 //! `SessionEnd` the moment that pid dies. Fed ONLY from the hook decode path,
 //! so it is inert for sources whose payloads carry no `_pid`.
 //!
-//! A wrong pid is NOT self-healing: acting on the first sighting walked the
-//! sprite out on every hook for a whole session (#896). So the watch arms only
-//! when an agent reports the SAME pid twice in a row — this crate's
-//! `SHARP-EDGES.md` has why that costs nothing and what it buys.
+//! A pid wrong on EVERY hook does not self-heal: acting on the first sighting
+//! walked the sprite out and back in for a whole session (#896). So a
+//! shim-GUESSED pid arms only when an agent reports it twice in a row; a pid the
+//! source stamped itself arms on sight. This crate's `SHARP-EDGES.md` has what
+//! that costs and what it buys.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::source::exit_watch::ExitWatch;
@@ -28,18 +29,19 @@ pub(crate) struct HookPidWatch {
     bindings: Arc<Mutex<Bindings>>,
 }
 
-/// The two halves of a sighting, in ONE lock so they cannot contradict: a pid is
-/// either a candidate or armed, never both.
+/// One agent's pid sighting. An agent is armed on AT MOST ONE pid, which is why
+/// this is an enum and not a pair of maps: "armed on two pids at once" was
+/// reachable when the two states lived in separate collections.
+enum Sighting {
+    /// A shim GUESS seen once — armed only if the next sighting repeats it.
+    Candidate(i32),
+    /// Watched: its death ends this agent.
+    Armed(i32),
+}
+
 #[derive(Default)]
 struct Bindings {
-    /// Armed pid → the agents ended when it dies. Drained by [`Bindings::take`],
-    /// so it holds only pids the exit watch is actually watching.
-    armed: HashMap<i32, HashSet<AgentId>>,
-    /// The ONE uncorroborated sighting per agent. A runner whose wrapper pid is
-    /// fresh every hook never corroborates, and nothing would ever evict those —
-    /// only the exit watch removes entries, and it never sees them — so keying
-    /// by AGENT bounds this at one per live session instead of one per tool call.
-    candidate: HashMap<AgentId, i32>,
+    by_agent: HashMap<AgentId, Sighting>,
 }
 
 impl HookPidWatch {
@@ -79,11 +81,11 @@ impl HookPidWatch {
         Some(this)
     }
 
-    /// Bind `agent_id` to `pid`, arming the exit watch once that agent repeats
-    /// the pid back-to-back (idempotent). Callers must note at most once per
-    /// hook PAYLOAD, or a multi-event batch would confirm its own pid.
-    pub(crate) fn note(&self, pid: i32, agent_id: AgentId) {
-        if self.lock().sight(pid, agent_id) {
+    /// Bind `agent_id` to `pid`, arming the exit watch (idempotent). With
+    /// `corroborate`, that takes a second consecutive sighting — so callers must
+    /// note at most once per hook PAYLOAD, or a batch would confirm its own pid.
+    pub(crate) fn note(&self, pid: i32, agent_id: AgentId, corroborate: bool) {
+        if self.lock().sight(pid, agent_id, corroborate) {
             self.exit.watch(pid);
         }
     }
@@ -100,25 +102,37 @@ impl HookPidWatch {
 /// Split from the [`ExitWatch`] side so it is unit-testable without spawning the
 /// platform watcher thread.
 impl Bindings {
-    /// Record a sighting; `true` when it CORROBORATES this agent's previous one,
-    /// which is what arms the watch. A different pid for the same agent replaces
-    /// the candidate rather than joining it.
-    fn sight(&mut self, pid: i32, agent_id: AgentId) -> bool {
-        if self.armed.get(&pid).is_some_and(|a| a.contains(&agent_id)) {
-            return false;
+    /// Record a sighting; `true` when it NEWLY arms `pid`, which is what the
+    /// caller watches on. `corroborate` asks for a second, consecutive sighting
+    /// before arming — right for a shim-resolved pid, which is a guess about
+    /// which ancestor is the CLI, and wrong for a source that stamps its OWN
+    /// `process.pid`: that is a fact, and a session may report it only once.
+    fn sight(&mut self, pid: i32, agent_id: AgentId, corroborate: bool) -> bool {
+        match self.by_agent.get(&agent_id) {
+            Some(Sighting::Armed(p)) if *p == pid => return false,
+            Some(Sighting::Candidate(p)) if *p == pid => {}
+            _ if corroborate => {
+                self.by_agent.insert(agent_id, Sighting::Candidate(pid));
+                return false;
+            }
+            _ => {}
         }
-        if self.candidate.insert(agent_id, pid) != Some(pid) {
-            return false;
-        }
-        self.candidate.remove(&agent_id);
-        self.armed.entry(pid).or_default().insert(agent_id);
+        self.by_agent.insert(agent_id, Sighting::Armed(pid));
         true
     }
 
-    /// Remove `pid`'s entry and return the agents bound to it. The removal keeps
-    /// the map from accumulating across CLI launches.
+    /// Remove and return the agents armed on `pid` — the ones its death ends.
     fn take(&mut self, pid: i32) -> Vec<AgentId> {
-        self.armed.remove(&pid).into_iter().flatten().collect()
+        let dead: Vec<AgentId> = self
+            .by_agent
+            .iter()
+            .filter(|(_, s)| matches!(s, Sighting::Armed(p) if *p == pid))
+            .map(|(agent, _)| *agent)
+            .collect();
+        for agent in &dead {
+            self.by_agent.remove(agent);
+        }
+        dead
     }
 }
 
@@ -133,6 +147,9 @@ mod tests {
         assert!(HookPidWatch::spawn(tx).is_some());
     }
 
+    const GUESS: bool = true;
+    const FACT: bool = false;
+
     /// Two sightings each, so both agents are ARMED on the shared pid.
     #[test]
     fn take_returns_every_agent_armed_on_a_pid_and_only_once() {
@@ -141,24 +158,17 @@ mod tests {
         let a2 = AgentId::from_parts("codewhale", "agent-child");
         let other = AgentId::from_parts("codewhale", "/other");
         for _ in 0..2 {
-            b.sight(4242, a1);
-            b.sight(4242, a2);
-            b.sight(99, other);
+            b.sight(4242, a1, GUESS);
+            b.sight(4242, a2, GUESS);
+            b.sight(99, other, GUESS);
         }
 
         let mut taken = b.take(4242);
         taken.sort_unstable();
         let mut expected = vec![a1, a2];
         expected.sort_unstable();
-        assert_eq!(
-            taken, expected,
-            "both agents armed on the pid are ended on its death"
-        );
-
-        assert!(
-            b.take(4242).is_empty(),
-            "the entry is removed on the first take"
-        );
+        assert_eq!(taken, expected, "both agents armed on the pid are ended");
+        assert!(b.take(4242).is_empty(), "removed on the first take");
         assert_eq!(b.take(99).len(), 1);
     }
 
@@ -166,29 +176,46 @@ mod tests {
     fn the_second_sighting_arms_and_further_ones_do_not_rearm() {
         let mut b = Bindings::default();
         let a = AgentId::from_parts("codewhale", "/ws");
-        assert!(!b.sight(7, a), "a first sighting is not a repeat");
-        assert!(b.sight(7, a), "the second sighting is the repeat");
-        assert!(!b.sight(7, a), "an already-armed pairing must not re-arm");
+        assert!(!b.sight(7, a, GUESS), "a first sighting is not a repeat");
+        assert!(b.sight(7, a, GUESS), "the second sighting is the repeat");
+        assert!(
+            !b.sight(7, a, GUESS),
+            "an already-armed pairing must not re-arm"
+        );
         assert_eq!(b.take(7).len(), 1, "a re-sighted (pid, agent) is deduped");
     }
 
+    /// A pid the SOURCE stamped is not a guess: opencode's plugin sends its own
+    /// `process.pid`, and a session with no tool call reports it exactly once —
+    /// this watch is that source's instance-teardown path, so it arms on sight.
+    #[test]
+    fn a_source_stamped_pid_arms_on_the_first_sighting() {
+        let mut b = Bindings::default();
+        let a = AgentId::from_parts("opencode", "ses_x");
+        assert!(
+            b.sight(4242, a, FACT),
+            "a stamped pid needs no corroboration"
+        );
+        assert_eq!(b.take(4242), vec![a]);
+    }
+
     /// #896: a per-invocation wrapper reports a FRESH pid each hook, so no
-    /// pairing ever repeats and nothing is ever armed.
+    /// sighting ever repeats and nothing is ever armed.
     #[test]
     fn a_fresh_pid_per_hook_never_arms_and_never_accumulates() {
         let mut b = Bindings::default();
         let agent = AgentId::from_parts("cursor", "sess-A");
         for wrapper_pid in [4808, 5379, 8924, 9869, 13594] {
             assert!(
-                !b.sight(wrapper_pid, agent),
+                !b.sight(wrapper_pid, agent, GUESS),
                 "wrapper pid {wrapper_pid} must never read as corroborated"
             );
         }
-        assert!(b.armed.is_empty(), "nothing may be armed");
+        assert!(b.take(13594).is_empty(), "nothing may be armed");
         assert_eq!(
-            b.candidate.len(),
+            b.by_agent.len(),
             1,
-            "only the LATEST candidate is kept — one entry per agent, not per hook"
+            "only the LATEST sighting is kept — one entry per agent, not per hook"
         );
     }
 
@@ -200,17 +227,51 @@ mod tests {
     fn an_interleaved_pid_resets_the_corroboration() {
         let mut b = Bindings::default();
         let a = AgentId::from_parts("cursor", "sess-A");
-        assert!(!b.sight(100, a));
-        assert!(!b.sight(200, a), "a different pid replaces the candidate");
+        assert!(!b.sight(100, a, GUESS));
         assert!(
-            !b.sight(100, a),
+            !b.sight(200, a, GUESS),
+            "a different pid replaces the candidate"
+        );
+        assert!(
+            !b.sight(100, a, GUESS),
             "100 was seen before, but not CONSECUTIVELY — it must not arm"
         );
-        assert!(b.armed.is_empty(), "a recycled pid must not arm a wrapper");
-        assert!(b.sight(100, a), "back-to-back 100 is real corroboration");
+        assert!(
+            b.take(100).is_empty(),
+            "a recycled pid must not arm a wrapper"
+        );
+        assert!(
+            b.sight(100, a, GUESS),
+            "back-to-back 100 is real corroboration"
+        );
     }
 
-    /// Two agents behind one wrapper pid still bound by AGENT, not by sighting.
+    /// An ARMED pid must not shield a stale candidate into a later arm: with the
+    /// two states in separate maps, sighting an armed pid skipped the candidate
+    /// bookkeeping, so 9,7,9 armed 9 non-consecutively AND left the agent armed
+    /// on two pids at once. One `Sighting` per agent makes both unrepresentable.
+    #[test]
+    fn sighting_an_armed_pid_cannot_resurrect_a_stale_candidate() {
+        let mut b = Bindings::default();
+        let a = AgentId::from_parts("codewhale", "/ws");
+        assert!(!b.sight(7, a, GUESS));
+        assert!(b.sight(7, a, GUESS), "7 is armed");
+        assert!(!b.sight(9, a, GUESS), "9 becomes the candidate");
+        assert!(
+            !b.sight(7, a, GUESS),
+            "7 is armed but not consecutive with 9"
+        );
+        assert!(
+            !b.sight(9, a, GUESS),
+            "9 must NOT arm — its candidacy was broken by the 7 sighting"
+        );
+        assert!(
+            b.take(7).is_empty() || b.take(9).is_empty(),
+            "an agent is armed on at most ONE pid"
+        );
+    }
+
+    /// One entry per agent however many sightings arrive.
     #[test]
     fn candidates_are_bounded_by_live_agents() {
         let mut b = Bindings::default();
@@ -219,15 +280,11 @@ mod tests {
                 b.sight(
                     10_000 + hook,
                     AgentId::from_parts("cursor", &format!("s{n}")),
+                    GUESS,
                 );
             }
         }
-        assert!(b.armed.is_empty());
-        assert_eq!(
-            b.candidate.len(),
-            3,
-            "one candidate per agent, 150 sightings"
-        );
+        assert_eq!(b.by_agent.len(), 3, "one entry per agent, 150 sightings");
     }
 
     #[tokio::test]
@@ -242,8 +299,8 @@ mod tests {
             .expect("spawn a child to watch");
         let pid = i32::try_from(child.id()).expect("pid fits i32");
         let agent = AgentId::from_parts("codewhale", "/ws");
-        watch.note(pid, agent);
-        watch.note(pid, agent); // the CLI's pid rides every hook event
+        watch.note(pid, agent, true);
+        watch.note(pid, agent, true); // the CLI's pid rides every hook event
         child.kill().expect("kill the watched child");
         let _ = child.wait();
 
@@ -270,7 +327,7 @@ mod tests {
             .spawn()
             .expect("spawn a stand-in wrapper shell");
         let pid = i32::try_from(wrapper.id()).expect("pid fits i32");
-        watch.note(pid, AgentId::from_parts("cursor", "sess-A"));
+        watch.note(pid, AgentId::from_parts("cursor", "sess-A"), true);
         wrapper.kill().expect("kill the wrapper");
         let _ = wrapper.wait();
 

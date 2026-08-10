@@ -673,8 +673,10 @@ const HERMES: SourceDescriptor = SourceDescriptor {
         caps: SourceCaps {
             // `on_session_end` fires on clean completion — best-effort counts.
             // The payload carries no pid, but the shim stamps one, so an abrupt
-            // exit rides it — falling to the stale-sweep only when the runner's
-            // wrapper is one `cli_pid`'s walk does not recognise.
+            // exit rides it — falling to the stale-sweep where no `ExitWatch`
+            // backend exists (Windows / pre-5.3 Linux), where the walk does not
+            // recognise the runner's wrapper, or before two consecutive payloads
+            // corroborate the pid (#896).
             has_exit_signal: true,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.

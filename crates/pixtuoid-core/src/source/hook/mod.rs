@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::{debug, warn};
 
 use crate::source::decoder::{checked_pid, decode_hook_payload};
+use crate::source::registry::SourceDescriptor;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -170,7 +171,8 @@ impl Drop for UndeliveredEvents {
 /// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
 /// binding here only offers a second, weaker answer — and, binding once per
 /// session, it would strand an uncorroborated candidate that nothing evicts.
-fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
+fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
+    use crate::source::registry::FocusChannel;
     let (agent_id, source) = match ev {
         AgentEvent::SessionStart {
             agent_id, source, ..
@@ -180,9 +182,22 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
         } => (agent_id, source),
         _ => return None,
     };
-    crate::source::registry::descriptor_for(source)
-        .is_some_and(|d| d.focus_channel().accepts_stamp())
-        .then_some(*agent_id)
+    match crate::source::registry::descriptor_for(source).map(SourceDescriptor::focus_channel) {
+        // The shim GUESSED which ancestor is the CLI — corroborate it.
+        Some(FocusChannel::ShimStamp) => Some((*agent_id, true)),
+        // The source stamped its own `process.pid`; a session that never calls a
+        // tool reports it once, and for opencode this watch IS the teardown path.
+        Some(FocusChannel::PluginStamp) => Some((*agent_id, false)),
+        _ => None,
+    }
+}
+
+/// The batch's bind targets, at most one per agent: a payload must not
+/// corroborate its own pid. No decoder pairs two bind-target events for one
+/// agent today (activity events are not bind targets), so this is a FORWARD
+/// guard — pinned by `a_batch_yields_one_bind_target_per_agent`.
+fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool> {
+    evs.iter().filter_map(pid_bind_target).collect()
 }
 
 /// Stamp the connection's peeked `_pid` onto every `Identity` event of a decoded
@@ -279,14 +294,8 @@ pub(crate) async fn handle_conn(
                     // real identity before the activity event applies.
                     Ok(evs) => {
                         if let (Some(pid), Some(watch)) = (pid, pid_watch.as_ref()) {
-                            // ONE sighting per payload: `note` arms on a repeat,
-                            // and a batch must not be its own corroboration.
-                            for agent_id in evs
-                                .iter()
-                                .filter_map(pid_bind_target)
-                                .collect::<std::collections::BTreeSet<_>>()
-                            {
-                                watch.note(pid, agent_id);
+                            for (agent_id, corroborate) in bind_targets(&evs) {
+                                watch.note(pid, agent_id, corroborate);
                             }
                         }
                         let mut evs = evs;
@@ -382,6 +391,41 @@ mod tests {
 
     /// A `TranscriptProbe` source is excluded: its `_pid` is declared untrusted,
     /// and it has an authoritative pid of its own.
+    /// The guard `handle_conn` relies on: a batch yields at most ONE sighting per
+    /// agent, so a payload can never corroborate its own pid. No decoder pairs
+    /// two bind-target events today, so this pins the FORWARD guard directly —
+    /// the handle_conn-level test cannot, it would pass with the dedupe deleted.
+    #[test]
+    fn a_batch_yields_one_bind_target_per_agent() {
+        let id = AgentId::from_parts("cursor", "sess-A");
+        let batch = [
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "cursor".into(),
+                session_id: "sess-A".into(),
+                cwd: "/r".into(),
+                parent_id: None,
+            },
+            AgentEvent::Identity {
+                agent_id: id,
+                source: "cursor".into(),
+                session_id: "sess-A".into(),
+                cwd: None,
+                pid: None,
+            },
+        ];
+        assert_eq!(
+            bind_targets(&batch).len(),
+            1,
+            "two bind-target events for one agent must collapse to one sighting"
+        );
+        assert_eq!(
+            bind_targets(&batch).get(&id),
+            Some(&true),
+            "cursor is ShimStamp — its pid is a guess and needs corroborating"
+        );
+    }
+
     #[test]
     fn pid_bind_target_skips_a_source_whose_stamp_is_untrusted() {
         for source in ["claude-code", "codex"] {
@@ -420,7 +464,11 @@ mod tests {
                 pid: None,
             },
         ] {
-            assert_eq!(pid_bind_target(&ev), Some(id), "{ev:?} must bind the pid");
+            assert_eq!(
+                pid_bind_target(&ev),
+                Some((id, false)),
+                "{ev:?} must bind the pid; opencode stamps its own, so no corroboration"
+            );
         }
         for ev in [
             AgentEvent::ActivityStart {
@@ -713,11 +761,13 @@ mod tests {
         );
     }
 
-    /// The #896 shape at this seam: ONE payload, whose batch is an `Identity` +
-    /// an activity event carrying the same `_pid`. A batch must not corroborate
-    /// its own pid, so that pid dying ends nothing.
+    /// The #896 shape at this seam: ONE payload carrying a `_pid`, then that pid
+    /// dies. A single sighting of a shim-guessed pid must end nothing. (The
+    /// batch-dedupe guard itself is pinned by `a_batch_yields_one_bind_target_per_agent`
+    /// — this test would pass with the dedupe deleted, because no decoder emits
+    /// two bind-target events for one agent today.)
     #[tokio::test]
-    async fn handle_conn_batch_does_not_corroborate_its_own_pid() {
+    async fn handle_conn_a_single_sighting_dying_ends_nothing() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
             return; // no exit-watch backend on this platform — nothing to assert

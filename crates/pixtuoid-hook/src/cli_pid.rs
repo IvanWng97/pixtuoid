@@ -23,18 +23,21 @@ struct ProcRow {
 
 /// By NAME because a process table carries nothing structural: matching the
 /// ancestor's command line needs `NtQueryInformationProcess`, and "created
-/// within N ms of us" skips the CLI itself at session_start. One cross-OS list
-/// because no spelling here collides with a real CLI on the other OS.
+/// within N ms of us" skips the CLI itself at session_start. Bare STEMS, since
+/// the same shell is `bash` under a Unix `comm` and `bash.exe` in a Toolhelp32
+/// snapshot (Git-Bash/MSYS2 put the latter on Windows). `busybox` is here
+/// because Alpine's `/bin/sh` IS busybox and `comm` reports the real image.
 const INTERPOSER_SHELLS: &[&str] = &[
-    "cmd.exe",
-    "powershell.exe",
-    "pwsh.exe",
+    "cmd",
+    "powershell",
+    "pwsh",
     "sh",
     "bash",
     "zsh",
     "dash",
     "ksh",
     "fish",
+    "busybox",
 ];
 
 /// Terminator for a cyclic/corrupt snapshot, not a tuning knob (a real chain
@@ -42,9 +45,13 @@ const INTERPOSER_SHELLS: &[&str] = &[
 const MAX_HOPS: usize = 8;
 
 fn is_interposer(exe: &str) -> bool {
+    let stem = exe
+        .rsplit_once('.')
+        .filter(|(_, ext)| ext.eq_ignore_ascii_case("exe"))
+        .map_or(exe, |(stem, _)| stem);
     INTERPOSER_SHELLS
         .iter()
-        .any(|shell| exe.eq_ignore_ascii_case(shell))
+        .any(|shell| stem.eq_ignore_ascii_case(shell))
 }
 
 /// First ancestor of `start` that isn't an interposed shell. A parent of `1`
@@ -275,6 +282,24 @@ mod tests {
                 Some(200),
                 "{shell} wrapper must resolve to the CLI, not the wrapper"
             );
+        }
+    }
+
+    /// Git-Bash/MSYS2 put a `.exe`-suffixed unix shell on Windows, and Alpine's
+    /// `/bin/sh` reports its real image, `busybox`.
+    #[test]
+    fn suffixed_and_busybox_spellings_are_interposers_too() {
+        for exe in ["bash.exe", "ZSH.EXE", "sh.exe", "busybox", "cmd.exe", "CMD"] {
+            assert!(is_interposer(exe), "{exe} must read as an interposer");
+        }
+        for exe in [
+            "cursor-agent",
+            "node.exe",
+            "claude",
+            "codex.exe",
+            "fisherman",
+        ] {
+            assert!(!is_interposer(exe), "{exe} is a CLI, not a shell");
         }
     }
 
