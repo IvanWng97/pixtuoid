@@ -776,7 +776,7 @@ fn enqueue_desk_chairs<'a>(ctx: &PaintCtx<'_>, drawables: &mut Vec<Drawable<'a>>
             anchor_y: crate::layout::desk_walk_anchor_facing(desk, facing).y,
             kind: DrawableKind::DeskChair {
                 pos: Point {
-                    x: anchors::seated_anchor_facing(desk, drawable::CHAIR_BACK_W, facing).x,
+                    x: anchors::seated_anchor_facing(desk, drawable::DESK_CHAIR_BACK_W, facing).x,
                     y: desk.y + CHAIR_BACK_TOP_DY,
                 },
             },

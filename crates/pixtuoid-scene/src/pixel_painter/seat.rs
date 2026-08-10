@@ -273,17 +273,14 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
                     } else {
                         SeatView::Front
                     };
-                    (view, cell.y.saturating_sub(SEAT_Z_LIFT))
+                    // The z-key IS the chair row, derived from the chair rather
+                    // than the desk so it moves with the seat: a viewer-facing
+                    // chair keeps a key below the desk furniture's, so that
+                    // sitter and its sit-down glide sort BEHIND the monitor; a
+                    // back-turned chair is further south and its key follows,
+                    // which is what puts that occupant IN FRONT of their desk.
+                    (view, cell.y)
                 })
             })
         })
 }
-
-/// How far ABOVE its chair cell a desk sitter's z-key sits.
-///
-/// Derived from the chair rather than the desk so it moves with the seat: a
-/// viewer-facing chair at `desk.y + 4` keeps the historical `desk.y + 4` key,
-/// below the desk furniture's `desk.y + 7`, so that sitter and its sit-down
-/// glide sort behind the monitor. A back-turned chair is further south and its
-/// key follows, which is what puts that occupant IN FRONT of their desk.
-pub(super) const SEAT_Z_LIFT: u16 = 0;

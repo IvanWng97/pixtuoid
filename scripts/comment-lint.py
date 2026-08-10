@@ -111,16 +111,24 @@ def selftest() -> int:
         # renames the documented fn (must not).
         (repo / "src" / "moved.rs").write_text("/// Doc for the fn.\nfn owner() {}\n")
         (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn before() {}\n")
+        twins = "/// Shared opening line.\n/// One.\nfn a() {}\n\n/// Shared opening line.\n/// Two.\nfn b() {}\n"
+        (repo / "src" / "twins.rs").write_text(twins)
         # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
         # commit or the diff-scoped checks above see an empty diff.
         subprocess.run(
-            [*git, "add", "src/moved.rs", "src/renamed.rs"], cwd=repo, check=True
+            [*git, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs"], cwd=repo, check=True
         )
         subprocess.run([*git, "commit", "-qm", "base"], cwd=repo, check=True)
         (repo / "src" / "moved.rs").write_text(
             "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
         )
         (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn after() {}\n")
+        # SWAPPED: with a first-line key the second block's owner overwrites
+        # nothing and the first's changes, so the pair reads as a re-parent.
+        (repo / "src" / "twins.rs").write_text(
+            "/// Shared opening line.\n/// Two.\nfn b() {}\n\n"
+            "/// Shared opening line.\n/// One.\nfn a() {}\n"
+        )
         subprocess.run([*git, "add", "-A"], cwd=repo, check=True)
         subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True)
 
@@ -163,6 +171,8 @@ def selftest() -> int:
             fails.append(f"a doc block wedged off its fn must fire: {sorted(reparented)}")
         if "src/renamed.rs" in reparented:
             fails.append("a renamed fn keeping its doc must NOT fire: src/renamed.rs")
+        if "src/twins.rs" in reparented:
+            fails.append("two blocks sharing an opening line must NOT fire: src/twins.rs")
 
     if fails:
         print("comment-lint selftest FAILED:")
@@ -227,7 +237,12 @@ ITEM = re.compile(
 
 
 def doc_owners(src: str) -> dict[str, str]:
-    """Map each `///` block's FIRST line → the `kind name` it documents."""
+    """Map each `///` block's FULL text → the `kind name` it documents.
+
+    Keyed on the whole block, not its first line: two blocks in one file can
+    legitimately open with the same sentence, and a first-line key merges them
+    into a re-parent that never happened.
+    """
     out: dict[str, str] = {}
     block: list[str] = []
     for raw in src.splitlines():
@@ -238,7 +253,7 @@ def doc_owners(src: str) -> dict[str, str]:
             continue  # attributes and blank lines do not end a doc block
         else:
             if block and (m := ITEM.match(raw)):
-                out.setdefault(block[0], f"{m.group(1)} {m.group(2)}")
+                out.setdefault("\n".join(block), f"{m.group(1)} {m.group(2)}")
             block = []
     return out
 
@@ -338,7 +353,7 @@ def main() -> int:
     moved = reparented_doc_hits(base, worktree)
     for f, doc, old_owner, new_owner in moved:
         print(f"comment-lint: {f} — doc block re-homed from `{old_owner}` to `{new_owner}`")
-        print(f"    {doc}")
+        print(f"    {doc.splitlines()[0]}")
         if github:
             print(
                 f"::warning file={f}::this doc block documented `{old_owner}` on "

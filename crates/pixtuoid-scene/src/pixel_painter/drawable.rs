@@ -636,7 +636,7 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
     // this scale — it reads as the arms being detached from the chair.
     //
     // `#` paints, `.` skips. Row 2 carries the lit rim.
-    const CHAIR: [&[u8; CHAIR_BACK_W as usize]; CHAIR_BACK_H as usize] = [
+    const CHAIR: [&[u8; DESK_CHAIR_BACK_W as usize]; DESK_CHAIR_BACK_H as usize] = [
         b"#......#",
         b"#......#",
         b"########",
@@ -659,10 +659,10 @@ fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::
 
 /// Rows the chair spans: two flanks beside the occupant, then a three-row back
 /// below them.
-const CHAIR_BACK_H: u16 = 5;
+const DESK_CHAIR_BACK_H: u16 = 5;
 /// Chair-back width — flush with the 8 px character, so the back reads as the
 /// seat they are IN rather than a wider ledge behind them.
-pub(super) const CHAIR_BACK_W: u16 = 8;
+pub(super) const DESK_CHAIR_BACK_W: u16 = 8;
 
 /// Task lamp on the desk's west wing, plus its warm pool.
 ///
