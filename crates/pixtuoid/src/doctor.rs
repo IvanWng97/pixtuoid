@@ -612,7 +612,7 @@ pub(crate) fn focus_section(
     ));
     if !shim_stamp.is_empty() {
         out.push_str(&format!(
-            "  {} — shim-resolved `_pid` rides each hook event (getppid on unix; an ancestor walk past cmd.exe on Windows)\n",
+            "  {} — shim-resolved `_pid` rides each hook event (an ancestor walk past the interposed shell: a `$SHELL -c` wrapper on unix, `cmd.exe /C` on Windows)\n",
             shim_stamp.join(", ")
         ));
     }

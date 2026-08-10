@@ -179,7 +179,11 @@ pub(crate) fn cli_pid() -> Option<u32> {
 /// Empty or truncated on failure; the walk reads both as no answer.
 ///
 /// A second Toolhelp32 reader on purpose — `focus::windows::OsProcessTable` is
-/// the other, and the shim can't depend on that crate. Fix bugs in BOTH.
+/// the other, and the shim can't depend on that crate. Fix bugs in BOTH. The
+/// unix readers above have the same twins (`focus::{linux,macos}`), which walk
+/// the OTHER direction — CLI up to its terminal — and so answer a different
+/// permission question: `focus::macos` shells out to `ps` because the chain
+/// crosses the setuid-root `login`.
 #[cfg(windows)]
 fn process_snapshot() -> std::collections::HashMap<u32, ProcRow> {
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
