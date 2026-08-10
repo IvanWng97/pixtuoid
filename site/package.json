@@ -21,7 +21,7 @@
     "test:unit": "node --test \"config/**/*.test.mjs\"",
     "check:docs": "node config/assert-docs-rendered.mjs dist",
     "audit": "npm audit --audit-level=low",
-    "verify": "npm run audit && npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs",
+    "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs && npm run audit",
     "lighthouse": "lhci autorun",
     "e2e": "playwright test"
   },

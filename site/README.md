@@ -35,8 +35,11 @@ fails loud on a squatted port by design.
 ## Quality gates
 
 ```sh
-npm run verify     # audit → format:check → lint → check → knip → test:unit → build → check:docs
+npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
 # individually:
+# `audit` runs LAST on purpose: it resolves advisories live, so someone else's
+# publish would otherwise short-circuit every check below it (#847/#849).
+# `pages.yml` deliberately keeps it FIRST instead — that one ships.
 npm run audit      # fail on any known dependency vulnerability
 npm run format     # prettier --write .
 npm run lint       # eslint .
