@@ -15,7 +15,9 @@ vars), while `pre-commit` exports `GIT_INDEX_FILE` from ANY checkout.
 
 Scrubbing at each `main()` would leave one forgettable line per script, so the
 scrub lives in `git()` and `bypass_sweep()` fails the build for any git argv in
-`scripts/` that does not go through it.
+`scripts/**/*.py` that does not go through it. Python only, by decision rather
+than oversight: nothing in `scripts/*.sh` or `*.mjs` spawns git at all, and the
+class that bit us twice was the Python tools that drive throwaway repos.
 """
 
 from __future__ import annotations
