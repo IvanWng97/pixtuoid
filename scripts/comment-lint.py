@@ -28,19 +28,9 @@ import subprocess
 import sys
 import tempfile
 
+import gitenv
+
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
-
-
-def git_env() -> dict[str, str]:
-    """`os.environ` with every `GIT_*` dropped.
-
-    A git hook exports `GIT_DIR`/`GIT_INDEX_FILE`, and those OVERRIDE both `-C`
-    and `cwd` — so under `pre-push` a call meant for a throwaway repo runs
-    against the developer's own. Reproduced: the selftest put two commits and
-    fourteen fixture files into an ambient repository. Every git call in this
-    file goes through here.
-    """
-    return {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 
 
 def added_lines_by_file(
@@ -50,13 +40,12 @@ def added_lines_by_file(
     # `base...HEAD` is the merge-base range (the PR's own commits); bare `base`
     # also folds in uncommitted working-tree edits.
     rev = base if worktree else f"{base}...HEAD"
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC],
+    diff = gitenv.git(
+        "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC,
         capture_output=True,
         text=True,
         check=True,
         cwd=cwd,
-        env=git_env(),
     ).stdout
     added: dict[str, set[int]] = {}
     cur: str | None = None
@@ -83,7 +72,6 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
         text=True,
         check=True,
         cwd=cwd,
-        env=git_env(),
     ).stdout
     return json.loads(out)
 
@@ -124,9 +112,8 @@ def selftest() -> int:
         (repo / "src" / "banner.rs").write_text(
             "".join(f"//// l{n}\n" for n in range(14)) + "pub const C: u8 = 0;\n"
         )
-        git = ["git", "-c", "user.email=t@t", "-c", "user.name=t"]
-        env = git_env()
-        subprocess.run([*git, "init", "-q", "-b", "main"], cwd=repo, check=True, env=env)
+        ident = ("-c", "user.email=t@t", "-c", "user.name=t")
+        gitenv.git(*ident, "init", "-q", "-b", "main", cwd=repo, check=True)
         # The re-parent rule needs these two in the BASE for their doc owner to
         # have changed: `moved.rs` wedges a const in (fires), `renamed.rs`
         # renames the documented fn (must not).
@@ -136,8 +123,8 @@ def selftest() -> int:
         (repo / "src" / "twins.rs").write_text(twins)
         # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
         # commit or the diff-scoped checks above see an empty diff.
-        subprocess.run([*git, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs"], cwd=repo, check=True, env=env)
-        subprocess.run([*git, "commit", "-qm", "base"], cwd=repo, check=True, env=env)
+        gitenv.git(*ident, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-qm", "base", cwd=repo, check=True)
         (repo / "src" / "moved.rs").write_text(
             "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
         )
@@ -148,8 +135,8 @@ def selftest() -> int:
             "/// Shared opening line.\n/// Two.\nfn b() {}\n\n"
             "/// Shared opening line.\n/// One.\nfn a() {}\n"
         )
-        subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
-        subprocess.run([*git, "commit", "-qm", "fixture"], cwd=repo, check=True, env=env)
+        gitenv.git(*ident, "add", "-A", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-qm", "fixture", cwd=repo, check=True)
 
         # Only this arm needs ast-grep, so skipping it lets the gate run in the
         # PROTECTED ci-lint group; the advisory job that owns ast-grep still runs
@@ -212,8 +199,8 @@ def selftest() -> int:
 
         def prose_case(name: str, body: str) -> tuple[int, int]:
             (repo / "src" / f"{name}.rs").write_text(body)
-            subprocess.run([*git, "add", "-A"], cwd=repo, check=True, env=env)
-            subprocess.run([*git, "commit", "-qm", name], cwd=repo, check=True, env=env)
+            gitenv.git(*ident, "add", "-A", cwd=repo, check=True)
+            gitenv.git(*ident, "commit", "-qm", name, cwd=repo, check=True)
             cwd2 = os.getcwd()
             try:
                 os.chdir(repo)
@@ -258,6 +245,9 @@ def selftest() -> int:
             if not gate_fails(True, *args):
                 fails.append(f"the {arm} arm must block under --gate")
 
+    # Outside the fixture block: this spawns the whole selftest again.
+    if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
+        fails.append(leak)
 
     if fails:
         print("comment-lint selftest FAILED:")
@@ -370,9 +360,9 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
     moves the prose there.
     """
     rev = base if worktree else f"{base}...HEAD"
-    diff = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", rev, "--", "*.rs"],
-        capture_output=True, text=True, check=True, cwd=cwd, env=git_env(),
+    diff = gitenv.git(
+        "diff", "--unified=0", "--no-color", rev, "--", "*.rs",
+        capture_output=True, text=True, check=True, cwd=cwd,
     ).stdout
     prose = code = 0
     in_block = False
@@ -410,9 +400,9 @@ def reparented_doc_hits(
     what separates an accidental detachment from a plain rename.
     """
     rev = base if worktree else f"{base}...HEAD"
-    files = subprocess.run(
-        ["git", "diff", "--name-only", rev, "--", "*.rs"],
-        capture_output=True, text=True, check=True, cwd=cwd, env=git_env(),
+    files = gitenv.git(
+        "diff", "--name-only", rev, "--", "*.rs",
+        capture_output=True, text=True, check=True, cwd=cwd,
     ).stdout.split()
 
     def at(ref: str | None, path: str) -> str:
@@ -421,13 +411,12 @@ def reparented_doc_hits(
                 return open(os.path.join(cwd or ".", path), errors="ignore").read()
             except OSError:
                 return ""
-        r = subprocess.run(
-            ["git", "show", f"{ref}:{path}"],
+        r = gitenv.git(
+            "show", f"{ref}:{path}",
             capture_output=True,
             text=True,
             check=False,
             cwd=cwd,
-            env=git_env(),
         )
         return r.stdout if r.returncode == 0 else ""
 

@@ -23,11 +23,11 @@ Usage: gen-guides.py [--check]   (--check: write nothing, exit 1 on drift)
 
 from __future__ import annotations
 
-import os
 import pathlib
 import re
-import subprocess
 import sys
+
+import gitenv
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
@@ -174,14 +174,9 @@ def assert_verbatim(guide: pathlib.Path, sib: pathlib.Path, built: list[str]) ->
 
 
 def run(root: pathlib.Path, check: bool, quiet: bool = False) -> int:
-    tracked = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "*CLAUDE.md"],
+    tracked = gitenv.git(
+        "-C", str(root), "ls-files", "*CLAUDE.md",
         capture_output=True, text=True, check=True,
-        # A hook exports GIT_DIR/GIT_INDEX_FILE and those OVERRIDE `-C`, so under
-        # `pre-push` this listed the REAL repo's guides while `root` was the
-        # selftest's throwaway tree, and the read below died on a path that does
-        # not exist there.
-        env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     ).stdout.splitlines()
     drifted = []
     for rel in tracked:
@@ -213,18 +208,12 @@ def selftest() -> int:
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp) / "repo"
         (repo / "crate").mkdir(parents=True)
-        git = ["git", "-C", str(repo)]
-        # A git hook exports GIT_DIR/GIT_INDEX_FILE, and those OVERRIDE `-C`, so
-        # under `pre-push` these `add -A` calls staged the fixtures into the REAL
-        # repo — after which `--check` read a tracked `crate/CLAUDE.md` with no
-        # file behind it and died instead of reporting. Scrub the inherited git
-        # env so the throwaway repo is the only one this can touch.
-        env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        subprocess.run([*git, "init", "-q"], check=True, env=env)
+        at_repo = ("-C", str(repo))
+        gitenv.git(*at_repo, "init", "-q", check=True)
 
         def stage(rel: str, body: str) -> None:
             (repo / rel).write_text(body)
-            subprocess.run([*git, "add", "-A"], check=True, capture_output=True, env=env)
+            gitenv.git(*at_repo, "add", "-A", check=True, capture_output=True)
 
         def gen(check: bool) -> int:
             try:
@@ -286,12 +275,16 @@ def selftest() -> int:
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 
+    # Outside the fixture block: this spawns the whole selftest again.
+    if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
+        fails.append(leak)
+
     if fails:
         print("gen-guides selftest FAILED:")
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("gen-guides selftest: all 10 controls passed")
+    print("gen-guides selftest: all 11 controls passed")
     return 0
 
 

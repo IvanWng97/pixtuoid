@@ -237,8 +237,7 @@ machete:
 
 # License + supply-chain gate (bans/licenses/sources). Advisories are NOT here:
 # they're owned by the daily audit.yml (`check advisories`) so an overnight
-# RustSec advisory can't block a push of unchanged code. Keep this list in sync
-# with the ci-lint.yml `deny` job's `command:`.
+# RustSec advisory can't block a push of unchanged code.
 [group('rust')]
 deny:
     cargo deny check bans licenses sources
@@ -308,6 +307,7 @@ lint:
     run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
+    run gitenv  just gitenv-selftest      & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -689,7 +689,7 @@ site-dev-stop:
     cd site && node node_modules/astro/bin/astro.mjs dev stop
 
 [group('site')]
-[doc('Site static tier: audit → format-check → lint → astro check → knip → unit tests → build (site CI runs e2e + lighthouse after these)')]
+[doc('Site static tier: format-check → lint → astro check → knip → unit tests → build → check:docs → audit (site CI runs e2e + lighthouse before the audit)')]
 site-check:
     npm --prefix site run verify
 
@@ -1206,14 +1206,24 @@ ast-grep-test:
 comment-lint-selftest:
     python3 scripts/comment-lint.py --selftest
 
-# The comment checks as a GATE, for `lint`. The CI job stays advisory (it
-# annotates a PR); this is the local arm that fails a push — an advisory nobody
-# is required to read let a 40%-prose branch through nine preflights.
+# The comment checks as a GATE. Wired in two places that must stay in step:
+# `just lint` (so preflight and pre-push block) and the `comment gate` job in
+# ci-lint.yml. The ast-grep arm stays advisory in ci-supplemental — its npm
+# install must never gate.
 [group('meta')]
 [doc('Gate the comment checks: selftest, then --gate against origin/main')]
 comment-lint-gate:
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate
+
+# The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
+# sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
+# gate, because one of these leaks ate a developer's index before anyone noticed.
+# Runs in `lint`; CI's hygiene job enumerates it separately.
+[group('meta')]
+[doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
+gitenv-selftest:
+    python3 scripts/gitenv.py --selftest
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing
