@@ -496,6 +496,7 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "standing_desk",
     "bulletin_board",
     "exit_sign",
+    "desk_chair",
 ];
 
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[

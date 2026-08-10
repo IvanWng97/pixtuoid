@@ -8,7 +8,7 @@ use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
-/// Standby tint on EVERY desk's glass — a grid of black rectangles reads as "everyone went home".
+/// Standby tint on a BACK-TURNED desk's glass — a grid of black rectangles reads as "everyone went home".
 pub(super) fn paint_screen_idle(
     buf: &mut RgbBuffer,
     desk_x: u16,

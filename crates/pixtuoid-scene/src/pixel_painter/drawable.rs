@@ -367,7 +367,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 paint_waiting_bubble(buf, *anchor, theme);
             }
         }
-        DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, theme),
+        DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
         DrawableKind::WaypointPantry { pos, use_large } => {
             let anim_name = if *use_large { "pantry" } else { "pantry_small" };
             // A character behind the counter is occluded by the counter's own
@@ -584,46 +584,18 @@ fn paint_desk_coffee(
     }
 }
 
-/// Office-chair back, crossing a back-turned occupant's lower torso.
-pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, theme: &crate::theme::Theme) {
-    let c = theme.furniture.chair_trim;
-    // A lit TOP EDGE: `chair_trim` is darker than some themes' night floor, so a flat block reads as a hole.
-    const RIM_LIFT: f32 = 0.30;
-    let rim = blend_rgb(
-        c,
-        Rgb {
-            r: 255,
-            g: 255,
-            b: 255,
-        },
-        RIM_LIFT,
-    );
-    // `#` paints, `.` skips. The arms sit flush with the character's own 8 px and CLIP
-    // it; row 2 spans full width because a notch leaves the arms reading as detached.
-    const CHAIR: [&[u8; DESK_CHAIR_BACK_W as usize]; DESK_CHAIR_BACK_H as usize] = [
-        b"#......#",
-        b"#......#",
-        b"########",
-        b"########",
-        b".######.",
-    ];
-    /// Which row of `CHAIR` catches the light — the back's top edge, not the flanks.
-    const RIM_ROW: usize = 2;
-    for (dy, row) in CHAIR.iter().enumerate() {
-        for (dx, cell) in row.iter().enumerate() {
-            if *cell != b'#' {
-                continue;
-            }
-            let tone = if dy == RIM_ROW { rim } else { c };
-            buf.put_checked(top_left.x + dx as u16, top_left.y + dy as u16, tone);
-        }
-    }
+/// The desk task chair's art — the ONE authority for its size, so the enqueue
+/// site centres on what is actually drawn even under a `--pack-dir` override.
+pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
+    pack.animation("desk_chair").and_then(|a| a.frames.first())
 }
 
-/// Rows the chair spans: two flanks beside the occupant, then a three-row back.
-const DESK_CHAIR_BACK_H: u16 = 5;
-/// Chair-back width — flush with the 8 px character it frames.
-pub(super) const DESK_CHAIR_BACK_W: u16 = 8;
+/// Office-chair back, crossing a back-turned occupant's lower torso.
+pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack) {
+    if let Some(frame) = desk_chair_frame(pack) {
+        blit_frame(frame, top_left.x, top_left.y, buf);
+    }
+}
 
 /// Task lamp on the desk's west wing (the coffee cup and token tower own the other
 /// two), plus its warm pool; `strength` is the interior darkness.
@@ -654,8 +626,8 @@ pub(super) fn paint_desk_lamp(
     buf.put_checked(lx + 1, ly + 1, stem);
     /// A desk is 14 wide, so a larger pool washes the neighbouring workstations.
     const DESK_LAMP_RADIUS: u16 = 5;
-    /// Kept below the screen tint's own scale — at parity the pool washes the desk's west half out.
     const DESK_LAMP_MAX: f32 = 0.42;
+    const _: () = assert!(DESK_LAMP_MAX < super::SCREEN_IDLE_MAX);
     paint_warm_halo(
         buf,
         lx + 1,

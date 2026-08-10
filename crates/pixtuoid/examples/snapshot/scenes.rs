@@ -897,12 +897,26 @@ mod vocabulary_tests {
     #[test]
     fn anim_scene_stages_every_target_it_advertises() {
         let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // Every target `--anim` advertises, at the tool's own default size — a
+        // sample of two was the coverage when this PR moved DESK_H and
+        // INTRA_POD_GAP_Y under every waypoint. A FACING is not swept: a size
+        // legitimately need not host a south-facing couch, and the staging
+        // panics loudly there by design.
         for (target, facing) in [
-            ("desk", None),
-            ("desk", Some("north")),
-            ("desk", Some("south")),
-            ("couch", None),
-        ] {
+            "couch",
+            "sofa",
+            "chair",
+            "pantry",
+            "printer",
+            "vending",
+            "island",
+            "snackshelf",
+            "desk",
+        ]
+        .into_iter()
+        .map(|t| (t, None))
+        .chain([("desk", Some("north")), ("desk", Some("south"))])
+        {
             let (scene, _) = anim_scene(now, target, 192, 80, 0, facing);
             assert!(
                 !scene.agents.is_empty(),

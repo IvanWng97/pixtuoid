@@ -16,6 +16,7 @@ use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
+#[cfg(test)]
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
@@ -99,7 +100,8 @@ pub fn seated_anchor_for(
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
-// the two match in HUE, not byte-for-byte.
+// the two match in HUE, not byte-for-byte — and only on a NORTH-facing desk,
+// the only one whose screen the room can see.
 pub use palette::tool_glow_for_kind;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
@@ -525,20 +527,15 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         ctx.floor.altitude,
     );
 
+    // An empty floor reads dark because its four artificial lights go out with
+    // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
     let indoor_scale = frame.indoor_scale;
-    // Empty floors get an extra floor-darken boost on top of the time-of-day
-    // dim: with no monitor/lamp sources to balance the overhead darkness, they
-    // otherwise read as "lights off but room weirdly bright."
-    let min_level = LightingState::MIN_LEVEL;
-    let boost_ceiling = LightingState::EMPTY_FLOOR_DIM_BOOST;
-    let empty_floor_boost = 1.0 + (1.0 - indoor_scale) * (boost_ceiling - 1.0) / (1.0 - min_level);
-
     let dim_strength = background::NIGHT_FLOOR_DIM;
     dim_floor_overlay(
         ctx.buf,
         top_wall_h,
         buf_h,
-        look.darkness * dim_strength * empty_floor_boost,
+        look.darkness * dim_strength,
         ctx.theme,
     );
     // The positive mirror of the night dim. Independent of occupancy — sun
@@ -640,6 +637,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         agents,
         &frame.seated_agents,
         look.darkness,
+        indoor_scale,
         &mut drawables,
     );
 
@@ -655,7 +653,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
-    enqueue_desk_chairs(ctx.layout, &mut drawables);
+    enqueue_desk_chairs(ctx.layout, ctx.pack, &mut drawables);
 
     // V before H: at an inside corner the vertical's stitched `y_bot` ties the
     // horizontal's south-base anchor, and inserting V first keeps H winning
@@ -753,9 +751,12 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them (`SHARP-EDGES.md`).
-fn enqueue_desk_chairs<'a>(layout: &Layout, drawables: &mut Vec<Drawable<'a>>) {
+fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
     /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
     const CHAIR_BACK_TOP_DY: u16 = 6;
+    let Some(chair) = drawable::desk_chair_frame(pack) else {
+        return;
+    };
     for (i, &desk) in layout.home_desks.iter().enumerate() {
         let facing = layout.desk_facing(FloorLocalDeskIndex(i));
         if facing != crate::layout::Facing::North {
@@ -765,7 +766,7 @@ fn enqueue_desk_chairs<'a>(layout: &Layout, drawables: &mut Vec<Drawable<'a>>) {
             anchor_y: crate::layout::desk_walk_anchor_facing(desk, facing).y,
             kind: DrawableKind::DeskChair {
                 pos: Point {
-                    x: anchors::seated_anchor_facing(desk, drawable::DESK_CHAIR_BACK_W, facing).x,
+                    x: anchors::seated_anchor_facing(desk, chair.width(), facing).x,
                     y: desk.y + CHAIR_BACK_TOP_DY,
                 },
             },
@@ -780,15 +781,17 @@ pub(super) struct DeskLight {
     pub(super) screen_idle: f32,
 }
 
-/// Scaled by `darkness` — the INTERIOR illuminance, not a clock — so the screens
-/// peak exactly as the desk ceiling pools go out.
-fn desk_light(facing: crate::layout::Facing, darkness: f32) -> DeskLight {
-    const SCREEN_IDLE_MAX: f32 = 0.55;
-    const LAMP_MAX: f32 = 1.0;
+/// The standby screen's ceiling. `drawable`'s `DESK_LAMP_MAX` is held under it by
+/// a `const` assert there — at parity the lamp pool washes the desk's west half out.
+pub(super) const SCREEN_IDLE_MAX: f32 = 0.55;
+
+/// Scaled by `darkness` — `1 − exterior`, so weather counts and not just the hour
+/// — and by `indoor`, which is what an emptied floor switches off.
+fn desk_light(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> DeskLight {
     DeskLight {
-        lamp: LAMP_MAX * darkness,
+        lamp: darkness * indoor,
         screen_idle: if facing == crate::layout::Facing::North {
-            SCREEN_IDLE_MAX * darkness
+            SCREEN_IDLE_MAX * darkness * indoor
         } else {
             0.0
         },
@@ -804,6 +807,7 @@ fn enqueue_desk_cubicles<'a>(
     agents: &[AgentSlot],
     seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
     darkness: f32,
+    indoor_scale: f32,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
@@ -814,7 +818,7 @@ fn enqueue_desk_cubicles<'a>(
             .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
         // A far-seated desk shows the monitor's BACK — a glow there would be light leaking out of a case.
         let facing = ctx.layout.desk_facing(local);
-        let light = desk_light(facing, darkness);
+        let light = desk_light(facing, darkness, indoor_scale);
         let screen_glow = occupant
             .filter(|_| facing == crate::layout::Facing::North)
             .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))

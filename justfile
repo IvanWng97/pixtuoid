@@ -1211,8 +1211,15 @@ comment-lint-selftest:
 # ci-lint.yml. The ast-grep arm stays advisory in ci-supplemental — its npm
 # install must never gate.
 [group('meta')]
-[doc('Gate the comment checks: selftest, then --gate against origin/main')]
+[doc('Gate the comment checks: selftest, then --gate against a FRESH origin/main')]
 comment-lint-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # The three arms report FILES, not a diluted ratio, so a stale `origin/main`
+    # moves the merge-base back and blocks on other people's merged commits. CI
+    # fetches (ci-lint.yml); refusing to run beats measuring against a stale ref.
+    git fetch --quiet origin main \
+      || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate
 

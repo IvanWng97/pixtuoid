@@ -221,7 +221,6 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FrameIn
 pub struct pixtuoid_scene::floor::LightingState
 impl pixtuoid_scene::floor::LightingState
 pub const pixtuoid_scene::floor::LightingState::EMPTY_DEBOUNCE_MS: u64
-pub const pixtuoid_scene::floor::LightingState::EMPTY_FLOOR_DIM_BOOST: f32
 pub const pixtuoid_scene::floor::LightingState::FADE_TAU_MS: u64
 pub const pixtuoid_scene::floor::LightingState::MIN_LEVEL: f32
 pub fn pixtuoid_scene::floor::LightingState::level(&self) -> f32

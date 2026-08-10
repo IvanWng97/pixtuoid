@@ -185,6 +185,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "door_open.sprite",
         "bulletin_board.sprite",
         "exit_sign.sprite",
+        "desk_chair.sprite",
         "filing_cabinet.sprite",
         "cat_walk_0.sprite",
         "cat_walk_1.sprite",

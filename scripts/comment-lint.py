@@ -224,6 +224,11 @@ def selftest() -> int:
             # itself AND pad the denominator.
             ("blocky", "/*\n" + "".join(f" * n{n}\n" for n in range(7)) + " */\n" + code_floor,
              True, "`/* */` prose must count as prose"),
+            # `////` is an ordinary comment to rustc, so a `startswith("///")`
+            # test exempts it and `doc_run_hits`' regex does not — the same
+            # one-keystroke bypass, on the other arm.
+            ("banner", "".join(f"//// n{n}\n" for n in range(9)) + code_floor,
+             True, "`////` is prose, not a doc comment"),
             ("tiny", "// one\n// two\nfn a() {}\nfn b() {}\n",
              False, f"under {PROSE_MIN_CODE} code lines the ratio must not be judged"),
         ):
@@ -404,7 +409,7 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
         elif t.startswith("/*"):
             prose += 1
             in_block = "*/" not in t
-        elif t.startswith("///") or t.startswith("//!"):
+        elif re.match(r"(///|//!)($|[^/])", t):
             continue
         elif t.startswith("//"):
             prose += 1

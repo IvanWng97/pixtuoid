@@ -830,6 +830,10 @@ pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
 /// renders AT the approach cell rather than a fixed seat. The post-A\* settle walks
 /// `approach_point → S`; when `S` is blocked (meeting sofa, desk) that final
 /// segment is the "sit down" motion, not pathfinding.
+///
+/// The `Desk` arm assumes `Facing::South` and is therefore wrong for a north pod
+/// row; nothing reaches it today (`settle_seat_view` uses `desk_walk_anchor_facing`,
+/// and `WaypointKind` has no `Desk`), so a future caller must pass the facing.
 pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
     if !furniture_def(kind).occupies_pos {
         return None;

@@ -282,7 +282,7 @@ fn resolve_characters(
                       frame_idx: usize,
                       glow: CharacterGlow,
                       sleep_z_seed: Option<u64>| {
-            let facing = layout.desk_facing_at(desk);
+            let facing = layout.desk_facing(agent.desk_index.single_floor_local());
             let anchor_no_breath = seated_anchor_facing(desk, char_w, facing);
             let anim_name = seated_anim(anim_name, facing, pack);
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);

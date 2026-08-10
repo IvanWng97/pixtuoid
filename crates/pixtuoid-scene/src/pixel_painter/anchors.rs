@@ -135,7 +135,11 @@ pub fn character_anchor(
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
-            seated_anchor_facing(desk, w, layout.desk_facing_at(desk))
+            seated_anchor_facing(
+                desk,
+                w,
+                layout.desk_facing(agent.desk_index.single_floor_local()),
+            )
         }
         Pose::StandingAtDesk => standing_at_desk_anchor(desk, w),
         Pose::AtWaypoint { wp, kind } => {

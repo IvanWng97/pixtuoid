@@ -1,16 +1,13 @@
 //! Local wall-clock instants for tests.
 //!
-//! The sky model decodes `now` back through `chrono::Local` (`local_hour_frac`),
-//! so a test that builds its instants as epoch offsets is really asking for
-//! "whatever local hours this runner's `$TZ` happens to give". That is how
-//! `the_foreground_layer_is_lit_by_the_clock` came to pass in CI (UTC) and fail
-//! on a clean checkout in UTC-6, and why five copies of the same
-//! `with_ymd_and_hms` incantation had accumulated across the sky, ambient and
-//! floor suites before this module.
+//! The sky model decodes `now` back through `chrono::Local`, so a test building
+//! its instants as epoch offsets is really asking for whatever local hours the
+//! runner's `$TZ` gives — how `the_foreground_layer_is_lit_by_the_clock` passed
+//! in CI (UTC) and failed on a clean checkout in UTC-6.
 //!
-//! Anything whose ASSERTION depends on the hour builds its instants here. A test
-//! that just needs "some fixed moment" — a reducer lifecycle, an animation phase
-//! — is TZ-independent already and should keep using a plain epoch offset.
+//! Anything whose ASSERTION depends on the hour builds its instants here; a test
+//! needing only "some fixed moment" is TZ-independent already and keeps a plain
+//! epoch offset.
 
 use std::time::SystemTime;
 
@@ -145,7 +142,7 @@ mod sweep {
         let found = super::bypasses_in(&super::crate_src());
         assert!(
             found.is_empty(),
-            "build local instants through `localclock`, not directly: {found:?}"
+            "a TEST building a local instant goes through `localclock` (production reads the clock): {found:?}"
         );
     }
 

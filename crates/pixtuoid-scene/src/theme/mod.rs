@@ -183,7 +183,7 @@ pub struct FurnitureColors {
 pub struct EffectColors {
     /// Lit monitor bezel on an active screen.
     pub monitor_frame_lit: Rgb,
-    /// A powered-but-quiet screen's glass, on every desk after dark whether or not anyone is at it.
+    /// A powered-but-quiet screen's glass — a back-turned desk shows it after dark whether or not anyone is at it.
     pub monitor_idle: Rgb,
     /// Floating "z" of a sleeping agent.
     pub sleep_z: Rgb,

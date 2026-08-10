@@ -303,6 +303,7 @@ pub const INTRA_POD_GAP_X: u16 = 12;
 /// `DESK_H + this`, and that STEP must stay EVEN or the pod's two rows land on
 /// different half-block parities — so retuning either side needs both checked.
 pub const INTRA_POD_GAP_Y: u16 = 6;
+const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
 /// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,

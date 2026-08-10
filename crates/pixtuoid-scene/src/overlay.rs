@@ -80,7 +80,7 @@ fn lift_over_raised_monitor(
     let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
         return anchor;
     };
-    let facing = layout.desk_facing_at(desk);
+    let facing = layout.desk_facing(agent.desk_index.single_floor_local());
     if facing != crate::layout::Facing::North {
         return anchor;
     }

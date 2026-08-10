@@ -730,10 +730,6 @@ impl LightingState {
     pub const EMPTY_DEBOUNCE_MS: u64 = 5_000;
     /// Time constant of the exponential lit-level ease (ms).
     pub const FADE_TAU_MS: u64 = 800;
-    /// Multiplier on the time-of-day floor-darken overlay when the floor is
-    /// fully empty — the knob for how dark "empty" reads.
-    pub const EMPTY_FLOOR_DIM_BOOST: f32 = 2.4;
-
     /// A fully-lit floor (level 1.0), no fade in progress.
     pub fn new() -> Self {
         Self {

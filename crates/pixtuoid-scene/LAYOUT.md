@@ -185,6 +185,11 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   idle-wander knobs, a function of the snapshot inputs only: no routing, no per-frame
 │                   history; pure/tests.rs sibling),
 │                   tests.rs (#[cfg(test)] mod tests: unit + frame-by-frame continuity guards for the routed half)
+├── localclock.rs   TEST-ONLY local wall-clock instants: at_hour / at_hour_min / on_day. The sky model
+│                   decodes `now` back through chrono::Local, so a test built on epoch offsets really
+│                   asserts on the runner's $TZ — green in CI (UTC), red on a clean UTC-6 checkout. A
+│                   `sweep` module scans this crate's src for the raw construction forms, so the next
+│                   hour-dependent test cannot re-invent one.
 ├── motion/         per-agent walk-timing state, split production vs tests:
 │                   mod.rs (MotionState: entry/exit/snap_back/wander/walk_path fields — exit and
 │                   snap_back are WalkLeg{started_at,profile,from} structs (named fields, was a

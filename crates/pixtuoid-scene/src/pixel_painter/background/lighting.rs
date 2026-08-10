@@ -120,7 +120,6 @@ pub(in crate::pixel_painter) fn paint_warm_halo(
     strength: f32,
     warm: Rgb,
 ) {
-    let radius = radius.max(1);
     if strength <= 0.0 {
         return;
     }

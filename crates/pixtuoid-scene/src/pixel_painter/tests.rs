@@ -3329,8 +3329,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
     // standby SCREEN is the one that gates on facing.
     for darkness in [0.0_f32, 0.5, 1.0] {
-        let north = super::desk_light(Facing::North, darkness);
-        let south = super::desk_light(Facing::South, darkness);
+        let north = super::desk_light(Facing::North, darkness, 1.0);
+        let south = super::desk_light(Facing::South, darkness, 1.0);
         assert_eq!(
             north.lamp, south.lamp,
             "the lamp may not depend on facing (darkness {darkness})"
@@ -3341,9 +3341,29 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
         );
     }
     assert!(
-        super::desk_light(Facing::South, 1.0).lamp > 0.0,
+        super::desk_light(Facing::South, 1.0, 1.0).lamp > 0.0,
         "a viewer-facing desk must still light its lamp after dark"
     );
+}
+
+/// The two emitters this PR added; the ceiling pools and the floor lamp share the
+/// rule but not this pin (`SHARP-EDGES.md` enumerates the set). Dropping either
+/// factor makes that emitter's two readings equal.
+#[test]
+fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
+    use crate::layout::Facing;
+    let min = crate::floor::LightingState::MIN_LEVEL;
+    let lit = super::desk_light(Facing::North, 1.0, 1.0);
+    let empty = super::desk_light(Facing::North, 1.0, min);
+    for (what, lit, empty) in [
+        ("lamp", lit.lamp, empty.lamp),
+        ("screen_idle", lit.screen_idle, empty.screen_idle),
+    ] {
+        assert!(
+            (empty - lit * min).abs() < f32::EPSILON,
+            "an empty floor's {what} must scale with the level, got {empty} against {lit}"
+        );
+    }
 }
 
 #[test]
@@ -3378,8 +3398,12 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
         let layout =
             Layout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
                 .expect("240x160 lays out");
+        let pack = crate::embedded_pack::test_default_pack();
+        let chair_w = super::drawable::desk_chair_frame(&pack)
+            .expect("desk_chair is in the embedded pack")
+            .width();
         let mut drawables = Vec::new();
-        super::enqueue_desk_chairs(&layout, &mut drawables);
+        super::enqueue_desk_chairs(&layout, &pack, &mut drawables);
         // Keyed on the FULL position: desks in one pod column share an x, so an
         // x-only key silently folds a wrongly-chaired south desk onto its
         // north neighbour and the assertion cannot see it.
@@ -3400,12 +3424,8 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             })
             .map(|(_, &d)| {
                 (
-                    super::anchors::seated_anchor_facing(
-                        d,
-                        super::drawable::DESK_CHAIR_BACK_W,
-                        crate::layout::Facing::North,
-                    )
-                    .x,
+                    super::anchors::seated_anchor_facing(d, chair_w, crate::layout::Facing::North)
+                        .x,
                     d.y + 6,
                 )
             })
@@ -3418,6 +3438,33 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     }
 }
 
+/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort, and
+/// `SHARP-EDGES.md` says outright that breaking either paints the chair under
+/// its occupant with every other test still green. This is that gate: it reads
+/// `paint_frame`'s own source, because the failure is in the call order, not in
+/// any value a fixture can produce.
+#[test]
+fn the_chair_still_enqueues_after_its_occupant_and_the_sort_is_stable() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pixel_painter/mod.rs"),
+    )
+    .expect("the painter's own source");
+    let chars = src
+        .find("enqueue_characters(ctx, frame,")
+        .expect("enqueue_characters call");
+    let chairs = src
+        .find("enqueue_desk_chairs(")
+        .expect("enqueue_desk_chairs call");
+    assert!(
+        chars < chairs,
+        "the chair must be pushed AFTER its occupant, or the stable sort paints it under them"
+    );
+    assert!(
+        src.contains("drawables.sort_by_key("),
+        "the z-sort must stay STABLE — sort_unstable_by_key breaks the chair/occupant tie"
+    );
+}
+
 /// The painter half of the chair, on a BLANK buffer: no floor, no ceiling pool,
 /// no hour — so the only thing that can move these pixels is the chair itself.
 #[test]
@@ -3425,7 +3472,8 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
     const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
     let mut buf = RgbBuffer::filled(64, 32, BG);
     let at = Point { x: 20, y: 10 };
-    super::drawable::paint_chair_back(&mut buf, at, crate::theme::theme_by_name("normal").unwrap());
+    let pack = crate::embedded_pack::test_default_pack();
+    super::drawable::paint_chair_back(&mut buf, at, &pack);
     let painted: Vec<(u16, u16)> = (0..buf.height())
         .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
         .filter(|&(x, y)| buf.get(x, y) != BG)
@@ -3439,16 +3487,22 @@ fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
         painted.iter().map(|p| p.1).min().unwrap(),
         painted.iter().map(|p| p.1).max().unwrap(),
     );
-    assert_eq!(
-        (x0, y0),
-        (at.x, at.y),
-        "the mask must start at the requested top-left"
-    );
+    let w = super::drawable::desk_chair_frame(&pack)
+        .expect("desk_chair is in the embedded pack")
+        .width();
     assert!(
-        x1 < at.x + super::drawable::DESK_CHAIR_BACK_W && y1 < at.y + 8,
+        y0 == at.y && x0 >= at.x && x1 < at.x + w && y1 < at.y + 8,
         "the chair painted outside its own box: {:?}..{:?}",
         (x0, y0),
         (x1, y1)
+    );
+    // The back is inset on BOTH flanks so a seated occupant's shoulders stay visible;
+    // widening it back to the full box is the silent regression this pins.
+    assert!(
+        x0 > at.x && x1 < at.x + w - 1,
+        "the chair must leave both flank columns clear, spans {x0}..={x1} of {}..{}",
+        at.x,
+        at.x + w
     );
 }
 

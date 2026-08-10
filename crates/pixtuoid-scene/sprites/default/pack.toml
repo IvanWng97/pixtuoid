@@ -44,6 +44,8 @@ version = "1"
 "Q" = "#f0895a"   # lobster highlight (orange carapace)
 "A" = "#e85540"   # lobster claw (lit)
 "a" = "#c83828"   # lobster antenna
+"T" = "#26262c"   # desk task-chair shell — cool near-black, so it parts from the warm desk
+"I" = "#67676b"   # desk task-chair lit top edge (a flat shell reads as a hole in the floor)
 
 [animations.seated]
 frames   = ["seated.sprite"]
@@ -135,6 +137,10 @@ frame_ms = 600
 
 [animations.exit_sign]
 frames   = ["exit_sign.sprite"]
+frame_ms = 600
+
+[animations.desk_chair]
+frames   = ["desk_chair.sprite"]
 frame_ms = 600
 
 [animations.filing_cabinet]
