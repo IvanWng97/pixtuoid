@@ -582,27 +582,6 @@ fn transition_escapes_a_backward_clock_step() {
 
 /// The set of distinct colours painted inside a rect.
 ///
-/// A full-pass test cannot compare against a theme colour by equality: the
-/// foreground's day/night wash blends every drawable, so the exact RGB a painter
-/// wrote never reaches the buffer. Callers compare two such sets — the same rect
-/// on a desk that should have the piece against one that should not — so neither
-/// side has to predict what the wash will do.
-fn palette_in(
-    buf: &pixtuoid_core::sprite::RgbBuffer,
-    x0: u16,
-    y0: u16,
-    w: u16,
-    h: u16,
-) -> std::collections::HashSet<(u8, u8, u8)> {
-    (y0..(y0 + h).min(buf.height()))
-        .flat_map(|y| (x0..(x0 + w).min(buf.width())).map(move |x| (x, y)))
-        .map(|(x, y)| {
-            let c = buf.get(x, y);
-            (c.r, c.g, c.b)
-        })
-        .collect()
-}
-
 #[test]
 fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     // Driven through the FULL pass: a projection or sim/paint hop dropping
@@ -621,7 +600,7 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
     let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
     let mut coffee = CoffeeState::new();
     let mut chitchat = HashMap::new();
-    let layout = render_floor(
+    render_floor(
         &mut fctx,
         &mut buf,
         &mut coffee,
@@ -1079,9 +1058,12 @@ fn the_foreground_layer_is_lit_by_the_clock() {
         }
     }
     let frozen = 100.0 * f64::from(same) / f64::from(total);
-    assert!(
-        frozen < 12.0,
-        "{frozen:.1}% of the interior is byte-identical at noon and midnight — the \
-         foreground layer is not lit by the clock"
+    // ZERO, not a tolerance: every interior pixel now takes an hour term, so any
+    // margin here would just re-admit a whole frozen class (the corridor runner
+    // and the pantry mats sat under a 12% ceiling at 8.3% and read as passing).
+    assert_eq!(
+        same, 0,
+        "{frozen:.1}% of the interior is byte-identical at noon and midnight — a \
+         painter is running outside the clock"
     );
 }

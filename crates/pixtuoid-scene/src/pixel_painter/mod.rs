@@ -102,6 +102,18 @@ pub fn seated_anchor_for(
 // the two match in HUE, not byte-for-byte.
 pub use palette::tool_glow_for_kind;
 
+/// Applies the hour's object terms to every pixel painted since `since`.
+fn wash_since(buf: &mut RgbBuffer, since: &RgbBuffer, wash: [(Rgb, f32); 2]) {
+    for y in 0..buf.height() {
+        for x in 0..buf.width() {
+            let painted = buf.get(x, y);
+            if painted != since.get(x, y) {
+                buf.put(x, y, wash_object(painted, wash));
+            }
+        }
+    }
+}
+
 /// Composes the hour's two object terms in the floor overlays' own order.
 fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
     wash.into_iter().fold(painted, |c, (tint, a)| {
@@ -364,15 +376,10 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     }
 }
 
-/// Desk pools nearly out after dark: at full gain they merge into one pale sheet across the pod band.
-const DESK_POOL_NIGHT_KEEP: f32 = 0.18;
-/// Night-gain retention for the pantry and corridor pools.
-const SHARED_POOL_NIGHT_KEEP: f32 = 1.0;
-
 /// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
 /// deliberately NOT here — it is a different painter with its own strength +
 /// anchor, and the order (pools THEN halo) is load-bearing for byte-identity.
-fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = (Ellipse, f32)> + '_ {
+fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
     // Half-extents (a fluorescent tube's lit footprint) per pool kind.
     const DESK_POOL_HALF: (u16, u16) = (10, 5);
     const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
@@ -383,37 +390,24 @@ fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = (Ellipse, f32)>
             *desk,
             layout.desk_facing(FloorLocalDeskIndex(i)),
         );
-        (
-            Ellipse {
-                cx: c.x,
-                cy: c.y,
-                half_w: DESK_POOL_HALF.0,
-                half_h: DESK_POOL_HALF.1,
-            },
-            DESK_POOL_NIGHT_KEEP,
-        )
+        Ellipse {
+            cx: c.x,
+            cy: c.y,
+            half_w: DESK_POOL_HALF.0,
+            half_h: DESK_POOL_HALF.1,
+        }
     });
-    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| {
-        (
-            Ellipse {
-                cx: pr.x + pr.width / 2,
-                cy: pr.y + pr.height / 2,
-                half_w: PANTRY_POOL_HALF.0,
-                half_h: PANTRY_POOL_HALF.1,
-            },
-            SHARED_POOL_NIGHT_KEEP,
-        )
+    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| Ellipse {
+        cx: pr.x + pr.width / 2,
+        cy: pr.y + pr.height / 2,
+        half_w: PANTRY_POOL_HALF.0,
+        half_h: PANTRY_POOL_HALF.1,
     });
-    let corridor = layout.corridor.map(|c| {
-        (
-            Ellipse {
-                cx: c.x + c.width / 2,
-                cy: c.y + c.height / 2,
-                half_w: CORRIDOR_POOL_HALF.0,
-                half_h: CORRIDOR_POOL_HALF.1,
-            },
-            SHARED_POOL_NIGHT_KEEP,
-        )
+    let corridor = layout.corridor.map(|c| Ellipse {
+        cx: c.x + c.width / 2,
+        cy: c.y + c.height / 2,
+        half_w: CORRIDOR_POOL_HALF.0,
+        half_h: CORRIDOR_POOL_HALF.1,
     });
     desks.chain(pantry).chain(corridor)
 }
@@ -555,11 +549,10 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         buf_h,
         look.spill_strength * background::DAYLIGHT_FLOOR_LIFT,
     );
-    // Split so a pool kind can opt out of the DARK half alone (`DESK_POOL_NIGHT_KEEP`).
     const POOL_BASE: f32 = 0.15;
     const POOL_NIGHT_GAIN: f32 = 0.30;
-    for (pool, night_keep) in ceiling_pool_regions(ctx.layout) {
-        let strength = (POOL_BASE + POOL_NIGHT_GAIN * look.darkness * night_keep) * indoor_scale;
+    for pool in ceiling_pool_regions(ctx.layout) {
+        let strength = (POOL_BASE + POOL_NIGHT_GAIN * look.darkness) * indoor_scale;
         paint_ceiling_pool(ctx.buf, pool, strength, ctx.theme);
     }
     if let Some(lamp) = ctx.layout.floor_lamp() {
@@ -591,8 +584,13 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         .saturating_sub(3)
         .max(NEON_PANEL_X + NEON_PANEL_W + 1);
     paint_clock(ctx.buf, clock_x, 1, ctx.now, ctx.theme);
-    // The runner paints over the floor but BEFORE walls/decor so walls cleanly
-    // overlap it where they cross.
+    // These sit on the floor but overwrite it, so the floor overlays above never
+    // reach them, and they land in the drawable snapshot below so the object wash
+    // does not either — the corridor runner stayed full-daylight tan in a dimmed
+    // office, the brightest thing in the room. Washed as their own group so the
+    // EMITTERS painted above (ceiling pools, floor-lamp halo) and the self-lit
+    // wall fixtures (neon panel, clock) stay out of it.
+    let pre_floor_fixtures = ctx.buf.clone();
     if let Some(corridor) = ctx.layout.corridor {
         paint_corridor_runner(ctx.buf, corridor, ctx.theme);
     }
@@ -612,6 +610,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         furniture::paint_water_cooler(ctx.buf, pantry, ctx.now, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pantry);
     }
+    wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
     // Strength is a function of daylight so noon shadows are crisp and night
     // shadows subtle.
@@ -670,6 +669,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     drawables.sort_by_key(|d| d.anchor_y);
     // A per-pixel diff finds EXACTLY what the foreground wrote; a rectangular
     // band seamed the window glass and washed floor-between-pieces twice.
+    // AFTER `paint_shadow`/`paint_ambient`: both already take `look`, so folding
+    // them in here would apply the hour twice.
     let pre_foreground = ctx.buf.clone();
     for d in &drawables {
         paint_drawable(
@@ -685,14 +686,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     }
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
-    for y in 0..ctx.buf.height() {
-        for x in 0..ctx.buf.width() {
-            let painted = ctx.buf.get(x, y);
-            if painted != pre_foreground.get(x, y) {
-                ctx.buf.put(x, y, wash_object(painted, look.object_wash));
-            }
-        }
-    }
+    wash_since(ctx.buf, &pre_foreground, look.object_wash);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.

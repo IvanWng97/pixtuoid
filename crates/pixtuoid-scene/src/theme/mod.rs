@@ -378,6 +378,26 @@ mod tests {
         assert!(theme_by_name("doesnotexist").is_none());
     }
 
+    /// The night's read is warm lamp AGAINST cold screen, so the pair has to
+    /// stay on opposite sides in every theme — gruvbox shipped an olive
+    /// `monitor_idle` (R over B) because only the lamp half was ever stated.
+    #[test]
+    fn the_desk_lamp_reads_warm_and_the_standby_screen_cold_in_every_theme() {
+        for t in ALL_THEMES {
+            let (lamp, screen) = (t.lighting.desk_lamp, t.effects.monitor_idle);
+            assert!(
+                lamp.r > lamp.b,
+                "{}: desk_lamp {lamp:?} must read WARM (R over B)",
+                t.name
+            );
+            assert!(
+                screen.b > screen.r,
+                "{}: monitor_idle {screen:?} must read COLD (B over R)",
+                t.name
+            );
+        }
+    }
+
     #[test]
     fn theme_gallery_manifest_matches_all_themes() {
         // Site CI never runs the binary, so this test is the only bridge between

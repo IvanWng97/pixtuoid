@@ -296,9 +296,9 @@ pub static GRUVBOX: Theme = Theme {
             b: 69,
         },
         monitor_idle: Rgb {
-            r: 100,
-            g: 104,
-            b: 88,
+            r: 56,
+            g: 84,
+            b: 96,
         },
         sleep_z: Rgb {
             r: 131,
