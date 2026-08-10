@@ -165,6 +165,10 @@ def ambient_git_control(script: pathlib.Path) -> str | None:
             child = subprocess.run(
                 [sys.executable, str(script), "--selftest"],
                 env={**_hook_env(outer), INNER_ENV: "1"},
+                # `_hook_env` withholds GIT_WORK_TREE on purpose, so the child's
+                # `add -A` walks its CWD — which without this is the developer's
+                # own checkout, where the leaky probe's relative write landed.
+                cwd=tmp,
                 capture_output=True,
                 text=True,
                 timeout=CHILD_TIMEOUT_S,
