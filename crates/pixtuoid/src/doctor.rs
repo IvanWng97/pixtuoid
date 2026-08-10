@@ -810,10 +810,17 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         cc_registry.as_deref().map(|d| (d, d.is_dir())),
         (&codex_sessions, codex_sessions.is_dir()),
     ));
+    // Read as BYTES, lossy ONLY here: the advisory renders these for a human,
+    // it never opens them, so this is the one boundary where losing an
+    // ill-formed byte costs nothing.
+    let (home, up) = (
+        pixtuoid_core::platform::path_env("HOME"),
+        pixtuoid_core::platform::path_env("USERPROFILE"),
+    );
     if let Some(adv) = home_split_advisory(
         cfg!(windows),
-        std::env::var("HOME").ok().as_deref(),
-        std::env::var("USERPROFILE").ok().as_deref(),
+        home.as_ref().map(|p| p.to_string_lossy()).as_deref(),
+        up.as_ref().map(|p| p.to_string_lossy()).as_deref(),
     ) {
         out.push_str(&format!("\n{adv}\n"));
     }

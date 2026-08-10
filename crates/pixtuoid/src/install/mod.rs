@@ -323,7 +323,7 @@ pub(crate) fn install_target(
     let path = config
         .map(Ok)
         .unwrap_or_else(|| (t.default_config_path)())?;
-    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV).map(PathBuf::from);
+    let env_hook = io::nonempty_env(io::HOOK_OVERRIDE_ENV);
     let (binary, explicit_hook) =
         resolve_hook_binary_from(t, hook_path, env_hook, io::default_hook_binary)?;
     let hook_cmd = (t.hook_command)(&binary, explicit_hook)?;

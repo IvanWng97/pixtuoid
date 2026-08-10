@@ -328,18 +328,30 @@ fn default_socket_path_branches() {
 
     std::env::set_var("PIXTUOID_SOCKET", "/explicit/path.sock");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
-    assert_eq!(default_socket_path(), "/explicit/path.sock");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new("/explicit/path.sock")
+    );
 
     // Set-but-empty/whitespace = unset (the #172 RUST_LOG policy).
     std::env::set_var("PIXTUOID_SOCKET", "");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/0");
-    assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new("/run/user/0/pixtuoid.sock")
+    );
     std::env::set_var("PIXTUOID_SOCKET", "   ");
-    assert_eq!(default_socket_path(), "/run/user/0/pixtuoid.sock");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new("/run/user/0/pixtuoid.sock")
+    );
 
     std::env::remove_var("PIXTUOID_SOCKET");
     std::env::set_var("XDG_RUNTIME_DIR", "/run/user/1000");
-    assert_eq!(default_socket_path(), "/run/user/1000/pixtuoid.sock");
+    assert_eq!(
+        default_socket_path(),
+        std::path::Path::new("/run/user/1000/pixtuoid.sock")
+    );
 
     // A relative XDG_RUNTIME_DIR counts as unset per the XDG absolute-only spec.
     // Safety: getuid is always safe on Unix.
@@ -375,23 +387,28 @@ fn owned_tmp_socket_dir_matches_only_the_tmp_fallback() {
     let uid = unsafe { libc::getuid() };
     let owned = std::path::PathBuf::from(format!("/tmp/pixtuoid-{uid}"));
     assert_eq!(
-        paths::owned_tmp_socket_dir(&format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")),
+        paths::owned_tmp_socket_dir(std::path::Path::new(&format!(
+            "/tmp/pixtuoid-{uid}/pixtuoid.sock"
+        ))),
         Some(owned),
         "the /tmp fallback endpoint resolves its owned dir"
     );
     assert_eq!(
-        paths::owned_tmp_socket_dir("/run/user/1000/pixtuoid.sock"),
+        paths::owned_tmp_socket_dir(std::path::Path::new("/run/user/1000/pixtuoid.sock")),
         None,
         "XDG_RUNTIME_DIR is systemd's, not ours to police"
     );
     assert_eq!(
-        paths::owned_tmp_socket_dir("/explicit/path.sock"),
+        paths::owned_tmp_socket_dir(std::path::Path::new("/explicit/path.sock")),
         None,
         "an explicit PIXTUOID_SOCKET override is the user's, not ours"
     );
     // A different uid's tmp dir is not ours either.
     assert_eq!(
-        paths::owned_tmp_socket_dir(&format!("/tmp/pixtuoid-{}/pixtuoid.sock", uid + 1)),
+        paths::owned_tmp_socket_dir(std::path::Path::new(&format!(
+            "/tmp/pixtuoid-{}/pixtuoid.sock",
+            uid + 1
+        ))),
         None
     );
 }

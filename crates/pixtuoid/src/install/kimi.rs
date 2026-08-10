@@ -61,11 +61,14 @@ fn kimi_config_dir() -> Option<PathBuf> {
 
 /// Pure core for [`kimi_config_dir`], with the env override and home injected so
 /// both arms unit-test without env/FS mutation.
-fn resolve_config_dir(kimi_code_home_env: Option<String>, home: Option<String>) -> Option<PathBuf> {
+fn resolve_config_dir(
+    kimi_code_home_env: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
     if let Some(h) = kimi_code_home_env {
-        return Some(PathBuf::from(h));
+        return Some(h);
     }
-    home.map(|h| PathBuf::from(h).join(".kimi-code"))
+    home.map(|h| h.join(".kimi-code"))
 }
 
 pub(crate) fn default_config_path() -> Result<PathBuf> {
