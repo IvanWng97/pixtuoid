@@ -102,14 +102,19 @@ impl HookPidWatch {
 /// Split from the [`ExitWatch`] side so it is unit-testable without spawning the
 /// platform watcher thread.
 impl Bindings {
-    /// Record a sighting; `true` when it NEWLY arms `pid`, which is what the
-    /// caller watches on. `corroborate` asks for a second, consecutive sighting
-    /// before arming — right for a shim-resolved pid, which is a guess about
-    /// which ancestor is the CLI, and wrong for a source that stamps its OWN
-    /// `process.pid`: that is a fact, and a session may report it only once.
+    /// Record a sighting; `true` while the pairing is ARMED — not merely on the
+    /// sighting that arms it, so every later one re-asserts the watch. The
+    /// watcher dedupes an already-registered pid but DROPS a registration that
+    /// failed (`exit_watch.rs`'s `Registered::Failed`), so re-asserting is the
+    /// only retry; noting once would strand it.
+    ///
+    /// `corroborate` asks for a second, consecutive sighting before arming —
+    /// right for a shim-resolved pid, which is a guess about which ancestor is
+    /// the CLI, and wrong for a source that stamps its OWN `process.pid`: that
+    /// is a fact, and a session may report it only once.
     fn sight(&mut self, pid: i32, agent_id: AgentId, corroborate: bool) -> bool {
         match self.by_agent.get(&agent_id) {
-            Some(Sighting::Armed(p)) if *p == pid => return false,
+            Some(Sighting::Armed(p)) if *p == pid => return true,
             Some(Sighting::Candidate(p)) if *p == pid => {}
             _ if corroborate => {
                 self.by_agent.insert(agent_id, Sighting::Candidate(pid));
@@ -173,14 +178,15 @@ mod tests {
     }
 
     #[test]
-    fn the_second_sighting_arms_and_further_ones_do_not_rearm() {
+    fn the_second_sighting_arms_and_later_ones_re_assert_the_watch() {
         let mut b = Bindings::default();
         let a = AgentId::from_parts("codewhale", "/ws");
         assert!(!b.sight(7, a, GUESS), "a first sighting is not a repeat");
         assert!(b.sight(7, a, GUESS), "the second sighting is the repeat");
         assert!(
-            !b.sight(7, a, GUESS),
-            "an already-armed pairing must not re-arm"
+            b.sight(7, a, GUESS),
+            "an armed pairing stays armed, so the caller re-asserts the watch — \
+             a registration that FAILED is retried only by re-asserting it"
         );
         assert_eq!(b.take(7).len(), 1, "a re-sighted (pid, agent) is deduped");
     }
