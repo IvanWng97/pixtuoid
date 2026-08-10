@@ -264,6 +264,9 @@ def selftest() -> int:
         # gen-guides' and comment-lint's entry points, and nothing else tests it.
         probes = pathlib.Path(tmp) / "probes"
         probes.mkdir()
+        # A probe writes relative to the CALLER's cwd unless told otherwise, and
+        # `--selftest` runs from the developer's checkout via `lint`.
+        littered = set(os.listdir("."))
         clean = probes / "clean_child.py"
         clean.write_text("import sys\nsys.exit(0)\n")
         if (msg := ambient_git_control(clean)) is not None:
@@ -271,8 +274,9 @@ def selftest() -> int:
         leaker = probes / "leaky_child.py"
         leaker.write_text(
             "import pathlib, subprocess\n"
-            "pathlib.Path('PHANTOM.md').write_text('x')\n"
-            "subprocess.run(['git', 'add', '-A'])\n"
+            "d = pathlib.Path(__file__).parent\n"
+            "(d / 'PHANTOM.md').write_text('x')\n"
+            "subprocess.run(['git', '-C', str(d), 'add', '-A'])\n"
         )
         if ambient_git_control(leaker) is None:
             fails.append("the control must FIRE on a child that stages into the ambient repo")
@@ -280,6 +284,8 @@ def selftest() -> int:
         dier.write_text("import sys\nsys.exit(3)\n")
         if ambient_git_control(dier) is None:
             fails.append("the control must FIRE on a child that never reached its git calls")
+        if strays := sorted(set(os.listdir(".")) - littered):
+            fails.append(f"the selftest must not write into the caller's cwd (created {strays})")
 
     if fails:
         print("gitenv selftest FAILED:")
