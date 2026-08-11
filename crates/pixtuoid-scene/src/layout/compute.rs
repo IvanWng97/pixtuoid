@@ -405,17 +405,32 @@ pub(super) fn compute_with_seed(
         kitchen_island,
         &meeting_rooms,
     );
-    let mut plants: Vec<PlantItem> = plant_candidates
-        .into_iter()
-        .filter_map(|p| settle_plant(p, &home_desks, &waypoints, &singleton_rects, &cubicle_band))
-        .collect();
+    // Folded, not mapped: the corridor's two pots slide toward each other, so
+    // each must clear against the ones already placed.
+    let mut plants: Vec<PlantItem> = Vec::new();
+    for p in plant_candidates {
+        let mut obstacles = singleton_rects.clone();
+        obstacles.extend(plants.iter().map(|q| {
+            let v = furniture_def(q.kind.furniture()).visual;
+            (anchored_top_left(Anchor::Center, q.pos, v.w, v.h), v)
+        }));
+        if let Some(settled) = settle_plant(
+            p,
+            &home_desks,
+            &waypoints,
+            &obstacles,
+            &cubicle_band,
+            floor_seed,
+        ) {
+            plants.push(settled);
+        }
+    }
 
     let build_mask = |plants: &[PlantItem], wall_decor: &[WallDecorItem]| {
         mask::build_walkable_mask(&mask::MaskObstacles {
             buf_w,
             buf_h,
             top_margin,
-            door,
             home_desks: &home_desks,
             meeting_rooms: &meeting_rooms,
             kitchen_island,
@@ -800,20 +815,36 @@ fn settle_plant(
     waypoints: &[Waypoint],
     singletons: &[(Point, Size)],
     band: &Bounds,
+    floor_seed: u64,
 ) -> Option<PlantItem> {
     // 12: two appliance widths — enough to clear any single corner appliance
     // without wandering out of the authored corner region.
     const MAX_PLANT_NUDGE_PX: u16 = 12;
+    /// How far into the nudge budget the seeded first try may reach. The budget
+    /// and its inward direction are the ladder's own, so a scattered pot can
+    /// only stand where a DISPLACED one already could — no new clearance rule,
+    /// and no way out of the container the ladder already respects.
+    const PLANT_SCATTER_PX: u16 = 4;
+    // The sharp edge's claim — a scattered pot only stands where a DISPLACED one
+    // already could — holds only while the scatter fits inside the dodge budget.
+    const _: () = assert!(PLANT_SCATTER_PX <= MAX_PLANT_NUDGE_PX);
     let dir: i16 = if p.pos.x < band.x + band.width / 2 {
         1
     } else {
         -1
     };
     let clear = |cand: Point| plant_spot_clear(p.kind, cand, home_desks, waypoints, singletons);
-    if clear(p.pos) {
+    let slide = |step: u16| Point {
+        x: p.pos.x.saturating_add_signed(dir * step as i16),
+        y: p.pos.y,
+    };
+    let seeded = pixtuoid_core::id::splitmix64(floor_seed ^ super::decor::point_seed(p.pos))
+        % (u64::from(PLANT_SCATTER_PX) + 1);
+    let first = slide(seeded as u16);
+    if clear(first) {
         return Some(PlantItem {
             kind: p.kind,
-            pos: p.pos,
+            pos: first,
         });
     }
     // Beside the blocking obstacle, toward the band centre, on ITS row: it owns
@@ -844,11 +875,8 @@ fn settle_plant(
             });
         }
     }
-    (1..=MAX_PLANT_NUDGE_PX).find_map(|step| {
-        let cand = Point {
-            x: p.pos.x.saturating_add_signed(dir * step as i16),
-            y: p.pos.y,
-        };
+    (0..=MAX_PLANT_NUDGE_PX).find_map(|step| {
+        let cand = slide(step);
         clear(cand).then_some(PlantItem {
             kind: p.kind,
             pos: cand,
@@ -1277,6 +1305,48 @@ pub(super) fn compute_pod_desks(
     (home_desks, facings)
 }
 
+/// The kind for aisle slot `slot_idx`. Each pass over the roster deals a FRESH
+/// permutation of `PodDecor::ALL`, rotated past a collision with the previous
+/// pass's last kind, so a floor sees every kind before any repeats — the
+/// property a bare rotation was chosen for — WITHOUT its fixed cyclic order,
+/// where one slot's kind tells you the next one's. Per pass, not once: a floor
+/// holds several passes' worth of slots, so one permutation cycled would repeat
+/// itself verbatim.
+///
+/// Two identical pieces in neighbouring aisles is the failure a user sees
+/// first, and the one property the rotation gave for free — hence the collision
+/// rotate. It is path-dependent, so every pass is re-walked from 0 on each call
+/// rather than cached, keeping this a pure function of the seed; pinned by
+/// `no_two_adjacent_aisle_slots_share_a_kind`.
+pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
+    // Two kinds is the floor for alternating; below it the adjacency rule
+    // cannot be honoured and `rotate_left(1)` is a no-op. The ceiling is the
+    // floor COUNT: `a_wide_floors_decor_order_is_not_one_fixed_cycle` needs more
+    // distinct arrangements than the roster has kinds, and it can only observe
+    // `MAX_FLOORS` of them.
+    const _: () = assert!(PodDecor::ALL.len() >= 2);
+    const _: () = assert!(PodDecor::ALL.len() < pixtuoid_core::state::MAX_FLOORS);
+    let n = PodDecor::ALL.len();
+    let shuffled = |pass: u64| {
+        let mut bag = PodDecor::ALL.to_vec();
+        let mut z = floor_seed ^ pass;
+        for i in (1..n).rev() {
+            z = pixtuoid_core::id::splitmix64(z);
+            bag.swap(i, (z % (i as u64 + 1)) as usize);
+        }
+        bag
+    };
+    let mut bag = shuffled(0);
+    for pass in 1..=(slot_idx / n) as u64 {
+        let prev_tail = bag[n - 1];
+        bag = shuffled(pass);
+        if bag[0] == prev_tail {
+            bag.rotate_left(1);
+        }
+    }
+    bag[slot_idx % n]
+}
+
 /// Decor items placed in aisles between 2x2 desk pods.
 pub(super) fn compute_pod_decor(
     cubicle_band: &Bounds,
@@ -1293,9 +1363,7 @@ pub(super) fn compute_pod_decor(
     let pod_w = pod_stride_x - INTER_POD_AISLE_X;
     let pod_h = pod_stride_y - INTER_POD_AISLE_Y;
     let mut pod_decor: Vec<PodDecorItem> = Vec::new();
-    // Cycle through ALL with a per-slot counter so every decor type appears at
-    // least once before any repeats; a hash here never picked some kinds at all.
-    let mut slot_idx: usize = (floor_seed % 7) as usize;
+    let mut slot_idx: usize = 0;
     // Mirror of push_desk's x clamp: `pod_cols` floors at 1, so on a narrow band
     // the forced pod's aisle-slot centre lands past the band's right edge, and a
     // PhoneBooth/StandingDesk there gets promoted to a wander waypoint, sending
@@ -1308,7 +1376,7 @@ pub(super) fn compute_pod_decor(
     // uses (pos - h/2 .. pos - h/2 + h).
     let band_bottom = cubicle_band.y + cubicle_band.height;
     let mut push_slot = |pod_decor: &mut Vec<PodDecorItem>, x: u16, y: u16| {
-        let kind = PodDecor::ALL[slot_idx % PodDecor::ALL.len()];
+        let kind = decor_for_slot(floor_seed, slot_idx);
         slot_idx += 1;
         let vis = furniture_def(kind.furniture()).visual;
         if x.saturating_sub(vis.w / 2) + vis.w > band_right

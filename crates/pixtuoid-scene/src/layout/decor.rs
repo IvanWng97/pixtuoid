@@ -2,7 +2,7 @@
 //! furniture and waypoint kind in the office, plus THE table giving each its
 //! geometry. Kept separate so a new sprite kind doesn't churn the layout math.
 
-use super::{Anchor, Point, Size, CHARACTER_SPRITE_W, DESK_FOOT_H, DESK_H, DESK_W};
+use super::{Anchor, Point, Size, DESK_FOOT_H, DESK_H, DESK_W};
 
 /// Wander destinations the Idle state machine can pick — each kind controls the
 /// pose + sprite an arriving agent takes. Plants/lamps are decor, not waypoints.
@@ -796,18 +796,43 @@ pub const WALKING_Y_OFF: u16 = 12;
 /// where `walking_anchor` lands exactly on `back_couch_anchor`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
-/// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
-/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
-/// — the agent settles onto its seat with no arrival pop. Only the Y half
-/// derives from this const; the X half is a SECOND formula that agrees by
-/// arithmetic, not by construction. The identity is locked by
-/// `desk_walk_anchor_settles_exactly_on_the_seat` in `pixel_painter/tests.rs`.
-pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
+/// Y offset from a home desk's top-left to the agent's WALK anchor — how far
+/// south of the desk origin a FAR seat sits (a near one takes
+/// `DESK_WALK_Y_OFF_BACK`). The no-arrival-pop identity no longer depends on
+/// this value: sprite and walk both route through `Seat::render_anchor`, so it
+/// holds structurally, and `desk_walk_anchor_settles_exactly_on_the_seat` still
+/// pins it. The X half comes from `seat_center_x`, not from a second offset.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
+
+/// A point packed into one hash input, so a per-spot seed is derived the same
+/// way everywhere it is needed. The PACKING is load-bearing, not an
+/// implementation detail: every committed still and the wasm were rendered
+/// against it, and swapping the halves re-seeds every seat and pot while every
+/// property test still passes — pinned by `point_seed_packing_is_frozen`.
+pub(super) fn point_seed(p: Point) -> u64 {
+    (u64::from(p.x) << 32) | u64::from(p.y)
+}
+
+/// Half the seeded nudge's span. The chair is `CHARACTER_SPRITE_W` on a
+/// `visual.w` desk, so centring leaves 3 px a side and ±2 keeps a pixel of desk
+/// under each edge.
+const SEAT_NUDGE_PX: i32 = 2;
+
+/// The seat CENTRE's x — the ONE value the chair, its occupant and the walk that
+/// ends there all derive from, the way a meeting seat derives from `wp.pos`. It
+/// centres on the PAINTED desk, whose sprite is wider than `DESK_W`, and carries
+/// a per-desk nudge so a pod does not read as a stamped grid.
+fn seat_center_x(desk: Point) -> u16 {
+    let base = i32::from(desk.x) + i32::from(desk_furniture_def().visual.w) / 2;
+    let seed = point_seed(desk);
+    let span = SEAT_NUDGE_PX * 2 + 1;
+    let nudge = (pixtuoid_core::id::splitmix64(seed) % span as u64) as i32 - SEAT_NUDGE_PX;
+    base.saturating_add(nudge).max(0) as u16
+}
 
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
-// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the chair paints UNDER its occupant.
+// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
 /// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
@@ -817,7 +842,7 @@ pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
         Facing::South | Facing::East | Facing::West => DESK_WALK_Y_OFF,
     };
     Point {
-        x: desk.x + DESK_WALK_X_OFF,
+        x: seat_center_x(desk),
         y: desk.y + y_off,
     }
 }
@@ -958,9 +983,10 @@ impl PlantKind {
     }
 }
 
-/// Decor placed in the aisles BETWEEN 2×2 desk pods. Picked by a deterministic
-/// hash of the pod index, so each office layout is varied but stable across
-/// renders.
+/// Decor placed in the aisles BETWEEN 2×2 desk pods. Each slot draws from a
+/// per-floor shuffled bag (`compute::decor_for_slot`), so a floor sees every
+/// kind before any repeats and no two neighbouring aisles share one — stable
+/// across renders, varied across floors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PodDecor {
     /// A tall plant filling the aisle.
@@ -1284,10 +1310,12 @@ mod tests {
         assert_eq!(
             far,
             Point {
-                x: desk.x + DESK_W / 2,
+                // The pool follows the SEAT, so it reads the seat's own x rather
+                // than re-deriving a midline that would drift from it.
+                x: desk_walk_anchor_facing(desk, Facing::South).x,
                 y: desk.y - HISTORICAL_CY_LIFT,
             },
-            "a viewer-facing desk must light exactly where the hardcoded lift did"
+            "a viewer-facing desk lights the seat, at the historical lift"
         );
 
         let near = desk_ceiling_pool_center(desk, Facing::North);

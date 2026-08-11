@@ -477,7 +477,7 @@ pub fn derive_with_routing(
     // rendered position.
     let desk_pose = matches!(
         raw,
-        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } | Pose::StandingAtDesk
+        Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. }
     );
     let since_state = crate::anim::elapsed_ms(now, slot.state_started_at);
     let mut final_settle = Settle::None;

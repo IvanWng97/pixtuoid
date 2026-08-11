@@ -60,8 +60,10 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             return last;
         }
     }
-    // `last` was just REJECTED by the loop; the door threshold is walkable by construction.
+    // The snap restores WALKABILITY only, and a cell under the fish tank's glass
+    // is walkable by invariant #6 — so it faces the draws' visual filter too.
     snap_point_to_walkable(&layout.walkable, last)
+        .filter(|p| layout.is_visually_clear(*p))
         .or(layout.door_threshold)
         .unwrap_or(last)
 }

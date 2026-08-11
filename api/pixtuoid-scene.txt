@@ -1409,7 +1409,6 @@ pub pixtuoid_scene::pose::Pose::SeatedIdle
 pub pixtuoid_scene::pose::Pose::SeatedThinking
 pub pixtuoid_scene::pose::Pose::SeatedTyping
 pub pixtuoid_scene::pose::Pose::SeatedTyping::frame: usize
-pub pixtuoid_scene::pose::Pose::StandingAtDesk
 pub pixtuoid_scene::pose::Pose::Walking
 pub pixtuoid_scene::pose::Pose::Walking::carrying_coffee: bool
 pub pixtuoid_scene::pose::Pose::Walking::frame: usize

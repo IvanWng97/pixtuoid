@@ -187,20 +187,6 @@ fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
     (scene, id)
 }
 
-#[test]
-fn from_tui_hits_agent_at_its_desk_anchor() {
-    let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let (scene, id) = scene_with_agent_at_desk(0);
-    let d = layout.home_desks[0];
-    // Derived from the painter's seated anchor (a DESK_W-centred 8px sprite 8px
-    // above the desk), not a mirror of the impl's own literals.
-    let cx = d.x
-        + pixtuoid_scene::layout::DESK_W.saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
-            / 2;
-    let cy = d.y.saturating_sub(8) / 2;
-    assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
-}
-
 // The click-to-pin box must cover EXACTLY the cells the painter blits the seated
 // sprite into. The oracle is `character_anchor` — the same anchor the hover
 // tooltip and the sprite blit use — so hover and click cannot disagree.

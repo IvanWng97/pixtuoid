@@ -1281,8 +1281,10 @@ mod tests {
     fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
         use crate::layout::{Facing, CHARACTER_SPRITE_W};
         let desk = crate::layout::Point { x: 40, y: 30 };
-        let near = crate::pixel_painter::seated_anchor_for(desk, CHARACTER_SPRITE_W, Facing::North);
-        let far = crate::pixel_painter::seated_anchor_for(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near =
+            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far =
+            crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
         assert_eq!(
             near.y, desk.y,
             "the deleted override hardcoded desk.y; the shared anchor must still \
@@ -1344,7 +1346,7 @@ mod tests {
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
-        crate::pixel_painter::seated_anchor_for(
+        crate::pixel_painter::seated_anchor_facing(
             desk,
             crate::layout::CHARACTER_SPRITE_W,
             crate::layout::Facing::North,

@@ -4,14 +4,15 @@
 The whole-repo scan is dominated by pre-existing, mostly legitimate hits, so a
 whole-repo gate is wrong.
 
-Four arms. Three need only git and python and BLOCK under `--gate`: an over-long
-new `///`/`//!` run, a doc block re-homed onto a different item, and the diff's
-narrative-prose share. The fourth wraps the ast-grep rules and is advisory
-everywhere — it needs an npm install, which must never sit inside `ci-gate`.
+Four arms, TWO of which block under `--gate`: a doc block re-homed onto a
+different item, and the diff's narrative-prose share. The other two only ever
+report — an over-long new `///`/`//!` run, because a length cap contradicts the
+semantic rule it serves (see `gate_fails`), and the ast-grep wrapper, which
+needs an npm install that must never sit inside `ci-gate`.
 
 Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--github] [--selftest]
   BASE_REF     git ref to diff against (default: origin/main)
-  --gate       exit 1 on the three deterministic arms (default: exit 0 always)
+  --gate       exit 1 on the two blocking arms (default: exit 0 always)
   --worktree   diff the WORKING TREE vs BASE, not the committed BASE...HEAD range
   --github     emit ::warning:: annotations onto the PR diff
   --selftest   pin every arm, both directions, on a throwaway repo

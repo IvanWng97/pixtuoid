@@ -85,7 +85,7 @@ fn lift_over_raised_monitor(
         return anchor;
     }
     let seated =
-        crate::pixel_painter::seated_anchor_for(desk, crate::layout::CHARACTER_SPRITE_W, facing);
+        crate::pixel_painter::seated_anchor_facing(desk, crate::layout::CHARACTER_SPRITE_W, facing);
     if anchor != seated {
         return anchor;
     }

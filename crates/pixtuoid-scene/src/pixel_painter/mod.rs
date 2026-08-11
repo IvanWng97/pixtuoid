@@ -88,15 +88,8 @@ mod wall;
 
 pub use anchors::character_anchor;
 
-/// The painter's own seat anchor, exported so the binary's hit-test can't drift from the fn that places the sprite.
 #[doc(hidden)]
-pub fn seated_anchor_for(
-    desk: crate::layout::Point,
-    sprite_w: u16,
-    facing: crate::layout::Facing,
-) -> crate::layout::Point {
-    anchors::seated_anchor_facing(desk, sprite_w, facing)
-}
+pub use anchors::seated_anchor_facing;
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -1209,7 +1202,7 @@ fn enqueue_floor_fixtures<'a>(
         drawables.push(Drawable {
             // One row UNDER the sitter's z — derived from the occupant's OWN
             // view's seat key, so the pair can't drift apart.
-            anchor_y: seat::SeatView::of(wp.kind, wp.facing).z_key_for_seat(wp.pos) - 1,
+            anchor_y: seat::Seat::at_waypoint(wp.kind, wp.pos, wp.facing).z_key() - 1,
             kind: DrawableKind::MeetingChair {
                 pos: wp.pos,
                 // The backrest rides the side AWAY from the table: a chair

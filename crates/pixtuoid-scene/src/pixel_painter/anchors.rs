@@ -8,8 +8,8 @@ use crate::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
-use super::seat::SeatView;
-use crate::layout::{Point, WaypointKind, DESK_W};
+use super::seat::Seat;
+use crate::layout::{Point, WaypointKind};
 pub(crate) use crate::motion::walking_position;
 use crate::pose::{self, Pose};
 
@@ -21,24 +21,12 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 // character width — so a non-8-wide pack stays centered. The vertical pose
 // offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
 // stay fixed.
-/// Where a desk's occupant RENDERS: the walk anchor lifted by the sprite height, so a facing that moves the seat moves both.
-pub(super) fn seated_anchor_facing(
-    desk: Point,
-    sprite_w: u16,
-    facing: crate::layout::Facing,
-) -> Point {
-    let walk = crate::layout::desk_walk_anchor_facing(desk, facing);
-    Point {
-        x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
-        y: walk.y.saturating_sub(crate::layout::WALKING_Y_OFF),
-    }
-}
-
-pub(super) fn standing_at_desk_anchor(desk: Point, sprite_w: u16) -> Point {
-    Point {
-        x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
-        y: desk.y.saturating_sub(12),
-    }
+/// Where a desk's occupant RENDERS — the desk's seat cell put through the same
+/// `Seat` model every other seat uses, so the chair, its occupant and the walk
+/// that ends there cannot drift apart. Re-exported from `pixel_painter` so the
+/// binary's hit-test can't drift from the fn that places the sprite.
+pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {
+    Seat::at_desk(desk, facing).render_anchor(sprite_w)
 }
 
 pub(super) fn walking_anchor(p: Point, sprite_w: u16) -> Point {
@@ -141,7 +129,6 @@ pub fn character_anchor(
                 layout.desk_facing(agent.desk_index.single_floor_local()),
             )
         }
-        Pose::StandingAtDesk => standing_at_desk_anchor(desk, w),
         Pose::AtWaypoint { wp, kind } => {
             let wp_obj = layout.waypoints.get(wp)?;
             // Anchor off the resolved stand cell so the label tracks where the
@@ -149,9 +136,7 @@ pub fn character_anchor(
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Via the ONE authority the sprite blit uses, so label-vs-sprite
             // drift is structurally impossible.
-            SeatView::of(kind, wp_obj.facing)
-                .waypoint_render_anchor(stand, w)
-                .0
+            Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
         Pose::Walking {

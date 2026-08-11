@@ -10,24 +10,6 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
-const SEATED_BACK: &str = "seated_back";
-
-/// A table, not `format!("{anim}_back")`, because `anim_name` is `&'static str`.
-const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing", "typing_back")];
-
-/// A pose with no back view of its own falls back to the still one rather than showing a face.
-fn seated_anim(anim: &'static str, facing: crate::layout::Facing, pack: &Pack) -> &'static str {
-    if facing != crate::layout::Facing::North {
-        return anim;
-    }
-    SEATED_BACK_VIEWS
-        .iter()
-        .find(|(front, _)| *front == anim)
-        .map(|&(_, back)| back)
-        .filter(|back| pack.animation(back).is_some())
-        .or_else(|| pack.animation(SEATED_BACK).is_some().then_some(SEATED_BACK))
-        .unwrap_or(anim)
-}
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -41,10 +23,9 @@ use crate::pathfind::Router;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    seated_anchor_facing, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
-    waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
+    walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
+use super::seat::{settle_seat, Seat};
 
 /// The mutable world state one `sim_step` advances.
 pub(crate) struct SimStores<'a> {
@@ -278,32 +259,39 @@ fn resolve_characters(
         let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
             continue;
         };
-        let seated = |anim_name: &'static str,
+        let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
+        let seated = |base: &'static str,
                       frame_idx: usize,
                       glow: CharacterGlow,
                       sleep_z_seed: Option<u64>| {
             let facing = layout.desk_facing(agent.desk_index.single_floor_local());
-            let anchor_no_breath = seated_anchor_facing(desk, char_w, facing);
-            let anim_name = seated_anim(anim_name, facing, pack);
+            let seat = Seat::at_desk(desk, facing);
+            let anchor_no_breath = seat.render_anchor(char_w);
+            let (anim_name, flip_x) = seat.sprite_in_pack(base, pack);
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,
                 // Breath-independent z-key: the ±1px breath must not flip sort
                 // order against nearby desk decor frame-to-frame.
-                anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
+                anchor_y: seat.z_key(),
                 anim_name,
                 frame_idx,
                 anchor,
-                flip_x: false,
+                flip_x,
                 glow,
                 sleep_z_seed,
-                waiting_bubble: false,
+                waiting_bubble: is_waiting,
                 // The one arm that IS seated at a desk — see the field's doc.
                 seat_desk: Some(desk),
                 walking_dust_frame: None,
             }
         };
         match p {
+            Pose::SeatedIdle if is_waiting => {
+                // Waiting is the one state that WANTS the human — the `N wait`
+                // counter's twin. Asleep-with-zzz reads as the opposite.
+                placements.push(seated("seated", 0, CharacterGlow::None, None));
+            }
             Pose::SeatedIdle => {
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
                     "seated_sleeping"
@@ -323,50 +311,17 @@ fn resolve_characters(
             Pose::SeatedTyping { frame } => {
                 placements.push(seated("typing", frame, CharacterGlow::Tool, None));
             }
-            Pose::StandingAtDesk => {
-                let anchor_no_breath = standing_at_desk_anchor(desk, char_w);
-                let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
-                let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
-                placements.push(CharacterPlacement {
-                    agent_idx,
-                    anchor_y: anchor_no_breath.y + WALKING_Y_OFF,
-                    anim_name: "standing",
-                    frame_idx: 0,
-                    anchor,
-                    flip_x: false,
-                    glow: CharacterGlow::None,
-                    sleep_z_seed: None,
-                    waiting_bubble: is_waiting,
-                    seat_desk: None,
-                    walking_dust_frame: None,
-                });
-            }
             Pose::AtWaypoint { wp, kind } => {
                 if let Some(wp_obj) = layout.waypoints.get(wp) {
                     let rank = *wp_rank.entry(wp).or_insert(0);
                     wp_rank.insert(wp, rank + 1);
                     let dx = waypoint_rank_offset_x(kind, rank);
-                    use crate::layout::WaypointKind;
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-                    // `waypoint_render_anchor` is the ONE authority for the
-                    // anchor base + sprite height (the label twin in
-                    // `anchors::character_anchor` rides the SAME call, so they
-                    // can't drift). anim/flip STAY per-kind here: they need
-                    // `pack`, which the pure SeatView model can't hold.
-                    let view = SeatView::of(kind, wp_obj.facing);
-                    let (anchor_base, sprite_h) = view.waypoint_render_anchor(stand, char_w);
-                    let (anim_name, flip_x) = match kind {
-                        WaypointKind::Pantry => ("holding_coffee", false),
-                        WaypointKind::Couch
-                        | WaypointKind::MeetingSofa
-                        | WaypointKind::MeetingChair
-                        | WaypointKind::Island => seat_sprite_in_pack(pack, kind, wp_obj.facing),
-                        WaypointKind::PhoneBooth
-                        | WaypointKind::StandingDesk
-                        | WaypointKind::VendingMachine
-                        | WaypointKind::Printer
-                        | WaypointKind::SnackShelf => ("standing", false),
-                    };
+                    // The label twin in `anchors::character_anchor` rides this
+                    // SAME call, so sprite and badge can't drift.
+                    let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
+                    let anchor_base = seat.render_anchor(char_w);
+                    let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
                     let anchor_no_breath = Point {
                         x: anchor_base.x.saturating_add_signed(dx),
                         y: anchor_base.y,
@@ -385,18 +340,9 @@ fn resolve_characters(
                     let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
                     placements.push(CharacterPlacement {
                         agent_idx,
-                        // Seats route through `SeatView::z_key_for_seat` — the
-                        // SAME key the sit-down/stand-up glide uses, so the
-                        // agent can't pop across its furniture's z-key at the
-                        // walk→seat seam. Obstacles keep the stand-cell key:
-                        // the agent stands AT them, never settles onto them.
-                        anchor_y: match kind {
-                            WaypointKind::Couch
-                            | WaypointKind::MeetingSofa
-                            | WaypointKind::MeetingChair
-                            | WaypointKind::Island => view.z_key_for_seat(stand),
-                            _ => anchor_no_breath.y + sprite_h,
-                        },
+                        // The glide's own key, so nothing pops at the
+                        // walk→seat seam.
+                        anchor_y: seat.z_key(),
                         anim_name,
                         frame_idx: 0,
                         anchor,
@@ -451,10 +397,9 @@ fn resolve_characters(
                 // seat renders a FRONT walk and the agent sits facing the
                 // camera until it snaps at AtWaypoint. Ordinary travel segments
                 // keep the travel-direction facing and foot-position z-key.
-                let settle =
-                    settle_seat_view(to, layout).or_else(|| settle_seat_view(from, layout));
+                let settle = settle_seat(to, layout).or_else(|| settle_seat(from, layout));
                 let (going_back, flip) = match settle {
-                    Some((view, _)) => view.settle_walk(),
+                    Some(seat) => seat.settle_walk(),
                     None => (
                         dy.unsigned_abs() > dx.unsigned_abs() && dy < 0,
                         to.x < from.x,
@@ -471,7 +416,7 @@ fn resolve_characters(
                 placements.push(CharacterPlacement {
                     agent_idx,
                     anchor_y: match settle {
-                        Some((_, z_key)) => z_key,
+                        Some(seat) => seat.z_key(),
                         None => walker_anchor.y + WALKING_Y_OFF,
                     },
                     anim_name,

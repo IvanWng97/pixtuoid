@@ -79,8 +79,13 @@ fn active_state_is_seated_typing_with_cycling_frame() {
     assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping { frame: 0 }));
 }
 
+/// Waiting gets NO pose of its own — it rides `SeatedIdle`, so a back-turned
+/// desk needs no extra art and the cue reads identically whichever way the seat
+/// faces. The RENDER side splits it back out (`sim::resolve_characters` forces
+/// the awake `seated` base), because the sleeping sprite reads as the opposite
+/// of "wants you".
 #[test]
-fn waiting_state_is_standing_at_desk() {
+fn waiting_state_stays_seated_and_lets_the_bubble_say_so() {
     let (s, now) = slot(
         ActivityState::Waiting {
             reason: "perm".into(),
@@ -88,7 +93,7 @@ fn waiting_state_is_standing_at_desk() {
         5_000,
     );
     let l = layout();
-    assert_eq!(derive(&s, now, &l), Some(Pose::StandingAtDesk));
+    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedIdle));
 }
 
 #[test]
@@ -426,7 +431,7 @@ fn entry_window_fall_through_uses_state_driven_pose() {
         "layout must populate door_threshold"
     );
     s.created_at = now - Duration::from_millis(ENTRY_ANIMATION_MS + 10_000);
-    assert_eq!(derive(&s, now, &l), Some(Pose::StandingAtDesk));
+    assert_eq!(derive(&s, now, &l), Some(Pose::SeatedIdle));
 }
 
 #[test]
