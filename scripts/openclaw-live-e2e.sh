@@ -76,6 +76,17 @@ send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; 
 FAILED=0
 # Match the LAST `daemons=` line, not any line, so the idle -> busy -> idle round
 # trip is distinguishable (a plain grep-anywhere can't).
+# NOT hoisted into a shared `scripts/lib`, and adjudicated three times (two review
+# lenses + the online bot) — do not re-raise without new evidence. The bodies look
+# alike; the retry bounds await different EVENT CLASSES. This tier's 40x0.2s bounds
+# an in-process shim -> HookRouter -> reducer -> summary hop; multi-gateway's
+# 120x0.3s bounds N real `openclaw gateway run` node cold boots; cc-backend's
+# 120x0.25s for ONE real gateway predates that work. So "a real gateway appears" is
+# an established ~30s class and "a hermetic transition lands" an 8s one, with no
+# single correct shared value — a shared helper would take the timing as parameters
+# and hide ~12 lines behind a 4-argument interface. The drift that actually bit (a
+# `daemons=` format change rotting a script unseen) is caught by the recipes, not by
+# sharing this. In-FILE duplication WAS collapsed: `expect` delegates here.
 expect_line() {
     local want="$1" label="$2" last
     for _ in $(seq 1 40); do
