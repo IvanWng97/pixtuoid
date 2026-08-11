@@ -538,7 +538,8 @@ mutants *args:
 # lines" convention — pr-review.prompt.md's comment-value factor). DIFF-SCOPED
 # like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
 # `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
-# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
+# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes
+# the RE-PARENT and PROSE arms exit 1 — the ast-grep and doc-run-length arms only ever report,
 # `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
 # Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
 [group('meta')]
