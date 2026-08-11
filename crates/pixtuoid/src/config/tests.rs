@@ -560,7 +560,7 @@ fn pack_dir_config_expands_tilde() {
     // would drift from `\` under the Windows runner's Git Bash.
     match pixtuoid_core::platform::user_home_opt() {
         Some(home) => {
-            assert_eq!(result, Some(PathBuf::from(home).join("my-pack")));
+            assert_eq!(result, Some(home.join("my-pack")));
         }
         None => assert_eq!(result, Some(PathBuf::from("~/my-pack"))),
     }

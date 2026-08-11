@@ -6,22 +6,32 @@
 //! hook events silently never arrive; if you move this file, fix that `#[path]`
 //! rather than dropping the parity pin.
 
-pub(crate) fn default_socket_path() -> String {
-    if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
-        // Set-but-empty/whitespace = unset (the RUST_LOG policy): honored
-        // verbatim, "" makes the daemon's bind fail fatally and the shim
-        // silently drop every event.
-        if !p.trim().is_empty() {
-            return p;
-        }
+use std::path::PathBuf;
+
+/// A PATH-valued env var read as BYTES. `env::var` errs on a value that is not
+/// UTF-8 — legal for a Unix socket path — and would silently send the shim to a
+/// DIFFERENT endpoint than the daemon bound, so no event ever arrives. The
+/// shim cannot depend on `pixtuoid-core`, so this is a deliberate twin of
+/// `platform::path_env`; `socket_path_parity.rs` pins the two resolvers equal.
+fn path_env(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|v| !v.to_string_lossy().trim().is_empty())
+        .map(PathBuf::from)
+}
+
+pub(crate) fn default_socket_path() -> PathBuf {
+    // Set-but-empty/whitespace = unset (the RUST_LOG policy): honored verbatim,
+    // "" makes the daemon's bind fail fatally and the shim drop every event.
+    if let Some(p) = path_env("PIXTUOID_SOCKET") {
+        return p;
     }
     #[cfg(unix)]
     {
         // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
         // shim/daemon cwd mis-rendezvous. Non-absolute is invalid → treated as unset.
-        if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-            if !dir.trim().is_empty() && std::path::Path::new(&dir).is_absolute() {
-                return format!("{dir}/pixtuoid.sock");
+        if let Some(dir) = path_env("XDG_RUNTIME_DIR") {
+            if dir.is_absolute() {
+                return dir.join("pixtuoid.sock");
             }
         }
         // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user subdir the daemon
@@ -31,11 +41,11 @@ pub(crate) fn default_socket_path() -> String {
         // write into makes the daemon's bind fail loudly instead.
         // Safety: getuid is always safe on Unix.
         let uid = unsafe { libc::getuid() };
-        format!("/tmp/pixtuoid-{uid}/pixtuoid.sock")
+        PathBuf::from(format!("/tmp/pixtuoid-{uid}")).join("pixtuoid.sock")
     }
     #[cfg(windows)]
     {
-        default_windows_pipe_name()
+        PathBuf::from(default_windows_pipe_name())
     }
 }
 
@@ -60,10 +70,9 @@ pub(crate) fn default_windows_pipe_name() -> String {
 /// explicit-override branches are systemd's / the user's trust decision, not
 /// ours to police (an override may legitimately point at a cross-uid daemon).
 #[cfg(unix)]
-pub(crate) fn owned_tmp_socket_dir(endpoint: &str) -> Option<std::path::PathBuf> {
-    use std::path::{Path, PathBuf};
+pub(crate) fn owned_tmp_socket_dir(endpoint: &std::path::Path) -> Option<PathBuf> {
     // Safety: getuid is always safe on Unix.
     let uid = unsafe { libc::getuid() };
     let owned = PathBuf::from(format!("/tmp/pixtuoid-{uid}"));
-    (Path::new(endpoint).parent() == Some(owned.as_path())).then_some(owned)
+    (endpoint.parent() == Some(owned.as_path())).then_some(owned)
 }

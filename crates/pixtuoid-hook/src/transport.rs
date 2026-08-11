@@ -30,7 +30,7 @@ pub(crate) fn arm_watchdog() -> Option<TimeBound> {
 }
 
 #[cfg(unix)]
-pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(_bound: &TimeBound, endpoint: &std::path::Path, line: &[u8]) {
     use std::io::Write;
     // `UnixStream::connect` has no timeout knob, and a backlog-saturated
     // listener parks it indefinitely — past the budget `set_write_timeout` only
@@ -112,7 +112,7 @@ mod tests {
 }
 
 #[cfg(windows)]
-pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
+pub(crate) fn send_line(_bound: &TimeBound, endpoint: &std::path::Path, line: &[u8]) {
     use std::io::Write;
     // Named pipes have no SO_SNDTIMEO equivalent for sync writes, so the timeout
     // invariant is enforced solely by the watchdog's hard exit — hence the
@@ -132,7 +132,8 @@ pub(crate) fn send_line(_bound: &TimeBound, endpoint: &str, line: &[u8]) {
                 // our daemon's create failed → SocketBusy degrade) would else
                 // receive the payload. Scoped to our default rendezvous; an
                 // explicit PIXTUOID_SOCKET pipe is the user's trust call.
-                if endpoint == crate::paths::default_windows_pipe_name() && !peer::server_is_us(&f)
+                if endpoint == std::path::Path::new(&crate::paths::default_windows_pipe_name())
+                    && !peer::server_is_us(&f)
                 {
                     return;
                 }

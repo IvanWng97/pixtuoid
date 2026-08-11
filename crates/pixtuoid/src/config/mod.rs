@@ -141,7 +141,7 @@ pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Op
             // The ONE tilde-expander: it handles `~\` as well as `~/` and stays in
             // PathBuf-land, so `pack-dir` expands the same way on Windows.
             let home = pixtuoid_core::platform::user_home_opt();
-            crate::install::io::expand_tilde(p, home.as_deref().map(Path::new))
+            crate::install::io::expand_tilde(Path::new(p), home.as_deref())
         })
     })
 }
@@ -151,13 +151,10 @@ pub fn config_path() -> PathBuf {
     // falls to $HOME/.config rather than a CWD-relative `pixtuoid/config.toml`.
     let xdg = crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME");
     if let Some(base) = xdg {
-        return PathBuf::from(base).join("pixtuoid").join("config.toml");
+        return base.join("pixtuoid").join("config.toml");
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return PathBuf::from(home)
-            .join(".config")
-            .join("pixtuoid")
-            .join("config.toml");
+        return home.join(".config").join("pixtuoid").join("config.toml");
     }
     PathBuf::from(".config/pixtuoid/config.toml")
 }

@@ -20,7 +20,7 @@ use pixtuoid_core::sprite::format::{
 fn xdg_pack_dir() -> Option<PathBuf> {
     let base = xdg_config_base(
         std::env::var_os("XDG_CONFIG_HOME"),
-        pixtuoid_core::platform::user_home_opt().map(PathBuf::from),
+        pixtuoid_core::platform::user_home_opt(),
     )?;
     let dir = base.join("pixtuoid").join("sprites");
     if dir.join("pack.toml").is_file() {

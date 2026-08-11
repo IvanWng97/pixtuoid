@@ -139,8 +139,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
 /// Internal cross-crate helper, not a stable API.
 #[doc(hidden)]
 pub fn claude_config_dir() -> Option<PathBuf> {
-    crate::platform::nonempty(std::env::var("CLAUDE_CONFIG_DIR").ok())
-        .map(PathBuf::from)
+    crate::platform::path_env("CLAUDE_CONFIG_DIR")
         .map(|d| crate::platform::warn_if_relative_override("CLAUDE_CONFIG_DIR", d))
 }
 

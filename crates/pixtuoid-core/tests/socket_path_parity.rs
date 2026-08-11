@@ -18,7 +18,7 @@ use pixtuoid_core::source::claude_code::ClaudeCodeSource;
 
 fn both() -> (PathBuf, PathBuf) {
     (
-        PathBuf::from(hook_paths::default_socket_path()),
+        hook_paths::default_socket_path(),
         ClaudeCodeSource::default_socket_path(),
     )
 }
@@ -79,7 +79,7 @@ fn shim_and_daemon_resolve_identical_socket_paths_in_all_three_branches() {
     // The shim's pre-connect ownership guard derives its owned-dir from that same
     // fallback endpoint.
     assert_eq!(
-        hook_paths::owned_tmp_socket_dir(&shim.to_string_lossy()),
+        hook_paths::owned_tmp_socket_dir(&shim),
         Some(PathBuf::from(format!("/tmp/pixtuoid-{uid}"))),
     );
 

@@ -77,7 +77,7 @@ fn resolve_reasonix_home(
     reasonix_home_env: Option<PathBuf>,
     windows: bool,
     windows_config_dir: Option<PathBuf>,
-    unix_home: Option<String>,
+    unix_home: Option<PathBuf>,
 ) -> Option<PathBuf> {
     if let Some(h) = reasonix_home_env {
         return Some(h);
@@ -85,7 +85,7 @@ fn resolve_reasonix_home(
     if windows {
         return windows_config_dir.map(|d| d.join("reasonix"));
     }
-    unix_home.map(|h| PathBuf::from(h).join(".reasonix"))
+    unix_home.map(|h| h.join(".reasonix"))
 }
 
 /// Presence probe for auto-detection. The default file-exists check on
@@ -106,8 +106,8 @@ pub(crate) fn detect_installed() -> bool {
 fn user_config_dir() -> Option<PathBuf> {
     user_config_dir_checked(
         std::env::consts::OS,
-        std::env::var("APPDATA").ok(),
-        std::env::var("XDG_CONFIG_HOME").ok(),
+        pixtuoid_core::platform::path_env("APPDATA"),
+        pixtuoid_core::platform::path_env("XDG_CONFIG_HOME"),
         pixtuoid_core::platform::user_home_opt(),
     )
 }
@@ -117,21 +117,22 @@ fn user_config_dir() -> Option<PathBuf> {
 /// fn's own empty-as-unset filter so the two can't disagree on when that fires.
 fn user_config_dir_checked(
     os: &str,
-    appdata: Option<String>,
-    xdg: Option<String>,
-    home: Option<String>,
+    appdata: Option<PathBuf>,
+    xdg: Option<PathBuf>,
+    home: Option<PathBuf>,
 ) -> Option<PathBuf> {
+    // Blank values were already filtered at the read (`platform::path_env`).
     let env_decides = match os {
-        "windows" => io::nonempty(appdata.clone()).is_some(),
+        "windows" => appdata.is_some(),
         "macos" => false,
-        _ => io::nonempty(xdg.clone()).is_some(),
+        _ => xdg.is_some(),
     };
     if !env_decides && home.is_none() {
         return None;
     }
     // The home base is only read by the fallback arms, which the gate above
     // guarantees have a real home when reached.
-    let home_base = PathBuf::from(home.unwrap_or_default());
+    let home_base = home.unwrap_or_default();
     Some(pixtuoid_core::platform::resolve_user_config_dir(
         os, appdata, xdg, &home_base,
     ))
@@ -230,12 +231,9 @@ mod tests {
             user_config_dir_checked("linux", None, Some("/xdg".into()), None),
             Some(PathBuf::from("/xdg"))
         );
-        // An EMPTY env value counts as unset for the core resolver too.
+        // A blank env value counts as unset — filtered at the READ, so this core
+        // only ever sees real paths.
         assert_eq!(user_config_dir_checked("windows", None, None, None), None);
-        assert_eq!(
-            user_config_dir_checked("windows", Some("  ".into()), None, None),
-            None
-        );
         assert_eq!(user_config_dir_checked("macos", None, None, None), None);
         assert_eq!(user_config_dir_checked("linux", None, None, None), None);
         assert_eq!(

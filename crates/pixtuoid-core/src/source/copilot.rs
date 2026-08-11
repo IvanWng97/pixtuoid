@@ -41,9 +41,9 @@ pub const SOURCE_NAME: &str = "copilot";
 /// Whitespace-only, `--config-dir` and XDG are the divergences — see this
 /// crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
 pub fn copilot_home() -> PathBuf {
-    match crate::platform::nonempty(std::env::var("COPILOT_HOME").ok()) {
-        Some(v) => crate::platform::warn_if_relative_override("COPILOT_HOME", PathBuf::from(v)),
-        None => PathBuf::from(crate::platform::user_home()).join(".copilot"),
+    match crate::platform::path_env("COPILOT_HOME") {
+        Some(v) => crate::platform::warn_if_relative_override("COPILOT_HOME", v),
+        None => crate::platform::user_home().join(".copilot"),
     }
 }
 
