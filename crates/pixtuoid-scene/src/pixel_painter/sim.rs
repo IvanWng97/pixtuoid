@@ -259,6 +259,7 @@ fn resolve_characters(
         let Some(p) = poses.get(&agent.agent_id).copied().flatten() else {
             continue;
         };
+        let is_waiting = matches!(agent.state, ActivityState::Waiting { .. });
         let seated = |base: &'static str,
                       frame_idx: usize,
                       glow: CharacterGlow,
@@ -279,14 +280,14 @@ fn resolve_characters(
                 flip_x,
                 glow,
                 sleep_z_seed,
-                waiting_bubble: matches!(agent.state, ActivityState::Waiting { .. }),
+                waiting_bubble: is_waiting,
                 // The one arm that IS seated at a desk — see the field's doc.
                 seat_desk: Some(desk),
                 walking_dust_frame: None,
             }
         };
         match p {
-            Pose::SeatedIdle if matches!(agent.state, ActivityState::Waiting { .. }) => {
+            Pose::SeatedIdle if is_waiting => {
                 // Waiting is the one state that WANTS the human — the `N wait`
                 // counter's twin. Asleep-with-zzz reads as the opposite.
                 placements.push(seated("seated", 0, CharacterGlow::None, None));

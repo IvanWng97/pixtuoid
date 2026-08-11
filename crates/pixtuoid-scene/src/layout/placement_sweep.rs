@@ -1419,7 +1419,7 @@ fn a_wide_floors_decor_order_is_not_one_fixed_cycle() {
 /// neighbouring aisles is the failure a user sees first.
 #[test]
 fn no_two_adjacent_aisle_slots_share_a_kind() {
-    // Four passes over the roster: a floor holds up to 17 slots.
+    // Enough passes that the pass BOUNDARY is exercised, not just one bag.
     let span = crate::layout::PodDecor::ALL.len() * 4;
     for f in 0..crate::floor::MAX_FLOORS {
         let seed = crate::floor::floor_seed(f);

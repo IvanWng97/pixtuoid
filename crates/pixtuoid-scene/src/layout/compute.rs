@@ -838,8 +838,6 @@ fn settle_plant(
         x: p.pos.x.saturating_add_signed(dir * step as i16),
         y: p.pos.y,
     };
-    // The authored spot is step 0; a seeded step spends part of the SAME budget
-    // on variety, so a pot is not on the same pixel of every floor.
     let seeded = pixtuoid_core::id::splitmix64(floor_seed ^ super::decor::point_seed(p.pos))
         % (u64::from(PLANT_SCATTER_PX) + 1);
     let first = slide(seeded as u16);
@@ -1307,18 +1305,19 @@ pub(super) fn compute_pod_desks(
     (home_desks, facings)
 }
 
-/// The kind for aisle slot `slot_idx`: `PodDecor::ALL` reshuffled every pass,
-/// so a floor sees every kind before any repeats — the property a bare rotation
-/// was chosen for — WITHOUT its fixed cyclic order, where one slot's kind tells
-/// you the next one's. A single shuffle would not do: a floor holds up to 17
-/// slots against a 5-member roster, so one permutation would repeat three times
-/// over. Reshuffling also drops the coupling a phase index carried, that its
-/// modulus keep matching the roster's length.
+/// The kind for aisle slot `slot_idx`. Each pass over the roster deals a FRESH
+/// permutation of `PodDecor::ALL`, rotated past a collision with the previous
+/// pass's last kind, so a floor sees every kind before any repeats — the
+/// property a bare rotation was chosen for — WITHOUT its fixed cyclic order,
+/// where one slot's kind tells you the next one's. Per pass, not once: a floor
+/// holds several passes' worth of slots, so one permutation cycled would repeat
+/// itself verbatim.
 ///
-/// A fresh permutation may OPEN with the kind the last one CLOSED on, standing
-/// two identical pieces in neighbouring aisles — the one property the rotation
-/// gave for free. Rotating that bag restores it and stays a pure function of
-/// the seed; pinned by `no_two_adjacent_aisle_slots_share_a_kind`.
+/// Two identical pieces in neighbouring aisles is the failure a user sees
+/// first, and the one property the rotation gave for free — hence the collision
+/// rotate. It is path-dependent, so every pass is re-walked from 0 on each call
+/// rather than cached, keeping this a pure function of the seed; pinned by
+/// `no_two_adjacent_aisle_slots_share_a_kind`.
 pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
     // Two kinds is the floor for alternating; below it the adjacency rule
     // cannot be honoured and `rotate_left(1)` is a no-op.

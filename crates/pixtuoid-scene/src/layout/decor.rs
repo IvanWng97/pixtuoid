@@ -800,7 +800,7 @@ pub const SEAT_RENDER_Y_OFF: u16 = 7;
 /// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
 /// — the agent settles onto its seat with no arrival pop. Locked by
 /// `desk_walk_anchor_settles_exactly_on_the_seat` in `pixel_painter/tests.rs`.
-/// The X half is no longer a second formula: it derives from the seat centre.
+/// The X half comes from `seat_center_x`, not from a second offset here.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
 /// A point packed into one hash input, so a per-spot seed is derived the same

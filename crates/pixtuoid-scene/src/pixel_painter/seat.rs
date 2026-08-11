@@ -126,11 +126,12 @@ enum SeatKind {
 /// needs — sprite, flip, render anchor, z-key, sit-down glide — derives from
 /// these three, so a couch, a meeting chair and a home desk are one thing.
 ///
-/// Extend [`view`](Self::view) and the `match self.kind` arms below to add a
-/// seatable furniture; nothing else in the painter needs to learn about it.
-/// Every one of those matches lists its kinds EXPLICITLY (no `_`), so a new
-/// `WaypointKind` is a compile error at each decision it has to make rather
-/// than silently rendering as a stander.
+/// Extend [`view`](Self::view) and [`sprite_for`](Self::sprite_for) to add a
+/// seatable furniture — both list their kinds EXPLICITLY, so a new
+/// `WaypointKind` is a compile error there. The GEOMETRY pair reads
+/// [`seated_furniture`](Self::seated_furniture) instead, which defaults a
+/// newcomer to the upright anchor and feet-row key without complaint; the net
+/// for that is `settle_view_matches_the_seated_view_for_every_seat`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Seat {
     kind: SeatKind,
@@ -254,10 +255,11 @@ impl Seat {
     /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
     /// animations are never inherited from the embedded default (`merge_from` is
     /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
-    /// pose — a missing animation must never mean an invisible sitter. That now
-    /// holds for the UPRIGHT kinds too, which used to paint nothing at all: a
-    /// pack without `holding_coffee` shows a `base`-posed agent at the counter
-    /// rather than an empty one.
+    /// pose — a missing animation must never mean an invisible sitter. Two rungs
+    /// reach further than they used to: an UPRIGHT kind whose art the pack lacks
+    /// now shows a `base`-posed agent rather than nothing, and a back-turned
+    /// couch whose pack lacks `back_couch` falls to `seated_back` rather than to
+    /// a face at the window.
     pub(super) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
         let (anim, flip) = self.sprite_for(base);
         if pack.animation(anim).is_some() {

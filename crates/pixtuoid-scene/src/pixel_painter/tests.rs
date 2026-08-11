@@ -322,8 +322,8 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     );
 }
 
-/// The skeleton fixture pack with `extra` appended and every named
-/// `[animations.X]` section dropped — the only way to reach `sprite_in_pack`'s
+/// The skeleton fixture pack with the `[animations.X]` sections named in
+/// `without` removed and `extra` appended — the only way to reach `sprite_in_pack`'s
 /// degradation rungs, since the embedded pack has every animation.
 fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
     let dir = tmp.join("pack");
@@ -1186,16 +1186,15 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
 #[test]
 fn desk_occupant_always_sorts_behind_its_desk() {
     let visual_h = crate::layout::desk_furniture_def().visual.h;
+    // The z-key is width-independent, so a second width would run the identical
+    // assertion; the axis worth sweeping is the desk position.
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        for w in [CHARACTER_SPRITE_W, 10] {
-            let desk_furniture_z = desk.y + visual_h;
-            let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).z_key();
-            let _ = w;
-            assert!(
-                seated_z < desk_furniture_z,
-                "seated desk occupant z {seated_z} must be BEHIND the desk {desk_furniture_z}"
-            );
-        }
+        let desk_furniture_z = desk.y + visual_h;
+        let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).z_key();
+        assert!(
+            seated_z < desk_furniture_z,
+            "seated desk occupant z {seated_z} must be BEHIND the desk {desk_furniture_z}"
+        );
     }
 }
 
@@ -3767,6 +3766,30 @@ fn paint_flame_crown_draws_its_pattern() {
             "the crown painted outside its own box at ({x}, {y})"
         );
     }
+}
+
+/// The couch's rung is NEW on the waypoint path: the old two-rung ladder went
+/// straight to the front pose, seating a face at the window.
+#[test]
+fn a_back_turned_couch_falls_to_the_still_back_view_not_a_face_at_the_window() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let pack = fixture_pack(
+        &["back_couch"],
+        "\n[animations.seated_back]\nframes = [\"placeholder.sprite\"]\nframe_ms = 500\n",
+        tmp.path(),
+    );
+    assert!(
+        pack.animation("back_couch").is_none() && pack.animation("seated_back").is_some(),
+        "the fixture must lack the couch art and carry the still back view"
+    );
+    let seat = Seat::at_waypoint(WaypointKind::Couch, Point { x: 40, y: 30 }, Facing::North);
+    assert_eq!(seat.sprite_for("seated"), ("back_couch", false));
+    assert_eq!(
+        seat.sprite_in_pack("seated", &pack),
+        ("seated_back", false),
+        "a window-facing sitter keeps their back to the camera"
+    );
 }
 
 /// The upright kinds reach the degradation rung too: before the seat model they
