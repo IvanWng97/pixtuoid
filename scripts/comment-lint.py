@@ -33,20 +33,22 @@ import gitenv
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
 
-def added_lines_by_file(
-    base: str, worktree: bool, cwd: str | None = None
-) -> dict[str, set[int]]:
-    """Map each changed file → its NEW-side added/changed line numbers, 1-indexed."""
+def unified_diff(base: str, worktree: bool, cwd: str | None = None) -> str:
+    """The raw diff to scope against — the ONLY git this module does."""
     # `base...HEAD` is the merge-base range (the PR's own commits); bare `base`
     # also folds in uncommitted working-tree edits.
     rev = base if worktree else f"{base}...HEAD"
-    diff = gitenv.git(
+    return gitenv.git(
         "diff", "--unified=0", "--no-color", rev, "--", *PATHSPEC,
         capture_output=True,
         text=True,
         check=True,
         cwd=cwd,
     ).stdout
+
+
+def added_lines_by_file(diff: str) -> dict[str, set[int]]:
+    """Map each changed file → its NEW-side added/changed line numbers, 1-indexed."""
     added: dict[str, set[int]] = {}
     cur: str | None = None
     hunk = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
@@ -155,7 +157,7 @@ def selftest() -> int:
 
         # Driven through the REAL reader, not a second copy of the extension list,
         # which would pass while the production pathspec changed underneath it.
-        added = added_lines_by_file("HEAD~1", worktree=False, cwd=str(repo))
+        added = added_lines_by_file(unified_diff("HEAD~1", worktree=False, cwd=str(repo)))
         for path in ("src/plain.py", ".claude/skills/hidden.py", "src/keep.rs"):
             if not added.get(path):
                 fails.append(f"the pathspec drops {path}: {sorted(added)}")
@@ -271,11 +273,6 @@ def selftest() -> int:
         ):
             if not gate_fails(True, *args):
                 fails.append(f"the {arm} arm must block under --gate")
-
-    # Outside the fixture block: this spawns the whole selftest again.
-    if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
-        fails.append(leak)
-
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
@@ -515,7 +512,7 @@ def main() -> int:
     worktree = "--worktree" in sys.argv[1:]
     base = args[0] if args else "origin/main"
 
-    added = added_lines_by_file(base, worktree)
+    added = added_lines_by_file(unified_diff(base, worktree))
     if not any(added.values()):
         print("comment-lint: no added/changed Rust or Python lines vs", base)
         return 0

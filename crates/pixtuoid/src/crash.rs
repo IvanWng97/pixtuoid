@@ -147,13 +147,10 @@ fn crash_log_path() -> PathBuf {
     // Empty or RELATIVE XDG_STATE_HOME = unset (XDG spec): an unfiltered "" yields
     // root `/pixtuoid/...`, a relative one lands CWD-relative.
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
-        return PathBuf::from(format!("{state}/pixtuoid/crash.log"));
+        return state.join("pixtuoid").join("crash.log");
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("crash.log");
+        return home.join(".cache").join("pixtuoid").join("crash.log");
     }
     std::env::temp_dir().join("pixtuoid-crash.log")
 }
@@ -277,10 +274,7 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let saved_xdg = std::env::var_os("XDG_STATE_HOME");
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("crash.log");
+        let cache = home.join(".cache").join("pixtuoid").join("crash.log");
         for rel in ["", "   ", "rel/state", "~/state"] {
             std::env::set_var("XDG_STATE_HOME", rel);
             assert_eq!(

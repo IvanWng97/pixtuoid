@@ -22,10 +22,7 @@ impl AntigravitySource {
     pub fn default_paths() -> Self {
         let home = crate::platform::user_home();
         Self {
-            brain_root: PathBuf::from(home)
-                .join(".gemini")
-                .join("antigravity-cli")
-                .join("brain"),
+            brain_root: home.join(".gemini").join("antigravity-cli").join("brain"),
         }
     }
 }

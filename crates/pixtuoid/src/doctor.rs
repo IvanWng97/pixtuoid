@@ -612,7 +612,7 @@ pub(crate) fn focus_section(
     ));
     if !shim_stamp.is_empty() {
         out.push_str(&format!(
-            "  {} — shim-resolved `_pid` rides each hook event (getppid on unix; an ancestor walk past cmd.exe on Windows)\n",
+            "  {} — shim-resolved `_pid` rides each hook event (an ancestor walk past the interposed shell — a `$SHELL -c` wrapper, a `cmd.exe /C` — on macOS/Linux/Windows; a raw parent elsewhere)\n",
             shim_stamp.join(", ")
         ));
     }
@@ -780,13 +780,12 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
             let root = pixtuoid_core::source::resolved_source_root(src)?;
             let env = registry::descriptor_for(src)
                 .and_then(|d| d.home_env)
-                // Trim-based, matching every resolver's `nonempty` policy: a `"  "`
-                // override is ignored by the resolver, so it must not render as
-                // `via $VAR` or raise the ⚠ (the #172 class).
-                .map(|v| {
-                    let set = std::env::var(v).is_ok_and(|s| !s.trim().is_empty());
-                    (v, set)
-                });
+                // Read through the SAME `path_env` the resolvers use, or the two
+                // disagree: a `"  "` override is ignored by both (the #172 class),
+                // and a non-UTF-8 one is HONORED by both — read here with
+                // `env::var` it would look unset, dropping the `via $VAR` suffix
+                // and silencing the ⚠ in exactly the case the root is wrong.
+                .map(|v| (v, pixtuoid_core::platform::path_env(v).is_some()));
             Some(root_row(src, &root, root.is_dir(), env))
         })
         .collect();
@@ -810,10 +809,17 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         cc_registry.as_deref().map(|d| (d, d.is_dir())),
         (&codex_sessions, codex_sessions.is_dir()),
     ));
+    // Read as BYTES, lossy ONLY here: the advisory renders these for a human,
+    // it never opens them, so this is the one boundary where losing an
+    // ill-formed byte costs nothing.
+    let (home, up) = (
+        pixtuoid_core::platform::path_env("HOME"),
+        pixtuoid_core::platform::path_env("USERPROFILE"),
+    );
     if let Some(adv) = home_split_advisory(
         cfg!(windows),
-        std::env::var("HOME").ok().as_deref(),
-        std::env::var("USERPROFILE").ok().as_deref(),
+        home.as_ref().map(|p| p.to_string_lossy()).as_deref(),
+        up.as_ref().map(|p| p.to_string_lossy()).as_deref(),
     ) {
         out.push_str(&format!("\n{adv}\n"));
     }

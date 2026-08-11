@@ -17,9 +17,20 @@
 //! in one project stay distinct. The TOP-LEVEL `cwd` is EMPTY/absent in CLI
 //! hooks — `workspace_roots[0]` is the real workspace.
 //!
-//! - `tool_use_id` is always `None`: the reducer's per-call machinery
-//!   (hook-wins dedup, `active_tasks`) is bypassed — harmless on a single
-//!   transport.
+//! - **`tool_use_id` IS on the wire and DROPPED deliberately — do not "fix"
+//!   that.** Every `preToolUse` pairs with its `postToolUse` /
+//!   `postToolUseFailure` on the same id, and tools INTERLEAVE (a Read and a
+//!   Shell overlap), so the id looks like exactly what the reducer's per-call
+//!   machinery wants. The trap is `Task`: it fires `preToolUse` and NEVER a
+//!   post (capture-verified — the one unpaired id in a delegating run, while
+//!   `subagentStart`/`subagentStop` stay silent). Passing the id through would
+//!   satisfy `track_active_tasks`' `Some(tuid)` + `is_task()` arm, insert a
+//!   tuid nothing ever drains, and strand the parent Delegating for the rest of
+//!   the session — `apply_activity_end` re-enters Delegating on every later
+//!   tool end while `any_active_task` holds. The machinery the id would
+//!   otherwise buy is inert here anyway: hook-wins dedup needs a second
+//!   transport, and precise wait-resolution needs permission events this source
+//!   never emits. Pinned by `tool_use_id_is_dropped_even_though_the_wire_has_one`.
 //! - **Subagents render FLAT, never nested — the parent-link is genuinely
 //!   absent.** Each child runs as an INDEPENDENT session and NOTHING links it to
 //!   its parent: `subagentStart`/`subagentStop` don't fire (capture-verified:
@@ -28,10 +39,16 @@
 //!   idle stale-sweep.
 //! - Exit profile: `sessionEnd` FIRES on clean completion → `has_exit_signal:
 //!   true`. `stop` is turn-end and did NOT fire under `-p` (kept mapped for
-//!   interactive turns); abrupt exits (no PID exposed) fall to the stale-sweep.
-//! - A per-session JSONL transcript DOES exist
-//!   (`~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`) —
-//!   the seam if a watcher is ever wanted (its stem == our `session_id` key).
+//!   interactive turns). An abrupt exit rides the shim's `_pid` BEST-EFFORT:
+//!   the walk skips the `$SHELL -c` wrapper Cursor `eval`s every hook inside,
+//!   but some hooks arrive through a different non-shell ancestor, so the pid is
+//!   not stable across every event and corroboration often withholds the arm
+//!   (#896) — see this crate's `SHARP-EDGES.md`.
+//! - A per-session JSONL transcript DOES exist and the envelope now CARRIES its
+//!   path (`transcript_path`: `null` on `sessionStart`, set from the first tool
+//!   event on) — the seam if a watcher is ever wanted, without reconstructing
+//!   `~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`
+//!   (its stem == our `session_id` key).
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
@@ -257,6 +274,31 @@ mod tests {
                 assert_eq!(detail.unwrap().display(), "Read: /repo/src/main.rs");
             }
             other => panic!("expected ActivityStart, got {other:?}"),
+        }
+    }
+
+    /// The wire HAS a `tool_use_id` and it pairs; we drop it on purpose. Wiring
+    /// it would let `track_active_tasks` claim cursor's `Task` — which never
+    /// gets a `postToolUse` — and strand the parent Delegating. See the module
+    /// doc before changing this.
+    #[test]
+    fn tool_use_id_is_dropped_even_though_the_wire_has_one() {
+        for event in ["preToolUse", "postToolUse", "postToolUseFailure"] {
+            let ev = decode(json!({
+                "hook_event_name": event, "session_id": "s", "workspace_roots": ["/repo"],
+                "tool_name": "Shell", "tool_input": {"command": "ls"},
+                "tool_use_id": "tool_b3a89c28-dbe4-487e-8c70-ea05a83083a"
+            }));
+            let tuid = match &ev {
+                AgentEvent::ActivityStart { tool_use_id, .. }
+                | AgentEvent::ActivityEnd { tool_use_id, .. } => tool_use_id.clone(),
+                other => panic!("{event}: expected an activity event, got {other:?}"),
+            };
+            assert_eq!(
+                tuid, None,
+                "{event}: the id must stay dropped — passing it through strands \
+                 a Task-delegating parent (module doc)"
+            );
         }
     }
 

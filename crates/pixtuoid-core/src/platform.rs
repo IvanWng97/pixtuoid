@@ -9,27 +9,56 @@
 //! unset, so `XDG_CONFIG_HOME="   "` can't be unset for the app config but set
 //! for the CLI config-dir resolution.
 
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 
+/// A PATH-valued env var, read as BYTES. `env::var` returns `Err` on a value
+/// that is not UTF-8 — and a filesystem path is not required to be, on any
+/// Unix — so reading a path override with it DROPS a legal value and sends the
+/// resolver silently to a fallback location: the user's override is ignored and
+/// the office comes up empty (the #880/#343/#342/#195 failure shape, reached
+/// through the encoding rather than the precedence). `None` for unset, empty,
+/// or whitespace-only — a blank value is never a valid home/config dir.
+pub fn path_env(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|v| !is_blank(v))
+        .map(PathBuf::from)
+}
+
+/// [`path_env`]'s TRIMMING twin — hermes mirrors Python's
+/// `os.environ.get(K, "").strip()`, so `" /srv/hm "` IS `/srv/hm` upstream. A
+/// value that is not UTF-8 cannot be trimmed as text and is taken VERBATIM:
+/// preserving a legal path beats stripping hypothetical padding from one.
+pub fn path_env_trimmed(name: &str) -> Option<PathBuf> {
+    let raw = std::env::var_os(name)?;
+    match raw.to_str() {
+        Some(s) => (!s.trim().is_empty()).then(|| PathBuf::from(s.trim())),
+        None => Some(PathBuf::from(raw)),
+    }
+}
+
+/// Whitespace test that never rejects a non-UTF-8 value: the lossy form is used
+/// ONLY for the emptiness question, never as the value, and its replacement
+/// chars are not whitespace — so ill-formed bytes read as present, not blank.
+fn is_blank(v: &OsStr) -> bool {
+    v.to_string_lossy().trim().is_empty()
+}
+
 /// USERPROFILE-first on Windows, HOME on Unix. See module doc for WHY.
-pub(crate) fn user_home() -> String {
+pub(crate) fn user_home() -> PathBuf {
     resolve_home(
         cfg!(windows),
-        std::env::var("USERPROFILE").ok(),
-        std::env::var("HOME").ok(),
-        std::env::temp_dir().to_string_lossy().into_owned(),
+        path_env("USERPROFILE"),
+        path_env("HOME"),
+        std::env::temp_dir(),
     )
 }
 
 /// `Option` variant of `user_home`: the SAME USERPROFILE-vs-HOME rule, but
 /// with no host-level fallback — `None` when nothing is set, so a caller can
 /// supply its own.
-pub fn user_home_opt() -> Option<String> {
-    resolve_user_home_opt(
-        cfg!(windows),
-        std::env::var("USERPROFILE").ok(),
-        std::env::var("HOME").ok(),
-    )
+pub fn user_home_opt() -> Option<PathBuf> {
+    resolve_user_home_opt(cfg!(windows), path_env("USERPROFILE"), path_env("HOME"))
 }
 
 /// The Codex home dir, matching codex's own precedence (`codex-rs`
@@ -40,7 +69,7 @@ pub fn user_home_opt() -> Option<String> {
 /// leaves alone) — the inverse scoping of grok's, which canonicalizes only its
 /// DEFAULT. Same class, same reason it is unobservable here.
 pub(crate) fn codex_home() -> PathBuf {
-    resolve_codex_home(std::env::var("CODEX_HOME").ok(), user_home())
+    resolve_codex_home(path_env("CODEX_HOME"), user_home())
 }
 
 /// The grok home dir, matching grok-build's own resolution (`xai-grok-config`
@@ -56,29 +85,12 @@ pub(crate) fn codex_home() -> PathBuf {
 /// exposed surface — the sessions WATCH ROOT — is opened, not string-compared,
 /// and both forms resolve through the link to one dir.
 pub(crate) fn grok_home() -> PathBuf {
-    resolve_grok_home(std::env::var("GROK_HOME").ok(), user_home())
+    resolve_grok_home(path_env("GROK_HOME"), user_home())
 }
 
 /// Pure precedence core, separated so it's unit-testable without env mutation.
-fn resolve_grok_home(grok_home_env: Option<String>, home: String) -> PathBuf {
-    match nonempty(grok_home_env) {
-        Some(p) => PathBuf::from(p),
-        None => PathBuf::from(home).join(".grok"),
-    }
-}
-
-/// An env var value counts as UNSET when it's empty or whitespace-only — a
-/// whitespace-only path is never a valid home/config dir.
-pub(crate) fn nonempty(v: Option<String>) -> Option<String> {
-    v.filter(|s| !s.trim().is_empty())
-}
-
-/// [`nonempty`]'s TRIMMING twin — the value comes back STRIPPED, not merely
-/// tested. This is Python's `os.environ.get(K, "").strip()` idiom, which hermes
-/// applies to both `HERMES_HOME` and `LOCALAPPDATA`, so `" /srv/hm "` IS
-/// `/srv/hm` upstream while `nonempty` hands back the padded string.
-pub(crate) fn nonempty_trimmed(v: Option<String>) -> Option<String> {
-    nonempty(v).map(|s| s.trim().to_string())
+fn resolve_grok_home(grok_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    grok_home_env.unwrap_or_else(|| home.join(".grok"))
 }
 
 /// Hand back a CLI's env home override unchanged, warning when it is RELATIVE.
@@ -106,14 +118,11 @@ pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
 /// On a set-but-absent `CODEX_HOME` upstream codex returns a FATAL error; we
 /// deliberately fall back to `~/.codex` — benign for a visualizer, since codex
 /// itself won't run (and writes no rollouts) when its home dir is missing.
-fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
-    if let Some(p) = nonempty(codex_home_env) {
-        let pb = PathBuf::from(p);
-        if pb.is_dir() {
-            return pb;
-        }
+fn resolve_codex_home(codex_home_env: Option<PathBuf>, home: PathBuf) -> PathBuf {
+    if let Some(p) = codex_home_env.filter(|p| p.is_dir()) {
+        return p;
     }
-    PathBuf::from(home).join(".codex")
+    home.join(".codex")
 }
 
 /// `HOME`-FIRST home resolution, then `USERPROFILE` on Windows — the OPPOSITE
@@ -134,12 +143,7 @@ fn resolve_codex_home(codex_home_env: Option<String>, home: String) -> PathBuf {
 /// Every OTHER CLI uses its language stdlib (all `USERPROFILE`-first/only on
 /// Windows), so they correctly use the generic `user_home`, NOT this.
 pub fn home_first_dir() -> Option<PathBuf> {
-    resolve_home_first(
-        cfg!(windows),
-        std::env::var("HOME").ok(),
-        std::env::var("USERPROFILE").ok(),
-    )
-    .map(PathBuf::from)
+    resolve_home_first(cfg!(windows), path_env("HOME"), path_env("USERPROFILE"))
 }
 
 /// Pure precedence core (`HOME`-first, then `USERPROFILE` on Windows), separated
@@ -147,10 +151,10 @@ pub fn home_first_dir() -> Option<PathBuf> {
 /// `None`: we deliberately don't reach for `dirs::home_dir`'s getpwuid fallback.
 fn resolve_home_first(
     windows: bool,
-    home: Option<String>,
-    userprofile: Option<String>,
-) -> Option<String> {
-    nonempty(home).or_else(|| if windows { nonempty(userprofile) } else { None })
+    home: Option<PathBuf>,
+    userprofile: Option<PathBuf>,
+) -> Option<PathBuf> {
+    home.or(if windows { userprofile } else { None })
 }
 
 /// Pure mapping of Go's `os.UserConfigDir()` for the platforms we ship, with
@@ -158,20 +162,19 @@ fn resolve_home_first(
 /// on any host — the runtime `cfg!(target_os)` if-else couldn't test its
 /// non-host arms. Pass `std::env::consts::OS` for `os`; `home` is the
 /// already-resolved user home used for the relative fallbacks.
+///
+/// `appdata`/`xdg` must ALREADY be blank-filtered — [`path_env`] owns that, so a
+/// blank `PathBuf` handed in here is taken as a real path.
 pub fn resolve_user_config_dir(
     os: &str,
-    appdata: Option<String>,
-    xdg: Option<String>,
+    appdata: Option<PathBuf>,
+    xdg: Option<PathBuf>,
     home: &Path,
 ) -> PathBuf {
     match os {
         "macos" => home.join("Library/Application Support"),
-        "windows" => nonempty(appdata)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join("AppData/Roaming")),
-        _ => nonempty(xdg)
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".config")),
+        "windows" => appdata.unwrap_or_else(|| home.join("AppData/Roaming")),
+        _ => xdg.unwrap_or_else(|| home.join(".config")),
     }
 }
 
@@ -180,15 +183,15 @@ pub fn resolve_user_config_dir(
 /// precedence, so the USERPROFILE-vs-HOME rule lives in ONE place.
 fn resolve_home(
     windows: bool,
-    userprofile: Option<String>,
-    home: Option<String>,
-    temp_dir: String,
-) -> String {
+    userprofile: Option<PathBuf>,
+    home: Option<PathBuf>,
+    temp_dir: PathBuf,
+) -> PathBuf {
     resolve_user_home_opt(windows, userprofile, home).unwrap_or_else(|| {
         if windows {
             temp_dir
         } else {
-            "/tmp".into()
+            PathBuf::from("/tmp")
         }
     })
 }
@@ -199,45 +202,131 @@ fn resolve_home(
 /// the Windows arm is unit-testable on any host.
 pub(crate) fn resolve_user_home_opt(
     windows: bool,
-    userprofile: Option<String>,
-    home: Option<String>,
-) -> Option<String> {
+    userprofile: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
     if windows {
         // USERPROFILE is effectively always set on Windows; a lone HOME here
         // was set deliberately (MSYS users exporting a real Windows path).
-        return nonempty(userprofile).or_else(|| nonempty(home));
+        return userprofile.or(home);
     }
-    nonempty(home)
+    home
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn s(v: &str) -> Option<String> {
-        Some(v.to_string())
+    fn s(v: &str) -> Option<PathBuf> {
+        Some(PathBuf::from(v))
     }
 
-    #[test]
-    fn nonempty_treats_empty_and_whitespace_as_unset() {
-        assert_eq!(nonempty(None), None);
-        assert_eq!(nonempty(s("")), None);
-        assert_eq!(nonempty(s("   ")), None);
-        assert_eq!(nonempty(s("\t \n")), None);
-        assert_eq!(nonempty(s(" /home/u ")).as_deref(), Some(" /home/u "));
+    /// Stand-in for the host temp dir the Windows fallback uses.
+    fn t() -> PathBuf {
+        PathBuf::from("T")
     }
 
+    /// A filesystem path is not required to be UTF-8 on Unix, and `env::var`
+    /// returns `Err(NotUnicode)` for one that isn't — DROPPING a legal override
+    /// and sending the resolver to a fallback dir, silently. Pins the read at
+    /// the boundary where that decision is made.
+    #[cfg(unix)]
     #[test]
-    fn nonempty_trimmed_strips_the_value_where_nonempty_only_tests_it() {
-        assert_eq!(nonempty_trimmed(None), None);
-        assert_eq!(nonempty_trimmed(s("")), None);
-        assert_eq!(nonempty_trimmed(s("   ")), None);
-        assert_eq!(nonempty_trimmed(s(" /home/u ")).as_deref(), Some("/home/u"));
+    fn a_non_utf8_home_is_honored_not_dropped() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("HOME");
+        let saved_up = std::env::var_os("USERPROFILE");
+        std::env::remove_var("USERPROFILE");
+
+        // 0xFF is never valid UTF-8, and is a legal byte in a Unix path.
+        let bad = OsString::from_vec(b"/tmp/pixtuoid-caf\xFF".to_vec());
+        std::env::set_var("HOME", &bad);
+        let got = user_home_opt();
+
+        match saved {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+        if let Some(v) = saved_up {
+            std::env::set_var("USERPROFILE", v);
+        }
+
         assert_eq!(
-            nonempty(s(" /home/u ")).as_deref(),
-            Some(" /home/u "),
-            "the twins MUST differ here — that difference is the whole point"
+            got,
+            Some(PathBuf::from(&bad)),
+            "a non-UTF-8 HOME must be honored verbatim, not dropped to a fallback"
         );
+    }
+
+    /// The read boundary owns blank-filtering AND (for the trimming twin) the
+    /// `.strip()` mirror hermes needs — the pure resolvers below assume values
+    /// that already went through here.
+    #[test]
+    fn path_env_filters_blanks_and_the_trimmed_twin_strips() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        const K: &str = "PIXTUOID_PATH_ENV_TEST";
+        let saved = std::env::var_os(K);
+
+        std::env::remove_var(K);
+        assert_eq!(path_env(K), None, "unset");
+        for blank in ["", "   ", "\t \n"] {
+            std::env::set_var(K, blank);
+            assert_eq!(path_env(K), None, "{blank:?} counts as unset");
+            assert_eq!(path_env_trimmed(K), None, "{blank:?} counts as unset");
+        }
+        std::env::set_var(K, " /srv/hm ");
+        assert_eq!(
+            path_env(K),
+            Some(PathBuf::from(" /srv/hm ")),
+            "the plain read TESTS the padding, it does not strip it"
+        );
+        assert_eq!(
+            path_env_trimmed(K),
+            Some(PathBuf::from("/srv/hm")),
+            "the trimming twin mirrors hermes's `os.environ.get(K, '').strip()`"
+        );
+
+        match saved {
+            Some(v) => std::env::set_var(K, v),
+            None => std::env::remove_var(K),
+        }
+    }
+
+    /// The whole point of reading as bytes: an ill-formed value survives BOTH
+    /// readers rather than being dropped, and the trimming twin takes it
+    /// verbatim because it cannot be trimmed as text.
+    #[cfg(unix)]
+    #[test]
+    fn a_non_utf8_value_survives_both_readers() {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        const K: &str = "PIXTUOID_PATH_ENV_BYTES_TEST";
+        let saved = std::env::var_os(K);
+
+        let bad = OsString::from_vec(b"/tmp/caf\xFF".to_vec());
+        std::env::set_var(K, &bad);
+        assert!(
+            std::env::var(K).is_err(),
+            "precondition: env::var is what DROPS this value"
+        );
+        assert_eq!(path_env(K), Some(PathBuf::from(&bad)));
+        assert_eq!(path_env_trimmed(K), Some(PathBuf::from(&bad)));
+
+        match saved {
+            Some(v) => std::env::set_var(K, v),
+            None => std::env::remove_var(K),
+        }
     }
 
     #[test]
@@ -282,30 +371,26 @@ mod tests {
 
     #[test]
     fn windows_prefers_userprofile_over_home() {
-        let got = resolve_home(true, s(r"C:\Users\me"), s("/c/Users/me"), "T".into());
-        assert_eq!(got, r"C:\Users\me");
+        let got = resolve_home(true, s(r"C:\Users\me"), s("/c/Users/me"), t());
+        assert_eq!(got, PathBuf::from(r"C:\Users\me"));
     }
 
     #[test]
     fn windows_falls_back_to_home_then_tempdir() {
         assert_eq!(
-            resolve_home(true, None, s("/c/Users/me"), "T".into()),
-            "/c/Users/me"
+            resolve_home(true, None, s("/c/Users/me"), t()),
+            PathBuf::from("/c/Users/me")
         );
-        assert_eq!(resolve_home(true, None, None, "T".into()), "T");
-        assert_eq!(resolve_home(true, s(""), s(""), "T".into()), "T");
-        assert_eq!(resolve_home(true, s("  "), s("  "), "T".into()), "T");
+        assert_eq!(resolve_home(true, None, None, t()), t());
     }
 
     #[test]
-    fn unix_home_stays_authoritative_and_empty_home_is_unset() {
+    fn unix_home_stays_authoritative() {
         assert_eq!(
-            resolve_home(false, s(r"C:\ignored"), s("/Users/me"), "T".into()),
-            "/Users/me"
+            resolve_home(false, s(r"C:\ignored"), s("/Users/me"), t()),
+            PathBuf::from("/Users/me")
         );
-        assert_eq!(resolve_home(false, None, None, "T".into()), "/tmp");
-        assert_eq!(resolve_home(false, None, s(""), "T".into()), "/tmp");
-        assert_eq!(resolve_home(false, None, s("  "), "T".into()), "/tmp");
+        assert_eq!(resolve_home(false, None, None, t()), PathBuf::from("/tmp"));
     }
 
     #[test]
@@ -319,14 +404,11 @@ mod tests {
             s("/c/Users/me")
         );
         assert_eq!(resolve_user_home_opt(true, None, None), None);
-        assert_eq!(resolve_user_home_opt(true, s(""), s("")), None);
-        assert_eq!(resolve_user_home_opt(true, s("  "), s("  ")), None);
         assert_eq!(
             resolve_user_home_opt(false, s(r"C:\ignored"), s("/Users/me")),
             s("/Users/me")
         );
         assert_eq!(resolve_user_home_opt(false, None, None), None);
-        assert_eq!(resolve_user_home_opt(false, None, s("")), None);
     }
 
     #[test]
@@ -354,10 +436,6 @@ mod tests {
             PathBuf::from(r"C:\Users\ada\AppData\Roaming")
         );
         assert_eq!(
-            resolve_user_config_dir("windows", s(""), None, Path::new(r"C:\Users\ada")),
-            PathBuf::from(r"C:\Users\ada").join("AppData/Roaming")
-        );
-        assert_eq!(
             resolve_user_config_dir("windows", None, None, Path::new(r"C:\Users\ada")),
             PathBuf::from(r"C:\Users\ada").join("AppData/Roaming")
         );
@@ -368,14 +446,6 @@ mod tests {
         assert_eq!(
             resolve_user_config_dir("linux", None, s("/xdg/cfg"), Path::new("/home/u")),
             PathBuf::from("/xdg/cfg")
-        );
-        assert_eq!(
-            resolve_user_config_dir("linux", None, s(""), Path::new("/home/u")),
-            PathBuf::from("/home/u/.config")
-        );
-        assert_eq!(
-            resolve_user_config_dir("linux", None, s("   "), Path::new("/home/u")),
-            PathBuf::from("/home/u/.config")
         );
         assert_eq!(
             resolve_user_config_dir("linux", None, None, Path::new("/home/u")),
@@ -392,26 +462,15 @@ mod tests {
         let missing = std::env::temp_dir().join("pixtuoid-grok-home-missing-xyz");
         let _ = std::fs::remove_dir_all(&missing);
         assert_eq!(
-            resolve_grok_home(
-                Some(missing.to_string_lossy().into_owned()),
-                "/home/u".into()
-            ),
+            resolve_grok_home(Some(missing.clone()), PathBuf::from("/home/u")),
             missing
         );
     }
 
     #[test]
-    fn grok_home_falls_back_to_dot_grok_when_env_unset_or_empty() {
+    fn grok_home_falls_back_to_dot_grok_when_env_unset() {
         let expected = PathBuf::from("/home/u").join(".grok");
-        assert_eq!(resolve_grok_home(None, "/home/u".into()), expected);
-        assert_eq!(
-            resolve_grok_home(Some(String::new()), "/home/u".into()),
-            expected
-        );
-        assert_eq!(
-            resolve_grok_home(Some("   ".into()), "/home/u".into()),
-            expected
-        );
+        assert_eq!(resolve_grok_home(None, PathBuf::from("/home/u")), expected);
     }
 
     #[test]
@@ -419,7 +478,7 @@ mod tests {
         let tmp = std::env::temp_dir().join("pixtuoid-codex-home-exists-test");
         std::fs::create_dir_all(&tmp).unwrap();
         assert_eq!(
-            resolve_codex_home(Some(tmp.to_string_lossy().into_owned()), "/home/u".into()),
+            resolve_codex_home(Some(tmp.clone()), PathBuf::from("/home/u")),
             tmp
         );
         let _ = std::fs::remove_dir_all(&tmp);
@@ -435,10 +494,6 @@ mod tests {
             resolve_home_first(true, None, s(r"C:\Users\me")),
             s(r"C:\Users\me")
         );
-        assert_eq!(
-            resolve_home_first(true, s("  "), s(r"C:\Users\me")),
-            s(r"C:\Users\me")
-        );
         assert_eq!(resolve_home_first(true, None, None), None);
     }
 
@@ -449,7 +504,6 @@ mod tests {
             s("/Users/me")
         );
         assert_eq!(resolve_home_first(false, None, s(r"C:\ignored")), None);
-        assert_eq!(resolve_home_first(false, s(""), None), None);
     }
 
     #[test]
@@ -469,24 +523,13 @@ mod tests {
     }
 
     #[test]
-    fn codex_home_falls_back_to_dot_codex_when_env_unset_empty_or_missing_dir() {
+    fn codex_home_falls_back_to_dot_codex_when_env_unset_or_missing_dir() {
         let expected = PathBuf::from("/home/u").join(".codex");
-        assert_eq!(resolve_codex_home(None, "/home/u".into()), expected);
-        assert_eq!(
-            resolve_codex_home(Some(String::new()), "/home/u".into()),
-            expected
-        );
-        assert_eq!(
-            resolve_codex_home(Some("   ".into()), "/home/u".into()),
-            expected
-        );
+        assert_eq!(resolve_codex_home(None, PathBuf::from("/home/u")), expected);
         let missing = std::env::temp_dir().join("pixtuoid-codex-home-missing-xyz");
         let _ = std::fs::remove_dir_all(&missing);
         assert_eq!(
-            resolve_codex_home(
-                Some(missing.to_string_lossy().into_owned()),
-                "/home/u".into()
-            ),
+            resolve_codex_home(Some(missing.clone()), PathBuf::from("/home/u")),
             expected
         );
     }

@@ -84,16 +84,13 @@ pub(crate) fn log_file_path() -> PathBuf {
     // Kept in lockstep with init()'s `explicit_log_file` read, so "file mode
     // enabled" and "which file" cannot disagree on a whitespace value.
     if let Some(p) = pixtuoid::install::nonempty_env("PIXTUOID_LOG") {
-        return PathBuf::from(p);
+        return p;
     }
     if let Some(state) = pixtuoid::install::nonempty_abs_env("XDG_STATE_HOME") {
-        return PathBuf::from(format!("{state}/pixtuoid/log"));
+        return state.join("pixtuoid").join("log");
     }
     if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("log");
+        return home.join(".cache").join("pixtuoid").join("log");
     }
     // No home dir at all: the log must exist somewhere — it is the only runtime
     // diagnostics channel.
@@ -257,10 +254,7 @@ mod tests {
         // Build the expectation with the SAME joins the impl uses — a hardcoded
         // separator would drift under Windows.
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
-        let cache = PathBuf::from(home)
-            .join(".cache")
-            .join("pixtuoid")
-            .join("log");
+        let cache = home.join(".cache").join("pixtuoid").join("log");
         for rel in ["", "   ", "rel/state", "~/state"] {
             std::env::set_var("XDG_STATE_HOME", rel);
             assert_eq!(

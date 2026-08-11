@@ -1,9 +1,17 @@
 // Invariant #5 (non-negotiable): the shim must never block CC — it always exits 0
 // silently on any error. A prod `unwrap()`/`expect()`/`panic!` violates that, so
 // they are compiler-denied here (tests unwrap freely). Scoped to the shim only.
+// Indexing joins them because `release` sets `panic = "abort"`: an out-of-bounds
+// slice is a SIGABRT the agent CLI sees, and the parsers this crate feeds on
+// untrusted process rows are exactly where one would land.
 #![cfg_attr(
     not(test),
-    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+    deny(
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::panic,
+        clippy::indexing_slicing
+    )
 )]
 
 use std::io::Read;
@@ -83,7 +91,8 @@ fn main() -> Result<()> {
     };
 
     // Everything past here is OUR work on CC's clock — `cli_pid` walks a process
-    // snapshot on Windows — so the bound is armed first (see `arm_watchdog`).
+    // table, off-thread but not free — so the bound is armed first (see
+    // `arm_watchdog`).
     let Some(bound) = transport::arm_watchdog() else {
         return Ok(());
     };

@@ -78,7 +78,7 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 
 /// Mirrors upstream `user_grok_home()`'s resolvability gate — the condition under
 /// which grok's hook discovery actually scans `{grok_home}/hooks`.
-fn home_resolvable(grok_home_env: Option<&str>, home: Option<&str>) -> bool {
+fn home_resolvable(grok_home_env: Option<&Path>, home: Option<&Path>) -> bool {
     grok_home_env.is_some() || home.is_some()
 }
 
@@ -374,9 +374,12 @@ mod tests {
 
     #[test]
     fn config_path_requires_a_resolvable_home_or_grok_home() {
-        assert!(home_resolvable(Some("/custom"), None));
-        assert!(home_resolvable(None, Some("/home/u")));
-        assert!(home_resolvable(Some("/custom"), Some("/home/u")));
+        assert!(home_resolvable(Some(Path::new("/custom")), None));
+        assert!(home_resolvable(None, Some(Path::new("/home/u"))));
+        assert!(home_resolvable(
+            Some(Path::new("/custom")),
+            Some(Path::new("/home/u"))
+        ));
         assert!(!home_resolvable(None, None));
     }
 

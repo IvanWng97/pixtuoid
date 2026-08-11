@@ -39,11 +39,11 @@ pub const SOURCE_NAME: &str = "hermes";
 /// Hermes PROFILES are applied out-of-band and are deliberately not mirrored —
 /// see this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
 pub fn hermes_home() -> Option<PathBuf> {
-    let raw = std::env::var("HERMES_HOME").ok();
-    let from_env = crate::platform::nonempty_trimmed(raw.clone()).is_some();
+    let raw = crate::platform::path_env_trimmed("HERMES_HOME");
+    let from_env = raw.is_some();
     let dir = resolve_hermes_home(
         raw,
-        std::env::var("LOCALAPPDATA").ok(),
+        crate::platform::path_env_trimmed("LOCALAPPDATA"),
         cfg!(windows),
         crate::platform::user_home_opt(),
     )?;
@@ -62,23 +62,23 @@ pub fn hermes_home() -> Option<PathBuf> {
 /// `USERPROFILE`-first (`ntpath.expanduser`) exactly like [`user_home_opt`].
 ///
 /// [`user_home_opt`]: crate::platform::user_home_opt
+/// The env values arrive ALREADY trimmed and blank-filtered from
+/// `platform::path_env_trimmed` — normalized at the read boundary, not here.
 fn resolve_hermes_home(
-    hermes_home_env: Option<String>,
-    local_appdata: Option<String>,
+    hermes_home_env: Option<PathBuf>,
+    local_appdata: Option<PathBuf>,
     windows: bool,
-    user_home: Option<String>,
+    user_home: Option<PathBuf>,
 ) -> Option<PathBuf> {
-    use crate::platform::nonempty_trimmed;
-
-    if let Some(h) = nonempty_trimmed(hermes_home_env) {
-        return Some(PathBuf::from(h));
+    if let Some(h) = hermes_home_env {
+        return Some(h);
     }
     if !windows {
-        return user_home.map(|h| PathBuf::from(h).join(".hermes"));
+        return user_home.map(|h| h.join(".hermes"));
     }
-    let base = match nonempty_trimmed(local_appdata) {
-        Some(l) => PathBuf::from(l),
-        None => PathBuf::from(user_home?).join("AppData").join("Local"),
+    let base = match local_appdata {
+        Some(l) => l,
+        None => user_home?.join("AppData").join("Local"),
     };
     Some(base.join("hermes"))
 }
@@ -411,27 +411,41 @@ mod tests {
     }
 
     /// Pinned against a live probe of hermes 2026.8.3, the STRIP included.
+    /// `hermes_home` must read through the TRIMMING twin: upstream applies
+    /// `os.environ.get(K, "").strip()`, so a padded override IS the stripped
+    /// path. Nothing else pins that binding — swap `path_env_trimmed` for
+    /// `path_env` in `hermes_home()` and every other test still passes.
     #[test]
-    fn hermes_home_strips_the_env_value_then_falls_back_to_dot_hermes() {
+    fn hermes_home_strips_a_padded_env_override_like_upstream() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved = std::env::var_os("HERMES_HOME");
+
+        std::env::set_var("HERMES_HOME", "  /custom/hm  ");
+        let got = hermes_home();
+
+        match saved {
+            Some(v) => std::env::set_var("HERMES_HOME", v),
+            None => std::env::remove_var("HERMES_HOME"),
+        }
+        assert_eq!(got, Some(PathBuf::from("/custom/hm")));
+    }
+
+    #[test]
+    fn hermes_home_takes_the_env_value_then_falls_back_to_dot_hermes() {
         let unix = |env: Option<&str>| {
             resolve_hermes_home(
-                env.map(str::to_string),
+                env.map(PathBuf::from),
                 None,
                 false,
-                Some("/home/u".to_string()),
+                Some(PathBuf::from("/home/u")),
             )
         };
         let default = Some(PathBuf::from("/home/u").join(".hermes"));
 
         assert_eq!(unix(Some("/custom/hm")), Some(PathBuf::from("/custom/hm")));
-        assert_eq!(
-            unix(Some("  /custom/hm  ")),
-            Some(PathBuf::from("/custom/hm")),
-            "upstream reads HERMES_HOME through `.strip()` — the value is trimmed, not just tested"
-        );
         assert_eq!(unix(None), default);
-        assert_eq!(unix(Some("")), default);
-        assert_eq!(unix(Some("   ")), default);
         assert_eq!(resolve_hermes_home(None, None, false, None), None);
     }
 
@@ -441,10 +455,10 @@ mod tests {
     fn hermes_home_on_windows_is_local_appdata_not_dot_hermes() {
         let win = |env: Option<&str>, appdata: Option<&str>| {
             resolve_hermes_home(
-                env.map(str::to_string),
-                appdata.map(str::to_string),
+                env.map(PathBuf::from),
+                appdata.map(PathBuf::from),
                 true,
-                Some(r"C:\Users\ada".to_string()),
+                Some(PathBuf::from(r"C:\Users\ada")),
             )
         };
 
@@ -452,8 +466,6 @@ mod tests {
             win(None, Some(r"C:\Users\ada\AppData\Local")),
             Some(PathBuf::from(r"C:\Users\ada\AppData\Local").join("hermes"))
         );
-        // LOCALAPPDATA is `.strip()`ed upstream too, so a padded or blank one
-        // falls through to the same relative default.
         let relative_default = Some(
             PathBuf::from(r"C:\Users\ada")
                 .join("AppData")
@@ -461,11 +473,6 @@ mod tests {
                 .join("hermes"),
         );
         assert_eq!(win(None, None), relative_default);
-        assert_eq!(win(None, Some("   ")), relative_default);
-        assert_eq!(
-            win(None, Some(r"  C:\pad  ")),
-            Some(PathBuf::from(r"C:\pad").join("hermes"))
-        );
         assert_eq!(
             win(
                 Some(r"D:\profiles\work"),
@@ -480,7 +487,7 @@ mod tests {
     /// The arms MUST disagree — the assertion that would have caught the bug.
     #[test]
     fn the_windows_and_unix_defaults_diverge() {
-        let home = Some(r"C:\Users\ada".to_string());
+        let home = Some(PathBuf::from(r"C:\Users\ada"));
         assert_ne!(
             resolve_hermes_home(None, None, true, home.clone()),
             resolve_hermes_home(None, None, false, home),

@@ -173,11 +173,15 @@ def assert_verbatim(guide: pathlib.Path, sib: pathlib.Path, built: list[str]) ->
             )
 
 
-def run(root: pathlib.Path, check: bool, quiet: bool = False) -> int:
-    tracked = gitenv.git(
+def tracked_guides(root: pathlib.Path) -> list[str]:
+    """The guides git knows about — the ONLY git this module needs."""
+    return gitenv.git(
         "-C", str(root), "ls-files", "*CLAUDE.md",
         capture_output=True, text=True, check=True,
     ).stdout.splitlines()
+
+
+def run(root: pathlib.Path, tracked: list[str], check: bool, quiet: bool = False) -> int:
     drifted = []
     for rel in tracked:
         guide = root / rel
@@ -200,24 +204,27 @@ def run(root: pathlib.Path, check: bool, quiet: bool = False) -> int:
 
 
 def selftest() -> int:
-    """Negative-control every failure arm on a throwaway repo — a generator whose
-    own fires/does-not-fire contract broke rewrites blocks with garbage quietly."""
+    """Negative-control every failure arm on a throwaway tree — a generator whose
+    own fires/does-not-fire contract broke rewrites blocks with garbage quietly.
+
+    The fixture is a plain directory, not a git repo: `tracked_guides` is the only
+    git this module does, and injecting its result keeps every control here unable
+    to reach a real index at all.
+    """
     import tempfile
 
     fails: list[str] = []
     with tempfile.TemporaryDirectory() as tmp:
         repo = pathlib.Path(tmp) / "repo"
         (repo / "crate").mkdir(parents=True)
-        at_repo = ("-C", str(repo))
-        gitenv.git(*at_repo, "init", "-q", check=True)
+        tracked = ["crate/CLAUDE.md"]
 
         def stage(rel: str, body: str) -> None:
             (repo / rel).write_text(body)
-            gitenv.git(*at_repo, "add", "-A", check=True, capture_output=True)
 
         def gen(check: bool) -> int:
             try:
-                return run(repo, check, quiet=True)
+                return run(repo, tracked, check, quiet=True)
             except SystemExit as e:  # sys.exit from a builder/assert arm
                 return 1 if e.code else 0
 
@@ -275,23 +282,19 @@ def selftest() -> int:
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 
-    # Outside the fixture block: this spawns the whole selftest again.
-    if leak := gitenv.ambient_git_control(pathlib.Path(__file__)):
-        fails.append(leak)
-
     if fails:
         print("gen-guides selftest FAILED:")
         for f in fails:
             print(f"  - {f}")
         return 1
-    print("gen-guides selftest: all 11 controls passed")
+    print("gen-guides selftest: every control passed")
     return 0
 
 
 def main() -> int:
     if "--selftest" in sys.argv[1:]:
         return selftest()
-    return run(ROOT, "--check" in sys.argv[1:])
+    return run(ROOT, tracked_guides(ROOT), "--check" in sys.argv[1:])
 
 
 if __name__ == "__main__":

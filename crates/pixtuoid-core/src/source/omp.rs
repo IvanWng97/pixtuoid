@@ -70,12 +70,14 @@ pub(crate) fn omp_sessions_dir() -> PathBuf {
 /// The process environment omp's resolver reads, injected so every arm — the
 /// Windows one, the XDG one, the profile ones — unit-tests on any host.
 struct OmpEnv {
-    home: Option<String>,
+    home: Option<PathBuf>,
     config_dir_name: Option<String>,
     omp_profile: Option<String>,
     pi_profile: Option<String>,
-    agent_dir: Option<String>,
-    xdg_data_home: Option<String>,
+    /// PATH-valued, so `PathBuf` — a `String` here would drop a legal non-UTF-8
+    /// override at the read. The three above are NAMES, not paths.
+    agent_dir: Option<PathBuf>,
+    xdg_data_home: Option<PathBuf>,
 }
 
 impl OmpEnv {
@@ -86,8 +88,8 @@ impl OmpEnv {
             config_dir_name: var("PI_CONFIG_DIR"),
             omp_profile: var("OMP_PROFILE"),
             pi_profile: var("PI_PROFILE"),
-            agent_dir: var("PI_CODING_AGENT_DIR"),
-            xdg_data_home: var("XDG_DATA_HOME"),
+            agent_dir: crate::platform::path_env("PI_CODING_AGENT_DIR"),
+            xdg_data_home: crate::platform::path_env("XDG_DATA_HOME"),
         }
     }
 }
@@ -161,7 +163,7 @@ fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
         .as_deref()
         .filter(|s| !s.is_empty())
         .unwrap_or(".omp");
-    let root = node_join(Path::new(&env.home.clone()?), name);
+    let root = node_join(env.home.as_deref()?, name);
     Some(match profile {
         Some(p) => root.join("profiles").join(p),
         None => root,
@@ -178,15 +180,15 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
     }
     // `resolvePreProfileAgentDir`: drop a value that IS the PI_PROFILE-derived
     // agent dir — it was exported by a parent's setProfile, not chosen here.
-    let override_dir = crate::platform::nonempty(env.agent_dir.clone()).filter(|v| {
+    let override_dir = env.agent_dir.clone().filter(|v| {
         let derived = normalize_profile_name(env.pi_profile.as_deref())
             .and_then(|p| omp_config_root(env, Some(&p)))
             .map(|r| r.join("agent"));
-        derived.is_none_or(|d| Path::new(v) != d)
+        derived.is_none_or(|d| *v != d)
     });
     match override_dir {
         Some(v) => Some((
-            crate::platform::warn_if_relative_override("PI_CODING_AGENT_DIR", PathBuf::from(v)),
+            crate::platform::warn_if_relative_override("PI_CODING_AGENT_DIR", v),
             false,
             profile,
         )),
@@ -199,11 +201,7 @@ fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
         .map(|(d, _, _)| d)
         // The home-less fallback keeps the pre-#880 shape rather than inventing
         // a new one: an unresolvable home was already `/tmp`-rooted by `user_home`.
-        .unwrap_or_else(|| {
-            PathBuf::from(crate::platform::user_home())
-                .join(".omp")
-                .join("agent")
-        })
+        .unwrap_or_else(|| crate::platform::user_home().join(".omp").join("agent"))
 }
 
 /// `getSessionsDir()` = `agentSubdir(undefined, "sessions", "data")`.
@@ -227,11 +225,11 @@ fn resolve_omp_sessions_dir(
 /// directory EXISTS — the existence gate is what makes a not-yet-migrated user
 /// keep the home-rooted layout.
 fn xdg_app_root(
-    xdg_data_home: Option<&str>,
+    xdg_data_home: Option<&Path>,
     profile: Option<&str>,
     exists: &dyn Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    let app_root = node_join(Path::new(xdg_data_home.filter(|s| !s.is_empty())?), "omp");
+    let app_root = node_join(xdg_data_home?, "omp");
     let candidate = match profile {
         Some(p) => app_root.join("profiles").join(p),
         None => app_root,
@@ -1123,8 +1121,8 @@ mod tests {
             config_dir_name: None,
             omp_profile: profile.map(str::to_string),
             pi_profile: None,
-            agent_dir: agent.map(str::to_string),
-            xdg_data_home: xdg.map(str::to_string),
+            agent_dir: agent.map(PathBuf::from),
+            xdg_data_home: xdg.map(PathBuf::from),
         };
         let exists = |want: &'static str| move |p: &Path| p == Path::new(want);
         let home_default = PathBuf::from("/home/u/.omp/agent/sessions");
@@ -1174,7 +1172,7 @@ mod tests {
         assert_eq!(
             resolve_omp_sessions_dir(&env(Some(""), None, None), true, &exists("/xdg/omp")),
             home_default,
-            "an empty XDG_DATA_HOME is unset"
+            "a blank XDG_DATA_HOME never yields an ABSOLUTE xdg root, so the probe misses"
         );
     }
 

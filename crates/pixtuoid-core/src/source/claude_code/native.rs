@@ -29,20 +29,18 @@ impl ClaudeCodeSource {
     // this is the shim↔daemon parity anchor, pinned by socket_path_parity.rs.
     /// Resolve the hook rendezvous path — a Unix socket (or Windows named pipe) the shim connects to and the daemon binds.
     pub fn default_socket_path() -> PathBuf {
-        if let Ok(p) = std::env::var("PIXTUOID_SOCKET") {
-            // Set-but-empty/whitespace = unset: fall through to the default
-            // rather than bind it verbatim. Same shape as the shim's paths.rs.
-            if !p.trim().is_empty() {
-                return PathBuf::from(p);
-            }
+        // Set-but-empty/whitespace = unset: fall through to the default rather
+        // than bind it verbatim. Same shape as the shim's paths.rs.
+        if let Some(p) = crate::platform::path_env("PIXTUOID_SOCKET") {
+            return p;
         }
         #[cfg(unix)]
         {
             // XDG spec: absolute-only. Empty → `/pixtuoid.sock` (fatal bind); relative →
             // shim/daemon cwd mis-rendezvous → treated as unset. Parity with paths.rs.
-            if let Ok(dir) = std::env::var("XDG_RUNTIME_DIR") {
-                if !dir.trim().is_empty() && std::path::Path::new(&dir).is_absolute() {
-                    return PathBuf::from(format!("{dir}/pixtuoid.sock"));
+            if let Some(dir) = crate::platform::path_env("XDG_RUNTIME_DIR") {
+                if dir.is_absolute() {
+                    return dir.join("pixtuoid.sock");
                 }
             }
             // No XDG_RUNTIME_DIR (macOS, bare Linux): a per-user SUBDIR the bind
@@ -67,7 +65,7 @@ impl ClaudeCodeSource {
     /// Construct pointed at the default `~/.claude/projects` root.
     pub fn default_paths() -> Self {
         let projects_root = claude_config_dir()
-            .unwrap_or_else(|| PathBuf::from(crate::platform::user_home()).join(".claude"))
+            .unwrap_or_else(|| crate::platform::user_home().join(".claude"))
             .join("projects");
         Self {
             projects_root,

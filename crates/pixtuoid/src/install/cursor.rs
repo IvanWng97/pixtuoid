@@ -60,18 +60,18 @@ fn cursor_config_dir() -> Option<PathBuf> {
 /// Pure core for [`cursor_config_dir`] — env overrides, the Linux/BSD XDG flag, and
 /// the home are injected so every arm unit-tests on any host.
 fn resolve_config_dir(
-    cursor_config_dir_env: Option<String>,
-    xdg_config_home_env: Option<String>,
+    cursor_config_dir_env: Option<PathBuf>,
+    xdg_config_home_env: Option<PathBuf>,
     xdg_applies: bool,
-    home: Option<String>,
+    home: Option<PathBuf>,
 ) -> Option<PathBuf> {
     if let Some(d) = cursor_config_dir_env {
-        return Some(PathBuf::from(d));
+        return Some(d);
     }
     if let Some(xdg) = xdg_config_home_env.filter(|_| xdg_applies) {
-        return Some(PathBuf::from(xdg).join("cursor"));
+        return Some(xdg.join("cursor"));
     }
-    home.map(|h| PathBuf::from(h).join(".cursor"))
+    home.map(|h| h.join(".cursor"))
 }
 
 /// Presence probe for auto-detection. Cursor never creates `hooks.json` itself (it

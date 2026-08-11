@@ -130,7 +130,7 @@ echo "[9] agent_end success:true -> idle (heals)"
 send_a '{"type":"agent_end","runId":"r3","success":true}'
 expect idle idle-healed
 
-# `PidSeen` adoption is None-ONLY, and the shim stamps _pid=getppid() onto every
+# `PidSeen` adoption is None-ONLY, and the shim stamps a resolved _pid onto every
 # event lacking one — so [5]'s gateway_start already armed current_pid, and a bare
 # session_start here would adopt nothing. gateway_stop is used purely as the
 # deterministic route back to current_pid=None; the mechanism under test is the
@@ -142,7 +142,7 @@ expect down down-before-reattach
 sleep 600 &
 SPID=$!
 echo "[11] session_start carrying _pid=$SPID (reconnect, no gateway_start) -> idle"
-# The explicit _pid is KEPT by the shim (an inbound value wins over getppid). The
+# The explicit _pid is KEPT by the shim (an inbound value wins over the walk). The
 # `idle` here does NOT prove adoption — it comes from the SessionStarted resurrect;
 # only [12] proves it, so keep both steps.
 send "{\"type\":\"session_start\",\"sessionId\":\"mid1\",\"gatewayPort\":$PORT_A,\"_pid\":$SPID}"

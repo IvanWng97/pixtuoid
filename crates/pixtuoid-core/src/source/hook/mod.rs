@@ -5,6 +5,7 @@ use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
 use tracing::{debug, warn};
 
 use crate::source::decoder::{checked_pid, decode_hook_payload};
+use crate::source::registry::SourceDescriptor;
 use crate::source::{AgentEvent, TaggedSender, Transport};
 use crate::AgentId;
 
@@ -164,17 +165,38 @@ impl Drop for UndeliveredEvents {
 /// session whose `SessionStart` predates the daemon (opencode never re-emits
 /// `session.created`). Activity/Waiting/End never register a new slot.
 ///
-/// Matches on event SHAPE, so unlike [`patch_identity_pids`] this is NOT
-/// `FocusChannel`-gated — sound only while every platform with an `ExitWatch`
-/// backend takes its pid from an exec'd parent. A Windows backend would need
-/// this bind gated on `accepts_stamp()`; there is nothing to gate until then.
-fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
-    match ev {
-        AgentEvent::SessionStart { agent_id, .. } | AgentEvent::Identity { agent_id, .. } => {
-            Some(*agent_id)
+/// Dispatches on the SAME `FocusChannel` capability as [`patch_identity_pids`] —
+/// one fact ("is this source's `_pid` trustworthy") with two consumers. A
+/// `TranscriptProbe` source is excluded on its own terms: its pid comes from the
+/// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
+/// binding here would only offer a second, weaker answer.
+fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
+    use crate::source::registry::FocusChannel;
+    let (agent_id, source) = match ev {
+        AgentEvent::SessionStart {
+            agent_id, source, ..
         }
+        | AgentEvent::Identity {
+            agent_id, source, ..
+        } => (agent_id, source),
+        _ => return None,
+    };
+    match crate::source::registry::descriptor_for(source).map(SourceDescriptor::focus_channel) {
+        // The shim GUESSED which ancestor is the CLI — corroborate it.
+        Some(FocusChannel::ShimStamp) => Some((*agent_id, true)),
+        // The source stamped its own `process.pid`; a session that never calls a
+        // tool reports it once, and for opencode this watch IS the teardown path.
+        Some(FocusChannel::PluginStamp) => Some((*agent_id, false)),
         _ => None,
     }
+}
+
+/// The batch's bind targets, at most one per agent: a payload must not
+/// corroborate its own pid. No decoder pairs two bind-target events for one
+/// agent today (activity events are not bind targets), so this is a FORWARD
+/// guard — pinned by `a_batch_yields_one_bind_target_per_agent`.
+fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool> {
+    evs.iter().filter_map(pid_bind_target).collect()
 }
 
 /// Stamp the connection's peeked `_pid` onto every `Identity` event of a decoded
@@ -183,7 +205,7 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<AgentId> {
 ///
 /// The gate is the registry's [`FocusChannel`] capability, shared with
 /// `focus::resolve_pid`. `TranscriptProbe` sources (CC/Codex) are skipped: the
-/// shim's resolved pid is their hook-command's parent, not necessarily the CLI,
+/// shim's resolved pid is the nearest non-shell ancestor, not necessarily the CLI,
 /// and a stamped stale pid would shadow the probe's recycle guard in
 /// `resolve_pid`. The kernel start marker (#527, so the
 /// click-time guard can refuse a recycled pid) is read LAZILY on the first
@@ -271,10 +293,8 @@ pub(crate) async fn handle_conn(
                     // real identity before the activity event applies.
                     Ok(evs) => {
                         if let (Some(pid), Some(watch)) = (pid, pid_watch.as_ref()) {
-                            for ev in &evs {
-                                if let Some(agent_id) = pid_bind_target(ev) {
-                                    watch.note(pid, agent_id);
-                                }
+                            for (agent_id, corroborate) in bind_targets(&evs) {
+                                watch.note(pid, agent_id, corroborate);
                             }
                         }
                         let mut evs = evs;
@@ -368,6 +388,62 @@ mod tests {
         }
     }
 
+    /// A `TranscriptProbe` source is excluded: its `_pid` is declared untrusted,
+    /// and it has an authoritative pid of its own.
+    /// The guard `handle_conn` relies on: a batch yields at most ONE sighting per
+    /// agent, so a payload can never corroborate its own pid. No decoder pairs
+    /// two bind-target events today, so this pins the FORWARD guard directly —
+    /// the handle_conn-level test cannot, it would pass with the dedupe deleted.
+    #[test]
+    fn a_batch_yields_one_bind_target_per_agent() {
+        let id = AgentId::from_parts("cursor", "sess-A");
+        let batch = [
+            AgentEvent::SessionStart {
+                agent_id: id,
+                source: "cursor".into(),
+                session_id: "sess-A".into(),
+                cwd: "/r".into(),
+                parent_id: None,
+            },
+            AgentEvent::Identity {
+                agent_id: id,
+                source: "cursor".into(),
+                session_id: "sess-A".into(),
+                cwd: None,
+                pid: None,
+            },
+        ];
+        assert_eq!(
+            bind_targets(&batch).len(),
+            1,
+            "two bind-target events for one agent must collapse to one sighting"
+        );
+        assert_eq!(
+            bind_targets(&batch).get(&id),
+            Some(&true),
+            "cursor is ShimStamp — its pid is a guess and needs corroborating"
+        );
+    }
+
+    #[test]
+    fn pid_bind_target_skips_a_source_whose_stamp_is_untrusted() {
+        for source in ["claude-code", "codex"] {
+            let id = AgentId::from_parts(source, "s");
+            let ev = AgentEvent::SessionStart {
+                agent_id: id,
+                source: source.into(),
+                session_id: "s".into(),
+                cwd: "/r".into(),
+                parent_id: None,
+            };
+            assert_eq!(
+                pid_bind_target(&ev),
+                None,
+                "{source} declares its shim stamp untrusted; it must not bind"
+            );
+        }
+    }
+
     #[test]
     fn pid_bind_target_covers_both_registration_carriers() {
         let id = AgentId::from_parts("opencode", "ses_x");
@@ -387,7 +463,11 @@ mod tests {
                 pid: None,
             },
         ] {
-            assert_eq!(pid_bind_target(&ev), Some(id), "{ev:?} must bind the pid");
+            assert_eq!(
+                pid_bind_target(&ev),
+                Some((id, false)),
+                "{ev:?} must bind the pid; opencode stamps its own, so no corroboration"
+            );
         }
         for ev in [
             AgentEvent::ActivityStart {
@@ -642,22 +722,15 @@ mod tests {
 
         let (mut client, server) = tokio::io::duplex(4096);
         let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        // TWO payloads: the CLI's own pid rides every hook event, and that
+        // repeat is what arms the watch (#896).
         let line = format!(
             "{{\"_pixtuoid_source\":\"codewhale\",\"event\":\"session_start\",\
-             \"cwd\":\"/repo\",\"_pid\":{pid}}}\n"
+             \"cwd\":\"/repo\",\"_pid\":{pid}}}\n\
+             {{\"_pixtuoid_source\":\"codewhale\",\"event\":\"tool_call_before\",\
+             \"cwd\":\"/repo\",\"tool\":\"read_file\",\"_pid\":{pid}}}\n"
         );
         client.write_all(line.as_bytes()).await.unwrap();
-
-        // Drain the SessionStart so it doesn't race the SessionEnd on the channel.
-        let ev = match tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv()).await {
-            Ok(Some((_, ev))) => ev,
-            other => {
-                let _ = child.kill();
-                let _ = child.wait();
-                panic!("expected the SessionStart from the payload, got {other:?}");
-            }
-        };
-        assert!(matches!(ev, AgentEvent::SessionStart { .. }), "got {ev:?}");
 
         drop(client);
         task.await.unwrap();
@@ -665,14 +738,70 @@ mod tests {
         child.kill().expect("kill the watched child");
         let _ = child.wait();
         let expected = AgentId::from_parts("codewhale", "/repo");
-        let (transport, ev) = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
-            .await
-            .expect("a SessionEnd within 5s of the watched pid dying")
-            .expect("channel still open");
-        assert_eq!(transport, Transport::Hook);
+        let end = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            // The decoded payloads land first; the pid's death arrives behind them.
+            loop {
+                match rx.recv().await {
+                    Some((transport, AgentEvent::SessionEnd { agent_id, as_child })) => {
+                        return Some((transport, agent_id, as_child))
+                    }
+                    Some(_) => continue,
+                    None => return None,
+                }
+            }
+        })
+        .await
+        .expect("a SessionEnd within 5s of the watched pid dying")
+        .expect("channel still open");
+        assert_eq!(
+            end,
+            (Transport::Hook, expected, false),
+            "the payload-bound agent must end when its pid dies"
+        );
+    }
+
+    /// The #896 shape at this seam: ONE payload carrying a `_pid`, then that pid
+    /// dies. A single sighting of a shim-guessed pid must end nothing. (The
+    /// batch-dedupe guard itself is pinned by `a_batch_yields_one_bind_target_per_agent`
+    /// — this test would pass with the dedupe deleted, because no decoder emits
+    /// two bind-target events for one agent today.)
+    #[tokio::test]
+    async fn handle_conn_a_single_sighting_dying_ends_nothing() {
+        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let Some(watch) = HookPidWatch::spawn(tx.clone()) else {
+            return; // no exit-watch backend on this platform — nothing to assert
+        };
+        let mut wrapper = std::process::Command::new("sleep")
+            .arg("60")
+            .spawn()
+            .expect("spawn a stand-in wrapper shell");
+        let pid = wrapper.id();
+
+        let (mut client, server) = tokio::io::duplex(4096);
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
+        let line = format!(
+            "{{\"_pixtuoid_source\":\"cursor\",\"hook_event_name\":\"preToolUse\",\
+             \"session_id\":\"sess-A\",\"workspace_roots\":[\"/repo\"],\
+             \"tool_name\":\"Read\",\"_pid\":{pid}}}\n"
+        );
+        client.write_all(line.as_bytes()).await.unwrap();
+        drop(client);
+        task.await.unwrap();
+
+        wrapper.kill().expect("kill the wrapper");
+        let _ = wrapper.wait();
+        let ends = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            while let Some((_, ev)) = rx.recv().await {
+                if matches!(ev, AgentEvent::SessionEnd { .. }) {
+                    return true;
+                }
+            }
+            false
+        })
+        .await;
         assert!(
-            matches!(ev, AgentEvent::SessionEnd { agent_id, as_child: false } if agent_id == expected),
-            "the payload-bound agent must end when its pid dies, got {ev:?}"
+            matches!(ends, Err(_) | Ok(false)),
+            "a single payload's pid must not end the session when it dies"
         );
     }
 

@@ -30,9 +30,10 @@
 //!
 //! - **Exit profile.** `session_end` fires on a clean quit, so
 //!   `has_exit_signal: true`. An ABRUPT exit fires none — on Unix the shim
-//!   stamps CodeWhale's pid (via getppid, since `sh -c` exec's the hook) and
-//!   `hook::HookPidWatch` ends the sprite when that pid dies; on Windows (no
-//!   usable pid through `cmd /C`) it falls to the stale-sweep.
+//!   resolves CodeWhale's pid by walking past the runner's shell and
+//!   `hook::HookPidWatch` ends the sprite when that pid dies; on Windows it
+//!   falls to the stale-sweep — the walk resolves a pid there (#528), but no
+//!   `ExitWatch` backend exists to watch it.
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;

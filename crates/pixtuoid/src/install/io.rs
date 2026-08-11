@@ -10,8 +10,8 @@ pub fn nonempty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
 
-pub fn nonempty_env(name: &str) -> Option<String> {
-    nonempty(std::env::var(name).ok())
+pub fn nonempty_env(name: &str) -> Option<PathBuf> {
+    pixtuoid_core::platform::path_env(name)
 }
 
 /// [`nonempty_env`] that ALSO requires an ABSOLUTE path — for XDG base-dir reads
@@ -19,8 +19,8 @@ pub fn nonempty_env(name: &str) -> Option<String> {
 /// invalid and must be ignored (else config/log/pack land CWD-relative, silently
 /// bypassing `~/.config`). NOT for user-chosen paths like `PIXTUOID_LOG`, which
 /// may legitimately be relative.
-pub fn nonempty_abs_env(name: &str) -> Option<String> {
-    nonempty_env(name).filter(|v| std::path::Path::new(v).is_absolute())
+pub fn nonempty_abs_env(name: &str) -> Option<PathBuf> {
+    nonempty_env(name).filter(|v| v.is_absolute())
 }
 
 /// Normalize a config-location env override: TRIM it, and — when `home` is
@@ -31,15 +31,24 @@ pub fn nonempty_abs_env(name: &str) -> Option<String> {
 ///
 /// Returns a [`PathBuf`], NOT a `String`: comparisons stay STRUCTURAL
 /// (component-wise), never byte-wise on a `/`-vs-`\` string.
-pub(crate) fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
-    let v = value.trim();
-    match home {
-        Some(home) if v == "~" => home.to_path_buf(),
-        Some(home) => match v.strip_prefix("~/").or_else(|| v.strip_prefix("~\\")) {
-            Some(rest) => home.join(rest),
-            None => PathBuf::from(v),
-        },
-        None => PathBuf::from(v),
+pub(crate) fn expand_tilde(value: &Path, home: Option<&Path>) -> PathBuf {
+    // Trim as TEXT only where the value is text: a path that is not UTF-8 is
+    // taken verbatim rather than dropped — the bytes ARE the path.
+    let v = value.to_str().map_or(value, |s| Path::new(s.trim()));
+    let Some(home) = home else {
+        return v.to_path_buf();
+    };
+    if v == Path::new("~") {
+        return home.to_path_buf();
+    }
+    if let Ok(rest) = v.strip_prefix("~") {
+        return home.join(rest);
+    }
+    // `~\rest` is ONE component on unix, so the component strip above misses the
+    // Windows form a CLI may have written; only a UTF-8 value can carry it.
+    match v.to_str().and_then(|s| s.strip_prefix(r"~\")) {
+        Some(rest) => home.join(rest),
+        None => v.to_path_buf(),
     }
 }
 
@@ -48,8 +57,9 @@ pub(crate) fn expand_tilde(value: &str, home: Option<&Path>) -> PathBuf {
 /// [`home_relative_checked`] — installing into `./.reasonix/...` produces a
 /// file the CLI's global-scope loader never reads.
 pub(crate) fn home_relative(rel: &str) -> PathBuf {
-    let home = pixtuoid_core::platform::user_home_opt().unwrap_or_else(|| ".".into());
-    PathBuf::from(home).join(rel)
+    pixtuoid_core::platform::user_home_opt()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(rel)
 }
 
 pub(crate) fn home_relative_checked(rel: &str) -> Result<PathBuf> {
@@ -88,8 +98,8 @@ pub fn tighten_to_owner_only(f: &File) {
     let _ = f;
 }
 
-fn checked_home_join(home: Option<String>, rel: &str) -> Result<PathBuf> {
-    home.map(|h| PathBuf::from(h).join(rel)).ok_or_else(|| {
+fn checked_home_join(home: Option<PathBuf>, rel: &str) -> Result<PathBuf> {
+    home.map(|h| h.join(rel)).ok_or_else(|| {
         anyhow!("cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>")
     })
 }
@@ -560,27 +570,48 @@ mod tests {
         let home = Path::new("/home/u");
         // Expected paths are built via `join`, never a hardcoded `/`: the
         // comparison must stay structural to hold on Windows too.
-        assert_eq!(expand_tilde("~", Some(home)), home.to_path_buf());
-        assert_eq!(expand_tilde("~/claw", Some(home)), home.join("claw"));
-        assert_eq!(expand_tilde(r"~\claw", Some(home)), home.join("claw"));
-        assert_eq!(expand_tilde("  ~/claw  ", Some(home)), home.join("claw"));
-        assert_eq!(expand_tilde("~foo", Some(home)), PathBuf::from("~foo"));
+        assert_eq!(expand_tilde(Path::new("~"), Some(home)), home.to_path_buf());
         assert_eq!(
-            expand_tilde("~user/p", Some(home)),
+            expand_tilde(Path::new("~/claw"), Some(home)),
+            home.join("claw")
+        );
+        assert_eq!(
+            expand_tilde(Path::new(r"~\claw"), Some(home)),
+            home.join("claw")
+        );
+        assert_eq!(
+            expand_tilde(Path::new("  ~/claw  "), Some(home)),
+            home.join("claw")
+        );
+        assert_eq!(
+            expand_tilde(Path::new("~foo"), Some(home)),
+            PathBuf::from("~foo")
+        );
+        assert_eq!(
+            expand_tilde(Path::new("~user/p"), Some(home)),
             PathBuf::from("~user/p")
         );
         assert_eq!(
-            expand_tilde("rel/~/x", Some(home)),
+            expand_tilde(Path::new("rel/~/x"), Some(home)),
             PathBuf::from("rel/~/x")
         );
-        assert_eq!(expand_tilde("/abs/x", Some(home)), PathBuf::from("/abs/x"));
+        assert_eq!(
+            expand_tilde(Path::new("/abs/x"), Some(home)),
+            PathBuf::from("/abs/x")
+        );
     }
 
     #[test]
     fn expand_tilde_home_none_trims_only_never_expands() {
-        assert_eq!(expand_tilde("  /abs/x  ", None), PathBuf::from("/abs/x"));
-        assert_eq!(expand_tilde("~/claw", None), PathBuf::from("~/claw"));
-        assert_eq!(expand_tilde("~", None), PathBuf::from("~"));
+        assert_eq!(
+            expand_tilde(Path::new("  /abs/x  "), None),
+            PathBuf::from("/abs/x")
+        );
+        assert_eq!(
+            expand_tilde(Path::new("~/claw"), None),
+            PathBuf::from("~/claw")
+        );
+        assert_eq!(expand_tilde(Path::new("~"), None), PathBuf::from("~"));
     }
 
     #[test]
@@ -599,7 +630,7 @@ mod tests {
         // A leading-slash path is NOT absolute on Windows (no drive prefix).
         let abs = if cfg!(windows) { "C:/abs/x" } else { "/abs/x" };
         std::env::set_var(KEY, abs);
-        assert_eq!(nonempty_abs_env(KEY), Some(abs.to_string()));
+        assert_eq!(nonempty_abs_env(KEY), Some(PathBuf::from(abs)));
         std::env::remove_var(KEY);
         assert_eq!(nonempty_abs_env(KEY), None, "a missing var is unset");
         match saved {

@@ -42,17 +42,15 @@ fn opencode_config_dir() -> Result<PathBuf> {
 /// Mirrors opencode's own `global.ts` precedence, so we write into the dir it
 /// actually scans for plugins: `OPENCODE_CONFIG_DIR`, then
 /// `$XDG_CONFIG_HOME/opencode`, then `<home>/.config/opencode`.
-fn config_dir_from(oc: Option<&str>, xdg: Option<&str>, home: Option<&str>) -> Result<PathBuf> {
-    // Trim-aware (io::nonempty's policy) — a whitespace-only env override is
-    // unset, not a path made of spaces.
-    if let Some(dir) = oc.filter(|s| !s.trim().is_empty()) {
-        return Ok(PathBuf::from(dir));
+fn config_dir_from(oc: Option<&Path>, xdg: Option<&Path>, home: Option<&Path>) -> Result<PathBuf> {
+    // Blank overrides were already filtered at the read (`platform::path_env`).
+    if let Some(dir) = oc {
+        return Ok(dir.to_path_buf());
     }
-    if let Some(xdg) = xdg.filter(|s| !s.trim().is_empty()) {
-        return Ok(PathBuf::from(xdg).join("opencode"));
+    if let Some(xdg) = xdg {
+        return Ok(xdg.join("opencode"));
     }
-    home.filter(|s| !s.trim().is_empty())
-        .map(|h| PathBuf::from(h).join(".config").join("opencode"))
+    home.map(|h| h.join(".config").join("opencode"))
         .ok_or_else(|| {
             anyhow!(
                 "cannot resolve the home directory (HOME/USERPROFILE unset); pass --config <path>"
@@ -279,26 +277,24 @@ mod tests {
     #[test]
     fn config_dir_precedence_is_env_then_xdg_then_home() {
         assert_eq!(
-            config_dir_from(Some("/custom/oc"), Some("/xdg"), Some("/home/u")).unwrap(),
+            config_dir_from(
+                Some(Path::new("/custom/oc")),
+                Some(Path::new("/xdg")),
+                Some(Path::new("/home/u"))
+            )
+            .unwrap(),
             PathBuf::from("/custom/oc")
         );
         assert_eq!(
-            config_dir_from(None, Some("/xdg"), Some("/home/u")).unwrap(),
+            config_dir_from(None, Some(Path::new("/xdg")), Some(Path::new("/home/u"))).unwrap(),
             PathBuf::from("/xdg/opencode")
         );
         assert_eq!(
-            config_dir_from(None, None, Some("/home/u")).unwrap(),
+            config_dir_from(None, None, Some(Path::new("/home/u"))).unwrap(),
             PathBuf::from("/home/u/.config/opencode")
         );
-        // Empty and whitespace-only env values are both unset (basedir-spec).
-        assert_eq!(
-            config_dir_from(Some(""), Some(""), Some("/home/u")).unwrap(),
-            PathBuf::from("/home/u/.config/opencode")
-        );
-        assert_eq!(
-            config_dir_from(Some("   "), Some("   "), Some("/home/u")).unwrap(),
-            PathBuf::from("/home/u/.config/opencode")
-        );
+        // Empty and whitespace-only env values are unset — enforced at the READ
+        // (`platform::path_env`), which is where that policy now lives.
         // No home anywhere → a hard error (never a CWD-relative file).
         assert!(config_dir_from(None, None, None).is_err());
     }
@@ -306,7 +302,7 @@ mod tests {
     #[test]
     fn default_path_is_the_plugin_file_under_the_plural_plugins_dir() {
         assert_eq!(
-            config_dir_from(None, Some("/xdg"), None)
+            config_dir_from(None, Some(Path::new("/xdg")), None)
                 .unwrap()
                 .join("plugins")
                 .join("pixtuoid.ts"),
