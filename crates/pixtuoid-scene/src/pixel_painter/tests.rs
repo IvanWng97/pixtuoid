@@ -3816,3 +3816,26 @@ fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
         "and the name it degrades to must be one the pack can actually paint"
     );
 }
+
+/// The two sideways kinds mirror on OPPOSITE facings, and the shipped `standing`
+/// sprite is not left-right symmetric (its mouth sits off-centre), so aligning
+/// the two predicates turns every bartender around by a pixel — silently, since
+/// no other test reads either flip.
+#[test]
+fn the_chair_and_the_island_mirror_on_opposite_facings() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let p = Point { x: 40, y: 30 };
+    for (kind, flips_on) in [
+        (WaypointKind::MeetingChair, Facing::West),
+        (WaypointKind::Island, Facing::East),
+    ] {
+        for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
+            let (_, flip) = Seat::at_waypoint(kind, p, facing).sprite_for("seated");
+            assert_eq!(
+                flip,
+                facing == flips_on,
+                "{kind:?} must mirror on {flips_on:?} and nothing else, saw {facing:?} -> {flip}"
+            );
+        }
+    }
+}

@@ -135,13 +135,15 @@ enum SeatKind {
 /// newcomer to the upright anchor and feet-row key without complaint. The net
 /// for THAT is `sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture`,
 /// a per-kind z-key oracle that stops on a kind it does not name — and it sees
-/// a newcomer only if the furniture is `occupies_pos` and the swept layout
-/// places it.
+/// a newcomer only if the furniture is `occupies_pos` and ONE 192x158 layout
+/// places it, not the whole sweep.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Seat {
     kind: SeatKind,
-    /// The seat CELL an arrival settles onto — a waypoint's resolved stand cell,
-    /// a desk's walk anchor — so the sprite lands where the walk ends.
+    /// The cell the SPRITE renders on — a waypoint's resolved stand cell, a
+    /// desk's walk anchor. NOT the settle foot-cell `settle_seat` matches on,
+    /// which for a couch/sofa/chair is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF`
+    /// further south; constructing a `Seat` from that shifts anchor and z-key.
     pos: Point,
     /// Which way the SITTER looks, decoupled from the side they approached from.
     facing: crate::layout::Facing,
@@ -197,7 +199,8 @@ impl Seat {
                 }
             }
             // The base `side_seated` sprite faces East (the west chair's view),
-            // so the east chair mirrors; the island's stander does the same.
+            // so the east chair mirrors. The island's stander flips on the
+            // OPPOSITE facing; both directions are pinned, don't align them.
             SeatKind::Waypoint(WaypointKind::MeetingChair) => SeatView::Side {
                 flip: matches!(self.facing, Facing::West),
             },
