@@ -153,9 +153,9 @@ fn crate_src() -> std::path::PathBuf {
 
 #[cfg(test)]
 mod sweep {
-    /// The recurrence gate. A helper nobody is forced to use is a helper the
-    /// next hour-dependent test re-invents as an epoch offset, which is how the
-    /// lighting suite came to pass in UTC and fail in UTC-6.
+    /// The recurrence gate: a helper nobody is forced to use gets re-invented as
+    /// a SECOND hand-rolled local instant. The epoch-offset form that actually
+    /// broke UTC-6 is not statically detectable — this pins the half that is.
     #[test]
     fn nothing_outside_this_module_builds_a_local_instant() {
         let found = super::bypasses_in(&super::crate_src());

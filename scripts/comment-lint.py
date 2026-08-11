@@ -383,12 +383,11 @@ Rust only: the `.py` here and the site's TS answer to different conventions.
 """
 
 PROSE_MIN_CODE = 20
-
-#: How many of the counted prose lines the blocking message lists before eliding.
-PROSE_SAMPLE_MAX = 12
-
 """Added code lines below which the ratio is not judged — a handful of lines is
 all-or-nothing, and would fail on arithmetic rather than on slop."""
+
+PROSE_SAMPLE_MAX = 12
+"""How many of the counted prose lines the blocking message lists before eliding."""
 
 
 def prose_share(
