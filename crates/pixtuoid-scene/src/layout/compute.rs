@@ -512,7 +512,8 @@ pub(super) fn compute_with_seed(
 
     // A narrow band can wall off a back-turned desk's SOUTH front, leaving it with no
     // reachable approach; demote rather than drop. Safe after the mask: a desk's blocked
-    // ground is its body whichever way its occupant sits.
+    // ground is its body whichever way its occupant sits. A NET, not live code — see
+    // `SHARP-EDGES.md`.
     let desk_facings: Vec<Facing> = home_desks
         .iter()
         .zip(&desk_facings)

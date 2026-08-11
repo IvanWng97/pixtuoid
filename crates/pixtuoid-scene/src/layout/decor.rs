@@ -189,6 +189,15 @@ impl FurnitureDef {
         super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
+    /// The VISUAL rect — `ground_rect`'s twin on the other geometry axis. A sprite
+    /// legitimately overhangs its ground base, so this is strictly the larger box.
+    pub(super) fn visual_rect(&self, anchor: Anchor, pos: Point) -> (Point, Size) {
+        (
+            super::placement::anchored_top_left(anchor, pos, self.visual.w, self.visual.h),
+            self.visual,
+        )
+    }
+
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
@@ -831,9 +840,7 @@ pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
 /// `approach_point → S`; when `S` is blocked (meeting sofa, desk) that final
 /// segment is the "sit down" motion, not pathfinding.
 ///
-/// The `Desk` arm assumes `Facing::South` and is therefore wrong for a north pod
-/// row; nothing reaches it today (`settle_seat_view` uses `desk_walk_anchor_facing`,
-/// and `WaypointKind` has no `Desk`), so a future caller must pass the facing.
+/// The `Desk` arm hardcodes `Facing::South` — a future caller must pass the facing.
 pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
     if !furniture_def(kind).occupies_pos {
         return None;

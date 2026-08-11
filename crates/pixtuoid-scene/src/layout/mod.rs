@@ -347,6 +347,32 @@ impl SceneLayout {
         self.home_desks.get(i.0).copied()
     }
 
+    /// Is `p` clear of every furniture sprite's VISUAL box? Walkable is the GROUND
+    /// rule (invariant #6), so the cell in front of a desk is legitimately walkable
+    /// AND legitimately painted over — fine to walk THROUGH, wrong to park in.
+    pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
+        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
+            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
+            p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h
+        };
+        !self
+            .home_desks
+            .iter()
+            .any(|&d| covered(Anchor::TopLeft, d, Furniture::Desk))
+            && !self
+                .waypoints
+                .iter()
+                .any(|w| covered(Anchor::Center, w.pos, w.kind.furniture()))
+            && !self
+                .plants
+                .iter()
+                .any(|pl| covered(Anchor::Center, pl.pos, pl.kind.furniture()))
+            && !self
+                .pod_decor
+                .iter()
+                .any(|d| covered(Anchor::Center, d.pos, d.kind.furniture()))
+    }
+
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
     pub fn desk_facing_at(&self, pos: Point) -> Facing {
         self.home_desks

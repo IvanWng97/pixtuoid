@@ -53,7 +53,10 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             x: ((z >> 32) % u64::from(w)) as u16,
             y: (z % u64::from(h)) as u16,
         };
-        if layout.walkable.is_walkable(last.x, last.y) {
+        // Walkable is not enough: a cell under a desk's overhang is walkable by
+        // invariant #6 and painted over anyway, and the mascot RESTS at this
+        // point for most of its cycle. Walking through one stays fine.
+        if layout.walkable.is_walkable(last.x, last.y) && layout.is_visually_clear(last) {
             return last;
         }
     }
@@ -627,6 +630,40 @@ mod tests {
             mascot_elevator(&layout),
             Some(expected),
             "no door → snapped corridor-top centre, not None and not a door cell"
+        );
+    }
+
+    /// A creature parked inside a desk's overhang reads as debris, not a creature
+    /// — the OpenClaw demo shipped its own mascot half-behind a monitor for most
+    /// of a 9-second clip. Walkable alone cannot see this: the cell IS walkable
+    /// (invariant #6 makes the mask a ground projection), it is merely painted
+    /// over. Dropping the `is_visually_clear` conjunct reds this.
+    #[test]
+    fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
+        let mut checked = 0u32;
+        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180)] {
+            for seed in 0..24u64 {
+                let Some(layout) = crate::layout::Layout::compute(w, h, None) else {
+                    continue;
+                };
+                for n in 0..24u64 {
+                    let p = walkable_target(&layout, seed, n);
+                    // The fallback arm may hand back a snapped or door cell that no
+                    // filter promised — only judge the cells the loop ACCEPTED.
+                    if !layout.walkable.is_walkable(p.x, p.y) {
+                        continue;
+                    }
+                    assert!(
+                        layout.is_visually_clear(p),
+                        "{w}x{h} seed {seed} cycle {n}: wander target {p:?} rests under a sprite"
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked > 500,
+            "the sweep must actually reach targets, saw {checked}"
         );
     }
 
