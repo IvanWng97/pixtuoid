@@ -65,7 +65,7 @@ pub(crate) fn hit_test_from_tui(
             continue;
         };
         // The painter's OWN anchor: a south-facing desk seats off `desk.y - 8`.
-        let a = pixtuoid_scene::pixel_painter::seated_anchor_for(
+        let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
             desk,
             SPRITE_W,
             layout.desk_facing(agent.desk_index.single_floor_local()),

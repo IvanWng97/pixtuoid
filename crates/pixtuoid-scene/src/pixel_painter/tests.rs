@@ -1,8 +1,7 @@
 use super::anchors::{
-    back_couch_anchor, seated_anchor_facing, standing_at_desk_anchor, walking_anchor,
-    waypoint_anchor, CHARACTER_SPRITE_W,
+    back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView};
+use super::seat::{settle_seat, Seat};
 use super::wall::WALL_THICK_H_PX;
 use super::*;
 use crate::layout::stitch_vertical_wall;
@@ -239,37 +238,101 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
 }
 
 #[test]
-fn seat_sprite_maps_facing_to_sprite_and_flip() {
+fn seat_view_maps_facing_to_sprite_and_flip() {
     use crate::layout::{Facing, WaypointKind};
     assert_eq!(
-        seat_sprite(WaypointKind::Couch, Facing::North),
+        Seat::at_waypoint(WaypointKind::Couch, Point { x: 40, y: 30 }, Facing::North)
+            .sprite_for("seated"),
         ("back_couch", false),
         "couch's seated facing is North (window) → back_couch, same path as the sofa"
     );
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingSofa, Facing::North),
+        Seat::at_waypoint(
+            WaypointKind::MeetingSofa,
+            Point { x: 40, y: 30 },
+            Facing::North
+        )
+        .sprite_for("seated"),
         ("back_couch", false)
     );
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingSofa, Facing::South),
+        Seat::at_waypoint(
+            WaypointKind::MeetingSofa,
+            Point { x: 40, y: 30 },
+            Facing::South
+        )
+        .sprite_for("seated"),
         ("seated", false)
     );
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingChair, Facing::East),
+        Seat::at_waypoint(
+            WaypointKind::MeetingChair,
+            Point { x: 40, y: 30 },
+            Facing::East
+        )
+        .sprite_for("seated"),
         ("side_seated", false)
     );
     assert_eq!(
-        seat_sprite(WaypointKind::MeetingChair, Facing::West),
+        Seat::at_waypoint(
+            WaypointKind::MeetingChair,
+            Point { x: 40, y: 30 },
+            Facing::West
+        )
+        .sprite_for("seated"),
         ("side_seated", true)
     );
 }
 
 #[test]
-fn seat_sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
+fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
+    use crate::layout::{Facing, Point};
+    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let desk = Point { x: 40, y: 30 };
+    let back = Seat::at_desk(desk, Facing::North);
+    let front = Seat::at_desk(desk, Facing::South);
+    for (base, want) in [
+        ("seated", "seated_back"),
+        ("typing", "typing_back"),
+        // A pose with no back view of its own falls back to the still one
+        // rather than showing a face at the window.
+        ("seated_sleeping", "seated_back"),
+    ] {
+        assert_eq!(
+            back.sprite_in_pack(base, &pack),
+            (want, false),
+            "{base} back"
+        );
+        assert_eq!(
+            front.sprite_in_pack(base, &pack),
+            (base, false),
+            "{base} stays itself when the sitter faces the camera"
+        );
+    }
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
+    let old_pack = crate::embedded_pack::load_sprite_pack(Some(fixture)).expect("fixture pack");
+    assert!(
+        old_pack.animation("seated_back").is_none(),
+        "fixture must lack every back view to bite"
+    );
+    assert_eq!(
+        back.sprite_in_pack("typing", &old_pack),
+        ("typing", false),
+        "a pack with no back view at all degrades to the front pose, never to nothing"
+    );
+}
+
+#[test]
+fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
     let full = crate::embedded_pack::load_sprite_pack(None).expect("pack");
     assert_eq!(
-        seat_sprite_in_pack(&full, WaypointKind::MeetingChair, Facing::West),
+        Seat::at_waypoint(
+            WaypointKind::MeetingChair,
+            Point { x: 40, y: 30 },
+            Facing::West
+        )
+        .sprite_in_pack("seated", &full),
         ("side_seated", true),
         "a pack WITH the profile sprite uses it"
     );
@@ -280,7 +343,12 @@ fn seat_sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         "fixture must lack the profile sprite for this test to bite"
     );
     assert_eq!(
-        seat_sprite_in_pack(&old_pack, WaypointKind::MeetingChair, Facing::West),
+        Seat::at_waypoint(
+            WaypointKind::MeetingChair,
+            Point { x: 40, y: 30 },
+            Facing::West
+        )
+        .sprite_in_pack("seated", &old_pack),
         ("seated", false),
         "a pack WITHOUT it degrades to the front pose"
     );
@@ -716,6 +784,67 @@ fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
     assert_eq!(south_off(WaypointKind::Printer), 1);
 }
 
+/// The seat centre is the PAINTED desk's midline, not the layout box's — the two
+/// differ (`DESK_W` 10 vs a 14 px sprite), which is why the chair used to sit 2 px
+/// left of the desk it belongs to. Centring here is what makes a symmetric jitter
+/// fit: 8 px of chair on a 14 px desk leaves 3 px a side, so ±2 keeps 1 px.
+#[test]
+fn the_seat_centre_is_the_painted_desks_midline() {
+    use crate::layout::Facing;
+    let visual_w = crate::layout::desk_furniture_def().visual.w;
+    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
+        for facing in [Facing::South, Facing::North] {
+            let seat = crate::layout::desk_walk_anchor_facing(desk, facing);
+            let base = i32::from(desk.x) + i32::from(visual_w) / 2;
+            assert!(
+                (i32::from(seat.x) - base).abs() <= 2,
+                "{desk:?} {facing:?}: the seat sits within the nudge of the sprite's midline"
+            );
+        }
+    }
+}
+
+/// The chair, its occupant and the walk that ends there all derive from ONE
+/// point, the way a meeting seat derives from `wp.pos` — so the seeded nudge
+/// cannot slide any one of them off the others.
+#[test]
+fn a_seeded_seat_moves_the_chair_the_sitter_and_the_walk_together() {
+    use crate::layout::Facing;
+    let mut offsets = std::collections::BTreeSet::new();
+    for x in (20..120).step_by(7) {
+        for y in (20..90).step_by(5) {
+            let desk = Point { x, y };
+            for facing in [Facing::South, Facing::North] {
+                let centre = crate::layout::desk_walk_anchor_facing(desk, facing);
+                // the sitter and the chair both centre on it
+                for w in [CHARACTER_SPRITE_W, 8] {
+                    assert_eq!(
+                        seated_anchor_facing(desk, w, facing).x,
+                        centre.x - w / 2,
+                        "{desk:?} {facing:?} w={w}: sprite must centre on the seat"
+                    );
+                }
+                // and the walk lands exactly there
+                assert_eq!(
+                    crate::layout::desk_walk_anchor_facing(desk, facing).x,
+                    centre.x,
+                    "{desk:?} {facing:?}: the walk must end on the seat centre"
+                );
+                let base = desk.x + crate::layout::desk_furniture_def().visual.w / 2;
+                offsets.insert(i32::from(centre.x) - i32::from(base));
+            }
+        }
+    }
+    assert!(
+        offsets.iter().all(|o| o.abs() <= 2),
+        "the nudge must stay within ±2 of the midline, saw {offsets:?}"
+    );
+    assert!(
+        offsets.len() >= 3,
+        "the seed must actually vary the offset, saw {offsets:?}"
+    );
+}
+
 #[test]
 fn desk_walk_anchor_settles_exactly_on_the_seat() {
     for desk in [
@@ -793,11 +922,11 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
     for w in &seats {
         let foot = crate::layout::seated_foot_cell(w.kind.furniture(), w.pos)
             .expect("seat occupies_pos → has a settle foot cell");
-        let view = SeatView::of(w.kind, w.facing);
+        let seat = Seat::at_waypoint(w.kind, w.pos, w.facing);
         assert_eq!(
-            settle_seat_view(foot, &l),
-            Some((view, view.z_key_for_seat(w.pos))),
-            "settle onto {:?}@{:?} must use the seat view {view:?}",
+            settle_seat(foot, &l),
+            Some(seat),
+            "settle onto {:?}@{:?} must resolve to that seat",
             w.kind,
             w.pos
         );
@@ -810,11 +939,11 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
                     | WaypointKind::Island
             ),
             "seat kind {:?} has a settle foot-cell but is not explicitly handled \
-             in SeatView::of — add an arm there",
+             in Seat::view — add an arm there",
             w.kind
         );
-        let seated_is_back = view.seated_sprite().0 == "back_couch";
-        let (settle_is_back, _) = view.settle_walk();
+        let seated_is_back = seat.sprite_for("seated").0 == "back_couch";
+        let (settle_is_back, _) = seat.settle_walk();
         assert_eq!(
             seated_is_back, settle_is_back,
             "{:?}: seated render and sit-down settle must share orientation",
@@ -822,7 +951,7 @@ fn settle_view_matches_the_seated_view_for_every_seat() {
         );
         if foot != w.pos {
             assert_eq!(
-                settle_seat_view(w.pos, &l),
+                settle_seat(w.pos, &l),
                 None,
                 "seat centre {:?} is not a settle foot cell",
                 w.pos
@@ -855,8 +984,9 @@ fn island_settle_z_stays_behind_the_countertop() {
             .iter()
             .filter(|w| matches!(w.kind, WaypointKind::Island))
         {
-            let (_, z) =
-                settle_seat_view(wp.pos, &l).expect("island stand foot-cell == pos, so it settles");
+            let z = settle_seat(wp.pos, &l)
+                .expect("island stand foot-cell == pos, so it settles")
+                .z_key();
             assert_eq!(
                 z, wp.pos.y,
                 "island stand glide z must be the plain feet row (the settled \
@@ -872,22 +1002,23 @@ fn island_settle_z_stays_behind_the_countertop() {
 }
 
 #[test]
-fn settle_seat_view_recognizes_the_home_desk() {
+fn settle_seat_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
     use crate::layout::{desk_walk_anchor_facing, Furniture};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
     let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     // Pinning `Front` unconditionally would assert the pre-facing world.
-    let want_view = if l.desk_facing_at(desk) == crate::layout::Facing::North {
-        SeatView::Back
-    } else {
-        SeatView::Front
-    };
+    let want = Seat::at_desk(desk, l.desk_facing_at(desk));
     assert_eq!(
-        settle_seat_view(chair, &l),
-        Some((want_view, chair.y)),
-        "the desk chair {chair:?} must settle as {want_view:?} at its own chair row"
+        settle_seat(chair, &l),
+        Some(want),
+        "the desk chair {chair:?} must settle as that seat"
+    );
+    assert_eq!(
+        want.z_key(),
+        chair.y,
+        "and sort on its own chair row, not a couch-style pos+2"
     );
     // `seated_foot_cell` is facing-BLIND — it takes a kind and a position, so its
     // desk arm can only answer for the viewer-facing seat.
@@ -899,28 +1030,33 @@ fn settle_seat_view_recognizes_the_home_desk() {
         ))
     );
     assert_eq!(
-        settle_seat_view(desk, &l),
+        settle_seat(desk, &l),
         None,
         "the desk corner is not the chair"
     );
 }
 
 #[test]
-fn desk_settle_z_key_matches_the_seated_arm() {
+fn desk_sitter_feet_row_is_its_sort_row_on_the_documented_side_of_the_desk() {
+    use crate::layout::{desk_furniture_def, Facing};
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
-        for w in [CHARACTER_SPRITE_W, 10] {
-            let seated_arm_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
-            assert_eq!(
-                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y,
-                seated_arm_z,
-                "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
-            );
-            let visual_h = crate::layout::desk_furniture_def().visual.h;
-            assert!(
-                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y
-                    < desk.y + visual_h,
-                "desk sitter must sort behind the desk furniture"
-            );
+        for facing in [Facing::North, Facing::South] {
+            for w in [CHARACTER_SPRITE_W, 10] {
+                let seat = Seat::at_desk(desk, facing);
+                assert_eq!(
+                    seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
+                    seat.z_key(),
+                    "{facing:?}: the sitter's feet row must BE the row they sort on"
+                );
+                let desk_z = desk.y + desk_furniture_def().visual.h;
+                let sitter_z = seat.z_key();
+                assert_eq!(
+                    sitter_z < desk_z,
+                    facing == Facing::South,
+                    "{facing:?}: a viewer-facing sitter sorts BEHIND their desk \
+                     ({sitter_z} < {desk_z}), a back-turned one in FRONT"
+                );
+            }
         }
     }
 }
@@ -937,19 +1073,19 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
         .iter()
         .filter(|w| crate::layout::seated_foot_cell(w.kind.furniture(), w.pos).is_some())
     {
-        let view = SeatView::of(w.kind, w.facing);
-        let z = view.z_key_for_seat(w.pos);
+        let z = Seat::at_waypoint(w.kind, w.pos, w.facing).z_key();
 
-        let historical = match view {
-            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9. SideSeated
-            // shares Front's seat anchor + bottom-row geometry by design.
-            SeatView::Front | SeatView::Back | SeatView::SideSeated { .. } => {
+        // Independent oracle: the pre-lift partition, keyed on kind alone.
+        let historical = match w.kind {
+            // back_couch_anchor.y + sprite_h(9) = (pos.y - 7) + 9. The chair
+            // shares the front seat anchor + bottom-row geometry by design.
+            WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
                 back_couch_anchor(w.pos, CHARACTER_SPRITE_W).y + 9
             }
-            // waypoint_anchor.y + sprite_h(12) + 3 = (pos.y - 12) + 12 + 3
-            SeatView::Side { .. } => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12 + 3,
             // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint default.
-            SeatView::Stander { .. } => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
+            WaypointKind::Island => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
+            // waypoint_anchor.y + sprite_h(12) + 3 = (pos.y - 12) + 12 + 3
+            _ => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12 + 3,
         };
         assert_eq!(
             z, historical,
@@ -1003,15 +1139,11 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
             let desk_furniture_z = desk.y + visual_h;
-            let seated_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
-            let standing_z = standing_at_desk_anchor(desk, w).y + 12;
+            let seated_z = Seat::at_desk(desk, crate::layout::Facing::South).z_key();
+            let _ = w;
             assert!(
                 seated_z < desk_furniture_z,
                 "seated desk occupant z {seated_z} must be BEHIND the desk {desk_furniture_z}"
-            );
-            assert!(
-                standing_z < desk_furniture_z,
-                "standing desk occupant z {standing_z} must be BEHIND the desk {desk_furniture_z}"
             );
         }
     }
@@ -1442,19 +1574,24 @@ fn degraded_frame_transforms_opaque_pixels_and_preserves_transparency_and_dims()
 }
 
 #[test]
-fn seat_view_of_obstacle_kinds_is_upright_unflipped() {
+fn obstacle_kinds_render_upright_and_unflipped() {
     use crate::layout::{Facing, WaypointKind};
+    assert_eq!(
+        Seat::at_waypoint(WaypointKind::Pantry, Point { x: 40, y: 30 }, Facing::South)
+            .sprite_for("seated"),
+        ("holding_coffee", false),
+        "the pantry is the one stand-beside spot with art of its own"
+    );
     for kind in [
-        WaypointKind::Pantry,
         WaypointKind::PhoneBooth,
         WaypointKind::StandingDesk,
         WaypointKind::VendingMachine,
         WaypointKind::Printer,
     ] {
         assert_eq!(
-            SeatView::of(kind, Facing::South),
-            SeatView::Side { flip: false },
-            "{kind:?} must map to the upright default",
+            Seat::at_waypoint(kind, Point { x: 40, y: 30 }, Facing::South).sprite_for("seated"),
+            ("standing", false),
+            "{kind:?} must render as the upright default",
         );
     }
 }
@@ -2209,6 +2346,46 @@ fn sim_step_advances_motion_without_painting() {
     );
 }
 
+/// Waiting has NO pose of its own: the agent stays SEATED and the bubble carries
+/// the state. So the cue must ride the agent's STATE, not the pose — and must
+/// read the same on a back-turned desk, which has no waiting art and needs none.
+#[test]
+fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces() {
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let mut seen = std::collections::BTreeSet::new();
+    for (i, &desk) in layout.home_desks.iter().enumerate() {
+        let _ = desk;
+        let facing = layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
+        let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+        slot.desk_index = GlobalDeskIndex(i);
+        slot.state = ActivityState::Waiting {
+            reason: "perm".into(),
+        };
+        // Past the entry walk, or the agent is still coming in the door.
+        let now = now0 + std::time::Duration::from_millis(crate::pose::ENTRY_ANIMATION_MS + 5_000);
+        slot.created_at = now0;
+        slot.state_started_at = now0;
+        let mut owned = OwnedSimStores::new();
+        let f = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+        let p = f
+            .characters
+            .iter()
+            .find(|p| p.seat_desk.is_some())
+            .expect("a waiting agent is SEATED at its desk");
+        assert!(
+            p.waiting_bubble,
+            "{facing:?} desk {i}: a waiting agent must carry the bubble"
+        );
+        seen.insert(format!("{facing:?}"));
+    }
+    assert_eq!(
+        seen.len(),
+        2,
+        "the sweep must cover BOTH facings, saw {seen:?}"
+    );
+}
+
 #[test]
 fn paint_frame_is_pure_and_byte_identical() {
     use std::time::Duration;
@@ -2537,15 +2714,15 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
     let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
-    let view = SeatView::of(WaypointKind::MeetingChair, Facing::West);
-    let (anim, _) = view.seated_sprite();
-    let seated_h = pack.animation(anim).expect("chair sprite").frames[0].height();
     let pos = Point { x: 40, y: 30 };
+    let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
+    let (anim, _) = seat.sprite_for("seated");
+    let seated_h = pack.animation(anim).expect("chair sprite").frames[0].height();
     let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
     let bottom = anchor_y + seated_h - 1;
     assert_eq!(
         bottom,
-        view.z_key_for_seat(pos),
+        seat.z_key(),
         "the chair sprite's bottom row must land on its seat z-key row"
     );
     let chair = crate::layout::furniture_def(crate::layout::Furniture::MeetingChair).visual;
@@ -3028,7 +3205,7 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
 }
 
 #[test]
-fn waypoint_render_anchor_matches_the_pre_lift_kind_partition() {
+fn render_anchor_matches_the_pre_lift_kind_partition() {
     use crate::layout::{Facing, Point, WaypointKind};
     let stand = Point { x: 80, y: 60 };
     let w = CHARACTER_SPRITE_W;
@@ -3036,13 +3213,13 @@ fn waypoint_render_anchor_matches_the_pre_lift_kind_partition() {
         // Independent oracle: the exact pre-lift partition, keyed on kind alone.
         let expected = match kind {
             WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {
-                (back_couch_anchor(stand, w), 9u16)
+                back_couch_anchor(stand, w)
             }
-            _ => (waypoint_anchor(stand, w), 12u16),
+            _ => waypoint_anchor(stand, w),
         };
         for facing in [Facing::North, Facing::South, Facing::East, Facing::West] {
             assert_eq!(
-                SeatView::of(kind, facing).waypoint_render_anchor(stand, w),
+                Seat::at_waypoint(kind, stand, facing).render_anchor(w),
                 expected,
                 "{kind:?}/{facing:?}: render anchor drifted from the pre-lift partition"
             );
@@ -3051,7 +3228,7 @@ fn waypoint_render_anchor_matches_the_pre_lift_kind_partition() {
 }
 
 #[test]
-fn waypoint_render_anchor_upright_height_recovers_the_feet_row() {
+fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
     use crate::layout::{Facing, Point, WaypointKind};
     let stand = Point { x: 80, y: 60 };
     let w = CHARACTER_SPRITE_W;
@@ -3062,11 +3239,16 @@ fn waypoint_render_anchor_upright_height_recovers_the_feet_row() {
         ) {
             continue;
         }
-        let (anchor, sprite_h) = SeatView::of(kind, Facing::South).waypoint_render_anchor(stand, w);
+        let seat = Seat::at_waypoint(kind, stand, Facing::South);
         assert_eq!(
-            anchor.y + sprite_h,
+            seat.render_anchor(w).y + crate::layout::WALKING_Y_OFF,
+            seat.z_key(),
+            "{kind:?}: an upright occupant's feet row must BE the row they sort on"
+        );
+        assert_eq!(
+            seat.z_key(),
             stand.y,
-            "{kind:?}: upright anchor.y + sprite_h must land on the feet row (stand.y)"
+            "{kind:?}: and that row is the stand cell"
         );
     }
 }

@@ -408,7 +408,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
                     wall.rs (the wall's RENDER half — frosted-glass room dividers: paint_glass_wall_h/v +
                              paint_door_jamb_h/v + enqueue_room_walls_h/v; the GEOMETRY half — thickness
                              consts, WallDef/wall_segment_rect, stitch_vertical_wall — lives in layout::rooms::walls),
-                    seat.rs (SeatView orientation single-source + seat_sprite + settle_seat_view + paint_character_at),
+                    seat.rs (Seat = kind x cell x facing: THE seat model for couch/sofa/chair/island/home desk — sprite, anchor, z-key, settle glide — + paint_character_at),
                     debug_overlay.rs (#[cfg(debug_assertions)] mask/approach/route overlay — the `w` toggle),
                     tests.rs (sibling unit suite, extracted from mod.rs)
 ```

@@ -686,10 +686,12 @@ fn snap_back_skipped_when_prev_within_min_distance() {
     let l = layout();
     let slot = active_slot(now, now - Duration::from_secs(60));
     let desk = l.home_desks[0];
-    // Only 3 px away — below the 8-px snap-back threshold.
+    // 3 px from the SEAT, not from the desk origin — the threshold is measured
+    // against where the agent sits, and the seat carries a per-desk nudge.
+    let seat = crate::layout::desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
     let close = Point {
-        x: desk.x + 3,
-        y: desk.y,
+        x: seat.x,
+        y: seat.y.saturating_sub(3),
     };
     let mut history = PoseHistory::new();
     history.record(slot.agent_id, close, now - Duration::from_millis(50));

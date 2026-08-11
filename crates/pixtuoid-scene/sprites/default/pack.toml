@@ -8,7 +8,6 @@ version = "1"
 "S" = "#f4c79a"   # skin
 "e" = "#1a1a1a"   # eyes
 "m" = "#a04040"   # mouth
-"O" = "#3a1414"   # open-mouth (waiting)
 "B" = "#2e62cf"   # shirt (per-agent recolor target)
 "P" = "#2a2e44"   # pants (per-agent recolor target — dark navy default)
 "c" = "#7ed4e2"   # cyan accent (water cooler tank, coffee display)

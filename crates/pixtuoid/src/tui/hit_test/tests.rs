@@ -192,13 +192,14 @@ fn from_tui_hits_agent_at_its_desk_anchor() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let (scene, id) = scene_with_agent_at_desk(0);
     let d = layout.home_desks[0];
-    // Derived from the painter's seated anchor (a DESK_W-centred 8px sprite 8px
-    // above the desk), not a mirror of the impl's own literals.
-    let cx = d.x
-        + pixtuoid_scene::layout::DESK_W.saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
-            / 2;
-    let cy = d.y.saturating_sub(8) / 2;
-    assert_eq!(hit_test_from_tui(&scene, &layout, cx, cy), Some(id));
+    // From the painter's OWN seated anchor: the seat centre carries a per-desk
+    // seeded nudge, so any formula re-derived here is a second one that drifts.
+    let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+        d,
+        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+        layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
+    );
+    assert_eq!(hit_test_from_tui(&scene, &layout, a.x, a.y / 2), Some(id));
 }
 
 // The click-to-pin box must cover EXACTLY the cells the painter blits the seated

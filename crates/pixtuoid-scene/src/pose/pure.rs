@@ -154,8 +154,6 @@ pub enum Pose {
         /// Typing animation frame index (`0..TYPING_FRAMES`).
         frame: usize,
     },
-    /// Standing at the desk.
-    StandingAtDesk,
     /// At a lounge waypoint; the concrete sprite depends on the kind.
     AtWaypoint {
         /// Index of the target waypoint.
@@ -263,7 +261,7 @@ fn state_driven_pose(
             let frame = ((elapsed / TYPING_FRAME_MS) as usize) % TYPING_FRAMES;
             Some(Pose::SeatedTyping { frame })
         }
-        ActivityState::Waiting { .. } => Some(Pose::StandingAtDesk),
+        ActivityState::Waiting { .. } => Some(Pose::SeatedIdle),
         ActivityState::Idle => {
             if in_thinking_window(slot, now) {
                 Some(Pose::SeatedThinking)
