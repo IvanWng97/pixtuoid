@@ -316,7 +316,7 @@ lint:
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
-    run prose   just comment-lint-gate --require-fn-body & pids+=($!)
+    run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -539,12 +539,11 @@ mutants *args:
 # like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
 # `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
 # grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes
-# the RE-PARENT and PROSE arms exit 1, and `--require-fn-body` (which needs ast-grep, so only
-# callers that have it pass it) adds the FN-BODY arm — only doc-run length ever just reports,
+# the RE-PARENT and PROSE arms exit 1 — the ast-grep and doc-run-length arms only ever report,
 # `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
 # Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
 [group('meta')]
-[doc('Flag NEW comment runs — fn-body `//` and over-long `///` (diff-scoped; advisory without --gate)')]
+[doc('Advisory: flag NEW comment runs — fn-body `//` and over-long `///` (diff-scoped)')]
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
 
@@ -1120,7 +1119,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -1224,7 +1223,7 @@ comment-lint-selftest:
 # install must never gate.
 [group('meta')]
 [doc('Gate the comment checks: selftest, then --gate against a FRESH origin/main')]
-comment-lint-gate *args:
+comment-lint-gate:
     #!/usr/bin/env bash
     set -euo pipefail
     # A stale `origin/main` moves the merge-base back: the re-parent arm then
@@ -1236,7 +1235,7 @@ comment-lint-gate *args:
     git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
       || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
     python3 scripts/comment-lint.py --selftest
-    python3 scripts/comment-lint.py origin/main --gate {{ args }}
+    python3 scripts/comment-lint.py origin/main --gate
 
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence

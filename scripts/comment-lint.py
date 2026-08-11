@@ -4,14 +4,15 @@
 The whole-repo scan is dominated by pre-existing, mostly legitimate hits, so a
 whole-repo gate is wrong.
 
-Four arms. Three need only git and python and BLOCK under `--gate`: an over-long
-new `///`/`//!` run, a doc block re-homed onto a different item, and the diff's
-narrative-prose share. The fourth wraps the ast-grep rules and is advisory
-everywhere — it needs an npm install, which must never sit inside `ci-gate`.
+Four arms, TWO of which block under `--gate`: a doc block re-homed onto a
+different item, and the diff's narrative-prose share. The other two only ever
+report — an over-long new `///`/`//!` run, because a length cap contradicts the
+semantic rule it serves (see `gate_fails`), and the ast-grep wrapper, which
+needs an npm install that must never sit inside `ci-gate`.
 
 Usage: comment-lint.py [BASE_REF] [--gate] [--worktree] [--github] [--selftest]
   BASE_REF     git ref to diff against (default: origin/main)
-  --gate       exit 1 on the three deterministic arms (default: exit 0 always)
+  --gate       exit 1 on the two blocking arms (default: exit 0 always)
   --worktree   diff the WORKING TREE vs BASE, not the committed BASE...HEAD range
   --github     emit ::warning:: annotations onto the PR diff
   --selftest   pin every arm, both directions, on a throwaway repo
@@ -31,24 +32,6 @@ import tempfile
 import gitenv
 
 PATHSPEC = ("*.rs", "*.py", "*.pyi")
-
-
-def dirty_tracked_sources(cwd: str | None = None) -> bool:
-    """Whether any TRACKED file the arms scan differs from the index/HEAD.
-
-    ast-grep scans the WORKING TREE, so a `...HEAD` line basis skews against it
-    the moment the tree is dirty: a context line lands on an added line's number
-    and the fn-body arm reports a run nobody wrote. Harmless while that arm only
-    printed; it fails a build now, so `main` switches the basis rather than
-    guess. CI checks out clean, where this is a no-op."""
-    out = gitenv.git(
-        "status", "--porcelain", "--untracked-files=no", "--", *PATHSPEC,
-        capture_output=True,
-        text=True,
-        check=True,
-        cwd=cwd,
-    ).stdout
-    return bool(out.strip())
 
 
 def unified_diff(base: str, worktree: bool, cwd: str | None = None) -> str:
@@ -282,25 +265,20 @@ def selftest() -> int:
 
         # Which arms BLOCK, both directions. Without this the ast-grep arm can
         # silently become a hard gate on a machine that happens to have it.
-        if gate_fails(True, [], [], False, [], True):
+        if gate_fails(True, [], [], False):
             fails.append("nothing found must not fail the gate")
-        if gate_fails(False, ["d"], ["m"], True, ["h"], True):
+        if gate_fails(False, ["d"], ["m"], True):
             fails.append("without --gate nothing may fail")
         for arm, args in (
-            ("re-parent", ([], ["m"], False, [], False)),
-            ("prose", ([], [], True, [], False)),
-            ("fn-body", ([], [], False, ["h"], True)),
+            ("re-parent", ([], ["m"], False)),
+            ("prose", ([], [], True)),
         ):
             if not gate_fails(True, *args):
                 fails.append(f"the {arm} arm must block under --gate")
         # The OTHER direction, and the one that rots silently: an arm that is
         # advisory by design must stay advisory. `docs` alone may never block.
-        if gate_fails(True, ["d"], [], False, [], True):
+        if gate_fails(True, ["d"], [], False):
             fails.append("the doc-run arm is advisory and must NOT block")
-        # CI's protected `comment-gate` has no ast-grep and passes a bare
-        # --gate: it must keep its two arms and never fail for the third.
-        if gate_fails(True, [], [], False, ["h"], False):
-            fails.append("a bare --gate must not block on the fn-body arm")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
@@ -519,27 +497,14 @@ def reparented_doc_hits(
     return out
 
 
-def gate_fails(
-    gate: bool,
-    docs: list,
-    moved: list,
-    over_prose: bool,
-    fn_body_runs: list,
-    require_fn_body: bool,
-) -> bool:
-    """Whether `--gate` should exit non-zero. Three arms can block; the third is
-    opt-in.
+def gate_fails(gate: bool, docs: list, moved: list, over_prose: bool) -> bool:
+    """Whether `--gate` should exit non-zero. TWO of the four arms block.
 
-    The fn-body arm blocks only under `--require-fn-body`, never on a bare
-    `--gate`. It needs ast-grep, and the protected `comment-gate` CI job
-    deliberately carries no npm install — so the requirement travels as a FLAG
-    the caller sets, not as an inference from `shutil.which`, which would fail
-    that job on every PR while passing on any author's machine that ran
-    `setup-tools`. `just preflight` passes it; CI's tool-free recipe does not.
-    An advisory the author can read and walk past is not a gate: this arm
-    printed 18 findings and exited 0 on the PR that added this paragraph.
+    The ast-grep arm needs an npm install, so it runs only in advisory
+    `ci-supplemental`; letting it block locally would make `just lint` stricter
+    than the CI job sharing its recipe.
 
-    `docs` (the doc-run length) does not block, and that is a correction,
+    `docs` (the doc-run length) does not block either, and that is a correction,
     not an oversight: CLAUDE.md's three comment tests are all SEMANTIC and it says
     outright "none demands brevity … a comment stays at whatever length it earned",
     so a length cap contradicts the rule it was built to serve. Measured, the tree
@@ -549,42 +514,29 @@ def gate_fails(
     whether the length was earned is the comment lens's call.
     """
     _ = docs
-    return gate and (
-        bool(moved) or over_prose or (require_fn_body and bool(fn_body_runs))
-    )
+    return gate and (bool(moved) or over_prose)
 
 
 def main() -> int:
     if "--selftest" in sys.argv[1:]:
         return selftest()
 
-    flags = {"--gate", "--worktree", "--github", "--require-fn-body"}
+    flags = {"--gate", "--worktree", "--github"}
     args = [a for a in sys.argv[1:] if a not in flags]
     gate = "--gate" in sys.argv[1:]
-    require_fn_body = "--require-fn-body" in sys.argv[1:]
     worktree = "--worktree" in sys.argv[1:]
     base = args[0] if args else "origin/main"
-
-    if not worktree and dirty_tracked_sources():
-        print("comment-lint: uncommitted sources — scoping to the working tree")
-        worktree = True
 
     added = added_lines_by_file(unified_diff(base, worktree))
     if not any(added.values()):
         print("comment-lint: no added/changed Rust or Python lines vs", base)
         return 0
 
-    # A run that REQUIRES this arm must never pass vacuously because the
-    # detector was absent; a run that merely reports degrades to a hint.
+    # Fail SOFT if ast-grep isn't installed — this is an advisory, so a dev without
+    # it gets a hint, never a traceback that reads like the tool is broken.
     docs_only = shutil.which("ast-grep") is None
     if docs_only:
         print("comment-lint: ast-grep not found — run `just setup-tools` (`//` rules skipped)")
-        if require_fn_body:
-            print(
-                "comment-lint: --require-fn-body cannot run without ast-grep",
-                file=sys.stderr,
-            )
-            return 1
 
     hits = [] if docs_only else scan_hits()
 
@@ -644,7 +596,7 @@ def main() -> int:
                 f"newcomer its own"
             )
 
-    blocking = gate_fails(gate, docs, moved, over_prose, new_hits, require_fn_body)
+    blocking = gate_fails(gate, docs, moved, over_prose)
     if not new_hits and not docs and not moved and not over_prose:
         print("comment-lint: no new 3+-comment runs in the diff vs", base, "✓")
         return 0
