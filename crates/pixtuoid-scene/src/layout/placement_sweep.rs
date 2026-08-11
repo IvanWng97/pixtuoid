@@ -1379,7 +1379,6 @@ fn every_pod_decor_kind_can_open_a_floor() {
                 .and_then(|l| l.pod_decor.first().map(|d| d.kind))
         })
         .collect();
-    seen.dedup_by(|a, b| a == b);
     seen.sort_by_key(|k| format!("{k:?}"));
     seen.dedup();
     assert_eq!(

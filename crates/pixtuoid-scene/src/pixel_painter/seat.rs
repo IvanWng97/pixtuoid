@@ -300,11 +300,9 @@ impl Seat {
             // front sofa, where insertion order puts the sitter on top.
             return self.pos.y + 2;
         }
-        match self.kind {
-            // The plain feet row, which for the bartender sits INSIDE the
-            // island body — so the whole arc stays behind the counter.
-            SeatKind::Waypoint(_) | SeatKind::HomeDesk => self.pos.y,
-        }
+        // The plain feet row, which for the bartender sits INSIDE the island
+        // body — so the whole arc stays behind the counter.
+        self.pos.y
     }
 
     /// The render ANCHOR-BASE. The ONE authority BOTH the sprite blit
