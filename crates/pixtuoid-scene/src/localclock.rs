@@ -90,7 +90,14 @@ mod tests {
 /// excepted.
 #[cfg(test)]
 fn bypasses_in(root: &std::path::Path) -> Vec<String> {
-    const FORMS: [&str; 3] = ["with_ymd_and_hms", "from_local_datetime", "Local.timestamp"];
+    // `Local.timestamp` is receiver-qualified and rustfmt breaks a chain before the
+    // `.`, so the scan below reads a two-line window, not one physical line.
+    const FORMS: [&str; 4] = [
+        "with_ymd_and_hms",
+        "from_local_datetime",
+        "and_local_timezone",
+        "Local.timestamp",
+    ];
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
@@ -116,8 +123,20 @@ fn bypasses_in(root: &std::path::Path) -> Vec<String> {
                 .unwrap_or_default()
                 .to_string_lossy()
                 .into_owned();
-            for (i, line) in text.lines().enumerate() {
-                if FORMS.iter().any(|f| line.contains(f)) && !line.trim_start().starts_with("//") {
+            let lines: Vec<&str> = text.lines().collect();
+            let squashed = |s: &str| -> String { s.split_whitespace().collect() };
+            let hits = |s: &str| FORMS.iter().any(|f| s.contains(f));
+            for (i, line) in lines.iter().enumerate() {
+                if line.trim_start().starts_with("//") {
+                    continue;
+                }
+                let next = lines.get(i + 1).copied().unwrap_or("");
+                // Report the line the form STARTS on: whole-on-this-line, or split
+                // across the break with neither half whole (rustfmt's chain wrap).
+                let split = !hits(&squashed(line))
+                    && !hits(&squashed(next))
+                    && hits(&squashed(&[*line, next].concat()));
+                if hits(&squashed(line)) || split {
                     out.push(format!("{name}:{}", i + 1));
                 }
             }
@@ -160,6 +179,19 @@ mod sweep {
             super::bypasses_in(dir.path()),
             vec!["planted.rs:2".to_string()],
             "the scan must reach a nested file and report its line"
+        );
+        // rustfmt breaks a chain before the `.` once it exceeds width, which is how
+        // `crates/pixtuoid/examples/snapshot/main.rs` already formats this call — a
+        // single-line scan would not see it.
+        std::fs::write(
+            dir.path().join("deep/planted.rs"),
+            "fn f() {\n    chrono::Local\n        .timestamp_opt(0, 0);\n}\n",
+        )
+        .expect("write");
+        assert_eq!(
+            super::bypasses_in(dir.path()),
+            vec!["planted.rs:2".to_string()],
+            "the RECEIVER-qualified form split by rustfmt is one bypass, reported once"
         );
         // And it must not fire on the same form inside a comment.
         std::fs::write(

@@ -635,28 +635,52 @@ mod tests {
 
     /// A creature parked inside a desk's overhang reads as debris, not a creature
     /// — the OpenClaw demo shipped its own mascot half-behind a monitor for most
-    /// of a 9-second clip. Walkable alone cannot see this: the cell IS walkable
-    /// (invariant #6 makes the mask a ground projection), it is merely painted
-    /// over. Dropping the `is_visually_clear` conjunct reds this.
+    /// of a 9-second clip. Walkable alone cannot see it: the cell IS walkable
+    /// (invariant #6 makes the mask a ground projection), it is merely painted over.
+    ///
+    /// The oracle is built HERE from the layout's own collections, NOT from
+    /// `is_visually_clear` — asserting the predicate on points the loop accepted
+    /// because of that same predicate is a tautology, and it is what let the first
+    /// version ship missing the pantry counter and the aquarium.
     #[test]
     fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
+        use crate::layout::{Anchor, Furniture};
         let mut checked = 0u32;
-        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180)] {
+        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180), (320, 200)] {
             for seed in 0..24u64 {
-                let Some(layout) = crate::layout::Layout::compute(w, h, None) else {
+                let Some(l) = crate::layout::Layout::compute(w, h, None) else {
                     continue;
                 };
+                // Independent rects: the pantry counter from its RUNTIME size, the
+                // aquarium from the lounge, both of which the const table cannot give.
+                let mut boxes: Vec<(crate::layout::Point, crate::layout::Size)> = Vec::new();
+                for wp in &l.waypoints {
+                    if wp.kind == crate::layout::WaypointKind::Pantry {
+                        let sz = l.pantry_counter_size();
+                        boxes.push((
+                            crate::layout::anchored_top_left(Anchor::Center, wp.pos, sz.w, sz.h),
+                            sz,
+                        ));
+                    }
+                }
+                if let Some(t) = l.lounge.and_then(|lo| lo.fish_tank) {
+                    let sz = crate::layout::furniture_def(Furniture::FishTank).visual;
+                    boxes.push((
+                        crate::layout::anchored_top_left(Anchor::Center, t, sz.w, sz.h),
+                        sz,
+                    ));
+                }
                 for n in 0..24u64 {
-                    let p = walkable_target(&layout, seed, n);
-                    // The fallback arm may hand back a snapped or door cell that no
-                    // filter promised — only judge the cells the loop ACCEPTED.
-                    if !layout.walkable.is_walkable(p.x, p.y) {
+                    let p = walkable_target(&l, seed, n);
+                    if !l.walkable.is_walkable(p.x, p.y) {
                         continue;
                     }
-                    assert!(
-                        layout.is_visually_clear(p),
-                        "{w}x{h} seed {seed} cycle {n}: wander target {p:?} rests under a sprite"
-                    );
+                    for (tl, sz) in &boxes {
+                        assert!(
+                            !(p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h),
+                            "{w}x{h} seed {seed} cycle {n}: target {p:?} rests inside {tl:?}+{sz:?}"
+                        );
+                    }
                     checked += 1;
                 }
             }

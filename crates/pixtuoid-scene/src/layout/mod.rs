@@ -347,30 +347,88 @@ impl SceneLayout {
         self.home_desks.get(i.0).copied()
     }
 
-    /// Is `p` clear of every furniture sprite's VISUAL box? Walkable is the GROUND
-    /// rule (invariant #6), so the cell in front of a desk is legitimately walkable
-    /// AND legitimately painted over — fine to walk THROUGH, wrong to park in.
+    /// Is `p` clear of the furniture sprites that PAINT OVER it? Walkable is the
+    /// GROUND rule (invariant #6), so the cell in front of a desk is legitimately
+    /// walkable AND legitimately covered — fine to walk THROUGH, wrong to park in.
+    ///
+    /// Destructured with NO `..`, the same guarantee `placement_sweep::pieces`
+    /// takes: a new collection is a compile error HERE, not a finding two review
+    /// rounds later. Three kinds carry a `0x0` table `visual` because their sprite
+    /// is runtime-sized, so each is read from its own authority below.
     pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
-        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
-            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
+        let SceneLayout {
+            home_desks,
+            waypoints,
+            plants,
+            pod_decor,
+            wall_decor,
+            lounge,
+            meeting_rooms,
+            pantry,
+            desk_facings: _, // a desk ATTRIBUTE, not a sprite
+            room_walls: _,   // translucent glass; a creature behind it still reads
+            door: _,         // architecture, and the band it punches is not walkable
+            door_threshold: _,
+            doorways: _,
+            corridor: _,     // a zone, not a sprite
+            cubicle_band: _, // containers
+            cubicle_aisle: _,
+            buf_w: _,
+            buf_h: _,
+            top_margin: _,
+            walkable: _,
+            reachable: _,
+        } = self;
+        let inside = |tl: Point, sz: Size| {
             p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h
         };
-        !self
-            .home_desks
+        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
+            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
+            inside(tl, sz)
+        };
+        let table = home_desks
             .iter()
             .any(|&d| covered(Anchor::TopLeft, d, Furniture::Desk))
-            && !self
-                .waypoints
+            || waypoints
                 .iter()
                 .any(|w| covered(Anchor::Center, w.pos, w.kind.furniture()))
-            && !self
-                .plants
+            || plants
                 .iter()
                 .any(|pl| covered(Anchor::Center, pl.pos, pl.kind.furniture()))
-            && !self
-                .pod_decor
+            || pod_decor
                 .iter()
                 .any(|d| covered(Anchor::Center, d.pos, d.kind.furniture()))
+            // Wall decor is NOT out as a class: the whiteboard is free-standing
+            // floor furniture standing in an inter-pod aisle.
+            || wall_decor
+                .iter()
+                .any(|d| covered(Anchor::TopLeft, d.pos, d.kind.furniture()));
+        let lounge = lounge.is_some_and(|l| {
+            covered(Anchor::Center, l.couch_center, Furniture::Couch)
+                || covered(Anchor::Center, l.floor_lamp, Furniture::FloorLamp)
+                || covered(Anchor::Center, l.side_table, Furniture::LoungeSideTable)
+                || l.fish_tank
+                    .is_some_and(|t| covered(Anchor::Center, t, Furniture::FishTank))
+        });
+        let runtime = waypoints.iter().any(|w| {
+            w.kind == WaypointKind::Pantry && {
+                let sz = self.pantry_counter_size();
+                inside(
+                    placement::anchored_top_left(Anchor::Center, w.pos, sz.w, sz.h),
+                    sz,
+                )
+            }
+        }) || meeting_rooms.iter().any(|r| {
+            r.trio.is_some_and(|tr| {
+                tr.sofas
+                    .iter()
+                    .any(|&s| covered(Anchor::Center, s, Furniture::MeetingSofaBody))
+                    || covered(Anchor::Center, tr.table, Furniture::MeetingTable)
+            })
+        }) || pantry
+            .and_then(|pa| pa.kitchen_island)
+            .is_some_and(|i| covered(Anchor::Center, i, Furniture::KitchenIsland));
+        !(table || lounge || runtime)
     }
 
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).

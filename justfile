@@ -1218,7 +1218,10 @@ comment-lint-gate:
     # The three arms report FILES, not a diluted ratio, so a stale `origin/main`
     # moves the merge-base back and blocks on other people's merged commits. CI
     # fetches (ci-lint.yml); refusing to run beats measuring against a stale ref.
-    git fetch --quiet origin main \
+    # Bounded by GIT's own stall detector, not `timeout(1)` — that is coreutils,
+    # absent on a stock macOS box. `lint` joins its jobs with `wait`, so an
+    # unbounded fetch on a captive-portal network hangs preflight and pre-push.
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
       || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate

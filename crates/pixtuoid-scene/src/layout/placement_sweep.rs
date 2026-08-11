@@ -1251,3 +1251,33 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         v[..v.len().min(6)].join("\n")
     );
 }
+
+/// `is_visually_clear`'s completeness, checked against the enumeration that is
+/// ALREADY compile-forced. The predicate destructures `SceneLayout` with no `..`,
+/// so the compiler catches a new COLLECTION; this catches a member of an existing
+/// one that the predicate reads with the wrong anchor, kind or size — the class
+/// that shipped incomplete twice (lounge + the runtime-sized kinds, then the
+/// free-standing whiteboard).
+#[test]
+fn every_placed_sprite_is_opaque_to_the_visual_clearance_predicate() {
+    let mut checked = 0u32;
+    sweep(|w, h, seed, l| {
+        for p in pieces(l) {
+            let (tl, sz) = p.visual;
+            if sz.w == 0 || sz.h == 0 {
+                continue; // runtime-sized: the table has no rect to centre on
+            }
+            let mid = Point {
+                x: tl.x + sz.w / 2,
+                y: tl.y + sz.h / 2,
+            };
+            assert!(
+                !l.is_visually_clear(mid),
+                "{w}x{h} seed {seed}: {} paints over {mid:?} but the predicate calls it clear",
+                p.label
+            );
+            checked += 1;
+        }
+    });
+    assert!(checked > 1000, "the sweep must reach pieces, saw {checked}");
+}

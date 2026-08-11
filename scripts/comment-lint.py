@@ -204,7 +204,8 @@ def selftest() -> int:
             cwd2 = os.getcwd()
             try:
                 os.chdir(repo)
-                return prose_share("HEAD~1", worktree=False)
+                pr, co, _ = prose_share("HEAD~1", worktree=False)
+                return pr, co
             finally:
                 os.chdir(cwd2)
 
@@ -290,7 +291,9 @@ longest legitimate run is 35. Diff-scoped, so existing runs are grandfathered,
 and a new block past it is not banned, only made deliberate."""
 
 
-def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
+def doc_run_hits(
+    added: dict[str, set[int]], worktree: bool = True, cwd: str | None = None
+) -> list[tuple[str, int, int]]:
     """New `///`/`//!` runs longer than DOC_RUN_MAX, as (file, start_line, len).
 
     The ast-grep rules deliberately exclude doc comments, so nothing else in this
@@ -302,10 +305,20 @@ def doc_run_hits(added: dict[str, set[int]]) -> list[tuple[str, int, int]]:
     for f, lines in added.items():
         if not f.endswith(".rs") or not lines:
             continue
-        try:
-            src = open(f, errors="ignore").read().splitlines()
-        except OSError:
-            continue
+        # `added`'s line numbers come from the diff, so the source must be read at
+        # the SAME revision — a dirty tree shifts them under an unchanged block.
+        if worktree:
+            try:
+                src = open(os.path.join(cwd or ".", f), errors="ignore").read().splitlines()
+            except OSError:
+                continue
+        else:
+            r = gitenv.git(
+                "show", f"HEAD:{f}", capture_output=True, text=True, check=False, cwd=cwd
+            )
+            if r.returncode != 0:
+                continue
+            src = r.stdout.splitlines()
         run_start = None
         run_len = 0
 
@@ -373,11 +386,17 @@ Rust only: the `.py` here and the site's TS answer to different conventions.
 """
 
 PROSE_MIN_CODE = 20
+
+#: How many of the counted prose lines the blocking message lists before eliding.
+PROSE_SAMPLE_MAX = 12
+
 """Added code lines below which the ratio is not judged — a handful of lines is
 all-or-nothing, and would fail on arithmetic rather than on slop."""
 
 
-def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int, int]:
+def prose_share(
+    base: str, worktree: bool, cwd: str | None = None
+) -> tuple[int, int, list[str]]:
     """`(narrative_prose, code)` line counts among the diff's ADDED Rust lines.
 
     Blank lines and doc comments count as neither (see [`PROSE_MAX_PCT`]). Test
@@ -391,11 +410,17 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
     ).stdout
     prose = code = 0
     in_block = False
+    samples: list[str] = []
+    cur_file = "?"
     for line in diff.splitlines():
         # A file or hunk header closes any open block. `--unified=0` makes the
         # added lines non-contiguous, so a `/*` whose `*/` is CONTEXT would
         # otherwise charge every later added line in the whole diff as prose.
-        if line.startswith("+++") or line.startswith("@@"):
+        if line.startswith("+++"):
+            cur_file = line[6:] if line.startswith("+++ b/") else line[4:]
+            in_block = False
+            continue
+        if line.startswith("@@"):
             in_block = False
             continue
         if not line.startswith("+"):
@@ -405,17 +430,20 @@ def prose_share(base: str, worktree: bool, cwd: str | None = None) -> tuple[int,
         # denominator — the one-keystroke bypass `doc_run_hits` guards against.
         if in_block:
             prose += 1
+            samples.append(f"{cur_file}: {t}")
             in_block = "*/" not in t
         elif t.startswith("/*"):
             prose += 1
+            samples.append(f"{cur_file}: {t}")
             in_block = "*/" not in t
         elif re.match(r"(///|//!)($|[^/])", t):
             continue
         elif t.startswith("//"):
             prose += 1
+            samples.append(f"{cur_file}: {t}")
         elif t:
             code += 1
-    return prose, code
+    return prose, code, samples
 
 
 def reparented_doc_hits(
@@ -510,7 +538,7 @@ def main() -> int:
         if ln in added.get(f, ()):  # noqa: SIM118 — set membership
             new_hits.append((f, ln, h["text"].strip().splitlines()[0], h["message"]))
 
-    docs = doc_run_hits(added)
+    docs = doc_run_hits(added, worktree)
     github = "--github" in sys.argv[1:]
     for f, ln, n in docs:
         print(f"comment-lint: {f}:{ln} — new {n}-line doc-comment run (max {DOC_RUN_MAX})")
@@ -520,7 +548,7 @@ def main() -> int:
                 f"(max {DOC_RUN_MAX}) — every sentence must carry new information"
             )
 
-    prose, code = prose_share(base, worktree)
+    prose, code, prose_lines = prose_share(base, worktree)
     over_prose = code >= PROSE_MIN_CODE and prose * 100 > (prose + code) * PROSE_MAX_PCT
     if over_prose:
         pct = 100 * prose / (prose + code)
@@ -528,6 +556,16 @@ def main() -> int:
             f"comment-lint: {pct:.1f}% of this diff's new Rust lines are narrative "
             f"prose ({prose} prose / {code} code, max {PROSE_MAX_PCT}%; doc comments exempt)"
         )
+        # This arm BLOCKS, so it owes the reader a place to look and a remedy —
+        # the ratio alone is the one message with neither.
+        print(
+            "  cut restated WHAT, migration traces and unmeasured numbers, "
+            "not legitimate WHY. The lines counted:"
+        )
+        for s in prose_lines[:PROSE_SAMPLE_MAX]:
+            print(f"  {s}")
+        if len(prose_lines) > PROSE_SAMPLE_MAX:
+            print(f"  … and {len(prose_lines) - PROSE_SAMPLE_MAX} more")
         if "--github" in sys.argv[1:]:
             print(
                 f"::warning::{pct:.1f}% prose in new Rust ({prose}/{prose + code}, "
