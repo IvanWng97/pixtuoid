@@ -1182,7 +1182,17 @@ fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
                     wp_idx,
                     kind: WaypointKind::MeetingSofa | WaypointKind::MeetingChair,
                     ..
-                } => Some((id, wp_idx)),
+                } => {
+                    // The probe walks FORWARD, so a venue's LAST seat has no
+                    // sibling ahead of it and the agent legitimately walks off —
+                    // the doc says so. Require a successor in the same room, or
+                    // the test asserts more than the code promises.
+                    let sibling_ahead = l
+                        .waypoints
+                        .get(wp_idx + 1)
+                        .is_some_and(|w| w.room_id == l.waypoints[wp_idx].room_id);
+                    sibling_ahead.then_some((id, wp_idx))
+                }
                 _ => None,
             }
         })

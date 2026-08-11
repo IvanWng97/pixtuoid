@@ -1281,3 +1281,134 @@ fn every_placed_sprite_is_opaque_to_the_visual_clearance_predicate() {
     });
     assert!(checked > 1000, "the sweep must reach pieces, saw {checked}");
 }
+
+/// The north wall band is a WALL PLANE, not floor — nothing in it is walkable,
+/// the elevator included. Its doorway is a hole in the WALL, not in the ground:
+/// `door_threshold` already stands clear to the south, so a cut here only ever
+/// produced walkable wall, and `creatures::walkable_target` draws wander
+/// destinations straight off this mask (#902 — a cat wandering up the channel).
+#[test]
+fn no_cell_of_the_north_wall_band_is_walkable() {
+    let mut checked = 0usize;
+    sweep(|w, h, seed, l| {
+        let band = l.wall_band_h();
+        assert!(band > 0, "{w}x{h} seed {seed}: no wall band to check");
+        for y in 0..band {
+            for x in 0..l.walkable.width() {
+                assert!(
+                    !l.walkable.is_walkable(x, y),
+                    "{w}x{h} seed {seed}: ({x},{y}) is walkable inside the wall band \
+                     (rows 0..{band}), door at {:?}",
+                    l.door
+                );
+            }
+        }
+        checked += 1;
+    });
+    assert!(checked > 0, "the sweep produced no layouts");
+}
+
+/// A pot must not stand on the same pixel of every floor. `settle_plant` was
+/// already authorised to slide `MAX_PLANT_NUDGE_PX` inward to dodge an
+/// obstacle; the seeded first step spends part of that same budget on variety,
+/// so this asks only that the budget is actually being spent.
+#[test]
+fn a_plants_spot_varies_by_floor() {
+    use std::collections::HashSet;
+    for &(w, h) in &[(96u16, 70u16), (160, 120), (192, 158)] {
+        let mut seen: HashSet<Vec<(u16, u16)>> = HashSet::new();
+        for f in 0..crate::floor::MAX_FLOORS {
+            if let Some(l) = SceneLayout::compute_with_seed(w, h, None, crate::floor::floor_seed(f))
+            {
+                seen.insert(l.plants.iter().map(|p| (p.pos.x, p.pos.y)).collect());
+            }
+        }
+        assert!(
+            seen.len() > crate::floor::MAX_FLOORS / 2,
+            "{w}x{h}: only {} distinct plant arrangements over {} floors — the \
+             seeded step is not reaching the pots",
+            seen.len(),
+            crate::floor::MAX_FLOORS
+        );
+    }
+}
+
+/// Each PASS of the decor bag is a permutation: a floor sees every kind before
+/// any repeats. That is the property a bare rotation was picked for, and the
+/// reason a plain hash was rejected before it — a shuffled bag has to keep it.
+#[test]
+fn each_pass_of_the_decor_bag_is_a_permutation_of_the_roster() {
+    use crate::layout::PodDecor;
+    let n = PodDecor::ALL.len();
+    let pass_at = |seed: u64, pass: usize| -> Vec<PodDecor> {
+        (0..n)
+            .map(|i| super::compute::decor_for_slot(seed, pass * n + i))
+            .collect()
+    };
+    let mut saw_two_orders = false;
+    for f in 0..crate::floor::MAX_FLOORS {
+        let seed = crate::floor::floor_seed(f);
+        for pass in 0..4 {
+            let got = pass_at(seed, pass);
+            for kind in PodDecor::ALL {
+                assert_eq!(
+                    got.iter().filter(|k| *k == kind).count(),
+                    1,
+                    "floor {f} pass {pass}: {kind:?} is not exactly once in {got:?}"
+                );
+            }
+            saw_two_orders |= got != pass_at(seed, 0);
+        }
+    }
+    assert!(
+        saw_two_orders,
+        "every pass has the SAME order — that is a rotation, not a bag, and a \
+         floor wide enough for a second pass repeats it verbatim"
+    );
+}
+
+/// Every pod-decor kind must be able to open a floor. The slot phase is
+/// `floor_seed % PodDecor::ALL.len()`, and a modulus that does not match the
+/// roster silently strands a kind: `% 7` against a 5-member roster left phase 2
+/// (`Tv`) unreachable, so on a one-slot floor that asset never rendered.
+#[test]
+fn every_pod_decor_kind_can_open_a_floor() {
+    let mut seen: Vec<crate::layout::PodDecor> = (0..crate::floor::MAX_FLOORS)
+        .filter_map(|f| {
+            SceneLayout::compute_with_seed(192, 80, None, crate::floor::floor_seed(f))
+                .and_then(|l| l.pod_decor.first().map(|d| d.kind))
+        })
+        .collect();
+    seen.dedup_by(|a, b| a == b);
+    seen.sort_by_key(|k| format!("{k:?}"));
+    seen.dedup();
+    assert_eq!(
+        seen.len(),
+        crate::layout::PodDecor::ALL.len(),
+        "only {seen:?} ever open a floor — a phase modulus that misses the \
+         roster strands the rest"
+    );
+}
+
+/// A wide floor's aisles must not read as one repeating cycle. A rotation can
+/// only ever produce `PodDecor::ALL.len()` arrangements however many slots a
+/// floor has, because one slot's kind fixes every later one.
+#[test]
+fn a_wide_floors_decor_order_is_not_one_fixed_cycle() {
+    use std::collections::HashSet;
+    for &(w, h) in &[(160u16, 120u16), (192, 158), (200, 116)] {
+        let seen: HashSet<Vec<crate::layout::PodDecor>> = (0..crate::floor::MAX_FLOORS)
+            .filter_map(|f| {
+                SceneLayout::compute_with_seed(w, h, None, crate::floor::floor_seed(f))
+                    .map(|l| l.pod_decor.iter().map(|d| d.kind).collect())
+            })
+            .collect();
+        assert!(
+            seen.len() > crate::layout::PodDecor::ALL.len(),
+            "{w}x{h}: only {} distinct aisle arrangements over {} floors — no more \
+             than a rotation of the roster would give",
+            seen.len(),
+            crate::floor::MAX_FLOORS
+        );
+    }
+}

@@ -80,7 +80,6 @@ pub(super) struct MaskObstacles<'a> {
     pub(super) buf_w: u16,
     pub(super) buf_h: u16,
     pub(super) top_margin: u16,
-    pub(super) door: Option<Point>,
     pub(super) home_desks: &'a [Point],
     pub(super) meeting_rooms: &'a [MeetingRoom],
     pub(super) kitchen_island: Option<Point>,
@@ -100,7 +99,6 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         buf_w,
         buf_h,
         top_margin,
-        door,
         home_desks,
         meeting_rooms,
         kitchen_island,
@@ -121,6 +119,11 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     // between are carpet apron under the windows, so blocking them pushed the
     // walkable boundary south of the visible wall base (mask = ground
     // projection, invariant #6).
+    //
+    // Solid for the band's WHOLE width, elevator included: the doorway is a hole
+    // in the WALL, not in the ground, and `door_threshold` already stands
+    // DOOR_THRESHOLD_CLEARANCE_PX south of this base. The cut that used to be
+    // here was walkable wall that only creatures ever wandered into (#902).
     mask.mark_blocked(
         0,
         0,
@@ -128,13 +131,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         top_margin.saturating_sub(WALL_BAND_TO_TOP_MARGIN),
         0,
     );
-    const DOOR_CUT_W: u16 = 8;
     const BASEBOARD_H: u16 = 3;
-    if let Some(d) = door {
-        let cut_x = d.x.saturating_sub(2);
-        let cut_h = top_margin.saturating_add(OBSTACLE_PAD_PX);
-        mask.mark_walkable(cut_x, 0, DOOR_CUT_W, cut_h);
-    }
 
     let baseboard_top = buf_h.saturating_sub(BASEBOARD_H);
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
@@ -401,7 +398,6 @@ mod tests {
             buf_w: 120,
             buf_h: 96,
             top_margin: 20,
-            door: None,
             home_desks: &[],
             meeting_rooms: &[],
             kitchen_island: None,
