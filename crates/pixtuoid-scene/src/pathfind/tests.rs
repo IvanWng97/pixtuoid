@@ -242,7 +242,6 @@ fn reachset_never_claims_an_unroutable_cell() {
 #[test]
 fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
     use crate::floor::floor_seed;
-    use crate::layout::desk_walk_anchor;
     use crate::pose::{aimless_wander_seed, desk_leg_endpoint, pick_aimless_dest};
     use pixtuoid_core::state::MAX_FLOORS;
     use pixtuoid_core::AgentId;
@@ -274,7 +273,12 @@ fn every_aimless_wander_destination_is_routable_from_its_home_desk() {
                     for cycle in 0..8u64 {
                         let seed = aimless_wander_seed(id, cycle);
                         let dest = pick_aimless_dest(&l, seed, desk);
-                        if dest == desk_walk_anchor(desk) {
+                        if dest
+                            == crate::layout::desk_walk_anchor_facing(
+                                desk,
+                                crate::layout::Facing::South,
+                            )
+                        {
                             continue; // documented last resort: the agent's own seat
                         }
                         for &origin in &origins {
@@ -838,4 +842,30 @@ fn octile_cost_is_the_shared_diag_straight_formula() {
     let a = crate::layout::Point { x: 2, y: 7 };
     let b = crate::layout::Point { x: 9, y: 3 };
     assert_eq!(crate::pose::octile_distance(a, b), octile_cost(7, 4));
+}
+
+#[test]
+fn snap_lands_on_an_open_pixel_when_the_cell_centre_itself_is_blocked() {
+    // The coarse grid calls a cell walkable at `COARSE_CELL_WALKABLE_MIN` of its
+    // 16 px open, so the cell it snaps to can have a BLOCKED centre.
+    let mut mask = pixtuoid_core::walkable::WalkableMask::new_open(64, 64);
+    let cell = (4u16, 4u16);
+    let centre = cell_center(cell.0, cell.1);
+    // 2x2 leaves 12 of the cell's 16 px open — walkable to the coarse grid, centre blocked.
+    mask.mark_blocked(centre.x, centre.y, 2, 2, 0);
+    assert!(
+        !mask.is_walkable(centre.x, centre.y),
+        "fixture must block the cell centre, else this pins nothing"
+    );
+    assert!(
+        cell_walkable(&mask, &OccupancyOverlay::new(), cell.0, cell.1),
+        "fixture must leave the cell walkable to the COARSE grid, else snap skips it"
+    );
+
+    let snapped = snap_point_to_walkable(&mask, centre).expect("an open pixel exists in the cell");
+    assert!(
+        mask.is_walkable(snapped.x, snapped.y),
+        "snap must return a point that passes the predicate its name promises: \
+         {snapped:?}"
+    );
 }

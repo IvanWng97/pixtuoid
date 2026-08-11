@@ -10,11 +10,14 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
+
+use super::background::paint_warm_halo;
+use super::palette::blend_rgb;
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
-    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_sleep_z, paint_waiting_bubble,
-    paint_walking_dust,
+    paint_coffee_steam, paint_pet_hearts, paint_screen_glow, paint_screen_idle, paint_sleep_z,
+    paint_waiting_bubble, paint_walking_dust,
 };
 use super::epoch_ms;
 use super::frame_at;
@@ -52,12 +55,12 @@ pub(super) enum DrawableKind<'a> {
     /// bottom-edge row.
     DeskCubicle {
         desk: Point,
-        /// Buffer column of this cubicle's pod divider, or `None` when the desk
-        /// has no east pod-mate to be divided FROM (the row's last desk, or a
-        /// pod whose second column the band clamp dropped).
-        divider_x: Option<u16>,
+        /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
+        facing: crate::layout::Facing,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
+        lamp: f32,
+        screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
         /// 0 = no tower (byte-identical to the pre-meter desk), 1..=3 = reams.
@@ -78,6 +81,10 @@ pub(super) enum DrawableKind<'a> {
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
+    },
+    /// Office chair, keyed to TIE with its seat's occupant so it paints over them.
+    DeskChair {
+        pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
     /// in z-order. `use_large` picks the detailed 32×10 kitchen sprite vs. the
@@ -258,6 +265,20 @@ pub(super) struct DrawableCtx<'a> {
     pub theme: &'a crate::theme::Theme,
 }
 
+/// The monitor bezel standing proud of the desk back, above `desk.y`.
+const DESK_BEZEL_RAISE: u16 = 1;
+
+/// The desk art for a seat facing `facing`, or `None` for the base `desk`. Only a
+/// back-turned seat needs its own — its occupant y-sorts in FRONT and covers the screen.
+fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
+    match facing {
+        crate::layout::Facing::North => Some("desk_north"),
+        crate::layout::Facing::South
+        | crate::layout::Facing::East
+        | crate::layout::Facing::West => None,
+    }
+}
+
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
@@ -268,26 +289,16 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
     match &d.kind {
         DrawableKind::DeskCubicle {
             desk,
-            divider_x,
+            facing,
             has_cabinet,
             screen_glow,
+            lamp,
+            screen_idle,
             has_coffee,
             coffee_steam,
             token_tier,
             sheet_fall,
         } => {
-            let divider = theme.office.cubicle_divider;
-            if let Some(div_x) = *divider_x {
-                // Spans the desk sprite's own painted rows so it reads as tall
-                // as the workstation.
-                let visual_h = crate::layout::desk_furniture_def().visual.h;
-                for dy in 0..=visual_h {
-                    let py = desk.y.saturating_sub(1) + dy;
-                    if div_x < buf.width() && py < buf.height() {
-                        buf.put(div_x, py, divider);
-                    }
-                }
-            }
             if *has_cabinet {
                 if let Some(cab) = pack
                     .animation("filing_cabinet")
@@ -300,15 +311,36 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                     }
                 }
             }
-            if let Some(frame) = pack.animation("desk").and_then(|a| a.frames.first()) {
-                // The desk sprite's top row is the monitor's raised bezel, 1px
-                // above the desk back, so blit 1px higher.
-                blit_frame(frame, desk.x, desk.y.saturating_sub(1), buf);
+            let base_h = pack
+                .animation("desk")
+                .and_then(|a| a.frames.first())
+                .map_or(0, |f| f.height());
+            // A taller variant keeps the BASE sprite's bottom row; its extra rows land above `desk.y`.
+            let art = desk_sprite_name(*facing)
+                .and_then(|n| pack.animation(n))
+                .or_else(|| pack.animation("desk"))
+                .and_then(|a| a.frames.first());
+            // The effects address the monitor by the sprite's OWN row numbering, so this is
+            // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
+            let mut sprite_top = desk.y;
+            if let Some(frame) = art {
+                sprite_top = desk
+                    .y
+                    .saturating_sub(DESK_BEZEL_RAISE + frame.height().saturating_sub(base_h));
+                blit_frame(frame, desk.x, sprite_top, buf);
             }
+            paint_desk_lamp(buf, *desk, *lamp, theme);
+            paint_screen_idle(
+                buf,
+                desk.x,
+                sprite_top,
+                theme.effects.monitor_idle,
+                *screen_idle,
+            );
             paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
             paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
             if let Some(tint) = screen_glow {
-                paint_screen_glow(buf, desk.x, desk.y, now, *tint, theme);
+                paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
             }
         }
         DrawableKind::Character {
@@ -335,6 +367,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 paint_waiting_bubble(buf, *anchor, theme);
             }
         }
+        DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
         DrawableKind::WaypointPantry { pos, use_large } => {
             let anim_name = if *use_large { "pantry" } else { "pantry_small" };
             // A character behind the counter is occluded by the counter's own
@@ -551,6 +584,60 @@ fn paint_desk_coffee(
     }
 }
 
+/// The desk task chair's art — the ONE authority for its size, so the enqueue
+/// site centres on what is actually drawn even under a `--pack-dir` override.
+pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
+    pack.animation("desk_chair").and_then(|a| a.frames.first())
+}
+
+/// Office-chair back, crossing a back-turned occupant's lower torso.
+pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack) {
+    if let Some(frame) = desk_chair_frame(pack) {
+        blit_frame(frame, top_left.x, top_left.y, buf);
+    }
+}
+
+/// Task lamp on the desk's west wing (the coffee cup and token tower own the other
+/// two), plus its warm pool; `strength` is the interior darkness.
+pub(super) fn paint_desk_lamp(
+    buf: &mut RgbBuffer,
+    desk: Point,
+    strength: f32,
+    theme: &crate::theme::Theme,
+) {
+    if strength <= 0.0 {
+        return;
+    }
+    let warm = theme.lighting.desk_lamp;
+    const WHITE: Rgb = Rgb {
+        r: 255,
+        g: 255,
+        b: 255,
+    };
+    const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+    // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
+    const OFF: f32 = 0.80;
+    let unlit = blend_rgb(warm, BLACK, OFF);
+    let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
+    let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
+    let (lx, ly) = (desk.x, desk.y);
+    buf.put_checked(lx, ly, shade);
+    buf.put_checked(lx + 1, ly, shade);
+    buf.put_checked(lx + 1, ly + 1, stem);
+    /// A desk is 14 wide, so a larger pool washes the neighbouring workstations.
+    const DESK_LAMP_RADIUS: u16 = 5;
+    const DESK_LAMP_MAX: f32 = 0.42;
+    const _: () = assert!(DESK_LAMP_MAX < super::SCREEN_IDLE_MAX);
+    paint_warm_halo(
+        buf,
+        lx + 1,
+        ly + 1,
+        DESK_LAMP_RADIUS,
+        strength * DESK_LAMP_MAX,
+        warm,
+    );
+}
+
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
 /// the monitor's east side, growing NORTH past the bezel at T3 so the
 /// silhouette reads across the room; the T3 top sheet teeters 1px east.
@@ -653,9 +740,11 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                divider_x: None,
+                facing: crate::layout::Facing::South,
                 has_cabinet: false,
                 screen_glow: None,
+                lamp: 0.0,
+                screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,
                 token_tier,
@@ -843,9 +932,11 @@ mod tests {
                     .h,
             kind: DrawableKind::DeskCubicle {
                 desk,
-                divider_x: None,
+                facing: crate::layout::Facing::South,
                 has_cabinet: true,
                 screen_glow: None,
+                lamp: 0.0,
+                screen_idle: 0.0,
                 has_coffee: false,
                 coffee_steam: false,
                 token_tier: 0,

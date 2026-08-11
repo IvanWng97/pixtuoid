@@ -15,11 +15,12 @@ use celestial::{
 };
 pub(super) use lighting::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
-    paint_neon_panel, paint_radial_falloff, paint_shadow, Ellipse, RadialFalloff,
+    paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo, Ellipse, RadialFalloff,
 };
 pub(super) use sky::{
     beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
     sun_on_wall, time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
+    DAYLIGHT_FLOOR_LIFT, NIGHT_FLOOR_DIM,
 };
 
 use std::time::SystemTime;

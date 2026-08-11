@@ -329,7 +329,7 @@ fn partial_bottom_row_caps_mid_fill_when_agents_run_out() {
     // desk appears at num_agents = cap-1 and second at cap, so cap-1 breaks the
     // `'partial_y` loop MID-ROW. A smaller num_agents caps in the earlier full-pod
     // phase instead and never reaches it.
-    for (w, h, cap) in [(88u16, 108u16, 6usize), (88, 120, 8), (88, 175, 10)] {
+    for (w, h, cap) in [(88u16, 100u16, 6usize), (88, 125, 8), (88, 160, 10)] {
         let full = SceneLayout::compute_with_seed(w, h, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
         assert_eq!(
             full.home_desks.len(),
@@ -481,10 +481,10 @@ fn narrow_width_desks_stay_inside_the_band_with_anchors_on_buffer() {
                     "{w}x70 seed {seed}: desk x={} overflows the band's right edge {band_right}",
                     d.x
                 );
-                let a = desk_walk_anchor(*d);
+                let a = desk_walk_anchor_facing(*d, crate::layout::Facing::South);
                 assert!(
                     a.x < l.buf_w && a.y < l.buf_h,
-                    "{w}x70 seed {seed}: desk_walk_anchor {a:?} is off-buffer ({}x{})",
+                    "{w}x70 seed {seed}: desk_walk_anchor_facing {a:?} is off-buffer ({}x{})",
                     l.buf_w,
                     l.buf_h
                 );
@@ -535,35 +535,60 @@ fn compute_places_all_waypoint_kinds() {
 }
 
 #[test]
-fn every_home_desk_has_a_reachable_north_approach() {
-    // Back-row pod desks face the front row across the thin INTRA_POD_GAP_Y, whose
-    // south EDGE cell has a coarse routing cell that straddles the desk and is
-    // ReachSet-rejected — so only the deeper reachable-aware scan finds them.
-    // Pushing the origin far north makes `approach_point` prefer the north side
-    // whenever it has a reachable cell, so a north return proves the scan got there.
-    use crate::layout::{approach_point, desk_walk_anchor, Facing, Furniture};
+fn every_home_desk_has_a_reachable_approach_on_its_own_far_side() {
+    // A pod's back row faces the front row across the thin INTRA_POD_GAP_Y, whose
+    // edge cell sits in a ReachSet-rejected coarse cell straddling the desk — only
+    // the deeper reachable-aware scan finds it, and only a far-side probe prefers it.
+    use crate::layout::{approach_point, desk_walk_anchor_facing, Facing, Furniture};
     for (w, h) in [(192u16, 158u16), (160, 120), (240, 160)] {
         let l = SceneLayout::compute(w, h, Some(64)).expect("fits");
-        for &desk in &l.home_desks {
-            let chair = desk_walk_anchor(desk);
-            let north_origin = Point {
-                x: chair.x,
-                y: chair.y.saturating_sub(40),
+        // Without this the loop is vacuous: chair, probe and assertion agree under
+        // any single facing, so an all-`South` layout would pass it untouched.
+        assert!(
+            l.desk_facings.contains(&Facing::North),
+            "{w}x{h}: no desk faces north — the pod back row never turned around, \
+             so nothing below probes the gap-side approach"
+        );
+        for (i, &desk) in l.home_desks.iter().enumerate() {
+            let facing = l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
+            let chair = desk_walk_anchor_facing(desk, facing);
+            const PROBE_DIST: u16 = 40;
+            let origin = match facing {
+                Facing::North => Point {
+                    x: chair.x,
+                    y: chair.y.saturating_add(PROBE_DIST),
+                },
+                _ => Point {
+                    x: chair.x,
+                    y: chair.y.saturating_sub(PROBE_DIST),
+                },
             };
             let a = approach_point(
                 Furniture::Desk,
                 chair,
-                Facing::South,
+                facing,
                 l.pantry_counter_size(),
                 &l.walkable,
-                north_origin,
+                origin,
                 &l.reachable,
             );
-            assert_ne!(a, chair, "desk {desk:?}: no reachable approach (sentinel)");
-            assert!(
-                a.y < chair.y,
-                "desk {desk:?}: approach {a:?} should be NORTH of the chair {chair:?}"
+            assert_ne!(
+                a, chair,
+                "desk {desk:?} ({facing:?}): no reachable approach"
             );
+            // The contract is the ROTATED approach set: an E/W cell at the chair's row is legitimate.
+            match facing {
+                Facing::North => assert!(
+                    a.y >= chair.y,
+                    "desk {desk:?} faces north: approach {a:?} is NORTH of {chair:?}, \
+                     the side its occupant sits on"
+                ),
+                _ => assert!(
+                    a.y <= chair.y,
+                    "desk {desk:?} faces south: approach {a:?} is SOUTH of {chair:?}, \
+                     the side its occupant sits on"
+                ),
+            }
             assert!(
                 l.reachable.reaches(a),
                 "desk {desk:?}: approach {a:?} must be A*-reachable"

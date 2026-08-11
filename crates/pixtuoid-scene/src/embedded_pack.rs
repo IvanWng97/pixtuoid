@@ -159,6 +159,9 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     }
     embedded_sprites![
         "seated.sprite",
+        "seated_back.sprite",
+        "typing_back_0.sprite",
+        "typing_back_1.sprite",
         "side_seated.sprite",
         "typing_0.sprite",
         "typing_1.sprite",
@@ -171,6 +174,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "walking_coffee_1.sprite",
         "desk.sprite",
         "desk@4x.sprite",
+        "desk_north.sprite",
         "plant.sprite",
         "plant_tall.sprite",
         "plant_flower.sprite",
@@ -181,6 +185,7 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "door_open.sprite",
         "bulletin_board.sprite",
         "exit_sign.sprite",
+        "desk_chair.sprite",
         "filing_cabinet.sprite",
         "cat_walk_0.sprite",
         "cat_walk_1.sprite",
@@ -520,6 +525,59 @@ mod tests {
             crate::layout::CHARACTER_SPRITE_H_CELLS,
             crate::layout::CHARACTER_SPRITE_H_CELLS * 2
         );
+    }
+
+    /// A facing does not change how big a desk IS: `desk_north` is taller only above `desk.y`.
+    /// Checked on the edge COLUMNS the monitor never covers — the middle legitimately differs.
+    #[test]
+    fn both_desk_variants_are_the_same_desk_below_the_monitor() {
+        let pack = test_default_pack();
+        let frame = |n: &str| {
+            pack.animation(n)
+                .and_then(|a| a.frames.first())
+                .unwrap_or_else(|| panic!("the embedded pack ships {n}"))
+        };
+        let (base, north) = (frame("desk"), frame("desk_north"));
+        assert_eq!(base.width(), north.width(), "a facing never changes width");
+        // Both blit so their BOTTOM rows coincide, so the taller one's extra rows are all above.
+        let lift = north
+            .height()
+            .checked_sub(base.height())
+            .expect("the raised variant is the taller one");
+        // `desk.y` is one row into the base sprite (its top row is the bezel).
+        const BASE_DESK_Y_ROW: u16 = 1;
+        let edges = [0, 1, base.width() - 2, base.width() - 1];
+        for x in edges {
+            for dy in 0..(base.height() - BASE_DESK_Y_ROW) {
+                let b = base.get(x, BASE_DESK_Y_ROW + dy);
+                let n = north.get(x, BASE_DESK_Y_ROW + lift + dy);
+                assert_eq!(
+                    b, n,
+                    "column {x} differs at desk.y+{dy}: the two variants must be \
+                     the same desk below the monitor"
+                );
+            }
+        }
+
+        // The column loop above starts at `desk.y`, so wood a variant grows ABOVE that row is
+        // invisible to it; counting OPAQUE rows would miss it too (a screen row is opaque either way).
+        let wood = base
+            .get(0, BASE_DESK_Y_ROW)
+            .expect("the desk's west edge at desk.y is surface");
+        let surface_rows = |f: &pixtuoid_core::sprite::Frame| {
+            (0..f.height())
+                .filter(|&y| (0..f.width()).any(|x| f.get(x, y) == Some(wood)))
+                .count() as u16
+        };
+        for (name, art) in [("desk", base), ("desk_north", north)] {
+            assert_eq!(
+                surface_rows(art),
+                crate::layout::DESK_SURFACE_ROWS,
+                "{name} draws {} rows of surface; DESK_SURFACE_ROWS declares {}",
+                surface_rows(art),
+                crate::layout::DESK_SURFACE_ROWS
+            );
+        }
     }
 
     // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the

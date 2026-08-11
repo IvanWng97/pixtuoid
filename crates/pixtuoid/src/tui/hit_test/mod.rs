@@ -64,10 +64,13 @@ pub(crate) fn hit_test_from_tui(
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // The painter's seated anchor: the 8px sprite centered on the SAME DESK_W
-        // the painter centers on, 8px above the desk.
-        let ax = desk.x + pixtuoid_scene::layout::DESK_W.saturating_sub(SPRITE_W) / 2;
-        let ay = desk.y.saturating_sub(8);
+        // The painter's OWN anchor: a south-facing desk seats off `desk.y - 8`.
+        let a = pixtuoid_scene::pixel_painter::seated_anchor_for(
+            desk,
+            SPRITE_W,
+            layout.desk_facing(agent.desk_index.single_floor_local()),
+        );
+        let (ax, ay) = (a.x, a.y);
         let cell_x = ax;
         let cell_y = ay / 2;
         if mx >= cell_x

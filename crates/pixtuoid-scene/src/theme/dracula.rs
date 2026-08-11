@@ -54,11 +54,6 @@ pub static DRACULA: Theme = Theme {
             g: 31,
             b: 40,
         },
-        cubicle_divider: Rgb {
-            r: 68,
-            g: 71,
-            b: 90,
-        },
         runner_base: Rgb {
             r: 60,
             g: 45,
@@ -183,6 +178,11 @@ pub static DRACULA: Theme = Theme {
             g: 121,
             b: 198,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 202,
+            b: 140,
+        },
         night_tint: Rgb {
             r: 25,
             g: 15,
@@ -291,6 +291,11 @@ pub static DRACULA: Theme = Theme {
             r: 98,
             g: 114,
             b: 164,
+        },
+        monitor_idle: Rgb {
+            r: 72,
+            g: 88,
+            b: 140,
         },
         sleep_z: Rgb {
             r: 139,

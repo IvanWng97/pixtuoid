@@ -21,10 +21,16 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 // character width — so a non-8-wide pack stays centered. The vertical pose
 // offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
 // stay fixed.
-pub(super) fn seated_anchor(desk: Point, sprite_w: u16) -> Point {
+/// Where a desk's occupant RENDERS: the walk anchor lifted by the sprite height, so a facing that moves the seat moves both.
+pub(super) fn seated_anchor_facing(
+    desk: Point,
+    sprite_w: u16,
+    facing: crate::layout::Facing,
+) -> Point {
+    let walk = crate::layout::desk_walk_anchor_facing(desk, facing);
     Point {
         x: desk.x + DESK_W.saturating_sub(sprite_w) / 2,
-        y: desk.y.saturating_sub(8),
+        y: walk.y.saturating_sub(crate::layout::WALKING_Y_OFF),
     }
 }
 
@@ -129,7 +135,11 @@ pub fn character_anchor(
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
-            seated_anchor(desk, w)
+            seated_anchor_facing(
+                desk,
+                w,
+                layout.desk_facing(agent.desk_index.single_floor_local()),
+            )
         }
         Pose::StandingAtDesk => standing_at_desk_anchor(desk, w),
         Pose::AtWaypoint { wp, kind } => {

@@ -54,11 +54,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 24,
             b: 36,
         },
-        cubicle_divider: Rgb {
-            r: 65,
-            g: 72,
-            b: 104,
-        },
         runner_base: Rgb {
             r: 40,
             g: 44,
@@ -183,6 +178,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 162,
             b: 247,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 190,
+            b: 120,
+        },
         night_tint: Rgb {
             r: 10,
             g: 12,
@@ -292,6 +292,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             r: 65,
             g: 72,
             b: 104,
+        },
+        monitor_idle: Rgb {
+            r: 56,
+            g: 92,
+            b: 145,
         },
         sleep_z: Rgb {
             r: 125,

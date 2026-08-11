@@ -55,11 +55,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 24,
             b: 37,
         },
-        cubicle_divider: Rgb {
-            r: 69,
-            g: 71,
-            b: 90,
-        },
         runner_base: Rgb {
             r: 55,
             g: 50,
@@ -184,6 +179,11 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 226,
             b: 175,
         },
+        desk_lamp: Rgb {
+            r: 249,
+            g: 226,
+            b: 175,
+        },
         night_tint: Rgb {
             r: 17,
             g: 17,
@@ -293,6 +293,11 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 69,
             g: 71,
             b: 90,
+        },
+        monitor_idle: Rgb {
+            r: 86,
+            g: 104,
+            b: 150,
         },
         sleep_z: Rgb {
             r: 137,

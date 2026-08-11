@@ -381,8 +381,13 @@ pub const REQUIRED_CHARACTER_ANIMATIONS: &[&str] = &[
 ];
 
 /// Character animation names a pack MAY omit — the renderer degrades
-/// gracefully (`side_seated` falls back to the front `seated` pose).
-pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &["walking_coffee", "side_seated"];
+/// gracefully (`side_seated`/`seated_back` fall back to the front `seated`).
+pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
+    "walking_coffee",
+    "side_seated",
+    "seated_back",
+    "typing_back",
+];
 
 /// Separator joining a furniture animation to the density it is drawn at:
 /// `desk@4x` is the `desk` piece drawn on a 4x grid, for a painter rendering
@@ -463,6 +468,7 @@ pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
 /// inherits any that are missing from the base pack, density variants included.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
+    "desk_north",
     "filing_cabinet",
     "plant",
     "plant_tall",
@@ -490,6 +496,7 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "standing_desk",
     "bulletin_board",
     "exit_sign",
+    "desk_chair",
 ];
 
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[

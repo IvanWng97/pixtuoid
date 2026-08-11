@@ -1,0 +1,61 @@
+# 14x11 top-down desk for a NORTH-facing seat -- one whose occupant sits on
+# the NEAR side with their back to the viewer (`layout.desk_facings`, read by
+# `desk_facing_at`). Same 14 px width and same BOTTOM THREE rows as
+# `desk.sprite` (front edge + legs); the two extra rows are all above, which
+# is the entire point. (Three is the BLIT offset below, not a row count.)
+#
+# WHY a second sprite rather than a taller shared one: a back-turned occupant
+# is anchored at `desk.y` and y-sorts IN FRONT of their desk, so on the base
+# sprite their head lands exactly on rows 2-3 -- the screen -- and covers it.
+# Here the monitor stands tall enough that its UPPER screen row sits at
+# `desk.y-1`, clear of the head, so the screen and its tool-coloured glow are
+# visible on precisely the desks whose occupant is looking at one. A
+# far-seated desk keeps `desk.sprite`: its occupant is BEHIND the monitor, so a
+# raised screen would show a display nobody in the scene can see.
+#
+# TWO extra rows, so `blit_y = desk.y - 3`. One MORE row was the first version:
+# it put BOTH screen rows above `desk.y` and therefore both clear of the head,
+# which reads better on an occupied desk but leaves the monitor visibly floating
+# a row off the wood on an empty one. Owner picked the lower monitor
+# (facing north 的电脑可以整体往下移动1px吗), so the lower screen row now lands
+# INSIDE the surface band at `desk.y+0` and an occupant's hair covers it —
+# a deliberate trade of screen area for a monitor that sits on its desk.
+#
+# That lower row therefore carries flanking WOOD, exactly as every screen row of
+# `desk.sprite` does: a monitor row inside the surface band has desk either side
+# of it. Only the rows ABOVE the band are transparent-flanked. Get this wrong in
+# either direction and the two desks stop being the same size — which shipped
+# once (facing south 4px vs facing north 6px, then 7px).
+#
+# The desk SURFACE runs up behind the screen rows rather than stopping under
+# them, so the monitor is drawn standing IN the desk rather than perched at its
+# back edge -- wood flanks it at rows 2-4 and only the top two rows rise clear,
+# the same 1-2 rows of proud monitor the base desk already reads with. Two
+# earlier passes got this wrong: 14x12 with a 1px stand neck floating the
+# monitor a whole row above the wood (owner-rejected as too tall, and the neck
+# was hidden behind the head anyway), then 14x11 with the surface starting
+# below the chin, which left the monitor touching the wood but never
+# overlapping it. The desk reads 2 rows deeper than `desk.sprite` as a result;
+# that is a VISUAL overhang north, which the shallow south-strip footprint
+# (`ground_y: End`, invariant #6) does not care about.
+#
+# The monitor block's ROW ROLES are load-bearing, not tidiness: from this
+# sprite's own top row, 0-1 are casing, 2-3 glass, 4 the chin, and
+# `effects::paint_screen_glow` lights all three (`paint_screen_idle` the glass
+# rows only)
+# (`SCREEN_CASING_ROWS`/`SCREEN_GLASS_ROWS`/`SCREEN_CHIN_ROW`, cols 3..=10 and
+# 4..=9). Reshuffling them, or dropping a casing row to save height, lights the
+# wrong pixels. `desk.sprite` satisfies the same roles from ITS top row; the two
+# blocks are no longer pixel-identical, so do not restore that as the check.
+@frame 0
+. . . M M M M M M M M . . .
+. . . M M M M M M M M . . .
+. . . M j j j j j j M . . .
+D D D M j j j j j j M D D D
+D D D D n n n n n n D D D D
+D D D D D D D D D D D D D D
+D D D D D D D D D D D D D D
+D D D D D D D D D D D D D D
+d d d d d d d d d d d d d d
+d d . . . . . . . . . . d d
+d d . . . . . . . . . . d d

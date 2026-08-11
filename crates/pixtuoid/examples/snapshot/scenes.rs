@@ -166,7 +166,25 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
         "gallery exemplars must span all four tiers"
     );
     use std::time::Duration as D;
-    let agents: [(&str, ActivityState, D); 12] = [
+    // (label, state, since_event, since_entry) — the two must DIFFER, or
+    // `in_thinking_window` and `ENTRY_ANIMATION_MS` between them bar both seated poses.
+    let agents: [(&str, ActivityState, D, D); 12] = [
+        // Desk 0 is a FAR-seated desk, so this one also demonstrates the
+        // screen staying dark behind a monitor the room only sees the back of.
+        (
+            "thinking",
+            ActivityState::Idle,
+            D::from_secs(5),
+            D::from_secs(90),
+        ),
+        (
+            "waiting",
+            ActivityState::Waiting {
+                reason: "permission?".into(),
+            },
+            D::from_secs(10),
+            D::from_secs(30),
+        ),
         (
             "working",
             ActivityState::Active {
@@ -175,18 +193,26 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Edit,
             },
             D::from_millis(0),
+            D::from_secs(6),
         ),
         (
-            "waiting",
-            ActivityState::Waiting {
-                reason: "permission?".into(),
-            },
-            D::from_secs(10),
+            "idle-a",
+            ActivityState::Idle,
+            D::from_secs(300),
+            D::from_secs(300),
+        ), // 5 min — wander/sleep cycle
+        (
+            "idle-b",
+            ActivityState::Idle,
+            D::from_secs(301),
+            D::from_secs(301),
         ),
-        ("thinking", ActivityState::Idle, D::from_secs(5)), // 5s ago — within thinking window
-        ("idle-a", ActivityState::Idle, D::from_secs(300)), // 5 min — wander/sleep cycle
-        ("idle-b", ActivityState::Idle, D::from_secs(301)),
-        ("idle-c", ActivityState::Idle, D::from_secs(303)),
+        (
+            "idle-c",
+            ActivityState::Idle,
+            D::from_secs(303),
+            D::from_secs(303),
+        ),
         (
             "couch-act",
             ActivityState::Active {
@@ -195,12 +221,14 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Read,
             },
             D::from_millis(140),
+            D::from_millis(140),
         ),
         (
             "couch-bk",
             ActivityState::Waiting {
                 reason: "review".into(),
             },
+            D::from_millis(0),
             D::from_millis(0),
         ),
         (
@@ -211,8 +239,14 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Bash,
             },
             D::from_millis(140),
+            D::from_millis(140),
         ),
-        ("floor-idle", ActivityState::Idle, D::from_millis(2_000)),
+        (
+            "floor-idle",
+            ActivityState::Idle,
+            D::from_millis(2_000),
+            D::from_millis(2_000),
+        ),
         (
             "floor-act2",
             ActivityState::Active {
@@ -221,12 +255,18 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 kind: ToolKind::Search,
             },
             D::from_millis(280),
+            D::from_millis(280),
         ),
-        ("floor-idle2", ActivityState::Idle, D::from_millis(3_000)),
+        (
+            "floor-idle2",
+            ActivityState::Idle,
+            D::from_millis(3_000),
+            D::from_millis(3_000),
+        ),
     ];
     const DEMO_REPOS: [&str; 3] = ["/demo/api", "/demo/web", "/demo/infra"];
     for i in desks {
-        let (key, state, age) = &agents[i % agents.len()];
+        let (key, state, since_event, since_entry) = &agents[i % agents.len()];
         // Keys must be unique across the full desk range so each desk slot gets its
         // own AgentId — suffixed once the archetypes cycle.
         let unique_key = if i < agents.len() {
@@ -245,9 +285,9 @@ fn fill_sample_agents(s: &mut SceneState, now: SystemTime, desks: std::ops::Rang
                 cwd: std::sync::Arc::from(PathBuf::from(cwd_str).as_path()),
                 label: unique_key.as_str().into(),
                 state: state.clone(),
-                state_started_at: now - *age,
-                created_at: now - *age,
-                last_event_at: now - *age,
+                state_started_at: now - *since_event,
+                created_at: now - *since_entry,
+                last_event_at: now - *since_event,
                 exiting_at: None,
                 pending_idle_at: None,
 
@@ -635,22 +675,50 @@ pub(crate) fn anim_scene(
         .map(|(i, _)| i)
         .collect();
 
-    if target == "desk" {
-        if let Some(d) = l.home_desks.first() {
-            eprintln!("ANIM target=desk buf_pos≈({}, {}) [home desk 0]", d.x, d.y);
+    // Which home desk to stage. `--anim-facing` picks one seated that way, so
+    // the back-turned pose is reachable at all; desk 0 is always viewer-facing.
+    let desk_idx = if target == "desk" {
+        let pick = (0..l.home_desks.len()).find(|&i| {
+            want_facing
+                .is_none_or(|f| l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)) == f)
+        });
+        match pick {
+            Some(i) => {
+                let d = l.home_desks[i];
+                eprintln!(
+                    "ANIM target=desk buf_pos≈({}, {}) [home desk {i}]",
+                    d.x, d.y
+                );
+                i
+            }
+            None => panic!(
+                "no home desk faces {:?} at {buf_w}x{buf_h} seed {floor_seed} — staging \
+                 another one would render a pose you did not ask for",
+                want_facing.expect("a None filter matches desk 0")
+            ),
         }
-    } else if let Some(&i) = target_idxs.first() {
-        let p = l.waypoints[i].pos;
-        eprintln!(
-            "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",
-            p.x,
-            p.y,
-            target_idxs.len()
-        );
     } else {
-        eprintln!(
-            "ANIM target={target}: no matching waypoint at {buf_w}x{buf_h} seed {floor_seed}"
-        );
+        0
+    };
+    // `desk` resolved above against `home_desks` and aborts there on no-match;
+    // it has no waypoint, so falling into the arms below reads as unmatched.
+    if target != "desk" {
+        if let Some(&i) = target_idxs.first() {
+            let p = l.waypoints[i].pos;
+            eprintln!(
+                "ANIM target={target} buf_pos=({}, {}) [{} matching waypoints, {n} total]",
+                p.x,
+                p.y,
+                target_idxs.len()
+            );
+        } else {
+            panic!(
+                "ANIM target={target}{}: no matching waypoint at {buf_w}x{buf_h} seed \
+                 {floor_seed}. Staging a DIFFERENT waypoint here is what let three \
+                 captures in one review claim a pose they never rendered.",
+                want_facing.map_or(String::new(), |f| format!(" facing {f:?}"))
+            );
+        }
     }
 
     // Brute-force an agent whose cycle-0 trip lands on the target.
@@ -663,7 +731,9 @@ pub(crate) fn anim_scene(
                 && (target == "desk"
                     || (n > 0 && target_idxs.contains(&waypoint_index_for_cycle(id, 0, n))))
         })
-        .unwrap_or_else(|| format!("/anim/{target}_fallback.jsonl"));
+        .unwrap_or_else(|| {
+            panic!("no agent id in 40k trips lands on {target} at seed {floor_seed}")
+        });
 
     let id = AgentId::from_transcript_path(&path);
     // The agent's ACTUAL cycle-0 target — NOT the first matching waypoint above,
@@ -677,9 +747,17 @@ pub(crate) fn anim_scene(
             wp.kind, wp.facing, wp.pos.x, wp.pos.y
         );
     }
-    // Fresh agent at `now` for a clean Seated start; the GIF pre-rolls `skip_ms`
-    // past the seated dwell so capture begins right as it walks out.
-    let skip_ms = seated_dwell_ms(id).saturating_sub(1_000);
+    // Fresh agent at `now` for a clean Seated start. `desk` is the one target
+    // whose SUBJECT is the seat, so it pre-rolls to the dwell's MIDPOINT and
+    // holds the pose; every other target is about the trip, so it pre-rolls to
+    // just before the walk-out. At `dwell - 1s` the desk clip spent 29% of its
+    // frames seated and the rest on an agent standing in an aisle.
+    let dwell = seated_dwell_ms(id);
+    let skip_ms = if target == "desk" {
+        dwell / 2
+    } else {
+        dwell.saturating_sub(1_000)
+    };
     eprintln!(
         "ANIM agent seated_dwell={}ms → pre-roll skip={skip_ms}ms",
         seated_dwell_ms(id)
@@ -700,7 +778,7 @@ pub(crate) fn anim_scene(
             last_event_at: now,
             exiting_at: None,
             pending_idle_at: None,
-            desk_index: GlobalDeskIndex(0),
+            desk_index: GlobalDeskIndex(desk_idx),
             floor_idx: 0,
             tool_call_count: 0,
             active_ms: 0,
@@ -809,6 +887,42 @@ mod vocabulary_tests {
             K::Island => Some("island"),
             K::SnackShelf => Some("snackshelf"),
             K::PhoneBooth | K::StandingDesk => None,
+        }
+    }
+
+    /// `waypoint_target("desk") == None` above says desk is the callers' special
+    /// case; this DRIVES the caller. Without it the desk arm fell through to the
+    /// no-match `panic!` and every `--anim desk` aborted for a whole branch —
+    /// `--anim` is in neither the justfile nor media.json, so nothing else looks.
+    #[test]
+    fn anim_scene_stages_every_target_it_advertises() {
+        let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        // Every target `--anim` advertises, at the tool's own default size — a
+        // sample of two was the coverage when this PR moved DESK_H and
+        // INTRA_POD_GAP_Y under every waypoint. A FACING is not swept: a size
+        // legitimately need not host a south-facing couch, and the staging
+        // panics loudly there by design.
+        for (target, facing) in [
+            "couch",
+            "sofa",
+            "chair",
+            "pantry",
+            "printer",
+            "vending",
+            "island",
+            "snackshelf",
+            "desk",
+        ]
+        .into_iter()
+        .map(|t| (t, None))
+        .chain([("desk", Some("north")), ("desk", Some("south"))])
+        {
+            let (scene, _) = anim_scene(now, target, 192, 80, 0, facing);
+            assert!(
+                !scene.agents.is_empty(),
+                "--anim {target}{} staged no agent",
+                facing.map_or(String::new(), |f| format!(" --anim-facing {f}"))
+            );
         }
     }
 

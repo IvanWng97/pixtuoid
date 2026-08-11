@@ -21,7 +21,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest + gen-guides-check + gitenv-selftest) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest + gen-guides-check + gitenv-selftest + env-paths + prose) → NOTE: `prose` fetches `origin/main`, so preflight now needs network → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```
@@ -249,7 +249,35 @@ issue labels (e.g. `bug` / `enhancement` / `upstream-drift` / `needs-human-verif
 
 What to run and when, for an agent-driven change:
 
-- **before code**, if non-trivial (new seam / ≥3 files), plan against [`.github/prompts/impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) → **touched the `--json` / `SourceStatus` / `OutcomeRow` shape?** `just gen-contract` (regenerates BOTH committed schemas + the Raycast types) (else the Raycast `gen:contract` diff + `tsc` go red) → **before push** `just preflight` (lint → clippy → hack → test; never pipe through `tail`/`head` — it eats the exit code; the [CI-only gates](#ci-gates) — semver, gen-check — still run separately) → **before merge** the two-lens review (2+ agents, differentiated lenses; see [Pull requests](#pull-requests)) → **dogfood a source/lifecycle change** with `pixtuoid run --headless --projects-root ~/.claude/projects` vs live CC, or replay hermetically via `scripts/replay-fixture.sh` / `just openclaw-e2e`. **Touched OpenClaw?** every one of its three e2e tiers now has a justfile recipe, deliberately — the cc-backend script shipped BROKEN for a whole release because nothing invoked it, so a summary-format change rotted it unseen: `just openclaw-e2e` (hermetic, free) → `just openclaw-multi-e2e` (N REAL gateways, free, needs `openclaw` on PATH — the tier that catches multi-instance render/crowding) → `just openclaw-backend-e2e` (real gateway AND one BILLED model turn; run deliberately, not casually). Their `expect_line` pollers are DELIBERATELY not hoisted into a shared `scripts/lib` — adjudicated three times now (two review lenses + the online bot), so do not re-raise it without new evidence. The bodies look alike but their retry bounds await different EVENT CLASSES: the hermetic tier's 40x0.2s bounds an in-process shim -> HookRouter -> reducer -> summary hop, while the multi-gateway tier's 120x0.3s bounds N real `openclaw gateway run` node cold boots — and cc-backend's 120x0.25s for ONE real gateway PREDATES the multi-gateway work, so "a real gateway appears" is an established ~30s class and "a hermetic transition lands" an 8s one. There is no single correct shared value, so a shared helper would take the timing as parameters and hide ~12 lines behind a 4-argument interface (the shallow-module trade). The drift that actually bit — a `daemons=` format change rotting a script unseen — is mitigated by the recipes ABOVE, not by sharing the poller. The in-FILE duplication WAS collapsed: live-e2e's single-state `expect` delegates to its own `expect_line`. Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py` (wire-format drift); the `risk radar` PR workflow (`scripts/risk-radar.py` / `just risk-radar`) — deterministic path matching that posts the documented blast-radius escalations (shim never-panic audit, motion render-and-watch, reducer interaction-graph trace, …) as a sticky PR comment so prose-only escalation can't be silently skipped (#198); and `just comment-lint` (`scripts/comment-lint.py` over the ast-grep rule in `.ast-grep/rules/`) — flags NEW runs of 3+ consecutive comment lines inside a fn body on a PR's changed lines, in Rust (`//`) AND Python (`#`) (the "fn-body comments ≤2 lines" comment-value factor), diff-scoped so the ~5k pre-existing legitimate WHY comments are grandfathered; the CI `comment-lint` job emits inline `::warning::` annotations, never blocks.
+| when | run | authority |
+|---|---|---|
+| before code, if non-trivial (new seam / ≥3 files) | plan against [`impl-plan.prompt.md`](../.github/prompts/impl-plan.prompt.md) | — |
+| touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` | [`CLAUDE.md`](../CLAUDE.md) "Build & test" |
+| before push | `just preflight` | same — including why never to pipe it |
+| before merge | the two-lens review | [Pull requests](#pull-requests) |
+| a source/lifecycle change | dogfood against live CC, or replay hermetically | the three tiers below |
+
+The three OpenClaw e2e tiers, cheapest first — none runs in CI:
+
+- `just openclaw-live-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
+- `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
+- `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
+
+Their `expect_line` pollers are deliberately not shared; the WHY lives at the
+definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
+is already looking.
+
+Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
+(wire-format drift); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
+path matching that posts the documented blast-radius escalations as a sticky PR comment so
+prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
+arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
+become a required check.
+
+Which `comment-lint` arms BLOCK is stated once, in `gate_fails`' docstring in
+`scripts/comment-lint.py` — pinned in both directions by that script's selftest.
+It is not restated here; this file said "three arms" for one commit after the
+code said two, and the online bot is what caught it.
 
 ## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 

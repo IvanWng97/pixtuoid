@@ -102,6 +102,8 @@ echo "  headless pixtuoid up (pid $PIXPID), HookRouter owns $SOCK"
 FAILED=0
 # Wait until the LATEST `daemons=` line contains `want` — a substring match, so a
 # per-instance assertion does not have to name every sibling.
+# Deliberately NOT shared with the sibling tiers' pollers — the WHY (differing
+# retry-bound event classes) is at `openclaw-live-e2e.sh`'s `expect_line`.
 expect_line() {
     local want="$1" label="$2" last
     for _ in $(seq 1 120); do

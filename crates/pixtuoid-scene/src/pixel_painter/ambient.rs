@@ -426,23 +426,10 @@ mod tests {
     #[test]
     fn sun_spot_scales_with_beam_strength() {
         use crate::pixel_painter::background::Weather;
-        use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        // 07:00 → East-wall spot; weather varies by day, so search days for
-        // each. Calendar arithmetic (NaiveDate + Days), NOT
-        // `with_ymd_and_hms(2026, 1, day, …)`: a raw day > 31 is an invalid
-        // date and panics in any timezone whose day-hash sequence lacks a
-        // wanted weather within January.
-        let morning = |day: u32| -> SystemTime {
-            let date = chrono::NaiveDate::from_ymd_opt(2026, 1, 1).expect("valid base date")
-                + chrono::Days::new(u64::from(day));
-            chrono::Local
-                .from_local_datetime(&date.and_hms_opt(7, 0, 0).expect("valid time"))
-                .single()
-                .expect("unambiguous local 07:00")
-                .into()
-        };
+        // 07:00 → East-wall spot; weather varies by day, so search days for each.
+        let morning = |day: u32| crate::localclock::on_day(day, 7);
         let find = |want: Weather| (0..60u32).map(morning).find(|t| weather_state(*t) == want);
         let clear_t = find(Weather::Clear).expect("a clear morning");
         let snow_t = find(Weather::Snow).expect("a snow morning");
@@ -489,14 +476,9 @@ mod tests {
     // no-op must hold whichever early-return catches it.
     #[test]
     fn sun_spot_paints_nothing_at_the_exact_sunrise_instant() {
-        use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
-        let sunrise: SystemTime = chrono::Local
-            .with_ymd_and_hms(2026, 1, 1, 5, 0, 0)
-            .single()
-            .unwrap()
-            .into();
+        let sunrise = crate::localclock::at_hour(5);
         let spot = sun_on_wall(sunrise).expect("sun is up (just risen) at 05:00");
         assert_eq!(spot.intensity, 0.0, "altitude is exactly zero at sunrise");
 
@@ -543,18 +525,11 @@ mod tests {
 
     #[test]
     fn dust_motes_clamp_to_a_tiny_buffer() {
-        use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         // 07:00 Clear morning → sun up + full beam.
         let now = (1..=60u32)
-            .map(|day| -> SystemTime {
-                chrono::Local
-                    .with_ymd_and_hms(2026, 1, day, 7, 0, 0)
-                    .single()
-                    .unwrap()
-                    .into()
-            })
+            .map(|day| crate::localclock::on_day(day, 7))
             .find(|t| weather_state(*t) == crate::pixel_painter::background::Weather::Clear)
             .expect("a clear morning");
         // No assertion: the test is that the clamped, out-of-bounds puts on a
@@ -573,7 +548,6 @@ mod tests {
 
     #[test]
     fn sun_spot_zero_wall_band_returns_early() {
-        use chrono::TimeZone;
         let theme = &crate::theme::NORMAL;
         // top_margin == WALL_BAND_TO_TOP_MARGIN → wall_band_h saturating_sub to 0.
         let mut layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
@@ -581,13 +555,7 @@ mod tests {
         // A real beam under Clear, so execution reaches the wall_band_h == 0
         // guard rather than an earlier return.
         let clear_morning = (1..=60u32)
-            .map(|day| -> SystemTime {
-                chrono::Local
-                    .with_ymd_and_hms(2026, 1, day, 7, 0, 0)
-                    .single()
-                    .unwrap()
-                    .into()
-            })
+            .map(|day| crate::localclock::on_day(day, 7))
             .find(|t| weather_state(*t) == crate::pixel_painter::background::Weather::Clear)
             .expect("a clear morning");
         let fill = Rgb {

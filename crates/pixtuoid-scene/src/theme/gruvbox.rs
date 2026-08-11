@@ -55,11 +55,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 32,
             b: 33,
         },
-        cubicle_divider: Rgb {
-            r: 80,
-            g: 73,
-            b: 69,
-        },
         runner_base: Rgb {
             r: 70,
             g: 60,
@@ -184,6 +179,11 @@ pub static GRUVBOX: Theme = Theme {
             g: 128,
             b: 25,
         },
+        desk_lamp: Rgb {
+            r: 254,
+            g: 190,
+            b: 100,
+        },
         night_tint: Rgb {
             r: 18,
             g: 18,
@@ -294,6 +294,11 @@ pub static GRUVBOX: Theme = Theme {
             r: 80,
             g: 73,
             b: 69,
+        },
+        monitor_idle: Rgb {
+            r: 56,
+            g: 84,
+            b: 96,
         },
         sleep_z: Rgb {
             r: 131,

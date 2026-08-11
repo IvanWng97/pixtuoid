@@ -189,6 +189,15 @@ impl FurnitureDef {
         super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
+    /// The VISUAL rect — `ground_rect`'s twin on the other geometry axis. A sprite
+    /// legitimately overhangs its ground base, so this is strictly the larger box.
+    pub(super) fn visual_rect(&self, anchor: Anchor, pos: Point) -> (Point, Size) {
+        (
+            super::placement::anchored_top_left(anchor, pos, self.visual.w, self.visual.h),
+            self.visual,
+        )
+    }
+
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
@@ -788,17 +797,37 @@ pub const WALKING_Y_OFF: u16 = 12;
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
 /// Offsets from a home desk's top-left to the agent's WALK anchor. Chosen so
-/// `walking_anchor(desk_walk_anchor(d)) == seated_anchor(d)` — the agent settles
-/// exactly onto its north seat with no arrival pop, just clear of the desk
-/// obstacle. That identity is locked by a `pixel_painter` test.
+/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
+/// — the agent settles onto its seat with no arrival pop. Only the Y half
+/// derives from this const; the X half is a SECOND formula that agrees by
+/// arithmetic, not by construction. The identity is locked by
+/// `desk_walk_anchor_settles_exactly_on_the_seat` in `pixel_painter/tests.rs`.
 pub(crate) const DESK_WALK_X_OFF: u16 = (DESK_W - CHARACTER_SPRITE_W) / 2 + 4;
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
-/// The cell an agent walks to/from for its home `desk` (top-left Point).
-pub fn desk_walk_anchor(desk: Point) -> Point {
+pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
+
+// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the chair paints UNDER its occupant.
+const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
+
+/// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
+pub fn desk_walk_anchor_facing(desk: Point, facing: Facing) -> Point {
+    let y_off = match facing {
+        Facing::North => DESK_WALK_Y_OFF_BACK,
+        Facing::South | Facing::East | Facing::West => DESK_WALK_Y_OFF,
+    };
     Point {
         x: desk.x + DESK_WALK_X_OFF,
-        y: desk.y + DESK_WALK_Y_OFF,
+        y: desk.y + y_off,
+    }
+}
+
+/// Where a desk's ceiling tube pools its light — derived from the SEAT, not the desk origin, since the facing places the workstation.
+pub fn desk_ceiling_pool_center(desk: Point, facing: Facing) -> Point {
+    let walk = desk_walk_anchor_facing(desk, facing);
+    Point {
+        x: walk.x,
+        y: walk.y.saturating_sub(WALKING_Y_OFF / 2),
     }
 }
 
@@ -810,6 +839,8 @@ pub fn desk_walk_anchor(desk: Point) -> Point {
 /// renders AT the approach cell rather than a fixed seat. The post-A\* settle walks
 /// `approach_point → S`; when `S` is blocked (meeting sofa, desk) that final
 /// segment is the "sit down" motion, not pathfinding.
+///
+/// The `Desk` arm hardcodes `Facing::South` — a future caller must pass the facing.
 pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
     if !furniture_def(kind).occupies_pos {
         return None;
@@ -823,8 +854,8 @@ pub fn seated_foot_cell(kind: Furniture, pos: Point) -> Option<Point> {
         },
         // waypoint render (`== walking_anchor`): S == pos.
         Furniture::IslandStand => pos,
-        // desk render is `seated_anchor`; its inverse is `desk_walk_anchor`.
-        Furniture::Desk => desk_walk_anchor(pos),
+        // desk render is `seated_anchor`; its inverse is `desk_walk_anchor_facing`.
+        Furniture::Desk => desk_walk_anchor_facing(pos, crate::layout::Facing::South),
         // The early return handled every obstacle kind. A FUTURE occupies_pos seat
         // that forgets its arm here must fail loud, not silently settle the
         // occupant on the blocked furniture centre (walk-through-desk bugs).
@@ -1241,5 +1272,33 @@ mod tests {
                 "sprite_name {n:?} is not a registered OPTIONAL_FURNITURE_ANIMATIONS key"
             );
         }
+    }
+
+    #[test]
+    fn the_desk_light_follows_the_seat_and_leaves_a_far_seat_where_it_was() {
+        // The lift the pool hardcoded before it read the facing.
+        const HISTORICAL_CY_LIFT: u16 = 2;
+        let desk = Point { x: 40, y: 30 };
+
+        let far = desk_ceiling_pool_center(desk, Facing::South);
+        assert_eq!(
+            far,
+            Point {
+                x: desk.x + DESK_W / 2,
+                y: desk.y - HISTORICAL_CY_LIFT,
+            },
+            "a viewer-facing desk must light exactly where the hardcoded lift did"
+        );
+
+        let near = desk_ceiling_pool_center(desk, Facing::North);
+        assert!(
+            near.y > desk.y,
+            "a back-turned desk seats its occupant SOUTH, so its light must move \
+             there too: {near:?} vs desk {desk:?}"
+        );
+        assert!(
+            near.y < desk_walk_anchor_facing(desk, Facing::North).y,
+            "...but stay on the body rather than drop to their feet: {near:?}"
+        );
     }
 }

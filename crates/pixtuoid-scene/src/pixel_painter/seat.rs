@@ -220,7 +220,7 @@ impl SeatView {
     /// (`sim::resolve_characters`) AND its label twin
     /// (`anchors::character_anchor`) derive the anchor from, so the badge can
     /// never float above the sitter. The home-DESK sitter is NOT covered here —
-    /// it anchors via `seated_anchor(desk, w)`.
+    /// it anchors via `seated_anchor_facing(desk, w, facing)`.
     pub(super) fn waypoint_render_anchor(self, stand: Point, sprite_w: u16) -> (Point, u16) {
         // UPRIGHT height REUSES the offset `waypoint_anchor` subtracts, so the
         // obstacle z-key `anchor.y + sprite_h` recovers the feet row BY
@@ -248,7 +248,7 @@ impl SeatView {
 /// Covers the home desk too: `layout.home_desks` are NOT waypoints, but the
 /// chair is a settle target once the desk's arrival glides onto it.
 pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView, u16)> {
-    use crate::layout::{seated_foot_cell, Furniture};
+    use crate::layout::seated_foot_cell;
     layout
         .waypoints
         .iter()
@@ -259,14 +259,17 @@ pub(super) fn settle_seat_view(cell: Point, layout: &Layout) -> Option<(SeatView
             })
         })
         .or_else(|| {
-            layout.home_desks.iter().find_map(|&desk| {
-                (seated_foot_cell(Furniture::Desk, desk) == Some(cell))
-                    .then_some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF))
+            layout.home_desks.iter().enumerate().find_map(|(i, &desk)| {
+                let facing = layout.desk_facing(FloorLocalDeskIndex(i));
+                (crate::layout::desk_walk_anchor_facing(desk, facing) == cell).then(|| {
+                    let view = if facing == crate::layout::Facing::North {
+                        SeatView::Back
+                    } else {
+                        SeatView::Front
+                    };
+                    // The z-key IS the chair row: a viewer-facing sitter therefore sorts BEHIND the monitor, a back-turned one IN FRONT.
+                    (view, cell.y)
+                })
             })
         })
 }
-
-/// The home-desk sitter's z-key offset south of `desk`: `seated_anchor.y(=desk.y
-/// − 8) + sprite_h(12) = desk.y + 4`. Below the desk furniture key (`desk.y + 7`)
-/// so the sitter and its sit-down glide always sort behind the desk monitor.
-pub(super) const DESK_SEAT_Z_OFF: u16 = 4;

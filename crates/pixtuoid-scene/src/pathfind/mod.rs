@@ -322,7 +322,7 @@ pub fn point_in_walkable_cell(mask: &WalkableMask, p: Point) -> bool {
     cx < cell_w && cy < cell_h && cell_walkable(mask, &OccupancyOverlay::new(), cx, cy)
 }
 
-/// Snap a pixel-space `Point` to the nearest walkable coarse-cell *center* on
+/// Snap a pixel-space `Point` into the nearest walkable coarse CELL on
 /// the STATIC mask. `None` when the grid is degenerate or no walkable cell exists
 /// within `MAX_SNAP_RADIUS`. Distinct from `find_path`'s internal snapping, whose
 /// `reconstruct` overwrites the polyline endpoints with the RAW `from`/`to` — a
@@ -331,7 +331,15 @@ pub fn snap_point_to_walkable(mask: &WalkableMask, p: Point) -> Option<Point> {
     let (cell_w, cell_h) = grid_dims(mask)?;
     let empty = OccupancyOverlay::new();
     let (cx, cy) = snap(mask, &empty, cell_of(p), cell_w, cell_h, MAX_SNAP_RADIUS)?;
-    Some(cell_center(cx, cy))
+    let centre = cell_center(cx, cy);
+    if mask.is_walkable(centre.x, centre.y) {
+        return Some(centre);
+    }
+    // A cell passes at `COARSE_CELL_WALKABLE_MIN` open pixels, so its centre can be a blocked one.
+    let (x0, y0) = (cx * COARSE_CELL_SIZE, cy * COARSE_CELL_SIZE);
+    (y0..y0 + COARSE_CELL_SIZE)
+        .flat_map(|y| (x0..x0 + COARSE_CELL_SIZE).map(move |x| Point { x, y }))
+        .find(|c| mask.is_walkable(c.x, c.y))
 }
 
 fn reconstruct(

@@ -99,16 +99,33 @@ pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
     strength: f32,
     theme: &Theme,
 ) {
-    let warm = theme.lighting.floor_lamp_halo;
+    /// A room-corner fixture, so much wider than a desk lamp's pool.
     const RADIUS: u16 = 11;
+    paint_warm_halo(
+        buf,
+        cx,
+        cy,
+        RADIUS,
+        strength,
+        theme.lighting.floor_lamp_halo,
+    );
+}
+
+/// Shared so the floor lamp and the desk lamps cannot drift to different falloffs.
+pub(in crate::pixel_painter) fn paint_warm_halo(
+    buf: &mut RgbBuffer,
+    cx: u16,
+    cy: u16,
+    radius: u16,
+    strength: f32,
+    warm: Rgb,
+) {
     if strength <= 0.0 {
         return;
     }
-    let min_x = cx.saturating_sub(RADIUS);
-    let max_x = (cx + RADIUS).min(buf.width());
-    let min_y = cy.saturating_sub(RADIUS);
-    let max_y = (cy + RADIUS).min(buf.height());
-    let r2max = (RADIUS as f32) * (RADIUS as f32);
+    let (min_x, max_x) = (cx.saturating_sub(radius), (cx + radius).min(buf.width()));
+    let (min_y, max_y) = (cy.saturating_sub(radius), (cy + radius).min(buf.height()));
+    let r2max = (radius as f32) * (radius as f32);
     for y in min_y..max_y {
         for x in min_x..max_x {
             let dx = x as f32 - cx as f32;

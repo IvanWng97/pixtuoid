@@ -184,6 +184,9 @@ pub(in crate::pixel_painter) struct TimeOfDayLook {
     pub(in crate::pixel_painter) spill_strength: f32,
     pub(in crate::pixel_painter) spill_slant: f32,
     pub(in crate::pixel_painter) darkness: f32,
+    /// The cast this hour + weather puts on a LIT OBJECT: the cool night term
+    /// then the warm day one, applied in order like the floor's two overlays.
+    pub(in crate::pixel_painter) object_wash: [(Rgb, f32); 2],
 }
 
 pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme) -> TimeOfDayLook {
@@ -221,12 +224,27 @@ pub(in crate::pixel_painter) fn time_of_day_look(now: SystemTime, theme: &Theme)
         Body::Moon => (0.0, 0.0),
     };
 
+    // Below the floor's own share: a sprite carries art contrast a full-strength pass would swallow.
+    const OBJECT_WASH_SHARE: f32 = 0.55;
+    let darkness = 1.0 - exterior;
+    // SUPERPOSED, never chosen between: the floor runs both overlays every frame,
+    // so picking one arm on `interior >= darkness` stepped every object 16-27 luma
+    // in the frame that crossed it while the floor slid smoothly under them.
+    let object_wash = [
+        (
+            theme.lighting.night_tint,
+            darkness * NIGHT_FLOOR_DIM * OBJECT_WASH_SHARE,
+        ),
+        (SUN_TINT, interior * DAYLIGHT_FLOOR_LIFT * OBJECT_WASH_SHARE),
+    ];
+
     TimeOfDayLook {
         glass_a,
         glass_b,
         spill_strength,
         spill_slant,
-        darkness: 1.0 - exterior,
+        darkness,
+        object_wash,
     }
 }
 
@@ -310,6 +328,19 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
     blend_floor_band(buf, top_y, bottom_y, theme.lighting.night_tint, s);
 }
 
+/// How far a fully dark hour dims the interior.
+pub(in crate::pixel_painter) const NIGHT_FLOOR_DIM: f32 = 0.45;
+
+/// How far a fully lit hour lifts it.
+pub(in crate::pixel_painter) const DAYLIGHT_FLOOR_LIFT: f32 = 0.22;
+
+/// Pale warm midday sunlight — theme-agnostic, since daylight is daylight.
+const SUN_TINT: Rgb = Rgb {
+    r: 255,
+    g: 246,
+    b: 224,
+};
+
 /// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
 /// and the model's only positive day term (without it a clear noon leaves the
 /// floor at its plain brownish base). Sun enters regardless of occupancy, so —
@@ -320,12 +351,6 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
     bottom_y: u16,
     strength: f32,
 ) {
-    // Pale warm midday sunlight — theme-agnostic, since daylight is daylight.
-    const SUN_TINT: Rgb = Rgb {
-        r: 255,
-        g: 246,
-        b: 224,
-    };
     let s = strength.clamp(0.0, 0.40);
     blend_floor_band(buf, top_y, bottom_y, SUN_TINT, s);
 }
@@ -412,7 +437,6 @@ pub(in crate::pixel_painter) fn moon_phase(now: SystemTime) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
@@ -488,34 +512,23 @@ mod tests {
         }
     }
 
-    /// Local hour `h`, minute `m` on a fixed date — TZ-independent because the
-    /// code under test decodes the input back into `chrono::Local`.
+    use crate::localclock::{at_hour_min, on_day};
+
+    /// Local `h:m` on the reference day — `localclock` owns the construction.
     fn at_hour(h: u32, m: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, 1, h, m, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        at_hour_min(h, m)
     }
 
     /// Local 02:00 (always night) on a given January day. Weather varies by day
     /// at a fixed hour, so searching days finds different weathers/moon phases.
     fn night_on(day: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, day, 2, 0, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        on_day(day, 2)
     }
 
     /// Local midnight on a given January day — near the night arc's apex, so
     /// it's close to the brightest instant of that night.
     fn midnight_on(day: u32) -> SystemTime {
-        chrono::Local
-            .with_ymd_and_hms(2026, 1, day, 0, 0, 0)
-            .single()
-            .expect("local time should be unambiguous")
-            .into()
+        on_day(day, 0)
     }
 
     #[test]

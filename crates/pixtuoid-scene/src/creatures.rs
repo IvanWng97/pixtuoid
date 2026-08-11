@@ -53,11 +53,17 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             x: ((z >> 32) % u64::from(w)) as u16,
             y: (z % u64::from(h)) as u16,
         };
-        if layout.walkable.is_walkable(last.x, last.y) {
+        // Walkable is not enough: a cell under a desk's overhang is walkable by
+        // invariant #6 and painted over anyway, and the mascot RESTS at this
+        // point for most of its cycle. Walking through one stays fine.
+        if layout.walkable.is_walkable(last.x, last.y) && layout.is_visually_clear(last) {
             return last;
         }
     }
-    snap_point_to_walkable(&layout.walkable, last).unwrap_or(last)
+    // `last` was just REJECTED by the loop; the door threshold is walkable by construction.
+    snap_point_to_walkable(&layout.walkable, last)
+        .or(layout.door_threshold)
+        .unwrap_or(last)
 }
 
 /// A centre-anchored sprite's `(w, h)`, or `(0, 0)` when the pack lacks the
@@ -88,6 +94,17 @@ fn clamp_sprite_inside(p: Point, (fw, fh): (u16, u16), layout: &Layout) -> Point
         x: axis(p.x, layout.walkable.width(), fw),
         y: axis(p.y, layout.walkable.height(), fh),
     }
+}
+
+fn place_creature(p: Point, extent: (u16, u16), layout: &Layout) -> Point {
+    let clamped = clamp_sprite_inside(p, extent, layout);
+    if layout.walkable.is_walkable(clamped.x, clamped.y) {
+        return clamped;
+    }
+    // Snapping is free to move the point back out past the edge the clamp pulled it in from.
+    snap_point_to_walkable(&layout.walkable, clamped)
+        .map(|s| clamp_sprite_inside(s, extent, layout))
+        .unwrap_or(clamped)
 }
 
 /// Pet roaming the whole office: each 40s cycle picks a destination, walks there
@@ -129,7 +146,7 @@ pub(crate) fn pet_position(
         let pos = walk_between(layout, prev, dest, t);
         let anim = kind.walk_anim();
         return Some((
-            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            place_creature(pos, sprite_extent(pack, anim), layout),
             flip,
             anim,
             frame_idx,
@@ -145,7 +162,7 @@ pub(crate) fn pet_position(
         kind.sit_anim()
     };
     Some((
-        clamp_sprite_inside(rest_pos, sprite_extent(pack, anim), layout),
+        place_creature(rest_pos, sprite_extent(pack, anim), layout),
         false,
         anim,
         0,
@@ -353,7 +370,7 @@ pub(crate) fn mascot_position(
     let home = mascot_home(layout)?;
     let anchor = |pos: Point, anim: &'static str, frame_idx: usize| {
         (
-            clamp_sprite_inside(pos, sprite_extent(pack, anim), layout),
+            place_creature(pos, sprite_extent(pack, anim), layout),
             anim,
             frame_idx,
         )
@@ -613,6 +630,64 @@ mod tests {
             mascot_elevator(&layout),
             Some(expected),
             "no door → snapped corridor-top centre, not None and not a door cell"
+        );
+    }
+
+    /// A creature parked inside a desk's overhang reads as debris, not a creature
+    /// — the OpenClaw demo shipped its own mascot half-behind a monitor for most
+    /// of a 9-second clip. Walkable alone cannot see it: the cell IS walkable
+    /// (invariant #6 makes the mask a ground projection), it is merely painted over.
+    ///
+    /// The oracle is built HERE from the layout's own collections, NOT from
+    /// `is_visually_clear` — asserting the predicate on points the loop accepted
+    /// because of that same predicate is a tautology, and it is what let the first
+    /// version ship missing the pantry counter and the aquarium.
+    #[test]
+    fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
+        use crate::layout::{Anchor, Furniture};
+        let mut checked = 0u32;
+        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180), (320, 200)] {
+            for seed in 0..24u64 {
+                let Some(l) = crate::layout::Layout::compute(w, h, None) else {
+                    continue;
+                };
+                // Independent rects: the pantry counter from its RUNTIME size, the
+                // aquarium from the lounge, both of which the const table cannot give.
+                let mut boxes: Vec<(crate::layout::Point, crate::layout::Size)> = Vec::new();
+                for wp in &l.waypoints {
+                    if wp.kind == crate::layout::WaypointKind::Pantry {
+                        let sz = l.pantry_counter_size();
+                        boxes.push((
+                            crate::layout::anchored_top_left(Anchor::Center, wp.pos, sz.w, sz.h),
+                            sz,
+                        ));
+                    }
+                }
+                if let Some(t) = l.lounge.and_then(|lo| lo.fish_tank) {
+                    let sz = crate::layout::furniture_def(Furniture::FishTank).visual;
+                    boxes.push((
+                        crate::layout::anchored_top_left(Anchor::Center, t, sz.w, sz.h),
+                        sz,
+                    ));
+                }
+                for n in 0..24u64 {
+                    let p = walkable_target(&l, seed, n);
+                    if !l.walkable.is_walkable(p.x, p.y) {
+                        continue;
+                    }
+                    for (tl, sz) in &boxes {
+                        assert!(
+                            !(p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h),
+                            "{w}x{h} seed {seed} cycle {n}: target {p:?} rests inside {tl:?}+{sz:?}"
+                        );
+                    }
+                    checked += 1;
+                }
+            }
+        }
+        assert!(
+            checked > 500,
+            "the sweep must actually reach targets, saw {checked}"
         );
     }
 

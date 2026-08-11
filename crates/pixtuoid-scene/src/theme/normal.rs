@@ -54,11 +54,6 @@ pub static NORMAL: Theme = Theme {
             g: 42,
             b: 54,
         },
-        cubicle_divider: Rgb {
-            r: 72,
-            g: 82,
-            b: 104,
-        },
         runner_base: Rgb {
             r: 160,
             g: 120,
@@ -183,6 +178,11 @@ pub static NORMAL: Theme = Theme {
             g: 210,
             b: 130,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 210,
+            b: 130,
+        },
         night_tint: Rgb {
             r: 18,
             g: 22,
@@ -266,8 +266,8 @@ pub static NORMAL: Theme = Theme {
             b: 0x2f,
         },
         tank_fish_alt: Rgb {
-            // NOT the lobster carapace reds (#d2402f/#e85540/#c83828/#9e2a20):
-            // the mascot harness counts those RGBs as exclusive presence proof.
+            // Distinct from the lobster's carapace reds so the two read apart on
+            // screen; the mascot harness no longer keys on those RGBs.
             r: 0xd9,
             g: 0x4f,
             b: 0x1f,
@@ -293,6 +293,11 @@ pub static NORMAL: Theme = Theme {
             r: 180,
             g: 200,
             b: 200,
+        },
+        monitor_idle: Rgb {
+            r: 72,
+            g: 112,
+            b: 145,
         },
         sleep_z: Rgb {
             r: 110,

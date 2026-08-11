@@ -89,7 +89,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                         [MeetingSofaBody/MeetingTable/KitchenIsland/FloorLamp/LoungeSideTable].
 │                         Only PLANT_FOOTPRINT [6×3, shared by the TWO 6px-pot plants: Ficus + Tall;
 │                         Flower (2×2) and Succulent (3×2) carry their own shallow south-anchored pot
-│                         strips] + DESK_APPROACH/desk_walk_anchor
+│                         strips] + DESK_APPROACH/desk_walk_anchor_facing
 │                         live alongside; walls use the linear WALL_THICK_H/V [owned by rooms::walls, not this table]),
 │                       placement.rs (Anchor {Center,TopLeft} + anchored_top_left + z_sort_row — the ONE
 │                         convention for WHERE a box sits relative to its `pos` [footprint origin = sprite
@@ -185,6 +185,11 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   idle-wander knobs, a function of the snapshot inputs only: no routing, no per-frame
 │                   history; pure/tests.rs sibling),
 │                   tests.rs (#[cfg(test)] mod tests: unit + frame-by-frame continuity guards for the routed half)
+├── localclock.rs   TEST-ONLY local wall-clock instants: at_hour / at_hour_min / on_day. The sky model
+│                   decodes `now` back through chrono::Local, so a test built on epoch offsets really
+│                   asserts on the runner's $TZ — green in CI (UTC), red on a clean UTC-6 checkout. A
+│                   `sweep` module scans this crate's src for the raw construction forms, so the next
+│                   hour-dependent test cannot re-invent one.
 ├── motion/         per-agent walk-timing state, split production vs tests:
 │                   mod.rs (MotionState: entry/exit/snap_back/wander/walk_path fields — exit and
 │                   snap_back are WalkLeg{started_at,profile,from} structs (named fields, was a
@@ -247,7 +252,20 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   ../sprites/default/, watched by pixtuoid-scene's build.rs for rerun-if-changed) →
 │                   sprite::format::load_pack_from_strings; --pack-dir merges OPTIONAL_FURNITURE over it
 ├── cutaway/        the ENRICHED orthographic cutaway PROFILE — the sibling renderer, not a
-│                   fidelity knob on the classic one. The brief models two renderers over ONE
+│                   fidelity knob on the classic one, and NOT converging on it. It is being
+│                   built toward an OWNER-SUPPLIED REFERENCE RENDER (a dark room of workers seen
+│                   from behind); classic is the shipping look, this is the target look, and they
+│                   are not the same picture. So parity with classic is owed ONLY where the
+│                   SIMULATION speaks — which desk an agent sits at, which side of it, where they
+│                   walk — because that is one world observed twice. Everything else (materials,
+│                   light, desk art, density) is this profile's own, judged against the reference,
+│                   and "make it match classic" is the WRONG repair for a difference there.
+│                   It is deliberately NOT user-reachable yet: `render_cutaway`'s only caller is
+│                   `pixtuoid/examples/cutaway_snapshot`, `run` paints classic unconditionally, and
+│                   `--graphics` is a `doctor`-only capability report (see the binary guide). It
+│                   stays that way until the reference look is actually reached — a half-built
+│                   profile behind a flag is a worse release than no profile.
+│                   The brief models two renderers over ONE
 │                   shared scene frame, and that frame already exists: `pixel_painter::sim.rs`'s
 │                   `sim_step` returns an owned immutable `SimFrame`, so this module becomes its
 │                   SECOND reader and no new seam is invented. shade.rs = the vocabulary the
@@ -281,13 +299,22 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 │                   (`"D" = #8b5a2b`), NOT the theme — `furniture.wood_top` is a different material
 │                   that reads nearly identical to the carpet in tokyo-night — and sampling means a
 │                   custom `--pack-dir` desk gets a matching front face for free.
-│                   (3) a desk-seated pose is RE-PROJECTED: `CharacterPlacement.seat_desk`
+│                   (3) a desk-seated pose is NOT re-projected. `CharacterPlacement.seat_desk`
 │                   carries the desk the sim seated an agent at, because `anchor` is already
-│                   projected FOR CLASSIC (it raises the sprite so the monitor overhangs and hides
-│                   the lower body) and a second profile cannot recover the desk from it. Classic
-│                   ignores the field; the cutaway anchors at the desk's own row so the head reads
-│                   OVER the surface. That field is what "one simulation, two projections" has to
-│                   mean in practice — without it the shared frame silently belongs to one painter.
+│                   projected and a second profile cannot recover the desk from it — but it is the
+│                   CHAIR and the suppressed contact shadow that read it, never the seat side.
+│                   Which side of their desk someone sits on is a SIM fact (`layout.desk_facings`,
+│                   through `seated_anchor_facing`), so both profiles get it from the same place.
+│                   `cutaway_seat_anchor` used to override it onto the desk's own row for EVERY
+│                   occupant, which was right while the sim seated everyone far-side and this
+│                   profile wanted them near; once a pod's two rows started facing opposite ways
+│                   the override began contradicting the sim, and it was DELETED rather than made
+│                   facing-aware (the row it hardcoded is exactly what the shared anchor yields for
+│                   a back-turned desk). Note the direction of that repair: it removed a
+│                   divergence about WHERE SOMEONE IS, which is the only class parity is owed on.
+│                   Diverging on how the desk is DRAWN is expected and fine — classic ships
+│                   `desk_north.sprite` (raised monitor) and this profile has no equivalent yet,
+│                   which is a to-do against the REFERENCE, not a parity bug.
 │                   (4) MIXED DENSITY: `densest_art(pack, name, scale)` prefers a `<name>@<N>x`
 │                   pack variant (see the core guide) over block-scaling the base — picking the
 │                   densest one that DIVIDES the render scale and blitting it at the remainder,
@@ -327,7 +354,7 @@ src/                (the pixtuoid-scene crate root; default pack at ../sprites/d
 ├── render_scale.rs THE layout-space ↔ buffer-space seam. Every layout coordinate is a buffer
 │                   pixel today, so the office's SIZE and its RESOLUTION are ONE axis — doubling
 │                   the buffer builds a room with 4× the desks rather than drawing the same room
-│                   sharper (measured: 25 desks at 192×160, 1554 at 1536×1280). `RenderScale`
+│                   sharper (measured: 25 desks at 192×160, 1722 at 1536×1280). `RenderScale`
 │                   splits them: layout keeps computing in LOGICAL units (capacity, desk
 │                   assignment and the walkable mask untouched), the painter multiplies on its
 │                   way to pixels. `RenderScale::ONE` is the classic path, byte-identical to the

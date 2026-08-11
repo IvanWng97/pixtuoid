@@ -1,0 +1,34 @@
+# 8x10 seated character seen from BEHIND — the desk pose for a back-turned seat
+# (`layout.desk_facings`), and the fallback for every seated pose whose own back
+# view the pack does not ship.
+#
+# The HEAD keeps the front view's six rows. That proportion is not a bug to fix:
+# `seated.sprite` spends the same six on hair + face, so both silhouettes are one
+# head over one torso. An earlier revision of this file claimed the six rows made
+# it "read as a ball" and added a NECK to break them up — wrong twice over. The
+# front view has no neck at all (its chin row meets the shoulders directly), so
+# it invented an organ the pack's own language does not use, and at 2 px wide it
+# was the sub-pixel detail this art scale cannot render anyway.
+#
+# What actually differs from the front is INTERNAL STRUCTURE: a face carries
+# eyes, a mouth and a hairline, while the back of a head is one flat colour. If
+# that ever needs breaking up, the lever is SHADING (an `n` band low on the
+# skull) — shape, which reads at half-block — not another feature.
+#
+# The hands ARE kept: `.SBBBBS.` is row 9 of `seated.sprite` verbatim, so the two
+# views read as the same person, and they carry the only skin a back view can
+# honestly show. That matters because per-agent identity is hair + skin
+# (`agent_id`-seeded) while the outfit is cwd-seeded and SHARED across a repo's
+# agents — but two pixels is all this angle affords, and losing the rest is a
+# property of facing away, not a defect to engineer around.
+@frame 0
+. n H H H H n .
+n H H H H H H n
+H H H H H H H H
+H H H H H H H H
+. H H H H H H .
+. n H H H H n .
+. B B B B B B .
+B B B B B B B B
+B B B B B B B B
+. S B B B B S .

@@ -616,16 +616,49 @@ fn render_floor_paints_the_flame_crown_for_a_top_tier_agent() {
         },
     )
     .expect("layout");
-    let ember = crate::pixel_painter::FLAME_DEEP;
-    let tip = crate::pixel_painter::FLAME_TIP;
-    let count = |c| {
-        (0..buf.height())
-            .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
-            .filter(|&(x, y)| buf.get(x, y) == c)
-            .count()
-    };
-    assert!(count(ember) > 0, "ember hair must survive the full pass");
-    assert!(count(tip) > 0, "flame tips must survive the full pass");
+    // Against the SAME scene with the crown's inputs cleared: the foreground's
+    // day/night wash blends every drawable, so the crown's authored RGB never
+    // reaches the buffer and an equality probe pins nothing. What must survive
+    // the full pass is that the crown CHANGES the frame.
+    let mut plain = scene.clone();
+    let slot = plain.agents.values_mut().next().expect("one agent");
+    slot.model = None;
+    slot.effort = None;
+    let mut fctx2 = FloorCtx::new();
+    let mut buf2 = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+    let mut coffee2 = CoffeeState::new();
+    let mut chitchat2 = HashMap::new();
+    render_floor(
+        &mut fctx2,
+        &mut buf2,
+        &mut coffee2,
+        &mut chitchat2,
+        FrameInputs {
+            scene: &plain,
+            pack: &pack,
+            theme,
+            now,
+            size: Size { w: 192, h: 160 },
+            floor_meta: FloorMeta::ground(),
+            active_pet: None,
+            floor_pet: None,
+            debug_walkable: false,
+        },
+    )
+    .expect("layout");
+    // What this pins is that model/effort REACH the painter through projection
+    // and the sim/paint hop — not that the crown itself drew. The burn tier also
+    // tints the sprite over the crown's own pixels, so no scoping of this diff
+    // can isolate the crown; `paint_flame_crown_draws_its_pattern` owns that half.
+    let differing = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != buf2.get(x, y))
+        .count();
+    assert!(
+        differing > 0,
+        "a top-tier agent rendered byte-identical to a model-less one — \
+         slot.model/effort were dropped before the painter"
+    );
 }
 
 #[test]
@@ -972,3 +1005,74 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
 // itself is garbled — the classic pass honoured the scale at a handful of
 // centred blits and nowhere else. `FrameInputs` no longer carries a scale, so
 // there is no half-kept promise left to certify.
+
+#[test]
+fn the_foreground_layer_is_lit_by_the_clock() {
+    // The day/night overlays sweep the floor band BEFORE the drawables paint, so
+    // every enqueued piece — desks, appliances, plants, wall decor, characters,
+    // chairs, partitions — carried no time-of-day term at all. Measured at the
+    // whole LAYER rather than one piece: the paint loop is the shared seam, so a
+    // new DrawableKind inherits this without touching the test.
+    use crate::localclock::at_hour;
+    let render = |now: SystemTime| {
+        let pack = crate::embedded_pack::test_default_pack();
+        let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+        let scene = make_scene(6, 8);
+        let mut fctx = FloorCtx::new();
+        let mut buf = RgbBuffer::filled(0, 0, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
+        let mut coffee = CoffeeState::new();
+        let mut chitchat = HashMap::new();
+        render_floor(
+            &mut fctx,
+            &mut buf,
+            &mut coffee,
+            &mut chitchat,
+            FrameInputs {
+                scene: &scene,
+                pack: &pack,
+                theme,
+                now,
+                size: Size { w: 192, h: 160 },
+                floor_meta: FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                debug_walkable: false,
+            },
+        )
+        .expect("layout");
+        buf
+    };
+    let (noon, night) = (render(at_hour(12)), render(at_hour(2)));
+    let (w, h) = (noon.width(), noon.height());
+    let frozen = |x: u16, y: u16| noon.get(x, y) == night.get(x, y);
+    // CLUSTERED, not counted. Two different blends can round to one u8, so a few
+    // scattered matches are arithmetic — a painter left outside the clock instead
+    // freezes a whole PIECE, and every pixel of it has a frozen neighbour. A
+    // count needs a threshold, and a threshold is what let the corridor runner
+    // and the pantry mats pass at 8.3% under a 12% ceiling.
+    let mut clustered = Vec::new();
+    for y in (h * 30 / 100)..(h * 92 / 100) {
+        for x in 0..w {
+            if frozen(x, y)
+                && [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .any(|(dx, dy)| {
+                        let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                        (0..w as i32).contains(&nx)
+                            && (0..h as i32).contains(&ny)
+                            && frozen(nx as u16, ny as u16)
+                    })
+            {
+                clustered.push((x, y));
+            }
+        }
+    }
+    assert!(
+        clustered.is_empty(),
+        "{} interior pixels are byte-identical at noon and midnight AND adjacent \
+         to another such pixel — a painter is running outside the clock, first at \
+         {:?}",
+        clustered.len(),
+        clustered.first()
+    );
+}

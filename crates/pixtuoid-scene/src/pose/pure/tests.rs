@@ -384,7 +384,7 @@ fn exit_override_walks_desk_to_door_within_window() {
         Pose::Walking { from, to, .. } => {
             assert_eq!(
                 from,
-                desk_walk_anchor(desk),
+                desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
                 "exit walk starts at desk anchor"
             );
             assert_eq!(
@@ -812,7 +812,9 @@ fn aimless_fallback_on_a_fully_blocked_mask_returns_the_desk_anchor() {
     for seed in 0..8u64 {
         assert_eq!(
             pick_aimless_dest(&l, seed, desk),
-            crate::layout::desk_walk_anchor(desk),
+            // The desk's OWN facing, not South: the fallback is whatever anchor
+            // production would use, and desk 0 is not guaranteed viewer-facing.
+            crate::layout::desk_walk_anchor_facing(desk, l.desk_facing_at(desk)),
             "seed {seed}: fully blocked corridor must fall back to the desk anchor"
         );
     }

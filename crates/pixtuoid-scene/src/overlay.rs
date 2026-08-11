@@ -25,6 +25,11 @@ use crate::theme::Theme;
 /// char.
 const LABEL_SEP: char = '\u{b7}';
 
+/// At least `desk_north.sprite`'s extra height, with headroom — not a copy of
+/// it. Keep EVEN: a half-block painter halves it, and an odd lift rounds onto
+/// the screen.
+const RAISED_MONITOR_LABEL_LIFT: u16 = 4;
+
 /// Activity-derived label tone — backend-agnostic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LabelTone {
@@ -65,6 +70,31 @@ pub struct LabelElement {
     pub hovered: bool,
 }
 
+/// Gated on the anchor MATCHING the desk's seated anchor, not on the pose: an agent walking past
+/// their own desk still reads `Facing::North`, and lifting their badge mid-corridor detaches it.
+fn lift_over_raised_monitor(
+    anchor: Point,
+    agent: &pixtuoid_core::AgentSlot,
+    layout: &Layout,
+) -> Point {
+    let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
+        return anchor;
+    };
+    let facing = layout.desk_facing(agent.desk_index.single_floor_local());
+    if facing != crate::layout::Facing::North {
+        return anchor;
+    }
+    let seated =
+        crate::pixel_painter::seated_anchor_for(desk, crate::layout::CHARACTER_SPRITE_W, facing);
+    if anchor != seated {
+        return anchor;
+    }
+    Point {
+        x: anchor.x,
+        y: anchor.y.saturating_sub(RAISED_MONITOR_LABEL_LIFT),
+    }
+}
+
 /// Build one `LabelElement` per VISIBLE agent — off-floor agents get no
 /// `character_anchor` and are skipped, so labels align 1:1 with the sprites.
 pub fn build_overlay(
@@ -83,6 +113,7 @@ pub fn build_overlay(
         let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
             continue;
         };
+        let anchor = lift_over_raised_monitor(anchor, agent, layout);
         let needs_disambig = label_counts.get(&*agent.label).copied().unwrap_or(0) > 1
             && agent.session_id.chars().count() >= 4;
         let raw: std::borrow::Cow<'_, str> = if needs_disambig {
@@ -359,5 +390,30 @@ mod tests {
         let a = disambig_suffix("/naïveté/app");
         assert_eq!(a, disambig_suffix("/naïveté/app"));
         assert_eq!(a.len(), 4);
+    }
+
+    /// Pins the lift against the art it cannot read: clearance, and evenness.
+    #[test]
+    fn desk_north_art_fits_under_the_label_lift() {
+        let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
+        let h = |name: &str| {
+            pack.animation(name)
+                .and_then(|a| a.frames.first())
+                .unwrap_or_else(|| panic!("the embedded pack ships {name}"))
+                .height()
+        };
+        let extra = h("desk_north") - h("desk");
+        let lift = super::RAISED_MONITOR_LABEL_LIFT;
+        assert!(
+            lift >= extra,
+            "desk_north rises {extra} rows above desk, but the badge lifts only \
+             {lift} — it would paint over the screen"
+        );
+        assert_eq!(
+            lift % 2,
+            0,
+            "an odd lift can round back onto the monitor once a half-block \
+             painter halves the anchor into a terminal cell"
+        );
     }
 }

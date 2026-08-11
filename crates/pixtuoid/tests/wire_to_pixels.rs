@@ -384,41 +384,32 @@ fn kimi_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("kimi"));
 }
 
-/// The lobster's exclusive carapace reds — the mascot sprite is NOT recolored,
-/// so its authored RGBs render exactly, and no recolored agent shirt collides.
-fn lobster_px(buf: &pixtuoid_core::sprite::RgbBuffer) -> usize {
-    use pixtuoid_core::sprite::Rgb;
-    let reds = [
-        Rgb {
-            r: 0xd2,
-            g: 0x40,
-            b: 0x2f,
-        }, // body
-        Rgb {
-            r: 0xe8,
-            g: 0x55,
-            b: 0x40,
-        }, // claw
-        Rgb {
-            r: 0xc8,
-            g: 0x38,
-            b: 0x28,
-        }, // antenna
-        Rgb {
-            r: 0x9e,
-            g: 0x2a,
-            b: 0x20,
-        }, // shade
-    ];
-    let mut n = 0;
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            if reds.contains(&buf.get(x, y)) {
-                n += 1;
-            }
+/// Cells the gateway presence ADDS to an otherwise identical office.
+///
+/// A differential, not a colour probe: the foreground wash recolours every
+/// drawable, so matching the authored carapace RGB would have to predict the
+/// wash — coupling a presence assertion to the lighting model and expecting a
+/// value the code under test computed.
+fn lobster_px(
+    r: &mut TuiRenderer<TestBackend>,
+    scene: &SceneState,
+    pack: &pixtuoid_core::sprite::format::Pack,
+    times: &[SystemTime],
+) -> usize {
+    let baseline = SceneState::uniform(16);
+    let settle = |r: &mut TuiRenderer<TestBackend>, s: &SceneState| {
+        for &t in times {
+            r.render(s, pack, t).expect("render office");
         }
-    }
-    n
+    };
+    settle(r, &baseline);
+    let base = r.buf().clone();
+    settle(r, scene);
+    let buf = r.buf();
+    (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != base.get(x, y))
+        .count()
 }
 
 /// The daemon/presence class: `apply_presence` is the sibling-channel seam
@@ -470,13 +461,11 @@ fn openclaw_presence_envelope_renders_a_lobster() {
     // wall-clock so it's scuttling the floor, well past the elevator.
     let pack = load_sprite_pack(None).expect("pack");
     let mut r = new_renderer(160, 80);
-    let mut t = now + Duration::from_secs(20);
-    for _ in 0..10 {
-        r.render(&scene, &pack, t).expect("render gateway office");
-        t += Duration::from_millis(130);
-    }
+    let times: Vec<_> = (0..10)
+        .map(|k| now + Duration::from_secs(20) + Duration::from_millis(k * 130))
+        .collect();
     assert!(
-        lobster_px(r.buf()) > 10,
+        lobster_px(&mut r, &scene, &pack, &times) > 10,
         "a live OpenClaw gateway (from real presence wire bytes) must paint the lobster mascot"
     );
 }

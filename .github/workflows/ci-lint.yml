@@ -53,6 +53,25 @@ jobs:
       - uses: extractions/setup-just@v4
       - run: just deny
 
+  comment-gate:
+    name: comment gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # origin/main is the diff base
+          persist-credentials: false
+      - uses: extractions/setup-just@v4
+      # Separate from the ast-grep advisory in ci-supplemental, which stays out
+      # of ci-gate so an npm install can never become a protected requirement.
+      # These arms need only git + python, so they can gate.
+      - run: |
+          git fetch --quiet origin main
+          just comment-lint-gate
+
   machete:
     name: unused deps
     runs-on: ubuntu-latest
@@ -214,7 +233,7 @@ jobs:
     # This explicit manifest prevents a nested job deletion or rename from
     # silently shrinking the single protected ci-gate.
     if: ${{ always() }}
-    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme, api-surface, docs]
+    needs: [fmt, clippy, deny, machete, comment-gate, hygiene, msrv, notes-curated, npm-gen, readme, api-surface, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

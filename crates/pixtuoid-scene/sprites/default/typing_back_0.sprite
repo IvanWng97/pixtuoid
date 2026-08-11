@@ -1,0 +1,21 @@
+# 8x11 BACK view of the typing pose, frame 0 — the desk pose of a back-turned
+# agent mid tool-call.
+#
+# Body is `seated_back`; only the ARMS move, and they move exactly as
+# `typing_0.sprite`'s do (left hand down at row 10). Keeping the two frame pairs
+# in lockstep is what makes a back-turned typist read as the SAME action as a
+# front-facing one — before this existed, every back-turned agent fell back to
+# the still `seated_back` and a working desk was indistinguishable from an idle
+# one on half the office.
+@frame 0
+. n H H H H n .
+n H H H H H H n
+H H H H H H H H
+H H H H H H H H
+. H H H H H H .
+. n H H H H n .
+. B B B B B B .
+B B B B B B B B
+B B B B B B B B
+S B B B B B B .
+. . . . . . S .

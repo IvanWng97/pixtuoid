@@ -54,11 +54,6 @@ pub static CYBERPUNK: Theme = Theme {
             g: 16,
             b: 32,
         },
-        cubicle_divider: Rgb {
-            r: 50,
-            g: 40,
-            b: 75,
-        },
         runner_base: Rgb {
             r: 40,
             g: 35,
@@ -171,6 +166,11 @@ pub static CYBERPUNK: Theme = Theme {
             g: 200,
             b: 255,
         },
+        desk_lamp: Rgb {
+            r: 255,
+            g: 168,
+            b: 92,
+        },
         night_tint: Rgb { r: 8, g: 6, b: 18 },
         sun_core: Rgb {
             r: 255,
@@ -275,6 +275,11 @@ pub static CYBERPUNK: Theme = Theme {
             r: 100,
             g: 60,
             b: 200,
+        },
+        monitor_idle: Rgb {
+            r: 96,
+            g: 56,
+            b: 168,
         },
         sleep_z: Rgb {
             r: 0,

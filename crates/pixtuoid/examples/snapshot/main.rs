@@ -228,7 +228,8 @@ struct SnapshotArgs {
 
     /// Restrict `--anim sofa`/`couch`/`chair` to a seat with a given SEATED
     /// facing: `north` (back-view, `back_couch` sprite — sofa occludes the lower
-    /// body) or `south` (front-view, `seated` sprite). Ignored for non-seat targets.
+    /// body) or `south` (front-view, `seated` sprite). Also picks WHICH home desk
+    /// `--anim desk` stages, so the back-turned seat is reachable at all.
     #[arg(long)]
     anim_facing: Option<String>,
 

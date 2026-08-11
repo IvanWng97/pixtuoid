@@ -241,6 +241,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         spill_strength: 0.8,
         spill_slant: 0.0,
         darkness: 0.2,
+        // Strength 0 — this fixture exercises the spill path, not the wash.
+        object_wash: [(theme.lighting.night_tint, 0.0); 2],
     };
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
@@ -253,17 +255,6 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         Rgb { r: 5, g: 5, b: 5 },
         "the wall band should still paint in the in-bounds rows"
     );
-}
-
-/// Build a `SystemTime` for local `h:mi` on a fixed date. TZ-independent, since
-/// every derivation decodes back into `chrono::Local`.
-fn at_local(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> SystemTime {
-    use chrono::TimeZone;
-    chrono::Local
-        .with_ymd_and_hms(y, mo, d, h, mi, 0)
-        .single()
-        .expect("local time should be unambiguous")
-        .into()
 }
 
 /// Render a full office wall through the real `paint_floor_and_walls` path at a
@@ -300,7 +291,7 @@ fn render_office_themed(
     }
     let _reset = Reset;
     set_weather_override(Some(weather));
-    let now = at_local(2026, 1, day, hour, 0);
+    let now = crate::localclock::on_day(day, hour);
     let look = time_of_day_look(now, theme);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
@@ -542,7 +533,7 @@ fn stars_gate_on_night_not_darkness_alone() {
     // Counting rendered pixels can't test this — the pale dawn sky is itself
     // "faint-white" — so assert the pure gate directly, with a HIGH darkness
     // passed at an hour when the sun is up.
-    let at = |h: u32| at_local(2026, 1, 1, h, 0);
+    let at = crate::localclock::at_hour;
     assert_eq!(
         night_star_strength(at(7), 0.6, Weather::Clear),
         0.0,
@@ -605,7 +596,7 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let geom = compute_disc(
-        at_local(2026, 1, 1, 21, 0),
+        crate::localclock::at_hour(21),
         Weather::Clear,
         buf_w,
         top_wall_h,
@@ -614,10 +605,10 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     .expect("moon disc visible at 21:00 under Clear");
 
     let crescent_day = (1..=31u32)
-        .find(|&d| sky::moon_phase(at_local(2026, 1, d, 21, 0)) < 0.35)
+        .find(|&d| sky::moon_phase(crate::localclock::on_day(d, 21)) < 0.35)
         .expect("a crescent night exists in January 2026");
     let full_day = (1..=31u32)
-        .find(|&d| sky::moon_phase(at_local(2026, 1, d, 21, 0)) > 0.9)
+        .find(|&d| sky::moon_phase(crate::localclock::on_day(d, 21)) > 0.9)
         .expect("a near-full night exists in January 2026");
 
     let count_dark_and_bright = |day: u32| -> (usize, usize) {
@@ -681,7 +672,7 @@ fn moon_glow_dims_at_new_moon() {
     let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
     let (mut full_moon_day, mut full_moon_frac) = (1u32, f32::MIN);
     for day in 1..=31u32 {
-        let frac = sky::moon_phase(at_local(2026, 1, day, 21, 0));
+        let frac = sky::moon_phase(crate::localclock::on_day(day, 21));
         if frac < new_moon_frac {
             new_moon_frac = frac;
             new_moon_day = day;
@@ -779,7 +770,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
 fn fullest_moon_day() -> u32 {
     (1..=31u32)
         .max_by(|&a, &b| {
-            let phase = |d: u32| sky::moon_phase(at_local(2026, 1, d, 0, 0));
+            let phase = |d: u32| sky::moon_phase(crate::localclock::on_day(d, 0));
             phase(a)
                 .partial_cmp(&phase(b))
                 .expect("moon_phase is never NaN")

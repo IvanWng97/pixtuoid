@@ -1,0 +1,9 @@
+# 8x5 desk task chair from behind: lit top edge, back, gas cylinder, base.
+# The back is 4 of the 8 columns so a seated occupant's shoulders stay visible
+# either side; 1 px armrest posts were tried and read as edge noise.
+@frame 0
+. . I I I I . .
+. . T T T T . .
+. . T T T T . .
+. . . T T . . .
+. . T T T T . .

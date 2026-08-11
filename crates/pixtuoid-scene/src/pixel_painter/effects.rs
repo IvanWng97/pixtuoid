@@ -8,15 +8,44 @@ use super::palette::{blend_pixel, blend_rgb};
 use crate::layout::Point;
 use crate::theme::Theme;
 
+/// Standby tint on a BACK-TURNED desk's glass — a grid of black rectangles reads as "everyone went home".
+pub(super) fn paint_screen_idle(
+    buf: &mut RgbBuffer,
+    desk_x: u16,
+    sprite_top: u16,
+    tint: Rgb,
+    strength: f32,
+) {
+    if strength <= 0.0 {
+        return;
+    }
+    for dx in SCREEN_GLASS_COLS {
+        for dy in SCREEN_GLASS_ROWS {
+            blend_pixel(buf, desk_x + dx, sprite_top + dy, tint, strength);
+        }
+    }
+}
+
+/// Glass columns offset from the desk sprite's left edge — shared so idle and glow can't diverge.
+const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
+
+/// Casing rows offset from the sprite TOP; lighting only the lower one leaves a black bar capping the glow.
+const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
+const SCREEN_GLASS_ROWS: std::ops::RangeInclusive<u16> = 2..=3;
+const SCREEN_CHIN_ROW: u16 = 4;
+
+/// `sprite_top` is the monitor's first frame row, NOT `desk.y` — a raised monitor sits rows higher.
 pub(super) fn paint_screen_glow(
     buf: &mut RgbBuffer,
     desk_x: u16,
-    desk_y: u16,
+    sprite_top: u16,
     now: SystemTime,
     tint: Rgb,
     theme: &Theme,
 ) {
-    let frame_lit = theme.effects.monitor_frame_lit;
+    // Untinted, the theme's cool `monitor_frame_lit` read as a metal plate capping the glow.
+    const CASING_TINT: f32 = 0.35;
+    let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
     let glow = tint;
     let white = Rgb {
         r: 255,
@@ -26,24 +55,28 @@ pub(super) fn paint_screen_glow(
     let glow_bright = blend_rgb(tint, white, 0.4);
     let scanline = blend_rgb(tint, white, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
-        buf.put_checked(desk_x + dx, desk_y + dy, c);
+        buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };
-    for dx in 3..=10 {
-        put(buf, dx, 0, frame_lit);
+    for dy in SCREEN_CASING_ROWS {
+        for dx in 3..=10 {
+            put(buf, dx, dy, frame_lit);
+        }
     }
-    for dx in 4..=9 {
-        put(buf, dx, 1, glow_bright);
-        put(buf, dx, 2, glow);
+    let (glass_upper, glass_lower) = (*SCREEN_GLASS_ROWS.start(), *SCREEN_GLASS_ROWS.end());
+    for dx in SCREEN_GLASS_COLS {
+        put(buf, dx, glass_upper, glow_bright);
+        put(buf, dx, glass_lower, glow);
     }
-    for dx in 4..=9 {
-        put(buf, dx, 3, frame_lit);
+    for dx in SCREEN_GLASS_COLS {
+        put(buf, dx, SCREEN_CHIN_ROW, frame_lit);
     }
     const SCANLINE_STEP_MS: u64 = 120;
     let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / SCANLINE_STEP_MS) as u16 + desk_x;
     let scan_col = 4 + (phase % 6);
-    put(buf, scan_col, 1, scanline);
-    put(buf, scan_col, 2, scanline);
+    for dy in SCREEN_GLASS_ROWS {
+        put(buf, scan_col, dy, scanline);
+    }
 }
 
 pub(super) fn paint_sleep_z(

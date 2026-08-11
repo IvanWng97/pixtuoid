@@ -45,6 +45,10 @@ pub mod footer;
 #[doc(hidden)]
 pub mod frame_cache;
 pub mod layout;
+// Test-only: local wall-clock instants, so an hour-dependent assertion names
+// the hour instead of inheriting the runner's $TZ.
+#[cfg(test)]
+pub(crate) mod localclock;
 pub mod motion;
 #[doc(hidden)]
 pub mod overlay;

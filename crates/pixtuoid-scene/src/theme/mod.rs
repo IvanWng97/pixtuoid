@@ -78,8 +78,6 @@ pub struct OfficeColors {
     pub room_wall_trim_light: Rgb,
     /// Room-divider door jambs + dark trim (also the aquarium frame).
     pub room_wall_trim_dark: Rgb,
-    /// Cubicle pod-divider wall.
-    pub cubicle_divider: Rgb,
     /// Corridor runner-rug base.
     pub runner_base: Rgb,
     /// Corridor runner-rug stripe.
@@ -129,6 +127,8 @@ pub struct LightingColors {
     pub ceiling_pool: Rgb,
     /// Lounge floor-lamp glow halo.
     pub floor_lamp_halo: Rgb,
+    /// Per-desk task-lamp light — WARM in every theme, or the night's warm-against-cold read is lost.
+    pub desk_lamp: Rgb,
     /// Night-time interior darkening tint.
     pub night_tint: Rgb,
     /// The sun disc's core color — the halo ring reuses this SAME hue at lower
@@ -183,6 +183,8 @@ pub struct FurnitureColors {
 pub struct EffectColors {
     /// Lit monitor bezel on an active screen.
     pub monitor_frame_lit: Rgb,
+    /// A powered-but-quiet screen's glass — a back-turned desk shows it after dark whether or not anyone is at it.
+    pub monitor_idle: Rgb,
     /// Floating "z" of a sleeping agent.
     pub sleep_z: Rgb,
     /// Steam wisp off a fresh coffee cup.
@@ -374,6 +376,26 @@ mod tests {
     #[test]
     fn unknown_theme_returns_none() {
         assert!(theme_by_name("doesnotexist").is_none());
+    }
+
+    /// The night's read is warm lamp AGAINST cold screen, so the pair has to
+    /// stay on opposite sides in every theme — gruvbox shipped an olive
+    /// `monitor_idle` (R over B) because only the lamp half was ever stated.
+    #[test]
+    fn the_desk_lamp_reads_warm_and_the_standby_screen_cold_in_every_theme() {
+        for t in ALL_THEMES {
+            let (lamp, screen) = (t.lighting.desk_lamp, t.effects.monitor_idle);
+            assert!(
+                lamp.r > lamp.b,
+                "{}: desk_lamp {lamp:?} must read WARM (R over B)",
+                t.name
+            );
+            assert!(
+                screen.b > screen.r,
+                "{}: monitor_idle {screen:?} must read COLD (B over R)",
+                t.name
+            );
+        }
     }
 
     #[test]

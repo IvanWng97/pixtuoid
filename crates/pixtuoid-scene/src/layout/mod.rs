@@ -20,9 +20,9 @@ pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::PANTRY_COUNTER_LARGE_W;
 pub(crate) use decor::repels_plants;
 pub use decor::{
-    desk_furniture_def, desk_walk_anchor, furniture_def, seated_foot_cell, ApproachSides,
-    DwellWindow, Facing, Furniture, FurnitureDef, PlantKind, PodDecor, WallDecor, WaypointKind,
-    DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
+    desk_ceiling_pool_center, desk_furniture_def, desk_walk_anchor_facing, furniture_def,
+    seated_foot_cell, ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
+    PodDecor, WallDecor, WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
@@ -164,6 +164,8 @@ pub struct SceneLayout {
     /// Per-agent home-desk anchor positions, indexed floor-locally (read via
     /// [`Self::home_desk`]).
     pub home_desks: Vec<Point>,
+    /// Facing per home desk, parallel to [`Self::home_desks`].
+    pub desk_facings: Vec<Facing>,
     /// Named stops (lounge seats, appliances, meeting slots) agents walk to.
     pub waypoints: Vec<Waypoint>,
     /// Placed potted plants.
@@ -241,9 +243,20 @@ pub const PANTRY_FOOTPRINT_DEPTH: u16 = 3;
 /// side cabinets included) and the overhang rides the aisle, so every band-EDGE
 /// clamp reads `DESK_GROUND_W`, not `DESK_W` (the #549 2px-overflow drift).
 pub const DESK_W: u16 = 10;
+/// Rows of desk SURFACE below `desk.y`; both desk sprites are cut to it.
+pub(crate) const DESK_SURFACE_ROWS: u16 = 5;
+pub(crate) const DESK_FRONT_ROWS: u16 = 1;
+pub(crate) const DESK_LEG_ROWS: u16 = 2;
+
 /// Desk body height in SLOT units — the N-S pod pitch; the blocked ground is
 /// only `DESK_FOOT_H` deep.
-pub const DESK_H: u16 = 5;
+pub const DESK_H: u16 = 6;
+
+const _: () = assert!(
+    DESK_H + 2 == DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS,
+    "the desk's VISUAL height (DESK_H + 2) must equal the rows its art draws: \
+     surface + front + legs"
+);
 /// The desk's ground-CONTACT depth (rows) — only the front edge / legs touch
 /// the floor; the surface + monitor OVERHANG north (`ground_y: End`), so a
 /// walker passes BEHIND the monitor and is occluded by the desk's own y-sort
@@ -286,8 +299,11 @@ pub const POD_SIDE: u16 = 2;
 /// reads as its own workstation, not a merged blob.
 pub const INTRA_POD_GAP_X: u16 = 12;
 /// N-S gap between the two desks stacked in one pod (vertical counterpart to
-/// [`INTRA_POD_GAP_X`]); sets the pod's inner height.
-pub const INTRA_POD_GAP_Y: u16 = 12;
+/// [`INTRA_POD_GAP_X`]); sets the pod's inner height. Rows step by
+/// `DESK_H + this`, and that STEP must stay EVEN or the pod's two rows land on
+/// different half-block parities — so retuning either side needs both checked.
+pub const INTRA_POD_GAP_Y: u16 = 6;
+const _: () = assert!((DESK_H + INTRA_POD_GAP_Y).is_multiple_of(2));
 /// Horizontal (E-W) gap between adjacent pod COLUMNS — wide enough to keep the
 /// pod boundary visually distinct AND to host the rolling whiteboard's GROUND
 /// footprint in the aisle. Deliberately > the N-S gap: screens are landscape,
@@ -295,8 +311,8 @@ pub const INTRA_POD_GAP_Y: u16 = 12;
 pub const INTER_POD_AISLE_X: u16 = 20;
 /// Vertical (N-S) gap between adjacent pod ROWS. INTENTIONALLY < the E-W gap
 /// (landscape screens — see `INTER_POD_AISLE_X`). Shrinking it breaks
-/// `every_home_desk_has_a_reachable_north_approach`: the seat's north approach
-/// cell collides with the desk in the row above.
+/// `every_home_desk_has_a_reachable_approach_on_its_own_far_side`: the seat's
+/// far-side approach cell collides with the desk in the row above.
 pub const INTER_POD_AISLE_Y: u16 = 18;
 
 impl SceneLayout {
@@ -329,6 +345,109 @@ impl SceneLayout {
     /// with an `AgentSlot.desk_index` directly.
     pub fn home_desk(&self, i: FloorLocalDeskIndex) -> Option<Point> {
         self.home_desks.get(i.0).copied()
+    }
+
+    /// Is `p` clear of the furniture sprites that PAINT OVER it? Walkable is the
+    /// GROUND rule (invariant #6), so the cell in front of a desk is legitimately
+    /// walkable AND legitimately covered — fine to walk THROUGH, wrong to park in.
+    ///
+    /// Destructured with NO `..`, the same guarantee `placement_sweep::pieces`
+    /// takes: a new collection is a compile error HERE, not a finding two review
+    /// rounds later. Three kinds carry a `0x0` table `visual` because their sprite
+    /// is runtime-sized, so each is read from its own authority below.
+    pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
+        let SceneLayout {
+            home_desks,
+            waypoints,
+            plants,
+            pod_decor,
+            wall_decor,
+            lounge,
+            meeting_rooms,
+            pantry,
+            desk_facings: _, // a desk ATTRIBUTE, not a sprite
+            room_walls: _,   // translucent glass; a creature behind it still reads
+            door: _,         // architecture, and the band it punches is not walkable
+            door_threshold: _,
+            doorways: _,
+            corridor: _,     // a zone, not a sprite
+            cubicle_band: _, // containers
+            cubicle_aisle: _,
+            buf_w: _,
+            buf_h: _,
+            top_margin: _,
+            walkable: _,
+            reachable: _,
+        } = self;
+        let inside = |tl: Point, sz: Size| {
+            p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h
+        };
+        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
+            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
+            inside(tl, sz)
+        };
+        let table = home_desks
+            .iter()
+            .any(|&d| covered(Anchor::TopLeft, d, Furniture::Desk))
+            || waypoints
+                .iter()
+                .any(|w| covered(Anchor::Center, w.pos, w.kind.furniture()))
+            || plants
+                .iter()
+                .any(|pl| covered(Anchor::Center, pl.pos, pl.kind.furniture()))
+            || pod_decor
+                .iter()
+                .any(|d| covered(Anchor::Center, d.pos, d.kind.furniture()))
+            // Wall decor is NOT out as a class: the whiteboard is free-standing
+            // floor furniture standing in an inter-pod aisle.
+            || wall_decor
+                .iter()
+                .any(|d| covered(Anchor::TopLeft, d.pos, d.kind.furniture()));
+        let lounge = lounge.is_some_and(|l| {
+            covered(Anchor::Center, l.couch_center, Furniture::Couch)
+                || covered(Anchor::Center, l.floor_lamp, Furniture::FloorLamp)
+                || covered(Anchor::Center, l.side_table, Furniture::LoungeSideTable)
+                || l.fish_tank
+                    .is_some_and(|t| covered(Anchor::Center, t, Furniture::FishTank))
+        });
+        let runtime = waypoints.iter().any(|w| {
+            w.kind == WaypointKind::Pantry && {
+                let sz = self.pantry_counter_size();
+                inside(
+                    placement::anchored_top_left(Anchor::Center, w.pos, sz.w, sz.h),
+                    sz,
+                )
+            }
+        }) || meeting_rooms.iter().any(|r| {
+            r.trio.is_some_and(|tr| {
+                tr.sofas
+                    .iter()
+                    .any(|&s| covered(Anchor::Center, s, Furniture::MeetingSofaBody))
+                    || covered(Anchor::Center, tr.table, Furniture::MeetingTable)
+            })
+        }) || pantry
+            .and_then(|pa| pa.kitchen_island)
+            .is_some_and(|i| covered(Anchor::Center, i, Furniture::KitchenIsland));
+        !(table || lounge || runtime)
+    }
+
+    /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
+    pub fn desk_facing_at(&self, pos: Point) -> Facing {
+        self.home_desks
+            .iter()
+            .position(|&d| d == pos)
+            .map_or(Facing::South, |i| self.desk_facing(FloorLocalDeskIndex(i)))
+    }
+
+    /// Which way desk `i`'s occupant faces — the ONE authority painters and the
+    /// approach/walk geometry share, so a seat is never drawn off its routed side.
+    pub fn desk_facing(&self, i: FloorLocalDeskIndex) -> Facing {
+        debug_assert_eq!(
+            self.desk_facings.len(),
+            self.home_desks.len(),
+            "desk_facings is index-parallel to home_desks; a short one seats the tail viewer-facing and passes every geometry invariant"
+        );
+        self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }
 
     /// The visible top window-wall band height in px (`compute` names the same

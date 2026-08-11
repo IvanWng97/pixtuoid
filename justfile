@@ -316,6 +316,7 @@ lint:
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
+    run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -532,15 +533,17 @@ mutants *args:
     cargo mutants --in-diff target/mutants.diff {{ args }}
 
 # Comment-slop advisory: flag NEW runs of 3+ consecutive line comments (Rust
-# `//`, Python `#`) inside a function body (the repo's "fn-body comments ≤2
+# `//`, Python `#`) inside a function body, AND new `///`/`//!` runs past
+# `DOC_RUN_MAX` (the ast-grep regexes exclude doc comments, where most bloat lands) (the repo's "fn-body comments ≤2
 # lines" convention — pr-review.prompt.md's comment-value factor). DIFF-SCOPED
 # like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
 # `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
-# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes it exit 1,
+# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes
+# the RE-PARENT and PROSE arms exit 1 — the ast-grep and doc-run-length arms only ever report,
 # `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
 # Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
 [group('meta')]
-[doc('Advisory: flag NEW 3+-consecutive-comment runs in a fn body (diff-scoped)')]
+[doc('Advisory: flag NEW comment runs — fn-body `//` and over-long `///` (diff-scoped)')]
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
 
@@ -1213,6 +1216,26 @@ ast-grep-test:
 [doc('Self-test the comment-lint driver (pathspec + hidden-dir scan)')]
 comment-lint-selftest:
     python3 scripts/comment-lint.py --selftest
+
+# The comment checks as a GATE. Wired in two places that must stay in step:
+# `just lint` (so preflight and pre-push block) and the `comment gate` job in
+# ci-lint.yml. The ast-grep arm stays advisory in ci-supplemental — its npm
+# install must never gate.
+[group('meta')]
+[doc('Gate the comment checks: selftest, then --gate against a FRESH origin/main')]
+comment-lint-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A stale `origin/main` moves the merge-base back: the re-parent arm then
+    # blocks on other people's merged commits and the prose RATIO is diluted by
+    # them. CI fetches (ci-lint.yml); refusing beats measuring against a stale ref.
+    # Bounded by GIT's own stall detector, not `timeout(1)` — that is coreutils,
+    # absent on a stock macOS box. `lint` joins its jobs with `wait`, so an
+    # unbounded fetch on a captive-portal network hangs preflight and pre-push.
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
+      || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
+    python3 scripts/comment-lint.py --selftest
+    python3 scripts/comment-lint.py origin/main --gate
 
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence

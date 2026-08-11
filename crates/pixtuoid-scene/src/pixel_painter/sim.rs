@@ -10,6 +10,24 @@
 use std::collections::HashMap;
 use std::time::SystemTime;
 
+const SEATED_BACK: &str = "seated_back";
+
+/// A table, not `format!("{anim}_back")`, because `anim_name` is `&'static str`.
+const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing", "typing_back")];
+
+/// A pose with no back view of its own falls back to the still one rather than showing a face.
+fn seated_anim(anim: &'static str, facing: crate::layout::Facing, pack: &Pack) -> &'static str {
+    if facing != crate::layout::Facing::North {
+        return anim;
+    }
+    SEATED_BACK_VIEWS
+        .iter()
+        .find(|(front, _)| *front == anim)
+        .map(|&(_, back)| back)
+        .filter(|back| pack.animation(back).is_some())
+        .or_else(|| pack.animation(SEATED_BACK).is_some().then_some(SEATED_BACK))
+        .unwrap_or(anim)
+}
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
@@ -23,7 +41,7 @@ use crate::pathfind::Router;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
+    seated_anchor_facing, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
     waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
 };
 use super::seat::{seat_sprite_in_pack, settle_seat_view, SeatView};
@@ -78,13 +96,7 @@ pub struct CharacterPlacement {
     /// The home desk this placement is SEATED AT, in logical units — `None` for
     /// anyone not sitting at one (walking, at a waypoint, standing).
     ///
-    /// `anchor` is already projected for the classic top-down painter (it rises
-    /// the sprite above the desk so the monitor overhangs). A second profile
-    /// needs to project the SAME seated agent differently — the cutaway seats
-    /// them at the near side with their head over the surface — and cannot
-    /// recover the desk from a pre-projected anchor. Carrying the desk keeps the
-    /// sim's one pass authoritative while leaving the projection to each
-    /// painter, which is what "one simulation, two projections" has to mean.
+    /// The occupant's desk, carried because `anchor` is already PROJECTED and cannot yield it back.
     pub seat_desk: Option<Point>,
 }
 
@@ -270,7 +282,9 @@ fn resolve_characters(
                       frame_idx: usize,
                       glow: CharacterGlow,
                       sleep_z_seed: Option<u64>| {
-            let anchor_no_breath = seated_anchor(desk, char_w);
+            let facing = layout.desk_facing(agent.desk_index.single_floor_local());
+            let anchor_no_breath = seated_anchor_facing(desk, char_w, facing);
+            let anim_name = seated_anim(anim_name, facing, pack);
             let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
             CharacterPlacement {
                 agent_idx,

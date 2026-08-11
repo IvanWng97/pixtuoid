@@ -1,5 +1,6 @@
 //! Layout computation helpers for `SceneLayout`.
 
+use super::decor::DESK_GROUND_H;
 use super::mask;
 use super::*;
 
@@ -190,7 +191,7 @@ pub(super) fn compute_with_seed(
         couch_to_desk_extra,
     };
 
-    let home_desks = compute_pod_desks(max_desks, &cubicle_band, pod_grid);
+    let (home_desks, desk_facings) = compute_pod_desks(max_desks, &cubicle_band, pod_grid);
 
     let pod_decor = compute_pod_decor(&cubicle_band, pod_grid, floor_seed);
 
@@ -371,7 +372,8 @@ pub(super) fn compute_with_seed(
         meeting_rooms.first(),
         door,
         has_meeting || has_pantry,
-        &home_desks,
+        &cubicle_band,
+        pod_grid,
     );
 
     // The island pushes its 4 Island slots BEFORE the snack shelf's slot — the
@@ -444,8 +446,10 @@ pub(super) fn compute_with_seed(
             return true;
         }
         let reach = ReachSet::from_mask(mask, conn_seed);
+        // Judged at `Facing::South` for EVERY desk: South is where the demotion pass below
+        // retreats, so a reachable south seat proves no decor arrangement strands a desk.
         home_desks.iter().any(|&d| {
-            let chair = desk_walk_anchor(d);
+            let chair = desk_walk_anchor_facing(d, crate::layout::Facing::South);
             approach_point(
                 Furniture::Desk,
                 chair,
@@ -471,11 +475,10 @@ pub(super) fn compute_with_seed(
         // the pocket".
         plants.retain(|p| !plant_ground_in_bounds(p, &cubicle_aisle));
         walkable = build_mask(&plants, &wall_decor);
-        // Next rung — the whiteboard is the one wall-decor kind with a floor
-        // footprint that juts into an aisle, so drop it before the drastic
-        // clear-all-plants: losing a whiteboard beats losing every plant.
+        // Next rung — only a wall decor that TOUCHES THE FLOOR can seal a lane, so drop
+        // those (by footprint, not by kind) before the drastic clear-all-plants.
         if severed(&walkable) {
-            wall_decor.retain(|d| d.kind != WallDecor::Whiteboard);
+            wall_decor.retain(|d| furniture_def(d.kind.furniture()).footprint.is_none());
             walkable = build_mask(&plants, &wall_decor);
         }
         // Last resort: drop every remaining scatter plant.
@@ -507,11 +510,40 @@ pub(super) fn compute_with_seed(
             fish_tank,
         });
 
+    // A narrow band can wall off a back-turned desk's SOUTH front, leaving it with no
+    // reachable approach; demote rather than drop. Safe after the mask: a desk's blocked
+    // ground is its body whichever way its occupant sits. A NET, not live code — see
+    // `SHARP-EDGES.md`.
+    let desk_facings: Vec<Facing> = home_desks
+        .iter()
+        .zip(&desk_facings)
+        .map(|(&desk, &facing)| {
+            if facing == Facing::North && {
+                // `approach_point` returns the probed cell itself as its "no side" sentinel.
+                let chair = desk_walk_anchor_facing(desk, facing);
+                approach_point(
+                    Furniture::Desk,
+                    chair,
+                    facing,
+                    pantry_counter_size,
+                    &walkable,
+                    chair,
+                    &reachable,
+                ) == chair
+            } {
+                Facing::South
+            } else {
+                facing
+            }
+        })
+        .collect();
+
     Some(SceneLayout {
         buf_w,
         buf_h,
         cubicle_band,
         cubicle_aisle,
+        desk_facings,
         home_desks,
         waypoints,
         plants,
@@ -554,7 +586,8 @@ fn place_wall_decor(
     meeting_room: Option<&MeetingRoom>,
     door: Option<Point>,
     has_side_rooms: bool,
-    home_desks: &[Point],
+    cubicle_band: &Bounds,
+    pod_grid: PodGrid,
 ) -> Vec<WallDecorItem> {
     let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
     let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
@@ -624,18 +657,23 @@ fn place_wall_decor(
         },
     });
     if has_side_rooms {
-        let pos = Point {
+        // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
+        // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
+        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
+        let hint = Point {
             x: mid_x + 3,
             y: top_margin + usable_h / 3,
         };
-        // The whiteboard's y (usable_h / 3) is independent of the desk grid, so
-        // at some band heights it lands ON a desk row instead of an aisle — skip
-        // the board when its wheel-strip ground would collide with a desk's.
-        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
-        let collides_a_desk = wb_def
-            .ground_rect(Anchor::TopLeft, pos)
-            .is_some_and(|wb_r| overlaps_a_desk_ground(wb_r, home_desks));
-        if !collides_a_desk {
+        let snapped = wb_def
+            .ground_rect(Anchor::TopLeft, hint)
+            .and_then(|(ground, size)| {
+                let y = pod_grid.snap_inter_pod_ground_y(cubicle_band, ground.y, size.h)?;
+                Some(Point {
+                    x: hint.x,
+                    y: y.saturating_sub(ground.y - hint.y),
+                })
+            });
+        if let Some(pos) = snapped {
             wall_decor.push(WallDecorItem {
                 kind: WallDecor::Whiteboard,
                 pos,
@@ -958,6 +996,35 @@ impl PodGrid {
             + pod_r * self.stride_y;
         (x, y)
     }
+
+    /// The full-width y-bands BETWEEN consecutive pod rows, north-to-south — the only
+    /// floor a free-standing piece may stand on. NOT "every pod-free strip": the north
+    /// margin and south remainder hold the lounge and the door's approach.
+    fn inter_pod_y_bands(self, cubicle_band: &Bounds) -> Vec<(u16, u16)> {
+        // NOT `stride_y - INTER_POD_AISLE_Y`: that prices the SLOT, and a desk's blocked
+        // ground runs to `DESK_GROUND_H` below its corner, so the overhang rows look free.
+        let pod_h = (POD_SIDE - 1) * (DESK_H + INTRA_POD_GAP_Y) + DESK_GROUND_H;
+        (0..self.rows.saturating_sub(1))
+            .map(|pod_r| {
+                let (_, top) = self.pod_origin(cubicle_band, 0, pod_r);
+                (top + pod_h, top + self.stride_y)
+            })
+            .filter(|&(start, end)| end > start)
+            .collect()
+    }
+
+    /// Top row for a ground strip `h` px tall, centred in the inter-pod aisle nearest
+    /// `desired` — `None` when no aisle can hold it. Centred, not flush: flush against a
+    /// pod the strip piles all its clearance on one side and can seal the lane.
+    fn snap_inter_pod_ground_y(self, cubicle_band: &Bounds, desired: u16, h: u16) -> Option<u16> {
+        let distance_to = |(start, end): (u16, u16)| (start + (end - start) / 2).abs_diff(desired);
+        let (start, end) = self
+            .inter_pod_y_bands(cubicle_band)
+            .into_iter()
+            .filter(|&(start, end)| end - start >= h)
+            .min_by_key(|&band| distance_to(band))?;
+        Some(start + (end - start - h) / 2)
+    }
 }
 
 /// The five hand-authored floor geometries. `floor_seed` selects one via
@@ -1060,13 +1127,23 @@ impl FloorGeometry {
     }
 }
 
+/// Which way a desk on pod row `r` seats its occupant — a pod's two rows face EACH
+/// OTHER across the inner gap. A partial bottom row is the next pod's row 0.
+fn pod_row_facing(r: u16) -> Facing {
+    if r == 0 {
+        Facing::South
+    } else {
+        Facing::North
+    }
+}
+
 /// Pod-grid desk placement: full pods, partial columns at right edge,
 /// partial row at bottom edge.
 pub(super) fn compute_pod_desks(
     max_desks: Option<usize>,
     cubicle_band: &Bounds,
     grid: PodGrid,
-) -> Vec<Point> {
+) -> (Vec<Point>, Vec<Facing>) {
     let PodGrid {
         cols: pod_cols,
         rows: pod_rows,
@@ -1079,6 +1156,7 @@ pub(super) fn compute_pod_desks(
     let grid_desk_cap =
         (pod_cols as usize) * (pod_rows as usize) * (POD_SIDE as usize) * (POD_SIDE as usize);
     let mut home_desks = Vec::with_capacity(n.min(grid_desk_cap.max(1)));
+    let mut facings = Vec::with_capacity(n.min(grid_desk_cap.max(1)));
     // Honest GROUND clamp on Y (the twin of desk_x_max below): the desk is
     // walk-behind (ground_y: End), so its blocked ground reaches DESK_GROUND_H
     // below the desk Point, NOT DESK_H (the slot) — clamping on DESK_H let a
@@ -1093,11 +1171,17 @@ pub(super) fn compute_pod_desks(
     // sprite, and DESK_W here let it poke past the buffer edge.
     let desk_x_max =
         (cubicle_band.x + cubicle_band.width).saturating_sub(super::decor::DESK_GROUND_W);
-    let push_desk = |desks: &mut Vec<Point>, x: u16, y: u16| -> bool {
+    let push_desk = |desks: &mut Vec<Point>,
+                     facings: &mut Vec<Facing>,
+                     x: u16,
+                     y: u16,
+                     facing: Facing|
+     -> bool {
         if desks.len() >= n || y > desk_y_max || x > desk_x_max {
             return desks.len() >= n;
         }
         desks.push(Point { x, y });
+        facings.push(facing);
         false
     };
 
@@ -1108,8 +1192,10 @@ pub(super) fn compute_pod_desks(
                 for c in 0..POD_SIDE {
                     let full = push_desk(
                         &mut home_desks,
+                        &mut facings,
                         pod_origin_x + c * (DESK_W + INTRA_POD_GAP_X),
                         pod_origin_y + r * (DESK_H + INTRA_POD_GAP_Y),
+                        pod_row_facing(r),
                     );
                     if full {
                         break 'outer;
@@ -1140,8 +1226,10 @@ pub(super) fn compute_pod_desks(
                 for i in 0..partial_col_count {
                     let full = push_desk(
                         &mut home_desks,
+                        &mut facings,
                         partial_col_x(i),
                         pod_origin_y + r * (DESK_H + INTRA_POD_GAP_Y),
+                        pod_row_facing(r),
                     );
                     if full {
                         break 'partial_x;
@@ -1162,8 +1250,10 @@ pub(super) fn compute_pod_desks(
             for c in 0..POD_SIDE {
                 let full = push_desk(
                     &mut home_desks,
+                    &mut facings,
                     pod_origin_x + c * (DESK_W + INTRA_POD_GAP_X),
                     partial_y,
+                    pod_row_facing(0),
                 );
                 if full {
                     break 'partial_y;
@@ -1171,14 +1261,20 @@ pub(super) fn compute_pod_desks(
             }
         }
         for i in 0..partial_col_count {
-            let full = push_desk(&mut home_desks, partial_col_x(i), partial_y);
+            let full = push_desk(
+                &mut home_desks,
+                &mut facings,
+                partial_col_x(i),
+                partial_y,
+                pod_row_facing(0),
+            );
             if full {
                 break;
             }
         }
     }
 
-    home_desks
+    (home_desks, facings)
 }
 
 /// Decor items placed in aisles between 2x2 desk pods.
@@ -1452,5 +1548,41 @@ mod tests {
             FloorVariant::Dense.mid_x_pct(),
             "a Dense floor that KEEPS both meeting rooms keeps its own column"
         );
+    }
+
+    /// Cross-checked against `compute_pod_desks`' own positions, not the band formula a
+    /// test could only copy.
+    #[test]
+    fn no_inter_pod_band_row_is_ground_a_desk_blocks() {
+        let band = super::Bounds {
+            x: 0,
+            y: 0,
+            width: 400,
+            height: 400,
+        };
+        let pod_h =
+            super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
+        let grid = super::PodGrid {
+            cols: 2,
+            rows: 3,
+            stride_x: super::POD_SIDE * super::DESK_W
+                + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_X
+                + super::INTER_POD_AISLE_X,
+            stride_y: pod_h + super::INTER_POD_AISLE_Y,
+            couch_to_desk_extra: 0,
+        };
+        let (desks, _) = super::compute_pod_desks(None, &band, grid);
+        assert!(!desks.is_empty(), "the fixture grid must place desks");
+        let bands = grid.inter_pod_y_bands(&band);
+        assert!(!bands.is_empty(), "a 3-row grid has bands between its rows");
+        for &(start, end) in &bands {
+            for d in &desks {
+                let (g0, g1) = (d.y, d.y + super::decor::DESK_GROUND_H);
+                assert!(
+                    start >= g1 || end <= g0,
+                    "band {start}..{end} overlaps desk {d:?}'s ground rows {g0}..{g1}"
+                );
+            }
+        }
     }
 }

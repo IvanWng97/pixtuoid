@@ -221,7 +221,6 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::floor::FrameIn
 pub struct pixtuoid_scene::floor::LightingState
 impl pixtuoid_scene::floor::LightingState
 pub const pixtuoid_scene::floor::LightingState::EMPTY_DEBOUNCE_MS: u64
-pub const pixtuoid_scene::floor::LightingState::EMPTY_FLOOR_DIM_BOOST: f32
 pub const pixtuoid_scene::floor::LightingState::FADE_TAU_MS: u64
 pub const pixtuoid_scene::floor::LightingState::MIN_LEVEL: f32
 pub fn pixtuoid_scene::floor::LightingState::level(&self) -> f32
@@ -784,6 +783,7 @@ pub pixtuoid_scene::layout::SceneLayout::buf_w: u16
 pub pixtuoid_scene::layout::SceneLayout::corridor: core::option::Option<pixtuoid_scene::layout::Bounds>
 pub pixtuoid_scene::layout::SceneLayout::cubicle_aisle: pixtuoid_scene::layout::Bounds
 pub pixtuoid_scene::layout::SceneLayout::cubicle_band: pixtuoid_scene::layout::Bounds
+pub pixtuoid_scene::layout::SceneLayout::desk_facings: alloc::vec::Vec<pixtuoid_scene::layout::Facing>
 pub pixtuoid_scene::layout::SceneLayout::door: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::layout::SceneLayout::door_threshold: core::option::Option<pixtuoid_scene::layout::Point>
 pub pixtuoid_scene::layout::SceneLayout::doorways: alloc::vec::Vec<pixtuoid_scene::layout::Doorway>
@@ -804,6 +804,8 @@ pub fn pixtuoid_scene::layout::SceneLayout::approach_point(&self, pixtuoid_scene
 pub fn pixtuoid_scene::layout::SceneLayout::compute(u16, u16, core::option::Option<usize>) -> core::option::Option<Self>
 pub fn pixtuoid_scene::layout::SceneLayout::compute_with_seed(u16, u16, core::option::Option<usize>, u64) -> core::option::Option<Self>
 pub fn pixtuoid_scene::layout::SceneLayout::couch_sprite_center(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
+pub fn pixtuoid_scene::layout::SceneLayout::desk_facing(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> pixtuoid_scene::layout::Facing
+pub fn pixtuoid_scene::layout::SceneLayout::desk_facing_at(&self, pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::Facing
 pub fn pixtuoid_scene::layout::SceneLayout::fish_tank(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::layout::SceneLayout::floor_lamp(&self) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::layout::SceneLayout::home_desk(&self, pixtuoid_core::state::FloorLocalDeskIndex) -> core::option::Option<pixtuoid_scene::layout::Point>
@@ -932,8 +934,9 @@ pub const pixtuoid_scene::layout::WALL_BAND_TO_TOP_MARGIN: u16
 pub const pixtuoid_scene::layout::WALL_THICK_H: u16
 pub const pixtuoid_scene::layout::WALL_THICK_V: u16
 pub fn pixtuoid_scene::layout::anchored_top_left(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16, u16) -> pixtuoid_scene::layout::Point
+pub fn pixtuoid_scene::layout::desk_ceiling_pool_center(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::desk_furniture_def() -> pixtuoid_scene::layout::FurnitureDef
-pub fn pixtuoid_scene::layout::desk_walk_anchor(pixtuoid_scene::layout::Point) -> pixtuoid_scene::layout::Point
+pub fn pixtuoid_scene::layout::desk_walk_anchor_facing(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16) -> u16
@@ -1580,6 +1583,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::theme::ApplianceCo
 pub struct pixtuoid_scene::theme::EffectColors
 pub pixtuoid_scene::theme::EffectColors::coffee_steam: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::EffectColors::monitor_frame_lit: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::theme::EffectColors::monitor_idle: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::EffectColors::sleep_z: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::EffectColors::waiting_bubble: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::EffectColors::walking_dust: pixtuoid_core::sprite::Rgb
@@ -1627,6 +1631,7 @@ pub struct pixtuoid_scene::theme::LightingColors
 pub pixtuoid_scene::theme::LightingColors::ceiling_pool: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::day_sky_a: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::day_sky_b: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::theme::LightingColors::desk_lamp: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::floor_lamp_halo: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::moon_core: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::LightingColors::night_sky_a: pixtuoid_core::sprite::Rgb
@@ -1655,7 +1660,6 @@ pub pixtuoid_scene::theme::OfficeColors::city_lit_windows: [pixtuoid_core::sprit
 pub pixtuoid_scene::theme::OfficeColors::clock_face: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::clock_hand: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::clock_rim: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::cubicle_divider: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::neon_frame_base: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::neon_panel_bg: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::room_wall_trim_dark: pixtuoid_core::sprite::Rgb

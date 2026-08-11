@@ -13,10 +13,10 @@ expression: l.home_desks
     },
     Point {
         x: 78,
-        y: 79,
+        y: 74,
     },
     Point {
         x: 100,
-        y: 79,
+        y: 74,
     },
 ]

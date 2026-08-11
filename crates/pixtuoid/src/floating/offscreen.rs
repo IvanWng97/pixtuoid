@@ -530,12 +530,12 @@ mod tests {
         // MEASURED buffers for the default 360×240 logical window. `office_scale`
         // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
         let measured = [
-            (1.00_f64, (360u32, 240u32), 70usize),
-            (1.25, (225, 150), 24),
-            (1.50, (270, 180), 35),
-            (1.75, (315, 210), 48),
+            (1.00_f64, (360u32, 240u32), 80usize),
+            (1.25, (225, 150), 30),
+            (1.50, (270, 180), 42),
+            (1.75, (315, 210), 56),
             (2.00, (240, 160), 30),
-            (3.00, (270, 180), 35),
+            (3.00, (270, 180), 42),
         ];
         for (sf, want_buf, want_floor0) in measured {
             let physical: PhysicalSize<u32> = logical.to_physical(sf);
@@ -979,7 +979,8 @@ mod tests {
         let (handle, rx) = crate::audio::AudioHandle::test_pair();
         renderer.set_audio(handle);
         let mut heard = Vec::new();
-        for step in 0..900u64 {
+        // A BUDGET, not part of the assertion: the wait rides random wander over live desk positions.
+        for step in 0..9_000u64 {
             let now = now0 + std::time::Duration::from_secs(2 * step);
             // 192x160: tall enough that the corridor hosts BOTH appliances
             // (the vending/printer height gates in layout::compute).

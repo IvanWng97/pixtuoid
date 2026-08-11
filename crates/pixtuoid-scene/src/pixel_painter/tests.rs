@@ -1,8 +1,8 @@
 use super::anchors::{
-    back_couch_anchor, seated_anchor, standing_at_desk_anchor, walking_anchor, waypoint_anchor,
-    CHARACTER_SPRITE_W,
+    back_couch_anchor, seated_anchor_facing, standing_at_desk_anchor, walking_anchor,
+    waypoint_anchor, CHARACTER_SPRITE_W,
 };
-use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView, DESK_SEAT_Z_OFF};
+use super::seat::{seat_sprite, seat_sprite_in_pack, settle_seat_view, SeatView};
 use super::wall::WALL_THICK_H_PX;
 use super::*;
 use crate::layout::stitch_vertical_wall;
@@ -718,18 +718,22 @@ fn waypoint_depth_baseline_is_center_pinned_sprite_south() {
 
 #[test]
 fn desk_walk_anchor_settles_exactly_on_the_seat() {
-    use crate::layout::desk_walk_anchor;
     for desk in [
         Point { x: 40, y: 30 },
         Point { x: 100, y: 60 },
         Point { x: 7, y: 5 }, // near-origin: saturating_sub edge
     ] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            assert_eq!(
-                walking_anchor(desk_walk_anchor(desk), w),
-                seated_anchor(desk, w),
-                "walking_anchor(desk_walk_anchor({desk:?}), {w}) must equal seated_anchor",
-            );
+            // Only X has teeth — on Y both facings reduce to the same `saturating_sub`.
+            // Y drift: `a_back_turned_seat_puts_the_occupant_past_the_desk_body`.
+            for facing in [crate::layout::Facing::South, crate::layout::Facing::North] {
+                assert_eq!(
+                    walking_anchor(crate::layout::desk_walk_anchor_facing(desk, facing), w),
+                    seated_anchor_facing(desk, w, facing),
+                    "walking_anchor(desk_walk_anchor_facing({desk:?}, {facing:?}), {w}) \
+                     must equal seated_anchor_facing",
+                );
+            }
         }
     }
 }
@@ -760,7 +764,7 @@ fn seated_foot_cell_settles_exactly_on_the_render_anchor() {
             let sd = seated_foot_cell(Furniture::Desk, pos).expect("desk is occupies_pos");
             assert_eq!(
                 walking_anchor(sd, w),
-                seated_anchor(pos, w),
+                seated_anchor_facing(pos, w, crate::layout::Facing::South),
                 "Desk: walking_anchor(seated_foot_cell)={:?} must equal seated_anchor",
                 walking_anchor(sd, w),
             );
@@ -870,18 +874,29 @@ fn island_settle_z_stays_behind_the_countertop() {
 #[test]
 fn settle_seat_view_recognizes_the_home_desk() {
     use crate::layout::TEST_DEFAULT_DESKS;
-    use crate::layout::{desk_walk_anchor, Furniture};
+    use crate::layout::{desk_walk_anchor_facing, Furniture};
     let l = Layout::compute(192, 158, Some(TEST_DEFAULT_DESKS)).expect("fits");
     let desk = *l.home_desks.first().expect("at least one home desk");
-    let chair = desk_walk_anchor(desk);
+    let chair = desk_walk_anchor_facing(desk, l.desk_facing_at(desk));
+    // Pinning `Front` unconditionally would assert the pre-facing world.
+    let want_view = if l.desk_facing_at(desk) == crate::layout::Facing::North {
+        SeatView::Back
+    } else {
+        SeatView::Front
+    };
     assert_eq!(
         settle_seat_view(chair, &l),
-        Some((SeatView::Front, desk.y + DESK_SEAT_Z_OFF)),
-        "the desk chair {chair:?} must settle as SeatView::Front at the desk z-key"
+        Some((want_view, chair.y)),
+        "the desk chair {chair:?} must settle as {want_view:?} at its own chair row"
     );
+    // `seated_foot_cell` is facing-BLIND — it takes a kind and a position, so its
+    // desk arm can only answer for the viewer-facing seat.
     assert_eq!(
         crate::layout::seated_foot_cell(Furniture::Desk, desk),
-        Some(chair)
+        Some(crate::layout::desk_walk_anchor_facing(
+            desk,
+            crate::layout::Facing::South
+        ))
     );
     assert_eq!(
         settle_seat_view(desk, &l),
@@ -894,15 +909,16 @@ fn settle_seat_view_recognizes_the_home_desk() {
 fn desk_settle_z_key_matches_the_seated_arm() {
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
-            let seated_arm_z = seated_anchor(desk, w).y + 12;
+            let seated_arm_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
             assert_eq!(
-                desk.y + DESK_SEAT_Z_OFF,
+                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y,
                 seated_arm_z,
                 "desk settle z-key must equal the SeatedIdle/Typing arm z-key"
             );
             let visual_h = crate::layout::desk_furniture_def().visual.h;
             assert!(
-                desk.y + DESK_SEAT_Z_OFF < desk.y + visual_h,
+                crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::South).y
+                    < desk.y + visual_h,
                 "desk sitter must sort behind the desk furniture"
             );
         }
@@ -987,7 +1003,7 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
         for w in [CHARACTER_SPRITE_W, 10] {
             let desk_furniture_z = desk.y + visual_h;
-            let seated_z = seated_anchor(desk, w).y + 12;
+            let seated_z = seated_anchor_facing(desk, w, crate::layout::Facing::South).y + 12;
             let standing_z = standing_at_desk_anchor(desk, w).y + 12;
             assert!(
                 seated_z < desk_furniture_z,
@@ -1001,12 +1017,22 @@ fn desk_occupant_always_sorts_behind_its_desk() {
     }
 }
 
+/// The geometry table's desk height must match the ART's, or the z-key sorts on
+/// a south row the sprite does not reach. The `- 1`: `desk` blits at `desk.y - 1`
+/// (top row is the north-overhanging bezel), so it covers `height - 1` from `desk.y`.
 #[test]
 fn desk_z_key_is_the_visual_south() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let art = pack
+        .animation("desk")
+        .and_then(|a| a.frames.first())
+        .expect("the embedded pack ships a desk");
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
-        7,
-        "desk z-key offset (DESK_H+2)"
+        art.height() - 1,
+        "the desk's visual height must equal the rows its sprite covers from \
+         desk.y down (sprite {} rows, blitted one above desk.y)",
+        art.height()
     );
 }
 
@@ -1063,7 +1089,11 @@ fn character_anchor_y_exceeds_desk_when_south_of_it() {
 #[test]
 fn character_anchor_y_below_desk_when_seated_at_it() {
     let desk_y: u16 = 20;
-    let seated_anchor = seated_anchor(Point { x: 0, y: desk_y }, CHARACTER_SPRITE_W);
+    let seated_anchor = seated_anchor_facing(
+        Point { x: 0, y: desk_y },
+        CHARACTER_SPRITE_W,
+        crate::layout::Facing::South,
+    );
     let char_feet_anchor = seated_anchor.y + 12;
     let desk_anchor_y = desk_y
         + crate::layout::furniture_def(crate::layout::Furniture::Desk)
@@ -2074,11 +2104,9 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     );
 }
 
-/// `seat_desk` is the whole of "one simulation, two projections": the cutaway
-/// re-anchors a desk-seated body and cannot recover the desk from `anchor`,
-/// which is already projected FOR CLASSIC. Its polarity had no test at all —
-/// the classic painter never reads the field, so flipping an arm to `None`
-/// would break the second profile while every existing assertion stayed green.
+/// The cutaway reads `seat_desk` for its chair and its suppressed contact
+/// shadow; the classic painter never reads it. So flipping an arm to `None`
+/// breaks the second profile while every classic assertion stays green.
 ///
 /// Driven through the real `sim_step` rather than by constructing a placement,
 /// so it pins what the sim DECIDES, not what a fixture was handed.
@@ -2896,7 +2924,9 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     let mut owned = OwnedSimStores::new();
     let mut stores = owned.stores();
     let mut max_on_sofa = 0usize;
-    for step in 0..6_000u64 {
+    // A BUDGET, not part of the assertion: three-on-a-sofa is reached by random
+    // wander, whose route rides live desk positions.
+    for step in 0..60_000u64 {
         let now = now0 + Duration::from_millis(250 * step);
         let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
         let n = frame
@@ -3058,11 +3088,23 @@ fn ceiling_pool_regions_yields_desks_then_pantry_then_corridor_in_order() {
         pools.len(),
         l.home_desks.len() + l.pantry.is_some() as usize + l.corridor.is_some() as usize
     );
-    for (pool, desk) in pools.iter().zip(&l.home_desks) {
-        assert_eq!(pool.cx, desk.x + DESK_W / 2);
-        assert_eq!(pool.cy, desk.y.saturating_sub(2));
+    let mut desk_rows = std::collections::HashSet::new();
+    for (i, (pool, desk)) in pools.iter().zip(&l.home_desks).enumerate() {
+        // Derived from the ONE authority rather than restating its arithmetic.
+        let want = crate::layout::desk_ceiling_pool_center(
+            *desk,
+            l.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i)),
+        );
+        assert_eq!((pool.cx, pool.cy), (want.x, want.y));
         assert_eq!((pool.half_w, pool.half_h), (10, 5));
+        desk_rows.insert(pool.cy as i32 - desk.y as i32);
     }
+    // Negative control: with one lift, a facing-blind impl passes the loop above.
+    assert!(
+        desk_rows.len() >= 2,
+        "this layout seats both sides, so its desk lights must sit at two \
+         different offsets — got {desk_rows:?}"
+    );
     if let Some(pr) = l.pantry.map(|p| p.bounds) {
         let p = pools[l.home_desks.len()];
         assert_eq!((p.cx, p.cy), (pr.x + pr.width / 2, pr.y + pr.height / 2));
@@ -3163,40 +3205,6 @@ fn character_render_names_resolve_in_the_animation_registry() {
     }
 }
 
-/// Paint one empty office through the REAL two-phase seam, paint ORDER included
-/// (a divider drawn UNDER the desk sprite is invisible here — that's the point).
-fn paint_empty_office(buf_w: u16, buf_h: u16) -> (RgbBuffer, Layout, &'static crate::theme::Theme) {
-    let pack = crate::embedded_pack::test_default_pack();
-    let layout = Layout::compute_with_seed(buf_w, buf_h, None, 0).expect("layout");
-    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    let scene = SceneState::uniform(16);
-    let coffee = HashMap::new();
-    let mut owned = OwnedSimStores::new();
-    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
-    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
-    paint_frame(
-        &mut PaintCtx {
-            scene: &scene,
-            layout: &layout,
-            pack: &pack,
-            now,
-            buf: &mut buf,
-            cache: &mut FrameCache::new(),
-            theme,
-            floor: crate::floor::FloorMeta::ground(),
-            active_pet: None,
-            floor_pet: None,
-            coffee: &coffee,
-            motion: &owned.motion,
-            door_anim_max_ms: 0,
-            debug_walkable: false,
-        },
-        &frame,
-    );
-    (buf, layout, theme)
-}
-
 // Sweeps gateway ports × wander phases: the escape is destination-hash-driven,
 // so no single port/instant demonstrates it.
 #[test]
@@ -3292,57 +3300,231 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 }
 
 #[test]
-fn pod_divider_spans_the_desk_rows_between_pod_mates_and_nowhere_else() {
-    let (buf, layout, theme) = paint_empty_office(192, 128);
-    let divider = theme.office.cubicle_divider;
-    let def = crate::layout::desk_furniture_def();
-    let sprite_w = def.visual.w;
-    let mate_pitch = DESK_W + crate::layout::INTRA_POD_GAP_X;
-    assert!(
-        layout.home_desks.len() >= 4,
-        "the rig must lay out real pods, got {}",
-        layout.home_desks.len()
-    );
-    let mut checked_pairs = 0;
-    let mut checked_ends = 0;
-    for &desk in &layout.home_desks {
-        let has_mate = layout
-            .home_desks
-            .iter()
-            .any(|d| d.y == desk.y && d.x == desk.x + mate_pitch);
-        let aisle: Vec<u16> = ((desk.x + sprite_w)..(desk.x + mate_pitch))
-            .filter(|&x| {
-                (0..=def.visual.h).any(|dy| buf.get(x, desk.y.saturating_sub(1) + dy) == divider)
-            })
-            .collect();
-        if has_mate {
-            checked_pairs += 1;
-            assert_eq!(
-                aisle.len(),
-                1,
-                "desk at {desk:?} should paint exactly one divider column in its aisle, \
-                 got {aisle:?}"
-            );
-            for dy in 0..=def.visual.h {
-                let py = desk.y.saturating_sub(1) + dy;
-                assert_eq!(
-                    buf.get(aisle[0], py),
-                    divider,
-                    "divider column {} must be unbroken over the desk's painted rows \
-                     (row {py} of desk {desk:?})",
-                    aisle[0]
-                );
-            }
-        } else {
-            checked_ends += 1;
-            assert!(
-                aisle.is_empty(),
-                "no divider east of a desk with no pod-mate: desk {desk:?} painted {aisle:?}"
-            );
-        }
+fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
+    use crate::layout::{Facing, Furniture};
+    let desk_h = crate::layout::furniture_def(Furniture::Desk).visual.h;
+    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
+        let far = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
+        let near = seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::North);
+        assert!(
+            far.y < desk.y,
+            "a viewer-facing occupant sits ABOVE the desk row: {far:?} vs {desk:?}"
+        );
+        assert!(
+            near.y >= desk.y,
+            "a back-turned occupant must reach the desk's own row, not hover above \
+             it: {near:?} vs {desk:?}"
+        );
+        assert!(
+            near.y < desk.y + desk_h,
+            "…but still overlap the desk body rather than float below it: \
+             {near:?} vs desk {desk:?} + visual h {desk_h}"
+        );
+    }
+}
+
+#[test]
+fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
+    use crate::layout::Facing;
+    // A lamp is a FIXTURE on the desk's west wing, visible from either side; the
+    // standby SCREEN is the one that gates on facing.
+    for darkness in [0.0_f32, 0.5, 1.0] {
+        let north = super::desk_light(Facing::North, darkness, 1.0);
+        let south = super::desk_light(Facing::South, darkness, 1.0);
+        assert_eq!(
+            north.lamp, south.lamp,
+            "the lamp may not depend on facing (darkness {darkness})"
+        );
+        assert!(
+            south.screen_idle == 0.0 && north.screen_idle >= south.screen_idle,
+            "only a back-turned desk shows its screen (darkness {darkness})"
+        );
     }
     assert!(
-        checked_pairs > 0 && checked_ends > 0,
-        "the rig must cover both cases (pairs={checked_pairs}, row-ends={checked_ends})"
+        super::desk_light(Facing::South, 1.0, 1.0).lamp > 0.0,
+        "a viewer-facing desk must still light its lamp after dark"
     );
+}
+
+/// The two emitters this PR added; the ceiling pools and the floor lamp share the
+/// rule but not this pin (`SHARP-EDGES.md` enumerates the set). Dropping either
+/// factor makes that emitter's two readings equal.
+#[test]
+fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
+    use crate::layout::Facing;
+    let min = crate::floor::LightingState::MIN_LEVEL;
+    let lit = super::desk_light(Facing::North, 1.0, 1.0);
+    let empty = super::desk_light(Facing::North, 1.0, min);
+    for (what, lit, empty) in [
+        ("lamp", lit.lamp, empty.lamp),
+        ("screen_idle", lit.screen_idle, empty.screen_idle),
+    ] {
+        assert!(
+            (empty - lit * min).abs() < f32::EPSILON,
+            "an empty floor's {what} must scale with the level, got {empty} against {lit}"
+        );
+    }
+}
+
+#[test]
+fn a_lamp_casting_no_pool_is_not_drawn_lit() {
+    // Whatever the fixture reads as, it must track the light it casts.
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let desk = Point { x: 20, y: 14 };
+    let bg = Rgb { r: 9, g: 9, b: 9 };
+    let render = |strength: f32| {
+        let mut buf = RgbBuffer::filled(60, 40, bg);
+        super::drawable::paint_desk_lamp(&mut buf, desk, strength, theme);
+        buf
+    };
+    let (dim, bright) = (render(0.05), render(1.0));
+    let lum = |c: Rgb| 0.299 * c.r as f32 + 0.587 * c.g as f32 + 0.114 * c.b as f32;
+    assert!(
+        lum(dim.get(desk.x, desk.y)) < lum(bright.get(desk.x, desk.y)),
+        "a barely-lit lamp must not paint the same shade as a fully-lit one: \
+         {:?} vs {:?}",
+        dim.get(desk.x, desk.y),
+        bright.get(desk.x, desk.y)
+    );
+}
+
+/// Asserted on the DRAWABLE list, not on pixels: a chair's rect is lit by the
+/// desk's ceiling pool, which this branch made facing-dependent, so contrasting
+/// a north desk's rect against a south one measures the pool as much as the
+/// chair — it passes with no chair drawn.
+#[test]
+fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
+    for seed in 0..8u64 {
+        let layout =
+            Layout::compute_with_seed(240, 160, Some(crate::layout::TEST_DEFAULT_DESKS), seed)
+                .expect("240x160 lays out");
+        let pack = crate::embedded_pack::test_default_pack();
+        let chair_w = super::drawable::desk_chair_frame(&pack)
+            .expect("desk_chair is in the embedded pack")
+            .width();
+        let mut drawables = Vec::new();
+        super::enqueue_desk_chairs(&layout, &pack, &mut drawables);
+        // Keyed on the FULL position: desks in one pod column share an x, so an
+        // x-only key silently folds a wrongly-chaired south desk onto its
+        // north neighbour and the assertion cannot see it.
+        let seated: std::collections::BTreeSet<(u16, u16)> = drawables
+            .iter()
+            .map(|d| match d.kind {
+                super::DrawableKind::DeskChair { pos, .. } => (pos.x, pos.y),
+                _ => panic!("enqueue_desk_chairs pushed a non-chair drawable"),
+            })
+            .collect();
+        let want: std::collections::BTreeSet<(u16, u16)> = layout
+            .home_desks
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| {
+                layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(*i))
+                    == crate::layout::Facing::North
+            })
+            .map(|(_, &d)| {
+                (
+                    super::anchors::seated_anchor_facing(d, chair_w, crate::layout::Facing::North)
+                        .x,
+                    d.y + 6,
+                )
+            })
+            .collect();
+        assert!(!want.is_empty(), "seed {seed}: fixture has no north desk");
+        assert_eq!(
+            seated, want,
+            "seed {seed}: one chair per north desk, at the seat"
+        );
+    }
+}
+
+/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort, and
+/// `SHARP-EDGES.md` says outright that breaking either paints the chair under
+/// its occupant with every other test still green. This is that gate: it reads
+/// `paint_frame`'s own source, because the failure is in the call order, not in
+/// any value a fixture can produce.
+#[test]
+fn the_chair_still_enqueues_after_its_occupant_and_the_sort_is_stable() {
+    let src = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/pixel_painter/mod.rs"),
+    )
+    .expect("the painter's own source");
+    let chars = src
+        .find("enqueue_characters(ctx, frame,")
+        .expect("enqueue_characters call");
+    let chairs = src
+        .find("enqueue_desk_chairs(")
+        .expect("enqueue_desk_chairs call");
+    assert!(
+        chars < chairs,
+        "the chair must be pushed AFTER its occupant, or the stable sort paints it under them"
+    );
+    assert!(
+        src.contains("drawables.sort_by_key("),
+        "the z-sort must stay STABLE — sort_unstable_by_key breaks the chair/occupant tie"
+    );
+}
+
+/// The painter half of the chair, on a BLANK buffer: no floor, no ceiling pool,
+/// no hour — so the only thing that can move these pixels is the chair itself.
+#[test]
+fn paint_chair_back_writes_its_mask_and_nothing_outside_it() {
+    const BG: Rgb = Rgb { r: 1, g: 2, b: 3 };
+    let mut buf = RgbBuffer::filled(64, 32, BG);
+    let at = Point { x: 20, y: 10 };
+    let pack = crate::embedded_pack::test_default_pack();
+    super::drawable::paint_chair_back(&mut buf, at, &pack);
+    let painted: Vec<(u16, u16)> = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != BG)
+        .collect();
+    assert!(!painted.is_empty(), "the chair must paint something");
+    let (x0, x1) = (
+        painted.iter().map(|p| p.0).min().unwrap(),
+        painted.iter().map(|p| p.0).max().unwrap(),
+    );
+    let (y0, y1) = (
+        painted.iter().map(|p| p.1).min().unwrap(),
+        painted.iter().map(|p| p.1).max().unwrap(),
+    );
+    let w = super::drawable::desk_chair_frame(&pack)
+        .expect("desk_chair is in the embedded pack")
+        .width();
+    assert!(
+        y0 == at.y && x0 >= at.x && x1 < at.x + w && y1 < at.y + 8,
+        "the chair painted outside its own box: {:?}..{:?}",
+        (x0, y0),
+        (x1, y1)
+    );
+    // The back is inset on BOTH flanks so a seated occupant's shoulders stay visible;
+    // widening it back to the full box is the silent regression this pins.
+    assert!(
+        x0 > at.x && x1 < at.x + w - 1,
+        "the chair must leave both flank columns clear, spans {x0}..={x1} of {}..{}",
+        at.x,
+        at.x + w
+    );
+}
+
+/// The crown's own pixels, on a BLANK buffer — the burn tier also tints the
+/// sprite over this exact box, so no full-pass diff can isolate the crown.
+#[test]
+fn paint_flame_crown_draws_its_pattern() {
+    const BG: Rgb = Rgb { r: 9, g: 9, b: 9 };
+    let mut buf = RgbBuffer::filled(40, 40, BG);
+    let anchor = Point { x: 12, y: 20 };
+    const W: u16 = 8;
+    super::effects::paint_flame_crown(&mut buf, anchor, W, SystemTime::UNIX_EPOCH);
+    let painted: Vec<(u16, u16)> = (0..buf.height())
+        .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != BG)
+        .collect();
+    assert!(!painted.is_empty(), "the crown must paint");
+    let cx = anchor.x + W / 2;
+    for &(x, y) in &painted {
+        assert!(
+            (cx - 2..=cx + 1).contains(&x) && (anchor.y - 2..=anchor.y).contains(&y),
+            "the crown painted outside its own box at ({x}, {y})"
+        );
+    }
 }

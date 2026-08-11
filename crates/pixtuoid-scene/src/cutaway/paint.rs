@@ -680,9 +680,9 @@ fn paint_desk(
 ) {
     let s = scale.get();
     let x = scale.to_buffer(lx);
-    // The SAME anchor the classic painter uses, including its 1px raise for the
-    // monitor bezel — read from there rather than re-derived, so the two
-    // profiles cannot place the same desk differently.
+    // The bezel raise for the BASE desk art. Classic lifts a `desk_north` by its
+    // extra height on top of this, and the cutaway always blits `desk` — an art
+    // difference, which is the cutaway's own to close, not a seat-side one.
     let top_y = scale.to_buffer(ly.saturating_sub(1));
 
     let Some((art, blit_at)) = densest_art(pack, "desk", scale) else {
@@ -806,34 +806,10 @@ fn paint_wall_decor(
     );
 }
 
-/// The row the cutaway paints `c` at — its re-projected anchor.
-///
-/// The ONE definition the draw list and [`paint_character`] share, so the row a
-/// character SORTS on can never disagree with the row it BLITS at.
+/// NO re-projection: the seat side is a per-desk layout fact, so an override here would make the two
+/// profiles disagree about which side of its desk half the office sits on.
 fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout::Point {
-    match c.seat_desk {
-        Some(desk) => cutaway_seat_anchor(desk, c.anchor),
-        None => c.anchor,
-    }
-}
-
-/// Where the cutaway seats an occupant, given the desk the sim says they sit at.
-///
-/// The classic painter RAISES a seated sprite above its desk so the monitor
-/// overhangs and hides the lower body — right for a pure top-down view. A
-/// cutaway seats them at the NEAR side instead, head over the surface, which is
-/// what the ratified reference shows. Anchoring at the desk's own row does that:
-/// the head lands on the surface band and the torso falls in front of it.
-fn cutaway_seat_anchor(
-    desk: crate::layout::Point,
-    classic: crate::layout::Point,
-) -> crate::layout::Point {
-    crate::layout::Point {
-        // x keeps the sim's centring (it already accounts for sprite width, and
-        // re-deriving it here would be a second copy that could drift).
-        x: classic.x,
-        y: desk.y,
-    }
+    c.anchor
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -849,7 +825,6 @@ fn paint_character(
 ) -> Option<CutawayLabel> {
     let c = frame.characters.get(idx)?;
     let agent = frame.agents.get(c.agent_idx)?;
-    // Re-project a desk-seated pose; everyone else keeps the sim's anchor.
     let at = cutaway_anchor(c);
 
     // The SAME recolored sprite the classic painter blits — per-agent hair,
@@ -1202,10 +1177,6 @@ mod tests {
     /// it actually blits. The occupant's chair lands south of the desk's front
     /// face, so the ratified "head over the surface" reading falls out of the
     /// shared convention — the desk needs no divergence of its own.
-    ///
-    /// The classic sim seats an occupant at `desk.y + 4`, which the cutaway
-    /// re-projects to `desk.y`; both values are exercised so a regression to
-    /// the classic projection reds here rather than only in a render.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();
@@ -1224,13 +1195,7 @@ mod tests {
         );
         let seated_z = sort_row(
             crate::layout::Anchor::TopLeft,
-            cutaway_seat_anchor(
-                desk,
-                crate::layout::Point {
-                    x: 1,
-                    y: desk.y - 8,
-                },
-            ),
+            near_seat(desk),
             body_h,
             CHAIR_BACK_H,
         );
@@ -1294,13 +1259,7 @@ mod tests {
         );
         let seated_z = sort_row(
             crate::layout::Anchor::TopLeft,
-            cutaway_seat_anchor(
-                desk,
-                crate::layout::Point {
-                    x: 1,
-                    y: desk.y - 8,
-                },
-            ),
+            near_seat(desk),
             body_h,
             CHAIR_BACK_H,
         );
@@ -1317,22 +1276,24 @@ mod tests {
         );
     }
 
-    /// The visible difference between the two profiles for the same agent:
-    /// classic raises the sprite above the desk, the cutaway drops it onto the
-    /// desk's own row so the head reads over the surface.
+    /// The seat side is the LAYOUT's to decide, and both profiles read it.
     #[test]
-    fn the_cutaway_seats_an_occupant_lower_than_the_classic_painter_does() {
+    fn both_profiles_seat_an_occupant_on_the_side_the_layout_chose() {
+        use crate::layout::{Facing, CHARACTER_SPRITE_W};
         let desk = crate::layout::Point { x: 40, y: 30 };
-        let classic = crate::layout::Point { x: 41, y: 30 - 8 };
-        let cut = cutaway_seat_anchor(desk, classic);
-        assert_eq!(cut.x, classic.x, "x centring comes from the sim, unchanged");
-        assert!(
-            cut.y > classic.y,
-            "classic {}, cutaway {}",
-            classic.y,
-            cut.y
+        let near = crate::pixel_painter::seated_anchor_for(desk, CHARACTER_SPRITE_W, Facing::North);
+        let far = crate::pixel_painter::seated_anchor_for(desk, CHARACTER_SPRITE_W, Facing::South);
+        assert_eq!(
+            near.y, desk.y,
+            "the deleted override hardcoded desk.y; the shared anchor must still \
+             land there for a back-turned desk, or deleting it moved someone"
         );
-        assert_eq!(cut.y, desk.y, "the head lands on the desk's own row");
+        assert!(
+            far.y < near.y,
+            "a viewer-facing occupant sits BEHIND the desk, a back-turned one in \
+             front: far {far:?}, near {near:?}"
+        );
+        assert_eq!(far.x, near.x, "the seat side never moves the centring");
     }
 
     /// The badge follows the CUTAWAY's body, not the classic one:
@@ -1380,6 +1341,14 @@ mod tests {
     /// The bundled pack, which ships `desk` (14x8) and `desk@4x` (56x32).
     fn pack() -> Pack {
         crate::embedded_pack::load_sprite_pack(None).expect("the embedded pack loads")
+    }
+
+    fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
+        crate::pixel_painter::seated_anchor_for(
+            desk,
+            crate::layout::CHARACTER_SPRITE_W,
+            crate::layout::Facing::North,
+        )
     }
 
     fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
