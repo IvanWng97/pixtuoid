@@ -22,7 +22,7 @@ pub(super) use crate::layout::CHARACTER_SPRITE_W;
 // offsets (8/12/7) are NOT sprite height: both packs are 12px tall, so they
 // stay fixed.
 /// Where a desk's occupant RENDERS — the desk's seat cell put through the same
-/// [`SeatView`] every other seat uses, so the chair, its occupant and the walk
+/// `Seat` model every other seat uses, so the chair, its occupant and the walk
 /// that ends there cannot drift apart. Re-exported from `pixel_painter` so the
 /// binary's hit-test can't drift from the fn that places the sprite.
 pub fn seated_anchor_facing(desk: Point, sprite_w: u16, facing: crate::layout::Facing) -> Point {

@@ -286,6 +286,11 @@ fn resolve_characters(
             }
         };
         match p {
+            Pose::SeatedIdle if matches!(agent.state, ActivityState::Waiting { .. }) => {
+                // Waiting is the one state that WANTS the human — the `N wait`
+                // counter's twin. Asleep-with-zzz reads as the opposite.
+                placements.push(seated("seated", 0, CharacterGlow::None, None));
+            }
             Pose::SeatedIdle => {
                 let sleep_variant = if agent.agent_id.raw() % 2 == 0 {
                     "seated_sleeping"
@@ -311,10 +316,8 @@ fn resolve_characters(
                     wp_rank.insert(wp, rank + 1);
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
-                    // `render_anchor` is the ONE authority for the anchor base +
-                    // sprite height (the label twin in
-                    // `anchors::character_anchor` rides the SAME call, so they
-                    // can't drift).
+                    // The label twin in `anchors::character_anchor` rides this
+                    // SAME call, so sprite and badge can't drift.
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let anchor_base = seat.render_anchor(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
@@ -336,9 +339,8 @@ fn resolve_characters(
                     let anchor = with_breath(anchor_no_breath, agent.agent_id, now);
                     placements.push(CharacterPlacement {
                         agent_idx,
-                        // The SAME key the sit-down/stand-up glide uses, so
-                        // the agent can't pop across its furniture's z-key at
-                        // the walk→seat seam.
+                        // The glide's own key, so nothing pops at the
+                        // walk→seat seam.
                         anchor_y: seat.z_key(),
                         anim_name,
                         frame_idx: 0,

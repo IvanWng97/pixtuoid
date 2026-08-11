@@ -128,6 +128,9 @@ enum SeatKind {
 ///
 /// Extend [`view`](Self::view) and the `match self.kind` arms below to add a
 /// seatable furniture; nothing else in the painter needs to learn about it.
+/// Every one of those matches lists its kinds EXPLICITLY (no `_`), so a new
+/// `WaypointKind` is a compile error at each decision it has to make rather
+/// than silently rendering as a stander.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Seat {
     kind: SeatKind,
@@ -161,6 +164,21 @@ impl Seat {
         }
     }
 
+    /// Whether this seat's occupant sits at SEAT height. Read by both geometry
+    /// arms so they cannot disagree — a seat-height anchor paired with a
+    /// feet-row z-key sorts a sitter through their own furniture. The meeting
+    /// chair qualifies because its profile sprite shares the front `seated`
+    /// sprite's 8x10 bottom-row geometry.
+    fn seated_furniture(self) -> bool {
+        use crate::layout::WaypointKind;
+        matches!(
+            self.kind,
+            SeatKind::Waypoint(
+                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
+            )
+        )
+    }
+
     fn view(self) -> SeatView {
         use crate::layout::{Facing, WaypointKind};
         match self.kind {
@@ -180,9 +198,7 @@ impl Seat {
             SeatKind::Waypoint(WaypointKind::Island) => SeatView::Side {
                 flip: matches!(self.facing, Facing::East),
             },
-            // Not seats — the agent stands AT these. Listed EXPLICITLY (no `_`)
-            // so a new WaypointKind is a compile error HERE, forcing a
-            // deliberate decision instead of silently rendering as a stander.
+            // Not seats — the agent stands AT these.
             SeatKind::Waypoint(
                 WaypointKind::Pantry
                 | WaypointKind::PhoneBooth
@@ -223,15 +239,25 @@ impl Seat {
             }
             // You leave the counter holding what you came for.
             SeatKind::Waypoint(WaypointKind::Pantry) => ("holding_coffee", false),
-            // Upright: the island's bartender and every stand-beside appliance.
-            SeatKind::Waypoint(_) => ("standing", matches!(view, SeatView::Side { flip: true })),
+            // The island's bartender and the stand-beside appliances.
+            SeatKind::Waypoint(
+                WaypointKind::Island
+                | WaypointKind::PhoneBooth
+                | WaypointKind::StandingDesk
+                | WaypointKind::VendingMachine
+                | WaypointKind::Printer
+                | WaypointKind::SnackShelf,
+            ) => ("standing", matches!(view, SeatView::Side { flip: true })),
         }
     }
 
     /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
     /// animations are never inherited from the embedded default (`merge_from` is
     /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
-    /// pose — a missing animation must never mean an invisible sitter.
+    /// pose — a missing animation must never mean an invisible sitter. That now
+    /// holds for the UPRIGHT kinds too, which used to paint nothing at all: a
+    /// pack without `holding_coffee` shows a `base`-posed agent at the counter
+    /// rather than an empty one.
     pub(super) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
         let (anim, flip) = self.sprite_for(base);
         if pack.animation(anim).is_some() {
@@ -262,18 +288,14 @@ impl Seat {
     /// furniture's own key on the way down: the agent pops in front of the sofa
     /// mid-glide, then jumps behind it.
     pub(super) fn z_key(self) -> u16 {
-        use crate::layout::WaypointKind;
+        if self.seated_furniture() {
+            // Behind a couch/sofa back (which sorts at pos+3) or tied with a
+            // front sofa, where insertion order puts the sitter on top.
+            return self.pos.y + 2;
+        }
         match self.kind {
-            // Behind a couch/sofa back (furniture sorts at pos+3) or tied with a
-            // front sofa (pos+2, insertion order puts the sitter on top). The
-            // chair shares it: its profile sprite has the front `seated`
-            // sprite's 8x10 bottom-row geometry.
-            SeatKind::Waypoint(
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair,
-            ) => self.pos.y + 2,
-            // The plain feet row — where an upright occupant's sprite bottoms
-            // out. The bartender's pos row sits INSIDE the island body, below
-            // the island's own south-row key, so the whole arc stays behind it.
+            // The plain feet row, which for the bartender sits INSIDE the
+            // island body — so the whole arc stays behind the counter.
             SeatKind::Waypoint(_) | SeatKind::HomeDesk => self.pos.y,
         }
     }
@@ -283,14 +305,12 @@ impl Seat {
     /// (`anchors::character_anchor`) derive the anchor from, so the badge can
     /// never float above the sitter.
     pub(super) fn render_anchor(self, sprite_w: u16) -> Point {
-        use crate::layout::WaypointKind;
-        match self.kind {
-            SeatKind::Waypoint(
-                WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair,
-            ) => back_couch_anchor(self.pos, sprite_w),
+        if self.seated_furniture() {
+            back_couch_anchor(self.pos, sprite_w)
+        } else {
             // The desk sitter keeps the UPRIGHT anchor: their seat cell IS the
             // walk anchor the arrival settles on, so sprite and walk share it.
-            SeatKind::Waypoint(_) | SeatKind::HomeDesk => waypoint_anchor(self.pos, sprite_w),
+            waypoint_anchor(self.pos, sprite_w)
         }
     }
 }

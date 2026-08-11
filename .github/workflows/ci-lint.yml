@@ -67,7 +67,11 @@ jobs:
       - uses: extractions/setup-just@v4
       # Separate from the ast-grep advisory in ci-supplemental, which stays out
       # of ci-gate so an npm install can never become a protected requirement.
-      # These arms need only git + python, so they can gate.
+      # These arms need only git + python, so they can gate. The fn-body arm
+      # rides `--require-fn-body`, which ONLY `just preflight` passes (setup-tools
+      # has put ast-grep there) — the gate an author actually runs, and the one
+      # this arm was walked past. Adding that flag here would make an npm install
+      # a protected requirement, which is the thing this split exists to prevent.
       - run: |
           git fetch --quiet origin main
           just comment-lint-gate

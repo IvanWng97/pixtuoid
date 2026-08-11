@@ -1184,9 +1184,7 @@ fn a_claimed_seat_sends_the_agent_to_the_next_seat_of_the_same_venue() {
                     ..
                 } => {
                     // The probe walks FORWARD, so a venue's LAST seat has no
-                    // sibling ahead of it and the agent legitimately walks off —
-                    // the doc says so. Require a successor in the same room, or
-                    // the test asserts more than the code promises.
+                    // sibling ahead and the agent legitimately walks off.
                     let sibling_ahead = l
                         .waypoints
                         .get(wp_idx + 1)

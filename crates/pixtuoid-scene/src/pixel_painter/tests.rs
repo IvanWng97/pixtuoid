@@ -322,6 +322,57 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     );
 }
 
+/// The skeleton fixture pack with `extra` appended and every named
+/// `[animations.X]` section dropped — the only way to reach `sprite_in_pack`'s
+/// degradation rungs, since the embedded pack has every animation.
+fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
+    let dir = tmp.join("pack");
+    std::fs::create_dir_all(&dir).expect("mkdir");
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
+    for entry in std::fs::read_dir(&fixture).expect("fixture dir") {
+        let entry = entry.expect("entry");
+        std::fs::copy(entry.path(), dir.join(entry.file_name())).expect("copy");
+    }
+    let manifest = std::fs::read_to_string(dir.join("pack.toml")).expect("read manifest");
+    let kept: String = manifest
+        .split("\n[animations.")
+        .enumerate()
+        .filter(|(i, sec)| *i == 0 || !without.iter().any(|w| sec.starts_with(&format!("{w}]"))))
+        .map(|(i, sec)| {
+            if i == 0 {
+                sec.to_string()
+            } else {
+                format!("\n[animations.{sec}")
+            }
+        })
+        .collect();
+    std::fs::write(dir.join("pack.toml"), format!("{kept}{extra}")).expect("write manifest");
+    crate::embedded_pack::load_sprite_pack(Some(dir)).expect("fixture pack")
+}
+
+/// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
+/// not the pose's own still hides a back-turned sitter's face.
+#[test]
+fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
+    use crate::layout::{Facing, Point};
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let pack = fixture_pack(
+        &[],
+        "\n[animations.seated_back]\nframes = [\"placeholder.sprite\"]\nframe_ms = 500\n",
+        tmp.path(),
+    );
+    assert!(
+        pack.animation("seated_back").is_some() && pack.animation("typing_back").is_none(),
+        "the fixture must have the still back view and NOT typing's for this rung to bite"
+    );
+    let back = Seat::at_desk(Point { x: 40, y: 30 }, Facing::North);
+    assert_eq!(
+        back.sprite_in_pack("typing", &pack),
+        ("seated_back", false),
+        "typing has no back view here, so the still one stands in — never the face"
+    );
+}
+
 #[test]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
@@ -817,18 +868,18 @@ fn a_seeded_seat_moves_the_chair_the_sitter_and_the_walk_together() {
             for facing in [Facing::South, Facing::North] {
                 let centre = crate::layout::desk_walk_anchor_facing(desk, facing);
                 // the sitter and the chair both centre on it
-                for w in [CHARACTER_SPRITE_W, 8] {
+                for w in [CHARACTER_SPRITE_W, 10] {
                     assert_eq!(
                         seated_anchor_facing(desk, w, facing).x,
                         centre.x - w / 2,
                         "{desk:?} {facing:?} w={w}: sprite must centre on the seat"
                     );
                 }
-                // and the walk lands exactly there
+                // and the ceiling pool — a THIRD consumer — lights the same x
                 assert_eq!(
-                    crate::layout::desk_walk_anchor_facing(desk, facing).x,
+                    crate::layout::desk_ceiling_pool_center(desk, facing).x,
                     centre.x,
-                    "{desk:?} {facing:?}: the walk must end on the seat centre"
+                    "{desk:?} {facing:?}: the desk's light must pool over the seat"
                 );
                 let base = desk.x + crate::layout::desk_furniture_def().visual.w / 2;
                 offsets.insert(i32::from(centre.x) - i32::from(base));
@@ -1084,8 +1135,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
             }
             // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint default.
             WaypointKind::Island => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
-            // waypoint_anchor.y + sprite_h(12) + 3 = (pos.y - 12) + 12 + 3
-            _ => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12 + 3,
+            _ => unreachable!("the loop filters to seats; {:?} has no foot cell", w.kind),
         };
         assert_eq!(
             z, historical,
@@ -2376,6 +2426,14 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         assert!(
             p.waiting_bubble,
             "{facing:?} desk {i}: a waiting agent must carry the bubble"
+        );
+        // Waiting rides the SeatedIdle pose, whose default sprite is the
+        // sleeping one — a waiter drawn asleep inverts the state's meaning.
+        assert!(
+            p.sleep_z_seed.is_none() && !p.anim_name.contains("sleeping"),
+            "{facing:?} desk {i}: a waiting agent must be AWAKE, saw {} with sleep seed {:?}",
+            p.anim_name,
+            p.sleep_z_seed
         );
         seen.insert(format!("{facing:?}"));
     }
@@ -3709,4 +3767,24 @@ fn paint_flame_crown_draws_its_pattern() {
             "the crown painted outside its own box at ({x}, {y})"
         );
     }
+}
+
+/// The upright kinds reach the degradation rung too: before the seat model they
+/// asked for a sprite the pack lacked and painted NOTHING.
+#[test]
+fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
+    use crate::layout::{Facing, Point, WaypointKind};
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let pack = fixture_pack(&["holding_coffee"], "", tmp.path());
+    assert!(
+        pack.animation("holding_coffee").is_none(),
+        "the fixture must lack the coffee pose for this rung to bite"
+    );
+    let seat = Seat::at_waypoint(WaypointKind::Pantry, Point { x: 40, y: 30 }, Facing::South);
+    assert_eq!(seat.sprite_for("seated"), ("holding_coffee", false));
+    assert_eq!(
+        seat.sprite_in_pack("seated", &pack),
+        ("seated", false),
+        "a pack without the coffee pose still shows someone at the counter"
+    );
 }

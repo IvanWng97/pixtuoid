@@ -803,6 +803,12 @@ pub const SEAT_RENDER_Y_OFF: u16 = 7;
 /// The X half is no longer a second formula: it derives from the seat centre.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
+/// A point packed into one hash input, so a per-spot seed is derived the same
+/// way everywhere it is needed.
+pub(super) fn point_seed(p: Point) -> u64 {
+    (u64::from(p.x) << 32) | u64::from(p.y)
+}
+
 /// Half the seeded nudge's span. The chair is `CHARACTER_SPRITE_W` on a
 /// `visual.w` desk, so centring leaves 3 px a side and ±2 keeps a pixel of desk
 /// under each edge.
@@ -814,7 +820,7 @@ const SEAT_NUDGE_PX: i32 = 2;
 /// a per-desk nudge so a pod does not read as a stamped grid.
 fn seat_center_x(desk: Point) -> u16 {
     let base = i32::from(desk.x) + i32::from(desk_furniture_def().visual.w) / 2;
-    let seed = (u64::from(desk.x) << 32) | u64::from(desk.y);
+    let seed = point_seed(desk);
     let span = SEAT_NUDGE_PX * 2 + 1;
     let nudge = (pixtuoid_core::id::splitmix64(seed) % span as u64) as i32 - SEAT_NUDGE_PX;
     base.saturating_add(nudge).max(0) as u16
@@ -822,7 +828,7 @@ fn seat_center_x(desk: Point) -> u16 {
 
 pub(crate) const DESK_WALK_Y_OFF_BACK: u16 = WALKING_Y_OFF;
 
-// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the chair paints UNDER its occupant.
+// Below `WALKING_Y_OFF`, `seated_anchor_facing`'s `saturating_sub` clamps and the sitter's sprite lands off its chair.
 const _: () = assert!(DESK_WALK_Y_OFF_BACK >= WALKING_Y_OFF);
 
 /// Where an agent walks to/from for its home `desk` (`East`/`West` never occur, and take the `South` arrangement).
@@ -973,9 +979,10 @@ impl PlantKind {
     }
 }
 
-/// Decor placed in the aisles BETWEEN 2×2 desk pods. Picked by a deterministic
-/// hash of the pod index, so each office layout is varied but stable across
-/// renders.
+/// Decor placed in the aisles BETWEEN 2×2 desk pods. Each slot draws from a
+/// per-floor shuffled bag (`compute::decor_for_slot`), so a floor sees every
+/// kind before any repeats and no two neighbouring aisles share one — stable
+/// across renders, varied across floors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PodDecor {
     /// A tall plant filling the aisle.

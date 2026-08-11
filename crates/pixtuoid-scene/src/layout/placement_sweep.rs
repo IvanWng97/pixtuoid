@@ -1367,10 +1367,10 @@ fn each_pass_of_the_decor_bag_is_a_permutation_of_the_roster() {
     );
 }
 
-/// Every pod-decor kind must be able to open a floor. The slot phase is
-/// `floor_seed % PodDecor::ALL.len()`, and a modulus that does not match the
-/// roster silently strands a kind: `% 7` against a 5-member roster left phase 2
-/// (`Tv`) unreachable, so on a one-slot floor that asset never rendered.
+/// Every pod-decor kind must be able to open a floor — a one-slot floor renders
+/// only whatever the bag deals first, so a kind that never leads is a sprite
+/// that never appears. The rotation this replaced stranded `Tv` exactly that
+/// way on all ten production floors.
 #[test]
 fn every_pod_decor_kind_can_open_a_floor() {
     let mut seen: Vec<crate::layout::PodDecor> = (0..crate::floor::MAX_FLOORS)
@@ -1410,5 +1410,30 @@ fn a_wide_floors_decor_order_is_not_one_fixed_cycle() {
             seen.len(),
             crate::floor::MAX_FLOORS
         );
+    }
+}
+
+/// No two adjacent aisle slots share a kind. The rotation this bag replaced had
+/// it by construction; a bag has to be told, because a fresh permutation may
+/// open on the kind the last one closed with — two identical pieces in
+/// neighbouring aisles is the failure a user sees first.
+#[test]
+fn no_two_adjacent_aisle_slots_share_a_kind() {
+    // Four passes over the roster: a floor holds up to 17 slots.
+    let span = crate::layout::PodDecor::ALL.len() * 4;
+    for f in 0..crate::floor::MAX_FLOORS {
+        let seed = crate::floor::floor_seed(f);
+        let kinds: Vec<_> = (0..span)
+            .map(|i| super::compute::decor_for_slot(seed, i))
+            .collect();
+        for i in 1..kinds.len() {
+            assert_ne!(
+                kinds[i],
+                kinds[i - 1],
+                "floor {f}: slots {} and {i} are both {:?}",
+                i - 1,
+                kinds[i]
+            );
+        }
     }
 }

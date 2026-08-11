@@ -119,11 +119,6 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     // between are carpet apron under the windows, so blocking them pushed the
     // walkable boundary south of the visible wall base (mask = ground
     // projection, invariant #6).
-    //
-    // Solid for the band's WHOLE width, elevator included: the doorway is a hole
-    // in the WALL, not in the ground, and `door_threshold` already stands
-    // DOOR_THRESHOLD_CLEARANCE_PX south of this base. The cut that used to be
-    // here was walkable wall that only creatures ever wandered into (#902).
     mask.mark_blocked(
         0,
         0,

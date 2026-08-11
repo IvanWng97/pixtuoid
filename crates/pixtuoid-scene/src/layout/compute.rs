@@ -405,10 +405,8 @@ pub(super) fn compute_with_seed(
         kitchen_island,
         &meeting_rooms,
     );
-    // Folded, not mapped: a settled plant joins the obstacle set the NEXT one
-    // clears against. The corridor's two pots slide toward each other (`dir` is
-    // inward for both), so on a narrow band they interpenetrate unless each
-    // sees the one before it.
+    // Folded, not mapped: the corridor's two pots slide toward each other, so
+    // each must clear against the ones already placed.
     let mut plants: Vec<PlantItem> = Vec::new();
     for p in plant_candidates {
         let mut obstacles = singleton_rects.clone();
@@ -827,6 +825,9 @@ fn settle_plant(
     /// only stand where a DISPLACED one already could — no new clearance rule,
     /// and no way out of the container the ladder already respects.
     const PLANT_SCATTER_PX: u16 = 4;
+    // The sharp edge's claim — a scattered pot only stands where a DISPLACED one
+    // already could — holds only while the scatter fits inside the dodge budget.
+    const _: () = assert!(PLANT_SCATTER_PX <= MAX_PLANT_NUDGE_PX);
     let dir: i16 = if p.pos.x < band.x + band.width / 2 {
         1
     } else {
@@ -839,9 +840,8 @@ fn settle_plant(
     };
     // The authored spot is step 0; a seeded step spends part of the SAME budget
     // on variety, so a pot is not on the same pixel of every floor.
-    let seeded = pixtuoid_core::id::splitmix64(
-        floor_seed ^ ((u64::from(p.pos.x) << 32) | u64::from(p.pos.y)),
-    ) % (u64::from(PLANT_SCATTER_PX) + 1);
+    let seeded = pixtuoid_core::id::splitmix64(floor_seed ^ super::decor::point_seed(p.pos))
+        % (u64::from(PLANT_SCATTER_PX) + 1);
     let first = slide(seeded as u16);
     if clear(first) {
         return Some(PlantItem {
@@ -1314,14 +1314,32 @@ pub(super) fn compute_pod_desks(
 /// slots against a 5-member roster, so one permutation would repeat three times
 /// over. Reshuffling also drops the coupling a phase index carried, that its
 /// modulus keep matching the roster's length.
+///
+/// A fresh permutation may OPEN with the kind the last one CLOSED on, standing
+/// two identical pieces in neighbouring aisles — the one property the rotation
+/// gave for free. Rotating that bag restores it and stays a pure function of
+/// the seed; pinned by `no_two_adjacent_aisle_slots_share_a_kind`.
 pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
+    // Two kinds is the floor for alternating; below it the adjacency rule
+    // cannot be honoured and `rotate_left(1)` is a no-op.
+    const _: () = assert!(PodDecor::ALL.len() >= 2);
     let n = PodDecor::ALL.len();
-    let mut bag = PodDecor::ALL.to_vec();
-    // Fisher-Yates over the pass's own seed.
-    let mut z = floor_seed ^ (slot_idx / n) as u64;
-    for i in (1..n).rev() {
-        z = pixtuoid_core::id::splitmix64(z);
-        bag.swap(i, (z % (i as u64 + 1)) as usize);
+    let shuffled = |pass: u64| {
+        let mut bag = PodDecor::ALL.to_vec();
+        let mut z = floor_seed ^ pass;
+        for i in (1..n).rev() {
+            z = pixtuoid_core::id::splitmix64(z);
+            bag.swap(i, (z % (i as u64 + 1)) as usize);
+        }
+        bag
+    };
+    let mut bag = shuffled(0);
+    for pass in 1..=(slot_idx / n) as u64 {
+        let prev_tail = bag[n - 1];
+        bag = shuffled(pass);
+        if bag[0] == prev_tail {
+            bag.rotate_left(1);
+        }
     }
     bag[slot_idx % n]
 }
