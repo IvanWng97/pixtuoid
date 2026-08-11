@@ -130,8 +130,11 @@ enum SeatKind {
 /// seatable furniture — both list their kinds EXPLICITLY, so a new
 /// `WaypointKind` is a compile error there. The GEOMETRY pair reads
 /// [`seated_furniture`](Self::seated_furniture) instead, which defaults a
-/// newcomer to the upright anchor and feet-row key without complaint; the net
-/// for that is `settle_view_matches_the_seated_view_for_every_seat`.
+/// newcomer to the upright anchor and feet-row key without complaint. The net
+/// for THAT is `sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture`,
+/// a per-kind z-key oracle that stops on a kind it does not name — and it sees
+/// a newcomer only if the furniture is `occupies_pos` and the swept layout
+/// places it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Seat {
     kind: SeatKind,
@@ -255,11 +258,11 @@ impl Seat {
     /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
     /// animations are never inherited from the embedded default (`merge_from` is
     /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
-    /// pose — a missing animation must never mean an invisible sitter. Two rungs
-    /// reach further than they used to: an UPRIGHT kind whose art the pack lacks
-    /// now shows a `base`-posed agent rather than nothing, and a back-turned
-    /// couch whose pack lacks `back_couch` falls to `seated_back` rather than to
-    /// a face at the window.
+    /// pose — a missing animation must never mean an invisible sitter. Two kinds
+    /// of sitter reach this ladder that did not: an UPRIGHT kind used to bypass
+    /// the pack check entirely and painted NOTHING when its art was missing, and
+    /// a back-turned couch lacking `back_couch` now falls to `seated_back` when
+    /// the pack HAS it, rather than to a face at the window.
     pub(super) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
         let (anim, flip) = self.sprite_for(base);
         if pack.animation(anim).is_some() {

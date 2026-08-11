@@ -1135,7 +1135,7 @@ fn sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture() {
             }
             // waypoint_anchor.y + sprite_h(12) = pos.y — the AtWaypoint default.
             WaypointKind::Island => waypoint_anchor(w.pos, CHARACTER_SPRITE_W).y + 12,
-            _ => unreachable!("the loop filters to seats; {:?} has no foot cell", w.kind),
+            _ => unreachable!("{:?} has a foot cell but no oracle arm — add one", w.kind),
         };
         assert_eq!(
             z, historical,
@@ -3805,9 +3805,14 @@ fn a_pantry_visitor_is_visible_even_when_the_pack_lacks_holding_coffee() {
     );
     let seat = Seat::at_waypoint(WaypointKind::Pantry, Point { x: 40, y: 30 }, Facing::South);
     assert_eq!(seat.sprite_for("seated"), ("holding_coffee", false));
+    let got = seat.sprite_in_pack("seated", &pack);
     assert_eq!(
-        seat.sprite_in_pack("seated", &pack),
+        got,
         ("seated", false),
         "a pack without the coffee pose still shows someone at the counter"
+    );
+    assert!(
+        pack.animation(got.0).is_some(),
+        "and the name it degrades to must be one the pack can actually paint"
     );
 }
