@@ -1,8 +1,9 @@
-//! Seat orientation + seated/standing character painting. `SeatView` is the
-//! single source of truth for how an occupant of ANY seat — waypoint couch,
-//! sofa, meeting chair, island stool, or a home desk — faces (sprite + flip +
-//! anchor + sit-down glide + z-key); `paint_character_at` is the shared
-//! recolor-blit.
+//! The seat model + seated/standing character painting. [`Seat`] (kind × cell ×
+//! facing) is the single source of truth for an occupant of ANY seat — waypoint
+//! couch, sofa, meeting chair, island stool, or a home desk: sprite + flip,
+//! render anchor, z-key and sit-down glide all derive from it. [`SeatView`] is
+//! the LOOK it resolves to, not the authority. `paint_character_at` is the
+//! shared recolor-blit.
 
 use super::*;
 
@@ -89,7 +90,8 @@ pub(crate) fn paint_character_at(
 }
 
 /// The still back view — also the fallback for a pose that has none of its own,
-/// so a back-turned sitter never shows a face.
+/// so a back-turned sitter keeps their back to the camera whenever the pack has
+/// this one.
 const SEATED_BACK: &str = "seated_back";
 
 /// A table, not `format!("{base}_back")`, because sprite names are `&'static str`.

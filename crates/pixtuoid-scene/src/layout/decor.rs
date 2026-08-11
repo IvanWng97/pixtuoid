@@ -796,15 +796,19 @@ pub const WALKING_Y_OFF: u16 = 12;
 /// where `walking_anchor` lands exactly on `back_couch_anchor`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
 
-/// Y offset from a home desk's top-left to the agent's WALK anchor, chosen so
-/// `walking_anchor(desk_walk_anchor_facing(d, f)) == seated_anchor_facing(d, f)`
-/// — the agent settles onto its seat with no arrival pop. Locked by
-/// `desk_walk_anchor_settles_exactly_on_the_seat` in `pixel_painter/tests.rs`.
-/// The X half comes from `seat_center_x`, not from a second offset here.
+/// Y offset from a home desk's top-left to the agent's WALK anchor — how far
+/// south of the desk origin a FAR seat sits (a near one takes
+/// `DESK_WALK_Y_OFF_BACK`). The no-arrival-pop identity no longer depends on
+/// this value: sprite and walk both route through `Seat::render_anchor`, so it
+/// holds structurally, and `desk_walk_anchor_settles_exactly_on_the_seat` still
+/// pins it. The X half comes from `seat_center_x`, not from a second offset.
 pub(crate) const DESK_WALK_Y_OFF: u16 = 4;
 
 /// A point packed into one hash input, so a per-spot seed is derived the same
-/// way everywhere it is needed.
+/// way everywhere it is needed. The PACKING is load-bearing, not an
+/// implementation detail: every committed still and the wasm were rendered
+/// against it, and swapping the halves re-seeds every seat and pot while every
+/// property test still passes — pinned by `point_seed_packing_is_frozen`.
 pub(super) fn point_seed(p: Point) -> u64 {
     (u64::from(p.x) << 32) | u64::from(p.y)
 }

@@ -1437,3 +1437,22 @@ fn no_two_adjacent_aisle_slots_share_a_kind() {
         }
     }
 }
+
+/// The seed PACKING, frozen by value. Every other seat/plant test asserts a
+/// property that survives any uniform seed — a swapped packing passes all of
+/// them while moving every chair and pot away from the committed art, which only
+/// the CI-only `gen-check` pixel diff would notice, and only as an opaque delta.
+#[test]
+fn point_seed_packing_is_frozen() {
+    assert_eq!(
+        super::decor::point_seed(Point { x: 1, y: 2 }),
+        (1u64 << 32) | 2,
+        "x occupies the high word and y the low one"
+    );
+    assert_eq!(super::decor::point_seed(Point { x: 0, y: 0 }), 0);
+    assert_ne!(
+        super::decor::point_seed(Point { x: 3, y: 5 }),
+        super::decor::point_seed(Point { x: 5, y: 3 }),
+        "the packing must not be symmetric in x and y"
+    );
+}

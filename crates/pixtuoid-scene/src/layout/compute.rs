@@ -1320,8 +1320,12 @@ pub(super) fn compute_pod_desks(
 /// `no_two_adjacent_aisle_slots_share_a_kind`.
 pub(super) fn decor_for_slot(floor_seed: u64, slot_idx: usize) -> PodDecor {
     // Two kinds is the floor for alternating; below it the adjacency rule
-    // cannot be honoured and `rotate_left(1)` is a no-op.
+    // cannot be honoured and `rotate_left(1)` is a no-op. The ceiling is the
+    // floor COUNT: `a_wide_floors_decor_order_is_not_one_fixed_cycle` needs more
+    // distinct arrangements than the roster has kinds, and it can only observe
+    // `MAX_FLOORS` of them.
     const _: () = assert!(PodDecor::ALL.len() >= 2);
+    const _: () = assert!(PodDecor::ALL.len() < pixtuoid_core::state::MAX_FLOORS);
     let n = PodDecor::ALL.len();
     let shuffled = |pass: u64| {
         let mut bag = PodDecor::ALL.to_vec();

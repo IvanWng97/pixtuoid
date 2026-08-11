@@ -79,9 +79,11 @@ fn active_state_is_seated_typing_with_cycling_frame() {
     assert_eq!(derive(&s, now, &l), Some(Pose::SeatedTyping { frame: 0 }));
 }
 
-/// Waiting gets NO pose of its own: the agent stays seated and the overhead
-/// bubble carries the state, so a back-turned desk needs no extra art and the
-/// cue reads identically whichever way the seat faces.
+/// Waiting gets NO pose of its own — it rides `SeatedIdle`, so a back-turned
+/// desk needs no extra art and the cue reads identically whichever way the seat
+/// faces. The RENDER side splits it back out (`sim::resolve_characters` forces
+/// the awake `seated` base), because the sleeping sprite reads as the opposite
+/// of "wants you".
 #[test]
 fn waiting_state_stays_seated_and_lets_the_bubble_say_so() {
     let (s, now) = slot(
