@@ -442,6 +442,11 @@ impl SceneLayout {
     /// Which way desk `i`'s occupant faces — the ONE authority painters and the
     /// approach/walk geometry share, so a seat is never drawn off its routed side.
     pub fn desk_facing(&self, i: FloorLocalDeskIndex) -> Facing {
+        debug_assert_eq!(
+            self.desk_facings.len(),
+            self.home_desks.len(),
+            "desk_facings is index-parallel to home_desks; a short one seats the tail viewer-facing and passes every geometry invariant"
+        );
         self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }
 

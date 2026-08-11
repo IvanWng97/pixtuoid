@@ -21,7 +21,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest + gen-guides-check + gitenv-selftest) → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest + gen-guides-check + gitenv-selftest + env-paths + prose) → NOTE: `prose` fetches `origin/main`, so preflight now needs network → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```

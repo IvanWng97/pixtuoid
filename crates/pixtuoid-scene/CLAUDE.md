@@ -34,10 +34,11 @@ real-world headings. Pin this and stop re-deriving it:
 
 `ApproachSides` states this once (`decor.rs`: *north = −y*); a piece's
 approach set is canonical (facing-South) then rotated by live `Facing`.
-Worked example — the **home desk** (`DESK_APPROACH = {n:true, s:false,
-e:true, w:true}`): approached from **North (far) + East + West**, NEVER
-South — the monitor faces the viewer at the south front, so the seat opens
-away from it. (We keep north=up even though a real sunny-window office in the
+Worked example — the **home desk**'s CANONICAL set (`DESK_APPROACH =
+{n:true, s:false, e:true, w:true}`) opens AWAY from the monitor. Half a pod is
+back-turned, so that set is rotated per desk: a viewer-facing desk is
+approached N/E/W, a back-turned one S/E/W. `layout.desk_facing(i)` is the
+authority — never assume the canonical set is the live one. (We keep north=up even though a real sunny-window office in the
 northern hemisphere would face its windows SOUTH — the compass is
 screen-space, and flipping it would invert the entire z-sort/"south row"
 vocabulary across 400+ sites for zero behavior change.)
@@ -115,6 +116,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 - **The weather VEILS are lit by the emitter, and their cross-weather ordering is NOT an invariant.** `skyline_haze` (behind the glass) and the Fog/Overcast/Smog `wash_glass` arms scale with …
 - **An EXCLUSIVE spot is single-occupancy, enforced where the destination is CHOSEN — not where it's drawn.** `waypoint_index_for_cycle(id, cycle_n, n)` is occupancy-BLIND (a pure hash of agent × cycle), so …
 - **The free-standing whiteboard OVERLAPS a north-facing desk's seat in the committed stills, and that is an ACCEPTED look, not a bug to fix.** Since the board snaps to an inter-pod aisle and this branch made that aisle every north pod …
+- **`desk_facings` is index-parallel to `home_desks` and stays that way — the consolidation into one `Vec<Desk>` was weighed and declined.** Both are `pub` on a published crate, and nothing in the type system pins their lengths, so a …
 - **A back-turned desk whose south front has no reachable approach is DEMOTED to viewer-facing, and that rung never fires in any swept layout.** `compute` re-probes every `Facing::North` desk after the walkable mask exists and flips it South …
 - **Two narrow-band connectivity guards keep the office ONE region (#566), both graceful DECOR degradation — not bugs.** (1) The lounge couch's east seat can seal the elevator `door_threshold`'s own column when the …
 - **The free-standing whiteboard stands ONLY in an inter-pod aisle, and is ABSENT rather than relocated when the band holds a single pod row.** Its `usable_h / 3` anchor is a HINT, not a slot: it knows nothing of the desk grid, so unsnapped …

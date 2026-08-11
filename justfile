@@ -1225,9 +1225,9 @@ comment-lint-selftest:
 comment-lint-gate:
     #!/usr/bin/env bash
     set -euo pipefail
-    # The three arms report FILES, not a diluted ratio, so a stale `origin/main`
-    # moves the merge-base back and blocks on other people's merged commits. CI
-    # fetches (ci-lint.yml); refusing to run beats measuring against a stale ref.
+    # A stale `origin/main` moves the merge-base back: the re-parent arm then
+    # blocks on other people's merged commits and the prose RATIO is diluted by
+    # them. CI fetches (ci-lint.yml); refusing beats measuring against a stale ref.
     # Bounded by GIT's own stall detector, not `timeout(1)` — that is coreutils,
     # absent on a stock macOS box. `lint` joins its jobs with `wait`, so an
     # unbounded fetch on a captive-portal network hangs preflight and pre-push.

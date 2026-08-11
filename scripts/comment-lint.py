@@ -34,7 +34,9 @@ PATHSPEC = ("*.rs", "*.py", "*.pyi")
 
 
 def unified_diff(base: str, worktree: bool, cwd: str | None = None) -> str:
-    """The raw diff to scope against — the ONLY git this module does."""
+    """The `origin/main` diff the arms scope against. Not this module's only git —
+`doc_run_hits`, `prose_share` and `reparented_doc_hits` each read their own
+revision; #895's one-seam shape is worth restoring, tracked separately."""
     # `base...HEAD` is the merge-base range (the PR's own commits); bare `base`
     # also folds in uncommitted working-tree edits.
     rev = base if worktree else f"{base}...HEAD"
@@ -267,12 +269,15 @@ def selftest() -> int:
         if gate_fails(False, ["d"], ["m"], True):
             fails.append("without --gate nothing may fail")
         for arm, args in (
-            ("doc-run", (["d"], [], False)),
             ("re-parent", ([], ["m"], False)),
             ("prose", ([], [], True)),
         ):
             if not gate_fails(True, *args):
                 fails.append(f"the {arm} arm must block under --gate")
+        # The OTHER direction, and the one that rots silently: an arm that is
+        # advisory by design must stay advisory. `docs` alone may never block.
+        if gate_fails(True, ["d"], [], False):
+            fails.append("the doc-run arm is advisory and must NOT block")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
@@ -283,9 +288,9 @@ def selftest() -> int:
 
 
 DOC_RUN_MAX = 10
-"""Longest NEW `///`/`//!` run allowed — above the tree's own long tail, whose
-longest legitimate run is 35. Diff-scoped, so existing runs are grandfathered,
-and a new block past it is not banned, only made deliberate."""
+"""Doc-run length at which a NEW `///`/`//!` block is REPORTED, not blocked — see
+[`gate_fails`] for why this arm is advisory. Diff-scoped, so the tree's existing
+long docs are grandfathered."""
 
 
 def doc_run_hits(
@@ -492,13 +497,23 @@ def reparented_doc_hits(
 
 
 def gate_fails(gate: bool, docs: list, moved: list, over_prose: bool) -> bool:
-    """Whether `--gate` should exit non-zero — the ast-grep arm deliberately absent.
+    """Whether `--gate` should exit non-zero. TWO of the four arms block.
 
-    That arm needs an npm install, so it runs only in advisory `ci-supplemental`;
-    letting it block locally would make `just lint` stricter than the CI job that
-    shares its recipe.
+    The ast-grep arm needs an npm install, so it runs only in advisory
+    `ci-supplemental`; letting it block locally would make `just lint` stricter
+    than the CI job sharing its recipe.
+
+    `docs` (the doc-run length) does not block either, and that is a correction,
+    not an oversight: CLAUDE.md's three comment tests are all SEMANTIC and it says
+    outright "none demands brevity … a comment stays at whatever length it earned",
+    so a length cap contradicts the rule it was built to serve. Measured, the tree
+    holds 50 `//!` and 47 `///` runs over the cap, and every per-CLI source module
+    — a recurring change type with its own committed skill — carries a 17-51 line
+    header. The arm still REPORTS: finding the candidate is mechanical, deciding
+    whether the length was earned is the comment lens's call.
     """
-    return gate and (bool(docs) or bool(moved) or over_prose)
+    _ = docs
+    return gate and (bool(moved) or over_prose)
 
 
 def main() -> int:
