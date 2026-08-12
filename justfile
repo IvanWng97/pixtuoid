@@ -318,6 +318,7 @@ lint:
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
+    run cites   just guide-drift-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1236,6 +1237,23 @@ comment-lint-gate:
       || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate
+
+# Guide citations whose symbol is gone from the code. `gen-guides-check` proves
+# the index blocks match their siblings — both can agree while both describe a
+# deleted function. On-demand like `fuzz`; it REPORTS, and some names are cited
+# precisely BECAUSE they must not exist.
+[group('meta')]
+[doc('Report guide citations whose symbol no longer exists in code')]
+guide-drift:
+    python3 scripts/guide-drift.py
+
+# Pins the citation scanner AND the self-validation bug it was born with: the
+# guides live under `crates/`, so a code search that includes them lets every
+# citation satisfy itself.
+[group('meta')]
+[doc('Self-test the guide-drift scanner (both directions)')]
+guide-drift-selftest:
+    python3 scripts/guide-drift.py --selftest
 
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence

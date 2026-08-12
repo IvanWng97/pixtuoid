@@ -133,6 +133,7 @@ jobs:
       - run: just gen-guides-check
       - run: just env-paths
       - run: just gitenv-selftest
+      - run: just guide-drift-selftest
 
   msrv:
     name: msrv
