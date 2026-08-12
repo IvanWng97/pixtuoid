@@ -318,6 +318,7 @@ lint:
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
+    run isslink just issue-links        & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1293,6 +1294,16 @@ comment-lint-replay n="20":
     echo "fn-body arm (advisory): $advisory/$total merged commits, $flagged lines"
     echo "blocking arms (--gate): $gated/$total merged commits — an arm reds the"
     echo "  commits that predate its own calibration, so read this against \`git log -S\`"
+
+# A closing keyword GitHub reads but the sentence does not mean. Wired in three
+# places that must stay in step: the `commit-msg` hook, `just lint`, and CI's
+# hygiene job — a commit message is authored locally, so the hook is where it can
+# still be fixed, and the other two catch a bypass.
+[group('meta')]
+[doc('Check commit messages for inline GitHub closing keywords')]
+issue-links range="origin/main..HEAD":
+    python3 scripts/issue-links.py --selftest
+    python3 scripts/issue-links.py {{ range }}
 
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence

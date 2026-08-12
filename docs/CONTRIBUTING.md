@@ -67,6 +67,14 @@ Cross-file report/upload semantics that actionlint cannot express are pinned by
 the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
 `just lint` and the CI hygiene job.
+An issue link closes its issue from a merged commit message or a PR description, and
+GitHub reads the KEYWORD, not the sentence — `Why this does NOT close #907` and
+`(the alternative that also fixes #912)` each closed an issue they were denying. So a
+closing keyword belongs on its own trailer line (`Closes: #N`) and nowhere else;
+`just issue-links` enforces that over commit messages, from the `commit-msg` hook where
+it can still be fixed and from `lint`/hygiene to catch a bypass. A PR DESCRIPTION is
+authored on GitHub and passes through no hook — that half stays on the author.
+
 `just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
 the repository deliberately requires a symbolic ref or SHA (not SHA-only),
 every checkout drops persisted credentials, and accepted analyzer findings use

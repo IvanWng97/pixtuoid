@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Commit-msg hook: a GitHub closing keyword may only appear as a trailer.
+# The rule and its WHY live in scripts/issue-links.py; this is the local arm of
+# the same check CI runs over the whole branch, so the two cannot drift.
+#
+# Set up once per clone with:
+#   git config core.hooksPath .githooks
+set -euo pipefail
+
+[[ "${SKIP_PREFLIGHT:-0}" == "1" ]] && exit 0
+cd "$(git rev-parse --show-toplevel)"
+python3 scripts/issue-links.py --stdin <"$1"
