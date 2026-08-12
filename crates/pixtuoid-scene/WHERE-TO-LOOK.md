@@ -41,13 +41,14 @@ and read that one, or read the file end to end when mapping the crate.
 >
 > Two things stay true and are worth not re-discovering. (a) The residue is mostly two mascots WALKING: 45% of every cycle is a routed leg and legs share the office's aisles however far apart their endpoints are, so no destination rule drives crowding to zero. (b) Expanding each anchor into its 8 neighbours instead of spreading was measured WORSE than the list at small sizes (62% -> 74%): 8 cells within 4px are ONE place to a 14x12 sprite. Spread, not offset, is the mechanism.
 >
-> Destinations come from the whole mask, but the RESOLVED point is clamped by the sprite's own
-> extent (`creatures::clamp_sprite_inside`, applied at every `mascot_position`/`pet_position` exit):
-> `blit_centered` parks a frame at `pos - size/2` and CLIPS at the buffer edge, so an unclamped
-> east draw rendered half a lobster pinned to the border (measured 3 of 8 independent port sets at
-> 192x80). Clamping the resolved POINT rather than insetting the destination draw is deliberate —
-> it leaves every seeded destination exactly where it was, so only the frames that would have
-> spilled move. The PET rides the same rule (same `walkable_target`, same centred blit).
+> Destinations come from the whole mask, and the sim NEVER moves the point it returns —
+> `mascot_position` is not even given the pack, so it cannot see a sprite's size. Keeping the
+> drawn sprite on the canvas is the PAINTER's (`pixel_painter::keep_sprite_on_canvas`, applied to
+> the pet and the mascot at enqueue): `blit_centered` parks a frame at `pos - size/2` and clips at
+> the buffer edge, so an unguarded east draw rendered half a lobster pinned to the border. Moving a
+> DRAWN position harms nothing; moving the SIM's put a creature inside furniture (#912). The PET
+> rides the same rule (same `walkable_target`, same centred blit). Agents do NOT get this guard yet
+> — measured 2-7% of aimless destinations shift or clip at the edge.
 >
 > What was GIVEN UP, deliberately: destinations no longer encode daemon state (state reads from the CADENCE — 4.5s busy / 9s idle / 14s degraded — and the sprite tint), and a creature may rest in open floor rather than beside furniture. Don't re-add claim/probe machinery to tighten this: that would couple one mascot's motion to which siblings exist, breaking the stateless invariant the whole module is built on.
 - "How does the lofi soundtrack get composed and rendered (and how do I add an instrument / a stem)?" → `audio/compose.rs::compose(mood, seed)` samples a theory-constrained grammar (10 day + 8 night progression templates × transpose, melody/groove/keys/bass rules) into a `GeneratedScore`; `audio/synth.rs::gen_beds` renders its SIX lanes (`bank::TRACK_STEMS` order: pad, sparkle, keys, drums, texture, bass) through the same cores the frozen `#[cfg(test)]` fingerprint anchors pin. The lead INSTRUMENT registry is `compose::LeadVoice` (EpVel + Pluck + Kalimba day-pool, EpVel + Vibraphone night-pool) dispatched once in `synth::lead_voice_fn`; the voice draw sits LAST in the seed stream. A new instrument = the 5-step checklist in `.claude/skills/procedural-lofi` (voice fn → variant → draw weight → distribution test → `examples/lofi_audition` listen batch, `--solo <lane>` isolates a lane). A new STEM is an arc, not a checklist: `LoopStem` (+ keep Rain LAST), `TRACK_STEMS`, `StemLevels` + its tier-gain table, `lane_recipe` + `gen_bed` arm (mind the silent `_ => Vec::new()` fallback — see the sharp edge), the generated-beds length/band asserts, the audition mix arrays, and the wasm/site gain-node counts (`pixtuoid-web/src/audio.rs` warmup tests, `OfficeBackdrop.astro` loops). Quality gate is STATISTICAL: blind-audition a seed batch, ratify the GENERATOR.
