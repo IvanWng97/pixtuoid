@@ -294,27 +294,37 @@ def selftest() -> int:
 
         # `gate_fails` is a pure predicate, so the pins above cannot see main()'s
         # wiring — where #907's reverted attempt broke the ast-grep-free CI job.
-        (repo / "src" / "advisory.rs").write_text(
-            "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n"
-        )
-        gitenv.git(*ident, "add", "src/advisory.rs", cwd=repo, check=True)
-        gitenv.git(*ident, "commit", "-qm", "advisory", cwd=repo, check=True)
         script = str(pathlib.Path(__file__).resolve())
-        for label, path, want_absent in (
-            ("PATH as-is", os.environ.get("PATH", ""), False),
-            ("ast-grep off PATH", path_without("ast-grep"), True),
+        states = [
+            ("PATH as-is", os.environ.get("PATH", "")),
+            ("ast-grep off PATH", path_without("ast-grep")),
+        ]
+        if shutil.which("ast-grep", path=states[1][1]) is not None:
+            fails.append("the ast-grep-free PATH still resolves it — that control is inert")
+        # One fixture commit per case, so `HEAD~1...HEAD` isolates the arm named:
+        # a shared range blocks on whichever arm fires first.
+        for path, body, want_block, why in (
+            (
+                "src/advisory.rs",
+                "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n",
+                False,
+                "fn-body findings alone must not block",
+            ),
+            (
+                "src/renamed.rs",
+                "/// Doc for the fn.\nconst LATE_WEDGE: u8 = 0;\n\nfn after() {}\n",
+                True,
+                "the re-parent arm must still block",
+            ),
         ):
-            if want_absent and shutil.which("ast-grep", path=path) is not None:
-                fails.append(f"{label}: ast-grep still resolves — this control is inert")
-            env = {**os.environ, "PATH": path}
-            for base, want_block, why in (
-                ("HEAD~1", False, "fn-body findings alone must not block"),
-                ("HEAD~2", True, "the re-parent arm must still block"),
-            ):
+            (repo / path).write_text(body)
+            gitenv.git(*ident, "add", path, cwd=repo, check=True)
+            gitenv.git(*ident, "commit", "-qm", f"e2e {path}", cwd=repo, check=True)
+            for label, env_path in states:
                 r = subprocess.run(
-                    [sys.executable, script, base, "--gate"],
+                    [sys.executable, script, "HEAD~1", "--gate"],
                     cwd=repo,
-                    env=env,
+                    env={**os.environ, "PATH": env_path},
                     capture_output=True,
                     text=True,
                 )

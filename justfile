@@ -1260,13 +1260,17 @@ comment-lint-replay n="20":
       cp -R "$root/.ast-grep" "$root/sgconfig.yml" "$tmp/wt/"
       rc=0
       out="$(cd "$tmp/wt" && python3 "$root/scripts/comment-lint.py" "$sha^" --gate 2>&1)" || rc=$?
-      # A crash prints no verdict line, and would otherwise count as zero.
-      case "$out" in
-        *"new comment-slop"*) n_hit="$(printf '%s' "$out" | sed -n 's/^comment-lint: \([0-9]*\) new comment-slop.*/\1/p')" ;;
-        *"no new 3+-comment runs"*|*"no added/changed Rust or Python lines"*) n_hit=0 ;;
-        *) echo "comment-lint-replay: no verdict from ${sha:0:8} — the replay is broken, not the commit" >&2
-           printf '%s\n' "$out" >&2; exit 1 ;;
-      esac
+      # Every path through the script prints a `comment-lint:` line; a crash
+      # prints none, and would otherwise be counted as zero findings.
+      if printf '%s\n' "$out" | grep -qE '^comment-lint: [0-9]+ new comment-slop'; then
+        n_hit="$(printf '%s\n' "$out" | sed -n 's/^comment-lint: \([0-9]*\) new comment-slop.*/\1/p')"
+      elif printf '%s\n' "$out" | grep -q '^comment-lint: '; then
+        n_hit=0
+      else
+        echo "comment-lint-replay: no verdict from ${sha:0:8} — the replay is broken, not the commit" >&2
+        printf '%s\n' "$out" >&2
+        exit 1
+      fi
       total=$((total + 1)) flagged=$((flagged + n_hit))
       if [ "$rc" -ne 0 ]; then
         gated=$((gated + 1))
