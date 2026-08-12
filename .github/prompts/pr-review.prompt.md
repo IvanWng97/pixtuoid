@@ -407,7 +407,7 @@ history:
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
   Its COUNT is that candidate list, not a status line: report N items each
   carrying a disposition, never "the run passed" — on #904 eighteen findings
-  were reported as a pass, and the diff then gained another.
+  mid-PR were reported as a pass, and the diff then gained another.
   **Redundancy-within is the axis this lens kept missing**: the other four
   compare the comment to the CODE, and a restatement repeats no code, so
   nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do

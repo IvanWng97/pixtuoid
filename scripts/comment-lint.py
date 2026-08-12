@@ -82,7 +82,7 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
 
 
 def path_without(tool: str) -> str:
-    """PATH with every directory that provides `tool` stripped, other tools intact."""
+    """PATH with every DIRECTORY that provides `tool` stripped."""
     dirs = os.environ.get("PATH", "").split(os.pathsep)
     while (hit := shutil.which(tool, path=os.pathsep.join(dirs))) is not None:
         home = os.path.normpath(os.path.dirname(hit) or ".")
@@ -136,11 +136,23 @@ def selftest() -> int:
         # renames the documented fn (must not).
         (repo / "src" / "moved.rs").write_text("/// Doc for the fn.\nfn owner() {}\n")
         (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn before() {}\n")
+        # The end-to-end re-parent case wedges into THIS one, so `renamed.rs` is
+        # not asked to be a must-not-fire and a must-fire fixture at once.
+        (repo / "src" / "e2e_wedge.rs").write_text("/// Doc for the wedged fn.\nfn wedged() {}\n")
         twins = "/// Shared opening line.\n/// One.\nfn a() {}\n\n/// Shared opening line.\n/// Two.\nfn b() {}\n"
         (repo / "src" / "twins.rs").write_text(twins)
         # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
         # commit or the diff-scoped checks above see an empty diff.
-        gitenv.git(*ident, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs", cwd=repo, check=True)
+        gitenv.git(
+            *ident,
+            "add",
+            "src/moved.rs",
+            "src/renamed.rs",
+            "src/twins.rs",
+            "src/e2e_wedge.rs",
+            cwd=repo,
+            check=True,
+        )
         gitenv.git(*ident, "commit", "-qm", "base", cwd=repo, check=True)
         (repo / "src" / "moved.rs").write_text(
             "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
@@ -302,20 +314,28 @@ def selftest() -> int:
         if shutil.which("ast-grep", path=states[1][1]) is not None:
             fails.append("the ast-grep-free PATH still resolves it — that control is inert")
         # One fixture commit per case, so `HEAD~1...HEAD` isolates the arm named:
-        # a shared range blocks on whichever arm fires first.
+        # a shared range blocks on whichever arm fires first. Each body carries
+        # `code_floor` where the ratio would otherwise decide the case.
         for path, body, want_block, why in (
             (
                 "src/advisory.rs",
-                "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n",
+                "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n" + code_floor,
                 False,
                 "fn-body findings alone must not block",
             ),
             (
-                "src/renamed.rs",
-                "/// Doc for the fn.\nconst LATE_WEDGE: u8 = 0;\n\nfn after() {}\n",
+                "src/e2e_wedge.rs",
+                "/// Doc for the wedged fn.\nconst LATE_WEDGE: u8 = 0;\n\nfn wedged() {}\n",
                 True,
                 "the re-parent arm must still block",
             ),
+            (
+                "src/e2e_prose.rs",
+                "".join(f"// n{n}\n" for n in range(9)) + code_floor,
+                True,
+                "the prose arm must still block",
+            ),
+            ("src/e2e_clean.rs", code_floor, False, "a findingless diff must not block"),
         ):
             (repo / path).write_text(body)
             gitenv.git(*ident, "add", path, cwd=repo, check=True)
@@ -329,7 +349,11 @@ def selftest() -> int:
                     text=True,
                 )
                 if (r.returncode != 0) is not want_block:
-                    fails.append(f"{label}: {why} (exit {r.returncode})\n{r.stdout}")
+                    fails.append(f"{label}: {why} (exit {r.returncode})\n{r.stdout}{r.stderr}")
+                # `comment-lint-replay` parses for this line to tell a run from a
+                # crash, and nothing else pins the string.
+                if not any(l.startswith("comment-lint: ") for l in r.stdout.splitlines()):
+                    fails.append(f"{label} {path}: no `comment-lint:` verdict line\n{r.stdout}")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
