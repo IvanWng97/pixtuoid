@@ -81,6 +81,18 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
     return json.loads(out)
 
 
+def path_without(tool: str) -> str:
+    """PATH with every DIRECTORY that provides `tool` stripped."""
+    dirs = os.environ.get("PATH", "").split(os.pathsep)
+    while (hit := shutil.which(tool, path=os.pathsep.join(dirs))) is not None:
+        home = os.path.normpath(os.path.dirname(hit) or ".")
+        pruned = [d for d in dirs if os.path.normpath(d or ".") != home]
+        if len(pruned) == len(dirs):
+            break
+        dirs = pruned
+    return os.pathsep.join(dirs)
+
+
 def selftest() -> int:
     """Pin this DRIVER's two behaviors: which files it diffs, and which it scans.
     The ast-grep RULES have their own pins (`just ast-grep-test`)."""
@@ -124,11 +136,23 @@ def selftest() -> int:
         # renames the documented fn (must not).
         (repo / "src" / "moved.rs").write_text("/// Doc for the fn.\nfn owner() {}\n")
         (repo / "src" / "renamed.rs").write_text("/// Doc for the fn.\nfn before() {}\n")
+        # The end-to-end re-parent case wedges into THIS one, so `renamed.rs` is
+        # not asked to be a must-not-fire and a must-fire fixture at once.
+        (repo / "src" / "e2e_wedge.rs").write_text("/// Doc for the wedged fn.\nfn wedged() {}\n")
         twins = "/// Shared opening line.\n/// One.\nfn a() {}\n\n/// Shared opening line.\n/// Two.\nfn b() {}\n"
         (repo / "src" / "twins.rs").write_text(twins)
         # Staged by PATH, not `-A`: everything else must stay NEW in the fixture
         # commit or the diff-scoped checks above see an empty diff.
-        gitenv.git(*ident, "add", "src/moved.rs", "src/renamed.rs", "src/twins.rs", cwd=repo, check=True)
+        gitenv.git(
+            *ident,
+            "add",
+            "src/moved.rs",
+            "src/renamed.rs",
+            "src/twins.rs",
+            "src/e2e_wedge.rs",
+            cwd=repo,
+            check=True,
+        )
         gitenv.git(*ident, "commit", "-qm", "base", cwd=repo, check=True)
         (repo / "src" / "moved.rs").write_text(
             "/// Doc for the fn.\nconst WEDGE: u8 = 0;\n\nfn owner() {}\n"
@@ -279,6 +303,68 @@ def selftest() -> int:
         # advisory by design must stay advisory. `docs` alone may never block.
         if gate_fails(True, ["d"], [], False):
             fails.append("the doc-run arm is advisory and must NOT block")
+
+        # `gate_fails` is a pure predicate, so the pins above cannot see main()'s
+        # wiring — where #907's reverted attempt broke the ast-grep-free CI job.
+        script = str(pathlib.Path(__file__).resolve())
+        full = os.environ.get("PATH", "")
+        bare = path_without("ast-grep")
+        if shutil.which("ast-grep", path=bare) is not None:
+            fails.append("the ast-grep-free PATH still resolves it — that control is inert")
+        if shutil.which("git", path=bare) is None:
+            fails.append("the ast-grep-free PATH lost git too — that control cannot run")
+        # A box without ast-grep makes the two PATHs identical, and running the
+        # same environment twice buys nothing.
+        states = [("PATH as-is", full, shutil.which("ast-grep", path=full) is not None)]
+        if bare != full:
+            states.append(("ast-grep off PATH", bare, False))
+        clean = "no new 3+-comment runs"
+        # One fixture commit per case, so `HEAD~1...HEAD` isolates the arm named:
+        # a shared range blocks on whichever arm fires first. Each body carries
+        # `code_floor` where the ratio would otherwise decide the case.
+        for path, body, want_block, why, want in (
+            (
+                "src/advisory.rs",
+                "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n" + code_floor,
+                False,
+                "fn-body findings alone must not block",
+                ("1 new comment-slop finding(s) in a fn body", clean),
+            ),
+            (
+                "src/e2e_wedge.rs",
+                "/// Doc for the wedged fn.\nconst LATE_WEDGE: u8 = 0;\n\nfn wedged() {}\n",
+                True,
+                "the re-parent arm must still block",
+                ("doc block re-homed from", "doc block re-homed from"),
+            ),
+            (
+                "src/e2e_prose.rs",
+                "".join(f"// n{n}\n" for n in range(9)) + code_floor,
+                True,
+                "the prose arm must still block",
+                ("are narrative prose", "are narrative prose"),
+            ),
+            ("src/e2e_clean.rs", code_floor, False, "a findingless diff must not block", (clean, clean)),
+        ):
+            (repo / path).write_text(body)
+            gitenv.git(*ident, "add", path, cwd=repo, check=True)
+            gitenv.git(*ident, "commit", "-qm", f"e2e {path}", cwd=repo, check=True)
+            for label, env_path, scans in states:
+                r = subprocess.run(
+                    [sys.executable, script, "HEAD~1", "--gate"],
+                    cwd=repo,
+                    env={**os.environ, "PATH": env_path},
+                    capture_output=True,
+                    text=True,
+                )
+                if (r.returncode != 0) is not want_block:
+                    fails.append(f"{label}: {why} (exit {r.returncode})\n{r.stdout}{r.stderr}")
+                # This arm's OWN line, not just a `comment-lint:` prefix: the
+                # ast-grep-absent notice prints one before any arm runs, and
+                # `comment-lint-replay` reads the fn-body COUNT out of its text.
+                expect = want[0] if scans else want[1]
+                if expect not in r.stdout:
+                    fails.append(f"{label} {path}: stdout lacks {expect!r}\n{r.stdout}{r.stderr}")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:

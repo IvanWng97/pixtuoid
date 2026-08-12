@@ -272,7 +272,9 @@ Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_dri
 path matching that posts the documented blast-radius escalations as a sticky PR comment so
 prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
-become a required check.
+become a required check. A proposal to make that arm BLOCK is priced by `just
+comment-lint-replay N` (#907). Merged is not adjudicated — read the flagged lines before
+calling them false positives.
 
 Which `comment-lint` arms BLOCK is stated once, in `gate_fails`' docstring in
 `scripts/comment-lint.py` — pinned in both directions by that script's selftest.

@@ -405,6 +405,9 @@ history:
   the diff's new lines only — the ~5k
   pre-existing legitimate WHY are grandfathered), but the keep / trim-to-≤2 /
   relocate-to-the-declaration-or-a-CLAUDE.md-sharp-edge call is this lens's.
+  Its COUNT is that candidate list, not a status line: report N items each
+  carrying a disposition, never "the run passed" — on #904 eighteen findings
+  mid-PR were reported as a pass, and the diff then gained another.
   **Redundancy-within is the axis this lens kept missing**: the other four
   compare the comment to the CODE, and a restatement repeats no code, so
   nothing else can flag it. Apply CLAUDE.md's comment test #2 verbatim — do

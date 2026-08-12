@@ -1237,6 +1237,63 @@ comment-lint-gate:
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate
 
+# Prices any proposal to make an arm BLOCK: today's rules replayed against
+# already-merged commits, so each finding is a block the proposal would have
+# imposed on work that shipped. On-demand like `fuzz` — N checkouts, origin/main.
+[group('meta')]
+[doc('Replay the comment-lint arms against the last N merged commits (default 20)')]
+comment-lint-replay n="20":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # Without it the fn-body count is 0 for every commit and the run still exits
+    # 0 — the fail-open `fuzz` guards for the same reason.
+    command -v ast-grep >/dev/null \
+      || { echo "comment-lint-replay: needs ast-grep — run \`just setup-tools\`" >&2; exit 1; }
+    root="$(git rev-parse --show-toplevel)"
+    tmp="$(mktemp -d)"
+    trap 'git worktree remove --force "$tmp/wt" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+    git worktree add -q --detach "$tmp/wt" HEAD
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
+      || { echo "comment-lint-replay: cannot reach origin" >&2; exit 1; }
+    total=0 advisory=0 gated=0 flagged=0
+    for sha in $(git log --first-parent --format=%H -n {{ n }} origin/main); do
+      git -C "$tmp/wt" checkout -q --force --detach "$sha"
+      # Only the RULES are injected — YAML, outside the scanned pathspec.
+      # Injecting the scripts counts their own comments as the commit's.
+      rm -rf "$tmp/wt/.ast-grep"
+      cp -R "$root/.ast-grep" "$root/sgconfig.yml" "$tmp/wt/"
+      rc=0
+      out="$(cd "$tmp/wt" && python3 "$root/scripts/comment-lint.py" "$sha^" --gate 2>&1)" || rc=$?
+      # Every path through the script prints a `comment-lint:` line (pinned by its
+      # selftest); a crash prints none, and would count as zero findings. Matched
+      # off a HERESTRING: `grep -q` quits early, and through a pipe that SIGPIPEs
+      # the writer, which `pipefail` then reads as no-match on a long verdict.
+      if grep -qE '^comment-lint: [0-9]+ new comment-slop' <<<"$out"; then
+        n_hit="$(printf '%s\n' "$out" | sed -n 's/^comment-lint: \([0-9]*\) new comment-slop.*/\1/p')"
+      elif grep -q '^comment-lint: ' <<<"$out"; then
+        n_hit=0
+      else
+        echo "comment-lint-replay: no verdict from ${sha:0:8} — the replay is broken, not the commit" >&2
+        printf '%s\n' "$out" >&2
+        exit 1
+      fi
+      total=$((total + 1)) flagged=$((flagged + n_hit))
+      if [ "$rc" -ne 0 ]; then
+        gated=$((gated + 1))
+        echo "GATE REDS ${sha:0:8}  $(git log -1 --format=%s "$sha")"
+      fi
+      if [ "$n_hit" -gt 0 ]; then
+        advisory=$((advisory + 1))
+        printf '  %s  %-4s %s\n' "${sha:0:8}" "$n_hit" "$(git log -1 --format=%s "$sha" | cut -c1-52)"
+      fi
+    done
+    # A bad N leaves the `for` word list empty without tripping `set -e`, and the
+    # summary then reports its most reassuring shape.
+    [ "$total" -gt 0 ] || { echo "comment-lint-replay: no commits walked — check N" >&2; exit 1; }
+    echo "fn-body arm (advisory): $advisory/$total merged commits, $flagged lines"
+    echo "blocking arms (--gate): $gated/$total merged commits — an arm reds the"
+    echo "  commits that predate its own calibration, so read this against \`git log -S\`"
+
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
 # gate, because one of these leaks ate a developer's index before anyone noticed.
