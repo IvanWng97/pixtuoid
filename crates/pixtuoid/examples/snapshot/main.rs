@@ -858,6 +858,33 @@ mod tests {
         assert!(rect.y <= cy && cy < rect.y + rect.height, "y not in crop");
     }
 
+    /// The seated fallback resolves an agent on a floor ABOVE the ground one.
+    /// `desk_index` is GLOBAL, and every floor gets its own geometry and seed, so
+    /// reading floor 0's is how an agent at a real desk reports having none.
+    #[test]
+    fn crop_rect_seats_an_agent_that_lives_on_an_upper_floor() {
+        let now = SystemTime::now();
+        // More agents than one floor holds, so the tail lands on floor 1+.
+        let scene = sample_scene(now, 4, 9);
+        let upper = scene
+            .agents
+            .values()
+            .find(|a| a.floor_idx > 0)
+            .expect("a scene with 9 agents over 4 desks must reach an upper floor");
+        let label = upper.label.to_string();
+        let floor = upper.floor_idx;
+
+        let history = pixtuoid_scene::pose::PoseHistory::new();
+        let args = crop_args(&["--crop-agent", &label]);
+        let rect = compute_crop_rect(&args, &scene, &history, 192, 64, now)
+            .unwrap_or_else(|e| panic!("floor {floor} agent {label:?} must crop: {e}"))
+            .expect("a seated agent crops");
+        assert!(
+            rect.width > 0 && rect.height > 0,
+            "empty crop for {label:?}"
+        );
+    }
+
     #[test]
     fn crop_rect_without_flags_is_none() {
         let now = SystemTime::now();

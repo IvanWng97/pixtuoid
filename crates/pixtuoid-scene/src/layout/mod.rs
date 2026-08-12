@@ -17,7 +17,7 @@ mod rooms;
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
-pub use compute::PANTRY_COUNTER_LARGE_W;
+pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
 pub(crate) use decor::repels_plants;
 pub use decor::{
     desk_ceiling_pool_center, desk_furniture_def, desk_walk_anchor_facing, furniture_def,

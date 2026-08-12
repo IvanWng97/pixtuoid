@@ -161,8 +161,10 @@ run mutants. Its `&&` sibling one column left IS observable off Windows (`false
 ## Deliberately NOT excluded
 
 `mascot_position`'s walk-in boundary (`if entered < MASCOT_ENTER_MS`) is an
-equivalent mutant — at t=1 the walk-in's endpoint IS `home`, which is also the
-wander's forced cycle-0 origin, so both branches render the identical `Point`. But
+equivalent mutant — the walk-in ends at `walkable_target(seed, 0)` and wander
+cycle 0 departs from that same draw, so both branches render the identical
+`Point`. Stronger since the `mascot_home` beat was deleted: the two endpoints are
+one expression now, not two that happened to agree. But
 its **sibling** boundary, `if age < enter_delay`, is genuinely killable: the stagger
 returns `None` rather than holding at the elevator, so `<=` changes drawn to
 not-drawn at exactly `age == enter_delay`, caught by

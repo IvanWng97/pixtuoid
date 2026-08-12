@@ -41,6 +41,16 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
 pub(super) const MIN_LAYOUT_W: u16 = DESK_W + DESK_GAP_X * 2;
 pub(super) const MIN_LAYOUT_H: u16 = 40 + MIN_TOP_MARGIN;
 
+/// The smallest buffer that lays out, for a painter that has to TELL the user
+/// why it is not drawing an office. Buffer units — each painter owns its own
+/// cell aspect, so only it can turn this into rows and columns.
+pub fn min_layout_size() -> Size {
+    Size {
+        w: MIN_LAYOUT_W,
+        h: MIN_LAYOUT_H,
+    }
+}
+
 /// A meeting room narrower than this can't host the sofa body with enough
 /// walkable margin for the coarse 4×4 router to reach the seats buried in it —
 /// find_path returns None and an idle agent sent there TELEPORTS. Below it the
