@@ -178,9 +178,33 @@ pub(crate) fn compute_crop_rect(
                     labels.join(", ")
                 )
             })?;
-        history
-            .recent(slot.agent_id, u64::MAX, now)
-            .ok_or_else(|| anyhow::anyhow!("agent {agent_label:?} has no visual position"))?
+        // `PoseHistory` records only waypoint and walking poses, so every
+        // desk-seated agent — the majority, and every seated pose — has no entry.
+        // Fall back to the seat the painter would draw them on rather than widen
+        // a sim store for a dev tool (#909).
+        match history.recent(slot.agent_id, u64::MAX, now) {
+            Some(p) => p,
+            None => {
+                let buf_w = cols;
+                let buf_h = rows.saturating_sub(1).saturating_mul(2);
+                let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
+                    buf_w,
+                    buf_h,
+                    Some(scene.floor_capacities[0]),
+                    args.floor_seed,
+                )
+                .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
+                let idx = slot.desk_index.single_floor_local();
+                let desk = layout.home_desk(idx).ok_or_else(|| {
+                    anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
+                })?;
+                pixtuoid_scene::pixel_painter::seated_anchor_facing(
+                    desk,
+                    pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+                    layout.desk_facing(idx),
+                )
+            }
+        }
     } else if let Some(ref furniture_str) = args.crop_furniture {
         let buf_w = cols;
         let buf_h = rows.saturating_sub(1).saturating_mul(2);

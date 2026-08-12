@@ -938,6 +938,7 @@ pub fn pixtuoid_scene::layout::desk_ceiling_pool_center(pixtuoid_scene::layout::
 pub const fn pixtuoid_scene::layout::desk_furniture_def() -> pixtuoid_scene::layout::FurnitureDef
 pub fn pixtuoid_scene::layout::desk_walk_anchor_facing(pixtuoid_scene::layout::Point, pixtuoid_scene::layout::Facing) -> pixtuoid_scene::layout::Point
 pub const fn pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture) -> pixtuoid_scene::layout::FurnitureDef
+pub fn pixtuoid_scene::layout::min_layout_size() -> pixtuoid_scene::layout::Size
 pub fn pixtuoid_scene::layout::seated_foot_cell(pixtuoid_scene::layout::Furniture, pixtuoid_scene::layout::Point) -> core::option::Option<pixtuoid_scene::layout::Point>
 pub fn pixtuoid_scene::layout::z_sort_row(pixtuoid_scene::layout::Anchor, pixtuoid_scene::layout::Point, u16) -> u16
 pub type pixtuoid_scene::layout::Layout = pixtuoid_scene::layout::SceneLayout

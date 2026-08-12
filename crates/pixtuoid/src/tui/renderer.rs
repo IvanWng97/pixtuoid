@@ -172,10 +172,61 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
+        paint_too_small_notice(f, actual, theme);
         paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
         paint_overlays(f, overlays, now, actual, theme);
     })?;
     Ok(())
+}
+
+/// Say WHY there is no office. Both callers of `draw_footer_only_frame` are a
+/// refusal — the scene rect is under the painter's own floor, or `frame_layout`
+/// declined — and a silent refusal reads as a crash at 80x24, the size a
+/// first-time user is most likely to be at (#908).
+fn paint_too_small_notice(
+    f: &mut ratatui::Frame<'_>,
+    area: Rect,
+    theme: &pixtuoid_scene::theme::Theme,
+) {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    // Rows carry TWO buffer pixels (half-block), and the footer takes its own.
+    let need_rows = min.h.div_ceil(2) + FOOTER_ROWS;
+    let need_cols = min.w.max(MIN_SCENE_WIDTH);
+    // Widest form that FITS: a terminal narrow enough to trigger this is often
+    // too narrow to hold the sentence explaining it, and skipping the line then
+    // leaves exactly the blank screen this exists to prevent.
+    let long = format!(
+        "needs {need_cols}x{need_rows}, this is {}x{}",
+        area.width, area.height
+    );
+    let short = format!("{need_cols}x{need_rows} min");
+    let lines: Vec<String> = if long.chars().count() as u16 <= area.width {
+        vec!["terminal too small".to_string(), long]
+    } else {
+        vec!["too small".to_string(), short]
+    };
+    let top = area.height.saturating_sub(FOOTER_ROWS) / 2;
+    for (i, text) in lines.iter().enumerate() {
+        let w = text.chars().count() as u16;
+        if w > area.width || top + i as u16 >= area.height {
+            continue;
+        }
+        f.render_widget(
+            ratatui::widgets::Paragraph::new(text.as_str()).style(
+                ratatui::style::Style::default().fg(Color::Rgb(
+                    theme.ui.tooltip_dim.r,
+                    theme.ui.tooltip_dim.g,
+                    theme.ui.tooltip_dim.b,
+                )),
+            ),
+            Rect {
+                x: (area.width - w) / 2,
+                y: top + i as u16,
+                width: w,
+                height: 1,
+            },
+        );
+    }
 }
 
 pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(

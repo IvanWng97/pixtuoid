@@ -12,6 +12,43 @@ fn too_small_terminal_returns_no_layout_no_panic() {
     );
 }
 
+/// A refusal has to SAY so. 80x24 is the classic default and it is under the
+/// layout minimum, so before #908 the user got a footer over a blank office —
+/// indistinguishable from a crash.
+#[test]
+fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    for (cols, rows) in [(80u16, 24u16), (15, 8)] {
+        let mut r = build(cols, rows, vec![]);
+        r.render(&scene, &pack(), t0()).expect("render");
+        assert!(r.cached_layout().is_none(), "{cols}x{rows} must refuse");
+        let text = frame_text(r.frame_buffer());
+        assert!(
+            text.contains("too small"),
+            "{cols}x{rows}: the refusal must be visible, saw:\n{text}"
+        );
+        // The wide form names both sizes; a terminal too narrow to hold that
+        // sentence still gets the requirement.
+        assert!(
+            text.contains(&format!("this is {cols}x{rows}")) || text.contains("min"),
+            "{cols}x{rows}: and must name what it needs"
+        );
+    }
+}
+
+/// The other direction: a terminal that CAN lay out must never show the notice.
+#[test]
+fn a_terminal_that_fits_shows_no_too_small_notice() {
+    let scene = scene_with(vec![idle("/ok/0.jsonl", 0, t0())], 16);
+    let mut r = build(100, 40, vec![]);
+    r.render(&scene, &pack(), t0()).expect("render");
+    assert!(r.cached_layout().is_some(), "100x40 must lay out");
+    assert!(
+        !frame_text(r.frame_buffer()).contains("terminal too small"),
+        "a fitting terminal must not be told it is too small"
+    );
+}
+
 #[test]
 fn colliding_labels_with_multibyte_session_ids_do_not_panic() {
     let mut scene = SceneState::uniform(16);

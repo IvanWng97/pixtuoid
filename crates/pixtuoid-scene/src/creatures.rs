@@ -53,18 +53,22 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             x: ((z >> 32) % u64::from(w)) as u16,
             y: (z % u64::from(h)) as u16,
         };
-        // Walkable is not enough: a cell under a desk's overhang is walkable by
-        // invariant #6 and painted over anyway, and the mascot RESTS at this
-        // point for most of its cycle. Walking through one stays fine.
-        if layout.walkable.is_walkable(last.x, last.y) && layout.is_visually_clear(last) {
-            return last;
+        // Judge the SNAPPED point, not the draw: `snap_point_to_walkable`
+        // answers with the coarse cell's CENTRE, so a clear draw can still rest
+        // on decor. Snapping is idempotent, which makes every downstream
+        // `snap(dest)` an identity — the walk lands exactly where the rest is.
+        if let Some(cand) = snap_point_to_walkable(&layout.walkable, last) {
+            // Walkable is not enough: a cell under a desk's overhang is walkable
+            // by invariant #6 and painted over anyway, and a creature RESTS here
+            // for most of its cycle. Walking through one stays fine.
+            if layout.is_visually_clear(cand) {
+                return cand;
+            }
         }
     }
-    // The snap restores WALKABILITY only, and a cell under the fish tank's glass
-    // is walkable by invariant #6 — so it faces the draws' visual filter too.
-    snap_point_to_walkable(&layout.walkable, last)
-        .filter(|p| layout.is_visually_clear(*p))
-        .or(layout.door_threshold)
+    layout
+        .door_threshold
+        .or_else(|| snap_point_to_walkable(&layout.walkable, last))
         .unwrap_or(last)
 }
 
@@ -103,9 +107,12 @@ fn place_creature(p: Point, extent: (u16, u16), layout: &Layout) -> Point {
     if layout.walkable.is_walkable(clamped.x, clamped.y) {
         return clamped;
     }
-    // Snapping is free to move the point back out past the edge the clamp pulled it in from.
+    // Same filter as the three other REST sites, for consistency rather than for
+    // a demonstrated trigger: no swept size reaches this snap with a decorated
+    // cell, so removing it reds nothing.
     snap_point_to_walkable(&layout.walkable, clamped)
         .map(|s| clamp_sprite_inside(s, extent, layout))
+        .filter(|s| layout.is_visually_clear(*s))
         .unwrap_or(clamped)
 }
 
@@ -288,6 +295,8 @@ fn mascot_elevator(layout: &Layout) -> Option<Point> {
 /// so the enter hand-off is pop-free (enter ends here, wander cycle 0 starts here).
 fn mascot_home(layout: &Layout) -> Option<Point> {
     let c = layout.corridor?;
+    // A REST beat, and the corridor hosts appliances — so it takes the filter
+    // too, unlike the elevator endpoint, which is a walk terminus.
     snap_point_to_walkable(
         &layout.walkable,
         Point {
@@ -295,6 +304,7 @@ fn mascot_home(layout: &Layout) -> Option<Point> {
             y: c.y + c.height / 2,
         },
     )
+    .filter(|p| layout.is_visually_clear(*p))
 }
 
 /// The wander seed for ONE daemon instance — folds the source AND the instance id
@@ -644,6 +654,45 @@ mod tests {
     /// `is_visually_clear` — asserting the predicate on points the loop accepted
     /// because of that same predicate is a tautology, and it is what let the first
     /// version ship missing the pantry counter and the aquarium.
+    /// The per-site sweep #905 asked for: every RESTING creature position, driven
+    /// through the real entry points rather than through `walkable_target` alone.
+    /// A walk-through is exempt by design; a rest is not, and `snap_point_to_walkable`
+    /// answers with a coarse CELL CENTRE, so a clear destination is not enough.
+    #[test]
+    fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
+        let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+        let mut rests = 0u32;
+        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180)] {
+            let Some(l) = crate::layout::Layout::compute(w, h, None) else {
+                continue;
+            };
+            for seed in 0..8u64 {
+                // 40s cycle: sample well past the walk fraction so every sample
+                // is the settled pose, which is the one that must be clear.
+                for cycle in 0..6u64 {
+                    let now = SystemTime::UNIX_EPOCH
+                        + std::time::Duration::from_millis(cycle * 40_000 + 34_000);
+                    if let Some((p, _, anim, _)) =
+                        pet_position(PetKind::Cat, &l, &pack, now, &[], false, seed)
+                    {
+                        if !anim.contains("walk") {
+                            assert!(
+                                l.is_visually_clear(p),
+                                "{w}x{h} seed {seed} cycle {cycle}: a resting cat at {p:?} \
+                                 is under a sprite that paints over it"
+                            );
+                            rests += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            rests > 50,
+            "the sweep must reach settled poses, saw {rests}"
+        );
+    }
+
     #[test]
     fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
         use crate::layout::{Anchor, Furniture};

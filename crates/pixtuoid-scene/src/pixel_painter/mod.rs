@@ -20,8 +20,8 @@ use crate::chitchat::{ActiveChitchat, ChitchatBubble};
 use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
-    z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, DESK_W,
-    ELEVATOR_H, ELEVATOR_W,
+    z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, ELEVATOR_H,
+    ELEVATOR_W,
 };
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
@@ -363,10 +363,14 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
 /// `enqueue_desk_cubicles` keys the sprite on, so a `DESK_H` retune moves the
 /// shadow WITH the sprite's south base. `half_h` is a taste literal.
 fn desk_shadow_ellipse(desk: Point) -> Ellipse {
+    // Every axis off the ONE furniture row, so the shadow cannot drift from the
+    // desk it falls under: `DESK_W` is the surface, not the piece — the side
+    // cabinets make the painted (and ground-contacting) width `visual.w`.
+    let v = crate::layout::desk_furniture_def().visual;
     Ellipse {
-        cx: desk.x + DESK_W / 2,
-        cy: desk.y + crate::layout::desk_furniture_def().visual.h,
-        half_w: DESK_W / 2 + 1,
+        cx: desk.x + v.w / 2,
+        cy: desk.y + v.h,
+        half_w: v.w / 2 - 1,
         half_h: 3,
     }
 }

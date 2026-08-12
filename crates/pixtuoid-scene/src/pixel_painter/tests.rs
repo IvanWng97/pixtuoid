@@ -3313,9 +3313,10 @@ fn an_upright_occupant_sorts_on_the_row_their_sprite_bottoms_out_on() {
 #[test]
 fn desk_shadow_tracks_the_desk_zsort_row_not_a_hardcoded_offset() {
     let desk = Point { x: 40, y: 30 };
+    let v = crate::layout::desk_furniture_def().visual;
     let e = desk_shadow_ellipse(desk);
-    assert_eq!(e.cy, desk.y + crate::layout::desk_furniture_def().visual.h);
-    assert_eq!(e.cx, desk.x + DESK_W / 2);
+    assert_eq!(e.cy, desk.y + v.h);
+    assert_eq!(e.cx, desk.x + v.w / 2);
 }
 
 #[test]
@@ -3837,5 +3838,21 @@ fn the_chair_and_the_island_mirror_on_opposite_facings() {
                 "{kind:?} must mirror on {flips_on:?} and nothing else, saw {facing:?} -> {flip}"
             );
         }
+    }
+}
+
+/// The desk's shadow falls under the desk. `DESK_W` is the SURFACE width, not
+/// the piece's — the side cabinets that cast the shadow make it `visual.w` — so
+/// a shadow keyed on `DESK_W` sits 2 px west of the thing casting it (#906).
+#[test]
+fn the_desk_shadow_is_centred_on_the_desk_that_casts_it() {
+    let v = crate::layout::desk_furniture_def().visual;
+    for desk in [Point { x: 40, y: 30 }, Point { x: 100, y: 60 }] {
+        let e = super::desk_shadow_ellipse(desk);
+        // The desk's ground is stamped TOP-LEFT at `desk`, full `visual.w` wide.
+        assert!(
+            e.cx.saturating_sub(e.half_w) >= desk.x && e.cx + e.half_w <= desk.x + v.w,
+            "{desk:?}: the shadow must stay inside the desk's ground contact"
+        );
     }
 }
