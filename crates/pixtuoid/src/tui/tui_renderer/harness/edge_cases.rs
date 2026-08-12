@@ -36,6 +36,33 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     }
 }
 
+/// First run at 80x24 is the exact case the notice exists for, and first run is
+/// also when the onboarding modal opens — over the same centred rows.
+#[test]
+fn the_too_small_notice_survives_an_open_onboarding_modal() {
+    use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    let mut r = build(80, 24, vec![]);
+    r.set_onboarding_frame(OnboardingFrame {
+        open: true,
+        rows: vec![WelcomeRow {
+            source_id: "claude-code",
+            label_prefix: "cc",
+            display_name: "Claude Code".into(),
+            checked: true,
+        }],
+        selected: 0,
+        elapsed_ms: 60_000,
+        ..Default::default()
+    });
+    r.render(&scene, &pack(), t0()).expect("render");
+    let text = frame_text(r.frame_buffer());
+    assert!(
+        text.contains("too small"),
+        "the modal must not bury the only message that explains the black screen:\n{text}"
+    );
+}
+
 /// The size the notice NAMES has to be a size that works — a requirement nobody
 /// re-derives is the half of the rule that rots.
 #[test]

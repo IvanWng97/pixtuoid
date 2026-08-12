@@ -172,9 +172,12 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 ) -> Result<()> {
     term.draw(|f| {
         let actual = f.area();
-        paint_too_small_notice(f, actual, theme);
         paint_footer(f, scene, stats, actual, theme, floor_info, source_warning);
         paint_overlays(f, overlays, now, actual, theme);
+        // LAST: a modal centres on the same rows, and first run opens one here —
+        // so painting the notice first left the black screen unexplained in the
+        // one case it exists for.
+        paint_too_small_notice(f, actual, theme);
     })?;
     Ok(())
 }
