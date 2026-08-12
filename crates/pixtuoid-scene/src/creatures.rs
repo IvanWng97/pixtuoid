@@ -291,38 +291,6 @@ fn mascot_elevator(layout: &Layout) -> Option<Point> {
     snap_point_to_walkable(&layout.walkable, raw)
 }
 
-/// The wander "home" beat — the corridor centre, snapped. Also the leg-0 origin
-/// so the enter hand-off is pop-free (enter ends here, wander cycle 0 starts here).
-fn mascot_home(layout: &Layout) -> Option<Point> {
-    let c = layout.corridor?;
-    let centre = Point {
-        x: c.x + c.width / 2,
-        y: c.y + c.height / 2,
-    };
-    let snapped = snap_point_to_walkable(&layout.walkable, centre)?;
-    if layout.is_visually_clear(snapped) {
-        return Some(snapped);
-    }
-    // A REST beat, and the corridor hosts appliances — so step along the band
-    // for a clear cell, like `walkable_target` retries its draw. Falling back to
-    // the centre rather than NONE is the load-bearing half: `mascot_position`
-    // takes this through `?`, so a decorated centre dropped the whole mascot.
-    for dx in 1..=c.width / 2 {
-        for x in [centre.x.saturating_sub(dx), centre.x.saturating_add(dx)] {
-            if x < c.x || x >= c.x + c.width {
-                continue;
-            }
-            let cand = Point { x, y: centre.y };
-            if let Some(p) = snap_point_to_walkable(&layout.walkable, cand) {
-                if layout.is_visually_clear(p) {
-                    return Some(p);
-                }
-            }
-        }
-    }
-    Some(snapped)
-}
-
 /// The wander seed for ONE daemon instance — folds the source AND the instance id
 /// (OpenClaw's resolved gateway port), so N gateways of one source take N different
 /// paths and a gateway restarting on its own port keeps its path.
@@ -335,9 +303,9 @@ pub(crate) fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonI
 }
 
 /// How long one mascot may be held at the elevator before its walk-in starts.
-/// Gateways that first-sight in the SAME beat would otherwise lerp the identical
-/// `elevator → home` line for the whole [`MASCOT_ENTER_MS`] and render as ONE
-/// lobster — the seed reaches only the steady wander.
+/// Gateways that first-sight in the SAME beat leave the door at the same instant
+/// from the same cell, so without this they render as ONE lobster until their
+/// seeded walk-in lines have pulled apart.
 const MASCOT_ENTER_STAGGER_MS: u64 = 900;
 
 /// The seeded walk-in delay for one mascot — its slice of
@@ -356,22 +324,11 @@ fn mascot_enter_delay(seed: u64) -> u64 {
 
 /// Steady wander position at wander-clock `we_ms`. Returns `(pos, walking)`:
 /// walking during the first `MASCOT_WALK_FRAC` of each cycle, resting after.
-/// Cycle 0's origin is forced to `home` so it joins the enter walk pop-free.
-fn mascot_wander(
-    layout: &Layout,
-    we_ms: u64,
-    seed: u64,
-    home: Point,
-    cycle_ms: u64,
-) -> (Point, bool) {
+fn mascot_wander(layout: &Layout, we_ms: u64, seed: u64, cycle_ms: u64) -> (Point, bool) {
     let cycle = we_ms / cycle_ms;
     let frac = (we_ms % cycle_ms) as f32 / cycle_ms as f32;
     let dest = walkable_target(layout, seed, cycle.wrapping_add(1));
-    let prev = if cycle == 0 {
-        home
-    } else {
-        walkable_target(layout, seed, cycle)
-    };
+    let prev = walkable_target(layout, seed, cycle);
     if frac < MASCOT_WALK_FRAC {
         let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
         (walk_between(layout, prev, dest, t), true)
@@ -395,7 +352,6 @@ pub(crate) fn mascot_position(
     seed: u64,
 ) -> Option<(Point, &'static str, usize)> {
     let elevator = mascot_elevator(layout)?;
-    let home = mascot_home(layout)?;
     let anchor = |pos: Point, anim: &'static str, frame_idx: usize| {
         (
             place_creature(pos, sprite_extent(pack, anim), layout),
@@ -426,7 +382,7 @@ pub(crate) fn mascot_position(
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0)
             .saturating_sub(MASCOT_ENTER_MS + enter_delay);
-        let (from, _) = mascot_wander(layout, down_we, seed, home, MASCOT_IDLE_CYCLE_MS);
+        let (from, _) = mascot_wander(layout, down_we, seed, MASCOT_IDLE_CYCLE_MS);
         let t = down_age as f32 / MASCOT_LEAVE_MS as f32;
         return Some(anchor(
             walk_between(layout, from, elevator, t),
@@ -445,7 +401,7 @@ pub(crate) fn mascot_position(
     if entered < MASCOT_ENTER_MS {
         let t = entered as f32 / MASCOT_ENTER_MS as f32;
         return Some(anchor(
-            walk_between(layout, elevator, home, t),
+            walk_between(layout, elevator, walkable_target(layout, seed, 0), t),
             walk_anim,
             frame,
         ));
@@ -456,7 +412,7 @@ pub(crate) fn mascot_position(
         DaemonState::Degraded => MASCOT_DEGRADED_CYCLE_MS,
         _ => MASCOT_IDLE_CYCLE_MS,
     };
-    let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, home, cycle_ms);
+    let (pos, walking) = mascot_wander(layout, entered - MASCOT_ENTER_MS, seed, cycle_ms);
     if walking {
         Some(anchor(pos, walk_anim, frame))
     } else {
@@ -758,10 +714,12 @@ mod tests {
         );
     }
 
+    /// The enter hand-off is pop-free because leg 0 has no special origin: the
+    /// walk-in ends at draw 0 and cycle 0 departs from it, so the whole wander is
+    /// one chain of draws. A re-introduced special case would break this.
     #[test]
-    fn mascot_wander_cycle0_starts_from_home() {
+    fn mascot_wander_cycle0_starts_from_draw_zero() {
         let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
-        let home = mascot_home(&layout).expect("home beat");
         let cycle_ms = MASCOT_IDLE_CYCLE_MS;
         let we_ms = (cycle_ms as f32 * 0.2) as u64; // frac 0.2 < 0.45 → walking
         let seed = 3u64;
@@ -769,14 +727,15 @@ mod tests {
         let t = (frac / MASCOT_WALK_FRAC).clamp(0.0, 1.0);
         // Derived through the impl's own picker, so the assertion is about the ORIGIN
         // rather than a second copy of the destination math.
-        let dest = walkable_target(&layout, seed, 1);
-        let expected = walk_between(&layout, home, dest, t);
-        let (pos, walking) = mascot_wander(&layout, we_ms, seed, home, cycle_ms);
-        assert!(walking, "frac < walk_frac → walking");
-        assert_eq!(
-            pos, expected,
-            "cycle 0 leg must originate from home, not from a picked prev cell"
+        let expected = walk_between(
+            &layout,
+            walkable_target(&layout, seed, 0),
+            walkable_target(&layout, seed, 1),
+            t,
         );
+        let (pos, walking) = mascot_wander(&layout, we_ms, seed, cycle_ms);
+        assert!(walking, "frac < walk_frac → walking");
+        assert_eq!(pos, expected, "cycle 0 must originate from draw 0");
     }
 
     // Unlike desks/waypoints (placed by the layout with margins), nothing insets a
@@ -970,8 +929,8 @@ mod tests {
             .0
         };
         // The window where the claim holds: from when the LATER instance leaves the
-        // door to before the EARLIER one joins its wander. Outside it, crossing at
-        // the shared `home` beat is ordinary traffic, not the collapse.
+        // door to before the EARLIER one joins its wander. Outside it, two lobsters
+        // crossing is ordinary traffic, not the collapse.
         let (da, db) = (mascot_enter_delay(a), mascot_enter_delay(b));
         let (lo, hi) = (da.max(db) + 1, da.min(db) + MASCOT_ENTER_MS);
         assert!(
@@ -1019,7 +978,7 @@ mod tests {
     fn mascot_position_walks_in_from_elevator_during_enter_window() {
         let layout = crate::layout::Layout::compute(160, 120, Some(4)).expect("layout fits");
         let elevator = mascot_elevator(&layout).expect("elevator");
-        let home = mascot_home(&layout).expect("home");
+        let home = walkable_target(&layout, 0, 0);
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
         let seed = 0u64;
 
@@ -1245,44 +1204,5 @@ mod tests {
                 "gateway {port} must appear once its {delay}ms stagger elapses"
             );
         }
-    }
-
-    /// A decorated corridor centre must NUDGE the mascot, never delete it:
-    /// `mascot_position` takes `mascot_home` through `?`, so a `None` here is the
-    /// whole gateway mascot gone on that layout, every frame.
-    #[test]
-    fn a_decorated_corridor_centre_never_removes_the_mascot() {
-        let mut exercised = 0u32;
-        for &(w, h, desks) in &[
-            (50u16, 150u16, Some(30usize)),
-            (53, 150, Some(4)),
-            (56, 144, None),
-        ] {
-            let Some(l) = crate::layout::Layout::compute(w, h, desks) else {
-                continue;
-            };
-            let Some(c) = l.corridor else { continue };
-            let centre = Point {
-                x: c.x + c.width / 2,
-                y: c.y + c.height / 2,
-            };
-            let Some(snapped) = snap_point_to_walkable(&l.walkable, centre) else {
-                continue;
-            };
-            if l.is_visually_clear(snapped) {
-                continue;
-            }
-            exercised += 1;
-            let home = mascot_home(&l).expect("a decorated centre must not delete the mascot");
-            assert!(
-                l.is_visually_clear(home),
-                "{w}x{h}: the nudge landed on decor"
-            );
-        }
-        // Without this the fixtures can drift clear and the test passes vacuously.
-        assert!(
-            exercised > 0,
-            "no fixture size decorates the corridor centre"
-        );
     }
 }
