@@ -36,6 +36,35 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     }
 }
 
+/// The size the notice NAMES has to be a size that works — a requirement nobody
+/// re-derives is the half of the rule that rots.
+#[test]
+fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
+    let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
+    let mut small = build(80, 24, vec![]);
+    small.render(&scene, &pack(), t0()).expect("render");
+    let text = frame_text(small.frame_buffer());
+    let named = text
+        .split_whitespace()
+        .find_map(|w| w.trim_end_matches(',').split_once('x'))
+        .and_then(|(c, r)| Some((c.parse::<u16>().ok()?, r.parse::<u16>().ok()?)))
+        .expect("the notice must name a size");
+
+    let mut at_min = build(named.0, named.1, vec![]);
+    at_min.render(&scene, &pack(), t0()).expect("render");
+    assert!(
+        at_min.cached_layout().is_some(),
+        "the notice asks for {named:?}, which does not lay out"
+    );
+    let mut one_short = build(named.0, named.1 - 1, vec![]);
+
+    one_short.render(&scene, &pack(), t0()).expect("render");
+    assert!(
+        one_short.cached_layout().is_none(),
+        "{named:?} minus a row lays out, so the notice overstates"
+    );
+}
+
 /// The other direction: a terminal that CAN lay out must never show the notice.
 #[test]
 fn a_terminal_that_fits_shows_no_too_small_notice() {

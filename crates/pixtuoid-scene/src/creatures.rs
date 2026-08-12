@@ -66,10 +66,9 @@ fn walkable_target(layout: &Layout, seed: u64, n: u64) -> Point {
             }
         }
     }
-    layout
-        .door_threshold
-        .or_else(|| snap_point_to_walkable(&layout.walkable, last))
-        .unwrap_or(last)
+    // Snapped like the loop's answers, so the idempotence above holds for EVERY
+    // return and not just the ones a draw found.
+    snap_point_to_walkable(&layout.walkable, layout.door_threshold.unwrap_or(last)).unwrap_or(last)
 }
 
 /// A centre-anchored sprite's `(w, h)`, or `(0, 0)` when the pack lacks the
@@ -107,12 +106,11 @@ fn place_creature(p: Point, extent: (u16, u16), layout: &Layout) -> Point {
     if layout.walkable.is_walkable(clamped.x, clamped.y) {
         return clamped;
     }
-    // Same filter as the three other REST sites, for consistency rather than for
-    // a demonstrated trigger: no swept size reaches this snap with a decorated
-    // cell, so removing it reds nothing.
+    // Clamped again because snapping is free to move the point back out past the
+    // edge the clamp pulled it in from. No clearance filter: `clamped` is already
+    // known NOT walkable, so rejecting the snap hands back something worse.
     snap_point_to_walkable(&layout.walkable, clamped)
         .map(|s| clamp_sprite_inside(s, extent, layout))
-        .filter(|s| layout.is_visually_clear(*s))
         .unwrap_or(clamped)
 }
 
@@ -304,8 +302,9 @@ pub(crate) fn mascot_seed(source: &str, instance: &pixtuoid_core::state::DaemonI
 
 /// How long one mascot may be held at the elevator before its walk-in starts.
 /// Gateways that first-sight in the SAME beat leave the door at the same instant
-/// from the same cell, so without this they render as ONE lobster until their
-/// seeded walk-in lines have pulled apart.
+/// from the same cell, so without this they are superimposed at the door. Their
+/// seeded walk-in lines usually diverge from there, but not always — a seed pair
+/// can draw the same terminus, and then only this separates them.
 const MASCOT_ENTER_STAGGER_MS: u64 = 900;
 
 /// The seeded walk-in delay for one mascot — its slice of
@@ -714,9 +713,80 @@ mod tests {
         );
     }
 
+    /// `place_creature`'s recovery snap exists to get a creature OFF an unwalkable
+    /// cell, so discarding that snap and returning the cell it started from is
+    /// strictly worse than taking it.
+    #[test]
+    fn a_placed_creature_takes_the_recovery_snap_it_found() {
+        let mut exercised = 0u32;
+        for &(w, h) in &[(192u16, 160u16), (152, 140), (112, 100)] {
+            let l = crate::layout::Layout::compute(w, h, None).expect("layout fits");
+            let extent = (14u16, 12u16);
+            for y in (0..l.walkable.height()).step_by(3) {
+                for x in (0..l.walkable.width()).step_by(3) {
+                    let p = Point { x, y };
+                    let clamped = clamp_sprite_inside(p, extent, &l);
+                    if l.walkable.is_walkable(clamped.x, clamped.y) {
+                        continue;
+                    }
+                    // The clamp can push a snapped point back off the mask at the
+                    // buffer edge — pre-existing, and not what this pins.
+                    let Some(rescued) = snap_point_to_walkable(&l.walkable, clamped)
+                        .map(|s| clamp_sprite_inside(s, extent, &l))
+                        .filter(|s| l.walkable.is_walkable(s.x, s.y))
+                    else {
+                        continue;
+                    };
+                    exercised += 1;
+                    assert_eq!(
+                        place_creature(p, extent, &l),
+                        rescued,
+                        "{w}x{h} at {p:?}: a walkable recovery snap was discarded"
+                    );
+                }
+            }
+        }
+        assert!(
+            exercised > 100,
+            "the sweep must reach recoveries, saw {exercised}"
+        );
+    }
+
+    /// `mascot_position` still answers `None` through `mascot_elevator`, so losing
+    /// the whole mascot is narrowed by deleting the home beat, not closed.
+    #[test]
+    fn every_narrow_layout_still_draws_its_mascot() {
+        let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+        let min = crate::layout::min_layout_size();
+        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(30_000);
+        let mut checked = 0u32;
+        for w in (min.w..min.w + 24).step_by(3) {
+            for h in (min.h..min.h + 24).step_by(3) {
+                let Some(l) = crate::layout::Layout::compute(w, h, Some(4)) else {
+                    continue;
+                };
+                checked += 1;
+                assert!(
+                    mascot_position(
+                        &l,
+                        &pack,
+                        &idle_presence(now, 30_000),
+                        "lobster_walk",
+                        "lobster_rest",
+                        now,
+                        7,
+                    )
+                    .is_some(),
+                    "{w}x{h} draws no mascot"
+                );
+            }
+        }
+        assert!(checked > 8, "the sweep must reach layouts, saw {checked}");
+    }
+
     /// The enter hand-off is pop-free because leg 0 has no special origin: the
     /// walk-in ends at draw 0 and cycle 0 departs from it, so the whole wander is
-    /// one chain of draws. A re-introduced special case would break this.
+    /// one chain of draws.
     #[test]
     fn mascot_wander_cycle0_starts_from_draw_zero() {
         let layout = crate::layout::Layout::compute(160, 200, Some(4)).expect("layout fits");
@@ -978,7 +1048,7 @@ mod tests {
     fn mascot_position_walks_in_from_elevator_during_enter_window() {
         let layout = crate::layout::Layout::compute(160, 120, Some(4)).expect("layout fits");
         let elevator = mascot_elevator(&layout).expect("elevator");
-        let home = walkable_target(&layout, 0, 0);
+        let draw_zero = walkable_target(&layout, 0, 0);
         let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(20_000);
         let seed = 0u64;
 
@@ -996,7 +1066,7 @@ mod tests {
         assert_eq!(anim0, "lobster_walk", "enter window → walk anim");
         assert_eq!(
             pos0,
-            walk_between(&layout, elevator, home, 0.0),
+            walk_between(&layout, elevator, draw_zero, 0.0),
             "age 0 → exactly at the elevator"
         );
 
@@ -1016,12 +1086,12 @@ mod tests {
         let t = age as f32 / MASCOT_ENTER_MS as f32;
         assert_eq!(
             pos_mid,
-            walk_between(&layout, elevator, home, t),
-            "mid enter → the elevator→home interpolation"
+            walk_between(&layout, elevator, draw_zero, t),
+            "mid enter → the elevator→draw-0 interpolation"
         );
         assert_ne!(
-            elevator, home,
-            "the elevator and home must differ for a real walk-in"
+            elevator, draw_zero,
+            "the elevator and draw 0 must differ for a real walk-in"
         );
     }
 

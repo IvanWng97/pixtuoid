@@ -179,10 +179,10 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     Ok(())
 }
 
-/// Say WHY there is no office. Both callers of `draw_footer_only_frame` are a
-/// refusal — the scene rect is under the painter's own floor, or `frame_layout`
-/// declined — and a silent refusal reads as a crash at 80x24, the size a
-/// first-time user is most likely to be at (#908).
+/// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
+/// a refusal — the scene rect is under the painter's own floor, `frame_layout`
+/// declined, or a floor transition hit the same gate — and a silent refusal reads
+/// as a crash at 80x24, the size a first-time user is most likely to be at.
 fn paint_too_small_notice(
     f: &mut ratatui::Frame<'_>,
     area: Rect,
@@ -190,7 +190,7 @@ fn paint_too_small_notice(
 ) {
     let min = pixtuoid_scene::layout::min_layout_size();
     // Rows carry TWO buffer pixels (half-block), and the footer takes its own.
-    let need_rows = min.h.div_ceil(2) + FOOTER_ROWS;
+    let need_rows = (min.h.div_ceil(2) + FOOTER_ROWS).max(MIN_SCENE_HEIGHT);
     let need_cols = min.w.max(MIN_SCENE_WIDTH);
     // Widest form that FITS: a terminal narrow enough to trigger this is often
     // too narrow to hold the sentence explaining it, and skipping the line then
