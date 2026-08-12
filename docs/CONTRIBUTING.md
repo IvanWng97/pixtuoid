@@ -274,6 +274,12 @@ prose-only escalation can't be silently skipped (#198); and `just comment-lint`'
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
 become a required check.
 
+`just guide-drift` joins them: the guides cite ~930 symbols and nothing checks the code
+still has them. `gen-guides-check` proves the index blocks match their siblings, which is a
+different claim — both sides agree happily while both describe a deleted function. It reports
+rather than gates because some names are cited precisely BECAUSE they must not exist, so it
+prints the sentence beside the name. Its selftest DOES run in `lint` and the hygiene job.
+
 Which `comment-lint` arms BLOCK is stated once, in `gate_fails`' docstring in
 `scripts/comment-lint.py` — pinned in both directions by that script's selftest.
 It is not restated here; this file said "three arms" for one commit after the
