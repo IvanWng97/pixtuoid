@@ -295,16 +295,32 @@ fn mascot_elevator(layout: &Layout) -> Option<Point> {
 /// so the enter hand-off is pop-free (enter ends here, wander cycle 0 starts here).
 fn mascot_home(layout: &Layout) -> Option<Point> {
     let c = layout.corridor?;
-    // A REST beat, and the corridor hosts appliances — so it takes the filter
-    // too, unlike the elevator endpoint, which is a walk terminus.
-    snap_point_to_walkable(
-        &layout.walkable,
-        Point {
-            x: c.x + c.width / 2,
-            y: c.y + c.height / 2,
-        },
-    )
-    .filter(|p| layout.is_visually_clear(*p))
+    let centre = Point {
+        x: c.x + c.width / 2,
+        y: c.y + c.height / 2,
+    };
+    let snapped = snap_point_to_walkable(&layout.walkable, centre)?;
+    if layout.is_visually_clear(snapped) {
+        return Some(snapped);
+    }
+    // A REST beat, and the corridor hosts appliances — so step along the band
+    // for a clear cell, like `walkable_target` retries its draw. Falling back to
+    // the centre rather than NONE is the load-bearing half: `mascot_position`
+    // takes this through `?`, so a decorated centre dropped the whole mascot.
+    for dx in 1..=c.width / 2 {
+        for x in [centre.x.saturating_sub(dx), centre.x.saturating_add(dx)] {
+            if x < c.x || x >= c.x + c.width {
+                continue;
+            }
+            let cand = Point { x, y: centre.y };
+            if let Some(p) = snap_point_to_walkable(&layout.walkable, cand) {
+                if layout.is_visually_clear(p) {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    Some(snapped)
 }
 
 /// The wander seed for ONE daemon instance — folds the source AND the instance id
@@ -1229,5 +1245,44 @@ mod tests {
                 "gateway {port} must appear once its {delay}ms stagger elapses"
             );
         }
+    }
+
+    /// A decorated corridor centre must NUDGE the mascot, never delete it:
+    /// `mascot_position` takes `mascot_home` through `?`, so a `None` here is the
+    /// whole gateway mascot gone on that layout, every frame.
+    #[test]
+    fn a_decorated_corridor_centre_never_removes_the_mascot() {
+        let mut exercised = 0u32;
+        for &(w, h, desks) in &[
+            (50u16, 150u16, Some(30usize)),
+            (53, 150, Some(4)),
+            (56, 144, None),
+        ] {
+            let Some(l) = crate::layout::Layout::compute(w, h, desks) else {
+                continue;
+            };
+            let Some(c) = l.corridor else { continue };
+            let centre = Point {
+                x: c.x + c.width / 2,
+                y: c.y + c.height / 2,
+            };
+            let Some(snapped) = snap_point_to_walkable(&l.walkable, centre) else {
+                continue;
+            };
+            if l.is_visually_clear(snapped) {
+                continue;
+            }
+            exercised += 1;
+            let home = mascot_home(&l).expect("a decorated centre must not delete the mascot");
+            assert!(
+                l.is_visually_clear(home),
+                "{w}x{h}: the nudge landed on decor"
+            );
+        }
+        // Without this the fixtures can drift clear and the test passes vacuously.
+        assert!(
+            exercised > 0,
+            "no fixture size decorates the corridor centre"
+        );
     }
 }
