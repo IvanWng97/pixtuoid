@@ -187,14 +187,20 @@ pub(crate) fn compute_crop_rect(
             None => {
                 let buf_w = cols;
                 let buf_h = rows.saturating_sub(1).saturating_mul(2);
+                // The agent's OWN floor: `desk_index` is global, and a scene with
+                // more agents than `--max-desks` puts them on floor 1+, whose
+                // geometry and seed both differ from floor 0's.
                 let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
                     buf_w,
                     buf_h,
-                    Some(scene.floor_capacities[0]),
-                    args.floor_seed,
+                    Some(
+                        scene.floor_capacities
+                            [slot.floor_idx.min(pixtuoid_core::state::MAX_FLOORS - 1)],
+                    ),
+                    pixtuoid_scene::floor::floor_seed(slot.floor_idx),
                 )
                 .ok_or_else(|| anyhow::anyhow!("scene too small to compute a layout"))?;
-                let idx = slot.desk_index.single_floor_local();
+                let idx = scene.floor_local_desk(slot.desk_index);
                 let desk = layout.home_desk(idx).ok_or_else(|| {
                     anyhow::anyhow!("agent {agent_label:?} is neither placed nor at a home desk")
                 })?;
