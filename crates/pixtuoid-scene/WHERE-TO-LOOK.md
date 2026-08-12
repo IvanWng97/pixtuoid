@@ -46,8 +46,14 @@ and read that one, or read the file end to end when mapping the crate.
 > drawn sprite on the canvas is the PAINTER's (`pixel_painter::keep_sprite_on_canvas`, applied to
 > the pet and the mascot at enqueue): `blit_centered` parks a frame at `pos - size/2` and clips at
 > the buffer edge, so an unguarded east draw rendered half a lobster pinned to the border. Moving a
-> DRAWN position harms nothing; moving the SIM's put a creature inside furniture (#912). The PET
-> rides the same rule (same `walkable_target`, same centred blit). Agents do NOT get this guard yet
+> DRAWN position is the cheaper error, not a free one — the nudge still seats a few percent of
+> settled frames on furniture at small buffers (`SHARP-EDGES.md`); what changed is that the SIM's
+> answer is now always real floor, so the hover box, the z-sort row and the next leg's origin no
+> longer inherit the compromise. The same delete removed a RECOVERY SNAP that fired on any
+> unwalkable point, sprite size or not: it quantized mid-walk samples to coarse-cell centres, so a
+> creature froze and teleported along a leg the sim was walking smoothly. The PET rides the same
+> rule — it still takes the pack, but only to ask whether the anim EXISTS. Agents do NOT get this
+> guard yet
 > — measured 2-7% of aimless destinations shift or clip at the edge.
 >
 > What was GIVEN UP, deliberately: destinations no longer encode daemon state (state reads from the CADENCE — 4.5s busy / 9s idle / 14s degraded — and the sprite tint), and a creature may rest in open floor rather than beside furniture. Don't re-add claim/probe machinery to tighten this: that would couple one mascot's motion to which siblings exist, breaking the stateless invariant the whole module is built on.

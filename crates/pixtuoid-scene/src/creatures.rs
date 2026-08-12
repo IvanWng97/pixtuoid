@@ -714,8 +714,11 @@ mod tests {
     /// furniture (#912).
     #[test]
     fn a_wandering_mascot_always_stands_on_walkable_ground() {
-        let (w, h) = (192u16, 160u16);
-        let layout = crate::layout::Layout::compute(w, h, Some(12)).expect("layout fits");
+        // The repo's own snapshot geometry (`--cols 192 --rows 80`). Sizes where
+        // the deleted clamp happened to land on clear floor exist — 192x160 is
+        // one — so a sweep that cannot RED on the #912 code pins nothing.
+        let (w, h) = (192u16, 80u16);
+        let layout = crate::layout::Layout::compute(w, h, None).expect("layout fits");
         let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
         let t0 = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
         let mut checked = 0u32;
