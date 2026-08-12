@@ -273,9 +273,8 @@ path matching that posts the documented blast-radius escalations as a sticky PR 
 prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
 become a required check. A proposal to make that arm BLOCK is priced by `just
-comment-lint-replay N`, which replays today's rules against already-merged commits, so each
-finding it reports is a block that proposal would have imposed on work that shipped (#907).
-Merged is not adjudicated — read the flagged lines before calling them false positives.
+comment-lint-replay N` (#907). Merged is not adjudicated — read the flagged lines before
+calling them false positives.
 
 Which `comment-lint` arms BLOCK is stated once, in `gate_fails`' docstring in
 `scripts/comment-lint.py` — pinned in both directions by that script's selftest.

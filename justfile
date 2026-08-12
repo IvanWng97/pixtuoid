@@ -1287,6 +1287,9 @@ comment-lint-replay n="20":
         printf '  %s  %-4s %s\n' "${sha:0:8}" "$n_hit" "$(git log -1 --format=%s "$sha" | cut -c1-52)"
       fi
     done
+    # A bad N leaves the `for` word list empty without tripping `set -e`, and the
+    # summary then reports its most reassuring shape.
+    [ "$total" -gt 0 ] || { echo "comment-lint-replay: no commits walked — check N" >&2; exit 1; }
     echo "fn-body arm (advisory): $advisory/$total merged commits, $flagged lines"
     echo "blocking arms (--gate): $gated/$total merged commits — an arm reds the"
     echo "  commits that predate its own calibration, so read this against \`git log -S\`"

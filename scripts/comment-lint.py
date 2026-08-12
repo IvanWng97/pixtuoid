@@ -307,40 +307,49 @@ def selftest() -> int:
         # `gate_fails` is a pure predicate, so the pins above cannot see main()'s
         # wiring — where #907's reverted attempt broke the ast-grep-free CI job.
         script = str(pathlib.Path(__file__).resolve())
-        states = [
-            ("PATH as-is", os.environ.get("PATH", "")),
-            ("ast-grep off PATH", path_without("ast-grep")),
-        ]
-        if shutil.which("ast-grep", path=states[1][1]) is not None:
+        full = os.environ.get("PATH", "")
+        bare = path_without("ast-grep")
+        if shutil.which("ast-grep", path=bare) is not None:
             fails.append("the ast-grep-free PATH still resolves it — that control is inert")
+        if shutil.which("git", path=bare) is None:
+            fails.append("the ast-grep-free PATH lost git too — that control cannot run")
+        # A box without ast-grep makes the two PATHs identical, and running the
+        # same environment twice buys nothing.
+        states = [("PATH as-is", full, shutil.which("ast-grep", path=full) is not None)]
+        if bare != full:
+            states.append(("ast-grep off PATH", bare, False))
+        clean = "no new 3+-comment runs"
         # One fixture commit per case, so `HEAD~1...HEAD` isolates the arm named:
         # a shared range blocks on whichever arm fires first. Each body carries
         # `code_floor` where the ratio would otherwise decide the case.
-        for path, body, want_block, why in (
+        for path, body, want_block, why, want in (
             (
                 "src/advisory.rs",
                 "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n" + code_floor,
                 False,
                 "fn-body findings alone must not block",
+                ("1 new comment-slop finding(s) in a fn body", clean),
             ),
             (
                 "src/e2e_wedge.rs",
                 "/// Doc for the wedged fn.\nconst LATE_WEDGE: u8 = 0;\n\nfn wedged() {}\n",
                 True,
                 "the re-parent arm must still block",
+                ("doc block re-homed from", "doc block re-homed from"),
             ),
             (
                 "src/e2e_prose.rs",
                 "".join(f"// n{n}\n" for n in range(9)) + code_floor,
                 True,
                 "the prose arm must still block",
+                ("are narrative prose", "are narrative prose"),
             ),
-            ("src/e2e_clean.rs", code_floor, False, "a findingless diff must not block"),
+            ("src/e2e_clean.rs", code_floor, False, "a findingless diff must not block", (clean, clean)),
         ):
             (repo / path).write_text(body)
             gitenv.git(*ident, "add", path, cwd=repo, check=True)
             gitenv.git(*ident, "commit", "-qm", f"e2e {path}", cwd=repo, check=True)
-            for label, env_path in states:
+            for label, env_path, scans in states:
                 r = subprocess.run(
                     [sys.executable, script, "HEAD~1", "--gate"],
                     cwd=repo,
@@ -350,10 +359,12 @@ def selftest() -> int:
                 )
                 if (r.returncode != 0) is not want_block:
                     fails.append(f"{label}: {why} (exit {r.returncode})\n{r.stdout}{r.stderr}")
-                # `comment-lint-replay` parses for this line to tell a run from a
-                # crash, and nothing else pins the string.
-                if not any(l.startswith("comment-lint: ") for l in r.stdout.splitlines()):
-                    fails.append(f"{label} {path}: no `comment-lint:` verdict line\n{r.stdout}")
+                # This arm's OWN line, not just a `comment-lint:` prefix: the
+                # ast-grep-absent notice prints one before any arm runs, and
+                # `comment-lint-replay` reads the fn-body COUNT out of its text.
+                expect = want[0] if scans else want[1]
+                if expect not in r.stdout:
+                    fails.append(f"{label} {path}: stdout lacks {expect!r}\n{r.stdout}{r.stderr}")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
