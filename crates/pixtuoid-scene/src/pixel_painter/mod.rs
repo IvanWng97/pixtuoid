@@ -957,9 +957,9 @@ fn enqueue_gateway_mascots<'a>(
             continue;
         };
         let seed = crate::creatures::mascot_seed(source, instance);
-        let Some((pos, anim_name, frame_idx)) = mascot_position(
-            ctx.layout, ctx.pack, presence, def.walk, def.rest, ctx.now, seed,
-        ) else {
+        let Some((pos, anim_name, frame_idx)) =
+            mascot_position(ctx.layout, presence, def.walk, def.rest, ctx.now, seed)
+        else {
             continue;
         };
         let (mascot_w, mascot_h) = ctx
