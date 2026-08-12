@@ -1237,6 +1237,50 @@ comment-lint-gate:
     python3 scripts/comment-lint.py --selftest
     python3 scripts/comment-lint.py origin/main --gate
 
+# Prices any proposal to make an arm BLOCK: today's rules replayed against
+# already-merged commits, where every finding is by construction a false
+# positive. On-demand like `fuzz` — N checkouts, and it needs origin/main.
+[group('meta')]
+[doc('Replay the comment-lint arms against the last N merged commits (default 20)')]
+comment-lint-replay n="20":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    root="$(git rev-parse --show-toplevel)"
+    tmp="$(mktemp -d)"
+    git worktree add -q --detach "$tmp/wt" HEAD
+    trap 'git worktree remove --force "$tmp/wt" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
+    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
+      || { echo "comment-lint-replay: cannot reach origin" >&2; exit 1; }
+    total=0 advisory=0 gated=0 flagged=0
+    for sha in $(git log --first-parent --format=%H -n {{ n }} origin/main); do
+      git -C "$tmp/wt" checkout -q --force --detach "$sha"
+      # Only the RULES are injected — YAML, outside the scanned pathspec.
+      # Injecting the scripts counts their own comments as the commit's.
+      rm -rf "$tmp/wt/.ast-grep"
+      cp -R "$root/.ast-grep" "$root/sgconfig.yml" "$tmp/wt/"
+      rc=0
+      out="$(cd "$tmp/wt" && python3 "$root/scripts/comment-lint.py" "$sha^" --gate 2>&1)" || rc=$?
+      # A crash prints no verdict line, and would otherwise count as zero.
+      case "$out" in
+        *"new comment-slop"*) n_hit="$(printf '%s' "$out" | sed -n 's/^comment-lint: \([0-9]*\) new comment-slop.*/\1/p')" ;;
+        *"no new 3+-comment runs"*|*"no added/changed Rust or Python lines"*) n_hit=0 ;;
+        *) echo "comment-lint-replay: no verdict from ${sha:0:8} — the replay is broken, not the commit" >&2
+           printf '%s\n' "$out" >&2; exit 1 ;;
+      esac
+      total=$((total + 1)) flagged=$((flagged + n_hit))
+      if [ "$rc" -ne 0 ]; then
+        gated=$((gated + 1))
+        echo "GATE REDS ${sha:0:8}  $(git log -1 --format=%s "$sha")"
+      fi
+      if [ "$n_hit" -gt 0 ]; then
+        advisory=$((advisory + 1))
+        printf '  %s  %-4s %s\n' "${sha:0:8}" "$n_hit" "$(git log -1 --format=%s "$sha" | cut -c1-52)"
+      fi
+    done
+    echo "fn-body arm (advisory): $advisory/$total merged commits, $flagged lines — all false positives"
+    echo "blocking arms (--gate): $gated/$total merged commits — must be 0"
+    [ "$gated" -eq 0 ]
+
 # The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
 # sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
 # gate, because one of these leaks ate a developer's index before anyone noticed.

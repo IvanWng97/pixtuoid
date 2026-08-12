@@ -81,6 +81,18 @@ def scan_hits(cwd: str | None = None) -> list[dict]:
     return json.loads(out)
 
 
+def path_without(tool: str) -> str:
+    """PATH with every directory that provides `tool` stripped, other tools intact."""
+    dirs = os.environ.get("PATH", "").split(os.pathsep)
+    while (hit := shutil.which(tool, path=os.pathsep.join(dirs))) is not None:
+        home = os.path.normpath(os.path.dirname(hit) or ".")
+        pruned = [d for d in dirs if os.path.normpath(d or ".") != home]
+        if len(pruned) == len(dirs):
+            break
+        dirs = pruned
+    return os.pathsep.join(dirs)
+
+
 def selftest() -> int:
     """Pin this DRIVER's two behaviors: which files it diffs, and which it scans.
     The ast-grep RULES have their own pins (`just ast-grep-test`)."""
@@ -279,6 +291,35 @@ def selftest() -> int:
         # advisory by design must stay advisory. `docs` alone may never block.
         if gate_fails(True, ["d"], [], False):
             fails.append("the doc-run arm is advisory and must NOT block")
+
+        # `gate_fails` is a pure predicate, so the pins above cannot see main()'s
+        # wiring — where #907's reverted attempt broke the ast-grep-free CI job.
+        (repo / "src" / "advisory.rs").write_text(
+            "fn g() -> u8 {\n    // one\n    // two\n    // three\n    2\n}\n"
+        )
+        gitenv.git(*ident, "add", "src/advisory.rs", cwd=repo, check=True)
+        gitenv.git(*ident, "commit", "-qm", "advisory", cwd=repo, check=True)
+        script = str(pathlib.Path(__file__).resolve())
+        for label, path, want_absent in (
+            ("PATH as-is", os.environ.get("PATH", ""), False),
+            ("ast-grep off PATH", path_without("ast-grep"), True),
+        ):
+            if want_absent and shutil.which("ast-grep", path=path) is not None:
+                fails.append(f"{label}: ast-grep still resolves — this control is inert")
+            env = {**os.environ, "PATH": path}
+            for base, want_block, why in (
+                ("HEAD~1", False, "fn-body findings alone must not block"),
+                ("HEAD~2", True, "the re-parent arm must still block"),
+            ):
+                r = subprocess.run(
+                    [sys.executable, script, base, "--gate"],
+                    cwd=repo,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                )
+                if (r.returncode != 0) is not want_block:
+                    fails.append(f"{label}: {why} (exit {r.returncode})\n{r.stdout}")
     if fails:
         print("comment-lint selftest FAILED:")
         for f in fails:
