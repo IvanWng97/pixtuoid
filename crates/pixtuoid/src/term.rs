@@ -132,20 +132,19 @@ fn parse_decrqss_truecolor(resp: &[u8]) -> Option<bool> {
     Some(normalized.contains("48:2:1:2:3") || normalized.contains("48:2::1:2:3"))
 }
 
-/// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` and the
-/// truecolor verdict, naming HOW it was determined so a "colors look wrong"
-/// report is self-diagnosable. `probe` is the `query_truecolor` result (or `None`
-/// when doctor isn't attached to a tty).
-pub(crate) fn terminal_diagnostic_row(
-    term: Option<&str>,
-    colorterm: Option<&str>,
-    probe: Option<bool>,
-) -> String {
-    let shown = |v: Option<&str>| match v {
+/// An env value for display: sanitized, or `(unset)` for absent/empty.
+pub(crate) fn shown_env(v: Option<&str>) -> String {
+    match v {
         Some(s) if !s.is_empty() => crate::strip_control_chars(s),
         _ => "(unset)".to_string(),
-    };
-    let verdict = if colorterm_is_truecolor(colorterm) {
+    }
+}
+
+/// The truecolor verdict, naming HOW it was determined so a "colors look wrong"
+/// report is self-diagnosable. `probe` is the `query_truecolor` result (or `None`
+/// when doctor isn't attached to a tty).
+pub(crate) fn truecolor_verdict(colorterm: Option<&str>, probe: Option<bool>) -> &'static str {
+    if colorterm_is_truecolor(colorterm) {
         "yes (COLORTERM)"
     } else {
         match probe {
@@ -153,12 +152,21 @@ pub(crate) fn terminal_diagnostic_row(
             Some(false) => "no (terminal downsamples)",
             None => "unknown (terminal did not answer)",
         }
-    };
+    }
+}
+
+/// The `pixtuoid doctor -v` `terminal:` line — `$TERM` / `$COLORTERM` and the
+/// truecolor verdict.
+pub(crate) fn terminal_diagnostic_row(
+    term: Option<&str>,
+    colorterm: Option<&str>,
+    probe: Option<bool>,
+) -> String {
     format!(
         "terminal: TERM={} COLORTERM={} truecolor={}",
-        shown(term),
-        shown(colorterm),
-        verdict,
+        shown_env(term),
+        shown_env(colorterm),
+        truecolor_verdict(colorterm, probe),
     )
 }
 

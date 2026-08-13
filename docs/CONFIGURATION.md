@@ -107,7 +107,7 @@ the terminal's name. If the terminal doesn't confirm, it prints a one-line
 stderr warning. It's **warn-only** (never blocks) and scrolls away once the
 office takes over. (`$COLORTERM=truecolor` is taken as a yes and skips the query;
 the query runs only otherwise.) Run `pixtuoid doctor` for the detected
-`terminal:` verdict.
+truecolor verdict (`doctor -v` for the full `terminal:` row).
 
 A terminal that's genuinely truecolor but doesn't answer the query (rare) may
 still get warned. If you know your terminal is fine, silence the warning with

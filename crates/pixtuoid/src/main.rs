@@ -99,8 +99,9 @@ fn main() -> Result<()> {
         }
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
-        Cmd::Doctor { graphics } => {
-            doctor::run(&logging::log_file_path(), graphics).map(|report| print!("{report}"))
+        Cmd::Doctor { graphics, verbose } => {
+            doctor::run(&logging::log_file_path(), graphics, verbose)
+                .map(|report| print!("{report}"))
         }
         Cmd::Sources { action: None, json } => sources_cli::run_sources_list(json),
         Cmd::Sources {

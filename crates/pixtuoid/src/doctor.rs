@@ -317,6 +317,19 @@ pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
         .map(|(_, v)| *v)
 }
 
+/// Installed-vs-verified comparison, `None` when either side can't parse or
+/// there is no anchor — the ONE comparison behind both the `-v` skew suffix and
+/// the default view's `versions` category.
+pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std::cmp::Ordering> {
+    if verified == "unknown" {
+        return None;
+    }
+    match (installed.and_then(parse_version), parse_version(verified)) {
+        (Some(i), Some(v)) => Some(i.cmp(&v)),
+        _ => None,
+    }
+}
+
 /// Skew is flagged ONLY when both the installed and the (non-`unknown`) verified
 /// version parse — otherwise the installed version shows with no alarm.
 pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String {
@@ -329,11 +342,11 @@ pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String 
     if verified == "unknown" {
         return inst_disp.to_string();
     }
-    let cmp = match (installed.and_then(parse_version), parse_version(verified)) {
-        (Some(i), Some(v)) if i > v => " — NEWER than verified, drift possible",
-        (Some(i), Some(v)) if i < v => " — older than verified",
-        (Some(_), Some(_)) => " — matches verified",
-        _ => "",
+    let cmp = match version_cmp(installed, verified) {
+        Some(std::cmp::Ordering::Greater) => " — NEWER than verified, drift possible",
+        Some(std::cmp::Ordering::Less) => " — older than verified",
+        Some(std::cmp::Ordering::Equal) => " — matches verified",
+        None => "",
     };
     format!("{inst_disp} (verified {verified}{cmp})")
 }
@@ -650,19 +663,52 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
         Err(e) => (
             String::new(),
             Some(sanitize(&format!(
-                "log unreadable: {} ({e}) — the decode-drift counts below are not meaningful",
+                "log unreadable: {} ({e}) — the decode-drift counts are not meaningful",
                 path.display()
             ))),
         ),
     }
 }
 
-/// Returns the rendered report rather than printing it, so the WHOLE report
-/// builder is unit-testable. `log_path` is injected by `main`, which owns the
+/// One resolved transcript root — the data behind a `resolved roots` row.
+pub(crate) struct RootStatus {
+    source: &'static str,
+    root: std::path::PathBuf,
+    exists: bool,
+    /// `(env var, set)` — the override that may explain a missing root.
+    env: Option<(&'static str, bool)>,
+}
+
+/// Everything `doctor` probed, separated from rendering: the default category
+/// rollup and the `-v` full report read the SAME collection, so the two views
+/// cannot diagnose different worlds.
+pub(crate) struct DoctorReport {
+    log_path: std::path::PathBuf,
+    config_path: std::path::PathBuf,
+    config_warnings: Vec<String>,
+    log_warning: Option<String>,
+    term_env: Option<String>,
+    colorterm_env: Option<String>,
+    truecolor_probe: Option<bool>,
+    color_pf: crate::term::ColorPreflight,
+    graphics: crate::GraphicsMode,
+    detected: Option<crate::graphics::Detected>,
+    max_density: u16,
+    rows: Vec<DoctorSourceRow>,
+    roots: Vec<RootStatus>,
+    backend: String,
+    /// `None` = probe disabled (non-standard projects root).
+    cc_registry: Option<(std::path::PathBuf, bool)>,
+    codex_sessions: (std::path::PathBuf, bool),
+    home_split: Option<String>,
+}
+
+/// All probing, no formatting. `log_path` is injected by `main`, which owns the
 /// log-path resolution; `graphics` is the `--graphics` flag.
-pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
-    let mut warnings = Vec::new();
-    let cfg = crate::config::load(&crate::config::config_path(), &mut warnings);
+fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorReport {
+    let mut config_warnings = Vec::new();
+    let config_path = crate::config::config_path();
+    let cfg = crate::config::load(&config_path, &mut config_warnings);
     // `doctor` is a separate PROCESS from the running TUI, so it derives the
     // connected-set fresh from config rather than the live in-process
     // `ConnectedSources` it can't see. That can lag a just-made in-TUI toggle
@@ -670,22 +716,18 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
-    let mut out = String::from("pixtuoid doctor — source health\n");
-    out.push_str(&format!("log: {}\n", log_path.display()));
-    out.push_str(&format!(
-        "config: {}\n",
-        crate::config::config_path().display()
-    ));
     // ASK the terminal for truecolor (DECRQSS) — but ONLY when stdout is a real
     // tty, so a piped `pixtuoid doctor > file` neither emits escape codes nor
     // blocks (and the capture-output test harness never probes), and only when
     // $TERM isn't dumb, which can't answer. The same `color_preflight` the
     // launcher acts on drives both the probe skip and the color-status line, so
     // the diagnostic matches what `run` would do.
+    let term_env = std::env::var("TERM").ok();
+    let colorterm_env = std::env::var("COLORTERM").ok();
     let color_pf = crate::term::color_preflight(
         std::env::var("NO_COLOR").ok().as_deref(),
         std::env::var("CLICOLOR_FORCE").ok().as_deref(),
-        std::env::var("TERM").ok().as_deref(),
+        term_env.as_deref(),
     );
     let probe_ok = std::io::IsTerminal::is_terminal(&std::io::stdout())
         && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
@@ -694,16 +736,6 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
     } else {
         None
     };
-    out.push_str(&crate::term::terminal_diagnostic_row(
-        std::env::var("TERM").ok().as_deref(),
-        std::env::var("COLORTERM").ok().as_deref(),
-        truecolor_probe,
-    ));
-    out.push('\n');
-    if let Some(line) = crate::term::color_status_row(color_pf) {
-        out.push_str(line);
-        out.push('\n');
-    }
     // Whether this terminal could paint the cutaway profile, gated on the SAME
     // `probe_ok` as the truecolor row: the capability query writes escape
     // sequences and reads the replies, so a piped `doctor > file` must neither
@@ -711,71 +743,44 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
     // it too — the flag says not to consider protocols, so asking anyway would
     // spend up to 2s establishing a fact the answer cannot use.
     let ask = probe_ok && graphics != crate::GraphicsMode::Off;
-    out.push_str(&crate::graphics::graphics_diagnostic_row(
-        graphics,
-        ask.then(crate::graphics::detect).flatten(),
-        // The pack a default `run` resolves — embedded, with the user's
-        // `$XDG_CONFIG_HOME/pixtuoid/sprites` merged over it if they have one.
-        // NOT just the bundled art: a user pack that ships density variants
-        // raises this, and reporting the bundled number would understate what
-        // their own `run` could draw. `--pack-dir` is the one case this misses,
-        // and doctor was not pointed at it.
-        pixtuoid_scene::embedded_pack::load_sprite_pack(None)
-            .map_or(1, |p| p.max_density_variant()),
-    ));
-    out.push('\n');
-    // A malformed config makes every source read disconnected, and a diagnostic
-    // tool must say WHY rather than silently swallow it. Sanitized: a warning can
-    // interpolate config content.
-    for w in &warnings {
-        out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
-    }
-    if let Some(w) = &log_warning {
-        out.push_str(&format!("⚠ {}\n", sanitize(w)));
-    }
-    out.push('\n');
+    let detected = ask.then(crate::graphics::detect).flatten();
+    // The pack a default `run` resolves — embedded, with the user's
+    // `$XDG_CONFIG_HOME/pixtuoid/sprites` merged over it if they have one.
+    // NOT just the bundled art: a user pack that ships density variants
+    // raises this, and reporting the bundled number would understate what
+    // their own `run` could draw. `--pack-dir` is the one case this misses,
+    // and doctor was not pointed at it.
+    let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(None)
+        .map_or(1, |p| p.max_density_variant());
 
-    let mut any_drift = false;
-    let mut broken: Vec<String> = Vec::new();
-    for src in registry::registered_source_names() {
-        let desc = registry::descriptor_for(src);
-        let target = crate::install::target::by_source(src);
-        let hooks_installed = target
-            .map(|t| crate::install::has_hooks(t, None))
-            .unwrap_or(false);
-        let diag = diagnose(src, &log, None);
-        let is_connected = connected.contains(src);
-        let cli_detected = target.map(crate::install::target::is_present);
-        let row = DoctorSourceRow {
-            prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
-            source_id: src,
-            connected: is_connected,
-            has_target: target.is_some(),
-            hooks_installed,
-            installed_version: may_probe_version(is_connected, cli_detected)
-                .then(|| desc.and_then(|d| d.version_probe).and_then(probe_version))
-                .flatten(),
-            verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
-            diag,
-        };
-        any_drift |= row.diag.drift.total() > 0;
-        if row.diag.is_broken() {
-            broken.push(format!("{}\u{b7}{}", row.prefix, row.source_id));
-        }
-        out.push_str(&format_doctor_row(&row));
-        out.push('\n');
-    }
-
-    out.push_str(&health_summary(
-        registry::registered_source_names().count(),
-        &broken,
-        any_drift,
-    ));
+    let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
+        .map(|src| {
+            let desc = registry::descriptor_for(src);
+            let target = crate::install::target::by_source(src);
+            let hooks_installed = target
+                .map(|t| crate::install::has_hooks(t, None))
+                .unwrap_or(false);
+            let is_connected = connected.contains(src);
+            let cli_detected = target.map(crate::install::target::is_present);
+            DoctorSourceRow {
+                prefix: desc.map(|d| d.label_prefix).unwrap_or("??"),
+                source_id: src,
+                connected: is_connected,
+                has_target: target.is_some(),
+                hooks_installed,
+                installed_version: may_probe_version(is_connected, cli_detected)
+                    .then(|| desc.and_then(|d| d.version_probe).and_then(probe_version))
+                    .flatten(),
+                verified_version: desc.map(|d| d.verified_version).unwrap_or("unknown"),
+                diag: diagnose(src, &log, None),
+            }
+        })
+        .collect();
 
     // A wrong root has no symptom but an empty office, so state it outright
     // (#880). Via `resolved_source_root` — the SAME call the driver makes, since
     // a second copy could show a healthy path while the watcher polled another.
-    let roots: Vec<String> = registry::registered_source_names()
+    let roots: Vec<RootStatus> = registry::registered_source_names()
         .filter_map(|src| {
             let root = pixtuoid_core::source::resolved_source_root(src)?;
             let env = registry::descriptor_for(src)
@@ -786,29 +791,28 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
                 // `env::var` it would look unset, dropping the `via $VAR` suffix
                 // and silencing the ⚠ in exactly the case the root is wrong.
                 .map(|v| (v, pixtuoid_core::platform::path_env(v).is_some()));
-            Some(root_row(src, &root, root.is_dir(), env))
+            let exists = root.is_dir();
+            Some(RootStatus {
+                source: src,
+                root,
+                exists,
+                env,
+            })
         })
         .collect();
-    if !roots.is_empty() {
-        out.push_str("\nresolved roots\n");
-        for r in roots {
-            out.push_str(&r);
-            out.push('\n');
-        }
-    }
+
     // Probe roots come from the DEFAULT resolution: a --projects-root /
     // --codex-sessions-root override changes the RUNNING app, but doctor
     // deliberately diagnoses the default setup.
     let cc_projects =
         pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths().projects_root;
-    let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects);
+    let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects).map(|d| {
+        let exists = d.is_dir();
+        (d, exists)
+    });
     let codex_sessions = pixtuoid_core::source::codex::CodexSource::default_paths().sessions_root;
-    out.push('\n');
-    out.push_str(&focus_section(
-        &activation_backend(),
-        cc_registry.as_deref().map(|d| (d, d.is_dir())),
-        (&codex_sessions, codex_sessions.is_dir()),
-    ));
+    let codex_exists = codex_sessions.is_dir();
+
     // Read as BYTES, lossy ONLY here: the advisory renders these for a human,
     // it never opens them, so this is the one boundary where losing an
     // ill-formed byte costs nothing.
@@ -816,14 +820,438 @@ pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow:
         pixtuoid_core::platform::path_env("HOME"),
         pixtuoid_core::platform::path_env("USERPROFILE"),
     );
-    if let Some(adv) = home_split_advisory(
+    let home_split = home_split_advisory(
         cfg!(windows),
         home.as_ref().map(|p| p.to_string_lossy()).as_deref(),
         up.as_ref().map(|p| p.to_string_lossy()).as_deref(),
-    ) {
+    );
+
+    DoctorReport {
+        log_path: log_path.to_path_buf(),
+        config_path,
+        config_warnings,
+        log_warning,
+        term_env,
+        colorterm_env,
+        truecolor_probe,
+        color_pf,
+        graphics,
+        detected,
+        max_density,
+        rows,
+        roots,
+        backend: activation_backend(),
+        cc_registry,
+        codex_sessions: (codex_sessions, codex_exists),
+        home_split,
+    }
+}
+
+fn broken_ids(rows: &[DoctorSourceRow]) -> Vec<String> {
+    rows.iter()
+        .filter(|r| r.diag.is_broken())
+        .map(|r| format!("{}\u{b7}{}", r.prefix, r.source_id))
+        .collect()
+}
+
+/// The `-v` view: every probed fact, one row per source — the pre-`-v` report
+/// format, unchanged.
+fn render_full(r: &DoctorReport) -> String {
+    let mut out = String::from("pixtuoid doctor — source health\n");
+    out.push_str(&format!("log: {}\n", r.log_path.display()));
+    out.push_str(&format!("config: {}\n", r.config_path.display()));
+    out.push_str(&crate::term::terminal_diagnostic_row(
+        r.term_env.as_deref(),
+        r.colorterm_env.as_deref(),
+        r.truecolor_probe,
+    ));
+    out.push('\n');
+    if let Some(line) = crate::term::color_status_row(r.color_pf) {
+        out.push_str(line);
+        out.push('\n');
+    }
+    out.push_str(&crate::graphics::graphics_diagnostic_row(
+        r.graphics,
+        r.detected,
+        r.max_density,
+    ));
+    out.push('\n');
+    // A malformed config makes every source read disconnected, and a diagnostic
+    // tool must say WHY rather than silently swallow it. Sanitized: a warning can
+    // interpolate config content.
+    for w in &r.config_warnings {
+        out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
+    }
+    if let Some(w) = &r.log_warning {
+        out.push_str(&format!("⚠ {}\n", sanitize(w)));
+    }
+    out.push('\n');
+
+    for row in &r.rows {
+        out.push_str(&format_doctor_row(row));
+        out.push('\n');
+    }
+
+    out.push_str(&health_summary(
+        r.rows.len(),
+        &broken_ids(&r.rows),
+        r.rows.iter().any(|row| row.diag.drift.total() > 0),
+    ));
+
+    if !r.roots.is_empty() {
+        out.push_str("\nresolved roots\n");
+        for root in &r.roots {
+            out.push_str(&root_row(root.source, &root.root, root.exists, root.env));
+            out.push('\n');
+        }
+    }
+    out.push('\n');
+    out.push_str(&focus_section(
+        &r.backend,
+        r.cc_registry.as_ref().map(|(p, e)| (p.as_path(), *e)),
+        (&r.codex_sessions.0, r.codex_sessions.1),
+    ));
+    if let Some(adv) = &r.home_split {
         out.push_str(&format!("\n{adv}\n"));
     }
-    Ok(out)
+    out
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CategoryStatus {
+    Ok,
+    Warn,
+    /// Reserved for an actionable install break; advisories are `Warn`.
+    Broken,
+}
+
+/// One line of the default rollup: `[glyph] name — summary`, plus indented
+/// detail lines only when there is a problem to expand.
+struct Category {
+    status: CategoryStatus,
+    name: &'static str,
+    summary: String,
+    details: Vec<String>,
+}
+
+fn terminal_category(r: &DoctorReport) -> Category {
+    let verdict = crate::term::truecolor_verdict(r.colorterm_env.as_deref(), r.truecolor_probe);
+    let graphics_short = match crate::graphics::resolve(r.graphics, r.detected, r.max_density) {
+        crate::graphics::Plan::Cutaway { scale } => {
+            format!("cutaway-capable at {}x (not wired)", scale.get())
+        }
+        crate::graphics::Plan::Classic { .. } => "classic half-blocks".to_string(),
+    };
+    let refused = matches!(
+        r.color_pf,
+        crate::term::ColorPreflight::RefuseNoColor | crate::term::ColorPreflight::RefuseDumbTerm
+    );
+    let mut details = Vec::new();
+    if refused {
+        if let Some(row) = crate::term::color_status_row(r.color_pf) {
+            details.push(row.to_string());
+        }
+    }
+    let status = if refused || verdict.starts_with("no ") {
+        CategoryStatus::Warn
+    } else {
+        CategoryStatus::Ok
+    };
+    Category {
+        status,
+        name: "terminal",
+        summary: format!(
+            "TERM={} · truecolor {verdict} · {graphics_short}",
+            crate::term::shown_env(r.term_env.as_deref()),
+        ),
+        details,
+    }
+}
+
+fn config_category(r: &DoctorReport) -> Option<Category> {
+    if r.config_warnings.is_empty() {
+        return None;
+    }
+    let n = r.config_warnings.len();
+    Some(Category {
+        status: CategoryStatus::Warn,
+        name: "config",
+        summary: format!(
+            "{n} warning{} loading {}",
+            plural_s(n),
+            r.config_path.display()
+        ),
+        details: r.config_warnings.iter().map(|w| sanitize(w)).collect(),
+    })
+}
+
+fn sources_category(rows: &[DoctorSourceRow]) -> Category {
+    let broken: Vec<&DoctorSourceRow> = rows.iter().filter(|r| r.diag.is_broken()).collect();
+    if broken.is_empty() {
+        return Category {
+            status: CategoryStatus::Ok,
+            name: "sources",
+            summary: format!("{} registered · connected installs sound", rows.len()),
+            details: Vec::new(),
+        };
+    }
+    let mut details: Vec<String> = broken
+        .iter()
+        .map(|r| {
+            let issues = r
+                .diag
+                .install
+                .as_ref()
+                .map(|i| i.issues.join("; "))
+                .unwrap_or_default();
+            format!(
+                "✗ {}\u{b7}{} — install broken: {issues}",
+                r.prefix, r.source_id
+            )
+        })
+        .collect();
+    details.push("→ fix: reconnect in the Sources panel (press s)".to_string());
+    Category {
+        status: CategoryStatus::Broken,
+        name: "sources",
+        summary: format!("{} of {} need attention", broken.len(), rows.len()),
+        details,
+    }
+}
+
+fn versions_category(rows: &[DoctorSourceRow]) -> Category {
+    let newer: Vec<String> = rows
+        .iter()
+        .filter(|r| {
+            version_cmp(r.installed_version.as_deref(), r.verified_version)
+                == Some(std::cmp::Ordering::Greater)
+        })
+        .map(|r| format!("{}\u{b7}{}", r.prefix, r.source_id))
+        .collect();
+    if newer.is_empty() {
+        return Category {
+            status: CategoryStatus::Ok,
+            name: "versions",
+            summary: "none newer than verified".to_string(),
+            details: Vec::new(),
+        };
+    }
+    let n = newer.len();
+    let noun = if n == 1 { "CLI" } else { "CLIs" };
+    Category {
+        status: CategoryStatus::Warn,
+        name: "versions",
+        summary: format!(
+            "{n} {noun} newer than verified (drift possible): {}",
+            newer.join(" ")
+        ),
+        details: Vec::new(),
+    }
+}
+
+fn drift_category(r: &DoctorReport) -> Category {
+    if let Some(w) = &r.log_warning {
+        return Category {
+            status: CategoryStatus::Warn,
+            name: "decode drift",
+            // The minted warning already says the counts are not meaningful.
+            summary: sanitize(w),
+            details: Vec::new(),
+        };
+    }
+    let drifted: Vec<&DoctorSourceRow> = r
+        .rows
+        .iter()
+        .filter(|row| row.diag.drift.total() > 0)
+        .collect();
+    if drifted.is_empty() {
+        return Category {
+            status: CategoryStatus::Ok,
+            name: "decode drift",
+            summary: "none recorded".to_string(),
+            details: Vec::new(),
+        };
+    }
+    let total: u64 = drifted.iter().map(|row| row.diag.drift.total()).sum();
+    let mut details: Vec<String> = drifted
+        .iter()
+        .map(|row| {
+            format!(
+                "! {}\u{b7}{} — {}",
+                row.prefix,
+                row.source_id,
+                drift_detail(&row.diag.drift)
+            )
+        })
+        .collect();
+    details.push(
+        "may predate a CLI's wire format — report: https://github.com/IvanWng97/pixtuoid/issues"
+            .to_string(),
+    );
+    Category {
+        status: CategoryStatus::Warn,
+        name: "decode drift",
+        summary: format!(
+            "{total} event{} across {} source{}",
+            plural_s(total as usize),
+            drifted.len(),
+            plural_s(drifted.len())
+        ),
+        details,
+    }
+}
+
+fn roots_category(roots: &[RootStatus]) -> Option<Category> {
+    if roots.is_empty() {
+        return None;
+    }
+    let present = roots.iter().filter(|r| r.exists).count();
+    let alarmed: Vec<String> = roots
+        .iter()
+        .filter_map(|r| match r.env {
+            Some((var, true)) if !r.exists => Some(format!(
+                "! {} — ${var} is set but {} does not exist",
+                r.source,
+                sanitize(&r.root.display().to_string())
+            )),
+            _ => None,
+        })
+        .collect();
+    let summary = if present == roots.len() {
+        format!("{present} resolved, all present")
+    } else {
+        format!(
+            "{present} of {} present (a missing root is normal for a CLI never run)",
+            roots.len()
+        )
+    };
+    Some(Category {
+        status: if alarmed.is_empty() {
+            CategoryStatus::Ok
+        } else {
+            CategoryStatus::Warn
+        },
+        name: "transcript roots",
+        summary,
+        details: alarmed,
+    })
+}
+
+fn focus_category(r: &DoctorReport) -> Category {
+    let mut details = Vec::new();
+    if r.backend.contains('\u{2717}') {
+        details.push(r.backend.clone());
+    }
+    match &r.cc_registry {
+        Some((p, false)) => details.push(format!(
+            "! claude-code registry probe missing: {} — focus no-ops until CC writes it",
+            p.display()
+        )),
+        None => details.push(
+            "! claude-code registry probe disabled (non-standard projects root) — focus no-ops"
+                .to_string(),
+        ),
+        _ => {}
+    }
+    if !r.codex_sessions.1 {
+        details.push(format!(
+            "! codex rollout probe missing: {} — focus no-ops until codex writes it",
+            r.codex_sessions.0.display()
+        ));
+    }
+    Category {
+        status: if details.is_empty() {
+            CategoryStatus::Ok
+        } else {
+            CategoryStatus::Warn
+        },
+        name: "focus-jump",
+        // The backend string carries its own ✓; the category glyph already says
+        // it, so strip the redundant trailing one.
+        summary: r
+            .backend
+            .strip_suffix(" \u{2713}")
+            .unwrap_or(&r.backend)
+            .to_string(),
+        details,
+    }
+}
+
+fn home_split_category(r: &DoctorReport) -> Option<Category> {
+    r.home_split.as_ref().map(|adv| Category {
+        status: CategoryStatus::Warn,
+        name: "windows",
+        summary: "HOME and USERPROFILE point at different homes".to_string(),
+        details: vec![adv.clone()],
+    })
+}
+
+fn plural_s(n: usize) -> &'static str {
+    if n == 1 {
+        ""
+    } else {
+        "s"
+    }
+}
+
+/// The default view: flutter-doctor-style category rollup — one `[✓]`/`[!]`/`[✗]`
+/// line per category, detail lines only under problems, `-v` for everything.
+fn render_summary(r: &DoctorReport) -> String {
+    let mut cats: Vec<Category> = vec![terminal_category(r)];
+    cats.extend(config_category(r));
+    cats.push(sources_category(&r.rows));
+    cats.push(versions_category(&r.rows));
+    cats.push(drift_category(r));
+    cats.extend(roots_category(&r.roots));
+    cats.push(focus_category(r));
+    cats.extend(home_split_category(r));
+
+    let mut out = String::from("pixtuoid doctor\n");
+    for c in &cats {
+        let glyph = match c.status {
+            CategoryStatus::Ok => '\u{2713}',
+            CategoryStatus::Warn => '!',
+            CategoryStatus::Broken => '\u{2717}',
+        };
+        out.push_str(&format!("[{glyph}] {} — {}\n", c.name, c.summary));
+        for d in &c.details {
+            out.push_str(&format!("    {d}\n"));
+        }
+    }
+    let issues = cats
+        .iter()
+        .filter(|c| c.status != CategoryStatus::Ok)
+        .count();
+    out.push('\n');
+    if issues == 0 {
+        out.push_str("• no issues found · full detail: pixtuoid doctor -v\n");
+    } else {
+        let noun = if issues == 1 {
+            "category"
+        } else {
+            "categories"
+        };
+        out.push_str(&format!(
+            "! issues in {issues} {noun} · full detail: pixtuoid doctor -v\n"
+        ));
+    }
+    out
+}
+
+/// Returns the rendered report rather than printing it, so the WHOLE report
+/// builder is unit-testable. Default = the category rollup; `verbose` = the
+/// full per-source report. Both render the same [`collect`] pass.
+pub fn run(
+    log_path: &std::path::Path,
+    graphics: crate::GraphicsMode,
+    verbose: bool,
+) -> anyhow::Result<String> {
+    let report = collect(log_path, graphics);
+    Ok(if verbose {
+        render_full(&report)
+    } else {
+        render_summary(&report)
+    })
 }
 
 /// One `roots:` line per source with a single on-disk root. A FACT row, not an
@@ -990,16 +1418,251 @@ mod tests {
     }
 
     #[test]
-    fn run_renders_the_structural_report_headers() {
+    fn run_verbose_renders_the_structural_report_headers() {
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
+            true,
         )
         .unwrap();
         assert!(out.contains("pixtuoid doctor — source health"), "{out}");
         assert!(out.contains("config:"), "{out}");
         assert!(out.contains("terminal: TERM="), "{out}");
         assert!(out.contains("sources \u{b7}"), "{out}");
+    }
+
+    #[test]
+    fn run_default_renders_the_category_rollup() {
+        let out = run(
+            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+            crate::GraphicsMode::Auto,
+            false,
+        )
+        .unwrap();
+        assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
+        assert!(out.contains("] terminal — TERM="), "{out}");
+        assert!(out.contains("] sources — "), "{out}");
+        assert!(out.contains("] decode drift — "), "{out}");
+        assert!(out.contains("] focus-jump — "), "{out}");
+        assert!(out.contains("full detail: pixtuoid doctor -v"), "{out}");
+        // The full-report sections stay behind -v.
+        assert!(!out.contains("resolved roots"), "{out}");
+        assert!(!out.contains("pixtuoid doctor — source health"), "{out}");
+    }
+
+    fn summary_row(prefix: &'static str, id: &'static str) -> DoctorSourceRow {
+        DoctorSourceRow {
+            prefix,
+            source_id: id,
+            connected: true,
+            has_target: true,
+            hooks_installed: true,
+            installed_version: Some("1.0.0".into()),
+            verified_version: "unknown",
+            diag: SourceDiagnostics {
+                install: Some(crate::install::verify::SchemaVerifyResult::default()),
+                drift: LogScanResult::default(),
+            },
+        }
+    }
+
+    fn summary_report(rows: Vec<DoctorSourceRow>) -> DoctorReport {
+        DoctorReport {
+            log_path: "/tmp/log".into(),
+            config_path: "/tmp/config.toml".into(),
+            config_warnings: vec![],
+            log_warning: None,
+            term_env: Some("xterm".into()),
+            colorterm_env: None,
+            truecolor_probe: None,
+            color_pf: crate::term::ColorPreflight::Proceed,
+            graphics: crate::GraphicsMode::Auto,
+            detected: None,
+            max_density: 1,
+            rows,
+            roots: vec![],
+            backend: "NSRunningApplication (macOS) \u{2713}".into(),
+            cc_registry: Some(("/tmp/reg".into(), true)),
+            codex_sessions: ("/tmp/cx".into(), true),
+            home_split: None,
+        }
+    }
+
+    #[test]
+    fn summary_clean_report_collapses_every_category() {
+        let out = render_summary(&summary_report(vec![
+            summary_row("cc", "claude-code"),
+            summary_row("cx", "codex"),
+        ]));
+        assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
+        assert!(
+            out.contains("[✓] sources — 2 registered · connected installs sound"),
+            "{out}"
+        );
+        assert!(
+            out.contains("[✓] versions — none newer than verified"),
+            "{out}"
+        );
+        assert!(out.contains("[✓] decode drift — none recorded"), "{out}");
+        // The redundant trailing ✓ is stripped — the category glyph says it.
+        assert!(
+            out.contains("[✓] focus-jump — NSRunningApplication (macOS)\n"),
+            "{out}"
+        );
+        assert!(
+            out.ends_with("• no issues found · full detail: pixtuoid doctor -v\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn summary_broken_install_expands_with_fix_line() {
+        let mut broken = summary_row("cx", "codex");
+        broken.diag.install = Some(crate::install::verify::SchemaVerifyResult {
+            issues: vec!["missing hook entries for: SessionEnd".into()],
+            notes: vec![],
+        });
+        let out = render_summary(&summary_report(vec![
+            summary_row("cc", "claude-code"),
+            broken,
+        ]));
+        assert!(out.contains("[✗] sources — 1 of 2 need attention"), "{out}");
+        assert!(
+            out.contains(
+                "    ✗ cx\u{b7}codex — install broken: missing hook entries for: SessionEnd"
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("    → fix: reconnect in the Sources panel (press s)"),
+            "{out}"
+        );
+        assert!(
+            out.ends_with("! issues in 1 category · full detail: pixtuoid doctor -v\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn summary_flags_clis_newer_than_verified() {
+        let mut newer = summary_row("cp", "copilot");
+        newer.installed_version = Some("GitHub Copilot CLI 1.0.79.".into());
+        newer.verified_version = "1.0.62";
+        let mut older = summary_row("hm", "hermes");
+        older.installed_version = Some("v0.17.0".into());
+        older.verified_version = "0.18.0";
+        let out = render_summary(&summary_report(vec![newer, older]));
+        assert!(
+            out.contains(
+                "[!] versions — 1 CLI newer than verified (drift possible): cp\u{b7}copilot"
+            ),
+            "older-than-verified is not an alarm: {out}"
+        );
+    }
+
+    #[test]
+    fn summary_drift_expands_per_source_with_report_pointer() {
+        let mut drifted = summary_row("gk", "grok");
+        drifted.diag.drift = LogScanResult {
+            unknown_event: 2,
+            missing_field: 1,
+            ..Default::default()
+        };
+        let out = render_summary(&summary_report(vec![drifted]));
+        assert!(
+            out.contains("[!] decode drift — 3 events across 1 source\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("    ! gk\u{b7}grok — 2 unknown-event, 1 missing-field"),
+            "{out}"
+        );
+        assert!(
+            out.contains("report: https://github.com/IvanWng97/pixtuoid/issues"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn summary_unreadable_log_surfaces_the_warning_not_a_clean_verdict() {
+        let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
+        r.log_warning =
+            Some("log unreadable: /x (denied) — the decode-drift counts are not meaningful".into());
+        let out = render_summary(&r);
+        assert!(
+            out.contains("[!] decode drift — log unreadable: /x"),
+            "{out}"
+        );
+        assert!(!out.contains("none recorded"), "{out}");
+    }
+
+    #[test]
+    fn summary_roots_alarm_only_on_env_set_missing() {
+        let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
+        r.roots = vec![
+            RootStatus {
+                source: "claude-code",
+                root: "/home/u/.claude/projects".into(),
+                exists: true,
+                env: None,
+            },
+            RootStatus {
+                source: "hermes",
+                root: "/home/u/.hermes".into(),
+                exists: false,
+                env: Some(("HERMES_HOME", true)),
+            },
+        ];
+        let out = render_summary(&r);
+        assert!(
+            out.contains("[!] transcript roots — 1 of 2 present"),
+            "{out}"
+        );
+        assert!(
+            out.contains("    ! hermes — $HERMES_HOME is set but /home/u/.hermes does not exist"),
+            "{out}"
+        );
+
+        // The same missing root WITHOUT an override is the ordinary
+        // never-ran-that-CLI state — a fact, not an alarm.
+        r.roots[1].env = None;
+        let out = render_summary(&r);
+        assert!(
+            out.contains("[✓] transcript roots — 1 of 2 present"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn summary_focus_probe_failure_warns_with_detail() {
+        let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
+        r.cc_registry = Some(("/tmp/reg".into(), false));
+        let out = render_summary(&r);
+        assert!(
+            out.contains("[!] focus-jump — NSRunningApplication (macOS)\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("    ! claude-code registry probe missing: /tmp/reg"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn summary_footer_counts_issue_categories() {
+        let mut broken = summary_row("cx", "codex");
+        broken.diag.install = Some(crate::install::verify::SchemaVerifyResult {
+            issues: vec!["shim binary missing: /old".into()],
+            notes: vec![],
+        });
+        let mut newer = summary_row("cp", "copilot");
+        newer.installed_version = Some("2.0.0".into());
+        newer.verified_version = "1.0.0";
+        let out = render_summary(&summary_report(vec![broken, newer]));
+        assert!(
+            out.ends_with("! issues in 2 categories · full detail: pixtuoid doctor -v\n"),
+            "{out}"
+        );
     }
 
     #[test]
@@ -1021,8 +1684,14 @@ mod tests {
             "got: {warning}"
         );
 
-        let out = run(dir.path(), crate::GraphicsMode::Auto).unwrap();
-        assert!(out.contains("⚠ log unreadable"), "{out}");
+        let full = run(dir.path(), crate::GraphicsMode::Auto, true).unwrap();
+        assert!(full.contains("⚠ log unreadable"), "{full}");
+        // The default rollup must not assert clean drift off a log it never read.
+        let rollup = run(dir.path(), crate::GraphicsMode::Auto, false).unwrap();
+        assert!(
+            rollup.contains("[!] decode drift — log unreadable"),
+            "{rollup}"
+        );
     }
 
     #[test]
@@ -1087,9 +1756,12 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
         std::env::remove_var("OPENCODE_CONFIG_DIR");
         std::env::set_var("PATH", &bin);
+        // The default (non-verbose) mode: the gate lives in `collect`, which
+        // both views share, so covering one covers both.
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
+            false,
         );
         let spawned = marker.exists();
         for (k, v) in saved {
