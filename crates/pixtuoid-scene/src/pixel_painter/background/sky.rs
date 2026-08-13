@@ -302,19 +302,18 @@ pub(in crate::pixel_painter) fn sun_on_wall(now: SystemTime) -> Option<SunSpot> 
 /// ALREADY-CLAMPED strength `s`. `s <= 0.0` early-returns: byte-identical to
 /// blending, but it skips the whole pass every clear frame. Tint and strength
 /// are constant across the band, so the blend runs through an [`RgbLut`] —
-/// byte-identical to per-pixel [`blend_rgb`], measured ~28% of a frame down
-/// to a fraction (#900's profile).
+/// byte-identical to per-pixel [`blend_rgb`] (#900).
 fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
     if s <= 0.0 {
         return;
     }
-    let lut = RgbLut::tabulate(|c| blend_rgb(c, tint, s));
     let w = buf.width() as usize;
     let start = (top_y.min(buf.height()) as usize) * w;
     let end = (bottom_y.min(buf.height()) as usize) * w;
     if start >= end {
         return;
     }
+    let lut = RgbLut::tabulate(|c| blend_rgb(c, tint, s));
     for px in &mut buf.as_mut_slice()[start..end] {
         *px = lut.apply(*px);
     }
@@ -519,6 +518,49 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn blend_floor_band_clamps_degenerate_bounds() {
+        let tint = Rgb {
+            r: 200,
+            g: 180,
+            b: 120,
+        };
+        let mut buf = RgbBuffer::filled(
+            6,
+            5,
+            Rgb {
+                r: 40,
+                g: 50,
+                b: 60,
+            },
+        );
+        let before = buf.clone();
+        blend_floor_band(&mut buf, 4, 2, tint, 0.5);
+        assert_eq!(
+            buf.as_slice(),
+            before.as_slice(),
+            "top >= bottom is a no-op"
+        );
+        blend_floor_band(&mut buf, 9, 12, tint, 0.5);
+        assert_eq!(
+            buf.as_slice(),
+            before.as_slice(),
+            "a band entirely past the bottom edge is a no-op"
+        );
+        blend_floor_band(&mut buf, 3, 12, tint, 0.5);
+        let mut expected = before.clone();
+        for y in 3..5u16 {
+            for x in 0..6u16 {
+                expected.put(x, y, blend_rgb(expected.get(x, y), tint, 0.5));
+            }
+        }
+        assert_eq!(
+            buf.as_slice(),
+            expected.as_slice(),
+            "bottom_y clamps to the buffer height"
+        );
     }
 
     #[test]

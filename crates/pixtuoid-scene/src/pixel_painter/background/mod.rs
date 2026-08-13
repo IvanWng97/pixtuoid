@@ -29,7 +29,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, mix_lab};
+use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`. The
 /// ambient/sky clock-decode funnel; `paint_clock`'s analog hands keep their own
@@ -117,23 +117,19 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
         return;
     }
     let alpha = 0.20 * level;
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            let cur = buf.get(x, y);
-            buf.put(
-                x,
-                y,
-                blend_rgb(
-                    cur,
-                    Rgb {
-                        r: 255,
-                        g: 255,
-                        b: 255,
-                    },
-                    alpha,
-                ),
-            );
-        }
+    let lut = RgbLut::tabulate(|c| {
+        blend_rgb(
+            c,
+            Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            },
+            alpha,
+        )
+    });
+    for px in buf.as_mut_slice() {
+        *px = lut.apply(*px);
     }
 }
 
@@ -304,14 +300,25 @@ pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<Sun
         .collect()
 }
 
+/// The base fill's complete input set. Every value the fill loops read is a
+/// named field here; a stale hit is invisible to every other gate, so this
+/// key IS the correctness boundary — a new input into the fill loops must
+/// join it.
+#[derive(PartialEq)]
+struct BaseFillKey {
+    buf_w: u16,
+    buf_h: u16,
+    band_h: u16,
+    carpet: [Rgb; 3],
+    wall: Rgb,
+}
+
 /// Memoized carpet-noise + wall-band base fill — the full-buffer fills were
 /// the largest single cost of a frame (#900's profile) yet their inputs
-/// change only on a resize, theme swap, or weather-tint change. The key
-/// carries EVERY input the fill reads; a stale hit is invisible to every
-/// other gate, so the key IS the correctness boundary — a new input into the
-/// fill loops must join it.
+/// ([`BaseFillKey`]) change only on a resize, theme swap, or weather-tint
+/// change.
 pub(crate) struct BaseFillCache {
-    key: Option<(u16, u16, u16, [Rgb; 3], Rgb)>,
+    key: Option<BaseFillKey>,
     filled: RgbBuffer,
 }
 
@@ -324,34 +331,28 @@ impl BaseFillCache {
         }
     }
 
-    fn fill(
-        &mut self,
-        buf_w: u16,
-        buf_h: u16,
-        band_h: u16,
-        carpet: [Rgb; 3],
-        wall: Rgb,
-    ) -> &RgbBuffer {
-        let key = (buf_w, buf_h, band_h, carpet, wall);
-        if self.key != Some(key) {
-            self.filled.resize_fill(buf_w, buf_h, wall);
-            for y in band_h..buf_h {
-                for x in 0..buf_w {
+    /// Stamp the memoized fill over `buf`, refilling on any key change.
+    fn blit_into(&mut self, buf: &mut RgbBuffer, key: BaseFillKey) {
+        if self.key.as_ref() != Some(&key) {
+            self.filled.resize_fill(key.buf_w, key.buf_h, key.wall);
+            for y in key.band_h..key.buf_h {
+                for x in 0..key.buf_w {
                     let hash = (x as u32)
                         .wrapping_mul(73)
                         .wrapping_add((y as u32).wrapping_mul(151))
                         ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
                     let color = match hash % 17 {
-                        0 | 1 => carpet[0],
-                        2 | 3 => carpet[1],
-                        _ => carpet[2],
+                        0 | 1 => key.carpet[0],
+                        2 | 3 => key.carpet[1],
+                        _ => key.carpet[2],
                     };
                     self.filled.put(x, y, color);
                 }
             }
             self.key = Some(key);
         }
-        &self.filled
+        debug_assert_eq!(buf.as_slice().len(), self.filled.as_slice().len());
+        buf.as_mut_slice().copy_from_slice(self.filled.as_slice());
     }
 }
 
@@ -385,9 +386,16 @@ pub(super) fn paint_floor_and_walls(
         blend_rgb(carpet_dark, tint, 0.15),
         blend_rgb(carpet_base, tint, 0.15),
     ];
-    let band_h = top_wall_h.min(buf_h);
-    let filled = base_fill.fill(buf_w, buf_h, band_h, carpet, wall);
-    buf.as_mut_slice().copy_from_slice(filled.as_slice());
+    base_fill.blit_into(
+        buf,
+        BaseFillKey {
+            buf_w,
+            buf_h,
+            band_h: top_wall_h.min(buf_h),
+            carpet,
+            wall,
+        },
+    );
 
     // Window HEIGHT grows with the wall band so taller terminals get dramatic
     // glass; width stays fixed so the skyline detail reads consistently.

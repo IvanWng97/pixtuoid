@@ -968,3 +968,98 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
         "clear vs rain must differ somewhere in the carpet (else this leg pins nothing)"
     );
 }
+
+#[test]
+fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = crate::localclock::on_day(1, 12);
+    let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
+        let look = time_of_day_look(now, theme);
+        let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
+        paint_floor_and_walls(base_fill, &mut buf, w, h, now, &look, 14, None, theme, 0.0);
+        buf
+    };
+    // The memo is single-slot, so each leg varies ONE key component against
+    // the immediately preceding call — a co-varying sibling would mask the
+    // component under test (a width-only change must repaint even when the
+    // height alone would have missed the memo anyway).
+    let mut warm = BaseFillCache::new();
+    let big = paint_at(&mut warm, 96, 64);
+    let narrow_shared = paint_at(&mut warm, 80, 64);
+    let narrow_fresh = paint_at(&mut BaseFillCache::new(), 80, 64);
+    assert_eq!(
+        narrow_shared.as_slice(),
+        narrow_fresh.as_slice(),
+        "a width-only resize on a warm cache must recompute the fill, not serve (or panic on) the old size"
+    );
+    let short_shared = paint_at(&mut warm, 80, 48);
+    let short_fresh = paint_at(&mut BaseFillCache::new(), 80, 48);
+    assert_eq!(
+        short_shared.as_slice(),
+        short_fresh.as_slice(),
+        "a height-only resize on a warm cache must recompute the fill"
+    );
+    let big_again = paint_at(&mut warm, 96, 64);
+    assert_eq!(
+        big.as_slice(),
+        big_again.as_slice(),
+        "growing back must re-derive the original fill"
+    );
+}
+
+#[test]
+fn lightning_flash_matches_the_per_pixel_blend_reference() {
+    use std::time::{Duration, UNIX_EPOCH};
+    let bucket = (0u64..)
+        .find(|&b| strike_offset(b) < 500)
+        .expect("a low-offset bucket exists");
+    let at =
+        UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket));
+    let mut lcg = 0xC0FFEEu32;
+    let mut next = || {
+        lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
+        Rgb {
+            r: (lcg >> 24) as u8,
+            g: (lcg >> 16) as u8,
+            b: (lcg >> 8) as u8,
+        }
+    };
+    let (w, h) = (37u16, 9u16);
+    let mut buf = RgbBuffer::filled(w, h, Rgb { r: 0, g: 0, b: 0 });
+    for y in 0..h {
+        for x in 0..w {
+            buf.put(x, y, next());
+        }
+    }
+    let mut expected = buf.clone();
+    let alpha = 0.20 * lightning_flash_level(at);
+    assert!(alpha > 0.0, "the fixture time must sit inside a flash");
+    for y in 0..h {
+        for x in 0..w {
+            let c = expected.get(x, y);
+            expected.put(
+                x,
+                y,
+                blend_rgb(
+                    c,
+                    Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                    },
+                    alpha,
+                ),
+            );
+        }
+    }
+    paint_lightning_flash(&mut buf, at, Weather::Storm);
+    for y in 0..h {
+        for x in 0..w {
+            assert_eq!(
+                buf.get(x, y),
+                expected.get(x, y),
+                "({x},{y}) diverged from the per-pixel blend reference"
+            );
+        }
+    }
+}

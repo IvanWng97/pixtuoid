@@ -99,12 +99,12 @@ pub use palette::tool_glow_for_kind;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
 ///
-/// Scanned in `WASH_SCAN_CHUNK`-pixel chunks: the branch-free equality
-/// reduction vectorizes, so untouched chunks — most of a real frame — cost a
-/// SIMD compare instead of a per-pixel branch, and the wash itself runs
-/// through a lazily-built [`palette::RgbLut`] over the chunks that differ
-/// (#900). Byte-identical to per-pixel [`wash_object`] on the diff set.
-pub(crate) fn wash_since(buf: &mut RgbBuffer, since: &RgbBuffer, wash: [(Rgb, f32); 2]) {
+/// The branch-free XOR-OR reduction replaces a hard-to-predict per-pixel
+/// branch with one predictable branch per `WASH_SCAN_CHUNK` on the clean
+/// path, and the wash itself runs through a lazily-built [`palette::RgbLut`]
+/// over the chunks that differ. Byte-identical to per-pixel [`wash_object`]
+/// on the diff set.
+fn wash_since(buf: &mut RgbBuffer, since: &RgbBuffer, wash: [(Rgb, f32); 2]) {
     const WASH_SCAN_CHUNK: usize = 64;
     let cur = buf.as_mut_slice();
     let old = since.as_slice();
