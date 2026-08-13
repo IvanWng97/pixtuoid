@@ -73,7 +73,16 @@ fn sweep_over(
     for &(w, h) in SWEEP_SIZES {
         for seed in seeds.clone() {
             match SceneLayout::compute_with_seed(w, h, None, seed) {
-                Some(l) => f(w, h, seed, &l),
+                Some(l) => {
+                    // The dual of the None arm below: that one prices a refusal, this
+                    // one prices an acceptance. A layout that EXISTS must seat someone.
+                    assert!(
+                        !l.home_desks.is_empty(),
+                        "{w}x{h} seed {seed}: a layout above the advertised minimum with \
+                         no desk to seat anyone"
+                    );
+                    f(w, h, seed, &l);
+                }
                 None => assert!(
                     w < super::compute::MIN_LAYOUT_W || h < super::compute::MIN_LAYOUT_H,
                     "{w}x{h} seed {seed}: compute returned None at a size above the \
@@ -630,22 +639,6 @@ fn assert_walkable_connected(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     );
 }
 
-/// A layout that EXISTS must seat someone. `MIN_LAYOUT_W` models WIDTH, so a
-/// geometry change that starves the first desk for any other reason is invisible
-/// to the boundary test that pins the derivation.
-fn assert_the_office_seats_someone(w: u16, h: u16, seed: u64, l: &SceneLayout) {
-    assert!(
-        !l.home_desks.is_empty(),
-        "{w}x{h} seed {seed}: a layout above the advertised minimum with no desk to seat anyone"
-    );
-}
-
-#[test]
-fn every_swept_office_seats_someone() {
-    sweep(assert_the_office_seats_someone);
-    sweep_production_floors(assert_the_office_seats_someone);
-}
-
 #[test]
 fn walkable_is_one_connected_region() {
     sweep(assert_walkable_connected);
@@ -865,6 +858,13 @@ fn narrow_band_connectivity_boundary_scan() {
         for &h in &[80u16, 100, 120, 148, 160] {
             for seed in SWEEP_SEEDS {
                 if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
+                    // `assert_home_desk_approaches_are_routable` iterates `home_desks`,
+                    // so it passes VACUOUSLY on an empty one — this scan visits the
+                    // widths between the grid points, where that would hide.
+                    assert!(
+                        !l.home_desks.is_empty(),
+                        "{w}x{h} seed {seed}: lays out with no desk to seat anyone"
+                    );
                     assert_walkable_connected(w, h, seed, &l);
                     assert_home_desk_approaches_are_routable(w, h, seed, &l);
                 }

@@ -219,9 +219,8 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn a_full_height_modal_never_covers_the_footer_row() {
     let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
-    // The office layout's exact minimum (`min_layout_size`), where the real release
-    // notes wrap past the 31 rows.
-    let mut r = build(37, 31, vec![]);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let mut r = build(cols, rows, vec![]);
     r.set_version_popup(true, t0());
     let t = t0() + Duration::from_millis(400); // fully scaled in
     r.render(&scene, &pack(), t).expect("render");
@@ -231,6 +230,14 @@ fn a_full_height_modal_never_covers_the_footer_row() {
         text.contains("Enter to close"),
         "the popup must be on screen for this to test anything; frame was:\n{text}"
     );
+    // The premise, not just the conclusion: "full-height" holds only while the notes
+    // overflow the clamped viewport, and `just bump` rewrites them wholesale. Without
+    // this the test stays green while testing nothing it is named for.
+    assert!(
+        text.contains("more \u{2014} see the link"),
+        "the notes must OVERFLOW at {cols}x{rows} for this to be a full-height modal; \
+         frame was:\n{text}"
+    );
     assert!(
         last_row.contains("[q]uit"),
         "the footer must survive a full-height modal, got last row {last_row:?};\
@@ -239,7 +246,7 @@ fn a_full_height_modal_never_covers_the_footer_row() {
 
     // Compare CELLS, not a substring: surviving glyphs are not a READABLE footer,
     // and the shadow's bottom band dims `fg` only.
-    let mut plain = build(37, 31, vec![]);
+    let mut plain = build(cols, rows, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
     let footer_y = lit.area.height - 1;

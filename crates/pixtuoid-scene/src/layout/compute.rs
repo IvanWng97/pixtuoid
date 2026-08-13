@@ -48,8 +48,12 @@ pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
 /// appliance aisle. THE two formulas `compute_with_seed` and the floor
 /// derivations both step from.
 pub(super) const fn band_w(buf_w: u16, mid_x_pct: u16) -> u16 {
-    buf_w.saturating_sub(pct(buf_w, mid_x_pct) + 1)
+    buf_w.saturating_sub(pct(buf_w, mid_x_pct) + MID_DIVIDER_W)
 }
+
+/// The 1px column between the left rooms and the cubicle band — `right_x` steps
+/// over it and `band_w` subtracts it, so it is one const, not two literals.
+const MID_DIVIDER_W: u16 = 1;
 
 pub(super) const fn band_h(buf_h: u16) -> u16 {
     let usable = buf_h.saturating_sub(top_margin(buf_h));
@@ -242,7 +246,7 @@ pub(super) fn compute_with_seed(
         None
     };
 
-    let right_x = mid_x + 1;
+    let right_x = mid_x + MID_DIVIDER_W;
     let right_w = band_w(buf_w, geom.mid_x_pct());
     // East edge of the meeting-room divider wall — the west bound lounge
     // furniture must clear. No meeting room ⇒ no wall ⇒ the clamp collapses to
@@ -1167,9 +1171,12 @@ pub(super) enum FloorVariant {
 }
 
 impl FloorVariant {
-    /// THE roster: the width-floor derivation sweeps it, `from_seed` indexes it,
-    /// and `COUNT` is its length — so a variant missing from here is unreachable
-    /// and prices nothing, which `the_sweep_reaches_every_floor_variant` reds on.
+    /// THE roster: the floor derivations sweep it, `from_seed` indexes it, and
+    /// `COUNT` is its length. A variant missing from here is unreachable — clippy's
+    /// `dead_code` under `-D warnings` reds on the never-constructed enum arm, NOT
+    /// `the_sweep_reaches_every_floor_variant`, which counts observed shapes against
+    /// `ALL.len()` and so stays green when both stay at 5. One added HERE that the
+    /// sweep seeds never reach is the direction that test does catch.
     pub(super) const ALL: [Self; 5] = [
         FloorVariant::Standard,
         FloorVariant::OpenPlan,
