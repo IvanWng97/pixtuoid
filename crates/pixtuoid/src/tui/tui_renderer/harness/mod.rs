@@ -72,6 +72,14 @@ pub(super) fn dark_theme() -> &'static pixtuoid_scene::theme::Theme {
     pixtuoid_scene::theme::theme_by_name("cyberpunk").expect("cyberpunk theme")
 }
 /// Build a renderer with the given pet KINDS, each using its default name.
+/// A terminal one row under the office minimum — the footer-only path, DERIVED
+/// so a floor move can't leave these tests asserting against a size that has
+/// since become perfectly renderable (it did: 80x24 used to be too small).
+pub(super) fn too_small_terminal() -> (u16, u16) {
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    (cols, rows - 1)
+}
+
 pub(super) fn build(cols: u16, rows: u16, kinds: Vec<PetKind>) -> TuiRenderer<TestBackend> {
     build_pets(
         cols,

@@ -12,13 +12,13 @@ fn too_small_terminal_returns_no_layout_no_panic() {
     );
 }
 
-/// A refusal has to SAY so. 80x24 is the classic default and it is under the
-/// layout minimum, so before #908 the user got a footer over a blank office —
-/// indistinguishable from a crash.
+/// A refusal has to SAY so — before #908 a sub-floor terminal got a footer over a
+/// blank office, indistinguishable from a crash. The fixture is DERIVED: pinning a
+/// size here is how the old one rotted into a size that renders fine.
 #[test]
 fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    for (cols, rows) in [(80u16, 24u16), (15, 8)] {
+    for (cols, rows) in [too_small_terminal(), (15, 8)] {
         let mut r = build(cols, rows, vec![]);
         r.render(&scene, &pack(), t0()).expect("render");
         assert!(r.cached_layout().is_none(), "{cols}x{rows} must refuse");
@@ -36,13 +36,14 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     }
 }
 
-/// First run at 80x24 is the exact case the notice exists for, and first run is
-/// also when the onboarding modal opens — over the same centred rows.
+/// A first run on a sub-floor terminal is the exact case the notice exists for, and
+/// first run is also when the onboarding modal opens — over the same centred rows.
 #[test]
 fn the_too_small_notice_survives_an_open_onboarding_modal() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut r = build(80, 24, vec![]);
+    let (cols, rows) = too_small_terminal();
+    let mut r = build(cols, rows, vec![]);
     r.set_onboarding_frame(OnboardingFrame {
         open: true,
         rows: vec![WelcomeRow {
@@ -68,7 +69,8 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
 #[test]
 fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut small = build(80, 24, vec![]);
+    let (small_cols, small_rows) = too_small_terminal();
+    let mut small = build(small_cols, small_rows, vec![]);
     small.render(&scene, &pack(), t0()).expect("render");
     let text = frame_text(small.frame_buffer());
     let named = text
@@ -162,12 +164,13 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/tiny/0.jsonl", 0, t0())], 16);
 
-    let mut r = build(80, 24, vec![]);
+    let (cols, rows) = too_small_terminal();
+    let mut r = build(cols, rows, vec![]);
     r.set_help_open(true);
     r.render(&scene, &pack(), t0()).expect("render");
     assert!(
         r.cached_layout().is_none(),
-        "80x24 is below the office layout minimum — this IS the footer-only path"
+        "{cols}x{rows} is below the office layout minimum — this IS the footer-only path"
     );
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -175,7 +178,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the help overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    let mut r = build(80, 24, vec![]);
+    let mut r = build(cols, rows, vec![]);
     r.set_onboarding_frame(OnboardingFrame {
         open: true,
         rows: vec![WelcomeRow {
@@ -195,7 +198,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the onboarding overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    let mut r = build(80, 24, vec![]);
+    let mut r = build(cols, rows, vec![]);
     r.set_connection_frame_parts(
         true,
         Vec::new(),

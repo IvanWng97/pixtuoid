@@ -10,17 +10,27 @@ use super::mask::pantry_ground_rect;
 use super::placement::rects_overlap;
 use super::*;
 
-/// The sweep's size axis: the forced-single-pod widths (37–41, floored by
-/// `MIN_LAYOUT_W`), the decor-vs-wall and Y-overflow corners, the golden and
-/// live wasm hero buffers, and a spread wide enough that the appliance kinds
-/// appear.
+/// The sweep's size axis: the forced-single-pod widths (floored by
+/// `MIN_LAYOUT_W`), the SHORT band the derived height floor opened (46-58 buffer
+/// px = 24-30 rows, which the old hand-written floor refused sight-unseen), the
+/// decor-vs-wall and Y-overflow corners, the golden and live wasm hero buffers,
+/// and a spread wide enough that the appliance kinds appear.
 ///
 /// Module-private on purpose: the routability guards that need this axis live
 /// HERE so the placement axis and the routability axis can't disagree — they
 /// did, and the narrow band was swept for placement but never for routability.
 const SWEEP_SIZES: &[(u16, u16)] = &[
+    (super::compute::MIN_LAYOUT_W, super::compute::MIN_LAYOUT_H),
     (super::compute::MIN_LAYOUT_W, 60),
     (super::compute::MIN_LAYOUT_W + 2, 100),
+    (48, 46),
+    (64, 48),
+    (80, 46),
+    (96, 52),
+    (120, 46),
+    (160, 50),
+    (200, 46),
+    (128, 56),
     (38, 120),
     (40, 70),
     (41, 160),

@@ -562,7 +562,10 @@ mod tests {
 
     #[test]
     fn an_unlayoutable_window_seeds_zero_not_a_fallback() {
-        let tiny = PhysicalSize::new(64u32, 48u32);
+        // DERIVED, not a pinned 64x48: that used to be unlayoutable and stopped
+        // being so when the layout floor dropped, which silently emptied this test.
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
         let (_scale, buf_w, buf_h) = window_buffer_geometry(tiny);
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(

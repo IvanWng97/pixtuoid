@@ -185,16 +185,25 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
 /// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
 /// a refusal — the scene rect is under the painter's own floor, `frame_layout`
 /// declined, or a floor transition hit the same gate — and a silent refusal reads
-/// as a crash at 80x24, the size a first-time user is most likely to be at.
+/// as a crash on the small terminal a first-time user is most likely to be at.
+/// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
+/// (half-block) and the footer takes its own, and the painter's own floor can
+/// outrank the layout's. THE one translation: the notice states it and the
+/// harness derives its too-small fixtures from it.
+pub(crate) fn min_terminal_size() -> (u16, u16) {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    (
+        min.w.max(MIN_SCENE_WIDTH),
+        (min.h.div_ceil(2) + FOOTER_ROWS).max(MIN_SCENE_HEIGHT),
+    )
+}
+
 fn paint_too_small_notice(
     f: &mut ratatui::Frame<'_>,
     area: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let min = pixtuoid_scene::layout::min_layout_size();
-    // Rows carry TWO buffer pixels (half-block), and the footer takes its own.
-    let need_rows = (min.h.div_ceil(2) + FOOTER_ROWS).max(MIN_SCENE_HEIGHT);
-    let need_cols = min.w.max(MIN_SCENE_WIDTH);
+    let (need_cols, need_rows) = min_terminal_size();
     // Widest form that FITS: a terminal narrow enough to trigger this is often
     // too narrow to hold the sentence explaining it, and skipping the line then
     // leaves exactly the blank screen this exists to prevent.
