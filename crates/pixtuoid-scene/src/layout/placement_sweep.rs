@@ -845,13 +845,35 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 /// grid structurally skips. Floored by `MIN_LAYOUT_W`; the upper bound is 76,
 /// not 64, to cover the FULL single-pod-column window: the desk grid stays one
 /// column through buf_w≈70 and only splits to two (two drains, robust) at ≈71,
-/// and the discrete grid's nearest points either side are 64 and 96.
+/// and the discrete grid's nearest points either side are 64 and 80.
 const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
 
 /// Step-1 width sweep across the degradation band, running BOTH connectivity
 /// predicates at that resolution — the discrete `SWEEP_SIZES` grid can't cover
 /// every width, and a sealed pocket at a width it skips ships silently. Heights
 /// span the tall floors where the aisle-seal manifests; only 148 reaches the #566 guard.
+/// The Y twin of the width scan below: the derived height floor opened 45..59, where
+/// `pod_rows` collapses to 1 and the appliance aisle sits at its 8px minimum. The
+/// discrete grid gives that band 6 points; this walks it at step 1.
+#[test]
+fn short_band_connectivity_boundary_scan() {
+    for h in super::compute::MIN_LAYOUT_H..60 {
+        for &w in &[super::compute::MIN_LAYOUT_W, 48u16, 80, 120, 200] {
+            for seed in SWEEP_SEEDS {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    panic!("{w}x{h} seed {seed}: refused above the floor");
+                };
+                assert!(
+                    !l.home_desks.is_empty(),
+                    "{w}x{h} seed {seed}: lays out with no desk to seat anyone"
+                );
+                assert_walkable_connected(w, h, seed, &l);
+                assert_home_desk_approaches_are_routable(w, h, seed, &l);
+            }
+        }
+    }
+}
+
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {

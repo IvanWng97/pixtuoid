@@ -169,8 +169,8 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // The narrowest buffer that lays out leaves the pantry under the shelf's
-    // `vis.w + 4` width gate.
+    // Seed 1 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
+    // width gate — the gate is a property of size AND seed, not of size alone.
     let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
         .expect("fits");
     assert!(
@@ -469,10 +469,11 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
         narrowest_band = narrowest_band.min(l.cubicle_band.width);
         shortest_band = shortest_band.min(l.cubicle_band.height);
     }
-    // TIGHTNESS, both axes. Every other test derives its fixture FROM the floors, so
-    // they move in lockstep with an overshoot and stay green — and an overshooting
-    // floor is exactly the bug on the height axis: the hand-written 60 refused 15
-    // buffer px of sizes that render, and made the notice lie about them.
+    // TIGHTNESS on the HEIGHT axis — an overshoot there is exactly the bug this PR
+    // fixes on it (the hand-written 60 refused 15 buffer px of sizes that render).
+    // The width arm below cannot see a +1 overshoot, because `pct` floors and two
+    // adjacent widths share a band; `neither_floor_could_be_one_px_lower` in
+    // `compute`'s own tests carries the exact form for both axes.
     assert_eq!(
         narrowest_band,
         crate::layout::compute::DESK_BAND_MIN_W,

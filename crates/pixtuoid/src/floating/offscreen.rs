@@ -617,16 +617,26 @@ mod tests {
         }
     }
 
-    /// One fixture per divergence class: 1280×720 and 64×48 catch a re-introduced
-    /// `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
+    /// One fixture per divergence class: 1280×720 and a derived sub-floor window catch a
+    /// re-introduced `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
     /// whose capacity moves under a few px of one-sided buffer drift — the other two
     /// absorb it.
     #[test]
     fn the_first_redraws_publish_agrees_with_the_boot_seed() {
+        // DERIVED like its sibling above: a pinned 64x48 stopped being zero-capacity
+        // when the layout floor dropped, leaving the fallback class uncovered.
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let unlayoutable = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
+        assert_eq!(
+            boot_capacities_for_window(unlayoutable)[0],
+            0,
+            "the zero-capacity fixture must actually seed zero, else the fallback class \
+             is covered by nothing here"
+        );
         for window in [
             PhysicalSize::new(1280u32, 720u32),
             PhysicalSize::new(853, 480),
-            PhysicalSize::new(64, 48),
+            unlayoutable,
         ] {
             let seed = boot_capacities_for_window(window);
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));

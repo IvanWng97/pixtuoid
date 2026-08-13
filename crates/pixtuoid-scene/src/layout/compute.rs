@@ -36,11 +36,11 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
     }
 }
 
-/// The cubicle band that seats ONE desk, per axis — the terms `compute_pod_desks`'
-/// clamp compares on that axis: the first pod's aisle half, plus the desk's blocked
-/// GROUND extent (side cabinets / walk-behind overhang included, so NOT
-/// `DESK_W`/`DESK_H`). The Y clamp adds a third, `couch_to_desk_extra`, which is 0
-/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — the floor is solved well under it.
+// The cubicle band that seats ONE desk, per axis — the terms `compute_pod_desks`'
+// clamp compares on that axis: the first pod's aisle half, plus the desk's blocked
+// GROUND extent (side cabinets / walk-behind overhang included, so NOT `DESK_W`/
+// `DESK_H`). The Y clamp adds a third, `couch_to_desk_extra`, which is 0 everywhere
+// below `COUCH_GAP_GROWTH_BASE_H` — the floor is solved well under it.
 pub(super) const DESK_BAND_MIN_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
 pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
 
@@ -48,10 +48,9 @@ pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
 /// over it and `band_w` subtracts it, so it is one const, not two literals.
 const MID_DIVIDER_W: u16 = 1;
 
-/// The cubicle band's extent for a buffer, per axis — everything east of the
-/// left column and its divider; everything below the wall band minus the
-/// appliance aisle. THE two formulas `compute_with_seed` and the floor
-/// derivations both step from.
+// The cubicle band's extent for a buffer, per axis — everything east of the left
+// column and its divider; everything below the wall band minus the appliance aisle.
+// THE two formulas `compute_with_seed` and the floor derivations both step from.
 pub(super) const fn band_w(buf_w: u16, mid_x_pct: u16) -> u16 {
     buf_w.saturating_sub(pct(buf_w, mid_x_pct) + MID_DIVIDER_W)
 }
@@ -259,7 +258,7 @@ pub(super) fn compute_with_seed(
         right_x
     };
     let cubicle_aisle_h = cubicle_aisle_h(usable_h);
-    let cubicle_h = usable_h.saturating_sub(cubicle_aisle_h);
+    let cubicle_h = band_h(buf_h);
     let cubicle_band = Bounds {
         x: right_x,
         y: top_margin,
@@ -1720,6 +1719,25 @@ mod tests {
             dual.mid_x_pct(),
             FloorVariant::Dense.mid_x_pct(),
             "a Dense floor that KEEPS both meeting rooms keeps its own column"
+        );
+    }
+
+    /// The solver's own exit condition — the tightness `narrowest_band ==
+    /// DESK_BAND_MIN_W` in `layout::tests` CANNOT see: `pct` floors, so two adjacent
+    /// widths share a band and a +1 overshoot passes that assert. One px below each
+    /// floor the band must FALL SHORT.
+    #[test]
+    fn neither_floor_could_be_one_px_lower() {
+        assert!(
+            super::band_w(super::MIN_LAYOUT_W - 1, super::widest_mid_x_pct())
+                < super::DESK_BAND_MIN_W,
+            "the width floor is not tight: {} px still clears the band",
+            super::MIN_LAYOUT_W - 1
+        );
+        assert!(
+            super::band_h(super::MIN_LAYOUT_H - 1) < super::DESK_BAND_MIN_H,
+            "the height floor is not tight: {} px still clears the band",
+            super::MIN_LAYOUT_H - 1
         );
     }
 

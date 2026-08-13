@@ -582,7 +582,7 @@ mod tests {
             (240, 180),
         ] {
             let Some(l) = crate::layout::Layout::compute(w, h, None) else {
-                continue;
+                panic!("{w}x{h}: refused at or above the derived floor");
             };
             for seed in 0..8u64 {
                 // 40s cycle: sample well past the walk fraction so every sample
@@ -626,7 +626,7 @@ mod tests {
         ] {
             for seed in 0..24u64 {
                 let Some(l) = crate::layout::Layout::compute(w, h, None) else {
-                    continue;
+                    panic!("{w}x{h}: refused at or above the derived floor");
                 };
                 // Independent rects: the pantry counter from its RUNTIME size, the
                 // aquarium from the lounge, both of which the const table cannot give.
@@ -678,7 +678,7 @@ mod tests {
         for w in (min.w..min.w + 24).step_by(3) {
             for h in (min.h..min.h + 24).step_by(3) {
                 let Some(l) = crate::layout::Layout::compute(w, h, Some(4)) else {
-                    continue;
+                    panic!("{w}x{h}: refused at or above the derived floor");
                 };
                 checked += 1;
                 assert!(

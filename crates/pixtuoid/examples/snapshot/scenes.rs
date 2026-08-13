@@ -811,8 +811,13 @@ mod tests {
         let (scene, warmup_ms) = meeting_scene(now, 3, cols, rows, 0, max_desks, 12).unwrap();
         assert_eq!(scene.agents.len(), 12, "staged 3 + 9 archetype fillers");
 
-        let layout =
-            SceneLayout::compute_with_seed(cols, (rows - 1) * 2, Some(max_desks), 0).unwrap();
+        let layout = SceneLayout::compute_with_seed(
+            cols,
+            (rows - pixtuoid::tui::renderer::FOOTER_ROWS) * 2,
+            Some(max_desks),
+            0,
+        )
+        .unwrap();
         let staged: Vec<_> = scene
             .agents
             .values()
