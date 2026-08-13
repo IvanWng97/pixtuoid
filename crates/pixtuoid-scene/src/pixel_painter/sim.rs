@@ -17,13 +17,14 @@ use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
 use crate::floor::LightingState;
-use crate::layout::{Layout, Point, WALKING_Y_OFF};
+use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
 use crate::motion::{walking_position, MotionState};
 use crate::pathfind::Router;
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
-    walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath, CHARACTER_SPRITE_W,
+    keep_sprite_on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
+    CHARACTER_SPRITE_W,
 };
 use super::seat::{settle_seat, Seat};
 
@@ -318,7 +319,7 @@ fn resolve_characters(
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     // The label twin in `anchors::character_anchor` rides this
-                    // SAME call, so sprite and badge can't drift.
+                    // SAME call — they diverge only at the canvas clamps below.
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let anchor_base = seat.render_anchor(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
@@ -432,6 +433,29 @@ fn resolve_characters(
             }
         }
     }
+    // ONE guard for every pose arm, on the frame each placement will blit.
+    // `anchor` only — the z-key and the chitchat visitor keep pre-clamp geometry.
+    let buf = Size {
+        w: layout.buf_w,
+        h: layout.buf_h,
+    };
+    for p in &mut placements {
+        let size = pack
+            .animation(p.anim_name)
+            .and_then(|a| super::frame_at(a, p.frame_idx))
+            .map_or(
+                Size {
+                    w: char_w,
+                    h: crate::layout::CHARACTER_SPRITE_H,
+                },
+                |f| Size {
+                    w: f.width(),
+                    h: f.height(),
+                },
+            );
+        p.anchor = keep_sprite_on_canvas(Anchor::TopLeft, p.anchor, size, buf);
+    }
+
     // wp_rank's keys ARE this tick's occupied waypoints — every AtWaypoint
     // occupant registers a rank.
     (

@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -79,6 +79,33 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     }
 }
 
+/// Nudge a sprite so the whole frame lands inside the canvas, answering in the
+/// SAME anchor space `pos` came in.
+///
+/// Lives at PAINT because invariant #6 runs one way: sprite size never moves a
+/// sim position.
+pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
+    match anchor {
+        // `min` before `max`: on a buffer narrower than the sprite the lower
+        // bound wins instead of `clamp`'s inverted-range panic.
+        Anchor::Center => Point {
+            x: pos
+                .x
+                .min(buf.w.saturating_sub(size.w.div_ceil(2)))
+                .max(size.w / 2),
+            y: pos
+                .y
+                .min(buf.h.saturating_sub(size.h.div_ceil(2)))
+                .max(size.h / 2),
+        },
+        // No lower bound needed — `u16` already floors a top-left `pos` at 0.
+        Anchor::TopLeft => Point {
+            x: pos.x.min(buf.w.saturating_sub(size.w)),
+            y: pos.y.min(buf.h.saturating_sub(size.h)),
+        },
+    }
+}
+
 /// How far a later arrival steps aside along x so two agents at one
 /// stand-beside spot don't render on top of each other. Sized to clear a
 /// character sprite (8 px bundled) with a pixel of daylight.
@@ -110,6 +137,11 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 /// follow the character rather than staying anchored at the desk. Uses
 /// `derive_with_routing` so labels track agents along their A* path instead of
 /// jumping to the straight-line midpoint.
+///
+/// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
+/// badge and the tui hit box on pixels the sprite occupies — the twin of the
+/// sprite's own guard in `sim::resolve_characters` (`SHARP-EDGES.md`: "clamped
+/// to the canvas TWICE").
 pub fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
@@ -119,7 +151,8 @@ pub fn character_anchor(
     let desk = layout.home_desk(agent.desk_index.single_floor_local())?;
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     // Labels use the DEFAULT width — a custom pack's true width isn't threaded
-    // here and ±1px doesn't matter; blit sites pass the real `frame.width`.
+    // here and the half-width difference doesn't matter; blit sites pass the
+    // real `frame.width`.
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {
@@ -135,7 +168,8 @@ pub fn character_anchor(
             // agent actually stands, not the blocked furniture center.
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Via the ONE authority the sprite blit uses, so label-vs-sprite
-            // drift is structurally impossible.
+            // drift is structurally impossible UPSTREAM of the canvas clamps
+            // (`SHARP-EDGES.md`: "clamped to the canvas TWICE").
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
@@ -143,7 +177,18 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    Some(anchor)
+    Some(keep_sprite_on_canvas(
+        Anchor::TopLeft,
+        anchor,
+        Size {
+            w,
+            h: crate::layout::CHARACTER_SPRITE_H,
+        },
+        Size {
+            w: layout.buf_w,
+            h: layout.buf_h,
+        },
+    ))
 }
 
 /// How long the elevator's open/close transition takes, used as both the opening

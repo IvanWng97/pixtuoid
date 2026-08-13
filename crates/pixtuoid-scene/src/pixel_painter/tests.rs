@@ -3544,6 +3544,180 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
 }
 
 #[test]
+fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
+    use crate::layout::{Anchor, Size};
+    use crate::pixel_painter::anchors::keep_sprite_on_canvas;
+    let buf = Size { w: 100, h: 80 };
+    let size = Size { w: 8, h: 12 };
+    let at = |a, x, y| keep_sprite_on_canvas(a, Point { x, y }, size, buf);
+
+    // Centre-anchored: `pos` is the middle, so BOTH bounds inset by half.
+    assert_eq!(at(Anchor::Center, 0, 0), Point { x: 4, y: 6 });
+    assert_eq!(at(Anchor::Center, 99, 79), Point { x: 96, y: 74 });
+    // Top-left-anchored: `u16` already floors the near edge, only the far one binds.
+    assert_eq!(at(Anchor::TopLeft, 0, 0), Point { x: 0, y: 0 });
+    assert_eq!(at(Anchor::TopLeft, 99, 79), Point { x: 92, y: 68 });
+
+    // A canvas smaller than the sprite: `Center` falls back to its lower bound
+    // rather than `clamp`'s inverted-range panic; `TopLeft` just floors at 0.
+    let tiny = Size { w: 4, h: 4 };
+    assert_eq!(
+        keep_sprite_on_canvas(Anchor::Center, Point { x: 2, y: 2 }, size, tiny),
+        Point { x: 4, y: 6 }
+    );
+    assert_eq!(
+        keep_sprite_on_canvas(Anchor::TopLeft, Point { x: 2, y: 2 }, size, tiny),
+        Point { x: 0, y: 0 }
+    );
+}
+
+/// The canvas-edge fixtures: per agent, the earliest second its PURE pose is
+/// aimless past the east rim, soonest first.
+///
+/// Probing `pose::derive` rather than the routed twin keeps the search cheap —
+/// only the survivors are worth an A* run — but a cold routing store answers
+/// `Walking`, so a caller must still drive its agent second by second up to the
+/// returned target.
+fn east_rim_targets(layout: &Layout, now0: SystemTime) -> Vec<(u32, u64)> {
+    use crate::pose::Pose;
+    use std::time::Duration;
+    let w = CHARACTER_SPRITE_W;
+    let mut targets: Vec<(u32, u64)> = (0..48u32)
+        .filter_map(|aid| {
+            let mut slot = make_slot(edge_agent_id(aid), ActivityState::Idle);
+            slot.created_at = now0;
+            slot.state_started_at = now0;
+            slot.last_event_at = now0;
+            (1..900u64)
+                .find(|&secs| {
+                    matches!(
+                        pose::derive(&slot, now0 + Duration::from_secs(secs), layout),
+                        Some(Pose::AimlessAt { dest })
+                            if waypoint_anchor(dest, w).x + w > layout.buf_w
+                    )
+                })
+                .map(|secs| (aid, secs))
+        })
+        .collect();
+    targets.sort_by_key(|&(_, secs)| secs);
+    targets
+}
+
+fn edge_agent_id(aid: u32) -> pixtuoid_core::AgentId {
+    pixtuoid_core::AgentId::from_transcript_path(&format!("/p/edge-{aid}.jsonl"))
+}
+
+/// The #916 case: `pick_aimless_dest` legally stands an agent in the outermost
+/// walkable column, where `blit_frame` silently dropped the columns past the
+/// buffer. Driven through the real `sim_step`, so deleting the guard in
+/// `resolve_characters` reds this rather than only moving pixels.
+#[test]
+fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
+    use crate::pose::Pose;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let coffee = HashMap::new();
+    let w = CHARACTER_SPRITE_W;
+
+    // Three agents, not all 48 — the earliest arrivals cost the fewest steps.
+    let mut hit = 0usize;
+    for &(aid, target) in east_rim_targets(&layout, now0).iter().take(3) {
+        let id = edge_agent_id(aid);
+        let mut slot = make_slot(id, ActivityState::Idle);
+        slot.created_at = now0;
+        slot.state_started_at = now0;
+        slot.last_event_at = now0;
+        let mut scene = SceneState::uniform(16);
+        scene.agents.insert(id, slot);
+        let mut owned = OwnedSimStores::new();
+        let mut stores = owned.stores();
+
+        for secs in 1..=target {
+            let now = now0 + Duration::from_secs(secs);
+            let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+            if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id) {
+                if waypoint_anchor(*dest, w).x + w > layout.buf_w {
+                    hit += 1;
+                }
+            }
+            for c in &f.characters {
+                let fw = pack
+                    .animation(c.anim_name)
+                    .and_then(|a| a.frames.first())
+                    .map_or(w, |fr| fr.width());
+                assert!(
+                    c.anchor.x + fw <= layout.buf_w,
+                    "agent {aid} at {secs}s renders at {:?} ({fw} px wide), running {} px \
+                     past the {} px canvas",
+                    c.anchor,
+                    c.anchor.x + fw - layout.buf_w,
+                    layout.buf_w
+                );
+            }
+        }
+    }
+    assert!(
+        hit > 0,
+        "no routed pose ever settled past the east rim — the guard went untested"
+    );
+}
+
+/// The badge/hit-box twin of the sprite guard above, and NOT covered by it:
+/// `character_anchor` is a second, independent derivation, so a clamp too loose
+/// to bind leaves every `sim_step`-driven test green while the badge floats
+/// off-screen.
+#[test]
+fn a_character_badge_is_never_anchored_off_the_canvas() {
+    use std::time::Duration;
+
+    let layout = Layout::compute_with_seed(112, 100, None, 0).expect("112x100 lays out");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let w = CHARACTER_SPRITE_W;
+
+    let mut at_the_rim = 0usize;
+    for &(aid, target) in east_rim_targets(&layout, now0).iter().take(3) {
+        let id = edge_agent_id(aid);
+        let mut slot = make_slot(id, ActivityState::Idle);
+        slot.created_at = now0;
+        slot.state_started_at = now0;
+        slot.last_event_at = now0;
+        let mut owned = OwnedSimStores::new();
+
+        for secs in 1..=target {
+            let Some(anchor) = character_anchor(
+                &slot,
+                &layout,
+                now0 + Duration::from_secs(secs),
+                &mut pose::RouteCtx {
+                    router: &mut owned.router,
+                    overlay: &owned.overlay,
+                    history: &mut owned.history,
+                    motion: &mut owned.motion,
+                },
+            ) else {
+                continue;
+            };
+            assert!(
+                anchor.x + w <= layout.buf_w,
+                "agent {aid} at {secs}s badges at {anchor:?}, running {} px past the {} px canvas",
+                anchor.x + w - layout.buf_w,
+                layout.buf_w
+            );
+            if anchor.x + w == layout.buf_w {
+                at_the_rim += 1;
+            }
+        }
+    }
+    assert!(
+        at_the_rim > 0,
+        "no badge ever reached the east rim — the clamp went untested"
+    );
+}
+
+#[test]
 fn a_back_turned_seat_puts_the_occupant_past_the_desk_body() {
     use crate::layout::{Facing, Furniture};
     let desk_h = crate::layout::furniture_def(Furniture::Desk).visual.h;

@@ -873,21 +873,6 @@ fn enqueue_desk_cubicles<'a>(
     }
 }
 
-/// Nudge a CENTER-anchored sprite's position so the whole sprite lands inside
-/// the canvas. Free-roaming creatures target the WHOLE walkable mask, which
-/// reaches within a few columns of the buffer edge, and `blit_centered` clips
-/// silently — so a creature resting there rendered sliced in half. Clamping
-/// HERE keeps `mascot_position`/`pet_position` pure and keeps the hover box on
-/// the pixels actually drawn.
-fn keep_sprite_on_canvas(pos: Point, w: u16, h: u16, buf_w: u16, buf_h: u16) -> Point {
-    // `min` before `max`: on a buffer narrower than the sprite the lower bound
-    // wins (sprite flush left/top) instead of `clamp`'s inverted-range panic.
-    Point {
-        x: pos.x.min(buf_w.saturating_sub(w.div_ceil(2))).max(w / 2),
-        y: pos.y.min(buf_h.saturating_sub(h.div_ceil(2))).max(h / 2),
-    }
-}
-
 /// The office pet (one per floor). An `active_pet` (mid heart-animation) is
 /// pinned in place; otherwise `pet_position` roams it around the idle desks.
 /// y-sorted at the CHOSEN anim's south row, since the anims differ in height —
@@ -949,7 +934,15 @@ fn enqueue_pet<'a>(
         .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
             (f.width(), f.height())
         });
-    let pos = keep_sprite_on_canvas(pos, pet_w, pet_h, ctx.layout.buf_w, ctx.layout.buf_h);
+    let pos = anchors::keep_sprite_on_canvas(
+        Anchor::Center,
+        pos,
+        Size { w: pet_w, h: pet_h },
+        Size {
+            w: ctx.layout.buf_w,
+            h: ctx.layout.buf_h,
+        },
+    );
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         kind: DrawableKind::Pet {
@@ -987,13 +980,29 @@ fn enqueue_gateway_mascots<'a>(
         else {
             continue;
         };
+        /// Fallback when a custom pack lacks the mascot anim: the bundled
+        /// lobster's size, so the z-sort row and the canvas clamp stay sane —
+        /// the blit itself no-ops.
+        const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
         let (mascot_w, mascot_h) = ctx
             .pack
             .animation(anim_name)
             .and_then(|a| a.frames.first())
-            .map_or((14, 12), |f| (f.width(), f.height()));
-        let pos =
-            keep_sprite_on_canvas(pos, mascot_w, mascot_h, ctx.layout.buf_w, ctx.layout.buf_h);
+            .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
+                (f.width(), f.height())
+            });
+        let pos = anchors::keep_sprite_on_canvas(
+            Anchor::Center,
+            pos,
+            Size {
+                w: mascot_w,
+                h: mascot_h,
+            },
+            Size {
+                w: ctx.layout.buf_w,
+                h: ctx.layout.buf_h,
+            },
+        );
         let run_count = presence.in_flight_runs.len() as u32;
         let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
         drawables.push(Drawable {
