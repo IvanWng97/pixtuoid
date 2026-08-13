@@ -1,6 +1,6 @@
 //! Layout computation helpers for `SceneLayout`.
 
-use super::decor::DESK_GROUND_H;
+use super::decor::{DESK_GROUND_H, DESK_GROUND_W};
 use super::mask;
 use super::*;
 
@@ -36,10 +36,43 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
     }
 }
 
+/// The narrowest cubicle band that seats ONE desk — the two terms
+/// `compute_pod_desks`' x-clamp compares: the first pod's west aisle half, and
+/// the desk's blocked GROUND width (side cabinets included, so NOT `DESK_W`).
+pub(super) const MIN_BAND_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
+
 /// The smallest buffer `compute_with_seed` lays out — below either bound it
 /// returns `None` ("terminal too small").
-pub(super) const MIN_LAYOUT_W: u16 = DESK_W + DESK_GAP_X * 2;
+///
+/// The width is SOLVED against the band, not the buffer: desks only ever land
+/// east of the left column (`buf_w − mid_x − 1` wide), so pricing one desk
+/// against the full buffer laid out an office with ZERO desks at 32–36px — a
+/// valid layout that could never seat an agent.
+pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
 pub(super) const MIN_LAYOUT_H: u16 = 40 + MIN_TOP_MARGIN;
+
+/// The widest left column any variant takes — the band gets the rest, so this
+/// variant is the one that prices the width floor for every seed.
+const fn widest_mid_x_pct() -> u16 {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < FloorVariant::ALL.len() {
+        let pct = FloorVariant::ALL[i].mid_x_pct();
+        if pct > widest {
+            widest = pct;
+        }
+        i += 1;
+    }
+    widest
+}
+
+const fn min_layout_w() -> u16 {
+    let mut w = MIN_BAND_W;
+    while w - (pct(w, widest_mid_x_pct()) + 1) < MIN_BAND_W {
+        w += 1;
+    }
+    w
+}
 
 /// The smallest buffer that lays out, for a painter that has to TELL the user
 /// why it is not drawing an office. Buffer units — each painter owns its own
@@ -1085,7 +1118,16 @@ pub(super) enum FloorVariant {
 }
 
 impl FloorVariant {
-    const COUNT: u64 = 5;
+    /// Every variant, so a const derivation (the width floor) can sweep the
+    /// roster instead of naming the widest one and rotting when it changes.
+    const ALL: [Self; 5] = [
+        FloorVariant::Standard,
+        FloorVariant::OpenPlan,
+        FloorVariant::Dense,
+        FloorVariant::Senior,
+        FloorVariant::Lounge,
+    ];
+    const COUNT: u64 = Self::ALL.len() as u64;
     /// Fibonacci-hash multiplier, chosen so the standard floor seeds each map to
     /// a distinct variant.
     const HASH_MULT: u64 = 0x4737819096da1dad;
@@ -1626,6 +1668,40 @@ mod tests {
             FloorVariant::Dense.mid_x_pct(),
             "a Dense floor that KEEPS both meeting rooms keeps its own column"
         );
+    }
+
+    /// `MIN_BAND_W` must be where `compute_pod_desks` ITSELF stops fitting a desk —
+    /// the width floor is derived from it, so a formula that merely looks right
+    /// would advertise a minimum the placer disagrees with.
+    #[test]
+    fn min_band_w_is_the_placers_own_first_desk_boundary() {
+        let pod_h =
+            super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
+        let grid = super::PodGrid {
+            // The forced single pod of a narrow band (`pod_cols`/`pod_rows` floor at 1).
+            cols: 1,
+            rows: 1,
+            stride_x: super::POD_SIDE * super::DESK_W
+                + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_X
+                + super::INTER_POD_AISLE_X,
+            stride_y: pod_h + super::INTER_POD_AISLE_Y,
+            couch_to_desk_extra: 0,
+        };
+        for (width, seats) in [(super::MIN_BAND_W, true), (super::MIN_BAND_W - 1, false)] {
+            let band = super::Bounds {
+                x: 5,
+                y: 5,
+                width,
+                height: 200,
+            };
+            let (desks, _) = super::compute_pod_desks(None, &band, grid);
+            assert_eq!(
+                !desks.is_empty(),
+                seats,
+                "a {width}px band: expected seats={seats}, placed {} desk(s)",
+                desks.len()
+            );
+        }
     }
 
     /// Cross-checked against `compute_pod_desks`' own positions, not the band formula a

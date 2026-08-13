@@ -503,7 +503,7 @@ fn dashboard_empty_scene_shows_placeholder() {
 /// clamped by `PanelGeometry::compute` to `bounds.height - FOOTER_ROWS`, so
 /// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
 /// selection has to stay inside it. Reachable ONLY on the footer-only draw path:
-/// the office needs 32×31, and at those heights `full_h` saturates so the
+/// these heights are under `min_layout_size`, and there `full_h` saturates so the
 /// viewport stays at the cap.
 #[test]
 fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {

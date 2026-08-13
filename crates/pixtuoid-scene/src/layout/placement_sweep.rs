@@ -10,16 +10,17 @@ use super::mask::pantry_ground_rect;
 use super::placement::rects_overlap;
 use super::*;
 
-/// The sweep's size axis: the forced-single-pod widths (34–41), the
-/// decor-vs-wall and Y-overflow corners, the golden and live wasm hero buffers,
-/// and a spread wide enough that the appliance kinds appear.
+/// The sweep's size axis: the forced-single-pod widths (37–41, floored by
+/// `MIN_LAYOUT_W`), the decor-vs-wall and Y-overflow corners, the golden and
+/// live wasm hero buffers, and a spread wide enough that the appliance kinds
+/// appear.
 ///
 /// Module-private on purpose: the routability guards that need this axis live
 /// HERE so the placement axis and the routability axis can't disagree — they
-/// did, and the 32-41 px band was swept for placement but never for routability.
+/// did, and the narrow band was swept for placement but never for routability.
 const SWEEP_SIZES: &[(u16, u16)] = &[
-    (34, 60),
-    (36, 100),
+    (37, 60),
+    (39, 100),
     (38, 120),
     (40, 70),
     (41, 160),
@@ -941,9 +942,13 @@ fn the_whiteboard_lands_whenever_an_inter_pod_aisle_exists() {
 #[test]
 fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
     // 32x120 seed 3 FORCED the aisle rule: the board sat +3px east of the divider — wall
-    // flush west, desk column east, sealing the south. Revert the snap and this goes red.
-    let l = SceneLayout::compute_with_seed(32, 120, None, 3).expect("32x120 lays out");
-    assert_walkable_connected(32, 120, 3, &l);
+    // flush west, desk column east, sealing the south. That width is now BELOW
+    // `MIN_LAYOUT_W` and no legal band reproduces the seal, so this holds the
+    // narrowest band a user can reach; the snap's teeth moved to the three sweeps that go
+    // red without it (no_two_furniture_grounds_overlap, free_standing_furniture_never_
+    // stands_inside_a_pod, the_whiteboard_lands_whenever_an_inter_pod_aisle_exists).
+    let l = SceneLayout::compute_with_seed(37, 120, None, 3).expect("37x120 lays out");
+    assert_walkable_connected(37, 120, 3, &l);
     assert!(
         l.wall_decor
             .iter()

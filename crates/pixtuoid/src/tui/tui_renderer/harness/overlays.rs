@@ -77,7 +77,7 @@ fn version_popup_interrupt_continues_from_edge() {
     );
 }
 
-/// The office needs 32×31, so a classic 80×24 terminal falls through to
+/// A classic 80×24 terminal is under `min_layout_size`, so it falls through to
 /// `draw_footer_only_frame` — this pins the popup CONTENT on that path.
 ///
 /// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail

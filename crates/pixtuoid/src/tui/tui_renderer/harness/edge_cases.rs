@@ -64,7 +64,8 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
 }
 
 /// The size the notice NAMES has to be a size that works — a requirement nobody
-/// re-derives is the half of the rule that rots.
+/// re-derives is the half of the rule that rots. WORKS means an office an agent
+/// can sit in: the old 32-col minimum laid out a deskless one.
 #[test]
 fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
@@ -79,17 +80,24 @@ fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
 
     let mut at_min = build(named.0, named.1, vec![]);
     at_min.render(&scene, &pack(), t0()).expect("render");
+    let layout = at_min
+        .cached_layout()
+        .unwrap_or_else(|| panic!("the notice asks for {named:?}, which does not lay out"));
     assert!(
-        at_min.cached_layout().is_some(),
-        "the notice asks for {named:?}, which does not lay out"
+        !layout.home_desks.is_empty(),
+        "the notice asks for {named:?}, which lays out an office with no desk to seat anyone"
     );
-    let mut one_short = build(named.0, named.1 - 1, vec![]);
-
-    one_short.render(&scene, &pack(), t0()).expect("render");
-    assert!(
-        one_short.cached_layout().is_none(),
-        "{named:?} minus a row lays out, so the notice overstates"
-    );
+    for (cols, rows, axis) in [
+        (named.0, named.1 - 1, "row"),
+        (named.0 - 1, named.1, "column"),
+    ] {
+        let mut one_short = build(cols, rows, vec![]);
+        one_short.render(&scene, &pack(), t0()).expect("render");
+        assert!(
+            one_short.cached_layout().is_none(),
+            "{named:?} minus a {axis} lays out, so the notice overstates"
+        );
+    }
 }
 
 /// The other direction: a terminal that CAN lay out must never show the notice.
@@ -209,9 +217,9 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn a_full_height_modal_never_covers_the_footer_row() {
     let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
-    // 32x31 is the office layout's exact minimum, and the real release notes wrap
-    // past 31 rows there.
-    let mut r = build(32, 31, vec![]);
+    // The office layout's exact minimum (`min_layout_size`), where the real release
+    // notes wrap past the 31 rows.
+    let mut r = build(37, 31, vec![]);
     r.set_version_popup(true, t0());
     let t = t0() + Duration::from_millis(400); // fully scaled in
     r.render(&scene, &pack(), t).expect("render");
@@ -229,7 +237,7 @@ fn a_full_height_modal_never_covers_the_footer_row() {
 
     // Compare CELLS, not a substring: surviving glyphs are not a READABLE footer,
     // and the shadow's bottom band dims `fg` only.
-    let mut plain = build(32, 31, vec![]);
+    let mut plain = build(37, 31, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
     let footer_y = lit.area.height - 1;
