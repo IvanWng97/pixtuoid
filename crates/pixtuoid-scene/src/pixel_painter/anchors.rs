@@ -151,7 +151,8 @@ pub fn character_anchor(
     let desk = layout.home_desk(agent.desk_index.single_floor_local())?;
     let pose = pose::derive_with_routing(agent, now, layout, rctx)?;
     // Labels use the DEFAULT width — a custom pack's true width isn't threaded
-    // here and ±1px doesn't matter; blit sites pass the real `frame.width`.
+    // here and the half-width difference doesn't matter; blit sites pass the
+    // real `frame.width`.
     let w = CHARACTER_SPRITE_W;
     let anchor = match pose {
         Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. } => {

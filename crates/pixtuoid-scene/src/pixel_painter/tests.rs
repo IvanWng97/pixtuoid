@@ -3558,8 +3558,8 @@ fn keep_sprite_on_canvas_bounds_differ_by_anchor_convention() {
     assert_eq!(at(Anchor::TopLeft, 0, 0), Point { x: 0, y: 0 });
     assert_eq!(at(Anchor::TopLeft, 99, 79), Point { x: 92, y: 68 });
 
-    // A canvas smaller than the sprite: the lower bound wins for each
-    // convention rather than `clamp`'s inverted-range panic.
+    // A canvas smaller than the sprite: `Center` falls back to its lower bound
+    // rather than `clamp`'s inverted-range panic; `TopLeft` just floors at 0.
     let tiny = Size { w: 4, h: 4 };
     assert_eq!(
         keep_sprite_on_canvas(Anchor::Center, Point { x: 2, y: 2 }, size, tiny),
@@ -3622,8 +3622,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
     let coffee = HashMap::new();
     let w = CHARACTER_SPRITE_W;
 
-    // Three agents, not all 48 — the earliest arrivals cost the fewest steps,
-    // and each still sweeps every second up to its own arrival.
+    // Three agents, not all 48 — the earliest arrivals cost the fewest steps.
     let mut hit = 0usize;
     for &(aid, target) in east_rim_targets(&layout, now0).iter().take(3) {
         let id = edge_agent_id(aid);
@@ -3667,9 +3666,9 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
 }
 
 /// The badge/hit-box twin of the sprite guard above, and NOT covered by it:
-/// `character_anchor` is a second, independent derivation, so a regression here
-/// — a wrong `Size`, the wrong buffer, an accidental revert to `Some(anchor)` —
-/// leaves every `sim_step`-driven test green while the badge floats off-screen.
+/// `character_anchor` is a second, independent derivation, so a clamp too loose
+/// to bind leaves every `sim_step`-driven test green while the badge floats
+/// off-screen.
 #[test]
 fn a_character_badge_is_never_anchored_off_the_canvas() {
     use std::time::Duration;

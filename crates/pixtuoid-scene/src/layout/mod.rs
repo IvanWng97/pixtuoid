@@ -270,8 +270,8 @@ pub const CHARACTER_SPRITE_W: u16 = 8;
 /// Default character sprite height in terminal CELLS — used by the tui hit-test
 /// pin box; the pixel pose offsets are a SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H_CELLS: u16 = 6;
-/// The same default height in buffer PIXELS — the width-unknown fallback's twin,
-/// for the label path where a custom pack's real frame isn't threaded.
+/// The same default height in buffer PIXELS — the width-unknown fallback's
+/// twin, for the paths where a custom pack's real frame isn't available.
 pub(crate) const CHARACTER_SPRITE_H: u16 = CHARACTER_SPRITE_H_CELLS * 2;
 /// Elevator-door sprite width in buffer px. Both the layout and the renderer
 /// read this, so the door footprint can't drift between them.
