@@ -43,3 +43,10 @@ pixtuoid-core = { path = "../pixtuoid-core", version = "0.17.0", default-feature
 serde_json = { workspace = true }
 proptest   = "1"
 tempfile   = "3"
+# Statistical render-path benchmarks (`just bench`). Lean feature set: no
+# plotters/rayon — numbers, not HTML reports.
+criterion  = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "render_frame"
+harness = false

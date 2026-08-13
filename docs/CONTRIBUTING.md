@@ -268,7 +268,10 @@ definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
 is already looking.
 
 Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
-(wire-format drift); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
+(wire-format drift); `just bench` (criterion render-path benchmarks — local numbers are the
+authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
+`mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
+FAQ); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
 path matching that posts the documented blast-radius escalations as a sticky PR comment so
 prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot

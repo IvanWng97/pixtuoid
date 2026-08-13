@@ -334,6 +334,15 @@ test *args:
         cargo test --workspace {{ args }}
     fi
 
+# Render-path benchmarks — LOCAL statistical numbers (criterion). CI's
+# bench.yml runs the same recipe on-demand, advisory-only: shared-runner
+# wall-clock is noise (criterion's own FAQ), so no benchmark ever gates.
+# Filter forwards: `just bench 360` runs only the 360x240 case.
+[group('rust')]
+[doc('Render-path criterion benchmarks; forwards a filter')]
+bench *args:
+    cargo bench -p pixtuoid-scene --bench render_frame -- {{ args }}
+
 # Feature-combination check — every feature subset must compile. Catches code
 # that silently only builds with `native` on (the wasm core builds without it).
 [group('rust')]
