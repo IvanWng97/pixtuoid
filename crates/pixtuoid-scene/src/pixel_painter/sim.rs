@@ -319,7 +319,8 @@ fn resolve_characters(
                     let dx = waypoint_rank_offset_x(kind, rank);
                     let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
                     // The label twin in `anchors::character_anchor` rides this
-                    // SAME call, so sprite and badge can't drift.
+                    // SAME call, so sprite and badge can't drift before the
+                    // canvas clamps below.
                     let seat = Seat::at_waypoint(kind, stand, wp_obj.facing);
                     let anchor_base = seat.render_anchor(char_w);
                     let (anim_name, flip_x) = seat.sprite_in_pack("seated", pack);
@@ -433,11 +434,8 @@ fn resolve_characters(
             }
         }
     }
-    // ONE guard for every pose arm, on the frame each placement will actually
-    // blit — an east-edge wanderer otherwise loses part of its sprite to
-    // `blit_frame`'s silent clip. `anchor` only: the z-key and the chitchat
-    // visitor keep pre-clamp geometry, unlike the creature sites which re-derive
-    // their z row from the clamped point.
+    // ONE guard for every pose arm, on the frame each placement will blit.
+    // `anchor` only — the z-key and the chitchat visitor keep pre-clamp geometry.
     let buf = Size {
         w: layout.buf_w,
         h: layout.buf_h,

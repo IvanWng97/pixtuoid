@@ -3608,8 +3608,8 @@ fn edge_agent_id(aid: u32) -> pixtuoid_core::AgentId {
 }
 
 /// The #916 case: `pick_aimless_dest` legally stands an agent in the outermost
-/// walkable column, where `blit_frame` silently dropped up to 3 of the sprite's
-/// 8 columns. Driven through the real `sim_step`, so deleting the guard in
+/// walkable column, where `blit_frame` silently dropped the columns past the
+/// buffer. Driven through the real `sim_step`, so deleting the guard in
 /// `resolve_characters` reds this rather than only moving pixels.
 #[test]
 fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {

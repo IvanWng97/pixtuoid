@@ -87,8 +87,7 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower
-        // bound wins (sprite flush left/top) instead of `clamp`'s
-        // inverted-range panic.
+        // bound wins instead of `clamp`'s inverted-range panic.
         Anchor::Center => Point {
             x: pos
                 .x
@@ -140,8 +139,9 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 /// jumping to the straight-line midpoint.
 ///
 /// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
-/// badge and the tui hit box on pixels the sprite occupies (`SHARP-EDGES.md`:
-/// "clamped to the canvas TWICE").
+/// badge and the tui hit box on pixels the sprite occupies — the twin of the
+/// sprite's own guard in `sim::resolve_characters` (`SHARP-EDGES.md`: "clamped
+/// to the canvas TWICE").
 pub fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
@@ -167,7 +167,8 @@ pub fn character_anchor(
             // agent actually stands, not the blocked furniture center.
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Via the ONE authority the sprite blit uses, so label-vs-sprite
-            // drift is structurally impossible.
+            // drift is structurally impossible UPSTREAM of the canvas clamps
+            // (`SHARP-EDGES.md`: "clamped to the canvas TWICE").
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),
@@ -175,8 +176,6 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    // Badge and hit box follow the sprite's own guard in
-    // `sim::resolve_characters`, on the DEFAULT size like the anchor above.
     Some(keep_sprite_on_canvas(
         Anchor::TopLeft,
         anchor,
