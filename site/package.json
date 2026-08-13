@@ -55,6 +55,7 @@
     "web-vitals": "6.0.1"
   },
   "overrides": {
+    "@puppeteer/browsers": "^3.2.0",
     "chrome-launcher@^0.13.4": "0.15.2",
     "esbuild": "0.28.1",
     "tmp": "^0.2.7",

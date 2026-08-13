@@ -232,6 +232,21 @@ The version-qualified `chrome-launcher@^0.13.4` override upgrades only LHCI's
 old CommonJS launcher line to 0.15.2 (removing its deprecated
 `rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
 while LHCI 0.15.1 still calls `require('chrome-launcher')`.
+The unqualified `@puppeteer/browsers` → 3.x override is the only route past
+GHSA-jmr9-qjv8-65gv, because no bump clears it in place: `extract-zip` has no
+patched release (npm audit prints its range as `*`) and nothing above it can
+float past one — `@lhci/cli` 0.15.1 pins `lighthouse 12.6.1` exactly, which
+takes `puppeteer-core ^24`, and every published 24.x pins an exact
+`@puppeteer/browsers` 2.x; 3.x is the first major without extract-zip. Crossing
+that major under puppeteer-core 24 rests on two things: LHCI launches Chrome
+through `chrome-launcher`, so puppeteer's download path never runs, and 3.x
+being ESM-only (2.x shipped dual) is survivable only because puppeteer-core's
+CJS `require` rides Node's `require(esm)` — available from 22.12, under this
+project's node-26 floor. The gate that proves it is `npm run lighthouse` —
+`site-check` never runs LHCI.
+Retire it once nothing requests `@puppeteer/browsers < 3`: drop the entry per
+the protocol below and read the top of npm audit's vulnerable `lighthouse`
+range — 13.3.0 today, so a `lighthouse >= 13.4.0` reaching `@lhci/cli` clears it.
 
 **Nothing gates a STALE `overrides` entry**, so retiring one is a manual
 audit: copy `package.json` to a scratch dir (never the working tree, whose
