@@ -1244,7 +1244,7 @@ fn render(r: &DoctorReport) -> String {
 }
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
-/// builder is unit-testable off one [`collect`] pass.
+/// builder is unit-testable off one `collect` pass.
 pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
     Ok(render(&collect(log_path, graphics)))
 }
