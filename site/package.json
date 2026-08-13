@@ -22,7 +22,7 @@
     "check:docs": "node config/assert-docs-rendered.mjs dist",
     "audit": "npm audit --audit-level=low",
     "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs && npm run audit",
-    "lighthouse": "lhci autorun",
+    "lighthouse": "node scripts/lighthouse-runner.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {
@@ -35,15 +35,16 @@
     "@astrojs/check": "^0.9.10",
     "@astrojs/markdown-remark": "^7.2.0",
     "@eslint/js": "^10.0.1",
-    "@lhci/cli": "^0.15.1",
     "@playwright/test": "^1.62.1",
     "@types/node": "^26.1.2",
     "astro": "^7.1.6",
+    "chrome-launcher": "^1.2.1",
     "eslint": "^10.8.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-astro": "^3.0.1",
     "globals": "^17.9.0",
     "knip": "^6.31.0",
+    "lighthouse": "^13.4.1",
     "mermaid": "^11.16.1",
     "playwright": "^1.62.1",
     "prettier": "^3.9.6",
@@ -55,8 +56,6 @@
     "web-vitals": "6.0.1"
   },
   "overrides": {
-    "@puppeteer/browsers": "^3.2.0",
-    "chrome-launcher@^0.13.4": "0.15.2",
     "esbuild": "0.28.1",
     "tmp": "^0.2.7",
     "uuid": "^11.1.1"

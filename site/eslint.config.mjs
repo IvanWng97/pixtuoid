@@ -1,6 +1,6 @@
-// Accessibility is enforced at runtime against the built pages by Lighthouse CI
-// (lighthouserc.json), not statically here — eslint-plugin-jsx-a11y caps at
-// eslint 9 and blocked the eslint 10 upgrade.
+// Accessibility is enforced at runtime against the built pages by the
+// Lighthouse runner (lighthouserc.json), not statically here —
+// eslint-plugin-jsx-a11y caps at eslint 9 and blocked the eslint 10 upgrade.
 import js from '@eslint/js';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
@@ -13,6 +13,11 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
+  // scripts/ are node-side tools (the lighthouse runner), not page code.
+  {
+    files: ['scripts/**/*.mjs'],
+    languageOptions: { globals: { ...globals.node } },
+  },
   {
     languageOptions: {
       globals: {
