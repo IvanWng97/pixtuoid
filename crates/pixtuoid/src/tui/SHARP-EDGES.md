@@ -1,6 +1,6 @@
 # pixtuoid tui painter — known sharp edges
 
-Indexed one line each in [`CLAUDE.md`](CLAUDE.md). These look like bugs and are deliberate design — read the entry before "fixing" one. An entry states the edge, the WHY, and where the authority lives; the full adjudication history is in the cited issue/PR, not here.
+Indexed one line each in [`CLAUDE.md`](CLAUDE.md). These look like bugs and are deliberate design — read the entry before "fixing" one. An entry states the edge, the WHY, and where the authority lives (the pinning test, the in-code comment, or the issue); the full adjudication history is in the cited issue/PR, not here.
 
 - **`draw_scene` is called through `TuiRenderer`** (its inherent `render` flush), which owns the cross-frame state (per-floor `FloorCtx` as ONE `store` field on the per-frame `DrawCtx` borrow, plus the disjoint `buf`), delegates the world render to `pixtuoid_scene::pixel_painter::render_to_rgb_buffer`, then does the terminal-only half-block flush + widgets + footer. It returns a shared `Arc<Layout>` handle (memoized per frame — a refcount bump, not a deep copy), cached on `TuiRenderer.cached_layout` for the hit-tests; cleared during floor transitions.
 

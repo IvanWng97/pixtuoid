@@ -1,10 +1,10 @@
 # pixtuoid-scene — where to look
 
 Answers for the questions indexed in [`CLAUDE.md`](CLAUDE.md)'s
-"Where to look". An entry earns its place only when the question's own
-words do NOT grep to the answer — it names a seam, a split, or a
-chokepoint you would miss from the obvious symbol. Everything else is
-the code's job to prove.
+"Where to look". An entry earns its place only when landing on the
+obvious symbol does NOT answer the question — it names a seam, a
+split, a chokepoint, or a decision that looks like a bug. Everything
+else is the code's job to prove.
 
 - "Where does a furniture's footprint / visual size / approach side / dwell come from?" → **`layout::decor`** — ONE geometry table: `FurnitureDef` keyed by the unified `Furniture` enum (+ `desk_furniture_def()` for the per-agent home desk). The role enums (`WaypointKind`, `PodDecor`, `PlantKind`, `WallDecor`) carry NO dimensions — each maps `.furniture()` onto one row, so an item playing two roles has its shape defined once. Four load-bearing distinctions: `footprint` (blocked ground) ≠ `visual` (sprite, may overhang — the occlusion sharp edge); `occupies_pos` (render fact) ≠ `exclusive` (capacity fact); placement overlap (bug, swept) ≠ occlusion overlap (correct, z-sort resolves it); `dwell` is orthogonal. A NEW `WaypointKind` must also join or opt out of the snapshot example's vocabulary census (compile-enforced).
 - "Why doesn't a bigger buffer just render the office sharper?" → `render_scale.rs` is THE layout-space ↔ buffer-space seam; `floor_capacity_is_invariant_under_render_scale` pins the property and `without_the_seam_a_bigger_buffer_builds_a_bigger_office` is the negative control keeping its teeth.

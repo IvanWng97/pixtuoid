@@ -1,10 +1,10 @@
 # pixtuoid (binary) — where to look
 
 Answers for the questions indexed in [`CLAUDE.md`](CLAUDE.md)'s
-"Where to look". An entry earns its place only when the question's own
-words do NOT grep to the answer — it names a seam, a split, or a
-chokepoint you would miss from the obvious symbol. Everything else is
-the code's job to prove.
+"Where to look". An entry earns its place only when landing on the
+obvious symbol does NOT answer the question — it names a seam, a
+split, a chokepoint, or a decision that looks like a bug. Everything
+else is the code's job to prove.
 
 - "How do hooks get installed?" → `install::target::Target` is the multi-target registry; `install::install_target`/`uninstall_target` run the pure ConfigLock round (read→merge→backup→write, invariant #4); the in-TUI Sources panel (`s`) is the direct presenter (the `install-hooks` CLI died in #284 — `PIXTUOID_HOOK` env is the one user-facing hook-path escape hatch). Per-target merge/format knowledge lives in that target's own `install/<cli>.rs` — read it before editing. The traps that span targets: Windows hook commands (Claude uses exec form; Codex/Reasonix share `hook_cmd::windows::windows_bare_hook_command` — cmd.exe quoting + DOS 8.3 short-name substitution, #195; `path_hit_is_native` keeps `which` from resolving a `.cmd` shim ahead of the real `.exe`); per-CLI home resolution mirrors each CLI's OWN resolver (CodeWhale/OpenClaw HOME-first via `platform::home_first_dir`, everyone else USERPROFILE-first); `~`-expansion only for CLIs that expand it themselves (#342 — don't blanket-expand); CodeWhale's `[hooks].enabled = false` is the user's own switch, untouched both directions; opencode/grok are wholly-owned-file targets (opencode uninstall writes a no-op stub — the orchestrator can't delete, accepted). Detection probes the CLI's OWN dirs, never our artifact (chicken-and-egg).
 - "Where do runtime errors / config warnings surface?" (#157, #87) → THREE sinks by failure class: (1) the always-on warn-floor file log (`logging.rs::init` — the alternate screen owns the terminal, so the file is the only runtime channel); (2) pre-altscreen stderr — config resolvers COLLECT warnings into a Vec that `main.rs` eprintlns before `setup_terminal`; both feed from ONE emission point, `config::warn_user`, which control-strips once (per-sink sanitizing is how the tracing twin once shipped raw); (3) the in-TUI source-health footer — a fatal `Source::run` exit publishes `SourceDeath` on a `watch` SIDE channel (deliberately not an `AgentEvent`, invariant #2).

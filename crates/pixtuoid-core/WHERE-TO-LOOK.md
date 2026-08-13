@@ -1,10 +1,10 @@
 # pixtuoid-core — where to look
 
 Answers for the questions indexed in [`CLAUDE.md`](CLAUDE.md)'s
-"Where to look". An entry earns its place only when the question's own
-words do NOT grep to the answer — it names a seam, a split, or a
-chokepoint you would miss from the obvious symbol. Everything else is
-the code's job to prove.
+"Where to look". An entry earns its place only when landing on the
+obvious symbol does NOT answer the question — it names a seam, a
+split, a chokepoint, or a decision that looks like a bug. Everything
+else is the code's job to prove.
 
 - "How does the per-agent state machine work?" → **two stacked layers, both extracted so the reducer reads as a coordinator.** Layer A = `state/fsm.rs` (single-slot transitions, each unit-tested); Layer B = `state/scope.rs` (the parent↔subagent tree ops). Cross-slot correlation (`active_tasks` suppression, permission gating, hook-wins dedup) stays in the reducer's layer — it spans slots and is NOT the FSM; the seven correlation maps' bookkeeping lives in `state/correlation.rs` (a `Correlation` struct the reducer owns), the DECISIONS stay in `state/reducer/mod.rs`. Don't move the correlation maps onto `AgentSlot`. Gate-aware suppress-restore is pinned by `suppressed_child_event_keeps_parents_own_parallel_tool_gate`.
 - "Why is the subagent's sprite the right one and not the parent?" → `reducer::Reducer::apply` does subagent-leak suppression via `active_tasks` before applying. `claude_code::decode_cc_line` emits `AgentEvent::Rename` from `attributionAgent`.

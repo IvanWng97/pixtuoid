@@ -49,6 +49,7 @@ GIST_BUDGET = 96
 TREE_BUDGET = 58  # annotation kept per skeleton entry (narrower: the KEY is the filename)
 # An entry is fact + WHY + authority pointer; past this it has become a per-subsystem
 # changelog — split it into its component edges or move the argument to its issue.
+# Guards the edges + lookup siblings; LAYOUT.md's post-fence notes are exempt (#920).
 MAX_ENTRY_CHARS = 2000
 
 
@@ -89,7 +90,7 @@ def guard_entry_sizes(sib: pathlib.Path) -> None:
     for e in bullet_entries(sib.read_text()):
         if len(e) > MAX_ENTRY_CHARS:
             sys.exit(
-                f"{sib.name}: entry is {len(e)} chars (max {MAX_ENTRY_CHARS}) — an entry is "
+                f"{sib}: entry is {len(e)} chars (max {MAX_ENTRY_CHARS}) — an entry is "
                 f"fact + WHY + pointer; split it or move the argument to its issue: {e[:60]}…"
             )
 
@@ -302,6 +303,10 @@ def selftest() -> int:
         if gen(False) != 1:
             fails.append("an oversized lookup entry must FAIL generation (guard_entry_sizes)")
         stage("crate/WHERE-TO-LOOK.md", lookup)
+        stage("crate/SHARP-EDGES.md", "# e\n\n- **Ok.** " + "x " * ((MAX_ENTRY_CHARS - 40) // 2) + "\n")
+        if gen(False) != 0:
+            fails.append("a just-under-ceiling entry must still generate (the does-not-fire arm)")
+        stage("crate/SHARP-EDGES.md", edges)
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 

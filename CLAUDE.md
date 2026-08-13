@@ -43,8 +43,9 @@ explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 **How these files load.** A nested `CLAUDE.md` is an INDEX; its bulk lives in
 siblings that are **not** auto-loaded — you must open them. The four Rust
 guides (core, scene, binary, tui) index `LAYOUT.md` (the annotated module
-tree), `SHARP-EDGES.md` (the full WHY per edge), and `WHERE-TO-LOOK.md` ("how
-does X work?"); core adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
+tree), `SHARP-EDGES.md` (the edge + WHY + authority pointer per entry), and
+`WHERE-TO-LOOK.md` (the non-obvious seams behind "how does X work?"); core
+adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
 plain pointers. The `tests/` and Raycast guides are small enough to keep their
 sharp edges INLINE — nothing to open there. **Every index line
 is the sibling entry's own opening text, verbatim — grep any of it to land on
@@ -250,7 +251,7 @@ and `procedural-lofi`.
 - **No scan-the-history logic.** Keep persistent state (a set, a map, a bool) updated as events arrive; never derive state by scanning backward through time.
 - **Match the surrounding shell** (zsh interactive / POSIX sh); `shellcheck` + `shfmt` any `.sh` you touch — run `just shfmt-fix` to format (both gated by `just lint` + the CI `hygiene` job). **macOS first**: BSD CLI, brew, launchd.
 - **Keep docs current.** A change that alters module structure, architecture, workflow, or public API updates the relevant `CLAUDE.md` + `README.md` in the same commit.
-- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant entry in that crate's `SHARP-EDGES.md` (or its guide's inline sharp-edges section where no sibling exists) — or add one in the same change. That keeps the context accurate for the next agent (the real payoff). **An entry is the edge + the WHY + the authority pointer** (pinning test / in-code comment / issue#) — measurements and the adjudication history stay in the issue/PR, and `gen-guides` FAILS generation past a per-entry size ceiling, so split a grown entry into its component edges instead of appending another layer. A `WHERE-TO-LOOK` entry earns its place only when the question's own words do NOT grep to the answer (a seam, a split, a chokepoint) — never as a feature tour the code proves itself.
+- **A refuted finding cites (or adds) a sharp edge.** When you reject a review finding as "deliberate design," point at the relevant entry in that crate's `SHARP-EDGES.md` (or its guide's inline sharp-edges section where no sibling exists) — or add one in the same change. That keeps the context accurate for the next agent (the real payoff). **An entry is the edge + the WHY + the authority pointer** (pinning test / in-code comment / issue#) — measurements and the adjudication history stay in the issue/PR, and `gen-guides` FAILS generation past a per-entry size ceiling, so split a grown entry into its component edges instead of appending another layer. A `WHERE-TO-LOOK` entry earns its place only when landing on the obvious symbol does NOT answer the question (a seam, a split, a chokepoint, a decision that looks like a bug) — never as a feature tour the code proves itself.
 - **Track every deferred finding as a GitHub issue** BEFORE moving on — problem, why deferred, fix sketch. A deferred finding with no issue is a silently-dropped finding. (Verify it's real first — see "Don't blindly accept reviewer findings".)
 - **Sprite changes require visual verification** — render, crop, read the PNG, self-critique until it reads at half-block scale; commit messages carry the iteration history. Full checklist: `.claude/skills/beautify-decoration/SKILL.md`.
 - **Periodic context-file audits also distill memory**: each `/revise-claude-md`-style audit sweeps recent session memories for promote-to-repo candidates (the memory layer of [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md)).
@@ -299,7 +300,7 @@ the render path end to end; the numbers live in `crates/pixtuoid/SHARP-EDGES.md`
 ## Where to look
 
 - "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid-scene`; the flush in `pixtuoid`'s `tui`.
-- Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific answers (layout, sources, install, themes, motion, pets, …) live in each crate's `WHERE-TO-LOOK.md`, indexed by question in its `CLAUDE.md`.
+- Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific answers (layout, sources, install, themes, motion, weather, …) live in each crate's `WHERE-TO-LOOK.md`, indexed by question in its `CLAUDE.md`.
 - One change spanning the Rust lib + the site + the Raycast extension: [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md). How lessons persist across agent runs: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
 - **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, the three OpenClaw e2e tiers, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
 
