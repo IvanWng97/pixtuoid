@@ -22,7 +22,7 @@
     "check:docs": "node config/assert-docs-rendered.mjs dist",
     "audit": "npm audit --audit-level=low",
     "verify": "npm run format:check && npm run lint && npm run check && npm run knip && npm run test:unit && npm run build && npm run check:docs && npm run audit",
-    "lighthouse": "node scripts/lighthouse-runner.mjs",
+    "lighthouse": "node config/lighthouse-runner.mjs",
     "e2e": "playwright test"
   },
   "dependencies": {
@@ -57,7 +57,6 @@
   },
   "overrides": {
     "esbuild": "0.28.1",
-    "tmp": "^0.2.7",
     "uuid": "^11.1.1"
   },
   "allowScripts": {

@@ -193,7 +193,7 @@ failure in the footer, green. `lighthouserc.json` therefore asserts
 contract, so anything that must NEVER regress needs its own per-audit
 assertion, and a CONTRACT audit needs every run to clear it. The
 `aggregationMethod` is not decoration: the runner defaults to `median`
-(`scripts/lighthouse-runner.mjs`), and the median of three runs still greens a
+(`config/lighthouse-runner.mjs`), and the median of three runs still greens a
 binary 0/1 axe audit that failed ONE of them — hence `pessimistic` on the
 contract audits. Second surprise: Lighthouse does **not** pick a theme of its own.
 `Base.astro`'s init falls back to night off the 7/19 wall clock, so an
@@ -228,7 +228,7 @@ exact-version esbuild approval; `fsevents` is explicitly denied because npm's
 registry metadata flags an install script even though the installed manifest
 needs none. Use `npm install-scripts ls` after dependency changes: an
 unreviewed script must fail installation instead of becoming a warning.
-`npm run lighthouse` is an in-repo runner (`scripts/lighthouse-runner.mjs`)
+`npm run lighthouse` is an in-repo runner (`config/lighthouse-runner.mjs`)
 driving lighthouse 13 through the official programmatic API (chrome-launcher +
 `lighthouse(url, {port})`, per lighthouse `docs/readme.md`), reading the SAME
 `lighthouserc.json` budgets `@lhci/cli` did. LHCI was dropped after a year
@@ -251,6 +251,6 @@ and without the entry, and diff the generated `packages` maps — identical
 means inert. The `yaml-language-server` → `yaml 2.8.3` pin was retired this
 way once `@astrojs/check` 0.9.10 pulled a language-server whose
 `yaml-language-server` declares an exact `yaml 2.8.3` of its own. **`npm
-audit` alone cannot clear an entry**: `chrome-launcher`'s guards a deprecated
-chain no advisory covers, so audit reads clean while
-`rimraf@3`/`glob@7`/`inflight` come back.
+audit` alone cannot clear an entry**: the retired `chrome-launcher` pin
+guarded a deprecated `rimraf@3`/`glob@7`/`inflight` chain no advisory ever
+covered — audit read clean the whole time it was load-bearing.

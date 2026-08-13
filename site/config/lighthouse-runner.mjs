@@ -10,6 +10,7 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 
 export function median(values) {
@@ -136,9 +137,12 @@ async function main() {
     cfg.collect.startServerReadyPattern,
     cfg.collect.startServerReadyTimeout
   );
-  const chrome = await chromeLauncher.launch({ chromeFlags: ['--headless'] });
+  // Launch inside the try: a ChromeNotInstalledError must still tear the
+  // detached preview down, or it squats port 4321 for the next local run.
+  let chrome;
   const failures = [];
   try {
+    chrome = await chromeLauncher.launch({ chromeFlags: ['--headless'] });
     for (const url of cfg.collect.url) {
       const lhrs = [];
       const slug = new URL(url).pathname.replaceAll('/', '_') || '_';
@@ -157,7 +161,7 @@ async function main() {
       console.log(`${url}: ${cfg.collect.numberOfRuns} runs collected`);
     }
   } finally {
-    chrome.kill();
+    chrome?.kill();
     stop(server);
   }
 

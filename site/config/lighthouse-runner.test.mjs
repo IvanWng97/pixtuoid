@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { aggregate, evaluateAssertions, median } from '../scripts/lighthouse-runner.mjs';
+import { aggregate, evaluateAssertions, median } from './lighthouse-runner.mjs';
 
 const lhr = ({ perf = 0.9, contrast = 1, lcp = 2000, mark = 5000 } = {}) => ({
   categories: { performance: { score: perf } },
@@ -57,6 +57,11 @@ test('default aggregation is median — the documented LHCI divergence', () => {
     'categories:performance': ['error', { minScore: 0.7, aggregationMethod: 'pessimistic' }],
   };
   assert.equal(evaluateAssertions(pessimistic, 'u', runs).length, 1);
+  // And the default is median, not optimistic: one GOOD run out of three must
+  // not rescue the assertion (median 0.5 fails where optimistic 0.9 passes) —
+  // the exact regression direction the divergence exists to prevent.
+  const mostlyBad = [lhr({ perf: 0.9 }), lhr({ perf: 0.5 }), lhr({ perf: 0.5 })];
+  assert.equal(evaluateAssertions(noMethod, 'u', mostlyBad).length, 1);
 });
 
 test('user-timings resolve a mark by startTime and a measure by duration', () => {
@@ -65,13 +70,16 @@ test('user-timings resolve a mark by startTime and a measure by duration', () =>
       'error',
       { maxNumericValue: 6500, aggregationMethod: 'pessimistic' },
     ],
-    'user-timings:measured-span': [
-      'error',
-      { maxNumericValue: 50, aggregationMethod: 'pessimistic' },
-    ],
   };
   assert.deepEqual(evaluateAssertions(assertions, 'u', [lhr({ mark: 6000 })]), []);
   assert.equal(evaluateAssertions(assertions, 'u', [lhr({ mark: 7000 })]).length, 1);
+  // The measure fixture has startTime 1 and duration 42: a 10 bound must fail
+  // via the DURATION read — a swapped `startTime ?? duration` fallback would
+  // read 1 and green it.
+  const measure = { 'user-timings:measured-span': ['error', { maxNumericValue: 10 }] };
+  assert.equal(evaluateAssertions(measure, 'u', [lhr()]).length, 1);
+  const loose = { 'user-timings:measured-span': ['error', { maxNumericValue: 50 }] };
+  assert.deepEqual(evaluateAssertions(loose, 'u', [lhr()]), []);
 });
 
 test('a missing audit, category, or timing FAILS — never a vacuous pass', () => {

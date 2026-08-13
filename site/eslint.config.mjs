@@ -13,11 +13,6 @@ export default [
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...astro.configs.recommended,
-  // scripts/ are node-side tools (the lighthouse runner), not page code.
-  {
-    files: ['scripts/**/*.mjs'],
-    languageOptions: { globals: { ...globals.node } },
-  },
   {
     languageOptions: {
       globals: {
