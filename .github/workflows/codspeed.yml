@@ -1,0 +1,40 @@
+name: codspeed
+
+# Instrumented (simulation-mode) benchmark trend on every PR + main push —
+# CodSpeed counts weighted instructions, not wall-clock, so shared-runner
+# noise doesn't apply (<1% variance; the same setup ruff/uv run). ADVISORY by
+# construction like bench.yml/mutants.yml: nothing `needs:` it and it is not
+# a required check — trend evidence, never a gate. Reports need the CodSpeed
+# GitHub App installed on the repo; auth is OIDC (`id-token: write`), no
+# token secret. Steps follow CodSpeed's documented criterion workflow
+# (moonrepo/setup-rust installs cargo-codspeed via binstall; the tool is not
+# in taiki-e/install-action's registry).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  codspeed:
+    name: benchmarks (codspeed simulation, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: moonrepo/setup-rust@v1
+        with:
+          channel: stable
+          cache-target: release
+          bins: cargo-codspeed
+      - name: Build instrumented benchmarks
+        run: cargo codspeed build -p pixtuoid-scene
+      - uses: CodSpeedHQ/action@v5
+        with:
+          mode: simulation
+          run: cargo codspeed run

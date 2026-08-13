@@ -43,9 +43,11 @@ pixtuoid-core = { path = "../pixtuoid-core", version = "0.17.0", default-feature
 serde_json = { workspace = true }
 proptest   = "1"
 tempfile   = "3"
-# Statistical render-path benchmarks (`just bench`). Lean feature set: no
-# plotters/rayon — numbers, not HTML reports.
-criterion  = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+# Statistical render-path benchmarks (`just bench`). The CodSpeed compat
+# package is a documented passthrough to real criterion when CodSpeed is
+# inactive, so local `cargo bench` behaves as plain criterion; codspeed.yml
+# instruments the same benches in CI. Lean feature set: no plotters/rayon.
+criterion  = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
 
 [[bench]]
 name = "render_frame"
