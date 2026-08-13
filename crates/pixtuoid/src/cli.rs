@@ -244,8 +244,7 @@ mod tests {
         assert!(matches!(
             cli.cmd,
             Some(Cmd::Doctor {
-                graphics: crate::GraphicsMode::Off,
-                ..
+                graphics: crate::GraphicsMode::Off
             })
         ));
         // Absent means Auto, so an existing `pixtuoid doctor` is unchanged.
@@ -253,8 +252,7 @@ mod tests {
         assert!(matches!(
             cli.cmd,
             Some(Cmd::Doctor {
-                graphics: crate::GraphicsMode::Auto,
-                ..
+                graphics: crate::GraphicsMode::Auto
             })
         ));
     }

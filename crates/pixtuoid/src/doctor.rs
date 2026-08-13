@@ -318,8 +318,7 @@ pub(crate) fn parse_version(s: &str) -> Option<(u64, u64, u64)> {
 }
 
 /// Installed-vs-verified comparison, `None` when either side can't parse or
-/// there is no anchor — the ONE comparison behind both the `-v` skew suffix and
-/// the default view's `versions` category.
+/// there is no anchor.
 pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std::cmp::Ordering> {
     if verified == "unknown" {
         return None;
@@ -411,7 +410,7 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         .filter(|s| !s.is_empty());
     let version = version.map_or_else(|| ink.dim("unknown"), str::to_string);
     let mut out = format!(
-        "      {} {}\u{b7}{:<13} {} {:<15} {}",
+        "{DETAIL_INDENT}{} {}\u{b7}{:<13} {} {:<15} {}",
         verdict_glyph(row, ink),
         row.prefix,
         row.source_id,
@@ -424,19 +423,19 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
-                "\n          \u{21b3} install broken: {}",
+                "\n{CONT_INDENT}\u{21b3} install broken: {}",
                 s.issues.join("; ")
             ));
         } else if !s.notes.is_empty() {
             out.push_str(&format!(
-                "\n          \u{21b3} note: {}",
+                "\n{CONT_INDENT}\u{21b3} note: {}",
                 s.notes.join("; ")
             ));
         }
     }
     if row.diag.drift.total() > 0 {
         out.push_str(&format!(
-            "\n          \u{21b3} decode drift: {}",
+            "\n{CONT_INDENT}\u{21b3} decode drift: {}",
             drift_detail(&row.diag.drift)
         ));
     }
@@ -511,28 +510,37 @@ fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
     connected || cli_detected.unwrap_or(false)
 }
 
-fn activation_backend() -> String {
+/// The focus backend's name and whether it can work AT ALL here — the verdict
+/// travels as data so the focus category never has to sniff a glyph out of the
+/// display string.
+fn activation_backend() -> (String, bool) {
     #[cfg(target_os = "macos")]
     {
-        "NSRunningApplication (macOS) ✓".to_string()
+        ("NSRunningApplication (macOS)".to_string(), true)
     }
     #[cfg(target_os = "linux")]
     {
-        linux_activation_backend(
+        let (msg, healthy) = linux_activation_backend(
             marker_set(std::env::var(crate::focus::SWAY_ENV).ok()),
             marker_set(std::env::var(crate::focus::HYPRLAND_ENV).ok()),
             marker_set(std::env::var("WAYLAND_DISPLAY").ok()),
             marker_set(std::env::var("DISPLAY").ok()),
-        )
-        .to_string()
+        );
+        (msg.to_string(), healthy)
     }
     #[cfg(windows)]
     {
-        "SetForegroundWindow (Windows) ✓ — the foreground lock may still deny".to_string()
+        (
+            "SetForegroundWindow (Windows) — the foreground lock may still deny".to_string(),
+            true,
+        )
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
-        "none — focus-jump is unsupported on this OS".to_string()
+        (
+            "none — focus-jump is unsupported on this OS".to_string(),
+            false,
+        )
     }
 }
 
@@ -554,19 +562,27 @@ fn marker_set(value: Option<String>) -> bool {
 /// list and mutter/kwin block focus-steal anyway, so the ✓ would mislead exactly
 /// the users focus fails for.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
-fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool) -> &'static str {
+fn linux_activation_backend(
+    sway: bool,
+    hyprland: bool,
+    wayland: bool,
+    x11: bool,
+) -> (&'static str, bool) {
     if sway {
-        "sway IPC (swaymsg) ✓"
+        ("sway IPC (swaymsg)", true)
     } else if hyprland {
-        "hyprland IPC (hyprctl) ✓"
+        ("hyprland IPC (hyprctl)", true)
     } else if wayland {
-        "✗ Wayland compositor without a pid-addressable focus channel (GNOME/KDE \
-         forbid focus-steal; xdg-activation unimplemented) — focus will silently \
-         no-op for native-Wayland terminals"
+        (
+            "Wayland compositor without a pid-addressable focus channel (GNOME/KDE \
+             forbid focus-steal; xdg-activation unimplemented) — focus will silently \
+             no-op for native-Wayland terminals",
+            false,
+        )
     } else if x11 {
-        "X11 EWMH ($DISPLAY) ✓"
+        ("X11 EWMH ($DISPLAY)", true)
     } else {
-        "✗ none detected — focus will silently no-op"
+        ("none detected — focus will silently no-op", false)
     }
 }
 
@@ -596,8 +612,8 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     }
 }
 
-/// One resolved transcript root — the data behind a `resolved roots` row.
-pub(crate) struct RootStatus {
+/// One resolved transcript root — the data behind a roots-category row.
+struct RootStatus {
     source: &'static str,
     root: std::path::PathBuf,
     exists: bool,
@@ -605,10 +621,10 @@ pub(crate) struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
-/// Everything `doctor` probed, separated from rendering: the default category
-/// rollup and the `-v` full report read the SAME collection, so the two views
-/// cannot diagnose different worlds.
-pub(crate) struct DoctorReport {
+/// Everything `doctor` probed, separated from rendering, so `render` is
+/// drivable off a hand-built report (no env/fs/subprocess probing in the
+/// render path).
+struct DoctorReport {
     log_path: std::path::PathBuf,
     config_path: std::path::PathBuf,
     config_warnings: Vec<String>,
@@ -623,14 +639,29 @@ pub(crate) struct DoctorReport {
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: String,
+    /// `false` = the focus backend itself can't work here (the Wayland /
+    /// no-display arms) — the focus category's verdict, not a probe result.
+    backend_healthy: bool,
     /// `None` = probe disabled (non-standard projects root).
     cc_registry: Option<(std::path::PathBuf, bool)>,
     codex_sessions: (std::path::PathBuf, bool),
     home_split: Option<String>,
-    /// Whether the report may carry ANSI color: a tty with color allowed by the
-    /// SAME `color_preflight` policy the launcher acts on, or `$CLICOLOR_FORCE`
-    /// (which per the spec forces color even piped).
+    /// Whether the report may carry ANSI color — see [`report_color`].
     color: bool,
+    /// Whether the DECRQSS truecolor probe was actually attempted, so the
+    /// terminal category can tell "asked, no answer" from "never asked".
+    truecolor_probe_ran: bool,
+}
+
+/// Whether the report may carry ANSI color: a tty with color allowed by the
+/// SAME `color_preflight` policy the launcher acts on, or `$CLICOLOR_FORCE`
+/// (bixense: forces color even piped) — except `$TERM=dumb`, which outranks
+/// the force (the preflight's own rule: forcing color can't fix a terminal
+/// that renders no escapes).
+fn report_color(tty: bool, pf: crate::term::ColorPreflight, clicolor_force: Option<&str>) -> bool {
+    pf != crate::term::ColorPreflight::RefuseDumbTerm
+        && (crate::term::clicolor_forced(clicolor_force)
+            || (tty && matches!(pf, crate::term::ColorPreflight::Proceed)))
 }
 
 /// ANSI paint, a no-op when [`DoctorReport::color`] is off. The escape codes
@@ -702,11 +733,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     );
     let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let probe_ok = tty && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
-    // `$TERM=dumb` outranks the force — the preflight's own rule: forcing color
-    // can't fix a terminal that renders no escapes.
-    let color = color_pf != crate::term::ColorPreflight::RefuseDumbTerm
-        && (crate::term::clicolor_forced(clicolor_force.as_deref())
-            || (tty && matches!(color_pf, crate::term::ColorPreflight::Proceed)));
+    let color = report_color(tty, color_pf, clicolor_force.as_deref());
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
@@ -802,6 +829,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         up.as_ref().map(|p| p.to_string_lossy()).as_deref(),
     );
 
+    let (backend, backend_healthy) = activation_backend();
     DoctorReport {
         log_path: log_path.to_path_buf(),
         config_path,
@@ -816,11 +844,13 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         max_density,
         rows,
         roots,
-        backend: activation_backend(),
+        backend,
+        backend_healthy,
         cc_registry,
         codex_sessions: (codex_sessions, codex_exists),
         home_split,
         color,
+        truecolor_probe_ran: probe_ok,
     }
 }
 
@@ -832,8 +862,7 @@ enum CategoryStatus {
     Broken,
 }
 
-/// One line of the default rollup: `[glyph] name — summary`, plus indented
-/// detail lines only when there is a problem to expand.
+/// One report category: `[glyph] name — summary`, plus indented detail rows.
 struct Category {
     status: CategoryStatus,
     name: &'static str,
@@ -841,8 +870,17 @@ struct Category {
     details: Vec<String>,
 }
 
+/// Detail rows sit one level under the `[x]` line; `↳` continuations one
+/// further. Shared so the report can't go ragged one site at a time.
+const DETAIL_INDENT: &str = "      ";
+const CONT_INDENT: &str = "          ";
+
 fn terminal_category(r: &DoctorReport) -> Category {
-    let verdict = crate::term::truecolor_verdict(r.colorterm_env.as_deref(), r.truecolor_probe);
+    let verdict = crate::term::truecolor_verdict(
+        r.colorterm_env.as_deref(),
+        r.truecolor_probe,
+        !r.truecolor_probe_ran,
+    );
     let refused = matches!(
         r.color_pf,
         crate::term::ColorPreflight::RefuseNoColor | crate::term::ColorPreflight::RefuseDumbTerm
@@ -850,15 +888,19 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // The graphics row stays whole — its tail names WHY a profile fell back to
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
-        "      {}",
+        "{DETAIL_INDENT}{}",
         crate::graphics::graphics_diagnostic_row(r.graphics, r.detected, r.max_density)
     )];
-    if refused {
-        if let Some(row) = crate::term::color_status_row(r.color_pf) {
-            details.push(format!("      {row}"));
-        }
+    // Whenever it has something to say — incl. the ForceColor note, so a
+    // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
+    if let Some(row) = crate::term::color_status_row(r.color_pf) {
+        details.push(format!("{DETAIL_INDENT}{row}"));
     }
-    let status = if refused || verdict.starts_with("no ") {
+    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned
+    // about exactly this terminal and pointed the user here; a skipped probe
+    // (piped) stays ✓.
+    let unconfirmed = r.truecolor_probe_ran && !verdict.starts_with("yes");
+    let status = if refused || unconfirmed {
         CategoryStatus::Warn
     } else {
         CategoryStatus::Ok
@@ -867,8 +909,9 @@ fn terminal_category(r: &DoctorReport) -> Category {
         status,
         name: "terminal",
         summary: format!(
-            "TERM={} \u{b7} truecolor {verdict}",
+            "TERM={} \u{b7} COLORTERM={} \u{b7} truecolor {verdict}",
             crate::term::shown_env(r.term_env.as_deref()),
+            crate::term::shown_env(r.colorterm_env.as_deref()),
         ),
         details,
     }
@@ -890,7 +933,7 @@ fn config_category(r: &DoctorReport) -> Option<Category> {
         details: r
             .config_warnings
             .iter()
-            .map(|w| format!("      {}", sanitize(w)))
+            .map(|w| format!("{DETAIL_INDENT}{}", sanitize(w)))
             .collect(),
     })
 }
@@ -909,11 +952,14 @@ fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
             details,
         };
     }
-    details.push(ink.hint("      → fix: reconnect in the Sources panel (press s)"));
+    details.push(ink.hint(&format!(
+        "{DETAIL_INDENT}→ fix: reconnect in the Sources panel (press s)"
+    )));
+    let verb = if broken == 1 { "needs" } else { "need" };
     Category {
         status: CategoryStatus::Broken,
         name: "sources",
-        summary: format!("{broken} of {} need attention", rows.len()),
+        summary: format!("{broken} of {} {verb} attention", rows.len()),
         details,
     }
 }
@@ -948,7 +994,7 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
                 .and_then(parsed_version_display)
                 .unwrap_or_else(|| "unknown".to_string());
             format!(
-                "      {:<15} {inst} installed \u{b7} {} verified",
+                "{DETAIL_INDENT}{:<15} {inst} installed \u{b7} {} verified",
                 format!("{}\u{b7}{}", r.prefix, r.source_id),
                 r.verified_version
             )
@@ -964,8 +1010,9 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
     }
 }
 
-/// The verdict line only — the per-source breakdown already rides each drifted
-/// source's `↳` row under `sources`, so this repeats nothing.
+/// No per-source breakdown here — it already rides each drifted source's `↳`
+/// row under `sources`; this category adds the verdict and the report-upstream
+/// pointer.
 fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
     if let Some(w) = &r.log_warning {
         return Category {
@@ -994,14 +1041,14 @@ fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
         status: CategoryStatus::Warn,
         name: "decode drift",
         summary: format!(
-            "{total} event{} across {drifted} source{} (details on the source rows)",
+            "{total} event{} across {drifted} source{} (see the \u{21b3} rows under sources)",
             plural_s(total as usize),
             plural_s(drifted)
         ),
-        details: vec![ink.hint(
-            "      → may predate a CLI's wire format — report: \
-             https://github.com/IvanWng97/pixtuoid/issues",
-        )],
+        details: vec![ink.hint(&format!(
+            "{DETAIL_INDENT}→ may predate a CLI's wire format — report: \
+             https://github.com/IvanWng97/pixtuoid/issues"
+        ))],
     }
 }
 
@@ -1014,13 +1061,13 @@ fn format_root_row(r: &RootStatus, ink: &Ink) -> String {
         _ => String::new(),
     };
     let path = sanitize(&r.root.display().to_string());
-    let mut line = format!("      {:<13} {path}{via}", r.source);
+    let mut line = format!("{DETAIL_INDENT}{:<13} {path}{via}", r.source);
     if !r.exists {
         match r.env {
             Some((var, true)) => {
                 line.push_str(&format!(" — {}", ink.warn("missing")));
                 line.push_str(&format!(
-                    "\n          \u{21b3} ${var} is set but that root does not exist — if this \
+                    "\n{CONT_INDENT}\u{21b3} ${var} is set but that root does not exist — if this \
                      source's sprite never appears, that env var is the first thing to check"
                 ));
             }
@@ -1068,18 +1115,18 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             .unwrap_or("??")
     };
     let mut details = Vec::new();
-    let mut problem = r.backend.contains('\u{2717}');
+    let mut problem = !r.backend_healthy;
     let cc_prefix = prefix_of(pixtuoid_core::source::claude_code::SOURCE_NAME);
     match &r.cc_registry {
         Some((p, true)) => details.push(format!(
-            "      {cc_prefix}\u{b7}claude-code — registry probe {} {}",
+            "{DETAIL_INDENT}{cc_prefix}\u{b7}claude-code — registry probe {} {}",
             ink.ok("\u{2713}"),
             p.display()
         )),
         Some((p, false)) => {
             problem = true;
             details.push(format!(
-                "      {cc_prefix}\u{b7}claude-code — registry probe {} {} (focus no-ops until \
+                "{DETAIL_INDENT}{cc_prefix}\u{b7}claude-code — registry probe {} {} (focus no-ops until \
                  CC writes it)",
                 ink.bad("\u{2717} missing"),
                 p.display()
@@ -1088,7 +1135,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         None => {
             problem = true;
             details.push(format!(
-                "      {cc_prefix}\u{b7}claude-code — registry probe disabled (non-standard \
+                "{DETAIL_INDENT}{cc_prefix}\u{b7}claude-code — registry probe disabled (non-standard \
                  projects root) — focus no-ops"
             ));
         }
@@ -1096,14 +1143,14 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
     let cx_prefix = prefix_of(pixtuoid_core::source::codex::SOURCE_NAME);
     if r.codex_sessions.1 {
         details.push(format!(
-            "      {cx_prefix}\u{b7}codex — rollout probe {} {}",
+            "{DETAIL_INDENT}{cx_prefix}\u{b7}codex — rollout probe {} {}",
             ink.ok("\u{2713}"),
             r.codex_sessions.0.display()
         ));
     } else {
         problem = true;
         details.push(format!(
-            "      {cx_prefix}\u{b7}codex — rollout probe {} {} (focus no-ops until codex \
+            "{DETAIL_INDENT}{cx_prefix}\u{b7}codex — rollout probe {} {} (focus no-ops until codex \
              writes it)",
             ink.bad("\u{2717} missing"),
             r.codex_sessions.0.display()
@@ -1132,19 +1179,19 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
     }
     if !shim_stamp.is_empty() {
         details.push(format!(
-            "      {} — shim-stamped `_pid`",
+            "{DETAIL_INDENT}{} — shim-stamped `_pid`",
             shim_stamp.join(" ")
         ));
     }
     if !plugin_stamp.is_empty() {
         details.push(format!(
-            "      {} — plugin-stamped `_pid`",
+            "{DETAIL_INDENT}{} — plugin-stamped `_pid`",
             plugin_stamp.join(" ")
         ));
     }
     if !no_channel.is_empty() {
         details.push(format!(
-            "      {} — no focus channel (click no-ops)",
+            "{DETAIL_INDENT}{} — no focus channel (click no-ops)",
             ink.dim(&no_channel.join(" "))
         ));
     }
@@ -1155,13 +1202,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             CategoryStatus::Ok
         },
         name: "focus-jump",
-        // The backend string carries its own ✓; the category glyph already says
-        // it, so strip the redundant trailing one.
-        summary: r
-            .backend
-            .strip_suffix(" \u{2713}")
-            .unwrap_or(&r.backend)
-            .to_string(),
+        summary: r.backend.clone(),
         details,
     }
 }
@@ -1169,9 +1210,11 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
 fn home_split_category(r: &DoctorReport) -> Option<Category> {
     r.home_split.as_ref().map(|adv| Category {
         status: CategoryStatus::Warn,
-        name: "windows",
+        // Not "windows": it renders only ON Windows, where that distinguishes
+        // nothing — the category names the subsystem, like its siblings.
+        name: "home",
         summary: "HOME and USERPROFILE point at different homes".to_string(),
-        details: vec![format!("      {adv}")],
+        details: vec![format!("{DETAIL_INDENT}{adv}")],
     })
 }
 
@@ -1204,7 +1247,6 @@ fn render(r: &DoctorReport) -> String {
     out.push('\n');
     out.push('\n');
     for (i, c) in cats.iter().enumerate() {
-        // A blank line between categories, so each section reads as a block.
         if i > 0 {
             out.push('\n');
         }
@@ -1244,7 +1286,7 @@ fn render(r: &DoctorReport) -> String {
 }
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
-/// builder is unit-testable off one `collect` pass.
+/// builder is unit-testable.
 pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
     Ok(render(&collect(log_path, graphics)))
 }
@@ -1279,11 +1321,17 @@ mod tests {
 
     #[test]
     fn linux_activation_backend_covers_every_channel_in_priority_order() {
-        assert!(linux_activation_backend(true, true, true, true).contains("sway"));
-        assert!(linux_activation_backend(false, true, true, true).contains("hyprland"));
-        assert!(linux_activation_backend(false, false, true, true).contains("✗ Wayland"));
-        assert!(linux_activation_backend(false, false, false, true).contains("EWMH"));
-        assert!(linux_activation_backend(false, false, false, false).contains("✗ none"));
+        let healthy = |s: bool, h: bool, w: bool, x: bool| linux_activation_backend(s, h, w, x);
+        assert!(healthy(true, true, true, true).0.contains("sway"));
+        assert!(healthy(true, true, true, true).1);
+        assert!(healthy(false, true, true, true).0.contains("hyprland"));
+        assert!(healthy(false, true, true, true).1);
+        let wayland = healthy(false, false, true, true);
+        assert!(wayland.0.contains("Wayland") && !wayland.1, "{wayland:?}");
+        assert!(healthy(false, false, false, true).0.contains("EWMH"));
+        assert!(healthy(false, false, false, true).1);
+        let none = healthy(false, false, false, false);
+        assert!(none.0.contains("none") && !none.1, "{none:?}");
     }
 
     #[test]
@@ -1299,17 +1347,17 @@ mod tests {
                 marker_set(Some(String::new())),
                 marker_set(Some(":0".to_string())),
             ),
-            "X11 EWMH ($DISPLAY) ✓"
+            ("X11 EWMH ($DISPLAY)", true)
         );
     }
 
     #[test]
     fn focus_category_buckets_sources_from_the_registry() {
         let mut r = summary_report(vec![]);
-        r.backend = "test-backend \u{2713}".into();
+        r.backend = "test-backend".into();
         let c = focus_category(&r, &Ink { on: false });
         assert_eq!(c.status, CategoryStatus::Ok);
-        assert_eq!(c.summary, "test-backend", "the trailing ✓ is stripped");
+        assert_eq!(c.summary, "test-backend");
         let s = c.details.join("\n");
         assert!(s.contains("claude-code — registry probe ✓"), "{s}");
         assert!(s.contains("codex — rollout probe ✓"), "{s}");
@@ -1362,15 +1410,33 @@ mod tests {
 
     #[test]
     fn run_renders_the_category_report() {
+        // A dev shell exporting CLICOLOR_FORCE would force escapes even under
+        // captured stdout — pin the env so the plain-text asserts hold anywhere.
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> = ["CLICOLOR_FORCE", "NO_COLOR"]
+            .iter()
+            .map(|k| (*k, std::env::var_os(k)))
+            .collect();
+        std::env::remove_var("CLICOLOR_FORCE");
+        std::env::remove_var("NO_COLOR");
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
-        )
-        .unwrap();
+        );
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        let out = out.unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
         assert!(out.contains("log    "), "{out}");
         assert!(out.contains("config "), "{out}");
         assert!(out.contains("] terminal — TERM="), "{out}");
+        assert!(out.contains("COLORTERM="), "{out}");
         assert!(out.contains("] sources — "), "{out}");
         assert!(out.contains("] decode drift — "), "{out}");
         assert!(out.contains("] focus-jump — "), "{out}");
@@ -1414,12 +1480,68 @@ mod tests {
             max_density: 1,
             rows,
             roots: vec![],
-            backend: "NSRunningApplication (macOS) \u{2713}".into(),
+            backend: "NSRunningApplication (macOS)".into(),
+            backend_healthy: true,
             cc_registry: Some(("/tmp/reg".into(), true)),
             codex_sessions: ("/tmp/cx".into(), true),
             home_split: None,
             color: false,
+            truecolor_probe_ran: false,
         }
+    }
+
+    /// The color policy is a pure fn precisely so these arms are testable —
+    /// force-when-piped and dumb-beats-force both survived mutation before the
+    /// extraction.
+    #[test]
+    fn report_color_truth_table() {
+        use crate::term::ColorPreflight as Pf;
+        // tty + Proceed → on; piped + Proceed → off.
+        assert!(report_color(true, Pf::Proceed, None));
+        assert!(!report_color(false, Pf::Proceed, None));
+        // CLICOLOR_FORCE forces even piped; "0"/empty do not.
+        assert!(report_color(false, Pf::Proceed, Some("1")));
+        assert!(!report_color(false, Pf::Proceed, Some("0")));
+        assert!(!report_color(false, Pf::Proceed, Some("  ")));
+        // NO_COLOR refuses; the force overrides it (pf is already ForceColor).
+        assert!(!report_color(true, Pf::RefuseNoColor, None));
+        assert!(report_color(false, Pf::ForceColor, Some("1")));
+        // TERM=dumb outranks everything, force included.
+        assert!(!report_color(true, Pf::RefuseDumbTerm, Some("1")));
+    }
+
+    #[test]
+    fn terminal_category_warns_when_an_attempted_probe_did_not_confirm() {
+        let mut r = summary_report(vec![]);
+        r.truecolor_probe_ran = true;
+        r.truecolor_probe = None; // asked, no answer — the launcher warned here
+        let c = terminal_category(&r);
+        assert_eq!(c.status, CategoryStatus::Warn);
+        assert!(c.summary.contains("did not answer"), "{}", c.summary);
+
+        r.truecolor_probe = Some(false);
+        assert_eq!(terminal_category(&r).status, CategoryStatus::Warn);
+
+        r.truecolor_probe = Some(true);
+        assert_eq!(terminal_category(&r).status, CategoryStatus::Ok);
+
+        // Piped: the probe never ran — that is not a warning, and the wording
+        // must not claim the terminal went silent.
+        r.truecolor_probe_ran = false;
+        r.truecolor_probe = None;
+        let c = terminal_category(&r);
+        assert_eq!(c.status, CategoryStatus::Ok);
+        assert!(c.summary.contains("probe skipped"), "{}", c.summary);
+    }
+
+    #[test]
+    fn focus_category_warns_on_an_unhealthy_backend() {
+        let mut r = summary_report(vec![]);
+        r.backend = "Wayland compositor without a pid-addressable focus channel".into();
+        r.backend_healthy = false;
+        let c = focus_category(&r, &Ink { on: false });
+        assert_eq!(c.status, CategoryStatus::Warn);
+        assert!(c.summary.contains("Wayland"), "{}", c.summary);
     }
 
     #[test]
@@ -1469,7 +1591,10 @@ mod tests {
             summary_row("cc", "claude-code"),
             broken,
         ]));
-        assert!(out.contains("[✗] sources — 1 of 2 need attention"), "{out}");
+        assert!(
+            out.contains("[✗] sources — 1 of 2 needs attention"),
+            "{out}"
+        );
         assert!(
             out.contains("      ✗ cx\u{b7}codex"),
             "the broken row leads with ✗: {out}"
@@ -1522,7 +1647,7 @@ mod tests {
         let out = render(&summary_report(vec![drifted]));
         assert!(
             out.contains(
-                "[!] decode drift — 3 events across 1 source (details on the source rows)\n"
+                "[!] decode drift — 3 events across 1 source (see the \u{21b3} rows under sources)\n"
             ),
             "{out}"
         );

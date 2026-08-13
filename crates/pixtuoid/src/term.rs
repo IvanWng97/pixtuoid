@@ -148,15 +148,21 @@ pub(crate) fn shown_env(v: Option<&str>) -> String {
 }
 
 /// The truecolor verdict, naming HOW it was determined so a "colors look wrong"
-/// report is self-diagnosable. `probe` is the `query_truecolor` result (or `None`
-/// when doctor isn't attached to a tty).
-pub(crate) fn truecolor_verdict(colorterm: Option<&str>, probe: Option<bool>) -> &'static str {
+/// report is self-diagnosable. `probe` is the `query_truecolor` result;
+/// `probe_skipped` separates "asked, no answer" from "never asked" (piped /
+/// `$TERM=dumb`), so a piped report doesn't claim the terminal went silent.
+pub(crate) fn truecolor_verdict(
+    colorterm: Option<&str>,
+    probe: Option<bool>,
+    probe_skipped: bool,
+) -> &'static str {
     if colorterm_is_truecolor(colorterm) {
         "yes (COLORTERM)"
     } else {
         match probe {
             Some(true) => "yes (terminal query)",
             Some(false) => "no (terminal downsamples)",
+            None if probe_skipped => "unknown (probe skipped — no color-capable tty)",
             None => "unknown (terminal did not answer)",
         }
     }
@@ -434,17 +440,26 @@ mod tests {
     #[test]
     fn truecolor_verdict_names_how_it_was_determined() {
         assert_eq!(
-            truecolor_verdict(Some("truecolor"), None),
+            truecolor_verdict(Some("truecolor"), None, true),
             "yes (COLORTERM)"
         );
-        assert_eq!(truecolor_verdict(None, Some(true)), "yes (terminal query)");
         assert_eq!(
-            truecolor_verdict(None, Some(false)),
+            truecolor_verdict(None, Some(true), false),
+            "yes (terminal query)"
+        );
+        assert_eq!(
+            truecolor_verdict(None, Some(false), false),
             "no (terminal downsamples)"
         );
         assert_eq!(
-            truecolor_verdict(None, None),
+            truecolor_verdict(None, None, false),
             "unknown (terminal did not answer)"
+        );
+        // A skipped probe is not an unanswered one — piped runs must not claim
+        // the terminal went silent.
+        assert_eq!(
+            truecolor_verdict(None, None, true),
+            "unknown (probe skipped — no color-capable tty)"
         );
     }
 
