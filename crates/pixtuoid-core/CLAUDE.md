@@ -11,26 +11,9 @@ and the binary (`pixtuoid`) sit on top of this. See the workspace
 
 ## Layout
 
-Annotated tree in [`LAYOUT.md`](LAYOUT.md) — grep it for a filename.
-
-<!-- layout:start · generated from LAYOUT.md by `just gen-guides` — edit the tree there, not this skeleton -->
-```
-src/
-├── source/             Source trait, hook+jsonl decoders, listeners …
-├── state/              SceneState + Reducer (event coordinator: Transport-tagged …
-├── sprite/             .sprite parser, pack.toml loader, blit_frame blitter …
-├── platform.rs         cross-platform home-dir resolution (user_home() …
-├── grid.rs             Grid<T> — a width×height row-major Vec<T> with checked …
-├── harness.rs          `harness` FEATURE (non-default, dev-only — absent from the …
-├── id.rs               AgentId + from_parts/from_transcript_path (moved out of …
-├── walkable.rs         WalkableMask = Grid<bool> (static obstacle mask) + …
-└── tests/              one integration test per concern
-```
-
-- **Burn-tier plumbing (model flame):** `AgentEvent::ModelInfo { model, effort }` carries RAW wire strings (interpret-at-paint — the …
-- **Token-meter plumbing (#632, the desk paper tower):** `AgentEvent::Usage { fresh_tokens }` carries a per-reading FRESH-spend delta (new input + cache …
-- **Focus-jump plumbing (#focus-jump):** the shim fills `_pid` (an ancestor walk past the runner's shell) into the hook envelope WHEN …
-<!-- layout:end -->
+Module map: `ls src/` — each file's `//!` header is its annotation. The
+cross-cutting plumbing digests (burn tier, token meter, focus-jump) live in
+[`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md).
 
 ## Known sharp edges (don't be surprised by these)
 
@@ -89,6 +72,9 @@ question:
 - How does the per-agent state machine work?
 - Why is the subagent's sprite the right one and not the parent?
 - How does multi-source decoding work?
+- How does the model flame (burn tier) get its data?
+- How does the token meter (the desk paper tower) get its data?
+- How does focus-jump resolve the agent's pid?
 - Why don't old idle sessions show on startup?
 <!-- lookup:end -->
 

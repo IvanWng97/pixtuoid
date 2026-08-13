@@ -42,9 +42,9 @@ explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 
 **How these files load.** A nested `CLAUDE.md` is an INDEX; its bulk lives in
 siblings that are **not** auto-loaded — you must open them. The four Rust
-guides (core, scene, binary, tui) index `LAYOUT.md` (the annotated module
-tree), `SHARP-EDGES.md` (the edge + WHY + authority pointer per entry), and
-`WHERE-TO-LOOK.md` (the non-obvious seams behind "how does X work?"); core
+guides (core, scene, binary, tui) index `SHARP-EDGES.md` (the edge + WHY +
+authority pointer per entry) and `WHERE-TO-LOOK.md` (the non-obvious seams
+behind "how does X work?"); core
 adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
 plain pointers. The `tests/` and Raycast guides are small enough to keep their
 sharp edges INLINE — nothing to open there. **Every index line

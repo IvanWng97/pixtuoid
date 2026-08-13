@@ -2,11 +2,11 @@
 """Regenerate the nested guides' index blocks from their sibling files.
 
 Each nested CLAUDE.md is an INDEX over sibling reference files (SHARP-EDGES.md,
-LAYOUT.md, WHERE-TO-LOOK.md); every indexed line is a PROJECTION of the
-sibling's own text — an entry's opening span plus a clipped gist, a tree
-entry's clipped annotation, a question. A hand-maintained projection is two
-copies of one fact (the latent-drift bug the magic-number rule names), so the
-blocks are marked and regenerated instead — the gen-readme idiom:
+WHERE-TO-LOOK.md); every indexed line is a PROJECTION of the sibling's own
+text — an entry's opening span plus a clipped gist, or a question. A
+hand-maintained projection is two copies of one fact (the latent-drift bug the
+magic-number rule names), so the blocks are marked and regenerated instead —
+the gen-readme idiom:
 
     <!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` ... -->
     <!-- edges:end -->
@@ -31,12 +31,8 @@ import gitenv
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
-START = re.compile(r"^<!-- (edges|layout|lookup):start · generated from (\S+) ")
-END = {kind: f"<!-- {kind}:end -->" for kind in ("edges", "layout", "lookup")}
-TREE_ENTRY = re.compile(r"^[│ ]*[├└]── ")
-# A long filename squeezes the annotation column to ONE space; keying the split on
-# a 2+-space run shipped that row unclipped AND unmarked. Glyph rows split on 1+.
-TREE_SPLIT = re.compile(r"^([│ ]*[├└]── \S+|\S[^ ]*) +(\S.*)$")
+START = re.compile(r"^<!-- (edges|lookup):start · generated from (\S+) ")
+END = {kind: f"<!-- {kind}:end -->" for kind in ("edges", "lookup")}
 # Group 1 keeps the lead's own trailing separator: re-synthesizing a " " between
 # lead and gist emitted `** ,` for a comma-followed lead — not verbatim, ungreppable.
 BOLD_LEAD = re.compile(r"^(\*\*.+?\*\*\s*)(.*)$", re.S)
@@ -46,10 +42,8 @@ QUESTION = re.compile(r'^- "(.+?)"[^→]*→')
 # Chars of sibling text an index line carries before deferring to the sibling —
 # enough for the entry's claim, small enough that a couple dozen entries stay an index.
 GIST_BUDGET = 96
-TREE_BUDGET = 58  # annotation kept per skeleton entry (narrower: the KEY is the filename)
 # An entry is fact + WHY + authority pointer; past this it has become a per-subsystem
 # changelog — split it into its component edges or move the argument to its issue.
-# Guards the edges + lookup siblings; LAYOUT.md's post-fence notes are exempt (#920).
 MAX_ENTRY_CHARS = 2000
 
 
@@ -107,42 +101,12 @@ def edges_block(sib: pathlib.Path) -> list[str]:
     return lines
 
 
-def layout_block(sib: pathlib.Path) -> list[str]:
-    lines = sib.read_text().splitlines()
-    fence = [i for i, ln in enumerate(lines) if ln.startswith("```")]
-    skeleton = []
-    for ln in lines[fence[0] + 1 : fence[1]]:
-        if not (TREE_ENTRY.match(ln) or not ln.startswith(("│", " "))):
-            continue
-        m = TREE_SPLIT.match(ln)
-        if m and len(m.group(2)) > TREE_BUDGET:
-            pad = ln[len(m.group(1)) : len(ln) - len(m.group(2))]
-            skeleton.append(f"{m.group(1)}{pad}{clip(m.group(2), TREE_BUDGET)}")
-        else:
-            skeleton.append(ln.rstrip())
-    notes = []
-    for para in re.split(r"\n\s*\n", "\n".join(lines[fence[1] + 1 :])):
-        joined = " ".join(x.strip() for x in para.strip().splitlines())
-        if not joined:
-            continue
-        m = BOLD_LEAD.match(joined)
-        if not m:
-            # A silently-dropped note defeats the index (a `> `-quoted paragraph
-            # shipped invisible this way); an unindexable one is the AUTHOR's bug.
-            sys.exit(
-                f"{sib}: post-fence paragraph has no bold lead, so it cannot be "
-                f"indexed — bold its opening phrase: {joined[:60]}…"
-            )
-        notes.append(f"- {m.group(1)}{clip(m.group(2), GIST_BUDGET)}".rstrip())
-    return ["```"] + skeleton + ["```"] + ([""] + notes if notes else [])
-
-
 def lookup_block(sib: pathlib.Path) -> list[str]:
     guard_entry_sizes(sib)
     return [f"- {m.group(1)}" for ln in sib.read_text().splitlines() if (m := QUESTION.match(ln))]
 
 
-BUILDERS = {"edges": edges_block, "layout": layout_block, "lookup": lookup_block}
+BUILDERS = {"edges": edges_block, "lookup": lookup_block}
 
 
 def regenerate(guide: pathlib.Path) -> str:
@@ -176,8 +140,6 @@ def assert_verbatim(guide: pathlib.Path, sib: pathlib.Path, built: list[str]) ->
     for ln in built:
         if ln.startswith("- "):
             probe = ln[2:]
-        elif TREE_ENTRY.match(ln) and (m := TREE_SPLIT.match(ln)):
-            probe = m.group(2)
         else:
             continue
         probe = probe[:-2].rstrip() if probe.endswith(" …") else probe
@@ -244,19 +206,15 @@ def selftest() -> int:
                 return 1 if e.code else 0
 
         guide = (
-            "# g\n\n## Layout\n\n"
-            "<!-- layout:start · generated from LAYOUT.md by `just gen-guides` — x -->\n"
-            "<!-- layout:end -->\n\n## Known sharp edges\n\n"
+            "# g\n\n## Known sharp edges\n\n"
             "<!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` — x -->\n"
             "<!-- edges:end -->\n\n## Where to look\n\n"
             "<!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — x -->\n"
             "<!-- lookup:end -->\n"
         )
-        layout = "# l\n\n```\nsrc/\n├── a.rs   does the thing, at length beyond any budget anyone set, truly beyond it\n```\n\n**A note.** body\n"
         edges = "# e\n\n- **Edge one.** the full text\n"
         lookup = '# w\n\n- "How does it work?" → the answer\n'
         stage("crate/CLAUDE.md", guide)
-        stage("crate/LAYOUT.md", layout)
         stage("crate/SHARP-EDGES.md", edges)
         stage("crate/WHERE-TO-LOOK.md", lookup)
 
@@ -265,8 +223,8 @@ def selftest() -> int:
         first = (repo / "crate/CLAUDE.md").read_text()
         if gen(False) != 0 or (repo / "crate/CLAUDE.md").read_text() != first:
             fails.append("generation must be idempotent")
-        if "- How does it work?" not in first or "- **Edge one.**" not in first or "├── a.rs" not in first:
-            fails.append("all three block kinds must emit")
+        if "- How does it work?" not in first or "- **Edge one.**" not in first:
+            fails.append("both block kinds must emit")
         if gen(True) != 0:
             fails.append("--check must pass right after generation")
 
@@ -289,11 +247,6 @@ def selftest() -> int:
         if gen(False) != 1:
             fails.append("a hard-wrapped sibling entry must FAIL generation (assert_verbatim)")
         stage("crate/SHARP-EDGES.md", edges)
-
-        stage("crate/LAYOUT.md", layout + "\n> **Quoted note.** silently droppable?\n")
-        if gen(False) != 1:
-            fails.append("an unindexable post-fence paragraph must FAIL generation, not vanish")
-        stage("crate/LAYOUT.md", layout)
 
         stage("crate/SHARP-EDGES.md", "# e\n\n- **Huge.** " + "x " * MAX_ENTRY_CHARS + "\n")
         if gen(False) != 1:
