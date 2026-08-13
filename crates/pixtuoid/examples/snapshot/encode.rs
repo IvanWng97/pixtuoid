@@ -29,7 +29,9 @@ pub(crate) fn debug_paint_walkable_overlay(
 
     let size = term.size()?;
     let scene_w = size.width;
-    let scene_h = size.height.saturating_sub(1);
+    let scene_h = size
+        .height
+        .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS);
     let buf_w = scene_w;
     let buf_h = scene_h * 2;
     // `None` = the SAME fill the renderer's draw_scene passes — the overlay
@@ -186,7 +188,9 @@ pub(crate) fn compute_crop_rect(
             Some(p) => p,
             None => {
                 let buf_w = cols;
-                let buf_h = rows.saturating_sub(1).saturating_mul(2);
+                let buf_h = rows
+                    .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
+                    .saturating_mul(2);
                 // The agent's OWN floor: `desk_index` is global, and a scene with
                 // more agents than `--max-desks` puts them on floor 1+, whose
                 // geometry and seed both differ from floor 0's.
@@ -213,7 +217,9 @@ pub(crate) fn compute_crop_rect(
         }
     } else if let Some(ref furniture_str) = args.crop_furniture {
         let buf_w = cols;
-        let buf_h = rows.saturating_sub(1).saturating_mul(2);
+        let buf_h = rows
+            .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
+            .saturating_mul(2);
         let layout = pixtuoid_scene::layout::SceneLayout::compute_with_seed(
             buf_w,
             buf_h,

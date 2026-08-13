@@ -10,19 +10,30 @@ use super::mask::pantry_ground_rect;
 use super::placement::rects_overlap;
 use super::*;
 
-/// The sweep's size axis: the forced-single-pod widths (34–41), the
+/// The sweep's size axis: the forced-single-pod widths (floored by
+/// `MIN_LAYOUT_W`), the SHORT band the derived height floor opened (46-58 buffer
+/// px = 24-30 rows, which the old hand-written floor refused sight-unseen), the
 /// decor-vs-wall and Y-overflow corners, the golden and live wasm hero buffers,
 /// and a spread wide enough that the appliance kinds appear.
 ///
 /// Module-private on purpose: the routability guards that need this axis live
 /// HERE so the placement axis and the routability axis can't disagree — they
-/// did, and the 32-41 px band was swept for placement but never for routability.
+/// did, and the narrow band was swept for placement but never for routability.
 const SWEEP_SIZES: &[(u16, u16)] = &[
-    (34, 60),
-    (36, 100),
-    (38, 120),
-    (40, 70),
-    (41, 160),
+    (super::compute::MIN_LAYOUT_W, super::compute::MIN_LAYOUT_H),
+    (super::compute::MIN_LAYOUT_W, 60),
+    (super::compute::MIN_LAYOUT_W + 2, 100),
+    (48, 46),
+    (64, 48),
+    (80, 46),
+    (96, 52),
+    (120, 46),
+    (160, 50),
+    (200, 46),
+    (128, 56),
+    (super::compute::MIN_LAYOUT_W + 1, 120),
+    (super::compute::MIN_LAYOUT_W + 3, 70),
+    (super::compute::MIN_LAYOUT_W + 4, 160),
     (48, 60),
     (50, 80),
     // The only size here that reaches the #566 guard, so every invariant below gets one
@@ -62,11 +73,22 @@ fn sweep_over(
     for &(w, h) in SWEEP_SIZES {
         for seed in seeds.clone() {
             match SceneLayout::compute_with_seed(w, h, None, seed) {
-                Some(l) => f(w, h, seed, &l),
-                None => assert!(
-                    w < super::compute::MIN_LAYOUT_W || h < super::compute::MIN_LAYOUT_H,
-                    "{w}x{h} seed {seed}: compute returned None at a size above the \
-                     documented minimum ({}x{})",
+                Some(l) => {
+                    // The dual of the None arm below: that one prices a refusal, this
+                    // one prices an acceptance.
+                    assert!(
+                        !l.home_desks.is_empty(),
+                        "{w}x{h} seed {seed}: a layout above the advertised minimum with \
+                         no desk to seat anyone"
+                    );
+                    f(w, h, seed, &l);
+                }
+                // Not "assert this refusal is legitimate": every entry is meant to be
+                // above both floors, so a refusal means a floor rose past a hand-pinned
+                // size and this axis lost that point SILENTLY.
+                None => panic!(
+                    "{w}x{h} seed {seed}: a SWEEP_SIZES entry fell under the floor \
+                     ({}x{}) — the sweep lost it",
                     super::compute::MIN_LAYOUT_W,
                     super::compute::MIN_LAYOUT_H
                 ),
@@ -822,11 +844,33 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 }
 
 /// Widths inside the narrow-band DEGRADATION zone the discrete `SWEEP_SIZES`
-/// grid structurally skips. The upper bound is 76, not 64, to cover the FULL
-/// single-pod-column window: the desk grid stays one column through buf_w≈70 and
-/// only splits to two (two drains, robust) at ≈71, and the discrete grid's
-/// nearest points either side are 64 and 96.
-const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=76;
+/// grid structurally skips. Floored by `MIN_LAYOUT_W`; the upper bound is 76,
+/// not 64, to cover the FULL single-pod-column window: the desk grid stays one
+/// column through buf_w≈70 and only splits to two (two drains, robust) at ≈71,
+/// and the discrete grid's nearest points either side are 64 and 80.
+const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
+
+/// The Y twin of the width scan below: the derived height floor opened 45..59, where
+/// `pod_rows` collapses to 1 and the appliance aisle sits at its 8px minimum. The
+/// discrete grid gives that band 6 points; this walks it at step 1.
+#[test]
+fn short_band_connectivity_boundary_scan() {
+    for h in super::compute::MIN_LAYOUT_H..60 {
+        for &w in &[super::compute::MIN_LAYOUT_W, 48u16, 80, 120, 200] {
+            for seed in SWEEP_SEEDS {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    panic!("{w}x{h} seed {seed}: refused above the floor");
+                };
+                assert!(
+                    !l.home_desks.is_empty(),
+                    "{w}x{h} seed {seed}: lays out with no desk to seat anyone"
+                );
+                assert_walkable_connected(w, h, seed, &l);
+                assert_home_desk_approaches_are_routable(w, h, seed, &l);
+            }
+        }
+    }
+}
 
 /// Step-1 width sweep across the degradation band, running BOTH connectivity
 /// predicates at that resolution — the discrete `SWEEP_SIZES` grid can't cover
@@ -835,9 +879,22 @@ const NARROW_BAND: std::ops::RangeInclusive<u16> = 32..=76;
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {
-        for &h in &[80u16, 100, 120, 148, 160] {
+        // 46 reaches the SHORT band the derived floor opened, where `pod_rows`
+        // collapses to 1 and the appliance aisle sits at its 8px minimum.
+        for &h in &[46u16, 80, 100, 120, 148, 160] {
             for seed in SWEEP_SEEDS {
-                if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
+                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    // Every size here is above BOTH floors, so a refusal is a bug —
+                    // and `sweep_over`'s None arm covers only the discrete grid.
+                    panic!("{w}x{h} seed {seed}: refused above the floor");
+                };
+                {
+                    // `assert_home_desk_approaches_are_routable` passes VACUOUSLY on an
+                    // empty one, and this scan visits the widths between the grid points.
+                    assert!(
+                        !l.home_desks.is_empty(),
+                        "{w}x{h} seed {seed}: lays out with no desk to seat anyone"
+                    );
                     assert_walkable_connected(w, h, seed, &l);
                     assert_home_desk_approaches_are_routable(w, h, seed, &l);
                 }
@@ -938,12 +995,17 @@ fn the_whiteboard_lands_whenever_an_inter_pod_aisle_exists() {
     sweep_production_floors(assert_the_whiteboard_lands_when_an_aisle_exists);
 }
 
+/// The 32x120 seed-3 repro that forced the aisle rule — board +3px east of the divider,
+/// wall flush west, desk column east, sealing the south — is under `MIN_LAYOUT_W` now, so
+/// this re-pins at the width floor. Still the snap's own guard: unsnapped, the board makes
+/// two desks' south approach unroutable, `severed` fires on that arm instead of a pocket,
+/// and the connectivity guard spends the board — reverting `snap_inter_pod_ground_y` reds
+/// the `wall_decor` assert below.
 #[test]
 fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
-    // 32x120 seed 3 FORCED the aisle rule: the board sat +3px east of the divider — wall
-    // flush west, desk column east, sealing the south. Revert the snap and this goes red.
-    let l = SceneLayout::compute_with_seed(32, 120, None, 3).expect("32x120 lays out");
-    assert_walkable_connected(32, 120, 3, &l);
+    let (w, h, seed) = (super::compute::MIN_LAYOUT_W, 120, 3);
+    let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("the width floor lays out");
+    assert_walkable_connected(w, h, seed, &l);
     assert!(
         l.wall_decor
             .iter()
@@ -1124,9 +1186,10 @@ fn the_sweep_reaches_every_floor_variant() {
         ));
     }
     assert!(
-        shapes.len() >= 5,
-        "sweep seeds reach only {} distinct floor shapes: {shapes:?} — widen SWEEP_SEEDS",
-        shapes.len()
+        shapes.len() >= super::compute::FloorVariant::ALL.len(),
+        "sweep seeds reach only {} of {} floor shapes: {shapes:?} — widen SWEEP_SEEDS",
+        shapes.len(),
+        super::compute::FloorVariant::ALL.len()
     );
 }
 

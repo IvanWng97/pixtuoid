@@ -562,7 +562,10 @@ mod tests {
 
     #[test]
     fn an_unlayoutable_window_seeds_zero_not_a_fallback() {
-        let tiny = PhysicalSize::new(64u32, 48u32);
+        // DERIVED, not a pinned 64x48: the floor dropped below it and the premise
+        // assert below went red. Derive so the next move can't reach it.
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let tiny = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
         let (_scale, buf_w, buf_h) = window_buffer_geometry(tiny);
         assert_eq!(
             pixtuoid_scene::floor::floor_capacity(
@@ -614,16 +617,21 @@ mod tests {
         }
     }
 
-    /// One fixture per divergence class: 1280×720 and 64×48 catch a re-introduced
-    /// `cap == 0 → FALLBACK_DESKS` fallback, and 853×480 (`office_scale` 3) is the one
+    /// One fixture per divergence class: the derived sub-floor window is the only one that
+    /// can catch a re-introduced `cap == 0 → FALLBACK_DESKS` fallback (the other two have
+    /// capacity on every floor), and 853×480 (`office_scale` 3) is the one
     /// whose capacity moves under a few px of one-sided buffer drift — the other two
     /// absorb it.
     #[test]
     fn the_first_redraws_publish_agrees_with_the_boot_seed() {
+        // DERIVED: a pinned 64x48 stopped being zero-capacity when the floor dropped, and
+        // the sibling above reds by name if this stops seeding zero.
+        let min = pixtuoid_scene::layout::min_layout_size();
+        let unlayoutable = PhysicalSize::new(u32::from(min.w), u32::from(min.h - 1));
         for window in [
             PhysicalSize::new(1280u32, 720u32),
             PhysicalSize::new(853, 480),
-            PhysicalSize::new(64, 48),
+            unlayoutable,
         ] {
             let seed = boot_capacities_for_window(window);
             let caps: [AtomicUsize; MAX_FLOORS] = std::array::from_fn(|_| AtomicUsize::new(0));

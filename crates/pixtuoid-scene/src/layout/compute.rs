@@ -1,6 +1,6 @@
 //! Layout computation helpers for `SceneLayout`.
 
-use super::decor::DESK_GROUND_H;
+use super::decor::{DESK_GROUND_H, DESK_GROUND_W};
 use super::mask;
 use super::*;
 
@@ -36,10 +36,95 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
     }
 }
 
+/// The band width that seats ONE desk: the two terms `compute_pod_desks`' x-clamp
+/// compares — the first pod's aisle half, plus the desk's blocked GROUND width (side
+/// cabinets included, so NOT `DESK_W`).
+pub(super) const DESK_BAND_MIN_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
+
+/// The Y twin. The y-clamp adds a third term, `couch_to_desk_extra`, which is 0
+/// everywhere below `COUCH_GAP_GROWTH_BASE_H` — pinned by the `const` assert there.
+pub(super) const DESK_BAND_MIN_H: u16 = INTER_POD_AISLE_Y / 2 + DESK_GROUND_H;
+
+/// The 1px column between the left rooms and the cubicle band — `right_x` steps
+/// over it and `band_w` subtracts it, so it is one const, not two literals.
+const MID_DIVIDER_W: u16 = 1;
+
+/// The cubicle band's WIDTH for a buffer — everything east of the left column and its
+/// divider. THE formula `compute_with_seed` and `min_layout_w` both step from.
+pub(super) const fn band_w(buf_w: u16, mid_x_pct: u16) -> u16 {
+    buf_w.saturating_sub(pct(buf_w, mid_x_pct) + MID_DIVIDER_W)
+}
+
+/// The band's HEIGHT — everything below the wall band, less the appliance aisle. THE
+/// formula `compute_with_seed` and `min_layout_h` both step from, and it SATURATES:
+/// see the use site for why that is load-bearing below the gate.
+pub(super) const fn band_h(buf_h: u16) -> u16 {
+    let usable = buf_h.saturating_sub(top_margin(buf_h));
+    usable.saturating_sub(cubicle_aisle_h(usable))
+}
+
+/// The north wall band's depth — 30% of the buffer, never under `MIN_TOP_MARGIN`.
+pub(super) const fn top_margin(buf_h: u16) -> u16 {
+    let pct30 = pct(buf_h, 30);
+    if pct30 > MIN_TOP_MARGIN {
+        pct30
+    } else {
+        MIN_TOP_MARGIN
+    }
+}
+
+const fn cubicle_aisle_h(usable_h: u16) -> u16 {
+    let tenth = usable_h / 10;
+    if tenth > MIN_CUBICLE_AISLE_H {
+        tenth
+    } else {
+        MIN_CUBICLE_AISLE_H
+    }
+}
+
+/// The appliance aisle south of the pods never shrinks below this.
+const MIN_CUBICLE_AISLE_H: u16 = 8;
+
 /// The smallest buffer `compute_with_seed` lays out — below either bound it
 /// returns `None` ("terminal too small").
-pub(super) const MIN_LAYOUT_W: u16 = DESK_W + DESK_GAP_X * 2;
-pub(super) const MIN_LAYOUT_H: u16 = 40 + MIN_TOP_MARGIN;
+///
+/// BOTH axes are SOLVED against the band, not the buffer. The two hand-written
+/// floors erred in OPPOSITE directions: W priced one desk against the whole buffer
+/// and advertised a size that lays out an office with no desk to seat anyone, while
+/// H was simply never re-derived and refused 15 buffer px of sizes that render.
+pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
+pub(super) const MIN_LAYOUT_H: u16 = min_layout_h();
+
+/// The widest left column any variant takes — the band gets the rest, so this
+/// variant is the one that prices the width floor for every seed.
+const fn widest_mid_x_pct() -> u16 {
+    let mut widest = 0;
+    let mut i = 0;
+    while i < FloorVariant::ALL.len() {
+        let pct = FloorVariant::ALL[i].mid_x_pct();
+        if pct > widest {
+            widest = pct;
+        }
+        i += 1;
+    }
+    widest
+}
+
+const fn min_layout_w() -> u16 {
+    let mut w = DESK_BAND_MIN_W;
+    while band_w(w, widest_mid_x_pct()) < DESK_BAND_MIN_W {
+        w += 1;
+    }
+    w
+}
+
+const fn min_layout_h() -> u16 {
+    let mut h = DESK_BAND_MIN_H;
+    while band_h(h) < DESK_BAND_MIN_H {
+        h += 1;
+    }
+    h
+}
 
 /// The smallest buffer that lays out, for a painter that has to TELL the user
 /// why it is not drawing an office. Buffer units — each painter owns its own
@@ -50,6 +135,20 @@ pub fn min_layout_size() -> Size {
         h: MIN_LAYOUT_H,
     }
 }
+
+/// `DESK_BAND_MIN_H` omits the Y clamp's third term because it is 0 at the floor;
+/// that holds only while the growth base stays above it.
+const _: () = assert!(COUCH_GAP_GROWTH_BASE_H > MIN_LAYOUT_H);
+
+const fn couch_to_desk_extra(buf_h: u16) -> u16 {
+    buf_h.saturating_sub(COUCH_GAP_GROWTH_BASE_H) / 20
+}
+
+/// Buffer height at which the couch-to-desk gap starts growing. It equalled the
+/// old hand-written `MIN_LAYOUT_H` by coincidence, not by derivation — re-tying it
+/// to the now-lower floor would widen the gap on most offices tall enough to render
+/// today, so it keeps its own name and its own number.
+const COUCH_GAP_GROWTH_BASE_H: u16 = 60;
 
 /// A meeting room narrower than this can't host the sofa body with enough
 /// walkable margin for the coarse 4×4 router to reach the seats buried in it —
@@ -73,7 +172,7 @@ pub(super) fn compute_with_seed(
         return None;
     }
 
-    let top_margin = pct(buf_h, 30).max(MIN_TOP_MARGIN);
+    let top_margin = top_margin(buf_h);
     let usable_h = buf_h - top_margin;
 
     let variant = FloorVariant::from_seed(floor_seed);
@@ -160,8 +259,8 @@ pub(super) fn compute_with_seed(
         None
     };
 
-    let right_x = mid_x + 1;
-    let right_w = buf_w.saturating_sub(right_x);
+    let right_x = mid_x + MID_DIVIDER_W;
+    let right_w = band_w(buf_w, geom.mid_x_pct());
     // East edge of the meeting-room divider wall — the west bound lounge
     // furniture must clear. No meeting room ⇒ no wall ⇒ the clamp collapses to
     // the band start.
@@ -170,8 +269,13 @@ pub(super) fn compute_with_seed(
     } else {
         right_x
     };
-    let cubicle_aisle_h = (usable_h / 10).max(8);
-    let cubicle_h = usable_h.saturating_sub(cubicle_aisle_h);
+    let cubicle_aisle_h = cubicle_aisle_h(usable_h);
+    // NOT `usable_h - cubicle_aisle_h`, though the locals are right here: `band_h`
+    // saturates from `buf_h`, so a sub-`top_margin` buffer collapses to a 0-height
+    // band instead of `usable_h`'s wrapped 58,974 and an office of garbage desks.
+    // Only observable below the gate, so no test can hold this — the gate + this line
+    // are both what keep it unobservable.
+    let cubicle_h = band_h(buf_h);
     let cubicle_band = Bounds {
         x: right_x,
         y: top_margin,
@@ -189,7 +293,7 @@ pub(super) fn compute_with_seed(
     let pod_h = POD_SIDE * DESK_H + (POD_SIDE - 1) * INTRA_POD_GAP_Y;
     let pod_stride_x = pod_w + INTER_POD_AISLE_X;
     let pod_stride_y = pod_h + INTER_POD_AISLE_Y;
-    let couch_to_desk_extra = buf_h.saturating_sub(60) / 20;
+    let couch_to_desk_extra = couch_to_desk_extra(buf_h);
     let pod_cols = ((right_w.saturating_sub(INTER_POD_AISLE_X / 2)) / pod_stride_x).max(1);
     let pod_rows =
         ((cubicle_h.saturating_sub(couch_to_desk_extra) + INTER_POD_AISLE_Y) / pod_stride_y).max(1);
@@ -1085,20 +1189,29 @@ pub(super) enum FloorVariant {
 }
 
 impl FloorVariant {
-    const COUNT: u64 = 5;
+    /// THE roster: the floor derivations sweep it, `from_seed` indexes it, and
+    /// `COUNT` is its length. A variant missing from here is unreachable — clippy's
+    /// `dead_code` under `-D warnings` reds on the never-constructed enum arm, NOT
+    /// `the_sweep_reaches_every_floor_variant`, which counts observed shapes against
+    /// `ALL.len()` and so stays green when both stay at 5. One added HERE that the
+    /// sweep seeds never reach is the direction that test does catch. What NOTHING
+    /// catches: `has_meeting` / `has_pantry_base` are `matches!` lists, so a variant
+    /// left out of those silently gets no meeting room and no pantry.
+    pub(super) const ALL: [Self; 5] = [
+        FloorVariant::Standard,
+        FloorVariant::OpenPlan,
+        FloorVariant::Dense,
+        FloorVariant::Senior,
+        FloorVariant::Lounge,
+    ];
+    const COUNT: u64 = Self::ALL.len() as u64;
     /// Fibonacci-hash multiplier, chosen so the standard floor seeds each map to
     /// a distinct variant.
     const HASH_MULT: u64 = 0x4737819096da1dad;
 
     /// Select the variant for a floor seed (Fibonacci hashing).
     fn from_seed(floor_seed: u64) -> Self {
-        match floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT {
-            0 => FloorVariant::Standard,
-            1 => FloorVariant::OpenPlan,
-            2 => FloorVariant::Dense,
-            3 => FloorVariant::Senior,
-            _ => FloorVariant::Lounge,
-        }
+        Self::ALL[(floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT) as usize]
     }
 
     /// Whether this variant encloses a meeting room (== the vertical-wall presence).
@@ -1626,6 +1739,101 @@ mod tests {
             FloorVariant::Dense.mid_x_pct(),
             "a Dense floor that KEEPS both meeting rooms keeps its own column"
         );
+    }
+
+    /// `DESK_BAND_MIN_H` omits the Y clamp's third term on the grounds that it is 0
+    /// at the floor. Pin that premise: move `COUCH_GAP_GROWTH_BASE_H` under the floor
+    /// and the height derivation is silently short by the gap it stops accounting for.
+    #[test]
+    fn the_couch_gap_is_zero_everywhere_the_height_floor_is_solved() {
+        let mut h = super::MIN_LAYOUT_H;
+        while h < super::COUCH_GAP_GROWTH_BASE_H {
+            assert_eq!(
+                super::couch_to_desk_extra(h),
+                0,
+                "buf_h {h}: the Y clamp's third term is non-zero where DESK_BAND_MIN_H \
+                 assumes it is 0"
+            );
+            h += 1;
+        }
+    }
+
+    /// Neither floor carries a SAFETY MARGIN. One-directional on purpose: it catches a
+    /// floor set too HIGH (a padded literal, a moved start point), which on the width
+    /// axis nothing else can — `pct` floors, so `band_w(37,35) == band_w(38,35)` and
+    /// `layout::tests`' `narrowest_band ==` assert is blind to +1. Too LOW is the other
+    /// tests' job: `every_floor_variant_seats_a_desk…` and the two boundary scans red on
+    /// it. Tautological against today's `while` loops — that IS the point, it fires when
+    /// the derivation is replaced by a number.
+    #[test]
+    fn neither_floor_carries_a_safety_margin() {
+        assert!(
+            super::band_w(super::MIN_LAYOUT_W - 1, super::widest_mid_x_pct())
+                < super::DESK_BAND_MIN_W,
+            "the width floor is not tight: {} px still clears the band",
+            super::MIN_LAYOUT_W - 1
+        );
+        assert!(
+            super::band_h(super::MIN_LAYOUT_H - 1) < super::DESK_BAND_MIN_H,
+            "the height floor is not tight: {} px still clears the band",
+            super::MIN_LAYOUT_H - 1
+        );
+    }
+
+    /// `DESK_BAND_MIN_W` must be where `compute_pod_desks` ITSELF stops fitting a desk —
+    /// the width floor is derived from it, so a formula that merely looks right
+    /// would advertise a minimum the placer disagrees with.
+    #[test]
+    fn min_band_w_is_the_placers_own_first_desk_boundary() {
+        let pod_h =
+            super::POD_SIDE * super::DESK_H + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_Y;
+        let grid = super::PodGrid {
+            // The forced single pod of a narrow band (`pod_cols`/`pod_rows` floor at 1).
+            cols: 1,
+            rows: 1,
+            stride_x: super::POD_SIDE * super::DESK_W
+                + (super::POD_SIDE - 1) * super::INTRA_POD_GAP_X
+                + super::INTER_POD_AISLE_X,
+            stride_y: pod_h + super::INTER_POD_AISLE_Y,
+            couch_to_desk_extra: 0,
+        };
+        for (width, seats) in [
+            (super::DESK_BAND_MIN_W, true),
+            (super::DESK_BAND_MIN_W - 1, false),
+        ] {
+            let band = super::Bounds {
+                x: 5,
+                y: 5,
+                width,
+                height: 200,
+            };
+            let (desks, _) = super::compute_pod_desks(None, &band, grid);
+            assert_eq!(
+                !desks.is_empty(),
+                seats,
+                "a {width}px band: expected seats={seats}, placed {} desk(s)",
+                desks.len()
+            );
+        }
+        // The Y twin, same clamp on the other axis — the height floor derives from it.
+        for (height, seats) in [
+            (super::DESK_BAND_MIN_H, true),
+            (super::DESK_BAND_MIN_H - 1, false),
+        ] {
+            let band = super::Bounds {
+                x: 5,
+                y: 5,
+                width: 200,
+                height,
+            };
+            let (desks, _) = super::compute_pod_desks(None, &band, grid);
+            assert_eq!(
+                !desks.is_empty(),
+                seats,
+                "a {height}px-tall band: expected seats={seats}, placed {} desk(s)",
+                desks.len()
+            );
+        }
     }
 
     /// Cross-checked against `compute_pod_desks`' own positions, not the band formula a

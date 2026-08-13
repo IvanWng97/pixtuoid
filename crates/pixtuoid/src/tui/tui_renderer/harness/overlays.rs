@@ -77,8 +77,10 @@ fn version_popup_interrupt_continues_from_edge() {
     );
 }
 
-/// The office needs 32×31, so a classic 80×24 terminal falls through to
-/// `draw_footer_only_frame` — this pins the popup CONTENT on that path.
+/// 80 columns is the classic default and `min_terminal_size().1` is the tightest HEIGHT
+/// that lays out the office at all — so it is also the tightest the popup must fit whole
+/// on. Not the tightest width: the panel saturates at `VERSION_POPUP_W`, narrower windows
+/// by design.
 ///
 /// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail
 /// is the first thing to disappear and the `⋮` marker the first to appear.
@@ -89,7 +91,8 @@ fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
     }
     let version = env!("CARGO_PKG_VERSION");
     let notes = crate::version::release_notes(version).expect("the shipped version has notes");
-    let mut r = build(80, 24, vec![]);
+    let rows = crate::tui::renderer::min_terminal_size().1;
+    let mut r = build(80, rows, vec![]);
     r.set_version_popup(true, t0());
     // Past the 200ms entrance ease, so the panel is at full scale.
     let now = t0() + Duration::from_millis(250);
@@ -98,7 +101,7 @@ fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
 
     assert!(
         !text.contains('\u{22ee}'),
-        "v{version}'s notes are windowed at 80×24 — the reader loses the tail behind \
+        "v{version}'s notes are windowed at 80x{rows} — the reader loses the tail behind \
          `⋮ N more`:\n{text}"
     );
     // `frame_text` joins per terminal ROW, so match the last WORD — a phrase would

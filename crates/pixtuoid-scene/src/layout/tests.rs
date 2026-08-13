@@ -169,13 +169,15 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // A 36-wide buffer yields a 6-7px pantry.
-    let s = SceneLayout::compute_with_seed(36, 100, None, 1).expect("fits");
+    // Seed 1 at the narrowest buffer leaves the pantry under the shelf's `vis.w + 4`
+    // width gate — the gate is a property of size AND seed, not of size alone.
+    let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
+        .expect("fits");
     assert!(
         !s.waypoints
             .iter()
             .any(|w| matches!(w.kind, WaypointKind::SnackShelf)),
-        "a 6px room refuses the 7px shelf"
+        "a pantry under the shelf's width gate must refuse it"
     );
 }
 
@@ -445,6 +447,39 @@ fn compute_returns_none_at_exact_boundary() {
     assert!(
         SceneLayout::compute(min_w, min_h, Some(1)).is_some(),
         "exactly at boundary should return Some"
+    );
+}
+
+/// The advertised minimum is a promise the painter repeats to the user, so it
+/// has to be a size an agent can actually SIT at — the variants that take a wide
+/// left column used to lay out an office with no desk in it.
+#[test]
+fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
+    let min_w = crate::layout::compute::MIN_LAYOUT_W;
+    let min_h = crate::layout::compute::MIN_LAYOUT_H;
+    let mut narrowest_band = u16::MAX;
+    let mut shortest_band = u16::MAX;
+    for seed in 0..64u64 {
+        let l = SceneLayout::compute_with_seed(min_w, min_h, None, seed)
+            .unwrap_or_else(|| panic!("seed {seed}: {min_w}x{min_h} is the minimum, must lay out"));
+        assert!(
+            !l.home_desks.is_empty(),
+            "seed {seed}: {min_w}x{min_h} lays out an office with no desk to seat anyone"
+        );
+        narrowest_band = narrowest_band.min(l.cubicle_band.width);
+        shortest_band = shortest_band.min(l.cubicle_band.height);
+    }
+    // TIGHTNESS. The width arm is blind to a +1 overshoot (`pct` floors, so adjacent
+    // widths share a band) — `neither_floor_carries_a_safety_margin` covers that.
+    assert_eq!(
+        narrowest_band,
+        crate::layout::compute::DESK_BAND_MIN_W,
+        "the width floor overshoots: the widest left column leaves more band than one desk needs"
+    );
+    assert_eq!(
+        shortest_band,
+        crate::layout::compute::DESK_BAND_MIN_H,
+        "the height floor overshoots: the band is taller than one desk needs"
     );
 }
 

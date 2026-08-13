@@ -573,9 +573,16 @@ mod tests {
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
         let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
         let mut rests = 0u32;
-        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180)] {
+        let min = crate::layout::min_layout_size();
+        for &(w, h) in &[
+            (min.w, min.h),
+            (min.w + 24, min.h + 6),
+            (160, 120),
+            (192, 160),
+            (240, 180),
+        ] {
             let Some(l) = crate::layout::Layout::compute(w, h, None) else {
-                continue;
+                panic!("{w}x{h}: refused at or above the derived floor");
             };
             for seed in 0..8u64 {
                 // 40s cycle: sample well past the walk fraction so every sample
@@ -608,10 +615,18 @@ mod tests {
     fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
         use crate::layout::{Anchor, Furniture};
         let mut checked = 0u32;
-        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180), (320, 200)] {
+        let min = crate::layout::min_layout_size();
+        for &(w, h) in &[
+            (min.w, min.h),
+            (min.w + 24, min.h + 6),
+            (160, 120),
+            (192, 160),
+            (240, 180),
+            (320, 200),
+        ] {
             for seed in 0..24u64 {
                 let Some(l) = crate::layout::Layout::compute(w, h, None) else {
-                    continue;
+                    panic!("{w}x{h}: refused at or above the derived floor");
                 };
                 // Independent rects: the pantry counter from its RUNTIME size, the
                 // aquarium from the lounge, both of which the const table cannot give.
@@ -663,7 +678,7 @@ mod tests {
         for w in (min.w..min.w + 24).step_by(3) {
             for h in (min.h..min.h + 24).step_by(3) {
                 let Some(l) = crate::layout::Layout::compute(w, h, Some(4)) else {
-                    continue;
+                    panic!("{w}x{h}: refused at or above the derived floor");
                 };
                 checked += 1;
                 assert!(
@@ -680,7 +695,9 @@ mod tests {
                 );
             }
         }
-        assert!(checked > 8, "the sweep must reach layouts, saw {checked}");
+        // The loop can no longer skip (a refusal panics), so a `> 8` floor cannot fire;
+        // pin the window itself, which reds if the derived bounds move.
+        assert_eq!(checked, 64, "the derived window must visit 8x8 sizes");
     }
 
     /// The enter hand-off is pop-free because leg 0 has no special origin: the

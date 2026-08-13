@@ -12,13 +12,13 @@ fn too_small_terminal_returns_no_layout_no_panic() {
     );
 }
 
-/// A refusal has to SAY so. 80x24 is the classic default and it is under the
-/// layout minimum, so before #908 the user got a footer over a blank office —
-/// indistinguishable from a crash.
+/// A refusal has to SAY so — before #908 a sub-floor terminal got a footer over a
+/// blank office, indistinguishable from a crash. The fixture is DERIVED: pinning a
+/// size here is how the old one rotted into a size that renders fine.
 #[test]
 fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    for (cols, rows) in [(80u16, 24u16), (15, 8)] {
+    for (cols, rows) in [too_small_terminal(), (15, 8)] {
         let mut r = build(cols, rows, vec![]);
         r.render(&scene, &pack(), t0()).expect("render");
         assert!(r.cached_layout().is_none(), "{cols}x{rows} must refuse");
@@ -36,13 +36,14 @@ fn a_terminal_under_the_layout_minimum_says_why_it_is_not_drawing() {
     }
 }
 
-/// First run at 80x24 is the exact case the notice exists for, and first run is
-/// also when the onboarding modal opens — over the same centred rows.
+/// A first run on a sub-floor terminal is the exact case the notice exists for, and
+/// first run is also when the onboarding modal opens — over the same centred rows.
 #[test]
 fn the_too_small_notice_survives_an_open_onboarding_modal() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut r = build(80, 24, vec![]);
+    let (cols, rows) = too_small_terminal();
+    let mut r = build(cols, rows, vec![]);
     r.set_onboarding_frame(OnboardingFrame {
         open: true,
         rows: vec![WelcomeRow {
@@ -66,9 +67,10 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
 /// The size the notice NAMES has to be a size that works — a requirement nobody
 /// re-derives is the half of the rule that rots.
 #[test]
-fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
+fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
-    let mut small = build(80, 24, vec![]);
+    let (small_cols, small_rows) = too_small_terminal();
+    let mut small = build(small_cols, small_rows, vec![]);
     small.render(&scene, &pack(), t0()).expect("render");
     let text = frame_text(small.frame_buffer());
     let named = text
@@ -79,17 +81,24 @@ fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
 
     let mut at_min = build(named.0, named.1, vec![]);
     at_min.render(&scene, &pack(), t0()).expect("render");
+    let layout = at_min
+        .cached_layout()
+        .unwrap_or_else(|| panic!("the notice asks for {named:?}, which does not lay out"));
     assert!(
-        at_min.cached_layout().is_some(),
-        "the notice asks for {named:?}, which does not lay out"
+        !layout.home_desks.is_empty(),
+        "the notice asks for {named:?}, which lays out an office with no desk to seat anyone"
     );
-    let mut one_short = build(named.0, named.1 - 1, vec![]);
-
-    one_short.render(&scene, &pack(), t0()).expect("render");
-    assert!(
-        one_short.cached_layout().is_none(),
-        "{named:?} minus a row lays out, so the notice overstates"
-    );
+    for (cols, rows, axis) in [
+        (named.0, named.1 - 1, "row"),
+        (named.0 - 1, named.1, "column"),
+    ] {
+        let mut one_short = build(cols, rows, vec![]);
+        one_short.render(&scene, &pack(), t0()).expect("render");
+        assert!(
+            one_short.cached_layout().is_none(),
+            "{named:?} minus a {axis} lays out, so the notice overstates"
+        );
+    }
 }
 
 /// The other direction: a terminal that CAN lay out must never show the notice.
@@ -155,12 +164,13 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
     use crate::tui::welcome::{OnboardingFrame, WelcomeRow};
     let scene = scene_with(vec![idle("/tiny/0.jsonl", 0, t0())], 16);
 
-    let mut r = build(80, 24, vec![]);
+    let (cols, rows) = too_small_terminal();
+    let mut r = build(cols, rows, vec![]);
     r.set_help_open(true);
     r.render(&scene, &pack(), t0()).expect("render");
     assert!(
         r.cached_layout().is_none(),
-        "80x24 is below the office layout minimum — this IS the footer-only path"
+        "{cols}x{rows} is below the office layout minimum — this IS the footer-only path"
     );
     let text = frame_text(r.frame_buffer());
     assert!(
@@ -168,7 +178,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the help overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    let mut r = build(80, 24, vec![]);
+    let mut r = build(cols, rows, vec![]);
     r.set_onboarding_frame(OnboardingFrame {
         open: true,
         rows: vec![WelcomeRow {
@@ -188,7 +198,7 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         "the onboarding overlay must paint on the footer-only frame; frame was:\n{text}"
     );
 
-    let mut r = build(80, 24, vec![]);
+    let mut r = build(cols, rows, vec![]);
     r.set_connection_frame_parts(
         true,
         Vec::new(),
@@ -209,9 +219,8 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
 #[test]
 fn a_full_height_modal_never_covers_the_footer_row() {
     let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
-    // 32x31 is the office layout's exact minimum, and the real release notes wrap
-    // past 31 rows there.
-    let mut r = build(32, 31, vec![]);
+    let (cols, rows) = crate::tui::renderer::min_terminal_size();
+    let mut r = build(cols, rows, vec![]);
     r.set_version_popup(true, t0());
     let t = t0() + Duration::from_millis(400); // fully scaled in
     r.render(&scene, &pack(), t).expect("render");
@@ -221,6 +230,13 @@ fn a_full_height_modal_never_covers_the_footer_row() {
         text.contains("Enter to close"),
         "the popup must be on screen for this to test anything; frame was:\n{text}"
     );
+    // The premise, not just the conclusion: "full-height" holds only while the notes
+    // overflow the clamped viewport, and `just bump` rewrites them wholesale.
+    assert!(
+        text.contains("more \u{2014} see the link"),
+        "the notes must OVERFLOW at {cols}x{rows} for this to be a full-height modal; \
+         frame was:\n{text}"
+    );
     assert!(
         last_row.contains("[q]uit"),
         "the footer must survive a full-height modal, got last row {last_row:?};\
@@ -229,10 +245,10 @@ fn a_full_height_modal_never_covers_the_footer_row() {
 
     // Compare CELLS, not a substring: surviving glyphs are not a READABLE footer,
     // and the shadow's bottom band dims `fg` only.
-    let mut plain = build(32, 31, vec![]);
+    let mut plain = build(cols, rows, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
-    let footer_y = lit.area.height - 1;
+    let footer_y = lit.area.height - crate::tui::renderer::FOOTER_ROWS;
     for x in 0..lit.area.width {
         let (a, b) = (
             lit.cell((x, footer_y)).expect("footer cell"),

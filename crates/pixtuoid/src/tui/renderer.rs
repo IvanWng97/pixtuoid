@@ -128,8 +128,11 @@ pub(crate) const MIN_SCENE_WIDTH: u16 = 20;
 pub(crate) const MIN_SCENE_HEIGHT: u16 = 12;
 
 /// How many rows at the bottom of the terminal the status footer owns — THE
-/// authority for that count, not three copies of a bare `1`.
-pub(crate) const FOOTER_ROWS: u16 = 1;
+/// authority for that count. `pub` so `examples/snapshot`, which mirrors the
+/// renderer's buffer arithmetic to build the committed media, reads it too — public
+/// for MECHANISM, not contract, hence `doc(hidden)`.
+#[doc(hidden)]
+pub const FOOTER_ROWS: u16 = 1;
 
 pub(crate) fn scene_rect(full: Rect) -> Rect {
     Rect {
@@ -182,19 +185,63 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     Ok(())
 }
 
+/// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
+/// (half-block), the footer takes its own, and the painter's own floor can outrank
+/// the layout's. The notice states it and the harness derives its fixtures from it;
+/// `runtime::capacity_for_terminal` holds the INVERSE and reads the same `FOOTER_ROWS`.
+pub(crate) fn min_terminal_size() -> (u16, u16) {
+    let min = pixtuoid_scene::layout::min_layout_size();
+    (min.w.max(MIN_SCENE_WIDTH), advertised_rows(min.h))
+}
+
+/// Rows for a `layout_h` buffer. The `.max` sits INSIDE the footer add because
+/// `MIN_SCENE_HEIGHT` gates `scene_rect.height`, which is already footer-less —
+/// outside it, the branch where the painter floor binds under-advertises by a row
+/// and the notice names a size that still shows the notice.
+const fn advertised_rows(layout_h: u16) -> u16 {
+    let scene_rows = layout_h.div_ceil(2);
+    let floored = if scene_rows > MIN_SCENE_HEIGHT {
+        scene_rows
+    } else {
+        MIN_SCENE_HEIGHT
+    };
+    floored + FOOTER_ROWS
+}
+
+#[cfg(test)]
+mod min_size_tests {
+    use super::*;
+
+    /// The painter-floor branch is dormant at today's layout floor, so pin it
+    /// directly: whatever it advertises must leave `MIN_SCENE_HEIGHT` scene rows
+    /// AFTER the footer, or `draw_scene`'s own gate refuses the advertised size.
+    #[test]
+    fn the_advertised_rows_clear_the_painters_gate_on_both_branches() {
+        for layout_h in [1u16, 2, 10, 24, 25, 90, 400] {
+            let rows = advertised_rows(layout_h);
+            assert!(
+                rows.saturating_sub(FOOTER_ROWS) >= MIN_SCENE_HEIGHT,
+                "layout_h {layout_h} advertises {rows} rows, leaving {} scene rows",
+                rows.saturating_sub(FOOTER_ROWS)
+            );
+            assert!(
+                rows.saturating_sub(FOOTER_ROWS) * 2 >= layout_h,
+                "layout_h {layout_h} advertises {rows} rows, whose buffer is under it"
+            );
+        }
+    }
+}
+
 /// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
 /// a refusal — the scene rect is under the painter's own floor, `frame_layout`
 /// declined, or a floor transition hit the same gate — and a silent refusal reads
-/// as a crash at 80x24, the size a first-time user is most likely to be at.
+/// as a crash on the small terminal a first-time user is most likely to be at.
 fn paint_too_small_notice(
     f: &mut ratatui::Frame<'_>,
     area: Rect,
     theme: &pixtuoid_scene::theme::Theme,
 ) {
-    let min = pixtuoid_scene::layout::min_layout_size();
-    // Rows carry TWO buffer pixels (half-block), and the footer takes its own.
-    let need_rows = (min.h.div_ceil(2) + FOOTER_ROWS).max(MIN_SCENE_HEIGHT);
-    let need_cols = min.w.max(MIN_SCENE_WIDTH);
+    let (need_cols, need_rows) = min_terminal_size();
     // Widest form that FITS: a terminal narrow enough to trigger this is often
     // too narrow to hold the sentence explaining it, and skipping the line then
     // leaves exactly the blank screen this exists to prevent.

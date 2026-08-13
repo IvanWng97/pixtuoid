@@ -211,7 +211,7 @@ pub struct SceneLayout {
 
 /// Integer percentage of `v`, floor semantics. Computed in u32: a bare
 /// `buf_h * 30` overflows u16 once `buf_h > 2184`.
-pub(crate) fn pct(v: u16, n: u16) -> u16 {
+pub(crate) const fn pct(v: u16, n: u16) -> u16 {
     ((v as u32 * n as u32) / 100) as u16
 }
 
@@ -286,10 +286,8 @@ pub const CLASSIC_OFFICE_DESKS: usize = 16;
 /// Test-facing alias for [`CLASSIC_OFFICE_DESKS`] — the named default
 /// deterministic tests/snapshots pass as `Some(TEST_DEFAULT_DESKS)`.
 pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
-/// Minimum horizontal gap (px) flanking the desk grid — sizes `MIN_LAYOUT_W`
-/// (`DESK_W` plus one gap on each side).
-pub const DESK_GAP_X: u16 = 11;
-/// The N-S counterpart to [`DESK_GAP_X`] — the desk-grid vertical gap unit (px).
+/// The desk-grid vertical gap unit (px) — the lounge-waypoint bound in the layout
+/// tests reads it; the pod grid itself prices its own spacing.
 pub const DESK_GAP_Y: u16 = 14;
 /// Floor (px) for the layout's `top_margin` — the north wall band never
 /// shrinks below this (`top_margin = max(30% of buffer height, this)`).
