@@ -259,7 +259,7 @@ What to run and when, for an agent-driven change:
 
 The three OpenClaw e2e tiers, cheapest first — none runs in CI:
 
-- `just openclaw-live-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
+- `just openclaw-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
 - `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
 
