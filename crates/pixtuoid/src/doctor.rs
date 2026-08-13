@@ -734,6 +734,12 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
     let probe_ok = tty && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
     let color = report_color(tty, color_pf, clicolor_force.as_deref());
+    if color {
+        // The ForceColor contract (term.rs): crossterm strips color under
+        // `$NO_COLOR` unless the caller forces — pin it rather than rely on the
+        // Display path happening not to check today.
+        crossterm::style::force_color_output(true);
+    }
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
