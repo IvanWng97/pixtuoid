@@ -130,9 +130,9 @@ pub(crate) fn resolve_boot_caps(
 }
 
 pub(crate) fn capacity_for_terminal(cols: u16, rows: u16, floor_seed: u64) -> usize {
-    // The footer eats one terminal row, and a half-block ▀ cell is 2 pixels
-    // tall — so the pixel-buffer height is (rows-1)*2.
-    let buf_h = rows.saturating_sub(1) * 2;
+    // The INVERSE of `renderer::min_terminal_size`, so it reads the same footer
+    // reserve: a half-block ▀ cell is 2 pixels tall.
+    let buf_h = rows.saturating_sub(crate::tui::renderer::FOOTER_ROWS) * 2;
     pixtuoid_scene::floor::floor_capacity(cols, buf_h, floor_seed)
 }
 
@@ -285,11 +285,23 @@ mod tests {
         assert_eq!(capacity_for_terminal(192, 0, 0), 0);
     }
 
+    /// The notice advertises `min_terminal_size()`; boot capacity computes the buffer
+    /// back from rows. If the two ever disagree on the footer reserve, the advertised
+    /// size seeds zero desks — the #803 silent over/under-seed class, other direction.
+    #[test]
+    fn the_advertised_minimum_seats_someone_through_the_boot_capacity_path() {
+        let (cols, rows) = crate::tui::renderer::min_terminal_size();
+        assert!(
+            capacity_for_terminal(cols, rows, pixtuoid_scene::floor::floor_seed(0)) > 0,
+            "the advertised minimum {cols}x{rows} seeds no desks through capacity_for_terminal"
+        );
+    }
+
     #[test]
     fn capacity_matches_renderer_formula() {
         let cols: u16 = 160;
         let rows: u16 = 50;
-        let buf_h = rows.saturating_sub(1) * 2;
+        let buf_h = rows.saturating_sub(crate::tui::renderer::FOOTER_ROWS) * 2;
         let expected = pixtuoid_scene::layout::SceneLayout::compute_with_seed(cols, buf_h, None, 0)
             .map(|l| l.home_desks.len())
             .unwrap_or(0);

@@ -182,14 +182,10 @@ pub(crate) fn draw_footer_only_frame<B: Backend<Error: Send + Sync + 'static>>(
     Ok(())
 }
 
-/// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
-/// a refusal — the scene rect is under the painter's own floor, `frame_layout`
-/// declined, or a floor transition hit the same gate — and a silent refusal reads
-/// as a crash on the small terminal a first-time user is most likely to be at.
 /// `min_layout_size` in the terminal's own units — rows carry TWO buffer pixels
-/// (half-block) and the footer takes its own, and the painter's own floor can
-/// outrank the layout's. THE one translation: the notice states it and the
-/// harness derives its too-small fixtures from it.
+/// (half-block), the footer takes its own, and the painter's own floor can outrank
+/// the layout's. The notice states it and the harness derives its fixtures from it;
+/// `runtime::capacity_for_terminal` holds the INVERSE and reads the same `FOOTER_ROWS`.
 pub(crate) fn min_terminal_size() -> (u16, u16) {
     let min = pixtuoid_scene::layout::min_layout_size();
     (
@@ -198,6 +194,10 @@ pub(crate) fn min_terminal_size() -> (u16, u16) {
     )
 }
 
+/// Say WHY there is no office. All three callers of `draw_footer_only_frame` are
+/// a refusal — the scene rect is under the painter's own floor, `frame_layout`
+/// declined, or a floor transition hit the same gate — and a silent refusal reads
+/// as a crash on the small terminal a first-time user is most likely to be at.
 fn paint_too_small_notice(
     f: &mut ratatui::Frame<'_>,
     area: Rect,

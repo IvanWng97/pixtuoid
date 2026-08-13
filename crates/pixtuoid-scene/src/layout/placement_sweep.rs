@@ -75,7 +75,7 @@ fn sweep_over(
             match SceneLayout::compute_with_seed(w, h, None, seed) {
                 Some(l) => {
                     // The dual of the None arm below: that one prices a refusal, this
-                    // one prices an acceptance. A layout that EXISTS must seat someone.
+                    // one prices an acceptance.
                     assert!(
                         !l.home_desks.is_empty(),
                         "{w}x{h} seed {seed}: a layout above the advertised minimum with \
@@ -855,12 +855,18 @@ const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W.
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {
-        for &h in &[80u16, 100, 120, 148, 160] {
+        // 46 reaches the SHORT band the derived floor opened, where `pod_rows`
+        // collapses to 1 and the appliance aisle sits at its 8px minimum.
+        for &h in &[46u16, 80, 100, 120, 148, 160] {
             for seed in SWEEP_SEEDS {
-                if let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) {
-                    // `assert_home_desk_approaches_are_routable` iterates `home_desks`,
-                    // so it passes VACUOUSLY on an empty one — this scan visits the
-                    // widths between the grid points, where that would hide.
+                let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
+                    // Every size here is above BOTH floors, so a refusal is a bug —
+                    // and `sweep_over`'s None arm covers only the discrete grid.
+                    panic!("{w}x{h} seed {seed}: refused above the floor");
+                };
+                {
+                    // `assert_home_desk_approaches_are_routable` passes VACUOUSLY on an
+                    // empty one, and this scan visits the widths between the grid points.
                     assert!(
                         !l.home_desks.is_empty(),
                         "{w}x{h} seed {seed}: lays out with no desk to seat anyone"

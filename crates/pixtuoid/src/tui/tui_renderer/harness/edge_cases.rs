@@ -231,8 +231,7 @@ fn a_full_height_modal_never_covers_the_footer_row() {
         "the popup must be on screen for this to test anything; frame was:\n{text}"
     );
     // The premise, not just the conclusion: "full-height" holds only while the notes
-    // overflow the clamped viewport, and `just bump` rewrites them wholesale. Without
-    // this the test stays green while testing nothing it is named for.
+    // overflow the clamped viewport, and `just bump` rewrites them wholesale.
     assert!(
         text.contains("more \u{2014} see the link"),
         "the notes must OVERFLOW at {cols}x{rows} for this to be a full-height modal; \

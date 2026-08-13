@@ -458,6 +458,7 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
     let min_w = crate::layout::compute::MIN_LAYOUT_W;
     let min_h = crate::layout::compute::MIN_LAYOUT_H;
     let mut narrowest_band = u16::MAX;
+    let mut shortest_band = u16::MAX;
     for seed in 0..64u64 {
         let l = SceneLayout::compute_with_seed(min_w, min_h, None, seed)
             .unwrap_or_else(|| panic!("seed {seed}: {min_w}x{min_h} is the minimum, must lay out"));
@@ -466,11 +467,21 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
             "seed {seed}: {min_w}x{min_h} lays out an office with no desk to seat anyone"
         );
         narrowest_band = narrowest_band.min(l.cubicle_band.width);
+        shortest_band = shortest_band.min(l.cubicle_band.height);
     }
+    // TIGHTNESS, both axes. Every other test derives its fixture FROM the floors, so
+    // they move in lockstep with an overshoot and stay green — and an overshooting
+    // floor is exactly the bug on the height axis: the hand-written 60 refused 15
+    // buffer px of sizes that render, and made the notice lie about them.
     assert_eq!(
         narrowest_band,
         crate::layout::compute::DESK_BAND_MIN_W,
         "the width floor overshoots: the widest left column leaves more band than one desk needs"
+    );
+    assert_eq!(
+        shortest_band,
+        crate::layout::compute::DESK_BAND_MIN_H,
+        "the height floor overshoots: the band is taller than one desk needs"
     );
 }
 

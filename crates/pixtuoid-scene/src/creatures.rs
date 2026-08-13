@@ -573,7 +573,14 @@ mod tests {
     fn no_resting_creature_settles_under_a_sprite_that_paints_over_it() {
         let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
         let mut rests = 0u32;
-        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180)] {
+        let min = crate::layout::min_layout_size();
+        for &(w, h) in &[
+            (min.w, min.h),
+            (min.w + 24, min.h + 6),
+            (160, 120),
+            (192, 160),
+            (240, 180),
+        ] {
             let Some(l) = crate::layout::Layout::compute(w, h, None) else {
                 continue;
             };
@@ -608,7 +615,15 @@ mod tests {
     fn a_wander_target_is_never_parked_under_a_sprite_that_paints_over_it() {
         use crate::layout::{Anchor, Furniture};
         let mut checked = 0u32;
-        for &(w, h) in &[(160u16, 120u16), (192, 160), (240, 180), (320, 200)] {
+        let min = crate::layout::min_layout_size();
+        for &(w, h) in &[
+            (min.w, min.h),
+            (min.w + 24, min.h + 6),
+            (160, 120),
+            (192, 160),
+            (240, 180),
+            (320, 200),
+        ] {
             for seed in 0..24u64 {
                 let Some(l) = crate::layout::Layout::compute(w, h, None) else {
                     continue;

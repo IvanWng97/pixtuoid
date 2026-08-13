@@ -77,8 +77,9 @@ fn version_popup_interrupt_continues_from_edge() {
     );
 }
 
-/// 80×24 is the classic default and the TIGHTEST terminal that still lays out the
-/// office, so it is also the tightest the popup must fit whole on.
+/// 80×24 is the classic default, and 24 rows is the tightest HEIGHT that lays out the
+/// office at all — so it is also the tightest the popup must fit whole on. Not the
+/// tightest width: the panel saturates at `VERSION_POPUP_W`, narrower windows by design.
 ///
 /// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail
 /// is the first thing to disappear and the `⋮` marker the first to appear.
