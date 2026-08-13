@@ -1203,7 +1203,11 @@ fn render(r: &DoctorReport) -> String {
     out.push_str(&ink.dim(&format!("config {}", r.config_path.display())));
     out.push('\n');
     out.push('\n');
-    for c in &cats {
+    for (i, c) in cats.iter().enumerate() {
+        // A blank line between categories, so each section reads as a block.
+        if i > 0 {
+            out.push('\n');
+        }
         let glyph = match c.status {
             CategoryStatus::Ok => ink.ok("\u{2713}"),
             CategoryStatus::Warn => ink.warn("!"),
@@ -1370,6 +1374,10 @@ mod tests {
         assert!(out.contains("] sources — "), "{out}");
         assert!(out.contains("] decode drift — "), "{out}");
         assert!(out.contains("] focus-jump — "), "{out}");
+        assert!(
+            out.contains("\n\n["),
+            "categories are separated by a blank line: {out}"
+        );
         // Under `cargo test` stdout is captured (not a tty), so the report must
         // carry no escape codes.
         assert!(!out.contains('\u{1b}'), "piped output stays plain: {out}");
