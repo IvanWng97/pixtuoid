@@ -246,7 +246,16 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     };
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
-        &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        &mut BaseFillCache::new(),
+        &mut buf,
+        buf_w,
+        buf_h,
+        now,
+        &look,
+        top_wall_h,
+        None,
+        theme,
+        0.0,
     );
     // Reaching here without a panic IS the primary assertion — `RgbBuffer::put`
     // has no bounds guard.
@@ -296,7 +305,16 @@ fn render_office_themed(
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
     paint_floor_and_walls(
-        &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        &mut BaseFillCache::new(),
+        &mut buf,
+        buf_w,
+        buf_h,
+        now,
+        &look,
+        top_wall_h,
+        None,
+        theme,
+        0.0,
     );
     buf
 }
@@ -880,4 +898,73 @@ fn fog_still_glows_over_the_midnight_sky() {
             theme.name
         );
     }
+}
+
+#[test]
+fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
+    let normal = crate::theme::theme_by_name("normal").expect("normal theme");
+    let other = crate::theme::ALL_THEMES
+        .iter()
+        .find(|t| {
+            t.surface.carpet_base != normal.surface.carpet_base
+                || t.surface.wall != normal.surface.wall
+        })
+        .copied()
+        .expect("a theme with a different carpet/wall exists");
+    let now = crate::localclock::on_day(1, 12);
+    let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
+    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
+        let look = time_of_day_look(now, theme);
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
+        paint_floor_and_walls(
+            base_fill, &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        );
+        buf
+    };
+    let mut shared = BaseFillCache::new();
+    let first = paint(&mut shared, normal);
+    let hit = paint(&mut shared, normal);
+    assert_eq!(
+        first.as_slice(),
+        hit.as_slice(),
+        "a cache HIT must be byte-identical to the fill it memoized"
+    );
+    let switched = paint(&mut shared, other);
+    let fresh = paint(&mut BaseFillCache::new(), other);
+    assert_eq!(
+        switched.as_slice(),
+        fresh.as_slice(),
+        "a theme swap on a warm cache must repaint, not serve the stale fill"
+    );
+    let back = paint(&mut shared, normal);
+    assert_eq!(
+        first.as_slice(),
+        back.as_slice(),
+        "swapping back must re-derive the original fill"
+    );
+
+    // Weather leg: the tint changes the CARPET colours while the wall stays
+    // put — the one key component nothing else covers.
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            set_weather_override(None);
+        }
+    }
+    let _reset = Reset;
+    set_weather_override(Some(Weather::Clear));
+    let clear = paint(&mut shared, normal);
+    set_weather_override(Some(Weather::Rain));
+    let rain_shared = paint(&mut shared, normal);
+    let rain_fresh = paint(&mut BaseFillCache::new(), normal);
+    assert_eq!(
+        rain_shared.as_slice(),
+        rain_fresh.as_slice(),
+        "a weather-tint change on a warm cache must repaint the carpet, not serve the stale fill"
+    );
+    assert_ne!(
+        clear.as_slice(),
+        rain_shared.as_slice(),
+        "clear vs rain must differ somewhere in the carpet (else this leg pins nothing)"
+    );
 }

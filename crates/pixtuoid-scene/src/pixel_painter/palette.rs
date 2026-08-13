@@ -464,6 +464,44 @@ pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     }
 }
 
+/// A pixel transform tabulated over the diagonal greys — byte-identical to
+/// calling `f` per pixel, but three L1 loads instead of the f32 chain, ONLY
+/// for channel-separable `f` (every constant-tint [`blend`] chain is; a
+/// transform where one output channel reads another input channel tabulates
+/// wrong). Amortizes when a pass touches ≫256 pixels.
+pub(super) struct RgbLut {
+    r: [u8; 256],
+    g: [u8; 256],
+    b: [u8; 256],
+}
+
+impl RgbLut {
+    pub(super) fn tabulate(f: impl Fn(Rgb) -> Rgb) -> Self {
+        let mut lut = RgbLut {
+            r: [0; 256],
+            g: [0; 256],
+            b: [0; 256],
+        };
+        for i in 0..256 {
+            let v = i as u8;
+            let o = f(Rgb { r: v, g: v, b: v });
+            lut.r[i] = o.r;
+            lut.g[i] = o.g;
+            lut.b[i] = o.b;
+        }
+        lut
+    }
+
+    #[inline]
+    pub(super) fn apply(&self, c: Rgb) -> Rgb {
+        Rgb {
+            r: self.r[c.r as usize],
+            g: self.g[c.g as usize],
+            b: self.b[c.b as usize],
+        }
+    }
+}
+
 /// Composite `tint` over the existing buffer pixel at `(x, y)` by `t` — the
 /// frosted-glass / haze / overlay primitive.
 pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {

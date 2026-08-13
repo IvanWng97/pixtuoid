@@ -304,8 +304,60 @@ pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<Sun
         .collect()
 }
 
+/// Memoized carpet-noise + wall-band base fill — the full-buffer fills were
+/// the largest single cost of a frame (#900's profile) yet their inputs
+/// change only on a resize, theme swap, or weather-tint change. The key
+/// carries EVERY input the fill reads; a stale hit is invisible to every
+/// other gate, so the key IS the correctness boundary — a new input into the
+/// fill loops must join it.
+pub(crate) struct BaseFillCache {
+    key: Option<(u16, u16, u16, [Rgb; 3], Rgb)>,
+    filled: RgbBuffer,
+}
+
+impl BaseFillCache {
+    /// Empty cache — no fill retained yet.
+    pub(crate) fn new() -> Self {
+        Self {
+            key: None,
+            filled: RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 }),
+        }
+    }
+
+    fn fill(
+        &mut self,
+        buf_w: u16,
+        buf_h: u16,
+        band_h: u16,
+        carpet: [Rgb; 3],
+        wall: Rgb,
+    ) -> &RgbBuffer {
+        let key = (buf_w, buf_h, band_h, carpet, wall);
+        if self.key != Some(key) {
+            self.filled.resize_fill(buf_w, buf_h, wall);
+            for y in band_h..buf_h {
+                for x in 0..buf_w {
+                    let hash = (x as u32)
+                        .wrapping_mul(73)
+                        .wrapping_add((y as u32).wrapping_mul(151))
+                        ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
+                    let color = match hash % 17 {
+                        0 | 1 => carpet[0],
+                        2 | 3 => carpet[1],
+                        _ => carpet[2],
+                    };
+                    self.filled.put(x, y, color);
+                }
+            }
+            self.key = Some(key);
+        }
+        &self.filled
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(super) fn paint_floor_and_walls(
+    base_fill: &mut BaseFillCache,
     buf: &mut RgbBuffer,
     buf_w: u16,
     buf_h: u16,
@@ -333,27 +385,9 @@ pub(super) fn paint_floor_and_walls(
         blend_rgb(carpet_dark, tint, 0.15),
         blend_rgb(carpet_base, tint, 0.15),
     ];
-    // Start BELOW the wall band: the loop right after overwrites it opaquely.
     let band_h = top_wall_h.min(buf_h);
-    for y in band_h..buf_h {
-        for x in 0..buf_w {
-            let hash = (x as u32)
-                .wrapping_mul(73)
-                .wrapping_add((y as u32).wrapping_mul(151))
-                ^ ((x as u32).wrapping_mul(11) ^ (y as u32).wrapping_mul(37));
-            let color = match hash % 17 {
-                0 | 1 => carpet[0],
-                2 | 3 => carpet[1],
-                _ => carpet[2],
-            };
-            buf.put(x, y, color);
-        }
-    }
-    for y in 0..band_h {
-        for x in 0..buf_w {
-            buf.put(x, y, wall);
-        }
-    }
+    let filled = base_fill.fill(buf_w, buf_h, band_h, carpet, wall);
+    buf.as_mut_slice().copy_from_slice(filled.as_slice());
 
     // Window HEIGHT grows with the wall band so taller terminals get dramatic
     // glass; width stays fixed so the skyline detail reads consistently.
