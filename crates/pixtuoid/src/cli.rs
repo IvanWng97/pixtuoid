@@ -108,10 +108,6 @@ pub enum Cmd {
         /// would be worse than no flag.
         #[arg(long, value_enum, default_value_t = crate::GraphicsMode::Auto)]
         graphics: crate::GraphicsMode,
-        /// Full per-source report (the sections the default rolls up into
-        /// category lines): source table, resolved roots, focus-jump wiring.
-        #[arg(short, long, default_value_t = false)]
-        verbose: bool,
     },
     /// List agent sources + their connection state, or apply a set. The
     /// scriptable twin of the in-TUI Sources panel (Raycast / automation).
@@ -261,21 +257,6 @@ mod tests {
                 ..
             })
         ));
-    }
-
-    /// Same declared-but-unwired class as `--graphics`: `-v` has to REACH
-    /// `doctor`, and its absence has to mean the rollup (false).
-    #[test]
-    fn verbose_parses_in_both_forms_and_defaults_off() {
-        for argv in [
-            ["pixtuoid", "doctor", "-v"],
-            ["pixtuoid", "doctor", "--verbose"],
-        ] {
-            let cli = Cli::try_parse_from(argv).expect("parses");
-            assert!(matches!(cli.cmd, Some(Cmd::Doctor { verbose: true, .. })));
-        }
-        let cli = Cli::try_parse_from(["pixtuoid", "doctor"]).expect("parses");
-        assert!(matches!(cli.cmd, Some(Cmd::Doctor { verbose: false, .. })));
     }
 
     #[test]

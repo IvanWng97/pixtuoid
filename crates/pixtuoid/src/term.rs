@@ -85,14 +85,21 @@ pub fn color_preflight(
     }
     let no_color_set = matches!(no_color, Some(v) if !v.is_empty());
     if no_color_set {
-        let forced = matches!(clicolor_force.map(str::trim), Some(v) if !v.is_empty() && v != "0");
-        return if forced {
+        return if clicolor_forced(clicolor_force) {
             ColorPreflight::ForceColor
         } else {
             ColorPreflight::RefuseNoColor
         };
     }
     ColorPreflight::Proceed
+}
+
+/// The bixense `$CLICOLOR_FORCE` convention: set and `!= 0` forces color "no
+/// matter what" — including into a pipe. Shared by [`color_preflight`] (the
+/// `$NO_COLOR` override) and doctor's paint decision, so the two can't parse
+/// the variable differently.
+pub(crate) fn clicolor_forced(v: Option<&str>) -> bool {
+    matches!(v.map(str::trim), Some(v) if !v.is_empty() && v != "0")
 }
 
 /// The `pixtuoid doctor` color-availability line, derived from the SAME
@@ -153,21 +160,6 @@ pub(crate) fn truecolor_verdict(colorterm: Option<&str>, probe: Option<bool>) ->
             None => "unknown (terminal did not answer)",
         }
     }
-}
-
-/// The `pixtuoid doctor -v` `terminal:` line — `$TERM` / `$COLORTERM` and the
-/// truecolor verdict.
-pub(crate) fn terminal_diagnostic_row(
-    term: Option<&str>,
-    colorterm: Option<&str>,
-    probe: Option<bool>,
-) -> String {
-    format!(
-        "terminal: TERM={} COLORTERM={} truecolor={}",
-        shown_env(term),
-        shown_env(colorterm),
-        truecolor_verdict(colorterm, probe),
-    )
 }
 
 /// The probe bytes: set bg to `48;2;1;2;3` — the SEMICOLON 24-bit SGR form
@@ -440,26 +432,27 @@ mod tests {
     }
 
     #[test]
-    fn terminal_row_names_how_truecolor_was_determined() {
-        let by_colorterm = terminal_diagnostic_row(Some("xterm-256color"), Some("truecolor"), None);
-        assert!(by_colorterm.contains("TERM=xterm-256color"));
-        assert!(by_colorterm.contains("COLORTERM=truecolor"));
-        assert!(by_colorterm.contains("truecolor=yes (COLORTERM)"));
-
-        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(true))
-            .contains("truecolor=yes (terminal query)"));
-        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(false))
-            .contains("truecolor=no (terminal downsamples)"));
-
-        let unknown = terminal_diagnostic_row(None, None, None);
-        assert!(unknown.contains("TERM=(unset)"), "{unknown}");
-        assert!(unknown.contains("COLORTERM=(unset)"), "{unknown}");
-        assert!(
-            unknown.contains("truecolor=unknown (terminal did not answer)"),
-            "{unknown}"
+    fn truecolor_verdict_names_how_it_was_determined() {
+        assert_eq!(
+            truecolor_verdict(Some("truecolor"), None),
+            "yes (COLORTERM)"
         );
+        assert_eq!(truecolor_verdict(None, Some(true)), "yes (terminal query)");
+        assert_eq!(
+            truecolor_verdict(None, Some(false)),
+            "no (terminal downsamples)"
+        );
+        assert_eq!(
+            truecolor_verdict(None, None),
+            "unknown (terminal did not answer)"
+        );
+    }
 
-        let sanitized = terminal_diagnostic_row(Some("a\x1b[31mb"), Some("truecolor"), None);
+    #[test]
+    fn shown_env_falls_back_to_unset_and_sanitizes() {
+        assert_eq!(shown_env(None), "(unset)");
+        assert_eq!(shown_env(Some("")), "(unset)");
+        let sanitized = shown_env(Some("a\x1b[31mb"));
         assert!(!sanitized.contains('\u{1b}'), "{sanitized}");
     }
 }

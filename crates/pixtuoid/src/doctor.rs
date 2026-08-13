@@ -189,9 +189,9 @@ pub(crate) fn home_split_advisory(
         return None;
     }
     // Sanitized: HOME/USERPROFILE are user-controlled env values surfaced in the
-    // report.
+    // report. No glyph: the presenter's category verdict owns it.
     Some(format!(
-        "⚠ Windows: HOME ({}) differs from USERPROFILE ({}). pixtuoid resolves \
+        "HOME ({}) differs from USERPROFILE ({}). pixtuoid resolves \
          CodeWhale/OpenClaw HOME-first to match their CLIs — but if a source's \
          sprite is missing, confirm its hook config landed under the home that \
          CLI actually reads.",
@@ -330,36 +330,25 @@ pub(crate) fn version_cmp(installed: Option<&str>, verified: &str) -> Option<std
     }
 }
 
-/// Skew is flagged ONLY when both the installed and the (non-`unknown`) verified
-/// version parse — otherwise the installed version shows with no alarm.
-pub(crate) fn version_status(installed: Option<&str>, verified: &str) -> String {
-    // Display the RAW probe string, not a lossy reformat (cursor's
-    // `2026.06.04-5fd875e` isn't semver); the skew check still parses internally.
-    let inst_disp = installed
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or("unknown");
-    if verified == "unknown" {
-        return inst_disp.to_string();
-    }
-    let cmp = match version_cmp(installed, verified) {
-        Some(std::cmp::Ordering::Greater) => " — NEWER than verified, drift possible",
-        Some(std::cmp::Ordering::Less) => " — older than verified",
-        Some(std::cmp::Ordering::Equal) => " — matches verified",
-        None => "",
-    };
-    format!("{inst_disp} (verified {verified}{cmp})")
+/// The parsed `MAJOR.MINOR.PATCH` a skew verdict compared — for the `versions`
+/// category, where showing the two COMPARED values beats echoing a raw banner.
+fn parsed_version_display(s: &str) -> Option<String> {
+    parse_version(s).map(|(major, minor, patch)| format!("{major}.{minor}.{patch}"))
 }
 
-fn verdict_glyph(row: &DoctorSourceRow) -> char {
-    if row.diag.is_broken() || row.diag.drift.total() > 0 {
-        '\u{26a0}' // ⚠
+/// A broken install outranks drift (✗ vs !); the two quiet states (– no
+/// install target, ○ not installed) are dimmed, not alarmed.
+fn verdict_glyph(row: &DoctorSourceRow, ink: &Ink) -> String {
+    if row.diag.is_broken() {
+        ink.bad("\u{2717}") // ✗
+    } else if row.diag.drift.total() > 0 {
+        ink.warn("!")
     } else if !row.has_target {
-        '\u{2013}' // –
+        ink.dim("\u{2013}") // –
     } else if !row.hooks_installed {
-        '\u{25cb}' // ○
+        ink.dim("\u{25cb}") // ○
     } else {
-        '\u{2713}' // ✓
+        ink.ok("\u{2713}") // ✓
     }
 }
 
@@ -390,14 +379,21 @@ fn drift_detail(s: &LogScanResult) -> String {
     format!("{}{when}{samples}", parts.join(", "))
 }
 
-/// Render one row: a scannable verdict line, plus an indented `↳` continuation
-/// line per problem so the long detail never wrecks the table's column alignment.
-pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
-    let conn = if row.connected {
-        "connected"
-    } else {
-        "disconnected"
-    };
+/// Render one source row under the `sources` category: a scannable verdict
+/// line, plus an indented `↳` continuation line per problem so the long detail
+/// never wrecks the table's column alignment. Widths are applied to the PLAIN
+/// text before painting — escape bytes inside a `{:<N}` pad would break the
+/// columns.
+fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
+    let conn = format!(
+        "{:<12}",
+        if row.connected {
+            "connected"
+        } else {
+            "disconnected"
+        }
+    );
+    let conn = if row.connected { conn } else { ink.dim(&conn) };
     let state = if !row.has_target {
         "transcript-only"
     } else if !row.hooks_installed {
@@ -405,10 +401,18 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
     } else {
         "installed"
     };
-    let version = version_status(row.installed_version.as_deref(), row.verified_version);
+    // The RAW probe string, not a lossy reformat (cursor's `2026.06.04-5fd875e`
+    // isn't semver); skew against the verified anchor is the `versions`
+    // category's job.
+    let version = row
+        .installed_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let version = version.map_or_else(|| ink.dim("unknown"), str::to_string);
     let mut out = format!(
-        "  {} {}\u{b7}{:<13} {:<12} {:<15} {}",
-        verdict_glyph(row),
+        "      {} {}\u{b7}{:<13} {} {:<15} {}",
+        verdict_glyph(row, ink),
         row.prefix,
         row.source_id,
         conn,
@@ -420,16 +424,19 @@ pub(crate) fn format_doctor_row(row: &DoctorSourceRow) -> String {
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
-                "\n       \u{21b3} install broken: {}",
+                "\n          \u{21b3} install broken: {}",
                 s.issues.join("; ")
             ));
         } else if !s.notes.is_empty() {
-            out.push_str(&format!("\n       \u{21b3} note: {}", s.notes.join("; ")));
+            out.push_str(&format!(
+                "\n          \u{21b3} note: {}",
+                s.notes.join("; ")
+            ));
         }
     }
     if row.diag.drift.total() > 0 {
         out.push_str(&format!(
-            "\n       \u{21b3} decode drift: {}",
+            "\n          \u{21b3} decode drift: {}",
             drift_detail(&row.diag.drift)
         ));
     }
@@ -563,87 +570,6 @@ fn linux_activation_backend(sway: bool, hyprland: bool, wayland: bool, x11: bool
     }
 }
 
-/// The family buckets come straight from the registry, so a new source lands in
-/// the right bucket with no edit here.
-pub(crate) fn focus_section(
-    backend: &str,
-    cc_registry: Option<(&std::path::Path, bool)>,
-    codex_sessions: (&std::path::Path, bool),
-) -> String {
-    let prefix_of = |src: &str| {
-        registry::descriptor_for(src)
-            .map(|d| d.label_prefix)
-            .unwrap_or("??")
-    };
-    use registry::FocusChannel;
-    let mut shim_stamp = Vec::new();
-    let mut plugin_stamp = Vec::new();
-    let mut no_channel = Vec::new();
-    for src in registry::registered_source_names() {
-        let Some(d) = registry::descriptor_for(src) else {
-            continue;
-        };
-        // Daemons aren't click-focusable agents; the TranscriptProbe sources get
-        // their own rows below.
-        if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
-            continue;
-        }
-        let tag = format!("{}\u{b7}{}", d.label_prefix, src);
-        match d.focus_channel() {
-            FocusChannel::ShimStamp => shim_stamp.push(tag),
-            FocusChannel::PluginStamp => plugin_stamp.push(tag),
-            FocusChannel::Unsupported => no_channel.push(tag),
-            FocusChannel::TranscriptProbe => unreachable!("skipped above"),
-        }
-    }
-    let mut out = String::from("focus-jump (click a sprite → its terminal comes forward):\n");
-    out.push_str(&format!("  backend: {backend}\n"));
-    let cc_prefix = prefix_of(pixtuoid_core::source::claude_code::SOURCE_NAME);
-    match cc_registry {
-        Some((dir, true)) => out.push_str(&format!(
-            "  {cc_prefix}\u{b7}claude-code — registry probe: {} ✓\n",
-            dir.display()
-        )),
-        Some((dir, false)) => out.push_str(&format!(
-            "  {cc_prefix}\u{b7}claude-code — registry probe: {} ✗ missing (focus no-ops until CC writes it)\n",
-            dir.display()
-        )),
-        None => out.push_str(&format!(
-            "  {cc_prefix}\u{b7}claude-code — registry probe disabled (non-standard projects root) — focus no-ops\n"
-        )),
-    }
-    let cx_prefix = prefix_of(pixtuoid_core::source::codex::SOURCE_NAME);
-    let (codex_dir, codex_present) = codex_sessions;
-    out.push_str(&format!(
-        "  {cx_prefix}\u{b7}codex — rollout fd probe: {} {}\n",
-        codex_dir.display(),
-        if codex_present {
-            "✓"
-        } else {
-            "✗ missing (focus no-ops until codex writes it)"
-        }
-    ));
-    if !shim_stamp.is_empty() {
-        out.push_str(&format!(
-            "  {} — shim-resolved `_pid` rides each hook event (an ancestor walk past the interposed shell — a `$SHELL -c` wrapper, a `cmd.exe /C` — on macOS/Linux/Windows; a raw parent elsewhere)\n",
-            shim_stamp.join(", ")
-        ));
-    }
-    if !plugin_stamp.is_empty() {
-        out.push_str(&format!(
-            "  {} — plugin-stamped `_pid` rides each hook event (all platforms)\n",
-            plugin_stamp.join(", ")
-        ));
-    }
-    if !no_channel.is_empty() {
-        out.push_str(&format!(
-            "  {} — no focus channel (click no-ops)\n",
-            no_channel.join(", ")
-        ));
-    }
-    out
-}
-
 /// Read the warn-floor log for a drift scan, separating "there is no log yet"
 /// from "the log could not be read" — the latter gets a warning line.
 ///
@@ -701,6 +627,50 @@ pub(crate) struct DoctorReport {
     cc_registry: Option<(std::path::PathBuf, bool)>,
     codex_sessions: (std::path::PathBuf, bool),
     home_split: Option<String>,
+    /// Whether the report may carry ANSI color: a tty with color allowed by the
+    /// SAME `color_preflight` policy the launcher acts on, or `$CLICOLOR_FORCE`
+    /// (which per the spec forces color even piped).
+    color: bool,
+}
+
+/// ANSI paint, a no-op when [`DoctorReport::color`] is off. The escape codes
+/// come from crossterm — the binary's terminal authority — never hand-rolled.
+struct Ink {
+    on: bool,
+}
+
+impl Ink {
+    fn s(&self, s: &str, f: impl FnOnce(&str) -> String) -> String {
+        if self.on {
+            f(s)
+        } else {
+            s.to_string()
+        }
+    }
+    fn ok(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.green().to_string())
+    }
+    fn warn(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.yellow().to_string())
+    }
+    fn bad(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.red().to_string())
+    }
+    fn hint(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.cyan().to_string())
+    }
+    fn dim(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.dim().to_string())
+    }
+    fn bold(&self, s: &str) -> String {
+        use crossterm::style::Stylize;
+        self.s(s, |s| s.bold().to_string())
+    }
 }
 
 /// All probing, no formatting. `log_path` is injected by `main`, which owns the
@@ -724,13 +694,19 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     // the diagnostic matches what `run` would do.
     let term_env = std::env::var("TERM").ok();
     let colorterm_env = std::env::var("COLORTERM").ok();
+    let clicolor_force = std::env::var("CLICOLOR_FORCE").ok();
     let color_pf = crate::term::color_preflight(
         std::env::var("NO_COLOR").ok().as_deref(),
-        std::env::var("CLICOLOR_FORCE").ok().as_deref(),
+        clicolor_force.as_deref(),
         term_env.as_deref(),
     );
-    let probe_ok = std::io::IsTerminal::is_terminal(&std::io::stdout())
-        && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
+    let tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let probe_ok = tty && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
+    // `$TERM=dumb` outranks the force — the preflight's own rule: forcing color
+    // can't fix a terminal that renders no escapes.
+    let color = color_pf != crate::term::ColorPreflight::RefuseDumbTerm
+        && (crate::term::clicolor_forced(clicolor_force.as_deref())
+            || (tty && matches!(color_pf, crate::term::ColorPreflight::Proceed)));
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
@@ -844,77 +820,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         cc_registry,
         codex_sessions: (codex_sessions, codex_exists),
         home_split,
+        color,
     }
-}
-
-fn broken_ids(rows: &[DoctorSourceRow]) -> Vec<String> {
-    rows.iter()
-        .filter(|r| r.diag.is_broken())
-        .map(|r| format!("{}\u{b7}{}", r.prefix, r.source_id))
-        .collect()
-}
-
-/// The `-v` view: every probed fact, one row per source — the pre-`-v` report
-/// format, unchanged.
-fn render_full(r: &DoctorReport) -> String {
-    let mut out = String::from("pixtuoid doctor — source health\n");
-    out.push_str(&format!("log: {}\n", r.log_path.display()));
-    out.push_str(&format!("config: {}\n", r.config_path.display()));
-    out.push_str(&crate::term::terminal_diagnostic_row(
-        r.term_env.as_deref(),
-        r.colorterm_env.as_deref(),
-        r.truecolor_probe,
-    ));
-    out.push('\n');
-    if let Some(line) = crate::term::color_status_row(r.color_pf) {
-        out.push_str(line);
-        out.push('\n');
-    }
-    out.push_str(&crate::graphics::graphics_diagnostic_row(
-        r.graphics,
-        r.detected,
-        r.max_density,
-    ));
-    out.push('\n');
-    // A malformed config makes every source read disconnected, and a diagnostic
-    // tool must say WHY rather than silently swallow it. Sanitized: a warning can
-    // interpolate config content.
-    for w in &r.config_warnings {
-        out.push_str(&format!("⚠ config: {}\n", sanitize(w)));
-    }
-    if let Some(w) = &r.log_warning {
-        out.push_str(&format!("⚠ {}\n", sanitize(w)));
-    }
-    out.push('\n');
-
-    for row in &r.rows {
-        out.push_str(&format_doctor_row(row));
-        out.push('\n');
-    }
-
-    out.push_str(&health_summary(
-        r.rows.len(),
-        &broken_ids(&r.rows),
-        r.rows.iter().any(|row| row.diag.drift.total() > 0),
-    ));
-
-    if !r.roots.is_empty() {
-        out.push_str("\nresolved roots\n");
-        for root in &r.roots {
-            out.push_str(&root_row(root.source, &root.root, root.exists, root.env));
-            out.push('\n');
-        }
-    }
-    out.push('\n');
-    out.push_str(&focus_section(
-        &r.backend,
-        r.cc_registry.as_ref().map(|(p, e)| (p.as_path(), *e)),
-        (&r.codex_sessions.0, r.codex_sessions.1),
-    ));
-    if let Some(adv) = &r.home_split {
-        out.push_str(&format!("\n{adv}\n"));
-    }
-    out
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -936,20 +843,19 @@ struct Category {
 
 fn terminal_category(r: &DoctorReport) -> Category {
     let verdict = crate::term::truecolor_verdict(r.colorterm_env.as_deref(), r.truecolor_probe);
-    let graphics_short = match crate::graphics::resolve(r.graphics, r.detected, r.max_density) {
-        crate::graphics::Plan::Cutaway { scale } => {
-            format!("cutaway-capable at {}x (not wired)", scale.get())
-        }
-        crate::graphics::Plan::Classic { .. } => "classic half-blocks".to_string(),
-    };
     let refused = matches!(
         r.color_pf,
         crate::term::ColorPreflight::RefuseNoColor | crate::term::ColorPreflight::RefuseDumbTerm
     );
-    let mut details = Vec::new();
+    // The graphics row stays whole — its tail names WHY a profile fell back to
+    // classic, and a fallback must never go unexplained.
+    let mut details = vec![format!(
+        "      {}",
+        crate::graphics::graphics_diagnostic_row(r.graphics, r.detected, r.max_density)
+    )];
     if refused {
         if let Some(row) = crate::term::color_status_row(r.color_pf) {
-            details.push(row.to_string());
+            details.push(format!("      {row}"));
         }
     }
     let status = if refused || verdict.starts_with("no ") {
@@ -961,7 +867,7 @@ fn terminal_category(r: &DoctorReport) -> Category {
         status,
         name: "terminal",
         summary: format!(
-            "TERM={} · truecolor {verdict} · {graphics_short}",
+            "TERM={} \u{b7} truecolor {verdict}",
             crate::term::shown_env(r.term_env.as_deref()),
         ),
         details,
@@ -981,52 +887,48 @@ fn config_category(r: &DoctorReport) -> Option<Category> {
             plural_s(n),
             r.config_path.display()
         ),
-        details: r.config_warnings.iter().map(|w| sanitize(w)).collect(),
+        details: r
+            .config_warnings
+            .iter()
+            .map(|w| format!("      {}", sanitize(w)))
+            .collect(),
     })
 }
 
-fn sources_category(rows: &[DoctorSourceRow]) -> Category {
-    let broken: Vec<&DoctorSourceRow> = rows.iter().filter(|r| r.diag.is_broken()).collect();
-    if broken.is_empty() {
+/// Every source row rides under the category line; the verdict lives in the
+/// category glyph + summary, so a glance answers "anything wrong?" and the rows
+/// answer "with what?".
+fn sources_category(rows: &[DoctorSourceRow], ink: &Ink) -> Category {
+    let broken = rows.iter().filter(|r| r.diag.is_broken()).count();
+    let mut details: Vec<String> = rows.iter().map(|r| format_doctor_row(r, ink)).collect();
+    if broken == 0 {
         return Category {
             status: CategoryStatus::Ok,
             name: "sources",
             summary: format!("{} registered · connected installs sound", rows.len()),
-            details: Vec::new(),
+            details,
         };
     }
-    let mut details: Vec<String> = broken
-        .iter()
-        .map(|r| {
-            let issues = r
-                .diag
-                .install
-                .as_ref()
-                .map(|i| i.issues.join("; "))
-                .unwrap_or_default();
-            format!(
-                "✗ {}\u{b7}{} — install broken: {issues}",
-                r.prefix, r.source_id
-            )
-        })
-        .collect();
-    details.push("→ fix: reconnect in the Sources panel (press s)".to_string());
+    details.push(ink.hint("      → fix: reconnect in the Sources panel (press s)"));
     Category {
         status: CategoryStatus::Broken,
         name: "sources",
-        summary: format!("{} of {} need attention", broken.len(), rows.len()),
+        summary: format!("{broken} of {} need attention", rows.len()),
         details,
     }
 }
 
+/// A CLI running AHEAD of the version this build's decoder was verified
+/// against is the one skew worth an alarm (its wire format may have moved);
+/// older/matching installs stay silent — that comparison is derivable, not
+/// actionable.
 fn versions_category(rows: &[DoctorSourceRow]) -> Category {
-    let newer: Vec<String> = rows
+    let newer: Vec<&DoctorSourceRow> = rows
         .iter()
         .filter(|r| {
             version_cmp(r.installed_version.as_deref(), r.verified_version)
                 == Some(std::cmp::Ordering::Greater)
         })
-        .map(|r| format!("{}\u{b7}{}", r.prefix, r.source_id))
         .collect();
     if newer.is_empty() {
         return Category {
@@ -1036,20 +938,35 @@ fn versions_category(rows: &[DoctorSourceRow]) -> Category {
             details: Vec::new(),
         };
     }
+    let details = newer
+        .iter()
+        .map(|r| {
+            // `version_cmp` returned Greater, so the installed side parsed.
+            let inst = r
+                .installed_version
+                .as_deref()
+                .and_then(parsed_version_display)
+                .unwrap_or_else(|| "unknown".to_string());
+            format!(
+                "      {:<15} {inst} installed \u{b7} {} verified",
+                format!("{}\u{b7}{}", r.prefix, r.source_id),
+                r.verified_version
+            )
+        })
+        .collect();
     let n = newer.len();
     let noun = if n == 1 { "CLI" } else { "CLIs" };
     Category {
         status: CategoryStatus::Warn,
         name: "versions",
-        summary: format!(
-            "{n} {noun} newer than verified (drift possible): {}",
-            newer.join(" ")
-        ),
-        details: Vec::new(),
+        summary: format!("{n} {noun} newer than verified (drift possible)"),
+        details,
     }
 }
 
-fn drift_category(r: &DoctorReport) -> Category {
+/// The verdict line only — the per-source breakdown already rides each drifted
+/// source's `↳` row under `sources`, so this repeats nothing.
+fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
     if let Some(w) = &r.log_warning {
         return Category {
             status: CategoryStatus::Warn,
@@ -1059,12 +976,12 @@ fn drift_category(r: &DoctorReport) -> Category {
             details: Vec::new(),
         };
     }
-    let drifted: Vec<&DoctorSourceRow> = r
+    let drifted = r
         .rows
         .iter()
         .filter(|row| row.diag.drift.total() > 0)
-        .collect();
-    if drifted.is_empty() {
+        .count();
+    if drifted == 0 {
         return Category {
             status: CategoryStatus::Ok,
             name: "decode drift",
@@ -1072,51 +989,55 @@ fn drift_category(r: &DoctorReport) -> Category {
             details: Vec::new(),
         };
     }
-    let total: u64 = drifted.iter().map(|row| row.diag.drift.total()).sum();
-    let mut details: Vec<String> = drifted
-        .iter()
-        .map(|row| {
-            format!(
-                "! {}\u{b7}{} — {}",
-                row.prefix,
-                row.source_id,
-                drift_detail(&row.diag.drift)
-            )
-        })
-        .collect();
-    details.push(
-        "may predate a CLI's wire format — report: https://github.com/IvanWng97/pixtuoid/issues"
-            .to_string(),
-    );
+    let total: u64 = r.rows.iter().map(|row| row.diag.drift.total()).sum();
     Category {
         status: CategoryStatus::Warn,
         name: "decode drift",
         summary: format!(
-            "{total} event{} across {} source{}",
+            "{total} event{} across {drifted} source{} (details on the source rows)",
             plural_s(total as usize),
-            drifted.len(),
-            plural_s(drifted.len())
+            plural_s(drifted)
         ),
-        details,
+        details: vec![ink.hint(
+            "      → may predate a CLI's wire format — report: \
+             https://github.com/IvanWng97/pixtuoid/issues",
+        )],
     }
 }
 
-fn roots_category(roots: &[RootStatus]) -> Option<Category> {
+/// One row per source with a single on-disk root. A FACT row, not an alarm — a
+/// missing root is normal for a CLI the user never runs, so the only alarm is
+/// missing WHILE that source's override is set (#880).
+fn format_root_row(r: &RootStatus, ink: &Ink) -> String {
+    let via = match r.env {
+        Some((var, true)) => format!(" (via ${var})"),
+        _ => String::new(),
+    };
+    let path = sanitize(&r.root.display().to_string());
+    let mut line = format!("      {:<13} {path}{via}", r.source);
+    if !r.exists {
+        match r.env {
+            Some((var, true)) => {
+                line.push_str(&format!(" — {}", ink.warn("missing")));
+                line.push_str(&format!(
+                    "\n          \u{21b3} ${var} is set but that root does not exist — if this \
+                     source's sprite never appears, that env var is the first thing to check"
+                ));
+            }
+            _ => line.push_str(&format!(" — {}", ink.dim("missing"))),
+        }
+    }
+    line
+}
+
+fn roots_category(roots: &[RootStatus], ink: &Ink) -> Option<Category> {
     if roots.is_empty() {
         return None;
     }
     let present = roots.iter().filter(|r| r.exists).count();
-    let alarmed: Vec<String> = roots
+    let alarmed = roots
         .iter()
-        .filter_map(|r| match r.env {
-            Some((var, true)) if !r.exists => Some(format!(
-                "! {} — ${var} is set but {} does not exist",
-                r.source,
-                sanitize(&r.root.display().to_string())
-            )),
-            _ => None,
-        })
-        .collect();
+        .any(|r| !r.exists && matches!(r.env, Some((_, true))));
     let summary = if present == roots.len() {
         format!("{present} resolved, all present")
     } else {
@@ -1126,44 +1047,112 @@ fn roots_category(roots: &[RootStatus]) -> Option<Category> {
         )
     };
     Some(Category {
-        status: if alarmed.is_empty() {
-            CategoryStatus::Ok
-        } else {
+        status: if alarmed {
             CategoryStatus::Warn
+        } else {
+            CategoryStatus::Ok
         },
-        name: "transcript roots",
+        name: "roots",
         summary,
-        details: alarmed,
+        details: roots.iter().map(|r| format_root_row(r, ink)).collect(),
     })
 }
 
-fn focus_category(r: &DoctorReport) -> Category {
+/// Click a sprite → its terminal comes forward. The channel buckets come
+/// straight from the registry, so a new source lands in the right bucket with
+/// no edit here.
+fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
+    let prefix_of = |src: &str| {
+        registry::descriptor_for(src)
+            .map(|d| d.label_prefix)
+            .unwrap_or("??")
+    };
     let mut details = Vec::new();
-    if r.backend.contains('\u{2717}') {
-        details.push(r.backend.clone());
-    }
+    let mut problem = r.backend.contains('\u{2717}');
+    let cc_prefix = prefix_of(pixtuoid_core::source::claude_code::SOURCE_NAME);
     match &r.cc_registry {
-        Some((p, false)) => details.push(format!(
-            "! claude-code registry probe missing: {} — focus no-ops until CC writes it",
+        Some((p, true)) => details.push(format!(
+            "      {cc_prefix}\u{b7}claude-code — registry probe {} {}",
+            ink.ok("\u{2713}"),
             p.display()
         )),
-        None => details.push(
-            "! claude-code registry probe disabled (non-standard projects root) — focus no-ops"
-                .to_string(),
-        ),
-        _ => {}
+        Some((p, false)) => {
+            problem = true;
+            details.push(format!(
+                "      {cc_prefix}\u{b7}claude-code — registry probe {} {} (focus no-ops until \
+                 CC writes it)",
+                ink.bad("\u{2717} missing"),
+                p.display()
+            ));
+        }
+        None => {
+            problem = true;
+            details.push(format!(
+                "      {cc_prefix}\u{b7}claude-code — registry probe disabled (non-standard \
+                 projects root) — focus no-ops"
+            ));
+        }
     }
-    if !r.codex_sessions.1 {
+    let cx_prefix = prefix_of(pixtuoid_core::source::codex::SOURCE_NAME);
+    if r.codex_sessions.1 {
         details.push(format!(
-            "! codex rollout probe missing: {} — focus no-ops until codex writes it",
+            "      {cx_prefix}\u{b7}codex — rollout probe {} {}",
+            ink.ok("\u{2713}"),
+            r.codex_sessions.0.display()
+        ));
+    } else {
+        problem = true;
+        details.push(format!(
+            "      {cx_prefix}\u{b7}codex — rollout probe {} {} (focus no-ops until codex \
+             writes it)",
+            ink.bad("\u{2717} missing"),
             r.codex_sessions.0.display()
         ));
     }
+    use registry::FocusChannel;
+    let mut shim_stamp = Vec::new();
+    let mut plugin_stamp = Vec::new();
+    let mut no_channel = Vec::new();
+    for src in registry::registered_source_names() {
+        let Some(d) = registry::descriptor_for(src) else {
+            continue;
+        };
+        // Daemons aren't click-focusable agents; the TranscriptProbe sources
+        // got their own probe rows above.
+        if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
+            continue;
+        }
+        let tag = format!("{}\u{b7}{}", d.label_prefix, src);
+        match d.focus_channel() {
+            FocusChannel::ShimStamp => shim_stamp.push(tag),
+            FocusChannel::PluginStamp => plugin_stamp.push(tag),
+            FocusChannel::Unsupported => no_channel.push(tag),
+            FocusChannel::TranscriptProbe => unreachable!("skipped above"),
+        }
+    }
+    if !shim_stamp.is_empty() {
+        details.push(format!(
+            "      {} — shim-stamped `_pid`",
+            shim_stamp.join(" ")
+        ));
+    }
+    if !plugin_stamp.is_empty() {
+        details.push(format!(
+            "      {} — plugin-stamped `_pid`",
+            plugin_stamp.join(" ")
+        ));
+    }
+    if !no_channel.is_empty() {
+        details.push(format!(
+            "      {} — no focus channel (click no-ops)",
+            ink.dim(&no_channel.join(" "))
+        ));
+    }
     Category {
-        status: if details.is_empty() {
-            CategoryStatus::Ok
-        } else {
+        status: if problem {
             CategoryStatus::Warn
+        } else {
+            CategoryStatus::Ok
         },
         name: "focus-jump",
         // The backend string carries its own ✓; the category glyph already says
@@ -1182,7 +1171,7 @@ fn home_split_category(r: &DoctorReport) -> Option<Category> {
         status: CategoryStatus::Warn,
         name: "windows",
         summary: "HOME and USERPROFILE point at different homes".to_string(),
-        details: vec![adv.clone()],
+        details: vec![format!("      {adv}")],
     })
 }
 
@@ -1194,28 +1183,36 @@ fn plural_s(n: usize) -> &'static str {
     }
 }
 
-/// The default view: flutter-doctor-style category rollup — one `[✓]`/`[!]`/`[✗]`
-/// line per category, detail lines only under problems, `-v` for everything.
-fn render_summary(r: &DoctorReport) -> String {
+/// The ONE report: flutter-doctor-style categories — a `[✓]`/`[!]`/`[✗]`
+/// verdict line per category, every probed fact riding as an indented detail
+/// row under its category, an issues-found footer.
+fn render(r: &DoctorReport) -> String {
+    let ink = Ink { on: r.color };
     let mut cats: Vec<Category> = vec![terminal_category(r)];
     cats.extend(config_category(r));
-    cats.push(sources_category(&r.rows));
+    cats.push(sources_category(&r.rows, &ink));
     cats.push(versions_category(&r.rows));
-    cats.push(drift_category(r));
-    cats.extend(roots_category(&r.roots));
-    cats.push(focus_category(r));
+    cats.push(drift_category(r, &ink));
+    cats.extend(roots_category(&r.roots, &ink));
+    cats.push(focus_category(r, &ink));
     cats.extend(home_split_category(r));
 
     let mut out = String::from("pixtuoid doctor\n");
+    out.push_str(&ink.dim(&format!("log    {}", r.log_path.display())));
+    out.push('\n');
+    out.push_str(&ink.dim(&format!("config {}", r.config_path.display())));
+    out.push('\n');
+    out.push('\n');
     for c in &cats {
         let glyph = match c.status {
-            CategoryStatus::Ok => '\u{2713}',
-            CategoryStatus::Warn => '!',
-            CategoryStatus::Broken => '\u{2717}',
+            CategoryStatus::Ok => ink.ok("\u{2713}"),
+            CategoryStatus::Warn => ink.warn("!"),
+            CategoryStatus::Broken => ink.bad("\u{2717}"),
         };
-        out.push_str(&format!("[{glyph}] {} — {}\n", c.name, c.summary));
+        out.push_str(&format!("[{glyph}] {} — {}\n", ink.bold(c.name), c.summary));
         for d in &c.details {
-            out.push_str(&format!("    {d}\n"));
+            out.push_str(d);
+            out.push('\n');
         }
     }
     let issues = cats
@@ -1224,89 +1221,28 @@ fn render_summary(r: &DoctorReport) -> String {
         .count();
     out.push('\n');
     if issues == 0 {
-        out.push_str("• no issues found · full detail: pixtuoid doctor -v\n");
+        out.push_str(&format!("{} no issues found\n", ink.ok("\u{2022}")));
     } else {
+        let broken_any = cats.iter().any(|c| c.status == CategoryStatus::Broken);
+        let glyph = if broken_any {
+            ink.bad("!")
+        } else {
+            ink.warn("!")
+        };
         let noun = if issues == 1 {
             "category"
         } else {
             "categories"
         };
-        out.push_str(&format!(
-            "! issues in {issues} {noun} · full detail: pixtuoid doctor -v\n"
-        ));
+        out.push_str(&format!("{glyph} issues in {issues} {noun}\n"));
     }
     out
 }
 
 /// Returns the rendered report rather than printing it, so the WHOLE report
-/// builder is unit-testable. Default = the category rollup; `verbose` = the
-/// full per-source report. Both render the same [`collect`] pass.
-pub fn run(
-    log_path: &std::path::Path,
-    graphics: crate::GraphicsMode,
-    verbose: bool,
-) -> anyhow::Result<String> {
-    let report = collect(log_path, graphics);
-    Ok(if verbose {
-        render_full(&report)
-    } else {
-        render_summary(&report)
-    })
-}
-
-/// One `roots:` line per source with a single on-disk root. A FACT row, not an
-/// alarm — a missing root is normal for a CLI the user never runs, so the only
-/// ⚠ is missing WHILE that source's override is set (#880).
-pub(crate) fn root_row(
-    source: &str,
-    root: &std::path::Path,
-    exists: bool,
-    home_env: Option<(&str, bool)>,
-) -> String {
-    let via = match home_env {
-        Some((var, true)) => format!(" via ${var}"),
-        _ => String::new(),
-    };
-    let mark = if exists { "ok" } else { "missing" };
-    let mut line = format!(
-        "  {:<13} {} ({mark}{via})",
-        source,
-        sanitize(&root.display().to_string())
-    );
-    if !exists {
-        if let Some((var, true)) = home_env {
-            line.push_str(&format!(
-                "\n    ⚠ ${var} is set but that root does not exist — if this source's \
-                 sprite never appears, that env var is the first thing to check"
-            ));
-        }
-    }
-    line
-}
-
-/// The rolled-up doctor footer: the broken-install rollup (locally fixable via
-/// reconnect) + the decode-drift note (report-upstream).
-fn health_summary(n: usize, broken: &[String], any_drift: bool) -> String {
-    let mut out = String::new();
-    if broken.is_empty() {
-        out.push_str(&format!("\n{n} sources · ✓ all connected installs sound"));
-    } else {
-        let verb = if broken.len() == 1 { "needs" } else { "need" };
-        out.push_str(&format!(
-            "\n{n} sources · ⚠ {} {verb} attention ({}) — reconnect in the Sources panel (press s)",
-            broken.len(),
-            broken.join(", ")
-        ));
-    }
-    if any_drift {
-        out.push_str(
-            " · ⚠ decode drift recorded — may predate a CLI's wire format; report: \
-             https://github.com/IvanWng97/pixtuoid/issues\n",
-        );
-    } else {
-        out.push_str(" · ✓ no decode drift\n");
-    }
-    out
+/// builder is unit-testable off one [`collect`] pass.
+pub fn run(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> anyhow::Result<String> {
+    Ok(render(&collect(log_path, graphics)))
 }
 
 #[cfg(test)]
@@ -1314,43 +1250,27 @@ mod tests {
     use super::*;
     use crate::test_capture::capture;
 
+    /// The plain-text plumbing: `Ink { on: false }` must be a byte-for-byte
+    /// no-op (piped output stays clean), `on: true` must actually wrap in
+    /// escapes — proving the color path CAN fire, not just that it parses.
     #[test]
-    fn health_summary_one_broken_uses_the_singular_verb() {
-        let s = health_summary(9, &["cc·claude-code".to_string()], false);
-        assert!(
-            s.contains("⚠ 1 needs attention (cc·claude-code)"),
-            "singular verb + the broken id: {s:?}"
-        );
-        assert!(s.contains("✓ no decode drift"), "clean-drift branch: {s:?}");
-    }
-
-    #[test]
-    fn health_summary_many_broken_pluralizes_and_comma_joins() {
-        let s = health_summary(
-            9,
-            &["cc·claude-code".to_string(), "cx·codex".to_string()],
-            false,
-        );
-        assert!(
-            s.contains("⚠ 2 need attention (cc·claude-code, cx·codex)"),
-            "plural verb + comma-joined list: {s:?}"
-        );
-    }
-
-    #[test]
-    fn health_summary_clean_installs_with_and_without_drift() {
-        // Exact byte layout, deliberately: the substring tests above can't catch a
-        // whitespace regression in the leading `\n` or the ` · ` joiners.
-        let clean = health_summary(9, &[], false);
-        assert_eq!(
-            clean,
-            "\n9 sources · ✓ all connected installs sound · ✓ no decode drift\n"
-        );
-        let drifted = health_summary(9, &[], true);
-        assert!(
-            drifted.contains("⚠ decode drift recorded"),
-            "drift flag surfaces the report note: {drifted:?}"
-        );
+    fn ink_paints_only_when_on() {
+        let off = Ink { on: false };
+        assert_eq!(off.ok("✓"), "✓");
+        assert_eq!(off.bad("✗"), "✗");
+        assert_eq!(off.bold("sources"), "sources");
+        let on = Ink { on: true };
+        for painted in [
+            on.ok("✓"),
+            on.warn("!"),
+            on.bad("✗"),
+            on.hint("→"),
+            on.dim("–"),
+            on.bold("sources"),
+        ] {
+            assert!(painted.contains('\u{1b}'), "carries an escape: {painted:?}");
+        }
+        assert!(on.ok("✓").contains('✓'), "the glyph survives painting");
     }
 
     #[test]
@@ -1380,23 +1300,26 @@ mod tests {
     }
 
     #[test]
-    fn focus_section_buckets_sources_from_the_registry() {
-        let cc = std::path::Path::new("/home/u/.claude/sessions");
-        let cx = std::path::Path::new("/home/u/.codex/sessions");
-        let s = focus_section("test-backend ✓", Some((cc, true)), (cx, true));
-        assert!(s.contains("backend: test-backend ✓"));
-        assert!(s.contains("claude-code — registry probe") && s.contains("✓"));
-        assert!(s.contains("codex — rollout fd probe"));
+    fn focus_category_buckets_sources_from_the_registry() {
+        let mut r = summary_report(vec![]);
+        r.backend = "test-backend \u{2713}".into();
+        let c = focus_category(&r, &Ink { on: false });
+        assert_eq!(c.status, CategoryStatus::Ok);
+        assert_eq!(c.summary, "test-backend", "the trailing ✓ is stripped");
+        let s = c.details.join("\n");
+        assert!(s.contains("claude-code — registry probe ✓"), "{s}");
+        assert!(s.contains("codex — rollout probe ✓"), "{s}");
         assert!(
             s.contains("opencode") && s.contains("plugin-stamped"),
             "plugin stampers listed separately: {s}"
         );
         assert!(
-            s.contains("cursor") && s.contains("shim-resolved `_pid`"),
+            s.contains("cursor") && s.contains("shim-stamped `_pid`"),
             "shim stampers listed separately: {s}"
         );
-        let no_channel_line = s
-            .lines()
+        let no_channel_line = c
+            .details
+            .iter()
             .find(|l| l.contains("no focus channel"))
             .expect("a no-channel line");
         assert!(
@@ -1407,47 +1330,49 @@ mod tests {
     }
 
     #[test]
-    fn focus_section_reports_missing_and_disabled_probe_roots() {
-        let cc = std::path::Path::new("/home/u/.claude/sessions");
-        let cx = std::path::Path::new("/home/u/.codex/sessions");
-        let missing = focus_section("b", Some((cc, false)), (cx, false));
-        assert!(missing.contains("✗ missing (focus no-ops until CC writes it)"));
-        assert!(missing.contains("✗ missing (focus no-ops until codex writes it)"));
-        let disabled = focus_section("b", None, (cx, true));
-        assert!(disabled.contains("registry probe disabled (non-standard projects root)"));
+    fn focus_category_warns_on_missing_and_disabled_probe_roots() {
+        let mut r = summary_report(vec![]);
+        r.cc_registry = Some(("/home/u/.claude/sessions".into(), false));
+        r.codex_sessions = ("/home/u/.codex/sessions".into(), false);
+        let c = focus_category(&r, &Ink { on: false });
+        assert_eq!(c.status, CategoryStatus::Warn);
+        let s = c.details.join("\n");
+        assert!(
+            s.contains("✗ missing") && s.contains("focus no-ops until CC writes it"),
+            "{s}"
+        );
+        assert!(s.contains("focus no-ops until codex writes it"), "{s}");
+
+        r.cc_registry = None;
+        r.codex_sessions = ("/home/u/.codex/sessions".into(), true);
+        let c = focus_category(&r, &Ink { on: false });
+        assert_eq!(c.status, CategoryStatus::Warn);
+        assert!(
+            c.details
+                .iter()
+                .any(|l| l.contains("registry probe disabled (non-standard projects root)")),
+            "{:?}",
+            c.details
+        );
     }
 
     #[test]
-    fn run_verbose_renders_the_structural_report_headers() {
+    fn run_renders_the_category_report() {
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
-            true,
-        )
-        .unwrap();
-        assert!(out.contains("pixtuoid doctor — source health"), "{out}");
-        assert!(out.contains("config:"), "{out}");
-        assert!(out.contains("terminal: TERM="), "{out}");
-        assert!(out.contains("sources \u{b7}"), "{out}");
-    }
-
-    #[test]
-    fn run_default_renders_the_category_rollup() {
-        let out = run(
-            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
-            crate::GraphicsMode::Auto,
-            false,
         )
         .unwrap();
         assert!(out.starts_with("pixtuoid doctor\n"), "{out}");
+        assert!(out.contains("log    "), "{out}");
+        assert!(out.contains("config "), "{out}");
         assert!(out.contains("] terminal — TERM="), "{out}");
         assert!(out.contains("] sources — "), "{out}");
         assert!(out.contains("] decode drift — "), "{out}");
         assert!(out.contains("] focus-jump — "), "{out}");
-        assert!(out.contains("full detail: pixtuoid doctor -v"), "{out}");
-        // The full-report sections stay behind -v.
-        assert!(!out.contains("resolved roots"), "{out}");
-        assert!(!out.contains("pixtuoid doctor — source health"), "{out}");
+        // Under `cargo test` stdout is captured (not a tty), so the report must
+        // carry no escape codes.
+        assert!(!out.contains('\u{1b}'), "piped output stays plain: {out}");
     }
 
     fn summary_row(prefix: &'static str, id: &'static str) -> DoctorSourceRow {
@@ -1485,12 +1410,13 @@ mod tests {
             cc_registry: Some(("/tmp/reg".into(), true)),
             codex_sessions: ("/tmp/cx".into(), true),
             home_split: None,
+            color: false,
         }
     }
 
     #[test]
-    fn summary_clean_report_collapses_every_category() {
-        let out = render_summary(&summary_report(vec![
+    fn report_clean_state_is_all_check_categories() {
+        let out = render(&summary_report(vec![
             summary_row("cc", "claude-code"),
             summary_row("cx", "codex"),
         ]));
@@ -1509,73 +1435,92 @@ mod tests {
             out.contains("[✓] focus-jump — NSRunningApplication (macOS)\n"),
             "{out}"
         );
+        assert!(out.ends_with("• no issues found\n"), "{out}");
+    }
+
+    #[test]
+    fn report_rows_ride_under_the_sources_category() {
+        let out = render(&summary_report(vec![
+            summary_row("cc", "claude-code"),
+            summary_row("cx", "codex"),
+        ]));
         assert!(
-            out.ends_with("• no issues found · full detail: pixtuoid doctor -v\n"),
-            "{out}"
+            out.contains("\n      ✓ cc\u{b7}claude-code   connected    installed       1.0.0\n"),
+            "every source keeps its row, healthy or not: {out}"
         );
     }
 
     #[test]
-    fn summary_broken_install_expands_with_fix_line() {
+    fn report_broken_install_expands_with_fix_line() {
         let mut broken = summary_row("cx", "codex");
         broken.diag.install = Some(crate::install::verify::SchemaVerifyResult {
             issues: vec!["missing hook entries for: SessionEnd".into()],
             notes: vec![],
         });
-        let out = render_summary(&summary_report(vec![
+        let out = render(&summary_report(vec![
             summary_row("cc", "claude-code"),
             broken,
         ]));
         assert!(out.contains("[✗] sources — 1 of 2 need attention"), "{out}");
         assert!(
-            out.contains(
-                "    ✗ cx\u{b7}codex — install broken: missing hook entries for: SessionEnd"
-            ),
+            out.contains("      ✗ cx\u{b7}codex"),
+            "the broken row leads with ✗: {out}"
+        );
+        assert!(
+            out.contains("\n          ↳ install broken: missing hook entries for: SessionEnd"),
             "{out}"
         );
         assert!(
-            out.contains("    → fix: reconnect in the Sources panel (press s)"),
+            out.contains("      → fix: reconnect in the Sources panel (press s)"),
             "{out}"
         );
-        assert!(
-            out.ends_with("! issues in 1 category · full detail: pixtuoid doctor -v\n"),
-            "{out}"
-        );
+        assert!(out.ends_with("! issues in 1 category\n"), "{out}");
     }
 
     #[test]
-    fn summary_flags_clis_newer_than_verified() {
+    fn report_versions_category_lists_only_newer_than_verified() {
         let mut newer = summary_row("cp", "copilot");
         newer.installed_version = Some("GitHub Copilot CLI 1.0.79.".into());
         newer.verified_version = "1.0.62";
         let mut older = summary_row("hm", "hermes");
         older.installed_version = Some("v0.17.0".into());
         older.verified_version = "0.18.0";
-        let out = render_summary(&summary_report(vec![newer, older]));
+        let out = render(&summary_report(vec![newer, older]));
         assert!(
-            out.contains(
-                "[!] versions — 1 CLI newer than verified (drift possible): cp\u{b7}copilot"
-            ),
+            out.contains("[!] versions — 1 CLI newer than verified (drift possible)"),
             "older-than-verified is not an alarm: {out}"
         );
+        assert!(
+            out.contains("      cp\u{b7}copilot      1.0.79 installed \u{b7} 1.0.62 verified"),
+            "the PARSED pair that was compared, not the raw banner: {out}"
+        );
+        assert!(
+            !out.contains("0.18.0 verified"),
+            "older-than-verified grows no versions detail row: {out}"
+        );
+        // The raw banner stays on the source row, without skew prose.
+        assert!(out.contains("GitHub Copilot CLI 1.0.79."), "{out}");
+        assert!(!out.contains("NEWER than verified"), "{out}");
     }
 
     #[test]
-    fn summary_drift_expands_per_source_with_report_pointer() {
+    fn report_drift_verdict_line_points_at_rows_and_upstream() {
         let mut drifted = summary_row("gk", "grok");
         drifted.diag.drift = LogScanResult {
             unknown_event: 2,
             missing_field: 1,
             ..Default::default()
         };
-        let out = render_summary(&summary_report(vec![drifted]));
+        let out = render(&summary_report(vec![drifted]));
         assert!(
-            out.contains("[!] decode drift — 3 events across 1 source\n"),
+            out.contains(
+                "[!] decode drift — 3 events across 1 source (details on the source rows)\n"
+            ),
             "{out}"
         );
         assert!(
-            out.contains("    ! gk\u{b7}grok — 2 unknown-event, 1 missing-field"),
-            "{out}"
+            out.contains("\n          ↳ decode drift: 2 unknown-event, 1 missing-field"),
+            "the breakdown rides the source row: {out}"
         );
         assert!(
             out.contains("report: https://github.com/IvanWng97/pixtuoid/issues"),
@@ -1584,11 +1529,11 @@ mod tests {
     }
 
     #[test]
-    fn summary_unreadable_log_surfaces_the_warning_not_a_clean_verdict() {
+    fn report_unreadable_log_surfaces_the_warning_not_a_clean_verdict() {
         let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
         r.log_warning =
             Some("log unreadable: /x (denied) — the decode-drift counts are not meaningful".into());
-        let out = render_summary(&r);
+        let out = render(&r);
         assert!(
             out.contains("[!] decode drift — log unreadable: /x"),
             "{out}"
@@ -1597,7 +1542,7 @@ mod tests {
     }
 
     #[test]
-    fn summary_roots_alarm_only_on_env_set_missing() {
+    fn report_roots_list_every_row_and_alarm_only_on_env_set_missing() {
         let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
         r.roots = vec![
             RootStatus {
@@ -1613,43 +1558,50 @@ mod tests {
                 env: Some(("HERMES_HOME", true)),
             },
         ];
-        let out = render_summary(&r);
+        let out = render(&r);
+        assert!(out.contains("[!] roots — 1 of 2 present"), "{out}");
         assert!(
-            out.contains("[!] transcript roots — 1 of 2 present"),
+            out.contains("      claude-code   /home/u/.claude/projects\n"),
+            "a present root is a bare fact row: {out}"
+        );
+        assert!(
+            out.contains("      hermes        /home/u/.hermes (via $HERMES_HOME) — missing"),
             "{out}"
         );
         assert!(
-            out.contains("    ! hermes — $HERMES_HOME is set but /home/u/.hermes does not exist"),
+            out.contains("\n          ↳ $HERMES_HOME is set but that root does not exist"),
             "{out}"
         );
 
         // The same missing root WITHOUT an override is the ordinary
         // never-ran-that-CLI state — a fact, not an alarm.
         r.roots[1].env = None;
-        let out = render_summary(&r);
+        let out = render(&r);
+        assert!(out.contains("[✓] roots — 1 of 2 present"), "{out}");
         assert!(
-            out.contains("[✓] transcript roots — 1 of 2 present"),
+            out.contains("      hermes        /home/u/.hermes — missing"),
             "{out}"
         );
+        assert!(!out.contains("↳ $HERMES_HOME"), "{out}");
     }
 
     #[test]
-    fn summary_focus_probe_failure_warns_with_detail() {
+    fn report_focus_probe_failure_warns_with_detail() {
         let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
         r.cc_registry = Some(("/tmp/reg".into(), false));
-        let out = render_summary(&r);
+        let out = render(&r);
         assert!(
             out.contains("[!] focus-jump — NSRunningApplication (macOS)\n"),
             "{out}"
         );
         assert!(
-            out.contains("    ! claude-code registry probe missing: /tmp/reg"),
+            out.contains("claude-code — registry probe ✗ missing /tmp/reg"),
             "{out}"
         );
     }
 
     #[test]
-    fn summary_footer_counts_issue_categories() {
+    fn report_footer_counts_issue_categories() {
         let mut broken = summary_row("cx", "codex");
         broken.diag.install = Some(crate::install::verify::SchemaVerifyResult {
             issues: vec!["shim binary missing: /old".into()],
@@ -1658,11 +1610,8 @@ mod tests {
         let mut newer = summary_row("cp", "copilot");
         newer.installed_version = Some("2.0.0".into());
         newer.verified_version = "1.0.0";
-        let out = render_summary(&summary_report(vec![broken, newer]));
-        assert!(
-            out.ends_with("! issues in 2 categories · full detail: pixtuoid doctor -v\n"),
-            "{out}"
-        );
+        let out = render(&summary_report(vec![broken, newer]));
+        assert!(out.ends_with("! issues in 2 categories\n"), "{out}");
     }
 
     #[test]
@@ -1684,14 +1633,9 @@ mod tests {
             "got: {warning}"
         );
 
-        let full = run(dir.path(), crate::GraphicsMode::Auto, true).unwrap();
-        assert!(full.contains("⚠ log unreadable"), "{full}");
-        // The default rollup must not assert clean drift off a log it never read.
-        let rollup = run(dir.path(), crate::GraphicsMode::Auto, false).unwrap();
-        assert!(
-            rollup.contains("[!] decode drift — log unreadable"),
-            "{rollup}"
-        );
+        // The report must not assert clean drift off a log it never read.
+        let out = run(dir.path(), crate::GraphicsMode::Auto).unwrap();
+        assert!(out.contains("[!] decode drift — log unreadable"), "{out}");
     }
 
     #[test]
@@ -1756,12 +1700,9 @@ mod tests {
         std::env::set_var("XDG_CONFIG_HOME", home.join(".config"));
         std::env::remove_var("OPENCODE_CONFIG_DIR");
         std::env::set_var("PATH", &bin);
-        // The default (non-verbose) mode: the gate lives in `collect`, which
-        // both views share, so covering one covers both.
         let out = run(
             std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
             crate::GraphicsMode::Auto,
-            false,
         );
         let spawned = marker.exists();
         for (k, v) in saved {
@@ -1781,32 +1722,42 @@ mod tests {
 
     #[test]
     fn root_row_states_the_fact_and_only_warns_on_missing_with_an_override() {
-        let p = std::path::Path::new("/home/u/.copilot/session-state");
+        let ink = Ink { on: false };
+        let root = |exists, env| RootStatus {
+            source: "copilot",
+            root: "/home/u/.copilot/session-state".into(),
+            exists,
+            env,
+        };
 
-        let ok = root_row("copilot", p, true, Some(("COPILOT_HOME", true)));
-        assert!(ok.contains("(ok via $COPILOT_HOME)"), "{ok}");
-        assert!(!ok.contains('⚠'), "an existing root never warns: {ok}");
+        let ok = format_root_row(&root(true, Some(("COPILOT_HOME", true))), &ink);
+        assert!(ok.contains("(via $COPILOT_HOME)"), "{ok}");
+        assert!(
+            !ok.contains("missing"),
+            "an existing root never warns: {ok}"
+        );
 
         // A missing root with NO override is the ordinary "never ran this CLI"
         // case — a fact, not an alarm.
-        let quiet = root_row("copilot", p, false, Some(("COPILOT_HOME", false)));
-        assert!(quiet.contains("(missing)"), "{quiet}");
-        assert!(!quiet.contains('⚠'), "no override set -> no alarm: {quiet}");
+        let quiet = format_root_row(&root(false, Some(("COPILOT_HOME", false))), &ink);
+        assert!(quiet.contains("— missing"), "{quiet}");
+        assert!(!quiet.contains('↳'), "no override set -> no alarm: {quiet}");
         assert!(
             !quiet.contains("via $"),
             "an unset var is not a 'via': {quiet}"
         );
 
-        // Missing WHILE overridden is the #880 shape, and the only one worth a ⚠.
-        let loud = root_row("copilot", p, false, Some(("COPILOT_HOME", true)));
+        // Missing WHILE overridden is the #880 shape, and the only one worth an
+        // alarm line.
+        let loud = format_root_row(&root(false, Some(("COPILOT_HOME", true))), &ink);
         assert!(
-            loud.contains('⚠') && loud.contains("COPILOT_HOME"),
+            loud.contains('↳') && loud.contains("COPILOT_HOME"),
             "{loud}"
         );
 
         // A source with no override column at all never grows a `via`.
-        let plain = root_row("antigravity", p, false, None);
-        assert!(!plain.contains('⚠') && !plain.contains("via $"), "{plain}");
+        let plain = format_root_row(&root(false, None), &ink);
+        assert!(!plain.contains('↳') && !plain.contains("via $"), "{plain}");
     }
 
     #[test]
@@ -1943,10 +1894,14 @@ mod tests {
                 drift: LogScanResult::default(),
             },
         };
-        let c = format_doctor_row(&clean);
+        let ink = Ink { on: false };
+        let c = format_doctor_row(&clean, &ink);
         assert!(c.contains("codex") && c.contains("connected") && c.contains("installed"));
         assert!(c.contains("2.0.0"));
-        assert!(c.starts_with("  \u{2713}"), "sound row leads with ✓: {c}");
+        assert!(
+            c.starts_with("      \u{2713}"),
+            "sound row leads with ✓: {c}"
+        );
         assert!(!c.contains('\n'), "a healthy row has no reason line: {c}");
         assert!(
             !c.to_lowercase().contains("broken"),
@@ -1969,15 +1924,15 @@ mod tests {
                 },
             },
         };
-        let d = format_doctor_row(&drifted);
-        assert!(
-            d.starts_with("  \u{26a0}"),
-            "a drifting row leads with ⚠: {d}"
-        );
+        let d = format_doctor_row(&drifted, &ink);
+        assert!(d.starts_with("      !"), "a drifting row leads with !: {d}");
         assert!(d.contains("transcript-only"), "{d}");
-        assert!(d.contains("NEWER than verified"), "skew flagged: {d}");
         assert!(
-            d.contains("\n       \u{21b3} decode drift: 3 missing-field"),
+            !d.contains("verified"),
+            "skew prose left the row for the versions category: {d}"
+        );
+        assert!(
+            d.contains("\n          \u{21b3} decode drift: 3 missing-field"),
             "{d}"
         );
     }
@@ -2000,13 +1955,13 @@ mod tests {
                 drift: LogScanResult::default(),
             },
         };
-        let b = format_doctor_row(&broken);
+        let b = format_doctor_row(&broken, &Ink { on: false });
         assert!(
-            b.starts_with("  \u{26a0}"),
-            "a broken row leads with ⚠: {b}"
+            b.starts_with("      \u{2717}"),
+            "a broken row leads with ✗: {b}"
         );
         assert!(
-            b.contains("\n       \u{21b3} install broken: shim binary missing"),
+            b.contains("\n          \u{21b3} install broken: shim binary missing"),
             "broken reason on its own ↳ line: {b}"
         );
     }
@@ -2132,15 +2087,17 @@ mod tests {
     }
 
     #[test]
-    fn version_status_flags_skew_only_with_a_known_anchor() {
-        let u = version_status(Some("3.4.5"), "unknown");
-        assert_eq!(u, "3.4.5");
-        assert!(!u.contains("verified"));
-        assert!(version_status(Some("1.1.0"), "1.0.62").contains("NEWER than verified"));
-        assert!(version_status(Some("1.0.0"), "1.0.62").contains("older than verified"));
-        assert!(version_status(Some("1.0.62"), "1.0.62").contains("matches verified"));
-        let n = version_status(None, "1.0.62");
-        assert!(n.contains("unknown") && !n.contains("NEWER"));
+    fn version_cmp_compares_only_with_a_known_anchor() {
+        use std::cmp::Ordering;
+        assert_eq!(version_cmp(Some("3.4.5"), "unknown"), None);
+        assert_eq!(
+            version_cmp(Some("1.1.0"), "1.0.62"),
+            Some(Ordering::Greater)
+        );
+        assert_eq!(version_cmp(Some("1.0.0"), "1.0.62"), Some(Ordering::Less));
+        assert_eq!(version_cmp(Some("1.0.62"), "1.0.62"), Some(Ordering::Equal));
+        assert_eq!(version_cmp(None, "1.0.62"), None);
+        assert_eq!(version_cmp(Some("garbage"), "1.0.62"), None);
     }
 
     #[test]
@@ -2244,9 +2201,9 @@ mod tests {
                 drift: LogScanResult::default(),
             },
         };
-        let s = format_doctor_row(&row);
+        let s = format_doctor_row(&row, &Ink { on: false });
         assert!(
-            s.starts_with("  \u{2013}"),
+            s.starts_with("      \u{2013}"),
             "clean transcript-only leads with –: {s}"
         );
         assert!(s.contains("transcript-only"), "{s}");
@@ -2268,9 +2225,9 @@ mod tests {
                 drift: LogScanResult::default(),
             },
         };
-        let s = format_doctor_row(&row);
+        let s = format_doctor_row(&row, &Ink { on: false });
         assert!(
-            s.starts_with("  \u{25cb}"),
+            s.starts_with("      \u{25cb}"),
             "installable-not-installed leads with ○: {s}"
         );
         assert!(s.contains("not installed"), "{s}");
@@ -2299,10 +2256,13 @@ mod tests {
                 drift: LogScanResult::default(),
             },
         };
-        let s = format_doctor_row(&row);
-        assert!(s.starts_with("  \u{2713}"), "sound-with-notes still ✓: {s}");
+        let s = format_doctor_row(&row, &Ink { on: false });
         assert!(
-            s.contains("\n       \u{21b3} note: pixtuoid-hook not on PATH"),
+            s.starts_with("      \u{2713}"),
+            "sound-with-notes still ✓: {s}"
+        );
+        assert!(
+            s.contains("\n          \u{21b3} note: pixtuoid-hook not on PATH"),
             "note on its own ↳ line: {s}"
         );
         assert!(
@@ -2333,7 +2293,7 @@ mod tests {
                 },
             },
         };
-        let s = format_doctor_row(&row);
+        let s = format_doctor_row(&row, &Ink { on: false });
         assert!(
             s.contains("decode drift: 2 unknown-event, 1 unknown-dispatch, 1 shape-drift"),
             "{s}"

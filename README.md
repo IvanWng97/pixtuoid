@@ -65,7 +65,7 @@ Then launch:
 pixtuoid
 ```
 
-Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code, Codex, Antigravity, Reasonix, …) — pixtuoid wires up the integration for you, no separate install step. In another terminal, start that coding agent. A character walks in from the elevator within a second; disconnect in the same panel and it walks back out. The panel also flags a source whose hooks are connected but broken (run `pixtuoid doctor` for a health rollup, `pixtuoid doctor -v` for the full per-source report).
+Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code, Codex, Antigravity, Reasonix, …) — pixtuoid wires up the integration for you, no separate install step. In another terminal, start that coding agent. A character walks in from the elevator within a second; disconnect in the same panel and it walks back out. The panel also flags a source whose hooks are connected but broken (run `pixtuoid doctor` for the full health report).
 
 **Keyboard shortcuts:** `q` quit · `p` pause · `s` sources (connect / health) · `t` themes · `m` sound (`+`/`-` volume) · `Tab` agent dashboard · `?` help · `↑↓/jk/PgUp/PgDn` floors · click an agent to bring its terminal to the front (`f` in the dashboard)
 
