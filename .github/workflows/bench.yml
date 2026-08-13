@@ -1,0 +1,41 @@
+name: bench
+
+# ON-DEMAND only, mirroring mutants.yml: a dispatch runs ONLY this, and nothing
+# `needs:` it, so a slow run gates nothing. Shared-runner wall-clock is noise
+# (criterion's own FAQ says not to rely on CI numbers), so this exists for
+# trend evidence on request — the authoritative numbers are `just bench` runs
+# on a quiet local machine, recorded in commit messages. It still earns its
+# keep beside codspeed.yml: an x86 Linux wall-clock run is the one signal that
+# can check an architecture-specific claim from an aarch64 dev machine, which
+# instruction counting can't.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    name: render benchmarks (on-demand, advisory)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: v1-rust # match setup-cargo-just's default cache namespace
+      - uses: extractions/setup-just@v4
+      - name: Run render benchmarks (advisory, non-blocking)
+        run: just bench
+      # JSON measurements only — the lean criterion feature set builds no HTML.
+      - name: Upload criterion measurements
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: criterion-measurements
+          path: target/criterion/
+          retention-days: 14
+          if-no-files-found: ignore

@@ -2462,6 +2462,7 @@ fn paint_frame_is_pure_and_byte_identical() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let black = Rgb { r: 0, g: 0, b: 0 };
     let mut cache = FrameCache::new();
+    let mut base_fill = BaseFillCache::new();
     let mut buf1 = RgbBuffer::filled(layout.buf_w, layout.buf_h, black);
     let mut buf2 = RgbBuffer::filled(layout.buf_w, layout.buf_h, black);
     for buf in [&mut buf1, &mut buf2] {
@@ -2473,6 +2474,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 now,
                 buf,
                 cache: &mut cache,
+                base_fill: &mut base_fill,
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
                 active_pet: None,
@@ -3484,6 +3486,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
             let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
             let mut cache = FrameCache::new();
+            let mut base_fill = BaseFillCache::new();
             let ctx = PaintCtx {
                 scene: &scene,
                 layout: &layout,
@@ -3491,6 +3494,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 now,
                 buf: &mut buf,
                 cache: &mut cache,
+                base_fill: &mut base_fill,
                 theme,
                 floor,
                 active_pet: None,
@@ -3854,5 +3858,115 @@ fn the_desk_shadow_is_centred_on_the_desk_that_casts_it() {
             e.cx.saturating_sub(e.half_w) >= desk.x && e.cx + e.half_w <= desk.x + v.w,
             "{desk:?}: the shadow must stay inside the desk's ground contact"
         );
+    }
+}
+
+#[test]
+fn wash_since_washes_exactly_the_diff_set_and_matches_the_naive_reference() {
+    let washes = [
+        [
+            (
+                Rgb {
+                    r: 255,
+                    g: 200,
+                    b: 150,
+                },
+                0.35f32,
+            ),
+            (
+                Rgb {
+                    r: 10,
+                    g: 20,
+                    b: 40,
+                },
+                0.15f32,
+            ),
+        ],
+        [
+            (Rgb { r: 0, g: 0, b: 0 }, 1.0f32),
+            (
+                Rgb {
+                    r: 255,
+                    g: 255,
+                    b: 255,
+                },
+                0.001f32,
+            ),
+        ],
+        [
+            (
+                Rgb {
+                    r: 90,
+                    g: 120,
+                    b: 200,
+                },
+                0.0f32,
+            ),
+            (
+                Rgb {
+                    r: 200,
+                    g: 90,
+                    b: 30,
+                },
+                0.6f32,
+            ),
+        ],
+    ];
+    // Odd width forces a partial trailing chunk; 1-px and 0-px cases guard the
+    // degenerate loops.
+    for (wash, (w, h)) in washes
+        .into_iter()
+        .cycle()
+        .zip([(67u16, 9u16), (192, 20), (1, 3), (0, 0)])
+        .chain(washes.into_iter().map(|wa| (wa, (128, 16))))
+    {
+        let mut lcg = 0x2545F491u32;
+        let mut next = || {
+            lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
+            Rgb {
+                r: (lcg >> 24) as u8,
+                g: (lcg >> 16) as u8,
+                b: (lcg >> 8) as u8,
+            }
+        };
+        let mut buf = RgbBuffer::filled(w, h, Rgb { r: 0, g: 0, b: 0 });
+        for y in 0..h {
+            for x in 0..w {
+                buf.put(x, y, next());
+            }
+        }
+        let since = buf.clone();
+        if w > 0 && h > 0 {
+            buf.put(0, 0, next());
+            buf.put(w - 1, h - 1, next());
+            let mid_y = h / 2;
+            for x in 0..w.min(80) {
+                buf.put(x, mid_y, next());
+            }
+            let lone = (w / 3, h - 1);
+            buf.put(lone.0, lone.1, next());
+            // A write of the identical value must stay invisible to the diff.
+            let same = since.get(w / 2, 0);
+            buf.put(w / 2, 0, same);
+        }
+        let mut expected = buf.clone();
+        for y in 0..h {
+            for x in 0..w {
+                let painted = expected.get(x, y);
+                if painted != since.get(x, y) {
+                    expected.put(x, y, wash_object(painted, wash));
+                }
+            }
+        }
+        wash_since(&mut buf, &since, wash);
+        for y in 0..h {
+            for x in 0..w {
+                assert_eq!(
+                    buf.get(x, y),
+                    expected.get(x, y),
+                    "({x},{y}) diverged from the naive reference at {w}x{h}"
+                );
+            }
+        }
     }
 }

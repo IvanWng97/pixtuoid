@@ -132,6 +132,10 @@ tool runs in CI.
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a
 gate). Coverage: `just coverage`. Property invariants use `proptest`.
+Benchmarks: `just bench` (criterion, `pixtuoid-scene/benches/render_frame.rs`) —
+LOCAL statistical numbers; CI's `bench.yml` is on-demand advisory like mutants,
+never a gate (shared-runner wall-clock is noise), and `codspeed.yml` tracks the
+same benches per PR as instruction-count simulation (also advisory).
 
 ### Visual verification
 

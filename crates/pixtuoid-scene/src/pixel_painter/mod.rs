@@ -98,12 +98,32 @@ pub use anchors::seated_anchor_facing;
 pub use palette::tool_glow_for_kind;
 
 /// Applies the hour's object terms to every pixel painted since `since`.
+///
+/// The branch-free XOR-OR reduction replaces a hard-to-predict per-pixel
+/// branch with one predictable branch per `WASH_SCAN_CHUNK` on the clean
+/// path, and the wash itself runs through a lazily-built [`palette::RgbLut`]
+/// over the chunks that differ. Byte-identical to per-pixel [`wash_object`]
+/// on the diff set.
 fn wash_since(buf: &mut RgbBuffer, since: &RgbBuffer, wash: [(Rgb, f32); 2]) {
-    for y in 0..buf.height() {
-        for x in 0..buf.width() {
-            let painted = buf.get(x, y);
-            if painted != since.get(x, y) {
-                buf.put(x, y, wash_object(painted, wash));
+    const WASH_SCAN_CHUNK: usize = 64;
+    let cur = buf.as_mut_slice();
+    let old = since.as_slice();
+    debug_assert_eq!(cur.len(), old.len());
+    let mut lut: Option<palette::RgbLut> = None;
+    for (cur_c, old_c) in cur
+        .chunks_mut(WASH_SCAN_CHUNK)
+        .zip(old.chunks(WASH_SCAN_CHUNK))
+    {
+        let differs = cur_c.iter().zip(old_c).fold(0u8, |acc, (a, b)| {
+            acc | (a.r ^ b.r) | (a.g ^ b.g) | (a.b ^ b.b)
+        });
+        if differs != 0 {
+            let lut =
+                lut.get_or_insert_with(|| palette::RgbLut::tabulate(|c| wash_object(c, wash)));
+            for (p, o) in cur_c.iter_mut().zip(old_c) {
+                if *p != *o {
+                    *p = lut.apply(*p);
+                }
             }
         }
     }
@@ -121,6 +141,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
 }
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
+pub(crate) use background::BaseFillCache;
 #[cfg(test)]
 pub(crate) use furniture::COOLER_WATER;
 pub(crate) use sim::{sim_step, SimStores};
@@ -291,9 +312,10 @@ pub struct PixelCtx<'a> {
 }
 
 /// The paint pass's borrow set — everything `paint_frame` may touch. The only
-/// `&mut`s are the pixel buffer and the paint-local `FrameCache`; the sim
-/// stores are absent BY TYPE (`motion` is an immutable view, read by the debug
-/// route overlay), so painting cannot move the world.
+/// `&mut`s are the pixel buffer and the paint-local caches (`FrameCache`,
+/// `BaseFillCache`); the sim stores are absent BY TYPE (`motion` is an
+/// immutable view, read by the debug route overlay), so painting cannot move
+/// the world.
 struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a Layout,
@@ -301,6 +323,7 @@ struct PaintCtx<'a> {
     now: SystemTime,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
+    base_fill: &'a mut background::BaseFillCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
     active_pet: Option<&'a crate::pet::PetState>,
@@ -339,6 +362,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             now: ctx.now,
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
+            base_fill: &mut ctx.store.base_fill,
             theme: ctx.theme,
             floor: ctx.floor,
             active_pet: ctx.active_pet,
@@ -513,6 +537,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // must skip a window that would otherwise bleed through the elevator frame.
     let door_x_range = ctx.layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     paint_floor_and_walls(
+        ctx.base_fill,
         ctx.buf,
         buf_w,
         buf_h,

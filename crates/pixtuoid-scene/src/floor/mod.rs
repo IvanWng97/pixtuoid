@@ -112,6 +112,8 @@ pub struct FloorCtx {
     pub history: PoseHistory,
     /// Per-agent recolored-sprite cache.
     pub cache: FrameCache,
+    /// Memoized carpet+wall base fill (see `BaseFillCache`).
+    pub(crate) base_fill: crate::pixel_painter::BaseFillCache,
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
@@ -140,6 +142,7 @@ impl FloorCtx {
             overlay: OccupancyOverlay::new(),
             history: PoseHistory::new(),
             cache: FrameCache::new(),
+            base_fill: crate::pixel_painter::BaseFillCache::new(),
             light: LightingState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,

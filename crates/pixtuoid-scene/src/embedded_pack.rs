@@ -147,6 +147,15 @@ fn load_embedded_pack() -> Result<Pack> {
     )
 }
 
+/// The compiled-in default pack with NO user-pack merge — the deterministic
+/// loader for measurement harnesses (`benches/`), where an operator's
+/// `$XDG_CONFIG_HOME` pack silently changing the drawable set would make the
+/// numbers non-reproducible. Mechanism, not contract (hence hidden).
+#[doc(hidden)]
+pub fn embedded_default_pack() -> Result<Pack> {
+    load_embedded_pack()
+}
+
 /// Every default sprite as `(filename, source)`. The macro keeps a new sprite to
 /// a SINGLE line — not a `let`-binding AND a matching tuple entry that can
 /// silently drift. Extracted so [`test_wide_pack`] reuses the EXACT sprite set

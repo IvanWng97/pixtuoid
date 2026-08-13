@@ -246,7 +246,16 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     };
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
-        &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        &mut BaseFillCache::new(),
+        &mut buf,
+        buf_w,
+        buf_h,
+        now,
+        &look,
+        top_wall_h,
+        None,
+        theme,
+        0.0,
     );
     // Reaching here without a panic IS the primary assertion — `RgbBuffer::put`
     // has no bounds guard.
@@ -296,7 +305,16 @@ fn render_office_themed(
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
     paint_floor_and_walls(
-        &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        &mut BaseFillCache::new(),
+        &mut buf,
+        buf_w,
+        buf_h,
+        now,
+        &look,
+        top_wall_h,
+        None,
+        theme,
+        0.0,
     );
     buf
 }
@@ -879,5 +897,169 @@ fn fog_still_glows_over_the_midnight_sky() {
             "{}: smog must still veil the midnight sky (smog={smog:.1} vs clear={clear:.1})",
             theme.name
         );
+    }
+}
+
+#[test]
+fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
+    let normal = crate::theme::theme_by_name("normal").expect("normal theme");
+    let other = crate::theme::ALL_THEMES
+        .iter()
+        .find(|t| {
+            t.surface.carpet_base != normal.surface.carpet_base
+                || t.surface.wall != normal.surface.wall
+        })
+        .copied()
+        .expect("a theme with a different carpet/wall exists");
+    let now = crate::localclock::on_day(1, 12);
+    let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
+    let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
+        let look = time_of_day_look(now, theme);
+        let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
+        paint_floor_and_walls(
+            base_fill, &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+        );
+        buf
+    };
+    let mut shared = BaseFillCache::new();
+    let first = paint(&mut shared, normal);
+    let hit = paint(&mut shared, normal);
+    assert_eq!(
+        first.as_slice(),
+        hit.as_slice(),
+        "a cache HIT must be byte-identical to the fill it memoized"
+    );
+    let switched = paint(&mut shared, other);
+    let fresh = paint(&mut BaseFillCache::new(), other);
+    assert_eq!(
+        switched.as_slice(),
+        fresh.as_slice(),
+        "a theme swap on a warm cache must repaint, not serve the stale fill"
+    );
+    let back = paint(&mut shared, normal);
+    assert_eq!(
+        first.as_slice(),
+        back.as_slice(),
+        "swapping back must re-derive the original fill"
+    );
+
+    // Weather leg: the tint changes the CARPET colours while the wall stays
+    // put — the one key component nothing else covers.
+    struct Reset;
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            set_weather_override(None);
+        }
+    }
+    let _reset = Reset;
+    set_weather_override(Some(Weather::Clear));
+    let clear = paint(&mut shared, normal);
+    set_weather_override(Some(Weather::Rain));
+    let rain_shared = paint(&mut shared, normal);
+    let rain_fresh = paint(&mut BaseFillCache::new(), normal);
+    assert_eq!(
+        rain_shared.as_slice(),
+        rain_fresh.as_slice(),
+        "a weather-tint change on a warm cache must repaint the carpet, not serve the stale fill"
+    );
+    assert_ne!(
+        clear.as_slice(),
+        rain_shared.as_slice(),
+        "clear vs rain must differ somewhere in the carpet (else this leg pins nothing)"
+    );
+}
+
+#[test]
+fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
+    let theme = crate::theme::theme_by_name("normal").expect("normal theme");
+    let now = crate::localclock::on_day(1, 12);
+    let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
+        let look = time_of_day_look(now, theme);
+        let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
+        paint_floor_and_walls(base_fill, &mut buf, w, h, now, &look, 14, None, theme, 0.0);
+        buf
+    };
+    // The memo is single-slot, so each leg varies ONE key component against
+    // the immediately preceding call — a co-varying sibling would mask the
+    // component under test (a width-only change must repaint even when the
+    // height alone would have missed the memo anyway).
+    let mut warm = BaseFillCache::new();
+    let big = paint_at(&mut warm, 96, 64);
+    let narrow_shared = paint_at(&mut warm, 80, 64);
+    let narrow_fresh = paint_at(&mut BaseFillCache::new(), 80, 64);
+    assert_eq!(
+        narrow_shared.as_slice(),
+        narrow_fresh.as_slice(),
+        "a width-only resize on a warm cache must recompute the fill, not serve (or panic on) the old size"
+    );
+    let short_shared = paint_at(&mut warm, 80, 48);
+    let short_fresh = paint_at(&mut BaseFillCache::new(), 80, 48);
+    assert_eq!(
+        short_shared.as_slice(),
+        short_fresh.as_slice(),
+        "a height-only resize on a warm cache must recompute the fill"
+    );
+    let big_again = paint_at(&mut warm, 96, 64);
+    assert_eq!(
+        big.as_slice(),
+        big_again.as_slice(),
+        "growing back must re-derive the original fill"
+    );
+}
+
+#[test]
+fn lightning_flash_matches_the_per_pixel_blend_reference() {
+    use std::time::{Duration, UNIX_EPOCH};
+    let bucket = (0u64..)
+        .find(|&b| strike_offset(b) < 500)
+        .expect("a low-offset bucket exists");
+    let at =
+        UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket));
+    let mut lcg = 0xC0FFEEu32;
+    let mut next = || {
+        lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
+        Rgb {
+            r: (lcg >> 24) as u8,
+            g: (lcg >> 16) as u8,
+            b: (lcg >> 8) as u8,
+        }
+    };
+    let (w, h) = (37u16, 9u16);
+    let mut buf = RgbBuffer::filled(w, h, Rgb { r: 0, g: 0, b: 0 });
+    for y in 0..h {
+        for x in 0..w {
+            buf.put(x, y, next());
+        }
+    }
+    let mut expected = buf.clone();
+    let alpha = 0.20 * lightning_flash_level(at);
+    assert!(alpha > 0.0, "the fixture time must sit inside a flash");
+    for y in 0..h {
+        for x in 0..w {
+            let c = expected.get(x, y);
+            expected.put(
+                x,
+                y,
+                blend_rgb(
+                    c,
+                    Rgb {
+                        r: 255,
+                        g: 255,
+                        b: 255,
+                    },
+                    alpha,
+                ),
+            );
+        }
+    }
+    paint_lightning_flash(&mut buf, at, Weather::Storm);
+    for y in 0..h {
+        for x in 0..w {
+            assert_eq!(
+                buf.get(x, y),
+                expected.get(x, y),
+                "({x},{y}) diverged from the per-pixel blend reference"
+            );
+        }
     }
 }
