@@ -85,14 +85,21 @@ pub fn color_preflight(
     }
     let no_color_set = matches!(no_color, Some(v) if !v.is_empty());
     if no_color_set {
-        let forced = matches!(clicolor_force.map(str::trim), Some(v) if !v.is_empty() && v != "0");
-        return if forced {
+        return if clicolor_forced(clicolor_force) {
             ColorPreflight::ForceColor
         } else {
             ColorPreflight::RefuseNoColor
         };
     }
     ColorPreflight::Proceed
+}
+
+/// The bixense `$CLICOLOR_FORCE` convention: set and `!= 0` forces color "no
+/// matter what" — including into a pipe. Shared by [`color_preflight`] (the
+/// `$NO_COLOR` override) and doctor's paint decision, so the two can't parse
+/// the variable differently.
+pub(crate) fn clicolor_forced(v: Option<&str>) -> bool {
+    matches!(v.map(str::trim), Some(v) if !v.is_empty() && v != "0")
 }
 
 /// The `pixtuoid doctor` color-availability line, derived from the SAME
@@ -132,34 +139,33 @@ fn parse_decrqss_truecolor(resp: &[u8]) -> Option<bool> {
     Some(normalized.contains("48:2:1:2:3") || normalized.contains("48:2::1:2:3"))
 }
 
-/// The `pixtuoid doctor` `terminal:` line — `$TERM` / `$COLORTERM` and the
-/// truecolor verdict, naming HOW it was determined so a "colors look wrong"
-/// report is self-diagnosable. `probe` is the `query_truecolor` result (or `None`
-/// when doctor isn't attached to a tty).
-pub(crate) fn terminal_diagnostic_row(
-    term: Option<&str>,
-    colorterm: Option<&str>,
-    probe: Option<bool>,
-) -> String {
-    let shown = |v: Option<&str>| match v {
+/// An env value for display: sanitized, or `(unset)` for absent/empty.
+pub(crate) fn shown_env(v: Option<&str>) -> String {
+    match v {
         Some(s) if !s.is_empty() => crate::strip_control_chars(s),
         _ => "(unset)".to_string(),
-    };
-    let verdict = if colorterm_is_truecolor(colorterm) {
+    }
+}
+
+/// The truecolor verdict, naming HOW it was determined so a "colors look wrong"
+/// report is self-diagnosable. `probe` is the `query_truecolor` result;
+/// `probe_skipped` separates "asked, no answer" from "never asked" (piped /
+/// `$TERM=dumb`), so a piped report doesn't claim the terminal went silent.
+pub(crate) fn truecolor_verdict(
+    colorterm: Option<&str>,
+    probe: Option<bool>,
+    probe_skipped: bool,
+) -> &'static str {
+    if colorterm_is_truecolor(colorterm) {
         "yes (COLORTERM)"
     } else {
         match probe {
             Some(true) => "yes (terminal query)",
             Some(false) => "no (terminal downsamples)",
+            None if probe_skipped => "unknown (probe skipped — no color-capable tty)",
             None => "unknown (terminal did not answer)",
         }
-    };
-    format!(
-        "terminal: TERM={} COLORTERM={} truecolor={}",
-        shown(term),
-        shown(colorterm),
-        verdict,
-    )
+    }
 }
 
 /// The probe bytes: set bg to `48;2;1;2;3` — the SEMICOLON 24-bit SGR form
@@ -432,26 +438,36 @@ mod tests {
     }
 
     #[test]
-    fn terminal_row_names_how_truecolor_was_determined() {
-        let by_colorterm = terminal_diagnostic_row(Some("xterm-256color"), Some("truecolor"), None);
-        assert!(by_colorterm.contains("TERM=xterm-256color"));
-        assert!(by_colorterm.contains("COLORTERM=truecolor"));
-        assert!(by_colorterm.contains("truecolor=yes (COLORTERM)"));
-
-        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(true))
-            .contains("truecolor=yes (terminal query)"));
-        assert!(terminal_diagnostic_row(Some("xterm"), None, Some(false))
-            .contains("truecolor=no (terminal downsamples)"));
-
-        let unknown = terminal_diagnostic_row(None, None, None);
-        assert!(unknown.contains("TERM=(unset)"), "{unknown}");
-        assert!(unknown.contains("COLORTERM=(unset)"), "{unknown}");
-        assert!(
-            unknown.contains("truecolor=unknown (terminal did not answer)"),
-            "{unknown}"
+    fn truecolor_verdict_names_how_it_was_determined() {
+        assert_eq!(
+            truecolor_verdict(Some("truecolor"), None, true),
+            "yes (COLORTERM)"
         );
+        assert_eq!(
+            truecolor_verdict(None, Some(true), false),
+            "yes (terminal query)"
+        );
+        assert_eq!(
+            truecolor_verdict(None, Some(false), false),
+            "no (terminal downsamples)"
+        );
+        assert_eq!(
+            truecolor_verdict(None, None, false),
+            "unknown (terminal did not answer)"
+        );
+        // A skipped probe is not an unanswered one — piped runs must not claim
+        // the terminal went silent.
+        assert_eq!(
+            truecolor_verdict(None, None, true),
+            "unknown (probe skipped — no color-capable tty)"
+        );
+    }
 
-        let sanitized = terminal_diagnostic_row(Some("a\x1b[31mb"), Some("truecolor"), None);
+    #[test]
+    fn shown_env_falls_back_to_unset_and_sanitizes() {
+        assert_eq!(shown_env(None), "(unset)");
+        assert_eq!(shown_env(Some("")), "(unset)");
+        let sanitized = shown_env(Some("a\x1b[31mb"));
         assert!(!sanitized.contains('\u{1b}'), "{sanitized}");
     }
 }
