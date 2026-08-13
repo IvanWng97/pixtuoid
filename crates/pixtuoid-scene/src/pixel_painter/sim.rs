@@ -435,7 +435,9 @@ fn resolve_characters(
     }
     // ONE guard for every pose arm, on the frame each placement will actually
     // blit — an east-edge wanderer otherwise loses part of its sprite to
-    // `blit_frame`'s silent clip.
+    // `blit_frame`'s silent clip. `anchor` only: the z-key and the chitchat
+    // visitor keep pre-clamp geometry, unlike the creature sites which re-derive
+    // their z row from the clamped point.
     let buf = Size {
         w: layout.buf_w,
         h: layout.buf_h,
@@ -447,7 +449,7 @@ fn resolve_characters(
             .map_or(
                 Size {
                     w: char_w,
-                    h: crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
+                    h: crate::layout::CHARACTER_SPRITE_H,
                 },
                 |f| Size {
                     w: f.width(),

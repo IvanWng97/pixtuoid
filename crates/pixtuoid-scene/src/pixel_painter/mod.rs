@@ -980,11 +980,17 @@ fn enqueue_gateway_mascots<'a>(
         else {
             continue;
         };
+        /// Fallback when a custom pack lacks the mascot anim: the bundled
+        /// lobster's size, so the z-sort row and the canvas clamp stay sane —
+        /// the blit itself no-ops.
+        const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
         let (mascot_w, mascot_h) = ctx
             .pack
             .animation(anim_name)
             .and_then(|a| a.frames.first())
-            .map_or((14, 12), |f| (f.width(), f.height()));
+            .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
+                (f.width(), f.height())
+            });
         let pos = anchors::keep_sprite_on_canvas(
             Anchor::Center,
             pos,

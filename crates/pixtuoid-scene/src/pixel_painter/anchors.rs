@@ -82,13 +82,8 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
 /// Nudge a sprite so the whole frame lands inside the canvas, answering in the
 /// SAME anchor space `pos` came in.
 ///
-/// Parameterized on [`Anchor`] rather than split in two, so no call site can
-/// reach for the other convention's bounds: centre-anchored creatures and
-/// top-left-anchored characters need different arithmetic and read it off one
-/// authority.
-///
-/// It lives at PAINT because invariant #6 runs one way: sprite size never moves
-/// a sim position.
+/// Lives at PAINT because invariant #6 runs one way: sprite size never moves a
+/// sim position.
 pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
     match anchor {
         // `min` before `max`: on a buffer narrower than the sprite the lower
@@ -143,6 +138,10 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 /// follow the character rather than staying anchored at the desk. Uses
 /// `derive_with_routing` so labels track agents along their A* path instead of
 /// jumping to the straight-line midpoint.
+///
+/// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
+/// badge and the tui hit box on pixels the sprite occupies (`SHARP-EDGES.md`:
+/// "clamped to the canvas TWICE").
 pub fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
@@ -176,15 +175,14 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    // The label's twin of the sprite's own guard in `sim::resolve_characters`,
-    // on the DEFAULT frame size like the anchor above — a badge that stayed put
-    // while its sprite was nudged would be worse than the ±1px.
+    // Badge and hit box follow the sprite's own guard in
+    // `sim::resolve_characters`, on the DEFAULT size like the anchor above.
     Some(keep_sprite_on_canvas(
         Anchor::TopLeft,
         anchor,
         Size {
             w,
-            h: crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
+            h: crate::layout::CHARACTER_SPRITE_H,
         },
         Size {
             w: layout.buf_w,
