@@ -64,10 +64,9 @@ fn the_too_small_notice_survives_an_open_onboarding_modal() {
 }
 
 /// The size the notice NAMES has to be a size that works — a requirement nobody
-/// re-derives is the half of the rule that rots. WORKS means an office an agent
-/// can sit in: the old 32-col minimum laid out a deskless one.
+/// re-derives is the half of the rule that rots.
 #[test]
-fn the_size_the_too_small_notice_names_is_one_that_lays_out() {
+fn the_size_the_too_small_notice_names_is_one_that_seats_someone() {
     let scene = scene_with(vec![idle("/sm/0.jsonl", 0, t0())], 16);
     let mut small = build(80, 24, vec![]);
     small.render(&scene, &pack(), t0()).expect("render");

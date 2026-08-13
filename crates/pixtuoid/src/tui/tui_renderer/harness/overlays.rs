@@ -77,8 +77,8 @@ fn version_popup_interrupt_continues_from_edge() {
     );
 }
 
-/// A classic 80×24 terminal is under `min_layout_size`, so it falls through to
-/// `draw_footer_only_frame` — this pins the popup CONTENT on that path.
+/// A classic 80×24 terminal is short of the rows `min_layout_size` works out to, so
+/// it falls through to `draw_footer_only_frame` — this pins the popup CONTENT there.
 ///
 /// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail
 /// is the first thing to disappear and the `⋮` marker the first to appear.

@@ -39,15 +39,21 @@ fn couch_pos(cubicle_band: &Bounds, top_margin: u16, west_clear_x: u16) -> Point
 /// The narrowest cubicle band that seats ONE desk — the two terms
 /// `compute_pod_desks`' x-clamp compares: the first pod's west aisle half, and
 /// the desk's blocked GROUND width (side cabinets included, so NOT `DESK_W`).
-pub(super) const MIN_BAND_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
+pub(super) const DESK_BAND_MIN_W: u16 = INTER_POD_AISLE_X / 2 + DESK_GROUND_W;
+
+/// The cubicle band's width for a buffer — everything east of the left column
+/// and its 1px divider. THE formula `compute_with_seed` and the width-floor
+/// derivation both step from.
+pub(super) const fn band_w(buf_w: u16, mid_x_pct: u16) -> u16 {
+    buf_w.saturating_sub(pct(buf_w, mid_x_pct) + 1)
+}
 
 /// The smallest buffer `compute_with_seed` lays out — below either bound it
 /// returns `None` ("terminal too small").
 ///
-/// The width is SOLVED against the band, not the buffer: desks only ever land
-/// east of the left column (`buf_w − mid_x − 1` wide), so pricing one desk
-/// against the full buffer laid out an office with ZERO desks at 32–36px — a
-/// valid layout that could never seat an agent.
+/// The width is SOLVED against the band, not the buffer: desks only land east
+/// of the left column, so pricing one desk against the whole buffer advertised
+/// a size that lays out an office with no desk to seat anyone.
 pub(super) const MIN_LAYOUT_W: u16 = min_layout_w();
 pub(super) const MIN_LAYOUT_H: u16 = 40 + MIN_TOP_MARGIN;
 
@@ -67,8 +73,8 @@ const fn widest_mid_x_pct() -> u16 {
 }
 
 const fn min_layout_w() -> u16 {
-    let mut w = MIN_BAND_W;
-    while w - (pct(w, widest_mid_x_pct()) + 1) < MIN_BAND_W {
+    let mut w = DESK_BAND_MIN_W;
+    while band_w(w, widest_mid_x_pct()) < DESK_BAND_MIN_W {
         w += 1;
     }
     w
@@ -194,7 +200,7 @@ pub(super) fn compute_with_seed(
     };
 
     let right_x = mid_x + 1;
-    let right_w = buf_w.saturating_sub(right_x);
+    let right_w = band_w(buf_w, geom.mid_x_pct());
     // East edge of the meeting-room divider wall — the west bound lounge
     // furniture must clear. No meeting room ⇒ no wall ⇒ the clamp collapses to
     // the band start.
@@ -1118,9 +1124,10 @@ pub(super) enum FloorVariant {
 }
 
 impl FloorVariant {
-    /// Every variant, so a const derivation (the width floor) can sweep the
-    /// roster instead of naming the widest one and rotting when it changes.
-    const ALL: [Self; 5] = [
+    /// THE roster: the width-floor derivation sweeps it, `from_seed` indexes it,
+    /// and `COUNT` is its length — so a variant missing from here is unreachable
+    /// and prices nothing, which `the_sweep_reaches_every_floor_variant` reds on.
+    pub(super) const ALL: [Self; 5] = [
         FloorVariant::Standard,
         FloorVariant::OpenPlan,
         FloorVariant::Dense,
@@ -1134,13 +1141,7 @@ impl FloorVariant {
 
     /// Select the variant for a floor seed (Fibonacci hashing).
     fn from_seed(floor_seed: u64) -> Self {
-        match floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT {
-            0 => FloorVariant::Standard,
-            1 => FloorVariant::OpenPlan,
-            2 => FloorVariant::Dense,
-            3 => FloorVariant::Senior,
-            _ => FloorVariant::Lounge,
-        }
+        Self::ALL[(floor_seed.wrapping_mul(Self::HASH_MULT) % Self::COUNT) as usize]
     }
 
     /// Whether this variant encloses a meeting room (== the vertical-wall presence).
@@ -1670,7 +1671,7 @@ mod tests {
         );
     }
 
-    /// `MIN_BAND_W` must be where `compute_pod_desks` ITSELF stops fitting a desk —
+    /// `DESK_BAND_MIN_W` must be where `compute_pod_desks` ITSELF stops fitting a desk —
     /// the width floor is derived from it, so a formula that merely looks right
     /// would advertise a minimum the placer disagrees with.
     #[test]
@@ -1687,7 +1688,10 @@ mod tests {
             stride_y: pod_h + super::INTER_POD_AISLE_Y,
             couch_to_desk_extra: 0,
         };
-        for (width, seats) in [(super::MIN_BAND_W, true), (super::MIN_BAND_W - 1, false)] {
+        for (width, seats) in [
+            (super::DESK_BAND_MIN_W, true),
+            (super::DESK_BAND_MIN_W - 1, false),
+        ] {
             let band = super::Bounds {
                 x: 5,
                 y: 5,

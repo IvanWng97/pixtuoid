@@ -912,7 +912,6 @@ pub const pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS: u16
 pub const pixtuoid_scene::layout::CHARACTER_SPRITE_W: u16
 pub const pixtuoid_scene::layout::CLASSIC_OFFICE_DESKS: usize
 pub const pixtuoid_scene::layout::DESK_APPROACH: pixtuoid_scene::layout::ApproachSides
-pub const pixtuoid_scene::layout::DESK_GAP_X: u16
 pub const pixtuoid_scene::layout::DESK_GAP_Y: u16
 pub const pixtuoid_scene::layout::DESK_H: u16
 pub const pixtuoid_scene::layout::DESK_W: u16

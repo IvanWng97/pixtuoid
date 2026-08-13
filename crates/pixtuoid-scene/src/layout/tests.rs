@@ -169,14 +169,15 @@ fn snack_shelf_hugs_the_west_wall_and_refuses_narrow_rooms() {
         .expect("roomy pantry hosts the shelf");
     let vis = furniture_def(Furniture::SnackShelf).visual;
     assert_eq!(shelf.pos.x, pr.x + 1 + vis.w / 2, "west-wall hug");
-    // The narrowest buffer that lays out yields a 6-7px pantry.
+    // The narrowest buffer that lays out leaves the pantry under the shelf's
+    // `vis.w + 4` width gate.
     let s = SceneLayout::compute_with_seed(crate::layout::compute::MIN_LAYOUT_W, 100, None, 1)
         .expect("fits");
     assert!(
         !s.waypoints
             .iter()
             .any(|w| matches!(w.kind, WaypointKind::SnackShelf)),
-        "a 6px room refuses the 7px shelf"
+        "a pantry under the shelf's width gate must refuse it"
     );
 }
 
@@ -450,8 +451,8 @@ fn compute_returns_none_at_exact_boundary() {
 }
 
 /// The advertised minimum is a promise the painter repeats to the user, so it
-/// has to be a size an agent can actually SIT at — 32-36px laid out an office
-/// with zero desks, on whichever variants took a wide left column.
+/// has to be a size an agent can actually SIT at — the variants that take a wide
+/// left column used to lay out an office with no desk in it.
 #[test]
 fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
     let min_w = crate::layout::compute::MIN_LAYOUT_W;
@@ -468,7 +469,7 @@ fn every_floor_variant_seats_a_desk_at_the_minimum_layout_size() {
     }
     assert_eq!(
         narrowest_band,
-        crate::layout::compute::MIN_BAND_W,
+        crate::layout::compute::DESK_BAND_MIN_W,
         "the width floor overshoots: the widest left column leaves more band than one desk needs"
     );
 }

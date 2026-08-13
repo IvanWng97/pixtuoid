@@ -502,9 +502,9 @@ fn dashboard_empty_scene_shows_placeholder() {
 /// A terminal too short for the popup's own `DASHBOARD_VIEWPORT_ROWS` cap gets
 /// clamped by `PanelGeometry::compute` to `bounds.height - FOOTER_ROWS`, so
 /// `paint_panel` windows the list into a viewport SMALLER than that cap — and the
-/// selection has to stay inside it. Reachable ONLY on the footer-only draw path:
-/// these heights are under `min_layout_size`, and there `full_h` saturates so the
-/// viewport stays at the cap.
+/// selection has to stay inside it. Reachable ONLY on the footer-only draw path: a
+/// terminal tall enough to lay out the office is also tall enough for `full_h` to
+/// saturate at the content height, so the viewport stays at the cap there.
 #[test]
 fn a_short_terminal_windows_the_dashboard_below_its_row_cap() {
     let mut agents = Vec::new();
