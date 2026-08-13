@@ -248,7 +248,7 @@ fn a_full_height_modal_never_covers_the_footer_row() {
     let mut plain = build(cols, rows, vec![]);
     plain.render(&scene, &pack(), t).expect("render");
     let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
-    let footer_y = lit.area.height - 1;
+    let footer_y = lit.area.height - crate::tui::renderer::FOOTER_ROWS;
     for x in 0..lit.area.width {
         let (a, b) = (
             lit.cell((x, footer_y)).expect("footer cell"),

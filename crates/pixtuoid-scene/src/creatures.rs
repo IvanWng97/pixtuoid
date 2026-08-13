@@ -695,7 +695,9 @@ mod tests {
                 );
             }
         }
-        assert!(checked > 8, "the sweep must reach layouts, saw {checked}");
+        // The loop can no longer skip (a refusal panics), so a `> 8` floor cannot fire;
+        // pin the window itself, which reds if the derived bounds move.
+        assert_eq!(checked, 64, "the derived window must visit 8x8 sizes");
     }
 
     /// The enter hand-off is pop-free because leg 0 has no special origin: the

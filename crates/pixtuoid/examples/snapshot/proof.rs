@@ -592,7 +592,7 @@ pub(crate) fn render_proof(job: &ProofJob) -> Result<()> {
     let mut pending: VecDeque<(u64, AgentEvent)> = script.events.iter().cloned().collect();
 
     // Anchor the burned callout to home_desks[0] in the SAME layout draw_scene
-    // computes: buf = cols x (rows-1)*2, the footer row excluded.
+    // computes: buf = cols x (rows - FOOTER_ROWS)*2.
     let buf_h = job
         .rows
         .saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)

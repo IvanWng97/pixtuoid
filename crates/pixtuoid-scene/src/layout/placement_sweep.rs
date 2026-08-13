@@ -31,9 +31,9 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (160, 50),
     (200, 46),
     (128, 56),
-    (38, 120),
-    (40, 70),
-    (41, 160),
+    (super::compute::MIN_LAYOUT_W + 1, 120),
+    (super::compute::MIN_LAYOUT_W + 3, 70),
+    (super::compute::MIN_LAYOUT_W + 4, 160),
     (48, 60),
     (50, 80),
     // The only size here that reaches the #566 guard, so every invariant below gets one
@@ -83,10 +83,12 @@ fn sweep_over(
                     );
                     f(w, h, seed, &l);
                 }
-                None => assert!(
-                    w < super::compute::MIN_LAYOUT_W || h < super::compute::MIN_LAYOUT_H,
-                    "{w}x{h} seed {seed}: compute returned None at a size above the \
-                     documented minimum ({}x{})",
+                // Not "assert this refusal is legitimate": every entry is meant to be
+                // above both floors, so a refusal means a floor rose past a hand-pinned
+                // size and this axis lost that point SILENTLY.
+                None => panic!(
+                    "{w}x{h} seed {seed}: a SWEEP_SIZES entry fell under the floor \
+                     ({}x{}) — the sweep lost it",
                     super::compute::MIN_LAYOUT_W,
                     super::compute::MIN_LAYOUT_H
                 ),
@@ -848,10 +850,6 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
 /// and the discrete grid's nearest points either side are 64 and 80.
 const NARROW_BAND: std::ops::RangeInclusive<u16> = super::compute::MIN_LAYOUT_W..=76;
 
-/// Step-1 width sweep across the degradation band, running BOTH connectivity
-/// predicates at that resolution — the discrete `SWEEP_SIZES` grid can't cover
-/// every width, and a sealed pocket at a width it skips ships silently. Heights
-/// span the tall floors where the aisle-seal manifests; only 148 reaches the #566 guard.
 /// The Y twin of the width scan below: the derived height floor opened 45..59, where
 /// `pod_rows` collapses to 1 and the appliance aisle sits at its 8px minimum. The
 /// discrete grid gives that band 6 points; this walks it at step 1.
@@ -874,6 +872,10 @@ fn short_band_connectivity_boundary_scan() {
     }
 }
 
+/// Step-1 width sweep across the degradation band, running BOTH connectivity
+/// predicates at that resolution — the discrete `SWEEP_SIZES` grid can't cover
+/// every width, and a sealed pocket at a width it skips ships silently. Heights
+/// span the tall floors where the aisle-seal manifests; only 148 reaches the #566 guard.
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {

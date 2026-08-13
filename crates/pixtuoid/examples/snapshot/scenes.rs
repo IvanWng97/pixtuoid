@@ -355,7 +355,11 @@ pub(crate) fn meeting_scene(
     // Match the renderer's layout EXACTLY (terminal minus 1-row footer,
     // half-block doubling), `None` being the same desk fill `draw_scene` passes
     // — otherwise the waypoint indices shift and the staging silently misses.
-    let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
+    let (buf_w, buf_h) = (
+        cols,
+        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
+            .saturating_mul(2),
+    );
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .ok_or_else(|| anyhow::anyhow!("--meeting: scene too small to compute a layout"))?;
     let nw = l.waypoints.len();
@@ -651,7 +655,11 @@ pub(crate) fn anim_scene(
     // Match the renderer EXACTLY: scene_rect = terminal minus the 1-row footer,
     // buf_h = scene_rect.height*2 (half-block). A 2px mismatch shifts the
     // waypoint set and the agent targets the wrong furniture.
-    let (buf_w, buf_h) = (cols, rows.saturating_sub(1).saturating_mul(2));
+    let (buf_w, buf_h) = (
+        cols,
+        rows.saturating_sub(pixtuoid::tui::renderer::FOOTER_ROWS)
+            .saturating_mul(2),
+    );
     let l = SceneLayout::compute_with_seed(buf_w, buf_h, None, floor_seed)
         .expect("anim layout computes");
     let n = l.waypoints.len();
