@@ -4,7 +4,7 @@
 
 use std::time::SystemTime;
 
-use crate::layout::{SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
+use crate::layout::{Anchor, Size, SEAT_RENDER_Y_OFF, WALKING_Y_OFF};
 use pixtuoid_core::AgentSlot;
 
 use super::epoch_ms;
@@ -79,6 +79,39 @@ pub(super) fn back_couch_anchor(wp: Point, sprite_w: u16) -> Point {
     }
 }
 
+/// Nudge a sprite so the whole frame lands inside the canvas, answering in the
+/// SAME anchor space `pos` came in.
+///
+/// Parameterized on [`Anchor`] rather than split in two, so no call site can
+/// reach for the other convention's bounds: centre-anchored creatures and
+/// top-left-anchored characters need different arithmetic and read it off one
+/// authority.
+///
+/// It lives at PAINT because invariant #6 runs one way: sprite size never moves
+/// a sim position.
+pub(crate) fn keep_sprite_on_canvas(anchor: Anchor, pos: Point, size: Size, buf: Size) -> Point {
+    match anchor {
+        // `min` before `max`: on a buffer narrower than the sprite the lower
+        // bound wins (sprite flush left/top) instead of `clamp`'s
+        // inverted-range panic.
+        Anchor::Center => Point {
+            x: pos
+                .x
+                .min(buf.w.saturating_sub(size.w.div_ceil(2)))
+                .max(size.w / 2),
+            y: pos
+                .y
+                .min(buf.h.saturating_sub(size.h.div_ceil(2)))
+                .max(size.h / 2),
+        },
+        // No lower bound needed — `u16` already floors a top-left `pos` at 0.
+        Anchor::TopLeft => Point {
+            x: pos.x.min(buf.w.saturating_sub(size.w)),
+            y: pos.y.min(buf.h.saturating_sub(size.h)),
+        },
+    }
+}
+
 /// How far a later arrival steps aside along x so two agents at one
 /// stand-beside spot don't render on top of each other. Sized to clear a
 /// character sprite (8 px bundled) with a pixel of daylight.
@@ -143,7 +176,21 @@ pub fn character_anchor(
             from, to, t_x1000, ..
         } => walking_anchor(walking_position(from, to, t_x1000), w),
     };
-    Some(anchor)
+    // The label's twin of the sprite's own guard in `sim::resolve_characters`,
+    // on the DEFAULT frame size like the anchor above — a badge that stayed put
+    // while its sprite was nudged would be worse than the ±1px.
+    Some(keep_sprite_on_canvas(
+        Anchor::TopLeft,
+        anchor,
+        Size {
+            w,
+            h: crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
+        },
+        Size {
+            w: layout.buf_w,
+            h: layout.buf_h,
+        },
+    ))
 }
 
 /// How long the elevator's open/close transition takes, used as both the opening
