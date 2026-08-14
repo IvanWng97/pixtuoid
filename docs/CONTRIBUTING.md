@@ -264,7 +264,7 @@ The three OpenClaw e2e tiers, cheapest first — none runs in CI:
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
 
 Their `expect_line` pollers are deliberately not shared; the WHY lives at the
-definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
+definition in `scripts/lib/tier-openclaw-hermetic.sh`, where someone about to hoist them
 is already looking.
 
 Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`

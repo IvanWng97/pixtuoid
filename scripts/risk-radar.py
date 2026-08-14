@@ -63,7 +63,7 @@ SEAMS: tuple[Seam, ...] = (
         title="🎞️ Motion / pose / walk-leg (not diff-readable)",
         match=lambda p: "/motion/" in p or "/pose/" in p,
         audit=(
-            "**Render and WATCH it** before approving: a gif via the snapshot example, and/or `scripts/replay-fixture.sh` for resume/lifecycle motion.",
+            "**Render and WATCH it** before approving: a gif via the snapshot example, and/or `scripts/lib/tier-replay.sh` for resume/lifecycle motion.",
             "Add or update a frame-by-frame continuity guard — the flash/teleport/replay regressions all came back as failing tests first (#61 shipped five walk regressions behind an unchecked 'live run').",
         ),
         source=(".github/prompts/pr_review_rules.md", "walk-leg"),

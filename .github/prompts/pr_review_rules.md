@@ -74,7 +74,7 @@ review in #198), NOT a replacement for the judgement below:
   green, because its two well-tested halves were joined by an untested line.
 - **`motion/` / `pose/` / walk-leg behavior** → not diff-readable. State in your
   summary that a human must render and WATCH it (an animation via the snapshot
-  example, or `scripts/replay-fixture.sh` for resume/lifecycle motion) before
+  example, or `scripts/lib/tier-replay.sh` for resume/lifecycle motion) before
   merge — five walk regressions once shipped behind an unchecked "live run" (#61).
 - **reducer / liveness ladder / sweeps** → trace the downstream interaction graph
   (rebind, TTLs, cascade, dedup), not just the changed lines; the bug is usually

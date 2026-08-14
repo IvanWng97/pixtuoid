@@ -30,7 +30,7 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 # workflow `run:` blocks go to actionlint, composite-action ones to
 # `actionlint-composites`. Both are shellcheck-only — shfmt cannot rewrite a
 # scalar in place — so adding a file here is not enough for embedded shell.
-SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
+SHELL_SOURCES := "scripts/*.sh scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
@@ -595,7 +595,7 @@ fuzz source dir:
 [group('rust')]
 [doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
 openclaw-e2e:
-    scripts/openclaw-live-e2e.sh
+    scripts/lib/tier-openclaw-hermetic.sh
 
 # N REAL `openclaw gateway run` processes, each in its own throwaway
 # OPENCLAW_HOME on its own port, feeding one headless pixtuoid: one
@@ -606,7 +606,7 @@ openclaw-e2e:
 [group('rust')]
 [doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
 openclaw-multi-e2e *ports:
-    scripts/openclaw-multi-gateway-e2e.sh {{ ports }}
+    scripts/lib/tier-openclaw-multi.sh {{ ports }}
 
 # The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
@@ -617,7 +617,15 @@ openclaw-multi-e2e *ports:
 [group('rust')]
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
 openclaw-backend-e2e:
-    scripts/openclaw-cc-backend-e2e.sh
+    scripts/lib/tier-openclaw-backend.sh
+
+# Replays a captured rollout through the FULL headless path — real watcher, real
+# socket, only the input is fixed. It had no recipe until this one, which is the
+# condition that let the cc-backend tier above rot unseen for a release.
+[group('rust')]
+[doc('Replay a captured rollout fixture through a hermetic headless run')]
+replay fixture delay="3":
+    scripts/lib/tier-replay.sh {{ fixture }} {{ delay }}
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug

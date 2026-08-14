@@ -435,7 +435,7 @@ history:
   and both bot and local rounds missed it (caught post-merge, bae3541).
 - **Motion / pose / walk-leg behavior changed** → render and WATCH it before
   the verdict: animated gif via the snapshot example, and/or replay a fixture
-  through the binary (`scripts/replay-fixture.sh`) for resume/lifecycle
+  through the binary (`scripts/lib/tier-replay.sh`) for resume/lifecycle
   motion. PR #61 was approved by per-phase + whole-feature code review (its
   "live run" test-plan checkbox left unchecked) and shipped five walk
   regressions, all visible within minutes of watching (fixed in #62,
@@ -465,7 +465,7 @@ history:
   installed-but-no-sprite, R0616-338-08); divergence shipped that class twice
   (#343, #342).
 - **New source / hook-only integration ships** → demand a LIVE run (or hermetic
-  replay: `scripts/replay-fixture.sh`, the live-e2e scripts) WITHOUT the capture
+  replay: `scripts/lib/tier-replay.sh`, the live-e2e scripts) WITHOUT the capture
   rig's convenience flags before the verdict — a `-C`/forced-workspace capture
   masks identity-field fallback paths. R0613-05 (env-mode cwd keyed solely on
   `DEEPSEEK_WORKSPACE` → cwd-less envelope, NO sprite) passed the unit tests,

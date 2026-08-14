@@ -11,10 +11,10 @@
 # `openclaw` (with the pixtuoid plugin + a claude-cli backend agent) and `claude`.
 #
 # Build first:  just build --release
-# Run:          scripts/openclaw-cc-backend-e2e.sh
+# Run:          just openclaw-backend-e2e
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
 PROJECTS="$HOME/.claude/projects"
 CFGDIR="$(mktemp -d)"
@@ -181,9 +181,9 @@ fi
 [ "$saw_both" = 1 ] && echo "PASS  both rendered in ONE frame ($WS_LABEL + openclaw@<port>:busy)"
 
 if [ "$FAILED" = 0 ]; then
-    echo "openclaw-cc-backend-e2e: PASS — the lobster (gateway) + cc· (claude-cli backend) coexist live"
+    echo "openclaw-backend: PASS — the lobster (gateway) + cc· (claude-cli backend) coexist live"
 else
-    echo "openclaw-cc-backend-e2e: FAIL" >&2
+    echo "openclaw-backend: FAIL" >&2
 fi
 trap - EXIT
 cleanup

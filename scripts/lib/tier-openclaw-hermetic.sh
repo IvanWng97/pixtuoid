@@ -6,10 +6,10 @@
 # backend-less platform that one step times out.
 #
 # Build first:  just build --release
-# Run:          scripts/openclaw-live-e2e.sh
+# Run:          just openclaw-e2e
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
 OUT="$(mktemp)"
@@ -193,9 +193,9 @@ expect_line "openclaw@$PORT_B:down" both-down
 echo "--- the lobster timeline (headless) ---"
 grep 'daemons=' "$OUT" | sed 's/^/  /'
 if [ "$FAILED" = 0 ]; then
-    echo "openclaw-live-e2e: PASS"
+    echo "openclaw-hermetic: PASS"
 else
-    echo "openclaw-live-e2e: FAIL" >&2
+    echo "openclaw-hermetic: FAIL" >&2
 fi
 trap - EXIT
 cleanup
