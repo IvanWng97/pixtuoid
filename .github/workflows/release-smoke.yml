@@ -1,9 +1,11 @@
 name: release-smoke
 
-# release.yml builds every Linux target --no-default-features, while
-# homebrew-core builds the workspace with DEFAULT features on macOS AND Linux and
-# runs its own `test do` — a configuration built nowhere else in this repo, whose
-# breakage lands in THEIR CI on an autobump we neither trigger nor get told about.
+# Two gaps, both landing in homebrew-core's CI on an autobump we neither trigger
+# nor get told about: release.yml builds every LINUX target
+# --no-default-features while their formula builds default features there too,
+# and nothing in this repo ever runs their `test do` assertions on any platform.
+# (macOS default-features IS built every release — release.yml passes empty flags
+# for the apple-darwin targets — so that half is not the gap.)
 # Dispatch this against a release branch before tagging, while the tag is still
 # reversible.
 on:

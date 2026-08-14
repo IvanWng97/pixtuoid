@@ -1047,7 +1047,7 @@ bump version:
     git commit -q -m "chore(release): v$ver"
     committed=1
 
-    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. walk the end-to-end pass (interactive, resumable):\n         just release-e2e %s\n    5. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n    6. once release.yml is green: just release-e2e %s --post\n' "$ver" "$branch" "$ver" "$ver" "$ver" "$ver"
+    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. push and open a PR — the e2e pass reads its checks, so open it FIRST\n    4. walk the end-to-end pass (interactive, resumable; ends by printing the tag\n       command for the verified commit):\n         just release-e2e\n    5. merge to main\n    6. tag to publish — IRREVERSIBLE (crates.io + npm, and the tag tarball\n       auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing)\n    7. once release.yml is green: just release-e2e --post\n' "$ver" "$branch"
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
@@ -1072,8 +1072,8 @@ npm-check:
 # exercised mid-cycle rather than once a release.
 [group('release')]
 [doc('Interactive, resumable end-to-end pass — pre-tag, or --post after publish')]
-release-e2e version *args:
-    scripts/release-e2e.sh {{ version }} {{ args }}
+release-e2e *args:
+    scripts/release-e2e.sh {{ args }}
 
 # Fail if the current release_notes() arm still has the uncurated TODO marker.
 # A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`

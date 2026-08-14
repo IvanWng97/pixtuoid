@@ -155,29 +155,41 @@ git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crat
 ### The end-to-end pass
 
 ```bash
-just release-e2e 0.5.1          # BEFORE the tag
-just release-e2e 0.5.1 --post   # after release.yml goes green
+just release-e2e          # BEFORE the tag
+just release-e2e --post   # after release.yml goes green
 ```
 
+The version comes from `Cargo.toml` — it is the authority, and a hand-typed copy
+would be a second one. Passing it (`just release-e2e 0.5.1`) turns it into an
+assertion instead: the run refuses if the tree says anything else.
+
 Interactive and resumable. Auto steps run a command; manual steps print
-instructions and wait for a verdict. State is keyed by version AND phase under
-`${XDG_STATE_HOME:-~/.local/state}/pixtuoid/release-e2e/`, deliberately outside
-the worktree so a release cut in a throwaway `git worktree` survives its removal
-— re-running replays only what is not already `pass`.
+instructions and wait for a verdict. State lives under
+`${XDG_STATE_HOME:-~/.local/state}/pixtuoid/release-e2e/`, outside the worktree so
+a release cut in a throwaway `git worktree` survives its removal.
 
-A **skip needs a typed reason** and is reprinted in the closing summary, so a
-step you could not run here (a CLI you have not installed, a registry that has
-not propagated yet) stays visible instead of reading as covered. `--list` prints
-the phase without running anything; `--from <id>` re-opens a step already passed.
+**Three verdicts, not two.** `pass` · `fail` · **`blocked`** — the last meaning
+the step could not run *here* (no `openclaw` on PATH, a CLI you have never
+installed, a registry that has not propagated yet). An auto step signals it by
+exiting 2; a manual one with `b` plus a required reason. Blocked steps do not
+halt the phase, and every one is reprinted at the end under
+`N step(s) BLOCKED — that coverage is NOT verified`, because "could not check"
+must never read as "checked". Collapsing that third state into either of the
+other two is what makes a checklist unfinishable or fail-open.
 
-Phase 1 ends by printing the exact `git tag -a` for the verified SHA and stops —
+**A `pass` certifies the commit it ran against.** Each verdict records the HEAD
+sha, and a re-run re-executes any step whose pass predates an edit — amend the
+release notes and `verify` is genuinely re-run, not remembered.
+
+`--list` prints the phase without running anything; `--from <id>` re-opens a
+step already passed.
+
+Phase 1's last step prints the exact `git tag -a` for the verified commit —
 **pushing the tag stays human.** Phase 2 covers what only exists after publish:
-the registries, the packaged artifact installed into a throwaway `HOME`, and the
-in-app "What's new" popup, which nothing else in the pipeline verifies actually
-reaches a user.
-
-`just release-e2e X.Y.Z --list` is also the cheapest way to see what a release
-costs before starting one.
+one `published` step across every registry and the GitHub release (its roster
+read from `cargo metadata`, so a new crate joins automatically), the packaged
+artifact installed into a throwaway `HOME`, and the in-app "What's new" popup,
+which nothing else in the pipeline verifies actually reaches a user.
 
 The tag also publishes **outside** this repo: `pixtuoid` is in homebrew-core,
 whose formula builds from the tag TARBALL and is `autobump: true`, so
@@ -283,8 +295,8 @@ What to run and when, for an agent-driven change:
 | before push | `just preflight` | same — including why never to pipe it |
 | before merge | the two-lens review | [Pull requests](#pull-requests) |
 | a source/lifecycle change | dogfood against live CC, or replay hermetically | the tiers below |
-| before the tag | `just release-e2e X.Y.Z` | [Releasing](#releasing) |
-| after `release.yml` is green | `just release-e2e X.Y.Z --post` | same |
+| before the tag | `just release-e2e` | [Releasing](#releasing) |
+| after `release.yml` is green | `just release-e2e --post` | same |
 
 Every e2e tier is a step of ONE checklist (`scripts/release-e2e.sh`), and each
 recipe below is an `--only` view of it — so the machinery the release pass rides

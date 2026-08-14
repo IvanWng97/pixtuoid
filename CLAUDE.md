@@ -311,7 +311,7 @@ the render path end to end; the numbers live in `crates/pixtuoid/SHARP-EDGES.md`
 - "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid-scene`; the flush in `pixtuoid`'s `tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific answers (layout, sources, install, themes, motion, weather, …) live in each crate's `WHERE-TO-LOOK.md`, indexed by question in its `CLAUDE.md`.
 - One change spanning the Rust lib + the site + the Raycast extension: [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md). How lessons persist across agent runs: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
-- **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, the three OpenClaw e2e tiers, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
+- **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, `just release-e2e` and the tiers that are its `--only` views, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
 
 ## When refactoring
 
