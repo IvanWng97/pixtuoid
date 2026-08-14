@@ -43,6 +43,7 @@ copilot) bin=copilot sub=-p extra="" ;;
 cursor) bin=cursor-agent sub=-p extra="--trust" ;;
 hermes) bin=hermes sub=-z extra="" ;;
 grok) bin=grok sub=-p extra="" ;;
+kimi) bin=kimi sub=-p extra="" ;;
 *)
     echo "no verified headless invocation for '$id' — check its --help and add one" >&2
     exit 2

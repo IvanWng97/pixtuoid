@@ -254,7 +254,11 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "kimi",
             source: "kimi",
-            fixture: "kimi/tool-run/hook-payloads.jsonl",
+            // The permission fixture, because a HEADLESS kimi run cannot reach
+            // Waiting — it auto-approves even `rm -rf`, so `PermissionRequest`
+            // only fires for a human at a real TUI. Both fixtures are captures;
+            // this is the one whose turn covers both classes.
+            fixture: "kimi/permission-flow/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting],
         },

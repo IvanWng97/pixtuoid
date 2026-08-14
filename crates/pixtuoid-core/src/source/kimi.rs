@@ -9,16 +9,23 @@
 //! (`<KIMI_CODE_HOME>/config.toml` `[[hooks]]`), whose envelope is
 //! CLAUDE-CODE-SHAPED: snake_case
 //! `hook_event_name`/`session_id`/`cwd`/`tool_name`/`tool_input` with PascalCase
-//! event VALUES.
+//! event VALUES — **except the per-call id, which Kimi spells `tool_call_id`**
+//! (capture-verified against kimi-code 0.36.0; `tool_use_id` is never sent).
 //!
 //! So most events ride the SHARED CC-shaped arms
 //! (`decoder::decode_hook_payload`) UNCHANGED, keyed on `session_id`; this
-//! module's custom `Extend` decoder handles ONLY Kimi's `PostToolUseFailure` /
-//! `StopFailure` variants and DECLINES (`Ok(None)`) for everything else.
+//! module's custom `Extend` decoder handles Kimi's `PostToolUseFailure` /
+//! `StopFailure` variants PLUS the two tool events — the latter only because
+//! the shared arms read the CC id name — and DECLINES (`Ok(None)`) otherwise.
 //!
 //! **Subagents** (Kimi's "agent swarm") are deliberately NOT modeled: the
 //! `SubagentStart`/`SubagentStop` payload shape is uncaptured, so sessions render
 //! FLAT until a byte-real capture can add nesting.
+//!
+//! **`PermissionRequest` needs a HUMAN to capture.** `kimi -p` auto-approves
+//! every tool — `rm -rf` included — so a headless run emits only SessionStart /
+//! PreToolUse / PostToolUse / Stop. The permission fixture came from an
+//! interactive TUI turn; re-record it the same way rather than composing one.
 
 use std::path::PathBuf;
 
@@ -46,18 +53,53 @@ pub(crate) fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent
         .as_object()
         .ok_or_else(|| anyhow!("kimi hook payload must be an object"))?;
     match obj.get("hook_event_name").and_then(|s| s.as_str()) {
+        // The two tool events are claimed here, not left to the shared CC-shaped
+        // arms, for ONE field: kimi names the per-call id `tool_call_id`. The
+        // shared arms read `tool_use_id`, which kimi never sends, so they decoded
+        // every id to None and silently bypassed the reducer's per-call
+        // machinery. The envelope is otherwise CC-shaped, so the bodies mirror
+        // those arms.
+        Some(ev @ ("PreToolUse" | "PostToolUse")) => {
+            let session_id = kimi_session_id(obj)?;
+            let agent_id = AgentId::from_parts(SOURCE_NAME, &session_id);
+            let cwd = kimi_cwd(obj);
+            let tool_use_id = kimi_tool_call_id(obj);
+            let identity = AgentEvent::identity(agent_id, SOURCE_NAME, session_id, cwd);
+            if ev == "PreToolUse" {
+                let tool_name = obj
+                    .get("tool_name")
+                    .and_then(|s| s.as_str())
+                    .unwrap_or_else(|| {
+                        crate::source::drift::missing_field(SOURCE_NAME, ev, "tool_name");
+                        "?"
+                    });
+                let detail = Some(crate::source::decoder::make_tool_detail(
+                    SOURCE_NAME,
+                    tool_name,
+                    obj.get("tool_input"),
+                ));
+                return Ok(Some(vec![
+                    identity,
+                    AgentEvent::ActivityStart {
+                        agent_id,
+                        tool_use_id,
+                        detail,
+                    },
+                ]));
+            }
+            Ok(Some(vec![
+                identity,
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id,
+                },
+            ]))
+        }
         Some("PostToolUseFailure") => {
             let session_id = kimi_session_id(obj)?;
             let agent_id = AgentId::from_parts(SOURCE_NAME, &session_id);
-            let cwd = obj
-                .get("cwd")
-                .and_then(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .map(PathBuf::from);
-            let tool_use_id = obj
-                .get("tool_use_id")
-                .and_then(|s| s.as_str())
-                .map(String::from);
+            let cwd = kimi_cwd(obj);
+            let tool_use_id = kimi_tool_call_id(obj);
             Ok(Some(vec![
                 AgentEvent::identity(agent_id, SOURCE_NAME, session_id, cwd),
                 AgentEvent::ActivityEnd {
@@ -82,6 +124,22 @@ pub(crate) fn decode_kimi_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent
 /// events. `Err` rather than `Ok(None)` on a missing/empty id: having claimed
 /// the event, falling through would hit the shared arms' "unsupported
 /// hook_event_name" bail with a misleading message.
+/// Kimi's per-call id. The name is the ONE way its envelope departs from the
+/// CC shape, and reading the CC name instead fails silently — `None`, never an
+/// error — so every claiming arm reads it through here.
+fn kimi_tool_call_id(obj: &Map<String, Value>) -> Option<String> {
+    obj.get("tool_call_id")
+        .and_then(|s| s.as_str())
+        .map(String::from)
+}
+
+fn kimi_cwd(obj: &Map<String, Value>) -> Option<PathBuf> {
+    obj.get("cwd")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from)
+}
+
 fn kimi_session_id(obj: &Map<String, Value>) -> Result<String> {
     obj.get("session_id")
         .and_then(|s| s.as_str())
@@ -102,7 +160,7 @@ mod tests {
             "session_id": "session_abc",
             "cwd": "/Users/dev/proj",
             "tool_name": "Bash",
-            "tool_use_id": "t1"
+            "tool_call_id": "t1"
         }))
         .expect("decodes")
         .expect("claims the event");
@@ -174,11 +232,10 @@ mod tests {
     #[test]
     fn non_failure_events_decline_to_the_shared_arms() {
         // SubagentStart is deliberately UNregistered — included to pin that the
-        // custom decoder declines it too.
+        // custom decoder declines it too. The two TOOL events are absent because
+        // they are claimed here now, for kimi's `tool_call_id` spelling.
         for ev in [
             "SessionStart",
-            "PreToolUse",
-            "PostToolUse",
             "PermissionRequest",
             "Stop",
             "SessionEnd",
@@ -240,5 +297,34 @@ mod tests {
             std::collections::BTreeSet::from([AgentId::from_parts(SOURCE_NAME, sid)]),
             "all kimi events must coalesce to one AgentId"
         );
+    }
+
+    /// Captured off kimi-code 0.36.0: the per-call id rides `tool_call_id`, and
+    /// kimi never sends the CC-shaped `tool_use_id` the shared arms read. Reading
+    /// the wrong name is silent — every id decodes to None and the reducer's
+    /// per-call machinery is bypassed — so this pins the wire name itself.
+    #[test]
+    fn per_call_id_rides_tool_call_id_not_tool_use_id() {
+        for ev in ["PreToolUse", "PostToolUse", "PostToolUseFailure"] {
+            let payload = json!({
+                "hook_event_name": ev,
+                "session_id": "session_abc",
+                "cwd": "/w",
+                "client_type": "kimi_code_cli",
+                "tool_name": "Read",
+                "tool_call_id": "call_1",
+            });
+            let evs = decode_kimi_hook_custom(&payload)
+                .unwrap_or_else(|e| panic!("{ev} must decode: {e}"))
+                .unwrap_or_else(|| panic!("{ev} must be claimed by kimi's own decoder"));
+            assert!(
+                evs.iter().any(|e| matches!(
+                    e,
+                    AgentEvent::ActivityStart { tool_use_id: Some(t), .. }
+                        | AgentEvent::ActivityEnd { tool_use_id: Some(t), .. } if t == "call_1"
+                )),
+                "{ev} must carry kimi's tool_call_id, got {evs:?}"
+            );
+        }
     }
 }

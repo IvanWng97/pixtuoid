@@ -11,9 +11,12 @@ is what the fixture then teaches every later reader: `cursor/tool-run` carries n
 every `preToolUse` and tools that INTERLEAVE (`cursor/tool-run-real`, and #901,
 which discovered the same gap the expensive way).
 
-Only two edits to a capture are allowed, both mechanical: drop a PII key
-(`user_email`), and add the `_pixtuoid_source` tag the shim itself stamps.
-Anything else and it stops being evidence.
+Only two edits to a capture are allowed, both mechanical: redact PII, and add the
+`_pixtuoid_source` tag the shim itself stamps. Anything else and it stops being
+evidence. PII is not always a field you can drop — cursor's arrives as a
+`user_email` key, kimi's as the owner column inside a captured `ls -la`
+`tool_output` — so read a capture before committing it rather than trusting a
+key-name filter.
 
 **Capture only what pixtuoid's OWN hook registration receives.** A machine can
 carry other tools' hooks on the same events — a debug tee, another integration —
