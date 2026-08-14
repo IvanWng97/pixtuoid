@@ -1,122 +1,147 @@
 #!/usr/bin/env bash
 # Record a conformance fixture from the bytes a real agent CLI actually sent.
 #
-# Every hook-only source's fixture in this tree was hand-written, and at least one
-# is provably wrong: cursor/tool-run carries no `tool_use_id` and strictly
-# sequential tools, while #901 established from a real capture that every
-# preToolUse carries an id and that tools INTERLEAVE. A fixture that encodes the
-# author's model instead of the wire teaches the next reader the wrong shape, so
-# these are recorded, never composed.
+# A composed fixture pins whatever its author believed the wire looked like, and
+# the decoder then agrees with it: kimi's per-call id decoded as None for the
+# whole source's life because fixture and decoder shared one wrong field name.
+# So these are recorded, never composed.
 #
-# ⚠ BILLED — one real model turn on that provider's account.
+# ⚠ BILLED — runs one real model turn on that provider's account.
 #
-# Run:  just capture-fixture <source-id> <scenario> ["prompt"]
-set -uo pipefail
+#   just capture-fixture kimi tool-run kimi -p '{prompt}'
+#   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
+#   just capture-fixture kimi permission-flow "$SHELL"   # then drive the TUI yourself and exit
+#
+# The CLI invocation is yours to pass, not a table this script keeps: a copy of
+# ten CLIs' flags would drift silently, and a drifted row captures the wrong
+# thing while still looking like evidence.
+set -euo pipefail
+
+[ $# -ge 3 ] || {
+    echo "usage: capture-fixture <source-id> <scenario> <cmd...>   ('{prompt}' expands)" >&2
+    exit 2
+}
+id=$1 scenario=$2
+shift 2
+
+# One prompt for every source, so captures stay comparable: reading the SAME file
+# twice around a list forces both shapes the composed fixtures got wrong — tools
+# that interleave, and a tool id that repeats.
+PROMPT='Read NOTE.txt, then list this directory, then read NOTE.txt again.'
+cmd=()
+for a in "$@"; do cmd+=("${a//\{prompt\}/$PROMPT}"); done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
-ROSTER="$REPO/target/release/examples/corpus_check"
-for b in "$PIX" "$HOOK" "$ROSTER"; do
-    [ -x "$b" ] || {
-        echo "missing $b — run: just build --release --bins --examples" >&2
-        exit 2
-    }
-done
-
-id="${1:?usage: capture-fixture <source-id> <scenario> [prompt]}"
-scenario="${2:?usage: capture-fixture <source-id> <scenario> [prompt]}"
-PROMPT="${3:-Read NOTE.txt, then list this directory, then read NOTE.txt again.}"
-
-# Per-CLI headless invocation. Every entry was checked against that CLI's own
-# --help; an unverified guess here would produce a capture of the wrong thing.
-case "$id" in
-claude-code) bin=claude sub=-p extra="--allowedTools Read Bash" ;;
-codex) bin=codex sub=exec extra="" ;;
-antigravity) bin=agy sub=-p extra="" ;;
-reasonix) bin=reasonix sub=-p extra="" ;;
-codewhale) bin=codewhale sub=exec extra="" ;;
-opencode) bin=opencode sub=run extra="" ;;
-copilot) bin=copilot sub=-p extra="" ;;
-    # --trust, not --yolo: the sandbox holds one file, and the narrower flag is
-    # the one cursor-agent's own refusal message offers.
-cursor) bin=cursor-agent sub=-p extra="--trust" ;;
-hermes) bin=hermes sub=-z extra="" ;;
-grok) bin=grok sub=-p extra="" ;;
-kimi) bin=kimi sub=-p extra="" ;;
-*)
-    echo "no verified headless invocation for '$id' — check its --help and add one" >&2
+[ -x "$HOOK" ] || {
+    echo "missing $HOOK — run: just build --release" >&2
     exit 2
-    ;;
-esac
-[ -d "$HOME/.local/bin" ] && PATH="$PATH:$HOME/.local/bin"
-command -v "$bin" >/dev/null 2>&1 || {
-    echo "'$bin' is not on PATH" >&2
+}
+command -v jq >/dev/null || {
+    echo "jq is required — run: just setup-tools" >&2
     exit 2
 }
 
-# A FIXED generic path, not a random temp dir: every payload embeds its cwd and
-# transcript path, and redacting a random path after the fact mangles them
-# (macOS's /private prefix, dash-encoded project dirs). Capturing somewhere
-# already generic means the bytes need no editing — which is the whole point.
-SB=/tmp/pixtuoid-capture
-WS="$SB/proj"
-RAW="$SB/captured.jsonl"
-rm -rf "$SB"
-mkdir -p "$SB/bin" "$WS"
-printf 'pong\n' >"$WS/NOTE.txt"
-git init -q "$WS" 2>/dev/null
-git -C "$WS" add -A 2>/dev/null
-git -C "$WS" -c user.email=fixture@pixtuoid -c user.name=fixture commit -qm init 2>/dev/null
-trap 'rm -rf "$SB"' EXIT
+dest="$REPO/crates/pixtuoid-core/tests/sources/fixtures/$id/$scenario"
+out="$dest/hook-payloads.jsonl"
+# A re-record of an existing scenario is drift EVIDENCE, so it lands beside the
+# original to be diffed rather than overwriting a committed, redacted capture.
+if [ -e "$out" ]; then out="$out.new"; fi
 
-# The recording shim: tee stdin to the capture, then hand the SAME bytes to the
-# real shim so the session behaves normally while being observed.
+# A FIXED generic path, because every payload embeds its own cwd and
+# transcript_path: capturing somewhere already generic is what lets the bytes
+# ship unedited. It is world-writable and predictable and goes FIRST on PATH
+# below, so the `rm -rf` under `set -e` is load-bearing, not tidiness.
+SB=/tmp/pixtuoid-capture
+RAWD="$SB/raw"
+WS="$SB/proj"
+rm -rf "$SB"
+mkdir -p "$SB/bin" "$RAWD" "$WS"
+# The executable always goes; a BILLED capture survives a failed run.
+ok=""
+trap 'rm -rf "$SB/bin"; if [ -n "$ok" ]; then rm -rf "$SB"; else echo "raw capture kept: $RAWD" >&2; fi' EXIT
+
+printf 'pong\n' >"$WS/NOTE.txt"
+git init -q "$WS"
+git -C "$WS" add -A
+git -C "$WS" -c user.email=fixture@pixtuoid -c user.name=fixture commit -qm init
+
+# The recording shim: one dir per invocation, claimed with an atomic mkdir.
+# Hooks for interleaved tools run concurrently, and a shared append can interleave
+# a payload large enough to split across writes.
 cat >"$SB/bin/pixtuoid-hook" <<SHIM
 #!/usr/bin/env bash
-payload="\$(cat)"
-printf '%s\n' "\$payload" >>"$RAW"
-printf '%s\n' "\$payload" | "$HOOK" "\$@"
+n=0
+while ! mkdir "$RAWD/\$n" 2>/dev/null; do n=\$((n + 1)); done
+tee "$RAWD/\$n/payload.json" | "$HOOK" "\$@"
 SHIM
 chmod +x "$SB/bin/pixtuoid-hook"
-PATH="$SB/bin:$PATH"
-export PATH
+export PATH="$SB/bin:$PATH"
 
-# A relocatable source gets a throwaway home with a hook config this run wrote,
-# so the capture does not depend on how the host's install happens to be wired.
-home_env="$("$ROSTER" --roster | awk -F'\t' -v i="$id" '$1==i{print $4}')"
-env_pair=""
-if [ "$home_env" != "-" ] && [ -n "$home_env" ]; then
-    mkdir -p "$SB/home"
-    if env "$home_env=$SB/home" "$PIX" connect "$id" --json >/dev/null 2>&1; then
-        env_pair="$home_env=$SB/home"
-    fi
-fi
+# Claimed slots, counted the same way the harvest walks them, so the two cannot
+# disagree about where the capture ends.
+count() {
+    local n=0
+    while [ -d "$RAWD/$n" ]; do n=$((n + 1)); done
+    echo "$n"
+}
 
 echo "capturing $id/$scenario — one real model turn"
-# shellcheck disable=SC2086  # $extra is a flag LIST and must word-split
-(cd "$WS" && env ${env_pair:+"$env_pair"} "$bin" "$sub" "$PROMPT" $extra </dev/null >"$SB/cli.log" 2>&1)
-rc=$?
-sleep 2
+rc=0
+(cd "$WS" && "${cmd[@]}") || rc=$?
 
-if [ ! -s "$RAW" ]; then
-    echo "captured nothing — is $id's hook installed and does it invoke a bare 'pixtuoid-hook'?" >&2
-    sed 's/^/    /' "$SB/cli.log" | tail -8 >&2
+# A hook can still be in flight when the CLI's own process exits, so wait for a
+# quiet period measured from the LAST PAYLOAD rather than from that exit.
+SETTLE_S=0.5
+QUIET_ROUNDS=4
+MAX_ROUNDS=40
+prev=-1
+quiet=0
+round=0
+while [ "$quiet" -lt "$QUIET_ROUNDS" ] && [ "$round" -lt "$MAX_ROUNDS" ]; do
+    n="$(count)"
+    if [ "$n" = "$prev" ]; then quiet=$((quiet + 1)); else quiet=0; fi
+    prev="$n"
+    round=$((round + 1))
+    sleep "$SETTLE_S"
+done
+
+# Production's shim stamps `_pixtuoid_source` downstream of the tee above, so the
+# recorder stamps it here rather than leaving it to a hand edit. jq also validates
+# each payload and flattens it to the one line JSONL wants.
+n=0
+while [ -f "$RAWD/$n/payload.json" ]; do
+    jq -c --arg s "$id" '. + {_pixtuoid_source: $s}' "$RAWD/$n/payload.json"
+    n=$((n + 1))
+done >"$SB/harvest.jsonl"
+
+if [ ! -s "$SB/harvest.jsonl" ]; then
+    echo "captured nothing — is $id's hook installed, and does it invoke a bare 'pixtuoid-hook'?" >&2
     exit 1
 fi
-
-dest="$REPO/crates/pixtuoid-core/tests/sources/fixtures/$id/$scenario"
 mkdir -p "$dest"
-cp "$RAW" "$dest/hook-payloads.jsonl"
-n="$(wc -l <"$dest/hook-payloads.jsonl" | tr -d ' ')"
-echo "wrote $dest/hook-payloads.jsonl ($n payloads, CLI exit $rc)"
+cp "$SB/harvest.jsonl" "$out"
+ok=1
+echo "wrote $out ($n payloads, CLI exit $rc)"
 
-grep -q "$HOME" "$dest/hook-payloads.jsonl" &&
-    echo "WARNING: the capture embeds your home path — inspect before committing" >&2
-# A non-zero CLI means the turn was cut short, so the capture is a PARTIAL wire;
-# committing it would pin a truncated shape as though it were the whole one.
-if [ "$rc" -ne 0 ]; then
-    echo "WARNING: the CLI exited $rc — this capture may be truncated:" >&2
-    sed 's/^/    /' "$SB/cli.log" | tail -10 >&2
+claimed="$(count)"
+if [ "$n" -ne "$claimed" ]; then
+    echo "WARNING: $claimed hook invocations claimed a slot but only $n wrote a payload" >&2
 fi
-echo "next: just test conformance   then   cargo insta review"
+
+# PII is not always a key you can drop — kimi's arrived as the owner column
+# inside a captured `ls -la`.
+pii="$HOME"
+if [ -n "${USER:-}" ]; then pii="$pii|$USER"; fi
+if grep -qE "$pii" "$out"; then
+    echo "WARNING: the capture embeds your home path or username — redact before committing" >&2
+fi
+# A non-zero CLI means the turn was cut short, so the capture is a PARTIAL wire.
+if [ "$rc" -ne 0 ]; then
+    echo "WARNING: the CLI exited $rc — this capture may be truncated" >&2
+fi
+if [ "$out" = "$dest/hook-payloads.jsonl" ]; then
+    echo "next: just test conformance   then   cargo insta review"
+else
+    echo "next: diff $dest/hook-payloads.jsonl $out"
+fi

@@ -562,15 +562,16 @@ comment-lint *args:
 
 # Record a conformance fixture from bytes a real CLI actually sent. Hook-only
 # sources have no persistent corpus — hook events are transient — so their
-# fixtures are the ONLY wire evidence they have, and every one in this tree was
-# composed by hand. cursor/tool-run still encodes the shape #901 disproved.
-# One BILLED model turn on that provider's account. Examples:
-#   just capture-fixture cursor tool-run
-#   just capture-fixture hermes tool-failure "Read MISSING.txt and report the error."
+# fixtures are the ONLY wire evidence they have, and the ones this tree has not
+# re-recorded yet were composed by hand. One BILLED model turn per run.
+# `{prompt}` expands to the shared scenario prompt; a custom one has to go
+# through the script directly, since just joins variadic args and loses quoting.
+#   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
+#   just capture-fixture kimi permission-flow "$SHELL"   # drive the TUI yourself
 [group('rust')]
 [doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
-capture-fixture source scenario prompt="":
-    scripts/capture-fixture.sh {{ source }} {{ scenario }} "{{ prompt }}"
+capture-fixture source scenario *cmd:
+    scripts/capture-fixture.sh {{ source }} {{ scenario }} {{ cmd }}
 
 # The corpus census, every transcript-bearing source in one pass — the drift half
 # of the pair: fixtures catch a decode regression, real bytes catch the wire
@@ -583,7 +584,7 @@ corpus-all:
     cc=target/release/examples/corpus_check
     [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
     rc=0
-    while IFS=$'\t' read -r id _ kind _; do
+    while IFS=$'\t' read -r id kind; do
         [ "$kind" = transcript ] || continue
         echo "── $id"
         "$cc" "$id" || rc=1

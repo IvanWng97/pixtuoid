@@ -166,24 +166,16 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // `id<TAB>label_prefix<TAB>transcript|hook<TAB>home_env` for every registered
-    // source, so a fixture-capture shell reads the roster, the badge prefixes and
-    // the relocation vars from the registry instead of keeping copies that drift.
+    // `id<TAB>transcript|hook` for every registered source, so the census shell
+    // reads its roster from the registry instead of keeping a copy that drifts.
     if args.iter().any(|a| a == "--roster") {
         for name in registry::registered_source_names() {
-            let Some(d) = registry::descriptor_for(name) else {
-                continue;
-            };
             let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
                 "transcript"
             } else {
                 "hook"
             };
-            println!(
-                "{name}\t{}\t{kind}\t{}",
-                d.label_prefix,
-                d.home_env.unwrap_or("-")
-            );
+            println!("{name}\t{kind}");
         }
         return;
     }

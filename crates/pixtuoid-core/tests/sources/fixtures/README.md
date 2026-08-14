@@ -3,20 +3,21 @@
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
-**Record these; do not compose them.** `just capture-fixture <source> <scenario>`
-runs the real CLI behind a shim that tees what it receives. A hand-written
-fixture pins whatever its author believed the wire looked like, and that belief
-is what the fixture then teaches every later reader: `cursor/tool-run` carries no
-`tool_use_id` and strictly sequential tools, while a real capture shows an id on
-every `preToolUse` and tools that INTERLEAVE (`cursor/tool-run-real`, and #901,
-which discovered the same gap the expensive way).
+**Record these; do not compose them.** `just capture-fixture <source> <scenario>
+<cmd...>` runs the CLI invocation you give it behind a shim that tees what it
+receives. A hand-written fixture pins whatever its author believed the wire
+looked like, and that belief is what the fixture then teaches every later reader:
+`cursor/tool-run` carries no `tool_use_id` and strictly sequential tools, while a
+real capture shows an id on every `preToolUse` and tools that INTERLEAVE
+(`cursor/tool-run-real`, and #901, which discovered the same gap the expensive
+way).
 
-Only two edits to a capture are allowed, both mechanical: redact PII, and add the
-`_pixtuoid_source` tag the shim itself stamps. Anything else and it stops being
-evidence. PII is not always a field you can drop — cursor's arrives as a
-`user_email` key, kimi's as the owner column inside a captured `ls -la`
-`tool_output` — so read a capture before committing it rather than trusting a
-key-name filter.
+Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
+being evidence — the `_pixtuoid_source` tag production's own shim adds downstream
+of the recorder's tee is stamped by the recorder itself, so it is not a hand
+edit. PII is not always a field you can drop — cursor's arrives as a `user_email`
+key, kimi's as the owner column inside a captured `ls -la` `tool_output` — so
+read a capture before committing it rather than trusting a key-name filter.
 
 **Capture only what pixtuoid's OWN hook registration receives.** A machine can
 carry other tools' hooks on the same events — a debug tee, another integration —
