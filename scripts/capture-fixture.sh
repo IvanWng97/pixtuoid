@@ -29,6 +29,7 @@ shift 2
 # twice around a list forces both shapes the composed fixtures got wrong — tools
 # that interleave, and a tool id that repeats.
 PROMPT='Read NOTE.txt, then list this directory, then read NOTE.txt again.'
+orig_cmd="$*"
 cmd=()
 for a in "$@"; do cmd+=("${a//\{prompt\}/$PROMPT}"); done
 
@@ -153,8 +154,20 @@ if [ ! -s "$SB/harvest.jsonl" ]; then
 fi
 mkdir -p "$dest"
 cp "$SB/harvest.jsonl" "$out"
+
+# The provenance the conformance gate requires. `--version` is a guess about a
+# CLI whose flags this script deliberately does not model, so a failure records
+# `unknown` rather than blocking a capture that already cost a turn.
+ver="$("${cmd[0]}" --version </dev/null 2>/dev/null | head -1 || true)"
+[ -n "$ver" ] || ver=unknown
+prov="$dest/provenance.json"
+case "$out" in *.new) prov="$prov.new" ;; esac
+jq -n --arg cli "$(basename "${cmd[0]}")" --arg version "$ver" \
+    --arg captured "$(date +%Y-%m-%d)" --arg command "$orig_cmd" \
+    '{origin:"recorded", cli:$cli, version:$version, captured:$captured, command:$command}' >"$prov"
+
 ok=1
-echo "wrote $out ($n payloads, CLI exit $rc)"
+echo "wrote $out ($n payloads, CLI exit $rc) + $prov"
 
 claimed="$(count)"
 if [ "$n" -ne "$claimed" ]; then

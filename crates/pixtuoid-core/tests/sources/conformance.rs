@@ -247,6 +247,73 @@ fn every_registered_source_has_a_coalescing_fixture() {
     }
 }
 
+/// Hook-only sources with no recorded scenario yet. The list only SHRINKS — a
+/// hook event is transient, so for these the fixture is the only wire evidence
+/// there will ever be, and a new hook-only CLI must not join it by default.
+const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "hermes", "openclaw", "opencode", "reasonix"];
+
+/// Every scenario declares where its bytes came from, because nothing IN them
+/// separates a capture from a composition — a redacted cwd and an invented one
+/// look alike. A composed fixture pins its author's belief and the decoder then
+/// agrees with it: kimi's shipped four confident per-call ids for a field kimi
+/// never sends.
+#[test]
+fn every_scenario_declares_its_provenance() {
+    let root = fixtures_root();
+    let mut recorded: BTreeSet<String> = BTreeSet::new();
+    for source_dir in sorted_dirs(&root) {
+        let source = source_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        for scenario_dir in sorted_dirs(&source_dir) {
+            let path = scenario_dir.join("provenance.json");
+            let body = std::fs::read_to_string(&path).unwrap_or_else(|e| {
+                panic!(
+                    "{}: {e}\n  every scenario declares an origin: recorded | composed | unknown",
+                    path.display()
+                )
+            });
+            let doc: serde_json::Value =
+                serde_json::from_str(&body).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+            let origin = doc
+                .get("origin")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            let required: &[&str] = match origin {
+                "recorded" => &["cli", "version", "captured", "command"],
+                "composed" | "unknown" => &["note"],
+                other => panic!(
+                    "{}: origin {other:?} is not recorded | composed | unknown",
+                    path.display()
+                ),
+            };
+            for key in required {
+                assert!(
+                    doc.get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .is_some_and(|s| !s.trim().is_empty()),
+                    "{}: origin {origin:?} requires a non-empty {key:?}",
+                    path.display()
+                );
+            }
+            if origin == "recorded" {
+                recorded.insert(source.clone());
+            }
+        }
+    }
+    for src in registry::registered_source_names().filter(|s| is_hook_only(s)) {
+        assert_eq!(
+            NO_WIRE_EVIDENCE_YET.contains(&src),
+            !recorded.contains(src),
+            "{src} is hook-only with recorded={}; either record a scenario and drop its \
+             NO_WIRE_EVIDENCE_YET entry, or add one",
+            recorded.contains(src)
+        );
+    }
+}
+
 #[test]
 fn all_source_fixtures_decode_and_coalesce() {
     let root = fixtures_root();

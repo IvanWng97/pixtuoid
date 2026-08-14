@@ -12,6 +12,21 @@ real capture shows an id on every `preToolUse` and tools that INTERLEAVE
 (`cursor/tool-run-real`, and #901, which discovered the same gap the expensive
 way).
 
+**Every scenario declares its own provenance**, in `provenance.json` beside the
+payloads, because nothing IN the bytes separates a capture from a composition — a
+redacted cwd and an invented one look alike. `origin` is one of:
+
+| origin | required | means |
+| --- | --- | --- |
+| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes; the recorder writes this file itself |
+| `composed` | `note` | hand-written, and the note says how you can tell |
+| `unknown` | `note` | predates the rule; nobody recorded where it came from |
+
+`every_scenario_declares_its_provenance` enforces the schema, and its
+`NO_WIRE_EVIDENCE_YET` list — the hook-only sources with no recorded scenario at
+all — only shrinks: recording one forces its entry out, and a new hook-only CLI
+cannot join by default.
+
 Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
 being evidence — the `_pixtuoid_source` tag production's own shim adds downstream
 of the recorder's tee is stamped by the recorder itself, so it is not a hand

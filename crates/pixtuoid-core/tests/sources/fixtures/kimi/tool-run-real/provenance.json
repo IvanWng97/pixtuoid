@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "kimi",
+  "version": "0.36.0",
+  "captured": "2026-08-14",
+  "command": "kimi -p '{prompt}'"
+}
