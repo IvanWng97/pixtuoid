@@ -596,7 +596,7 @@ fuzz source dir:
 [group('rust')]
 [doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
 openclaw-e2e:
-    scripts/lib/tier-openclaw-hermetic.sh
+    scripts/release-e2e.sh --only openclaw_hermetic
 
 # N REAL `openclaw gateway run` processes, each in its own throwaway
 # OPENCLAW_HOME on its own port, feeding one headless pixtuoid: one
@@ -607,7 +607,7 @@ openclaw-e2e:
 [group('rust')]
 [doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
 openclaw-multi-e2e *ports:
-    scripts/lib/tier-openclaw-multi.sh {{ ports }}
+    scripts/release-e2e.sh --only openclaw_multi -- {{ ports }}
 
 # The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
@@ -618,7 +618,7 @@ openclaw-multi-e2e *ports:
 [group('rust')]
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
 openclaw-backend-e2e:
-    scripts/lib/tier-openclaw-backend.sh
+    scripts/release-e2e.sh --only openclaw_backend
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
 # socket, only the input is fixed. It had no recipe until this one, which is the
@@ -626,7 +626,7 @@ openclaw-backend-e2e:
 [group('rust')]
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
 replay fixture delay="3":
-    scripts/lib/tier-replay.sh {{ fixture }} {{ delay }}
+    scripts/release-e2e.sh --only replay -- {{ fixture }} {{ delay }}
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
@@ -1064,6 +1064,16 @@ bump version:
 [doc('Node gates: the npm package generator + the OpenClaw plugin contract (CI + release; not in preflight)')]
 npm-check:
     node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs
+
+# The end-to-end pass, walked once before the tag and once after release.yml is
+# green (--post). Interactive and resumable: a failed or skipped step is re-run on
+# the next invocation, everything already passed is not. The openclaw and replay
+# recipes are `--only` views of this same checklist, so the release path is
+# exercised mid-cycle rather than once a release.
+[group('release')]
+[doc('Interactive, resumable end-to-end pass — pre-tag, or --post after publish')]
+release-e2e version *args:
+    scripts/release-e2e.sh {{ version }} {{ args }}
 
 # Fail if the current release_notes() arm still has the uncurated TODO marker.
 # A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`

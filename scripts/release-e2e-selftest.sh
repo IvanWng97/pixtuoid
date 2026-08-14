@@ -34,5 +34,64 @@ eq require-bin-status "$?" 2
 (e2e_require_bin "$(command -v sh)" >/dev/null 2>&1)
 eq require-bin-accepts-executable "$?" 0
 
+REPO="$(e2e_repo_root)"
+VERSION=0.0.0
+export LIB REPO VERSION
+# shellcheck source=/dev/null
+. "$LIB/checklist.sh"
+
+ids=""
+bad=0
+for s in "${STEPS[@]}"; do
+    IFS='|' read -r id kind _ <<<"$s"
+    ids="$ids $id"
+    case "$kind" in
+    auto | manual) ;;
+    *)
+        no "record:$id" "unknown kind '$kind'"
+        bad=1
+        ;;
+    esac
+    if ! declare -F "${kind}_${id}" >/dev/null; then
+        no "record:$id" "no ${kind}_${id} function"
+        bad=1
+    fi
+done
+[ "$bad" -eq 0 ] && ok "every record has its body"
+
+bad=0
+while read -r fn; do
+    bare="${fn#auto_}"
+    bare="${bare#manual_}"
+    case " $ids " in
+    *" $bare "*) ;;
+    *)
+        no "body:$fn" "function has no STEPS record"
+        bad=1
+        ;;
+    esac
+done < <(declare -F | awk '{print $3}' | grep -E '^(auto|manual)_')
+[ "$bad" -eq 0 ] && ok "every body has its record"
+
+case " $ids " in
+*" $PHASE1_LAST "*) ok "PHASE1_LAST names a real step" ;;
+*) no PHASE1_LAST "'$PHASE1_LAST' is not a step id" ;;
+esac
+
+tmp="$(e2e_sandbox)"
+XDG_STATE_HOME="$tmp" "$HERE/release-e2e.sh" --list 0.0.0 >/dev/null
+eq list-exits-clean "$?" 0
+XDG_STATE_HOME="$tmp" "$HERE/release-e2e.sh" --only zz_no_such_step >/dev/null 2>&1
+eq unknown-only-reds "$?" 2
+# A manual step must not self-approve when nothing can answer the prompt.
+if grep -q '|manual|' <(printf '%s\n' "${STEPS[@]}"); then
+    first_manual="$(printf '%s\n' "${STEPS[@]}" | grep -m1 '|manual|' | cut -d'|' -f1)"
+    XDG_STATE_HOME="$tmp" "$HERE/release-e2e.sh" --only "$first_manual" </dev/null >/dev/null 2>&1
+    eq manual-refuses-non-tty "$?" 1
+else
+    ok "manual-refuses-non-tty (no manual step yet)"
+fi
+rm -rf "$tmp"
+
 [ "$FAIL" -eq 0 ] || exit 1
 echo "release-e2e selftest: all checks passed"
