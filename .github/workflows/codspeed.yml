@@ -1,15 +1,21 @@
 name: codspeed
 
-# Instrumented (simulation-mode) benchmark trend on Rust-touching PRs + main
-# pushes — CodSpeed counts weighted instructions, not wall-clock, so
-# shared-runner noise doesn't apply (<1% variance; the same setup ruff/uv
-# run). ADVISORY by construction like bench.yml/mutants.yml: nothing `needs:`
-# it and it is not a required check — trend evidence, never a gate. Reports
-# need the CodSpeed GitHub App installed on the repo; auth is OIDC
-# (`id-token: write`, job-scoped per this repo's convention — see
-# ci-tests.yml's "Declared, not inherited"), no token secret. Steps follow
-# CodSpeed's documented criterion workflow; moonrepo/setup-rust installs
-# cargo-codspeed via binstall (revisit if taiki-e/install-action adds it).
+# Instrumented benchmark trend on Rust-touching PRs + main pushes, in TWO
+# modes: `simulation` counts weighted instructions (not wall-clock, so
+# shared-runner noise doesn't apply — <1% variance; the same setup ruff/uv
+# run) and `memory` counts heap allocations. ADVISORY by construction like
+# bench.yml/mutants.yml: nothing `needs:` it and it is not a required check —
+# trend evidence, never a gate. Reports need the CodSpeed GitHub App installed
+# on the repo; auth is OIDC (`id-token: write`, job-scoped per this repo's
+# convention — see ci-tests.yml's "Declared, not inherited"), no token secret.
+# Steps follow CodSpeed's documented criterion workflow; moonrepo/setup-rust
+# installs cargo-codspeed via binstall (revisit if taiki-e/install-action adds
+# it).
+#
+# TWO action steps rather than one `mode: simulation,memory`: the runner uploads
+# only after EVERY mode's run part completes, so a single process drops an
+# already-good simulation result whenever the newer memory instrument fails.
+# The build takes no mode — both instruments consume the same build today.
 on:
   push:
     branches: [main]
@@ -25,7 +31,7 @@ permissions:
 
 jobs:
   codspeed:
-    name: benchmarks (codspeed simulation, advisory)
+    name: benchmarks (codspeed simulation + memory, advisory)
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -41,8 +47,13 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
       - name: Build instrumented benchmarks
-        run: cargo codspeed build -p pixtuoid-scene
+        run: cargo codspeed build -p pixtuoid-scene -p pixtuoid-core
       - uses: CodSpeedHQ/action@v5
         with:
           mode: simulation
+          run: cargo codspeed run
+      - uses: CodSpeedHQ/action@v5
+        continue-on-error: true
+        with:
+          mode: memory
           run: cargo codspeed run

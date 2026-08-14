@@ -74,4 +74,11 @@ tempfile = "3"
 filetime = "0.2"
 insta = { version = "1", features = ["yaml"] }
 tracing-subscriber = { workspace = true }
+# Wire→state benchmarks (`just bench`); same CodSpeed compat passthrough as
+# `pixtuoid-scene`'s.
+criterion = { package = "codspeed-criterion-compat", version = "5", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "decode_reduce"
+harness = false
 
