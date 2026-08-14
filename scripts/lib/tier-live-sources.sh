@@ -109,14 +109,16 @@ fi
 
 present_ids="$("$PIX" sources --json | jq -r '.[] | select(.cli_present) | .id' | paste -sd' ' -)"
 
-# A hook command that is a BARE NAME resolves via the CLI's PATH. doctor only
-# soft-checks those on purpose (its own PATH is not the CLI's — verify.rs's
-# ShimRef::BareName), so a missing shim is invisible there but fatal here: no
-# shim, no events, no sprite, whatever the CLI does.
+# A hook command that is a BARE NAME resolves via the CLI's PATH, so this tier
+# puts ITS OWN shim there for the CLIs it launches — the same reason it injects
+# PIXTUOID_SOCKET. Without it the tier would measure whether a pixtuoid happens
+# to be installed, not whether THIS build decodes. An ABSOLUTE hook path in a
+# CLI's config is beyond reach: PATH cannot redirect it, only a reconnect can.
+mkdir -p "$SB/bin"
+ln -sf "$HOOK" "$SB/bin/pixtuoid-hook"
+PATH="$SB/bin:$PATH"
+export PATH
 SHIM_ON_PATH=1
-command -v pixtuoid-hook >/dev/null 2>&1 || SHIM_ON_PATH=0
-[ "$SHIM_ON_PATH" = 0 ] &&
-    echo "note: pixtuoid-hook is not on PATH — sources whose hook is a bare name cannot report"
 
 FAILED=0
 covered=0
@@ -140,14 +142,24 @@ for id in "${wanted[@]}"; do
         ;;
     esac
 
-    # Spend the turn only if the integration could possibly report. A broken
-    # install (a hook path left dangling by an uninstall) yields no events no
-    # matter how well the CLI runs, so burning a message to discover that is waste.
+    # Relocation is a REPAIR, not a default: a throwaway home also throws away the
+    # CLI's credentials, so it is used only when the host's own install is broken
+    # and the turn would otherwise be certain to report nothing. A healthy host
+    # config keeps its auth and is left alone.
     health="$("$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id==$i) | .health // empty')"
+    env_pair=""
     if [ -n "$health" ]; then
-        echo "  BLOCKED $id — $health"
-        declare_uncovered="$declare_uncovered $id"
-        continue
+        home_env="$("$ROSTER_BIN" --roster | awk -F'\t' -v i="$id" '$1==i{print $4}')"
+        if [ "$home_env" != "-" ] && [ -n "$home_env" ] &&
+            mkdir -p "$SB/home-$id" &&
+            env "$home_env=$SB/home-$id" "$PIX" connect "$id" --json >/dev/null 2>&1; then
+            env_pair="$home_env=$SB/home-$id"
+            echo "  (host install broken — retrying in an isolated $home_env)"
+        else
+            echo "  BLOCKED $id — $health"
+            declare_uncovered="$declare_uncovered $id"
+            continue
+        fi
     fi
 
     IFS='|' read -r bin sub extra <<<"$spec"
@@ -160,7 +172,8 @@ for id in "${wanted[@]}"; do
     # stdin from /dev/null: a CLI that also accepts a piped prompt otherwise waits
     # on the inherited terminal forever (codex: "Reading additional input...").
     # shellcheck disable=SC2086  # $extra is a flag LIST and must word-split
-    (cd "$WS" && PIXTUOID_SOCKET="$SOCK" "$bin" "$sub" "$PROMPT" $extra </dev/null >"$SB/$id.log" 2>&1) &
+    (cd "$WS" && env ${env_pair:+"$env_pair"} PIXTUOID_SOCKET="$SOCK" \
+        "$bin" "$sub" "$PROMPT" $extra </dev/null >"$SB/$id.log" 2>&1) &
     CLIPID=$!
 
     # Registration alone proves little — junk content registers a sprite too. The

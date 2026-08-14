@@ -186,7 +186,11 @@ fn main() {
             } else {
                 "hook"
             };
-            println!("{name}\t{}\t{kind}", d.label_prefix);
+            println!(
+                "{name}\t{}\t{kind}\t{}",
+                d.label_prefix,
+                d.home_env.unwrap_or("-")
+            );
         }
         return;
     }
