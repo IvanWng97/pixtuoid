@@ -192,10 +192,10 @@ failure in the footer, green. `lighthouserc.json` therefore asserts
 "pessimistic" }]` alongside the category — a category score is a budget, not a
 contract, so anything that must NEVER regress needs its own per-audit
 assertion, and a CONTRACT audit needs every run to clear it. The
-`aggregationMethod` is not decoration: LHCI defaults to `optimistic`
-(`@lhci/utils/src/assertions.js`), which for a `minScore` assertion takes
-`Math.max` over the three runs — so ONE passing run would green a binary 0/1
-axe audit. Second surprise: Lighthouse does **not** pick a theme of its own.
+`aggregationMethod` is not decoration: the runner defaults to `median`
+(`config/lighthouse-runner.mjs`), and the median of three runs still greens a
+binary 0/1 axe audit that failed ONE of them — hence `pessimistic` on the
+contract audits. Second surprise: Lighthouse does **not** pick a theme of its own.
 `Base.astro`'s init falls back to night off the 7/19 wall clock, so an
 unqualified URL audits whatever palette the runner's clock happens to hold —
 half of all CI runs on one palette, half on the other, and a hard per-audit
@@ -228,25 +228,21 @@ exact-version esbuild approval; `fsevents` is explicitly denied because npm's
 registry metadata flags an install script even though the installed manifest
 needs none. Use `npm install-scripts ls` after dependency changes: an
 unreviewed script must fail installation instead of becoming a warning.
-The version-qualified `chrome-launcher@^0.13.4` override upgrades only LHCI's
-old CommonJS launcher line to 0.15.2 (removing its deprecated
-`rimraf → glob → inflight` chain); do not widen it to 1.x, which is ESM-only
-while LHCI 0.15.1 still calls `require('chrome-launcher')`.
-The unqualified `@puppeteer/browsers` → 3.x override is the only route past
-GHSA-jmr9-qjv8-65gv, because no bump clears it in place: `extract-zip` has no
-patched release (npm audit prints its range as `*`) and nothing above it can
-float past one — `@lhci/cli` 0.15.1 pins `lighthouse 12.6.1` exactly, which
-takes `puppeteer-core ^24`, and every published 24.x pins an exact
-`@puppeteer/browsers` 2.x; 3.x is the first major without extract-zip. Crossing
-that major under puppeteer-core 24 rests on two things: LHCI launches Chrome
-through `chrome-launcher`, so puppeteer's download path never runs, and 3.x
-being ESM-only (2.x shipped dual) is survivable only because puppeteer-core's
-CJS `require` rides Node's `require(esm)` — available from 22.12, under this
-project's node-26 floor. The gate that proves it is `npm run lighthouse` —
-`site-check` never runs LHCI.
-Retire it once nothing requests `@puppeteer/browsers < 3`: drop the entry per
-the protocol below and read the top of npm audit's vulnerable `lighthouse`
-range — 13.3.0 today, so a `lighthouse >= 13.4.0` reaching `@lhci/cli` clears it.
+`npm run lighthouse` is an in-repo runner (`config/lighthouse-runner.mjs`)
+driving lighthouse 13 through the official programmatic API (chrome-launcher +
+`lighthouse(url, {port})`, per lighthouse `docs/readme.md`), reading the SAME
+`lighthouserc.json` budgets `@lhci/cli` did. LHCI was dropped after a year
+without a release left it pinning `lighthouse 12`, which dragged the
+`@puppeteer/browsers` and `chrome-launcher` overrides — both retired with it
+(GHSA-jmr9-qjv8-65gv's extract-zip chain is gone by construction: lighthouse 13
+takes `puppeteer-core ≥25`, whose `@puppeteer/browsers` is natively 3.x).
+Aggregation follows lighthouse `docs/variability.md`: serial runs, assertions
+on median-of-N. The ONE semantic divergence from LHCI: a missing
+`aggregationMethod` defaults to MEDIAN, not optimistic — stricter-or-equal,
+pinned by `config/lighthouse-runner.test.mjs`, which also pins that a renamed
+audit, category, or `user-timings` mark FAILS the run instead of passing
+vacuously. `config/lighthouse-budget.test.mjs` keeps gating the budget file's
+shape, unchanged.
 
 **Nothing gates a STALE `overrides` entry**, so retiring one is a manual
 audit: copy `package.json` to a scratch dir (never the working tree, whose
@@ -255,6 +251,6 @@ and without the entry, and diff the generated `packages` maps — identical
 means inert. The `yaml-language-server` → `yaml 2.8.3` pin was retired this
 way once `@astrojs/check` 0.9.10 pulled a language-server whose
 `yaml-language-server` declares an exact `yaml 2.8.3` of its own. **`npm
-audit` alone cannot clear an entry**: `chrome-launcher`'s guards a deprecated
-chain no advisory covers, so audit reads clean while
-`rimraf@3`/`glob@7`/`inflight` come back.
+audit` alone cannot clear an entry**: the retired `chrome-launcher` pin
+guarded a deprecated `rimraf@3`/`glob@7`/`inflight` chain no advisory ever
+covered — audit read clean the whole time it was load-bearing.
