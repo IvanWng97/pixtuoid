@@ -6,7 +6,8 @@
 # whole source's life because fixture and decoder shared one wrong field name.
 # So these are recorded, never composed.
 #
-# ⚠ BILLED — runs one real model turn on that provider's account.
+# ⚠ BILLED — runs one real model turn on that provider's account, and repoints
+#   that source's installed hook at the recorder until it exits.
 #
 #   just capture-fixture kimi tool-run kimi -p '{prompt}'
 #   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
@@ -33,12 +34,21 @@ for a in "$@"; do cmd+=("${a//\{prompt\}/$PROMPT}"); done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 HOOK="$REPO/target/release/pixtuoid-hook"
-[ -x "$HOOK" ] || {
-    echo "missing $HOOK — run: just build --release" >&2
-    exit 2
-}
+PIX="$REPO/target/release/pixtuoid"
+for b in "$HOOK" "$PIX"; do
+    [ -x "$b" ] || {
+        echo "missing $b — run: just build --release" >&2
+        exit 2
+    }
+done
 command -v jq >/dev/null || {
     echo "jq is required — run: just setup-tools" >&2
+    exit 2
+}
+
+was_connected="$("$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id == $i) | .connected')"
+[ -n "$was_connected" ] || {
+    echo "no source '$id' — see: pixtuoid sources" >&2
     exit 2
 }
 
@@ -50,16 +60,34 @@ if [ -e "$out" ]; then out="$out.new"; fi
 
 # A FIXED generic path, because every payload embeds its own cwd and
 # transcript_path: capturing somewhere already generic is what lets the bytes
-# ship unedited. It is world-writable and predictable and goes FIRST on PATH
-# below, so the `rm -rf` under `set -e` is load-bearing, not tidiness.
+# ship unedited. It is world-writable and predictable and the CLI is about to
+# execute the shim we put there, so the `rm -rf` under `set -e` is load-bearing.
 SB=/tmp/pixtuoid-capture
 RAWD="$SB/raw"
 WS="$SB/proj"
 rm -rf "$SB"
 mkdir -p "$SB/bin" "$RAWD" "$WS"
-# The executable always goes; a BILLED capture survives a failed run.
+# Put the source's hook back the way a normal install writes it. Not a config
+# edit of our own: `connect` is the install authority, and the pre-state comes
+# from `sources --json`.
+restore() {
+    if [ "$was_connected" = true ]; then
+        "$PIX" connect "$id" >/dev/null || echo "RESTORE FAILED — run: pixtuoid connect $id" >&2
+    else
+        "$PIX" disconnect "$id" >/dev/null || echo "RESTORE FAILED — run: pixtuoid disconnect $id" >&2
+    fi
+}
+# The executable always goes; a BILLED capture survives a failed run. The signal
+# traps exit rather than cleaning up, so cleanup runs once, from EXIT.
 ok=""
-trap 'rm -rf "$SB/bin"; if [ -n "$ok" ]; then rm -rf "$SB"; else echo "raw capture kept: $RAWD" >&2; fi' EXIT
+cleanup() {
+    rm -rf "${SB:?}/bin"
+    restore
+    if [ -n "$ok" ]; then rm -rf "${SB:?}"; else echo "raw capture kept: $RAWD" >&2; fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 printf 'pong\n' >"$WS/NOTE.txt"
 git init -q "$WS"
@@ -76,7 +104,11 @@ while ! mkdir "$RAWD/\$n" 2>/dev/null; do n=\$((n + 1)); done
 tee "$RAWD/\$n/payload.json" | "$HOOK" "\$@"
 SHIM
 chmod +x "$SB/bin/pixtuoid-hook"
-export PATH="$SB/bin:$PATH"
+# Every source but Claude embeds the hook's ABSOLUTE path in the CLI's own config
+# (`BinaryStrategy::EmbedAbsolute`), so a shim on PATH is never consulted. The
+# hook is repointed at the recorder through `PIXTUOID_HOOK`, the override the
+# installer embeds, and this run owns the CLI's real config until `restore`.
+PIXTUOID_HOOK="$SB/bin/pixtuoid-hook" "$PIX" connect "$id" >/dev/null
 
 # Claimed slots, counted the same way the harvest walks them, so the two cannot
 # disagree about where the capture ends.
@@ -86,7 +118,7 @@ count() {
     echo "$n"
 }
 
-echo "capturing $id/$scenario — one real model turn"
+echo "capturing $id/$scenario — one real model turn; $id's hook points at the recorder until this exits"
 rc=0
 (cd "$WS" && "${cmd[@]}") || rc=$?
 
@@ -116,7 +148,7 @@ while [ -f "$RAWD/$n/payload.json" ]; do
 done >"$SB/harvest.jsonl"
 
 if [ ! -s "$SB/harvest.jsonl" ]; then
-    echo "captured nothing — is $id's hook installed, and does it invoke a bare 'pixtuoid-hook'?" >&2
+    echo "captured nothing — the CLI fired no hook at all; check the invocation ran a real turn" >&2
     exit 1
 fi
 mkdir -p "$dest"
