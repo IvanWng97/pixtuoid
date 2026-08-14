@@ -152,6 +152,33 @@ just bump 0.5.1                             # bump + draft notes + preflight →
 git tag v0.5.1 && git push origin v0.5.1    # fires release.yml → build + crates.io + npm
 ```
 
+### The end-to-end pass
+
+```bash
+just release-e2e 0.5.1          # BEFORE the tag
+just release-e2e 0.5.1 --post   # after release.yml goes green
+```
+
+Interactive and resumable. Auto steps run a command; manual steps print
+instructions and wait for a verdict. State is keyed by version AND phase under
+`${XDG_STATE_HOME:-~/.local/state}/pixtuoid/release-e2e/`, deliberately outside
+the worktree so a release cut in a throwaway `git worktree` survives its removal
+— re-running replays only what is not already `pass`.
+
+A **skip needs a typed reason** and is reprinted in the closing summary, so a
+step you could not run here (a CLI you have not installed, a registry that has
+not propagated yet) stays visible instead of reading as covered. `--list` prints
+the phase without running anything; `--from <id>` re-opens a step already passed.
+
+Phase 1 ends by printing the exact `git tag -a` for the verified SHA and stops —
+**pushing the tag stays human.** Phase 2 covers what only exists after publish:
+the registries, the packaged artifact installed into a throwaway `HOME`, and the
+in-app "What's new" popup, which nothing else in the pipeline verifies actually
+reaches a user.
+
+`just release-e2e X.Y.Z --list` is also the cheapest way to see what a release
+costs before starting one.
+
 The tag also publishes **outside** this repo: `pixtuoid` is in homebrew-core,
 whose formula builds from the tag TARBALL and is `autobump: true`, so
 BrewTestBot opens a version-bump PR on its own — and the tarball is fetchable
@@ -255,11 +282,16 @@ What to run and when, for an agent-driven change:
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` | [`CLAUDE.md`](../CLAUDE.md) "Build & test" |
 | before push | `just preflight` | same — including why never to pipe it |
 | before merge | the two-lens review | [Pull requests](#pull-requests) |
-| a source/lifecycle change | dogfood against live CC, or replay hermetically | the three tiers below |
+| a source/lifecycle change | dogfood against live CC, or replay hermetically | the tiers below |
+| before the tag | `just release-e2e X.Y.Z` | [Releasing](#releasing) |
+| after `release.yml` is green | `just release-e2e X.Y.Z --post` | same |
 
-The three OpenClaw e2e tiers, cheapest first — none runs in CI:
+Every e2e tier is a step of ONE checklist (`scripts/release-e2e.sh`), and each
+recipe below is an `--only` view of it — so the machinery the release pass rides
+is exercised mid-cycle instead of once a release. None runs in CI. Cheapest first:
 
 - `just openclaw-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
+- `just replay <fixture>` — a captured rollout through the full headless path (real watcher, real socket; only the input is fixed).
 - `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
 

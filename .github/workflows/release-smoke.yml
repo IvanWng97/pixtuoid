@@ -1,0 +1,91 @@
+name: release-smoke
+
+# release.yml builds every Linux target --no-default-features, while
+# homebrew-core builds the workspace with DEFAULT features on macOS AND Linux and
+# runs its own `test do` — a configuration built nowhere else in this repo, whose
+# breakage lands in THEIR CI on an autobump we neither trigger nor get told about.
+# Dispatch this against a release branch before tagging, while the tag is still
+# reversible.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: smoke (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      # The default `audio` feature pulls rodio/cpal, which need ALSA on Linux.
+      # This is the dependency homebrew-core's formula must declare.
+      - name: Install ALSA
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build with DEFAULT features
+        run: cargo build --release --locked --bin pixtuoid
+
+      # The three assertions homebrew-core's `test do` makes. Their exact strings
+      # are pinned at their source sites; see the "homebrew-core contract"
+      # comments in validate.rs, sources_cli.rs and claude_code.rs.
+      - name: homebrew-core test-do contract
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/smokehome
+          XDG_CONFIG_HOME: ${{ runner.temp }}/smokehome/.config
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME" "$XDG_CONFIG_HOME"
+          bin=target/release/pixtuoid
+          [ "$RUNNER_OS" = Windows ] && bin=target/release/pixtuoid.exe
+
+          "$bin" --version
+
+          "$bin" init-pack "$RUNNER_TEMP/skeleton"
+          # The OK: line is line 1; optional-animation WARNs follow it on stdout.
+          ok="$("$bin" validate-pack "$RUNNER_TEMP/skeleton" | head -1)"
+          echo "$ok"
+          case "$ok" in
+          'OK: pack "skeleton" v'*' loaded') ;;
+          *)
+            echo "validate-pack broke the homebrew-core contract" >&2
+            exit 1
+            ;;
+          esac
+
+          row="$("$bin" connect claude-code --json)"
+          echo "$row"
+          [ "$(jq -r '.[0].id' <<<"$row")" = claude-code ]
+          [ "$(jq -r '.[0].outcome' <<<"$row")" = connected ]
+
+      # homebrew-core's install block requires both on CLEAN stdout — an empty or
+      # noisy stream breaks THEIR build, not ours.
+      - name: man and completions land on clean stdout
+        shell: bash
+        env:
+          HOME: ${{ runner.temp }}/smokehome
+        run: |
+          set -euo pipefail
+          bin=target/release/pixtuoid
+          [ "$RUNNER_OS" = Windows ] && bin=target/release/pixtuoid.exe
+          "$bin" man >"$RUNNER_TEMP/pixtuoid.1"
+          [ -s "$RUNNER_TEMP/pixtuoid.1" ]
+          for sh in bash zsh fish; do
+            "$bin" completions "$sh" >"$RUNNER_TEMP/pixtuoid.$sh"
+            [ -s "$RUNNER_TEMP/pixtuoid.$sh" ]
+          done

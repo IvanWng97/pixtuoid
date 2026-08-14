@@ -83,8 +83,10 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 │                    (`just gen-wasm` → committed site/public/wasm/), not a crates.io artifact.
 │                    Time is a PARAMETER — the engine never reads the clock on wasm.
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named pipe.
-scripts/             gen-media.py + media.json (the ONE driver for all committed art), the three
-                     OpenClaw e2e tiers (see Build & test), check_upstream_drift.py, risk-radar.py.
+scripts/             gen-media.py + media.json (the ONE driver for all committed art),
+                     release-e2e.sh + lib/ (THE e2e entry point — the three OpenClaw tiers
+                     and replay are `--only` views of its checklist; see Build & test),
+                     check_upstream_drift.py, risk-radar.py.
 policy/              policy-as-code: Conftest/OPA structural contracts + yq-extracted
                      action/workflow behavior tests (`policy/ci-observability/`).
 site/                Astro landing page → GitHub Pages. Self-contained Node project, own CI.
@@ -126,9 +128,9 @@ transcript/hook bytes through the production path drives
 `pixtuoid_core::harness::Drive` (core's dev-only `harness` feature, so it never
 enters the published crate). **A driver that keys the first-sight seed any way
 other than the source's registry row registers NOTHING** — a JSONL event for an
-unknown id is a documented no-op. The four shells and the two on-demand tools
-(`just fuzz`, the `corpus_check` census) are mapped in the tests guide; neither
-tool runs in CI.
+unknown id is a documented no-op. The four tiers under `scripts/lib/` and the two
+on-demand tools (`just fuzz`, the `corpus_check` census) are mapped in the tests
+guide; neither tool runs in CI.
 
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a

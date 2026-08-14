@@ -1047,7 +1047,7 @@ bump version:
     git commit -q -m "chore(release): v$ver"
     committed=1
 
-    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
+    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. walk the end-to-end pass (interactive, resumable):\n         just release-e2e %s\n    5. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n    6. once release.yml is green: just release-e2e %s --post\n' "$ver" "$branch" "$ver" "$ver" "$ver" "$ver"
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
