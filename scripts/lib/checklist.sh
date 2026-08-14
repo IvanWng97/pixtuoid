@@ -156,6 +156,10 @@ auto_corpus() {
 auto_release_smoke() {
     local branch t0 id tries=0
     branch="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
+    if [ -z "$(git -C "$REPO" ls-remote --heads origin "$branch")" ]; then
+        blocked "branch $branch is not on origin — push it before dispatching CI"
+        return 2
+    fi
     t0="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     gh workflow run release-smoke.yml --ref "$branch" || return 1
     while [ "$tries" -lt 30 ]; do
