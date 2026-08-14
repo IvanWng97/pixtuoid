@@ -9,26 +9,26 @@
 # Run:          just openclaw-e2e
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
-OUT="$(mktemp)"
-PROJ="$(mktemp -d)"
-CFGDIR="$(mktemp -d)"
-# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
-# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
-# and on a shared /tmp it is pre-plantable by another user (`ensure_owned_socket_dir`
-# deliberately leaves an explicit PIXTUOID_SOCKET path alone).
-SOCKDIR="$(mktemp -d)"
-SOCK="$SOCKDIR/pixtuoid.sock"
-PIXPID=""
+e2e_require_bin "$PIX" "$HOOK"
 
-for bin in "$PIX" "$HOOK"; do
-    [ -x "$bin" ] || {
-        echo "missing $bin — run: just build --release" >&2
-        exit 2
-    }
-done
+# The socket lives inside the PRIVATE 0700 sandbox, never as a fixed name in the
+# shared temp dir: a fixed name makes two concurrent runs bind/`rm` each other's
+# socket, and on a shared /tmp it is pre-plantable by another user
+# (`ensure_owned_socket_dir` deliberately leaves an explicit PIXTUOID_SOCKET alone).
+SB="$(e2e_sandbox)"
+OUT="$SB/pixtuoid.log"
+PROJ="$SB/projects"
+CFGDIR="$SB/config"
+SOCK="$SB/pixtuoid.sock"
+mkdir -p "$PROJ" "$CFGDIR"
+PIXPID=""
 
 cleanup() {
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
@@ -37,8 +37,7 @@ cleanup() {
     for p in "${SPID:-}" "${APID:-}" "${BPID:-}"; do
         [ -n "$p" ] && kill "$p" 2>/dev/null
     done
-    rm -f "$OUT"
-    rm -rf "$PROJ" "$CFGDIR" "$SOCKDIR"
+    rm -rf "$SB"
 }
 trap cleanup EXIT
 

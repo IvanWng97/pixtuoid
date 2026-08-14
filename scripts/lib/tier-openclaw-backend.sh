@@ -14,19 +14,25 @@
 # Run:          just openclaw-backend-e2e
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 PROJECTS="$HOME/.claude/projects"
-CFGDIR="$(mktemp -d)"
-# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
-# temp dir: a fixed name lets concurrent runs clobber each other's socket, and on
-# a shared /tmp it is pre-plantable by another user — nothing downstream polices
-# it, since `ensure_owned_socket_dir` leaves an explicit PIXTUOID_SOCKET alone.
-SOCKDIR="$(mktemp -d)"
-SOCK="$SOCKDIR/pixtuoid.sock"
-PIXLOG="$(mktemp)"
-GWLOG="$(mktemp)"
-AGENTLOG="$(mktemp)"
+# The socket lives inside the PRIVATE 0700 sandbox, never as a fixed name in the
+# shared temp dir: a fixed name lets concurrent runs clobber each other's socket,
+# and on a shared /tmp it is pre-plantable by another user — nothing downstream
+# polices it, since `ensure_owned_socket_dir` leaves an explicit PIXTUOID_SOCKET
+# alone.
+SB="$(e2e_sandbox)"
+CFGDIR="$SB/config"
+SOCK="$SB/pixtuoid.sock"
+PIXLOG="$SB/pixtuoid.log"
+GWLOG="$SB/gateway.log"
+AGENTLOG="$SB/agent.log"
+mkdir -p "$CFGDIR"
 PIXPID=""
 GWPID=""
 
@@ -36,10 +42,7 @@ for bin in openclaw claude; do
         exit 2
     }
 done
-[ -x "$PIX" ] || {
-    echo "missing $PIX — run: just build --release" >&2
-    exit 2
-}
+e2e_require_bin "$PIX"
 [ -d "$PROJECTS" ] || {
     echo "no $PROJECTS — has Claude Code ever run on this machine?" >&2
     exit 2
@@ -82,8 +85,7 @@ cleanup() {
     # shellcheck disable=SC2086  # word-split is intended — one kill per listener pid
     [ -n "$port_pids" ] && kill -9 $port_pids 2>/dev/null
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
-    rm -f "$PIXLOG" "$GWLOG" "$AGENTLOG"
-    rm -rf "$CFGDIR" "$SOCKDIR"
+    rm -rf "$SB"
 }
 trap cleanup EXIT
 

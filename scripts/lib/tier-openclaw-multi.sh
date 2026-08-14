@@ -16,17 +16,18 @@
 # Run:          just openclaw-multi-e2e [port ...]   (default: 4 ports)
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 # Four by default: two would prove the keying, four also exercises the one-floor
 # crowding the visit-spot offset logic exists for.
 PORTS=("$@")
 [ "${#PORTS[@]}" -gt 0 ] || PORTS=(18901 18902 18903 18904)
 
-[ -x "$PIX" ] || {
-    echo "missing $PIX — run: just build --release" >&2
-    exit 2
-}
+e2e_require_bin "$PIX"
 command -v openclaw >/dev/null 2>&1 || {
     echo "missing 'openclaw' on PATH — this live test drives the REAL gateway" >&2
     exit 2
@@ -38,7 +39,7 @@ for port in "${PORTS[@]}"; do
     fi
 done
 
-MG="$(mktemp -d)"
+MG="$(e2e_sandbox)"
 SOCK="$MG/pixtuoid.sock"
 OUT="$MG/pixtuoid.log"
 GW_PIDS=()

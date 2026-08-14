@@ -10,7 +10,11 @@
 #   PIXTUOID_BIN overrides the binary (default: this tree's target/release build).
 set -euo pipefail
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+repo="$(e2e_repo_root)"
 fixture="${1:?usage: just replay <rollout.jsonl> [delay_secs]}"
 delay="${2:-3}"
 # The WORKING TREE's binary, never a bare `pixtuoid` off PATH: a maintainer
@@ -27,23 +31,24 @@ command -v "$bin" >/dev/null 2>&1 || {
     exit 2
 }
 
-root="$(mktemp -d)"
-proj="$(mktemp -d)"
-cfgdir="$(mktemp -d)"
-# The socket lives inside a PRIVATE 0700 dir, not as a bare `mktemp -u` name in
-# the shared temp dir, which would leave a pre-plant/symlink race between name
+# The socket lives inside the PRIVATE 0700 sandbox, not as a bare `mktemp -u` name
+# in the shared temp dir, which would leave a pre-plant/symlink race between name
 # generation and pixtuoid's bind(). Nothing downstream closes it —
 # `ensure_owned_socket_dir` does not police an explicit PIXTUOID_SOCKET path.
-sockdir="$(mktemp -d)"
-sock="$sockdir/hook.sock"
-out="$(mktemp)"
+sb="$(e2e_sandbox)"
+root="$sb/sessions"
+proj="$sb/projects"
+cfgdir="$sb/config"
+sock="$sb/hook.sock"
+out="$sb/headless.log"
+mkdir -p "$root" "$proj" "$cfgdir"
 hpid=""
 cleanup() {
     if [ -n "$hpid" ]; then
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null || true
     fi
-    rm -rf "$root" "$proj" "$cfgdir" "$sockdir" "$out"
+    rm -rf "$sb"
     return 0
 }
 trap cleanup EXIT
