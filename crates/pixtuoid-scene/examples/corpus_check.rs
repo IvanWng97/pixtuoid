@@ -166,23 +166,38 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // `id<TAB>transcript|hook` for every registered source, so the census shell
-    // reads its roster from the registry instead of keeping a copy that drifts.
+    if args.iter().any(|a| a == "--sources") {
+        for name in registry::registered_source_names() {
+            if Drive::transcript(name, "/probe.jsonl").is_some() {
+                println!("{name}");
+            }
+        }
+        return;
+    }
+    // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
+    // source without a second copy of the roster or of the badge prefixes.
     if args.iter().any(|a| a == "--roster") {
         for name in registry::registered_source_names() {
+            let Some(d) = registry::descriptor_for(name) else {
+                continue;
+            };
             let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
                 "transcript"
             } else {
                 "hook"
             };
-            println!("{name}\t{kind}");
+            println!(
+                "{name}\t{}\t{kind}\t{}",
+                d.label_prefix,
+                d.home_env.unwrap_or("-")
+            );
         }
         return;
     }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     if positional.is_empty() {
-        eprintln!("usage: corpus_check <source> [root] [--json]  |  corpus_check --roster");
+        eprintln!("usage: corpus_check <source> [root] [--json]  |  corpus_check --sources");
         std::process::exit(2);
     }
     let source = positional[0].as_str();
@@ -215,8 +230,9 @@ fn main() {
     walk(source, &root, &mut files);
     files.sort();
     if files.is_empty() {
-        eprintln!("error: no .jsonl under {}", root.display());
-        std::process::exit(2);
+        // 3, not 2: an absent corpus is a coverage gap a caller may accept.
+        eprintln!("absent: no .jsonl under {}", root.display());
+        std::process::exit(3);
     }
 
     let pack = load_sprite_pack(None).expect("embedded pack");

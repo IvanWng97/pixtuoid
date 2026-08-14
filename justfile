@@ -584,7 +584,7 @@ corpus-all:
     cc=target/release/examples/corpus_check
     [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
     rc=0
-    while IFS=$'\t' read -r id kind; do
+    while IFS=$'\t' read -r id _ kind _; do
         [ "$kind" = transcript ] || continue
         echo "── $id"
         "$cc" "$id" || rc=1
