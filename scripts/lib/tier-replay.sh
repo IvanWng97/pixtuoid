@@ -31,10 +31,6 @@ command -v "$bin" >/dev/null 2>&1 || {
     exit 2
 }
 
-# The socket lives inside the PRIVATE 0700 sandbox, not as a bare `mktemp -u` name
-# in the shared temp dir, which would leave a pre-plant/symlink race between name
-# generation and pixtuoid's bind(). Nothing downstream closes it —
-# `ensure_owned_socket_dir` does not police an explicit PIXTUOID_SOCKET path.
 sb="$(e2e_sandbox)"
 root="$sb/sessions"
 proj="$sb/projects"

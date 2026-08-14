@@ -621,8 +621,7 @@ openclaw-backend-e2e:
     scripts/release-e2e.sh --only openclaw_backend
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
-# socket, only the input is fixed. It had no recipe until this one, which is the
-# condition that let the cc-backend tier above rot unseen for a release.
+# socket, only the input is fixed. Recipe-less until now, for the reason above.
 [group('rust')]
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
 replay fixture delay="3":
@@ -1196,8 +1195,7 @@ wasm-check-selftest:
 # needs only Pillow while `gen-check` needs the venv plus ffmpeg, node, a release
 # snapshot build and the wasm pair: a developer who cannot run that gate should
 # still be able to run this.
-# Gates the release-e2e machinery. Every assertion in it has been shown to red
-# against a broken subject — see the negative controls in its own header.
+# Gates the release-e2e machinery; also runs in ci-lint.yml's hygiene job.
 [group('meta')]
 [doc('Self-test the release-e2e driver and its shared tier helpers')]
 release-e2e-selftest:

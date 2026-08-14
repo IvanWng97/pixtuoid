@@ -75,17 +75,31 @@ auto_preconditions() {
     fi
 }
 
-auto_verify() { (cd "$REPO" && just verify); }
+auto_verify() {
+    if [ ! -d "$REPO/site/node_modules" ]; then
+        blocked "site deps not installed — run: just site-setup"
+        return 2
+    fi
+    (cd "$REPO" && just verify)
+}
 auto_npm_check() { (cd "$REPO" && just npm-check); }
 auto_build() { (cd "$REPO" && just build --release --bins --examples); }
-auto_site_e2e() { (cd "$REPO" && just site-e2e); }
+auto_site_e2e() {
+    if [ ! -d "$REPO/site/node_modules" ]; then
+        blocked "site deps not installed — run: just site-setup"
+        return 2
+    fi
+    (cd "$REPO" && just site-e2e)
+}
 
 # gen-wasm-check only proves the committed pair matches its own manifest.sha256 —
 # a stale set is perfectly self-consistent, so compare commit times too.
 auto_wasm_fresh() {
     local engine wasm
     (cd "$REPO" && just gen-wasm-check) || return 1
-    engine="$(git -C "$REPO" log -1 --format=%ct -- crates/pixtuoid-scene crates/pixtuoid-web)"
+    # src/ only: an examples/ or benches/ edit never reaches the wasm artifact, and
+    # treating the whole crate dir as wasm-affecting cries stale on every one.
+    engine="$(git -C "$REPO" log -1 --format=%ct -- crates/pixtuoid-scene/src crates/pixtuoid-web/src)"
     wasm="$(git -C "$REPO" log -1 --format=%ct -- site/public/wasm)"
     if [ -z "$engine" ] || [ -z "$wasm" ]; then
         blocked "no commit history for the scene/wasm paths (shallow clone?)"

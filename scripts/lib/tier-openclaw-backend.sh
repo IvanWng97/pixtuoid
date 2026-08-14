@@ -21,11 +21,6 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 PROJECTS="$HOME/.claude/projects"
-# The socket lives inside the PRIVATE 0700 sandbox, never as a fixed name in the
-# shared temp dir: a fixed name lets concurrent runs clobber each other's socket,
-# and on a shared /tmp it is pre-plantable by another user — nothing downstream
-# polices it, since `ensure_owned_socket_dir` leaves an explicit PIXTUOID_SOCKET
-# alone.
 SB="$(e2e_sandbox)"
 CFGDIR="$SB/config"
 SOCK="$SB/pixtuoid.sock"

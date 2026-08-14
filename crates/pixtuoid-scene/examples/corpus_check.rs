@@ -183,7 +183,8 @@ fn main() {
     let source = positional[0].as_str();
 
     // A source with no transcript decoder would otherwise report a clean census
-    // of nothing.
+    // of nothing. Above the root resolution, so a hook-only id reds with this
+    // rather than with a missing-root message.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(

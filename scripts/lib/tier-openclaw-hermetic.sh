@@ -18,10 +18,6 @@ PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
 e2e_require_bin "$PIX" "$HOOK"
 
-# The socket lives inside the PRIVATE 0700 sandbox, never as a fixed name in the
-# shared temp dir: a fixed name makes two concurrent runs bind/`rm` each other's
-# socket, and on a shared /tmp it is pre-plantable by another user
-# (`ensure_owned_socket_dir` deliberately leaves an explicit PIXTUOID_SOCKET alone).
 SB="$(e2e_sandbox)"
 OUT="$SB/pixtuoid.log"
 PROJ="$SB/projects"
@@ -75,7 +71,7 @@ send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; 
 FAILED=0
 # Match the LAST `daemons=` line, not any line, so the idle -> busy -> idle round
 # trip is distinguishable (a plain grep-anywhere can't).
-# NOT hoisted into a shared `scripts/lib`, and adjudicated three times (two review
+# NOT hoisted into `e2e-common.sh`, and adjudicated three times (two review
 # lenses + the online bot) — do not re-raise without new evidence. The bodies look
 # alike; the retry bounds await different EVENT CLASSES. This tier's 40x0.2s bounds
 # an in-process shim -> HookRouter -> reducer -> summary hop; multi-gateway's
