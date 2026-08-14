@@ -2717,6 +2717,7 @@ name = "pixtuoid-core"
 version = "0.17.0"
 dependencies = [
  "anyhow",
+ "codspeed-criterion-compat",
  "filetime",
  "insta",
  "libc",

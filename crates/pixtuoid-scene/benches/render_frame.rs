@@ -1,6 +1,11 @@
-//! Whole-frame render benchmark: `render_floor` on a 12-agent office at the
-//! two sizes issue #900 measured, in a busy (mixed-activity) and an idle
-//! configuration. Run via `just bench`; profile via
+//! Whole-frame render benchmark over two axes: the two SIZES issue #900
+//! measured (12 agents, busy and idle), and OCCUPANCY at the larger of them.
+//! Size is the saturated axis — #900 put frame cost at 2.814x for 2.812x the
+//! pixels — and 360x240 is where it stops: `office_scale` pins the floating
+//! window's buffer near 180px tall, so a bigger display renders a SMALLER
+//! office. Occupancy is what still varies in real use, and the per-agent work
+//! (z-sort, routing, chitchat) is the part that isn't linear in pixels.
+//! Run via `just bench`; profile via
 //! `cargo bench -p pixtuoid-scene --bench render_frame -- --profile-time 10`
 //! under `samply record`. Numbers are LOCAL statistical evidence (criterion's
 //! own FAQ warns shared-CI wall-clock is noise) — CI runs this advisory-only.
@@ -27,6 +32,11 @@ use pixtuoid_scene::layout::Size;
 const BASE_EPOCH_SECS: u64 = 1_700_000_200;
 const SIM_WINDOW_FRAMES: u32 = 600;
 const FRAME_STEP_MS: u64 = 100;
+/// The largest office buffer any painter produces (`FLOATING_DEFAULT_W/H`, and
+/// the scale-1 case of `office_scale`).
+const CEILING: (u16, u16) = (360, 240);
+/// Crowds above the 12 the size axis fixes — a busy pod-farm and a full floor.
+const OCCUPANCY: [usize; 2] = [32, 64];
 
 fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> SceneState {
     let mut s = SceneState::uniform(max_desks);
@@ -41,18 +51,22 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
     // The idle office's clocks sit far in the past so agents settle into the
     // deep-idle poses a real overnight office shows.
     let idle_epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    // Half the office mid-tool, a sixth parked on a prompt — at n=12 this is
+    // exactly the 6/2/4 split the size cases have measured since #900.
+    let active = n / 2;
+    let waiting = active + n / 6;
     for i in 0..n {
         let id = AgentId::from_transcript_path(&format!("/p/{i}.jsonl"));
         let state = match i {
-            0..=5 if busy => ActivityState::Active {
+            _ if !busy || i >= waiting => ActivityState::Idle,
+            _ if i < active => ActivityState::Active {
                 tool_use_id: Some(Arc::from(format!("t{i}").as_str())),
                 detail: Some(Arc::from("cargo test")),
                 kind: kinds[i % kinds.len()],
             },
-            6 | 7 if busy => ActivityState::Waiting {
+            _ => ActivityState::Waiting {
                 reason: Arc::from("permission"),
             },
-            _ => ActivityState::Idle,
         };
         let stamp = if busy {
             base + Duration::from_secs(i as u64)
@@ -97,39 +111,53 @@ fn render_frame(c: &mut Criterion) {
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);
     let idle = office_scene(12, 16, base, false);
+    // A 360x240 floor lays out 80 desks, so both crowds seat fully.
+    let crowds: Vec<(usize, SceneState)> = OCCUPANCY
+        .iter()
+        .map(|&n| (n, office_scene(n, n, base, true)))
+        .collect();
+
+    let mut cases: Vec<(String, &SceneState, u16, u16)> = Vec::new();
+    for (label, scene) in [("busy", &busy), ("idle", &idle)] {
+        for (w, h) in [(192u16, 160u16), CEILING] {
+            cases.push((format!("{label}12_{w}x{h}"), scene, w, h));
+        }
+    }
+    for (n, scene) in &crowds {
+        let (w, h) = CEILING;
+        cases.push((format!("busy{n}_{w}x{h}"), scene, w, h));
+    }
 
     let mut group = c.benchmark_group("render_floor");
-    for (label, scene) in [("busy", &busy), ("idle", &idle)] {
-        for (w, h) in [(192u16, 160u16), (360, 240)] {
-            group.bench_function(format!("{label}12_{w}x{h}"), |b| {
-                let mut fctx = FloorCtx::new();
-                let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-                let mut coffee = CoffeeState::new();
-                let mut chitchat = HashMap::new();
-                let mut i = 0u32;
-                b.iter(|| {
-                    i = (i + 1) % SIM_WINDOW_FRAMES;
-                    render_floor(
-                        &mut fctx,
-                        &mut buf,
-                        &mut coffee,
-                        &mut chitchat,
-                        FrameInputs {
-                            scene,
-                            pack: &pack,
-                            theme,
-                            now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
-                            size: Size { w, h },
-                            floor_meta: FloorMeta::ground(),
-                            active_pet: None,
-                            floor_pet: None,
-                            debug_walkable: false,
-                        },
-                    )
-                    .expect("layout")
-                });
+    for (name, scene, w, h) in cases {
+        group.bench_function(name, |b| {
+            let mut fctx = FloorCtx::new();
+            let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
+            let mut coffee = CoffeeState::new();
+            let mut chitchat = HashMap::new();
+            let mut i = 0u32;
+            b.iter(|| {
+                i = (i + 1) % SIM_WINDOW_FRAMES;
+                render_floor(
+                    &mut fctx,
+                    &mut buf,
+                    &mut coffee,
+                    &mut chitchat,
+                    FrameInputs {
+                        scene,
+                        pack: &pack,
+                        theme,
+                        now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
+                        size: Size { w, h },
+                        floor_meta: FloorMeta::ground(),
+                        active_pet: None,
+                        floor_pet: None,
+                        debug_walkable: false,
+                    },
+                )
+                .expect("layout")
             });
-        }
+        });
     }
     group.finish();
 }

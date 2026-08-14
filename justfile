@@ -334,14 +334,17 @@ test *args:
         cargo test --workspace {{ args }}
     fi
 
-# Render-path benchmarks — LOCAL statistical numbers (criterion). CI's
+# Frame + wire benchmarks — LOCAL statistical numbers (criterion). CI's
 # bench.yml runs the same recipe on-demand, advisory-only: shared-runner
 # wall-clock is noise (criterion's own FAQ), so no benchmark ever gates.
-# Filter forwards: `just bench 360` runs only the 360x240 case.
+# `render_frame` costs a FRAME, `decode_reduce` costs an EVENT; codspeed.yml
+# instruments both. Filter forwards: `just bench 360` runs only the 360x240
+# case, `just bench hook` only the hook-transport fold.
 [group('rust')]
-[doc('Render-path criterion benchmarks; forwards a filter')]
+[doc('Render-path + wire-path criterion benchmarks; forwards a filter')]
 bench *args:
     cargo bench -p pixtuoid-scene --bench render_frame -- {{ args }}
+    cargo bench -p pixtuoid-core --bench decode_reduce -- {{ args }}
 
 # Feature-combination check — every feature subset must compile. Catches code
 # that silently only builds with `native` on (the wasm core builds without it).

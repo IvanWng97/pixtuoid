@@ -268,7 +268,7 @@ definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
 is already looking.
 
 Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
-(wire-format drift); `just bench` (criterion render-path benchmarks — local numbers are the
+(wire-format drift); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR — instruction-count

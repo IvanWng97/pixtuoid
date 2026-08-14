@@ -41,7 +41,7 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
       - name: Build instrumented benchmarks
-        run: cargo codspeed build -p pixtuoid-scene
+        run: cargo codspeed build -p pixtuoid-scene -p pixtuoid-core
       - uses: CodSpeedHQ/action@v5
         with:
           mode: simulation
