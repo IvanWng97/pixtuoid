@@ -3,49 +3,68 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     source: hermes
-    session_id: hm-7f3a-sess
-    cwd: /Users/dev/proj
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - Identity:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     source: hermes
-    session_id: hm-7f3a-sess
-    cwd: /Users/dev/proj
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     tool_use_id: ~
     detail:
       Generic:
-        display: "terminal: cargo build"
+        display: "read_file: NOTE.txt"
 - Identity:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     source: hermes
-    session_id: hm-7f3a-sess
-    cwd: /Users/dev/proj
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     tool_use_id: ~
 - Identity:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     source: hermes
-    session_id: hm-7f3a-sess
-    cwd: /Users/dev/proj
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     tool_use_id: ~
     detail:
       Generic:
-        display: "read_file: /Users/dev/proj/src/main.rs"
+        display: "search_files: ."
 - Identity:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     source: hermes
-    session_id: hm-7f3a-sess
-    cwd: /Users/dev/proj
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
+    tool_use_id: ~
+- Identity:
+    agent_id: 16541491197388335030
+    source: hermes
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 16541491197388335030
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "read_file: NOTE.txt"
+- Identity:
+    agent_id: 16541491197388335030
+    source: hermes
+    session_id: 20260814_160213_3e22b6
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 16541491197388335030
     tool_use_id: ~
 - SessionEnd:
-    agent_id: 7533855382530380528
+    agent_id: 16541491197388335030
     as_child: false

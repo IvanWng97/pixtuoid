@@ -250,7 +250,7 @@ fn every_registered_source_has_a_coalescing_fixture() {
 /// Hook-only sources with no recorded scenario yet. The list only SHRINKS — a
 /// hook event is transient, so for these the fixture is the only wire evidence
 /// there will ever be, and a new hook-only CLI must not join it by default.
-const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "hermes", "openclaw", "opencode", "reasonix"];
+const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "openclaw", "opencode", "reasonix"];
 
 /// Every scenario declares where its bytes came from, because nothing IN them
 /// separates a capture from a composition — a redacted cwd and an invented one

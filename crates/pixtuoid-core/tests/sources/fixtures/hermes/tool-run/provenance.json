@@ -1,4 +1,7 @@
 {
-  "origin": "composed",
-  "note": "session_id hm-7f3a-sess"
+  "origin": "recorded",
+  "cli": "hermes",
+  "version": "Hermes Agent v0.20.0 (2026.8.3)",
+  "captured": "2026-08-14",
+  "command": "hermes --accept-hooks -z {prompt}"
 }

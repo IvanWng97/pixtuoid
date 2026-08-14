@@ -12,6 +12,13 @@
 //! alien to the shared CC-shaped arms, so per the `HookDecoding::custom` contract the
 //! decoder claims EVERY event (`.map(Some)`, never `Ok(None)`).
 //!
+//! `extra.tool_call_id` IS on the wire — capture-verified on BOTH tool events, and
+//! they pair — and dropped anyway: with only the four `HERMES_EVENTS` registered
+//! there is no permission event to resolve, no subagent event to drain and no second
+//! transport to dedup against, so the reducer's per-call machinery has nothing to do
+//! with it (the same reasoning `cursor.rs` spells out at length). Pinned by
+//! `pre_tool_call_is_activity_start_with_no_tool_id`.
+//!
 //! `subagent_stop` is deliberately absent from `HERMES_EVENTS`: the SHELL-hook payload
 //! carries a parent id but NO child session/agent id, so a decode could only end a
 //! child that was never started. Hermes's Python PLUGIN API does define a
