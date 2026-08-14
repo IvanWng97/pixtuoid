@@ -30,6 +30,7 @@
 //! the file atomically (temp + rename → new inode); the watcher re-stats by
 //! path, so a rewrite reads as a fresh transcript. Rare enough to live with.
 
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
@@ -58,8 +59,15 @@ pub const SOURCE_NAME: &str = "omp";
 /// a directory NAME under home; XDG on linux+darwin, only with no override and
 /// only when the target EXISTS (the file's header claims otherwise — its code
 /// calls `fs.existsSync`).
+///
+/// All three directory vars are read through the `.env` overlay first
+/// ([`with_omp_dotenv`], upstream `env.ts`), because upstream applies those files
+/// and then REBUILDS this resolver — so a var set only in `~/.env` moves omp's
+/// sessions dir, and reading process env alone would watch an empty directory.
 pub(crate) fn omp_sessions_dir() -> PathBuf {
-    let env = OmpEnv::from_process();
+    let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
+        std::fs::read_to_string(p).ok()
+    });
     resolve_omp_sessions_dir(
         &env,
         cfg!(any(target_os = "linux", target_os = "macos")),
@@ -69,13 +77,19 @@ pub(crate) fn omp_sessions_dir() -> PathBuf {
 
 /// The process environment omp's resolver reads, injected so every arm — the
 /// Windows one, the XDG one, the profile ones — unit-tests on any host.
+#[derive(Clone)]
 struct OmpEnv {
     home: Option<PathBuf>,
     config_dir_name: Option<String>,
     omp_profile: Option<String>,
     pi_profile: Option<String>,
+    /// `PI_PROFILE` as the OVERRIDE resolver sees it, which is not always what
+    /// profile SELECTION sees: upstream freezes `activeProfile` at module load,
+    /// but `resolveActiveAgentDirOverride` re-reads `PI_PROFILE` LIVE — after
+    /// the `.env` overlay. Equal to `pi_profile` until `with_omp_dotenv` runs.
+    pi_profile_live: Option<String>,
     /// PATH-valued, so `PathBuf` — a `String` here would drop a legal non-UTF-8
-    /// override at the read. The three above are NAMES, not paths.
+    /// override at the read. The four above are NAMES, not paths.
     agent_dir: Option<PathBuf>,
     xdg_data_home: Option<PathBuf>,
 }
@@ -88,6 +102,7 @@ impl OmpEnv {
             config_dir_name: var("PI_CONFIG_DIR"),
             omp_profile: var("OMP_PROFILE"),
             pi_profile: var("PI_PROFILE"),
+            pi_profile_live: var("PI_PROFILE"),
             agent_dir: crate::platform::path_env("PI_CODING_AGENT_DIR"),
             xdg_data_home: crate::platform::path_env("XDG_DATA_HOME"),
         }
@@ -180,8 +195,10 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
     }
     // `resolvePreProfileAgentDir`: drop a value that IS the PI_PROFILE-derived
     // agent dir — it was exported by a parent's setProfile, not chosen here.
+    // The LIVE `PI_PROFILE`: upstream's override resolver re-reads it after the
+    // `.env` overlay, where the frozen `pi_profile` above selected the profile.
     let override_dir = env.agent_dir.clone().filter(|v| {
-        let derived = normalize_profile_name(env.pi_profile.as_deref())
+        let derived = normalize_profile_name(env.pi_profile_live.as_deref())
             .and_then(|p| omp_config_root(env, Some(&p)))
             .map(|r| r.join("agent"));
         derived.is_none_or(|d| *v != d)
@@ -235,6 +252,143 @@ fn xdg_app_root(
         None => app_root,
     };
     exists(&candidate).then_some(candidate)
+}
+
+/// Overlay omp's `.env` files onto `env`, mirroring upstream `env.ts`: it applies
+/// them to `Bun.env` and then calls `refreshDirsFromEnv()`, so a directory var
+/// living ONLY in `~/.env` still moves omp's sessions dir — and a watcher reading
+/// process env alone sits on an empty directory forever. That ORDER is the whole
+/// point: the files are located with the resolver frozen at module load, then the
+/// resolver is rebuilt from the merged env, which is why this runs BEFORE
+/// [`resolve_omp_sessions_dir`] and locates its files from the PRE-overlay `env`.
+///
+/// Precedence is upstream's: the shell env wins over every file (its falsy
+/// `!Bun.env[key]` test, so a set-but-EMPTY var still yields), and among files the
+/// first to define a key wins. Upstream reads a fourth, higher-precedence
+/// `$CWD/.env`; that one is unreachable, because an out-of-process observer cannot
+/// know which directory omp was launched from.
+///
+/// The profile SELECTION is deliberately not overlaid: `refreshDirsFromEnv`
+/// rebuilds the resolver but REUSES the profile frozen at module load, so a
+/// file-borne `OMP_PROFILE` moves nothing upstream either. `PI_PROFILE` is the
+/// exception, and only for the agent-dir DROP check — `resolveActiveAgentDirOverride`
+/// re-reads it live, so a `.env` naming both a profile and its own derived agent
+/// dir must still drop that override, exactly as upstream does.
+///
+/// The reads are deliberately UNBOUNDED, unlike `source/`'s probe reads: those
+/// re-read per probe refresh, this answers a startup or click-time question, and a
+/// cap could truncate a key upstream's own unbounded `parseEnvFile` would honor.
+/// (`read_bounded_bytes` is `cfg(unix)` besides; this resolver builds on Windows.)
+fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpEnv {
+    let agent_dir = resolve_omp_agent_dir_parts(env).map(|(dir, _, _)| dir);
+    let config_root = omp_config_root(env, resolve_profile(env).as_deref());
+    let files = [
+        agent_dir.map(|d| d.join(".env")),
+        config_root.map(|r| r.join(".env")),
+        env.home.as_deref().map(|h| h.join(".env")),
+    ];
+
+    let mut out = env.clone();
+    for (key, value) in files
+        .into_iter()
+        .flatten()
+        .filter_map(|p| read(&p))
+        .flat_map(parse_omp_env_file)
+    {
+        // Upstream's fill test is FALSY (`!Bun.env[key]`), so a set-but-blank
+        // shell value still yields to a file. The two kinds carry that
+        // differently: a NAME keeps whatever the shell had, so the blank check
+        // is here, while `path_env` already resolved a blank PATH to `None`.
+        match key.as_str() {
+            "PI_CONFIG_DIR" => fill_name(&mut out.config_dir_name, value),
+            "PI_PROFILE" => fill_name(&mut out.pi_profile_live, value),
+            "PI_CODING_AGENT_DIR" => fill_path(&mut out.agent_dir, value),
+            "XDG_DATA_HOME" => fill_path(&mut out.xdg_data_home, value),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Fill a NAME slot the shell left unset or blank (upstream's falsy test).
+fn fill_name(slot: &mut Option<String>, value: String) {
+    if slot.as_deref().is_none_or(|s| s.trim().is_empty()) {
+        *slot = Some(value);
+    }
+}
+
+/// Fill a PATH slot the shell left unset. `platform::path_env` already mapped a
+/// blank value to `None`, so absence IS the falsy test here.
+fn fill_path(slot: &mut Option<PathBuf>, value: String) {
+    if slot.is_none() && !value.trim().is_empty() {
+        *slot = Some(PathBuf::from(value));
+    }
+}
+
+/// Upstream `parseEnvFile`. The `OMP_<X>` → `PI_<X>` aliasing runs AFTER the whole
+/// file is read because upstream lets it OVERRIDE an explicit `PI_` key.
+fn parse_omp_env_file(text: String) -> BTreeMap<String, String> {
+    let mut out: BTreeMap<String, String> = text
+        .lines()
+        .filter_map(|l| parse_omp_env_line(l).map(|(k, v)| (k.to_owned(), v)))
+        .collect();
+    let aliases: Vec<_> = out
+        .iter()
+        .filter_map(|(k, v)| Some((format!("PI_{}", k.strip_prefix("OMP_")?), v.clone())))
+        .collect();
+    out.extend(aliases);
+    out
+}
+
+/// Upstream `parseEnvLine`: an optional `export` prefix, `#` comments (full-line
+/// and inline after whitespace), and single/double/backtick quoting inside which a
+/// `#` stays literal. A NUL-bearing value is dropped (`isSafeEnvValue`).
+fn parse_omp_env_line(line: &str) -> Option<(&str, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    let (head, rest) = trimmed.split_once('=')?;
+    let head = head.trim();
+    let key = match head.strip_prefix("export") {
+        Some(tail) if tail.starts_with([' ', '\t']) => tail.trim(),
+        _ => head,
+    };
+    if !is_valid_env_name(key) {
+        return None;
+    }
+
+    let raw = rest.trim_start_matches([' ', '\t']);
+    let value = match raw.chars().next() {
+        Some(quote @ ('"' | '\'' | '`')) => {
+            let body = &raw[quote.len_utf8()..];
+            // The first quote NOT escaped by a preceding `\` closes the value; an
+            // unterminated one runs to end of line, as upstream's does.
+            let close = body
+                .match_indices(quote)
+                .find(|&(at, _)| body.as_bytes()[..at].last() != Some(&b'\\'))
+                .map(|(at, _)| at);
+            close.map_or(body, |at| &body[..at]).to_owned()
+        }
+        // Unquoted: an inline comment starts at the whitespace preceding its `#`.
+        _ => raw
+            .char_indices()
+            .find(|&(i, c)| matches!(c, ' ' | '\t') && raw[i + 1..].starts_with('#'))
+            .map_or(raw, |(i, _)| &raw[..i])
+            .trim_end()
+            .to_owned(),
+    };
+    (!value.contains('\0')).then_some((key, value))
+}
+
+/// Upstream `isValidEnvName`: the strict POSIX shell-identifier shape, so a dotenv
+/// key that no shell could export never reaches the resolver.
+fn is_valid_env_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    chars
+        .next()
+        .is_some_and(|c| c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 /// Does a path component look like a ROOT session file stem
@@ -1036,10 +1190,16 @@ mod tests {
                 config_dir_name: None,
                 omp_profile: None,
                 pi_profile: None,
+                pi_profile_live: None,
                 agent_dir: None,
                 xdg_data_home: None,
             };
             f(&mut e);
+            // `from_process` reads both from the same var; they diverge only
+            // after the `.env` overlay, which these axis cases don't exercise.
+            if e.pi_profile_live.is_none() {
+                e.pi_profile_live.clone_from(&e.pi_profile);
+            }
             e
         };
         let never = |_: &Path| false;
@@ -1121,6 +1281,7 @@ mod tests {
             config_dir_name: None,
             omp_profile: profile.map(str::to_string),
             pi_profile: None,
+            pi_profile_live: None,
             agent_dir: agent.map(PathBuf::from),
             xdg_data_home: xdg.map(PathBuf::from),
         };
@@ -1174,6 +1335,295 @@ mod tests {
             home_default,
             "a blank XDG_DATA_HOME never yields an ABSOLUTE xdg root, so the probe misses"
         );
+    }
+
+    /// [`resolve_omp_sessions_dir`] with omp's `.env` overlay applied first.
+    /// `files` maps an absolute `.env` path to its contents; a path absent from
+    /// it does not exist, so the empty table is the no-files baseline.
+    fn dotenv_sessions(
+        vars: &[(&str, &str)],
+        files: &[(&str, &str)],
+        existing_xdg: Option<&str>,
+    ) -> PathBuf {
+        let get = |k: &str| {
+            vars.iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        // The PATH slots come from `platform::path_env` in production, which
+        // maps a blank value to `None` — so a "set but empty" shell var must
+        // collapse here too, or the yields-to-a-file case tests a shape the
+        // resolver never sees.
+        let get_path = |k: &str| get(k).filter(|v| !v.trim().is_empty()).map(PathBuf::from);
+        let env = OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: get("PI_CONFIG_DIR"),
+            omp_profile: get("OMP_PROFILE"),
+            pi_profile: get("PI_PROFILE"),
+            pi_profile_live: get("PI_PROFILE"),
+            agent_dir: get_path("PI_CODING_AGENT_DIR"),
+            xdg_data_home: get_path("XDG_DATA_HOME"),
+        };
+        let overlaid = with_omp_dotenv(&env, &|p| {
+            files
+                .iter()
+                .find(|(n, _)| Path::new(n) == p)
+                .map(|(_, c)| (*c).to_owned())
+        });
+        resolve_omp_sessions_dir(&overlaid, true, &|p| {
+            existing_xdg.is_some_and(|x| p == Path::new(x))
+        })
+    }
+
+    /// omp applies its `.env` files and then REBUILDS the resolver, so a
+    /// directory var living only in a file still moves the sessions dir —
+    /// reading process env alone leaves those users watching an empty dir.
+    #[test]
+    fn a_dotenv_directory_var_moves_the_sessions_dir_the_way_omp_does() {
+        const HOME_ENV: &str = "/home/u/.env";
+        const CONFIG_ENV: &str = "/home/u/.omp/.env";
+        const AGENT_ENV: &str = "/home/u/.omp/agent/.env";
+        let default = Path::new("/home/u/.omp/agent/sessions");
+
+        assert_eq!(
+            dotenv_sessions(&[], &[], None),
+            default,
+            "no files, no change"
+        );
+        assert_eq!(
+            dotenv_sessions(&[], &[(HOME_ENV, "PI_CODING_AGENT_DIR=/data/omp")], None),
+            Path::new("/data/omp/sessions")
+        );
+        // The shell wins over every file — upstream fills only an unset key…
+        assert_eq!(
+            dotenv_sessions(
+                &[("PI_CODING_AGENT_DIR", "/shell/agent")],
+                &[(HOME_ENV, "PI_CODING_AGENT_DIR=/data/omp")],
+                None
+            ),
+            Path::new("/shell/agent/sessions")
+        );
+        // …and its test is FALSY. For a PATH var `path_env` already collapsed a
+        // blank shell value to `None` at the READ, so the yielding is settled
+        // before the overlay sees it (pinned end to end by
+        // `omp_sessions_dir_honors_non_empty_env_override`). A NAME var reaches
+        // the overlay with the blank still on it, so THIS is where the falsy
+        // test has to live: an exported `PI_CONFIG_DIR=` must still yield.
+        assert_eq!(
+            dotenv_sessions(
+                &[("PI_CONFIG_DIR", "")],
+                &[(HOME_ENV, "PI_CONFIG_DIR=.pi")],
+                None
+            ),
+            Path::new("/home/u/.pi/agent/sessions"),
+            "a set-but-blank NAME yields to a file, as upstream's falsy test does"
+        );
+        // The other direction of the same rule: a blank value IN a file is not a
+        // definition, so it neither overrides the shell nor consumes the
+        // first-to-define slot the next file is entitled to.
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[
+                    (AGENT_ENV, "PI_CODING_AGENT_DIR="),
+                    (HOME_ENV, "PI_CODING_AGENT_DIR=/from/home"),
+                ],
+                None
+            ),
+            Path::new("/from/home/sessions"),
+            "a blank file value does not claim the key from a later file"
+        );
+        // Among files the FIRST to define a key wins: agent, config root, home.
+        let all = [
+            (AGENT_ENV, "PI_CODING_AGENT_DIR=/from/agent"),
+            (CONFIG_ENV, "PI_CODING_AGENT_DIR=/from/config"),
+            (HOME_ENV, "PI_CODING_AGENT_DIR=/from/home"),
+        ];
+        assert_eq!(
+            dotenv_sessions(&[], &all, None),
+            Path::new("/from/agent/sessions")
+        );
+        assert_eq!(
+            dotenv_sessions(&[], &all[1..], None),
+            Path::new("/from/config/sessions")
+        );
+        assert_eq!(
+            dotenv_sessions(&[], &all[2..], None),
+            Path::new("/from/home/sessions")
+        );
+        // The other two directory vars ride the same overlay.
+        assert_eq!(
+            dotenv_sessions(&[], &[(HOME_ENV, "PI_CONFIG_DIR=.pi")], None),
+            Path::new("/home/u/.pi/agent/sessions")
+        );
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[(HOME_ENV, "XDG_DATA_HOME=/home/u/.local/share")],
+                Some("/home/u/.local/share/omp")
+            ),
+            Path::new("/home/u/.local/share/omp/sessions")
+        );
+        // Files are located with the PRE-overlay dirs, so a named profile's own
+        // tree is where omp looks — upstream reads them before its rebuild too.
+        assert_eq!(
+            dotenv_sessions(
+                &[("OMP_PROFILE", "work")],
+                &[(
+                    "/home/u/.omp/profiles/work/agent/.env",
+                    "XDG_DATA_HOME=/home/u/.local/share"
+                )],
+                Some("/home/u/.local/share/omp/profiles/work")
+            ),
+            Path::new("/home/u/.local/share/omp/profiles/work/sessions")
+        );
+    }
+
+    /// The overlay is DIRECTORY vars only: upstream's rebuild reuses the profile
+    /// frozen at module load, so a file-borne profile moves nothing there and
+    /// honoring one here would invent a tree omp never selected.
+    #[test]
+    fn a_dotenv_profile_is_ignored_because_upstream_freezes_the_profile() {
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[("/home/u/.env", "OMP_PROFILE=work\nPI_PROFILE=work")],
+                None
+            ),
+            Path::new("/home/u/.omp/agent/sessions")
+        );
+    }
+
+    /// The files are located from the PRE-overlay env, because upstream reads
+    /// them with the resolver `dirs.ts` froze at module load and only THEN calls
+    /// `refreshDirsFromEnv()`. Recomputing the search from the merged env would
+    /// read a `.env` omp never opened — so a home file that moves `PI_CONFIG_DIR`
+    /// must NOT move where the config-root file is looked for.
+    #[test]
+    fn dotenv_files_are_located_before_the_overlay_can_move_them() {
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[
+                    ("/home/u/.env", "PI_CONFIG_DIR=.other"),
+                    ("/home/u/.omp/.env", "PI_CODING_AGENT_DIR=/from/pre"),
+                    ("/home/u/.other/.env", "PI_CODING_AGENT_DIR=/from/post"),
+                ],
+                None
+            ),
+            Path::new("/from/pre/sessions"),
+            "the pre-overlay config root is the one whose `.env` is read"
+        );
+    }
+
+    /// …but `PI_PROFILE` still reaches the agent-dir DROP check, because
+    /// upstream's `resolveActiveAgentDirOverride` re-reads it LIVE while
+    /// `activeProfile` stays frozen. A `.env` carrying a parent's leftovers
+    /// must therefore drop the override without moving the profile path.
+    #[test]
+    fn a_dotenv_pi_profile_still_drops_a_profile_derived_agent_dir() {
+        const HOME_ENV: &str = "/home/u/.env";
+        const LEFTOVERS: &str =
+            "PI_PROFILE=work\nPI_CODING_AGENT_DIR=/home/u/.omp/profiles/work/agent";
+        assert_eq!(
+            dotenv_sessions(&[], &[(HOME_ENV, LEFTOVERS)], None),
+            Path::new("/home/u/.omp/agent/sessions"),
+            "an inherited profile-derived override is dropped, not honoured"
+        );
+        // The SELECTION half stays frozen: the profile path itself must not move.
+        assert_eq!(
+            dotenv_sessions(&[], &[(HOME_ENV, "PI_PROFILE=work")], None),
+            Path::new("/home/u/.omp/agent/sessions")
+        );
+        // A GENUINE override still survives the same file.
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[(
+                    HOME_ENV,
+                    "PI_PROFILE=work\nPI_CODING_AGENT_DIR=/custom/agent"
+                )],
+                None
+            ),
+            Path::new("/custom/agent/sessions")
+        );
+        // And the shell's own PI_PROFILE still wins over the file's.
+        assert_eq!(
+            dotenv_sessions(&[("PI_PROFILE", "other")], &[(HOME_ENV, LEFTOVERS)], None),
+            Path::new("/home/u/.omp/profiles/other/agent/sessions"),
+            "a shell profile selects its own tree and the override is disabled"
+        );
+    }
+
+    /// Upstream's `OMP_<X>` → `PI_<X>` alias, which OVERRIDES an explicit `PI_`
+    /// key in the same file — hence the pass over the WHOLE file, not per line.
+    #[test]
+    fn a_dotenv_omp_prefixed_key_aliases_and_overrides_its_pi_twin() {
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[("/home/u/.env", "OMP_CODING_AGENT_DIR=/aliased")],
+                None
+            ),
+            Path::new("/aliased/sessions")
+        );
+        assert_eq!(
+            dotenv_sessions(
+                &[],
+                &[(
+                    "/home/u/.env",
+                    "PI_CODING_AGENT_DIR=/explicit\nOMP_CODING_AGENT_DIR=/aliased"
+                )],
+                None
+            ),
+            Path::new("/aliased/sessions")
+        );
+    }
+
+    /// Upstream `parseEnvLine`, whose semantics a naive `split('=')` gets wrong
+    /// in both directions: each case is a value omp itself would read.
+    #[test]
+    fn dotenv_line_parsing_matches_upstream_bun_semantics() {
+        let got = |line: &str| parse_omp_env_line(line).map(|(k, v)| (k.to_owned(), v));
+        let kv = |k: &str, v: &str| Some((k.to_owned(), v.to_owned()));
+
+        assert_eq!(got("A=1"), kv("A", "1"));
+        assert_eq!(got("  export  A = 1 "), kv("A", "1"));
+        assert_eq!(got("A="), kv("A", ""));
+        // `export` needs its separator, or it is simply part of the name.
+        assert_eq!(got("exportA=1"), kv("exportA", "1"));
+        for skipped in ["", "   ", "# A=1", "NOEQUALS", "1BAD=x", "A-B=x", "=x"] {
+            assert_eq!(got(skipped), None, "{skipped:?} is not a dotenv assignment");
+        }
+        // An inline comment needs the preceding whitespace upstream requires.
+        assert_eq!(got("A=hello # trailing"), kv("A", "hello"));
+        assert_eq!(got("A=hello#nospace"), kv("A", "hello#nospace"));
+        // The `trimEnd` on an unquoted value, which only a MULTI-space run can
+        // pin — `.pi ` names a directory omp never created.
+        assert_eq!(got("A=.pi  # note"), kv("A", ".pi"));
+        assert_eq!(got("A=.pi   "), kv("A", ".pi"));
+        // Quoting keeps a `#` literal; all three of Bun's quote forms count.
+        assert_eq!(got(r#"A="hello # keep""#), kv("A", "hello # keep"));
+        assert_eq!(got("A='hello # keep'"), kv("A", "hello # keep"));
+        assert_eq!(got("A=`hello # keep`"), kv("A", "hello # keep"));
+        // An ESCAPED quote does not close the value, and upstream keeps the
+        // backslash — the raw slice is the value, there is no unescape pass.
+        assert_eq!(got(r#"A="esc\"aped""#), kv("A", r#"esc\"aped"#));
+        // An EMPTY quoted value closes at index 0, the one input that reaches
+        // the escape check with nothing before the quote to inspect.
+        for empty in [r#"A="""#, "A=''", "A=``"] {
+            assert_eq!(got(empty), kv("A", ""), "{empty:?} is an empty value");
+        }
+        assert_eq!(got(r#"A="unterminated"#), kv("A", "unterminated"));
+        // Multi-byte bytes either side of the escape, so the quote-scan index
+        // arithmetic is pinned against a slice panic rather than reasoned about.
+        assert_eq!(got(r#"A="café\"ﬁn" # x"#), kv("A", r#"café\"ﬁn"#));
+        assert_eq!(got("A=café # x"), kv("A", "café"));
+        // A CRLF file: upstream splits on `\n` and `trim`s the `\r` off; our
+        // `.lines()` strips it earlier, and both must reach the same value.
+        assert_eq!(got("A=1\r"), kv("A", "1"));
+        // `isSafeEnvValue`: a NUL would corrupt the C string of a real spawn.
+        assert_eq!(got("A=a\0b"), None);
     }
 
     /// Live-env twin of the injected matrix: proves the PRODUCTION fn reads

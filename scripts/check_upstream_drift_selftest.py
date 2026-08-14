@@ -409,6 +409,7 @@ ANCHOR_SAMPLES: dict[str, str] = {
         '    process.env.XDG_DATA_HOME; }\n'
         "}\n"
     ),
+    d.OMP_ENV_URL: "export function parseEnvFile(filePath: string): Record<string, string> {}",
     d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
     d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
@@ -1057,6 +1058,196 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     )
 
 
+
+# A minimal `env.ts` satisfying every omp-env sweep, shaped like the real file in
+# the two ways the sweep can be fooled: `.env`/`OMP_` appear in JSDoc as well as
+# code, and the quote detector (a lone `"` inside a single-quoted string) sits
+# ABOVE a comment that names checked symbols. Tracking only `"` desynchronises
+# there and leaks every later comment back into the "code" — which is why the
+# masking cases below live AFTER the detector, not before it.
+_OMP_ENV_LIVE = (
+    '/** Reads ".env" from each dir and aliases "OMP_" keys — JSDoc, not code. */\n'
+    'import { getAgentDir, getConfigRootDir, refreshDirsFromEnv } from "./dirs";\n'
+    "export function isValidEnvName(name: string): boolean { return true; }\n"
+    "export function isSafeEnvValue(value: string): boolean { return true; }\n"
+    "function parseEnvLine(line: string) {\n"
+    "\tif (quote === '\"' || quote === \"'\" || quote === \"`\") return undefined;\n"
+    "\treturn undefined;\n"
+    "}\n"
+    "export function parseEnvFile(filePath: string): Record<string, string> {\n"
+    "\tconst result = {};\n"
+    "\tfor (const line of content.split()) parseEnvLine(line);\n"
+    '\tif (k.startsWith("OMP_")) result[`PI_${k.slice(4)}`] = result[k];\n'
+    "\treturn result;\n"
+    "}\n"
+    "// Eagerly parse each dir's \".env\", then rebuild: getAgentDir() already\n"
+    "// located one, and parseEnvLine gives it Bun's semantics. Prose, not code.\n"
+    'parseEnvFile(path.join(getConfigRootDir(), ".env"));\n'
+    'parseEnvFile(path.join(getAgentDir(), ".env"));\n'
+    "refreshDirsFromEnv();\n"
+)
+
+
+def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
+    """Run the omp block over stubbed upstream files, returning only the lines
+    the `kind` sweep emits — a sibling sweep's noise must not read as this one."""
+
+    def stub(url: str) -> str:
+        if url in bodies:
+            return bodies[url]
+        raise urllib.error.URLError("not stubbed")  # -> transient, filtered below
+
+    real = d.fetch
+    d.fetch = stub
+    try:
+        report = d.Report()
+        d.run_checks(d.OurNames(omp={"session"}), report=report)
+    finally:
+        d.fetch = real
+    return [x for x in report.breaking if kind in x]
+
+
+def test_ts_comment_strip_survives_a_quote_detector_line() -> None:
+    """A `"`-only scanner desynchronises on `'"'` and leaks the REST OF THE FILE's
+    comments back into the "code" every presence sweep reads. upstream `env.ts`
+    ships exactly that line, so this is the live shape, not a hypothetical."""
+    detector = "if (quote === '\"' || quote === \"'\" || quote === \"`\") {}\n"
+    body = detector + "// getAgentDir is named here in PROSE only\nconst x = 1;\n"
+    code = d.strip_ts_comments(body)
+    check("getAgentDir" not in code, "a comment below the quote detector must be stripped")
+    check("const x = 1;" in code, "the code below it must survive")
+    # …and the quote characters must still HIDE a comment marker inside a string.
+    check(
+        "http://x" in d.strip_ts_comments("const u = 'http://x';\n"),
+        "a `//` inside a single-quoted string is not a comment",
+    )
+    check(
+        "keep" in d.strip_ts_comments("const t = `a // keep`;\n"),
+        "a `//` inside a template literal is not a comment",
+    )
+
+
+def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
+    """Rust's `'` is a lifetime far more often than a string opener. Tracking it
+    makes an ODD number of lifetimes leave one apostrophe "open", so the scanner
+    reads everything after it — comments included — as string content and stops
+    stripping. That is the TS quote-detector bug with the languages swapped: a
+    prose mention then masks a real rename, silently. Hence the per-language set
+    rather than one shared one."""
+    body = (
+        "fn f<'a>(x: &'a str) -> &'a str { x }\n"
+        "// RENAMED_AWAY is named here in PROSE only\n"
+        'const KNOWN: &[&str] = &["a"];\n'
+    )
+    code = d.strip_rust_comments(body)
+    check("RENAMED_AWAY" not in code, "a comment after an odd lifetime count is still stripped")
+    check('&["a"]' in code, "the code after it survives")
+    # The half Rust DOES share with TS: a `//` inside a string is not a comment.
+    check(
+        "keep" in d.strip_rust_comments('let u = "http://keep";\n'),
+        "a `//` inside a Rust string is not a comment",
+    )
+
+
+def test_omp_env_sweeps_fire_and_stay_silent() -> None:
+    """`with_omp_dotenv` only tracks omp while `refreshDirsFromEnv` still runs
+    AFTER the `.env` files load. If that ordering goes, our overlay becomes the
+    divergence — we would honour a file omp ignores — so this sweep needs the
+    both-directions treatment, comment-masking included: `.env` and `OMP_` sit
+    in the JSDoc as well as the code.
+    """
+    live = _OMP_ENV_LIVE
+    roles = (("omp dotenv locator", d.OMP_ENV_LOCATORS), ("omp dotenv parser", d.OMP_ENV_PARSERS))
+    # Floors first: every loop below iterates one of these, so an emptied set
+    # would run zero bodies and pass VACUOUSLY.
+    for label, size, floor in (
+        ("OMP_ENV_LOCATORS", len(d.OMP_ENV_LOCATORS), 3),
+        ("OMP_ENV_PARSERS", len(d.OMP_ENV_PARSERS), 3),
+        ("OMP_ENV_LITERALS", len(d.OMP_ENV_LITERALS), 2),
+    ):
+        check(size >= floor, f"{label} covers the overlay's inputs, got {size}")
+
+    for kind in ("omp dotenv locator", "omp dotenv parser", "omp dotenv literal"):
+        got = _drive_omp({d.OMP_ENV_URL: live}, kind)
+        check(not got, f"{kind}: an unchanged upstream must stay silent, got {got}")
+
+    # Each role's message must name ITS OWN requirement, or it sends the
+    # maintainer to the wrong half of source/omp.rs.
+    for kind, table in roles:
+        other = "parser" if "locator" in kind else "locator"
+        for fn, mirror in sorted(table.items()):
+            got = _drive_omp({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind)
+            check(
+                len(got) == 1
+                and f"`{fn}`" in got[0]
+                and f"`{mirror}`" in got[0]
+                and other not in got[0],
+                f"a vanished {fn} must fire once as a {kind} naming {mirror}, got {got}",
+            )
+
+    for lit in sorted(d.OMP_ENV_LITERALS):
+        got = _drive_omp(
+            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')}, "omp dotenv literal"
+        )
+        check(
+            len(got) == 1 and f"`{lit}`" in got[0],
+            f"a vanished literal {lit} must fire exactly once, got {got}",
+        )
+
+    # Renaming the ANCHOR is a BLIND probe, not a rename line — the louder
+    # signal, and the reason `parseEnvFile` is in neither role table.
+    gone = live.replace("export function parseEnvFile", "function gone")
+    got = _drive_omp({d.OMP_ENV_URL: gone}, "omp dotenv")
+    check(not got, f"an anchor miss must not masquerade as a rename, got {got}")
+
+    # The masking regression: the CODE occurrence goes, the comments keep it.
+    # `.env` survives in BOTH the leading JSDoc and the trailing `//` prose; the
+    # locator/parser names survive only in the trailing prose, which is the half
+    # a `"`-only comment stripper leaks (the detector line sits above it).
+    masked = live.replace('getConfigRootDir(), ".env"', 'getConfigRootDir(), ".renamed"')
+    masked = masked.replace('getAgentDir(), ".env"', 'getAgentDir(), ".renamed"')
+    check('".env"' in masked, "the JSDoc example must survive, or this proves nothing")
+    got = _drive_omp({d.OMP_ENV_URL: masked}, "omp dotenv literal")
+    check(
+        len(got) == 1 and "`.env`" in got[0],
+        f"a literal surviving only in JSDoc must still fire, got {got}",
+    )
+
+    for fn, kind in (("getAgentDir", "omp dotenv locator"), ("parseEnvLine", "omp dotenv parser")):
+        # Rename every CODE occurrence; the trailing prose keeps the name.
+        masked = "".join(
+            ln if ln.lstrip().startswith(("//", "*", "/*")) else ln.replace(fn, "renamed")
+            for ln in live.splitlines(keepends=True)
+        )
+        check(fn in masked, f"the prose mention of {fn} must survive, or this proves nothing")
+        got = _drive_omp({d.OMP_ENV_URL: masked}, kind)
+        check(
+            len(got) == 1 and f"`{fn}`" in got[0],
+            f"{fn} surviving only in a comment BELOW the quote detector must "
+            f"still fire, got {got}",
+        )
+
+    # The stays-silent half: the same names reached through a reshaped import
+    # and an aliased call are the SAME code, and a gate that reds on a reformat
+    # sends the maintainer to repin for nothing.
+    reshaped = live.replace(
+        'import { getAgentDir, getConfigRootDir, refreshDirsFromEnv } from "./dirs";',
+        'import {\n\tgetAgentDir,\n\tgetConfigRootDir,\n\trefreshDirsFromEnv as rebuild,\n} from "./dirs";',
+    ).replace("refreshDirsFromEnv();", "rebuild(); // refreshDirsFromEnv")
+    for kind, _ in roles:
+        got = _drive_omp({d.OMP_ENV_URL: reshaped}, kind)
+        check(not got, f"{kind}: a reshaped import is not a rename, got {got}")
+
+    # Every Rust symbol these messages name must be a REAL fn.
+    omp_rs = (d.REPO / "crates/pixtuoid-core/src/source/omp.rs").read_text()
+    named = set(d.OMP_ENV_LOCATORS.values()) | set(d.OMP_ENV_PARSERS.values())
+    for sym in sorted(named | {"parse_omp_env_file"}):
+        check(
+            f"fn {sym}(" in omp_rs,
+            f"drift messages name `{sym}` — it must exist in source/omp.rs",
+        )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -1078,6 +1269,9 @@ def main() -> int:
         test_report_separates_verified_change_from_probe_health,
         test_enum_body_survives_struct_variants_and_indentation,
         test_report_h1_is_the_issue_title_and_carries_the_disposition,
+        test_ts_comment_strip_survives_a_quote_detector_line,
+        test_rust_comment_strip_is_not_confused_by_lifetimes,
+        test_omp_env_sweeps_fire_and_stay_silent,
     ):
         t()
     if FAILS:

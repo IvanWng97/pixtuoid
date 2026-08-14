@@ -142,7 +142,7 @@
     "url": "https://omp.sh",
     "status": "supported",
     "featured": false,
-    "transport": "session transcripts only (~/.omp/agent/sessions/, subagents as nested per-task files)",
+    "transport": "session transcripts only (default ~/.omp/agent/sessions/, redirectable by profile, PI_CONFIG_DIR, XDG, or .env; subagents nested per-task)",
     "platforms": {
       "macos": "yes",
       "linux": "yes",
