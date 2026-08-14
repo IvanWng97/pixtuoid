@@ -230,7 +230,7 @@ done
 if [ "$FAILED" -ne 0 ]; then
     suffix=""
     [ "$PHASE" = post ] && suffix=" --post"
-    printf '\033[31mstopped at a failing step — resume: just release-e2e %s%s\033[0m\n' "$VERSION" "$suffix"
+    printf '\033[31mstopped at a failing step — resume: just release-e2e%s\033[0m\n' "$suffix"
 elif [ "$blocked" -gt 0 ]; then
     printf '\033[33mno failures, but %d step(s) BLOCKED — that coverage is NOT verified\033[0m\n' "$blocked"
 else
