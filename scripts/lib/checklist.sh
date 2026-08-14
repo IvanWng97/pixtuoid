@@ -150,6 +150,99 @@ manual_floating() {
     echo "  confirm the window opens and renders, and CPU stays near idle with no agents."
 }
 
+auto_release_run() {
+    local id
+    id="$(gh run list --workflow=release.yml --limit 1 --json databaseId --jq '.[0].databaseId')"
+    if [ -z "$id" ]; then
+        echo "no release.yml run found" >&2
+        return 1
+    fi
+    gh run watch "$id" --exit-status
+}
+
+auto_gh_release() {
+    local json
+    json="$(gh release view "v$VERSION" --json assets,isDraft,isPrerelease)" || return 1
+    if [ "$(jq -r .isDraft <<<"$json")" != false ]; then
+        echo "v$VERSION is still a draft" >&2
+        return 1
+    fi
+    if [ "$(jq -r .isPrerelease <<<"$json")" != false ]; then
+        echo "v$VERSION is marked prerelease" >&2
+        return 1
+    fi
+    echo "  assets: $(jq '.assets | length' <<<"$json")"
+}
+
+# The sparse index, not the crates.io JSON — that one's max_version grep can come
+# back empty. Every published name here is >=4 chars, so the prefix is name[0:2]/name[2:4].
+auto_crates_io() {
+    local c path line rc=0
+    for c in pixtuoid pixtuoid-core pixtuoid-scene pixtuoid-hook; do
+        path="${c:0:2}/${c:2:2}/$c"
+        line="$(curl -sf "https://index.crates.io/$path" | tail -1)"
+        if [ "$(jq -r .vers <<<"$line")" != "$VERSION" ]; then
+            echo "  $c: index tail is $(jq -r .vers <<<"$line"), expected $VERSION" >&2
+            rc=1
+            continue
+        fi
+        if [ "$(jq -r .yanked <<<"$line")" != false ]; then
+            echo "  $c: $VERSION is YANKED" >&2
+            rc=1
+            continue
+        fi
+        echo "  $c $VERSION"
+    done
+    return "$rc"
+}
+
+auto_npm_pub() {
+    local got
+    got="$(npm view pixtuoid version 2>/dev/null)"
+    if [ "$got" != "$VERSION" ]; then
+        echo "npm shows $got, expected $VERSION" >&2
+        return 1
+    fi
+}
+
+# autobump lags a tag by design, so "not yet" is a skip-and-resume, not a defect.
+auto_homebrew() {
+    local json got
+    json="$(curl -sf https://formulae.brew.sh/api/formula/pixtuoid.json)" || return 1
+    got="$(jq -r .versions.stable <<<"$json")"
+    echo "  autobump: $(jq -r .autobump <<<"$json")"
+    if [ "$got" != "$VERSION" ]; then
+        echo "homebrew-core is $got — autobump lags a tag; skip with a reason and resume later" >&2
+        return 1
+    fi
+}
+
+manual_fresh_install() {
+    local sb
+    sb="$(mktemp -d)"
+    echo "  sandbox HOME: $sb"
+    echo "  install the PUBLISHED artifact one of three ways:"
+    echo "    npm i -g pixtuoid@$VERSION   |   cargo install pixtuoid@$VERSION   |   brew install pixtuoid"
+    echo "  then, against that clean HOME:"
+    echo "    HOME=$sb XDG_CONFIG_HOME=$sb/.config pixtuoid --version   # expect $VERSION"
+    echo "    HOME=$sb XDG_CONFIG_HOME=$sb/.config pixtuoid doctor"
+    echo "    HOME=$sb XDG_CONFIG_HOME=$sb/.config pixtuoid run"
+    echo "  confirm the version matches, doctor is clean, and the office starts."
+}
+
+manual_homebrew_pr() {
+    echo "  check https://github.com/Homebrew/homebrew-core/pulls?q=pixtuoid"
+    echo "  BrewTestBot autobumps on its own; preempt it if a new depends_on must ship"
+    echo "  with the bump — their formula builds DEFAULT features on macOS AND Linux,"
+    echo "  the one configuration release.yml never builds."
+}
+
+manual_upgrade_popup() {
+    echo "  from an install of the PREVIOUS version, upgrade to $VERSION and launch."
+    echo "  confirm the 'What's new in v$VERSION' popup renders whole and Enter closes it."
+    echo "  nothing else in this pipeline verifies the curated notes reach a user."
+}
+
 # shellcheck disable=SC2034  # read by the sourcing driver, not here
 STEPS=(
     "preconditions|auto|clean tree, synced main, version + notes + tag shape"
@@ -172,6 +265,14 @@ STEPS=(
     "hook_sources|manual|every hook-only CLI installed here registers a sprite"
     "tui_small|manual|80x24 paints and every modal is reachable"
     "floating|manual|floating window renders with sane CPU"
+    "release_run|auto|release.yml green for the tag"
+    "gh_release|auto|GitHub release published with its assets"
+    "crates_io|auto|all four crates on the sparse index, unyanked"
+    "npm_pub|auto|npm shows the new version"
+    "homebrew|auto|homebrew-core formula tracks the release"
+    "fresh_install|manual|the PUBLISHED artifact installs and runs in a clean HOME"
+    "homebrew_pr|manual|the version-bump PR is open with any new depends_on"
+    "upgrade_popup|manual|upgrading shows the What's new popup"
 )
 
 # shellcheck disable=SC2034  # read by the sourcing driver, not here
