@@ -166,16 +166,38 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // `id<TAB>label_prefix<TAB>transcript|hook<TAB>home_env` for every registered
+    // source, so a fixture-capture shell reads the roster, the badge prefixes and
+    // the relocation vars from the registry instead of keeping copies that drift.
+    if args.iter().any(|a| a == "--roster") {
+        for name in registry::registered_source_names() {
+            let Some(d) = registry::descriptor_for(name) else {
+                continue;
+            };
+            let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
+                "transcript"
+            } else {
+                "hook"
+            };
+            println!(
+                "{name}\t{}\t{kind}\t{}",
+                d.label_prefix,
+                d.home_env.unwrap_or("-")
+            );
+        }
+        return;
+    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    if positional.len() < 2 {
-        eprintln!("usage: corpus_check <source> <root> [--json]");
+    if positional.is_empty() {
+        eprintln!("usage: corpus_check <source> [root] [--json]  |  corpus_check --roster");
         std::process::exit(2);
     }
-    let (source, root) = (positional[0].as_str(), PathBuf::from(positional[1]));
+    let source = positional[0].as_str();
 
     // A source with no transcript decoder would otherwise report a clean census
-    // of nothing.
+    // of nothing. Above the root resolution, so a hook-only id reds with this
+    // rather than with a missing-root message.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
@@ -185,6 +207,17 @@ fn main() {
         );
         std::process::exit(2);
     }
+
+    let root = match positional.get(1) {
+        Some(r) => PathBuf::from(r),
+        None => match pixtuoid_core::source::resolved_source_root(source) {
+            Some(r) => r,
+            None => {
+                eprintln!("error: {source:?} has no resolvable root on this host — pass one");
+                std::process::exit(2);
+            }
+        },
+    };
 
     let mut files = Vec::new();
     walk(source, &root, &mut files);

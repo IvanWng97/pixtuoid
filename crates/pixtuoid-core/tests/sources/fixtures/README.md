@@ -1,7 +1,39 @@
 # Source decode fixtures
 
 Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
-driven by `tests/sources/conformance.rs`. Each fixture is a directory:
+driven by `tests/sources/conformance.rs`.
+
+**Record these; do not compose them.** `just capture-fixture <source> <scenario>`
+runs the real CLI behind a shim that tees what it receives. A hand-written
+fixture pins whatever its author believed the wire looked like, and that belief
+is what the fixture then teaches every later reader: `cursor/tool-run` carries no
+`tool_use_id` and strictly sequential tools, while a real capture shows an id on
+every `preToolUse` and tools that INTERLEAVE (`cursor/tool-run-real`, and #901,
+which discovered the same gap the expensive way).
+
+Only two edits to a capture are allowed, both mechanical: drop a PII key
+(`user_email`), and add the `_pixtuoid_source` tag the shim itself stamps.
+Anything else and it stops being evidence.
+
+**Capture only what pixtuoid's OWN hook registration receives.** A machine can
+carry other tools' hooks on the same events — a debug tee, another integration —
+and a capture that scoops those up is a recording of somebody else's wire. Scope
+it to the source's install-side list (`CURSOR_EVENTS` in `install/cursor.rs`, and
+its siblings); an event outside that list never reaches the shim in production, so
+a decoder that bails on it is correct and a fixture containing it is fiction.
+Learned by getting it wrong: a capture off a 12-event debug tee looked like proof
+that the decoder mishandled three events pixtuoid never even subscribes to.
+
+Three lists describe each CLI and they answer different questions — read the
+install one before concluding anything about the decode one:
+
+| list | where | question |
+| --- | --- | --- |
+| `*_EVENTS` | `install/<cli>.rs` | which hooks we register — what the CLI sends us |
+| `KNOWN_*` | `source/<cli>.rs` | which shapes we recognise — what counts as drift |
+| `*_KNOWN_OMITTED` | `scripts/check_upstream_drift.py` | upstream has it, we deliberately skip it |
+
+Each fixture is a directory:
 
 ```
 tests/sources/fixtures/<source>/<scenario>/

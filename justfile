@@ -560,6 +560,36 @@ mutants *args:
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
 
+# Record a conformance fixture from bytes a real CLI actually sent. Hook-only
+# sources have no persistent corpus — hook events are transient — so their
+# fixtures are the ONLY wire evidence they have, and every one in this tree was
+# composed by hand. cursor/tool-run still encodes the shape #901 disproved.
+# One BILLED model turn on that provider's account. Examples:
+#   just capture-fixture cursor tool-run
+#   just capture-fixture hermes tool-failure "Read MISSING.txt and report the error."
+[group('rust')]
+[doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
+capture-fixture source scenario prompt="":
+    scripts/capture-fixture.sh {{ source }} {{ scenario }} "{{ prompt }}"
+
+# The corpus census, every transcript-bearing source in one pass — the drift half
+# of the pair: fixtures catch a decode regression, real bytes catch the wire
+# changing under us. Roster and roots both come from the registry.
+[group('rust')]
+[doc('Census every transcript-bearing source against its real local corpus')]
+corpus-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cc=target/release/examples/corpus_check
+    [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
+    rc=0
+    while IFS=$'\t' read -r id _ kind _; do
+        [ "$kind" = transcript ] || continue
+        echo "── $id"
+        "$cc" "$id" || rc=1
+    done < <("$cc" --roster)
+    exit "$rc"
+
 # Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
 # (on-demand; not in preflight/CI — points at local or public real sessions, not
 # committed data). SOURCE is a registered source name (see `registered_source_names`):
@@ -570,7 +600,11 @@ comment-lint *args:
 #   just fuzz codex ~/.codex/sessions          # your Codex rollouts
 #   just fuzz grok ~/.grok/sessions            # grok ACP transcripts
 #   just fuzz omp ~/.omp/agent/sessions        # omp sessions
-#   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz claude-code /tmp/cc/test_data/real_projects
+#   # a PUBLIC real-session corpus, so drift shows up without waiting for your own
+#   # sessions to hit the shape. That repo moved test_data/ -> dev-docs/messages/
+#   # (verified 2026-08-14: 59 lines, 0 decode-err); its codex samples are single
+#   # .json objects, which this recipe's *.jsonl glob does not admit.
+#   git clone --depth 1 https://github.com/daaain/claude-code-log /tmp/ccl && just fuzz claude-code /tmp/ccl/dev-docs/messages
 [group('rust')]
 [doc('Never-panic fuzz a source decoder over a JSONL corpus dir: just fuzz claude-code ~/.claude/projects')]
 fuzz source dir:
