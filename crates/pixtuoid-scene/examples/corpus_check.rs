@@ -166,8 +166,6 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    // Lets a caller walk every transcript-bearing source without keeping its own
-    // copy of the roster, which would drift the moment one is added.
     if args.iter().any(|a| a == "--sources") {
         for name in registry::registered_source_names() {
             if Drive::transcript(name, "/probe.jsonl").is_some() {
@@ -185,8 +183,7 @@ fn main() {
     let source = positional[0].as_str();
 
     // A source with no transcript decoder would otherwise report a clean census
-    // of nothing. Checked before the root resolves, so a hook-only source reds
-    // with this rather than with a missing-root message.
+    // of nothing.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
@@ -212,8 +209,7 @@ fn main() {
     walk(source, &root, &mut files);
     files.sort();
     if files.is_empty() {
-        // 3, not 2: "this host has never run that CLI" is a coverage gap a caller
-        // may accept, while 2 stays "you asked for something impossible".
+        // 3, not 2: an absent corpus is a coverage gap a caller may accept.
         eprintln!("absent: no .jsonl under {}", root.display());
         std::process::exit(3);
     }
