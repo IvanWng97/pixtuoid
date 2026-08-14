@@ -38,7 +38,11 @@ invocation_for() {
     esac
 }
 
-PROMPT='Reply with exactly one word: pong'
+# One turn, three things verified: the session registers, a TOOL call drives the
+# per-source tool-detail decode (where the decoders differ most), and the slot
+# returns. Asking for a file READ rather than a shell command keeps it inside
+# every CLI's default permissions, so no turn is spent on a approval prompt.
+PROMPT='Read the file NOTE.txt in the current directory and reply with only its contents.'
 TURN_TIMEOUT=180
 
 SB="$(e2e_sandbox)"
@@ -48,6 +52,13 @@ PROJ="$SB/projects"
 CFG="$SB/config"
 WS="$SB/workspace"
 mkdir -p "$PROJ" "$CFG/pixtuoid" "$WS"
+printf 'pong\n' >"$WS/NOTE.txt"
+# A git repo, because several CLIs refuse to act outside one (codex: "Not inside
+# a trusted directory"). Cheaper than a per-CLI trust flag, and it is what a real
+# user's workspace looks like anyway.
+git init -q "$WS" 2>/dev/null
+git -C "$WS" add -A 2>/dev/null
+git -C "$WS" -c user.email=e2e@pixtuoid -c user.name=e2e commit -qm init 2>/dev/null
 PIXPID=""
 CLIPID=""
 
@@ -111,35 +122,65 @@ for id in "${wanted[@]}"; do
         ;;
     esac
 
+    # Spend the turn only if the integration could possibly report. A broken
+    # install (a hook path left dangling by an uninstall) yields no events no
+    # matter how well the CLI runs, so burning a message to discover that is waste.
+    health="$("$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id==$i) | .health // empty')"
+    if [ -n "$health" ]; then
+        echo "  BLOCKED $id — $health"
+        declare_uncovered="$declare_uncovered $id"
+        continue
+    fi
+
     bin="${spec%%|*}"
     sub="${spec##*|}"
     echo "[$id] $bin $sub — one real model turn"
-    (cd "$WS" && PIXTUOID_SOCKET="$SOCK" "$bin" "$sub" "$PROMPT" >"$SB/$id.log" 2>&1) &
+    # stdin from /dev/null: a CLI that also accepts a piped prompt otherwise waits
+    # on the inherited terminal forever (codex: "Reading additional input...").
+    (cd "$WS" && PIXTUOID_SOCKET="$SOCK" "$bin" "$sub" "$PROMPT" </dev/null >"$SB/$id.log" 2>&1) &
     CLIPID=$!
 
+    # Registration alone proves little — junk content registers a sprite too. The
+    # tool-driven transition is the assertion; registration is reported so a
+    # failure says WHICH half broke.
     seen=0
+    drove=0
     for _ in $(seq 1 "$TURN_TIMEOUT"); do
-        if grep -q "agents=\[[^]]*$prefix·" "$OUT" 2>/dev/null; then
-            seen=1
-            break
-        fi
+        grep -q "agents=\[[^]]*${prefix}·" "$OUT" 2>/dev/null && seen=1
+        grep -qE "agents=\[[^]]*${prefix}·[^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
+        [ "$drove" = 1 ] && break
         kill -0 "$CLIPID" 2>/dev/null || {
             # The CLI finished; give the watcher a beat to observe its last write.
             sleep 3
-            grep -q "agents=\[[^]]*$prefix·" "$OUT" 2>/dev/null && seen=1
+            grep -q "agents=\[[^]]*${prefix}·" "$OUT" 2>/dev/null && seen=1
+            grep -qE "agents=\[[^]]*${prefix}·[^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
             break
         }
         sleep 1
     done
     kill "$CLIPID" 2>/dev/null
     wait "$CLIPID" 2>/dev/null
+    cli_rc=$?
     CLIPID=""
 
-    if [ "$seen" = 1 ]; then
-        echo "  PASS $id — $prefix· rendered"
+    # A CLI that failed on ITS OWN account (no credit, no API key, not logged in)
+    # says nothing about pixtuoid. Reporting that as a decode failure would be the
+    # same lie as calling an unrunnable check a pass.
+    if [ "$drove" = 0 ] && [ "$seen" = 0 ] && [ "$cli_rc" -ne 0 ]; then
+        echo "  BLOCKED $id — the CLI itself failed (exit $cli_rc), not a pixtuoid result"
+        tail -2 "$SB/$id.log" | sed 's/^/      /'
+        declare_uncovered="$declare_uncovered $id"
+        continue
+    fi
+
+    if [ "$drove" = 1 ]; then
+        echo "  PASS $id — ${prefix}· registered AND reached a lifecycle state"
         covered=$((covered + 1))
+    elif [ "$seen" = 1 ]; then
+        echo "  FAIL $id — ${prefix}· registered but never left idle (tool-detail decode?)" >&2
+        FAILED=1
     else
-        echo "  FAIL $id — no $prefix· sprite after its turn" >&2
+        echo "  FAIL $id — no ${prefix}· sprite after its turn" >&2
         echo "  --- $bin output tail ---" >&2
         tail -5 "$SB/$id.log" >&2
         FAILED=1
