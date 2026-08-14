@@ -318,6 +318,7 @@ lint:
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
+    run rele2e  just release-e2e-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1185,6 +1186,13 @@ wasm-check-selftest:
 # needs only Pillow while `gen-check` needs the venv plus ffmpeg, node, a release
 # snapshot build and the wasm pair: a developer who cannot run that gate should
 # still be able to run this.
+# Gates the release-e2e machinery. Every assertion in it has been shown to red
+# against a broken subject — see the negative controls in its own header.
+[group('meta')]
+[doc('Self-test the release-e2e driver and its shared tier helpers')]
+release-e2e-selftest:
+    scripts/release-e2e-selftest.sh
+
 [group('meta')]
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
 compare-selftest:
