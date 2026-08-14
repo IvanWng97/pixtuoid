@@ -31,6 +31,7 @@ run_tier() {
 auto_openclaw_hermetic() { run_tier tier-openclaw-hermetic.sh; }
 auto_openclaw_multi() { run_tier tier-openclaw-multi.sh "$@"; }
 auto_openclaw_backend() { run_tier tier-openclaw-backend.sh; }
+auto_live_sources() { run_tier tier-live-sources.sh "$@"; }
 
 # A full-checklist run forwards no arguments, so the step needs its own fixture —
 # without one the tier's `${1:?usage}` made this step unpassable.
@@ -339,6 +340,7 @@ STEPS=(
     "corpus|pre|auto|every transcript-bearing source decodes its real corpus"
     "openclaw_multi|pre|auto|N real OpenClaw gateways"
     "openclaw_backend|pre|auto|real gateway + one BILLED model turn"
+    "live_sources|pre|auto|every installed agent CLI renders its own sprite (BILLED)"
     "site_e2e|pre|auto|Playwright against the production site build"
     "release_smoke|pre|auto|release-smoke.yml on this ref, all platforms"
     "fresh_setup|pre|manual|fresh-HOME onboarding paints and lists every source"

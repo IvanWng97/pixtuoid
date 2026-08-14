@@ -620,6 +620,14 @@ openclaw-multi-e2e *ports:
 openclaw-backend-e2e:
     scripts/release-e2e.sh --only openclaw_backend
 
+# The broadest tier: launches each installed agent CLI non-interactively and
+# asserts ITS badge renders. One real model turn PER CLI, on each provider's own
+# account — the only proof a real CLI's real output reaches a real sprite.
+[group('rust')]
+[doc('Live multi-source e2e — every installed agent CLI, one BILLED turn each')]
+live-sources *ids:
+    scripts/release-e2e.sh --only live_sources -- {{ ids }}
+
 # Replays a captured rollout through the FULL headless path — real watcher, real
 # socket, only the input is fixed. Recipe-less until now, for the reason above.
 [group('rust')]

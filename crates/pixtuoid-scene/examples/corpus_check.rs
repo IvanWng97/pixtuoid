@@ -174,6 +174,22 @@ fn main() {
         }
         return;
     }
+    // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
+    // source without a second copy of the roster or of the badge prefixes.
+    if args.iter().any(|a| a == "--roster") {
+        for name in registry::registered_source_names() {
+            let Some(d) = registry::descriptor_for(name) else {
+                continue;
+            };
+            let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
+                "transcript"
+            } else {
+                "hook"
+            };
+            println!("{name}\t{}\t{kind}", d.label_prefix);
+        }
+        return;
+    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     if positional.is_empty() {

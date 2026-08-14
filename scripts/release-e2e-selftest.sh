@@ -91,8 +91,9 @@ for s in "${STEPS[@]}"; do
     IFS='|' read -r id _ kind _ <<<"$s"
     [ "$kind" = auto ] || continue
     case "$id" in
-    # These reach the network, a gateway, or a paid model turn.
-    verify | build | site_e2e | npm_check | ci_green | release_smoke | published | openclaw_* | corpus | preconditions | wasm_fresh) continue ;;
+    # These reach the network, a gateway, or a paid model turn. live_sources bills
+    # one turn PER installed CLI, so it must never be smoke-invoked from a lint.
+    verify | build | site_e2e | npm_check | ci_green | release_smoke | published | openclaw_* | live_sources | corpus | preconditions | wasm_fresh) continue ;;
     esac
     (auto_"$id" >/dev/null 2>&1)
     rc=$?
