@@ -138,7 +138,8 @@ costs a FRAME (size + occupancy axes), `pixtuoid-core/benches/decode_reduce.rs`
 costs an EVENT (both transports). LOCAL statistical numbers; CI's `bench.yml` is
 on-demand advisory like mutants,
 never a gate (shared-runner wall-clock is noise), and `codspeed.yml` tracks the
-same benches per PR as instruction-count simulation (also advisory).
+same benches per PR in two modes — instruction-count simulation and heap
+allocations (both advisory).
 
 ### Visual verification
 

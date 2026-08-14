@@ -271,9 +271,9 @@ Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_dri
 (wire-format drift); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
-FAQ, while `codspeed.yml` runs the same benches instrumented per PR — instruction-count
-simulation, so runner noise doesn't apply — and posts trends via the CodSpeed app, still
-gating nothing); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
+FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —
+instruction-count simulation, so runner noise doesn't apply, plus heap-allocation
+measurement — and posts trends via the CodSpeed app, still gating nothing); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
 path matching that posts the documented blast-radius escalations as a sticky PR comment so
 prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
