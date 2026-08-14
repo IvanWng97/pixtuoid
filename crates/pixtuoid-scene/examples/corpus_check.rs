@@ -166,16 +166,27 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Lets a caller walk every transcript-bearing source without keeping its own
+    // copy of the roster, which would drift the moment one is added.
+    if args.iter().any(|a| a == "--sources") {
+        for name in registry::registered_source_names() {
+            if Drive::transcript(name, "/probe.jsonl").is_some() {
+                println!("{name}");
+            }
+        }
+        return;
+    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    if positional.len() < 2 {
-        eprintln!("usage: corpus_check <source> <root> [--json]");
+    if positional.is_empty() {
+        eprintln!("usage: corpus_check <source> [root] [--json]  |  corpus_check --sources");
         std::process::exit(2);
     }
-    let (source, root) = (positional[0].as_str(), PathBuf::from(positional[1]));
+    let source = positional[0].as_str();
 
     // A source with no transcript decoder would otherwise report a clean census
-    // of nothing.
+    // of nothing. Checked before the root resolves, so a hook-only source reds
+    // with this rather than with a missing-root message.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
@@ -186,12 +197,25 @@ fn main() {
         std::process::exit(2);
     }
 
+    let root = match positional.get(1) {
+        Some(r) => PathBuf::from(r),
+        None => match pixtuoid_core::source::resolved_source_root(source) {
+            Some(r) => r,
+            None => {
+                eprintln!("error: {source:?} has no resolvable root on this host — pass one");
+                std::process::exit(2);
+            }
+        },
+    };
+
     let mut files = Vec::new();
     walk(source, &root, &mut files);
     files.sort();
     if files.is_empty() {
-        eprintln!("error: no .jsonl under {}", root.display());
-        std::process::exit(2);
+        // 3, not 2: "this host has never run that CLI" is a coverage gap a caller
+        // may accept, while 2 stays "you asked for something impossible".
+        eprintln!("absent: no .jsonl under {}", root.display());
+        std::process::exit(3);
     }
 
     let pack = load_sprite_pack(None).expect("embedded pack");
