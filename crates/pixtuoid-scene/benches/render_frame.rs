@@ -1,10 +1,10 @@
 //! Whole-frame render benchmark over two axes: the two SIZES issue #900
 //! measured (12 agents, busy and idle), and OCCUPANCY at the larger of them.
-//! Size is the saturated axis — #900 put frame cost at 2.814x for 2.812x the
-//! pixels — and 360x240 is where it stops: `office_scale` pins the floating
-//! window's buffer near 180px tall, so a bigger display renders a SMALLER
-//! office. Occupancy is what still varies in real use, and the per-agent work
-//! (z-sort, routing, chitchat) is the part that isn't linear in pixels.
+//! Size is the near-linear axis — #900 measured frame cost tracking pixel
+//! count — so occupancy is the one that still teaches something: the per-agent
+//! work is the part that isn't linear in pixels. The largest crowd carries an
+//! idle twin for the same reason the size axis does: without it the delta can't
+//! be split into headcount-driven and activity-driven halves.
 //! Run via `just bench`; profile via
 //! `cargo bench -p pixtuoid-scene --bench render_frame -- --profile-time 10`
 //! under `samply record`. Numbers are LOCAL statistical evidence (criterion's
@@ -32,10 +32,12 @@ use pixtuoid_scene::layout::Size;
 const BASE_EPOCH_SECS: u64 = 1_700_000_200;
 const SIM_WINDOW_FRAMES: u32 = 600;
 const FRAME_STEP_MS: u64 = 100;
-/// The largest office buffer any painter produces (`FLOATING_DEFAULT_W/H`, and
-/// the scale-1 case of `office_scale`).
-const CEILING: (u16, u16) = (360, 240);
-/// Crowds above the 12 the size axis fixes — a busy pod-farm and a full floor.
+/// The DEFAULT floating window's office buffer (`pixtuoid`'s
+/// `FLOATING_DEFAULT_W/H`, which `office_scale` leaves at scale 1). NOT a
+/// ceiling: the TUI buffer is the terminal's own size and `office_scale`
+/// divides by HEIGHT only, so a wide window or wide terminal exceeds it.
+const FLOATING_DEFAULT: Size = Size { w: 360, h: 240 };
+/// Crowds above the 12 the size axis fixes — a busy pod-farm and a near-full floor.
 const OCCUPANCY: [usize; 2] = [32, 64];
 
 fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> SceneState {
@@ -51,8 +53,7 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
     // The idle office's clocks sit far in the past so agents settle into the
     // deep-idle poses a real overnight office shows.
     let idle_epoch = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
-    // Half the office mid-tool, a sixth parked on a prompt — at n=12 this is
-    // exactly the 6/2/4 split the size cases have measured since #900.
+    // At n=12 this is exactly the 6/2/4 split the size cases have measured since #900.
     let active = n / 2;
     let waiting = active + n / 6;
     for i in 0..n {
@@ -111,25 +112,41 @@ fn render_frame(c: &mut Criterion) {
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);
     let idle = office_scene(12, 16, base, false);
-    // A 360x240 floor lays out 80 desks, so both crowds seat fully.
     let crowds: Vec<(usize, SceneState)> = OCCUPANCY
         .iter()
         .map(|&n| (n, office_scene(n, n, base, true)))
         .collect();
+    let biggest = OCCUPANCY[OCCUPANCY.len() - 1];
+    let idle_crowd = office_scene(biggest, biggest, base, false);
+    // Every crowd must seat, else the case measures a smaller office than its name claims.
+    let seats = pixtuoid_scene::floor::floor_capacity(
+        FLOATING_DEFAULT.w,
+        FLOATING_DEFAULT.h,
+        pixtuoid_scene::floor::floor_seed(0),
+    );
+    assert!(
+        seats >= biggest,
+        "{FLOATING_DEFAULT:?} seats {seats} < {biggest}"
+    );
 
-    let mut cases: Vec<(String, &SceneState, u16, u16)> = Vec::new();
+    let mut cases: Vec<(String, &SceneState, Size)> = Vec::new();
     for (label, scene) in [("busy", &busy), ("idle", &idle)] {
-        for (w, h) in [(192u16, 160u16), CEILING] {
-            cases.push((format!("{label}12_{w}x{h}"), scene, w, h));
+        for size in [Size { w: 192, h: 160 }, FLOATING_DEFAULT] {
+            cases.push((format!("{label}12_{}x{}", size.w, size.h), scene, size));
         }
     }
+    let Size { w, h } = FLOATING_DEFAULT;
     for (n, scene) in &crowds {
-        let (w, h) = CEILING;
-        cases.push((format!("busy{n}_{w}x{h}"), scene, w, h));
+        cases.push((format!("busy{n}_{w}x{h}"), scene, FLOATING_DEFAULT));
     }
+    cases.push((
+        format!("idle{biggest}_{w}x{h}"),
+        &idle_crowd,
+        FLOATING_DEFAULT,
+    ));
 
     let mut group = c.benchmark_group("render_floor");
-    for (name, scene, w, h) in cases {
+    for (name, scene, size) in cases {
         group.bench_function(name, |b| {
             let mut fctx = FloorCtx::new();
             let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
@@ -148,7 +165,7 @@ fn render_frame(c: &mut Criterion) {
                         pack: &pack,
                         theme,
                         now: base + Duration::from_millis(u64::from(i) * FRAME_STEP_MS),
-                        size: Size { w, h },
+                        size,
                         floor_meta: FloorMeta::ground(),
                         active_pet: None,
                         floor_pet: None,

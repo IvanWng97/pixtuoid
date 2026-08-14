@@ -12,9 +12,10 @@ name: codspeed
 # installs cargo-codspeed via binstall (revisit if taiki-e/install-action adds
 # it).
 #
-# Both modes are named on BOTH steps because build and run read the mode
-# independently (the run inherits it from the action via CODSPEED_RUNNER_MODE).
-# Measurement is per-mode, which is what the timeout headroom is for.
+# TWO action steps rather than one `mode: simulation,memory`: the runner uploads
+# only after EVERY mode's run part completes, so a single process drops an
+# already-good simulation result whenever the newer memory instrument fails.
+# The build takes no mode — both instruments consume the same build today.
 on:
   push:
     branches: [main]
@@ -32,7 +33,7 @@ jobs:
   codspeed:
     name: benchmarks (codspeed simulation + memory, advisory)
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -46,8 +47,13 @@ jobs:
           cache-target: release
           bins: cargo-codspeed
       - name: Build instrumented benchmarks
-        run: cargo codspeed build -p pixtuoid-scene -p pixtuoid-core -m simulation,memory
+        run: cargo codspeed build -p pixtuoid-scene -p pixtuoid-core
       - uses: CodSpeedHQ/action@v5
         with:
-          mode: simulation,memory
+          mode: simulation
+          run: cargo codspeed run
+      - uses: CodSpeedHQ/action@v5
+        continue-on-error: true
+        with:
+          mode: memory
           run: cargo codspeed run

@@ -529,6 +529,8 @@ mod tests {
 
         // MEASURED buffers for the default 360×240 logical window. `office_scale`
         // ROUNDS, so this is NOT monotone in sf — no logical-side seed is sound.
+        // The sf-1.0 row is also what pins `render_frame.rs`'s `FLOATING_DEFAULT`
+        // copy of these constants: a change to either reds this row first.
         let measured = [
             (1.00_f64, (360u32, 240u32), 80usize),
             (1.25, (225, 150), 30),

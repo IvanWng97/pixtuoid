@@ -338,7 +338,8 @@ test *args:
 # bench.yml runs the same recipe on-demand, advisory-only: shared-runner
 # wall-clock is noise (criterion's own FAQ), so no benchmark ever gates.
 # `render_frame` costs a FRAME, `decode_reduce` costs an EVENT; codspeed.yml
-# instruments both. Filter forwards: `just bench 360` runs only the 360x240
+# instruments both. Filter forwards to both targets, and a filter matching
+# nothing in one of them is not an error: `just bench 360` runs every 360x240
 # case, `just bench hook` only the hook-transport fold.
 [group('rust')]
 [doc('Render-path + wire-path criterion benchmarks; forwards a filter')]

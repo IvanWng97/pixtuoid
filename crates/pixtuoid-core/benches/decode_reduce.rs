@@ -1,7 +1,12 @@
 //! Wire→state benchmark: the decode→reduce half that runs on every transcript
 //! append and every hook envelope, driven through `harness::Drive` so it can't
 //! measure a decoder production doesn't use. The render benchmark next door
-//! costs a FRAME; this costs an EVENT, and the two scale with different things.
+//! costs a FRAME; this costs an EVENT.
+//!
+//! `Drive` folds through a real `Reducer` and RETAINS every decoded event, so
+//! the curve carries a constant harness component production doesn't pay (one
+//! `AgentEvent` clone per event, plus a per-event `tick` the runtime schedules
+//! on a timer). Read the memory mode's movement as directional, not absolute.
 //!
 //! Both transports are measured because their costs are structurally different:
 //! the JSONL arm parses the fatter envelope, the hook arm carries the
@@ -58,18 +63,16 @@ fn decode_reduce(c: &mut Criterion) {
         .seeded();
     let hook = Drive::hooks();
 
-    // A silently-rejected line would leave this benchmarking the decoder's error
-    // path, which is not the thing being measured.
-    for (what, driven) in [
-        ("jsonl", transcript.lines(&jsonl)),
-        ("hooks", hook.lines(&hooks)),
+    // Exact counts, not a floor: a decoder arm that DECLINES (`Ok(vec![])`, the
+    // shape of the documented quiet-drop paths) halves this while leaving
+    // `assert_clean` green, and a floor would not notice.
+    for (what, driven, want) in [
+        ("jsonl", transcript.lines(&jsonl), 2 * TURNS),
+        ("hooks", hook.lines(&hooks), 4 * TURNS + 1),
     ] {
         driven.assert_clean(what);
         assert_eq!(driven.registered(), 1, "{what}: one session must register");
-        assert!(
-            driven.wire_events() >= TURNS,
-            "{what}: the wire must carry at least one event per turn"
-        );
+        assert_eq!(driven.wire_events(), want, "{what}: wire event count");
     }
 
     let mut group = c.benchmark_group("decode_reduce");
