@@ -25,15 +25,24 @@ e2e_require_bin "$PIX" "$HOOK" "$ROSTER_BIN"
 # The one place per-CLI knowledge lives, and it is unavoidable: a headless
 # invocation is as source-specific as the decoder. A source absent here is
 # reported as uncovered, never silently skipped.
+# "<bin>|<subcommand-or-flag>|<extra flags>". The extra field exists because a
+# headless turn that a permission prompt auto-denies produces no tool call, and a
+# tool call is half of what this tier measures — scope the grant to reading.
 invocation_for() {
     case "$1" in
-    claude-code) echo "claude|-p" ;;
-    codex) echo "codex|exec" ;;
-    reasonix) echo "reasonix|-p" ;;
-    codewhale) echo "codewhale|exec" ;;
-    opencode) echo "opencode|run" ;;
-    hermes) echo "hermes|-z" ;;
-    copilot) echo "copilot|-p" ;;
+    # --allowedTools is VARIADIC, so it must follow the prompt or it eats it.
+    claude-code) echo "claude|-p|--allowedTools Read" ;;
+    codex) echo "codex|exec|" ;;
+    antigravity) echo "agy|-p|" ;;
+    reasonix) echo "reasonix|-p|" ;;
+    codewhale) echo "codewhale|exec|" ;;
+    opencode) echo "opencode|run|" ;;
+    copilot) echo "copilot|-p|" ;;
+    cursor) echo "cursor-agent|-p|" ;;
+    hermes) echo "hermes|-z|" ;;
+    grok) echo "grok|-p|" ;;
+    # omp and kimi have no entry: neither ships a binary this host can find, so
+    # an invocation here would be invented rather than verified.
     *) return 1 ;;
     esac
 }
@@ -100,6 +109,15 @@ fi
 
 present_ids="$("$PIX" sources --json | jq -r '.[] | select(.cli_present) | .id' | paste -sd' ' -)"
 
+# A hook command that is a BARE NAME resolves via the CLI's PATH. doctor only
+# soft-checks those on purpose (its own PATH is not the CLI's — verify.rs's
+# ShimRef::BareName), so a missing shim is invisible there but fatal here: no
+# shim, no events, no sprite, whatever the CLI does.
+SHIM_ON_PATH=1
+command -v pixtuoid-hook >/dev/null 2>&1 || SHIM_ON_PATH=0
+[ "$SHIM_ON_PATH" = 0 ] &&
+    echo "note: pixtuoid-hook is not on PATH — sources whose hook is a bare name cannot report"
+
 FAILED=0
 covered=0
 declare_uncovered=""
@@ -132,12 +150,17 @@ for id in "${wanted[@]}"; do
         continue
     fi
 
-    bin="${spec%%|*}"
-    sub="${spec##*|}"
+    IFS='|' read -r bin sub extra <<<"$spec"
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "  BLOCKED $id — '$bin' is not on PATH here"
+        declare_uncovered="$declare_uncovered $id"
+        continue
+    fi
     echo "[$id] $bin $sub — one real model turn"
     # stdin from /dev/null: a CLI that also accepts a piped prompt otherwise waits
     # on the inherited terminal forever (codex: "Reading additional input...").
-    (cd "$WS" && PIXTUOID_SOCKET="$SOCK" "$bin" "$sub" "$PROMPT" </dev/null >"$SB/$id.log" 2>&1) &
+    # shellcheck disable=SC2086  # $extra is a flag LIST and must word-split
+    (cd "$WS" && PIXTUOID_SOCKET="$SOCK" "$bin" "$sub" "$PROMPT" $extra </dev/null >"$SB/$id.log" 2>&1) &
     CLIPID=$!
 
     # Registration alone proves little — junk content registers a sprite too. The
@@ -146,14 +169,14 @@ for id in "${wanted[@]}"; do
     seen=0
     drove=0
     for _ in $(seq 1 "$TURN_TIMEOUT"); do
-        grep -q "agents=\[[^]]*${prefix}·" "$OUT" 2>/dev/null && seen=1
-        grep -qE "agents=\[[^]]*${prefix}·[^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
+        grep -q "agents=\[[^]]*${prefix}[·@]" "$OUT" 2>/dev/null && seen=1
+        grep -qE "agents=\[[^]]*${prefix}[·@][^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
         [ "$drove" = 1 ] && break
         kill -0 "$CLIPID" 2>/dev/null || {
             # The CLI finished; give the watcher a beat to observe its last write.
             sleep 3
-            grep -q "agents=\[[^]]*${prefix}·" "$OUT" 2>/dev/null && seen=1
-            grep -qE "agents=\[[^]]*${prefix}·[^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
+            grep -q "agents=\[[^]]*${prefix}[·@]" "$OUT" 2>/dev/null && seen=1
+            grep -qE "agents=\[[^]]*${prefix}[·@][^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
             break
         }
         sleep 1
@@ -172,15 +195,20 @@ for id in "${wanted[@]}"; do
         declare_uncovered="$declare_uncovered $id"
         continue
     fi
+    if [ "$drove" = 0 ] && [ "$seen" = 0 ] && [ "$SHIM_ON_PATH" = 0 ]; then
+        echo "  BLOCKED $id — its turn ran, but pixtuoid-hook is off PATH so no hook could fire"
+        declare_uncovered="$declare_uncovered $id"
+        continue
+    fi
 
     if [ "$drove" = 1 ]; then
-        echo "  PASS $id — ${prefix}· registered AND reached a lifecycle state"
+        echo "  PASS $id — ${prefix} registered AND reached a lifecycle state"
         covered=$((covered + 1))
     elif [ "$seen" = 1 ]; then
-        echo "  FAIL $id — ${prefix}· registered but never left idle (tool-detail decode?)" >&2
+        echo "  FAIL $id — ${prefix} registered but never left idle (tool-detail decode?)" >&2
         FAILED=1
     else
-        echo "  FAIL $id — no ${prefix}· sprite after its turn" >&2
+        echo "  FAIL $id — no ${prefix} sprite after its turn" >&2
         echo "  --- $bin output tail ---" >&2
         tail -5 "$SB/$id.log" >&2
         FAILED=1

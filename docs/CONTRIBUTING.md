@@ -306,6 +306,13 @@ is exercised mid-cycle instead of once a release. None runs in CI. Cheapest firs
 - `just replay <fixture>` — a captured rollout through the full headless path (real watcher, real socket; only the input is fixed).
 - `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
+- `just live-sources [id ...]` — launches each installed agent CLI non-interactively and
+  asserts ITS badge reaches a lifecycle state. The only tier that proves a real CLI's real
+  output becomes a real sprite; `corpus_check` proves decode over stored bytes and the
+  fixtures pin the wire contract. One BILLED turn per CLI, so it checks
+  `sources --json`'s `health` first and skips any source whose integration could not
+  report anyway. Its per-CLI invocation table is irreducible per-source knowledge — a
+  source with no entry is listed under `NOT COVERED`, never skipped silently.
 
 Their `expect_line` pollers are deliberately not shared; the WHY lives at the
 definition in `scripts/lib/tier-openclaw-hermetic.sh`, where someone about to hoist them
