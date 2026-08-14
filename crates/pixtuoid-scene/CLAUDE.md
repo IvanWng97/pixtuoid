@@ -53,7 +53,10 @@ render-seam digest (`render_floor`/`FloorSession`) lives in
 
 The one place the render layer answers "would the UI actually SHOW this?" for
 real, uncurated bytes: `cargo run --release -p pixtuoid-scene --example
-corpus_check -- <source> <root> [--json]` walks the `.jsonl` under a live
+corpus_check -- <source> [root] [--json]` (`--sources` lists the
+transcript-bearing ids; an omitted root resolves via `resolved_source_root`, so
+`just corpus-all` walks them all without a second copy of the roster or of any
+per-CLI path) walks the `.jsonl` under a live
 transcript tree that the source's registry `path_filter` admits (the same set
 the watcher would), drives each file through `pixtuoid_core::harness::Drive` (the
 shared decode→reduce pipeline, first-sight seed included), then asks

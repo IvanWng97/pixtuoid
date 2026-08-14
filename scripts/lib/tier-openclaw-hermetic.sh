@@ -6,29 +6,25 @@
 # backend-less platform that one step times out.
 #
 # Build first:  just build --release
-# Run:          scripts/openclaw-live-e2e.sh
+# Run:          just openclaw-e2e
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
-OUT="$(mktemp)"
-PROJ="$(mktemp -d)"
-CFGDIR="$(mktemp -d)"
-# The socket lives inside a PRIVATE 0700 dir, never as a fixed name in the shared
-# temp dir: a fixed name makes two concurrent runs bind/`rm` each other's socket,
-# and on a shared /tmp it is pre-plantable by another user (`ensure_owned_socket_dir`
-# deliberately leaves an explicit PIXTUOID_SOCKET path alone).
-SOCKDIR="$(mktemp -d)"
-SOCK="$SOCKDIR/pixtuoid.sock"
-PIXPID=""
+e2e_require_bin "$PIX" "$HOOK"
 
-for bin in "$PIX" "$HOOK"; do
-    [ -x "$bin" ] || {
-        echo "missing $bin — run: just build --release" >&2
-        exit 2
-    }
-done
+SB="$(e2e_sandbox)"
+OUT="$SB/pixtuoid.log"
+PROJ="$SB/projects"
+CFGDIR="$SB/config"
+SOCK="$SB/pixtuoid.sock"
+mkdir -p "$PROJ" "$CFGDIR"
+PIXPID=""
 
 cleanup() {
     [ -n "$PIXPID" ] && kill "$PIXPID" 2>/dev/null
@@ -37,8 +33,7 @@ cleanup() {
     for p in "${SPID:-}" "${APID:-}" "${BPID:-}"; do
         [ -n "$p" ] && kill "$p" 2>/dev/null
     done
-    rm -f "$OUT"
-    rm -rf "$PROJ" "$CFGDIR" "$SOCKDIR"
+    rm -rf "$SB"
 }
 trap cleanup EXIT
 
@@ -76,7 +71,7 @@ send_a() { send "$(printf '%s' "$1" | sed "s/}\$/,\"gatewayPort\":$PORT_A}/")"; 
 FAILED=0
 # Match the LAST `daemons=` line, not any line, so the idle -> busy -> idle round
 # trip is distinguishable (a plain grep-anywhere can't).
-# NOT hoisted into a shared `scripts/lib`, and adjudicated three times (two review
+# NOT hoisted into `e2e-common.sh`, and adjudicated three times (two review
 # lenses + the online bot) — do not re-raise without new evidence. The bodies look
 # alike; the retry bounds await different EVENT CLASSES. This tier's 40x0.2s bounds
 # an in-process shim -> HookRouter -> reducer -> summary hop; multi-gateway's
@@ -193,9 +188,9 @@ expect_line "openclaw@$PORT_B:down" both-down
 echo "--- the lobster timeline (headless) ---"
 grep 'daemons=' "$OUT" | sed 's/^/  /'
 if [ "$FAILED" = 0 ]; then
-    echo "openclaw-live-e2e: PASS"
+    echo "openclaw-hermetic: PASS"
 else
-    echo "openclaw-live-e2e: FAIL" >&2
+    echo "openclaw-hermetic: FAIL" >&2
 fi
 trap - EXIT
 cleanup

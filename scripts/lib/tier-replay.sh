@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# replay-fixture.sh — replay a captured Codex rollout fixture into a headless
+# tier-replay.sh — replay a captured Codex rollout fixture into a headless
 # pixtuoid run and print the cx· agent's state progression, without a live CLI.
 # All FOUR host couplings are isolated: sessions root, projects root, config
 # (XDG_CONFIG_HOME) and the hook socket.
 #
-# Usage:  scripts/replay-fixture.sh <rollout.jsonl> [delay_secs]
-#   e.g.  scripts/replay-fixture.sh \
+# Usage:  just replay <rollout.jsonl> [delay_secs]
+#   e.g.  just replay \
 #           crates/pixtuoid-core/tests/sources/fixtures/codex/permission-flow/rollout-*.jsonl
 #   PIXTUOID_BIN overrides the binary (default: this tree's target/release build).
 set -euo pipefail
 
-repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-fixture="${1:?usage: replay-fixture.sh <rollout.jsonl> [delay_secs]}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+repo="$(e2e_repo_root)"
+fixture="${1:?usage: just replay <rollout.jsonl> [delay_secs]}"
 delay="${2:-3}"
 # The WORKING TREE's binary, never a bare `pixtuoid` off PATH: a maintainer
 # normally has a RELEASED pixtuoid installed, so a PATH default would replay the
@@ -27,23 +31,20 @@ command -v "$bin" >/dev/null 2>&1 || {
     exit 2
 }
 
-root="$(mktemp -d)"
-proj="$(mktemp -d)"
-cfgdir="$(mktemp -d)"
-# The socket lives inside a PRIVATE 0700 dir, not as a bare `mktemp -u` name in
-# the shared temp dir, which would leave a pre-plant/symlink race between name
-# generation and pixtuoid's bind(). Nothing downstream closes it —
-# `ensure_owned_socket_dir` does not police an explicit PIXTUOID_SOCKET path.
-sockdir="$(mktemp -d)"
-sock="$sockdir/hook.sock"
-out="$(mktemp)"
+sb="$(e2e_sandbox)"
+root="$sb/sessions"
+proj="$sb/projects"
+cfgdir="$sb/config"
+sock="$sb/hook.sock"
+out="$sb/headless.log"
+mkdir -p "$root" "$proj" "$cfgdir"
 hpid=""
 cleanup() {
     if [ -n "$hpid" ]; then
         kill "$hpid" 2>/dev/null || true
         wait "$hpid" 2>/dev/null || true
     fi
-    rm -rf "$root" "$proj" "$cfgdir" "$sockdir" "$out"
+    rm -rf "$sb"
     return 0
 }
 trap cleanup EXIT

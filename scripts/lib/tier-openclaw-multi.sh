@@ -13,20 +13,21 @@
 # runs from a throwaway `OPENCLAW_HOME`.
 #
 # Build first:  just build --release
-# Run:          scripts/openclaw-multi-gateway-e2e.sh [port ...]   (default: 4 ports)
+# Run:          just openclaw-multi-e2e [port ...]   (default: 4 ports)
 set -uo pipefail
 
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=/dev/null
+. "$here/e2e-common.sh"
+
+REPO="$(e2e_repo_root)"
 PIX="$REPO/target/release/pixtuoid"
 # Four by default: two would prove the keying, four also exercises the one-floor
 # crowding the visit-spot offset logic exists for.
 PORTS=("$@")
 [ "${#PORTS[@]}" -gt 0 ] || PORTS=(18901 18902 18903 18904)
 
-[ -x "$PIX" ] || {
-    echo "missing $PIX — run: just build --release" >&2
-    exit 2
-}
+e2e_require_bin "$PIX"
 command -v openclaw >/dev/null 2>&1 || {
     echo "missing 'openclaw' on PATH — this live test drives the REAL gateway" >&2
     exit 2
@@ -38,7 +39,7 @@ for port in "${PORTS[@]}"; do
     fi
 done
 
-MG="$(mktemp -d)"
+MG="$(e2e_sandbox)"
 SOCK="$MG/pixtuoid.sock"
 OUT="$MG/pixtuoid.log"
 GW_PIDS=()
@@ -103,7 +104,7 @@ FAILED=0
 # Wait until the LATEST `daemons=` line contains `want` — a substring match, so a
 # per-instance assertion does not have to name every sibling.
 # Deliberately NOT shared with the sibling tiers' pollers — the WHY (differing
-# retry-bound event classes) is at `openclaw-live-e2e.sh`'s `expect_line`.
+# retry-bound event classes) is at `tier-openclaw-hermetic.sh`'s `expect_line`.
 expect_line() {
     local want="$1" label="$2" last
     for _ in $(seq 1 120); do
@@ -155,9 +156,9 @@ fi
 echo "--- the lobster timeline (headless):"
 grep 'daemons=' "$OUT" | sed 's/^/    /'
 if [ "$FAILED" = 0 ]; then
-    echo "openclaw-multi-gateway-e2e: PASS"
+    echo "openclaw-multi: PASS"
 else
-    echo "openclaw-multi-gateway-e2e: FAIL" >&2
+    echo "openclaw-multi: FAIL" >&2
 fi
 trap - EXIT
 cleanup

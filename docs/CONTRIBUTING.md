@@ -255,16 +255,25 @@ What to run and when, for an agent-driven change:
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` | [`CLAUDE.md`](../CLAUDE.md) "Build & test" |
 | before push | `just preflight` | same — including why never to pipe it |
 | before merge | the two-lens review | [Pull requests](#pull-requests) |
-| a source/lifecycle change | dogfood against live CC, or replay hermetically | the three tiers below |
+| a source/lifecycle change | dogfood against live CC, or replay hermetically | the tiers below |
 
-The three OpenClaw e2e tiers, cheapest first — none runs in CI:
+The e2e tiers live under `scripts/lib/`, each its own runnable script — none
+runs in CI. Cheapest first:
 
 - `just openclaw-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
+- `just replay <fixture>` — a captured rollout through the full headless path (real watcher, real socket; only the input is fixed).
 - `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
+- `just live-sources [id ...]` — launches each installed agent CLI non-interactively and
+  asserts ITS badge reaches a lifecycle state. The only tier that proves a real CLI's real
+  output becomes a real sprite; `corpus_check` proves decode over stored bytes and the
+  fixtures pin the wire contract. One BILLED turn per CLI, so it checks
+  `sources --json`'s `health` first and skips any source whose integration could not
+  report anyway. Its per-CLI invocation table is irreducible per-source knowledge — a
+  source with no entry is listed under `NOT COVERED`, never skipped silently.
 
 Their `expect_line` pollers are deliberately not shared; the WHY lives at the
-definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
+definition in `scripts/lib/tier-openclaw-hermetic.sh`, where someone about to hoist them
 is already looking.
 
 Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
