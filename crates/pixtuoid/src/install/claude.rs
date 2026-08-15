@@ -54,10 +54,10 @@ pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
         } else {
             "pixtuoid-hook"
         };
-        return crate::install::hook_cmd::shell_hook_command(
+        crate::install::hook_cmd::shell_hook_command(
             p,
             pixtuoid_core::source::claude_code::SOURCE_NAME,
-        );
+        )
     }
     #[cfg(windows)]
     {
