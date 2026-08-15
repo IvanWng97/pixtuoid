@@ -1147,8 +1147,8 @@ fn registry_cwd_extractor_matches_each_sources_real_head_shape() {
     let cases: [(&str, &str, Option<&str>); 4] = [
         (
             "claude-code",
-            "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
-            Some("/home/user/demo-project"),
+            "claude-code/permission-recorded/947851e2-a15a-4de8-8375-46e9cddb5c8f.jsonl",
+            Some("/private/tmp/pixtuoid-capture/proj"),
         ),
         (
             "codex",

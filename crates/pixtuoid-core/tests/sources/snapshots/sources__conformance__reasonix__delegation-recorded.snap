@@ -1,0 +1,188 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- SessionStart:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "bash: ls -la /tmp/pixtuoid-capture/proj 2>/dev…"
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "read_file: /tmp/pixtuoid-capture/proj/NOTE.txt"
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: ask
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "bash: cd /tmp/pixtuoid-capture/proj && git log…"
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- SessionStart:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: "read_file: /tmp/pixtuoid-capture/proj/NOTE.txt"
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail: Task
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail: Task
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- SessionStart:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: ask
+- Identity:
+    agent_id: 9520014083333453177
+    source: reasonix
+    session_id: /tmp/pixtuoid-capture/proj
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- ActivityEnd:
+    agent_id: 9520014083333453177
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 9520014083333453177
+    as_child: false

@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "reasonix",
+  "version": "v1.25.2",
+  "captured": "2026-08-15",
+  "command": "reasonix --permission-mode auto (interactive TUI, driven under a pty), prompted to read a file directly AND delegate with its `task` tool",
+  "note": "Pins that `task` still dispatches a subagent at v1.25.2 — SUBAGENT_TOOLS was verified against v1.2.0 and nothing re-checked it. The prompt deliberately mixes an UNGATED read with the delegation: wire_to_pixels wants this slot to reach both Active and Delegating, and a run where every tool gates only ever reaches Waiting and Delegating. A first attempt naming `explore` got `run_skill`, which is deliberately excluded from SUBAGENT_TOOLS and mints no Task."
+}

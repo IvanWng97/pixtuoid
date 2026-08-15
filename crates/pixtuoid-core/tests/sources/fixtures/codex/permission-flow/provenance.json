@@ -1,0 +1,4 @@
+{
+  "origin": "composed",
+  "note": "Pins the LEGACY escalation shape: a `function_call` whose `arguments` carry \"sandbox_permissions\": \"require_escalated\", which is the only in-rollout marker `function_call_needs_approval` can read. Modern codex (0.147.0, captured in permission-recorded) expresses the SAME escalated run as a `custom_tool_call` named `exec` with a JS `input` and NO escalation marker at all — there the gate exists only on the hook wire. Both shapes are real; this one is composed and cannot be re-recorded off the current CLI."
+}

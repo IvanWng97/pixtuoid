@@ -345,7 +345,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
     };
     let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
 
-    match method {
+    let decoded: Result<Vec<AgentEvent>> = match method {
         "session/update" => Ok(crate::source::acp::decode_session_update(
             agent_id,
             SOURCE_NAME,
@@ -435,7 +435,25 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
             Ok(vec![])
         }
         _ => Ok(vec![]),
+    };
+    let mut evs = decoded?;
+    // The model rides `_meta` on an ORDINARY update. `model_changed` exists but a
+    // normal session never sends one — 0 across both recorded captures, which
+    // carry the model on `user_message_chunk` instead — so keying model info on
+    // that tag alone left grok's flame dark for every real run.
+    if let Some(model) = update
+        .get("_meta")
+        .and_then(|m| m.get("modelId"))
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 /// grok transcript lines carry NO cwd anywhere in their content — it exists
@@ -628,6 +646,26 @@ mod tests {
                 other => panic!("expected SessionStart, got {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn an_ordinary_updates_meta_carries_the_model() {
+        // The shape from fixtures/grok/permission-recorded — `model_changed`
+        // never appears in a real session.
+        let evs = decode_line(json!({
+            "method": "session/update",
+            "params": {"sessionId": "s", "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "hi"},
+                "_meta": {"modelId": "grok-4.6"}
+            }}
+        }));
+        assert!(
+            evs.iter().any(
+                |e| matches!(e, AgentEvent::ModelInfo { model: Some(m), .. } if m == "grok-4.6")
+            ),
+            "an update's _meta.modelId must reach ModelInfo, got {evs:?}"
+        );
     }
 
     #[test]

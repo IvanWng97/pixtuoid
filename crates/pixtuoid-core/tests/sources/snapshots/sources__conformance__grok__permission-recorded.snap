@@ -2,6 +2,10 @@
 source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
+- ModelInfo:
+    agent_id: 1975995280667210078
+    model: grok-4.6
+    effort: ~
 - ActivityStart:
     agent_id: 1975995280667210078
     tool_use_id: call-713f6dac-5d10-4a74-85be-1539c5b24f22-0

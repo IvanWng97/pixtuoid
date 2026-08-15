@@ -1,3 +1,0 @@
-{"hook_event_name":"SessionStart","session_id":"01000000-0000-7000-8000-0000000000cc","transcript_path":"{{TRANSCRIPT_PATH}}","cwd":"/home/user/demo-project","source":"startup"}
-{"hook_event_name":"PreToolUse","session_id":"01000000-0000-7000-8000-0000000000cc","transcript_path":"{{TRANSCRIPT_PATH}}","cwd":"/home/user/demo-project","tool_name":"Glob","tool_input":{"pattern":"crates/**/*.rs"},"tool_use_id":"toolu_demo0000000000000001"}
-{"hook_event_name":"PostToolUse","session_id":"01000000-0000-7000-8000-0000000000cc","transcript_path":"{{TRANSCRIPT_PATH}}","tool_name":"Glob","tool_use_id":"toolu_demo0000000000000001"}

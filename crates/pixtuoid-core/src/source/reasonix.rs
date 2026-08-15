@@ -12,7 +12,8 @@
 //!
 //! camelCase fields, `event` discriminator (not `hook_event_name`), and — the
 //! load-bearing difference — **no session id, no transcript path, no tool-call
-//! id anywhere** (verified against `internal/hook/hook.go` Payload @v1.2.0).
+//! id anywhere** (`internal/hook/hook.go` Payload; pinned by the recorded
+//! fixtures, not by a version stamp nothing re-checks).
 //! The only situating field is `cwd` (the workspace root), so the AgentId is
 //! keyed on it — two concurrent Reasonix sessions in ONE project deliberately
 //! render as one sprite, and either session's `SessionEnd` walks that shared
@@ -35,14 +36,15 @@ use crate::AgentId;
 pub const SOURCE_NAME: &str = "reasonix";
 
 /// Reasonix tools that dispatch an in-process subagent (`internal/agent/task.go`
-/// plus `internal/skill/tools.go` @v1.2.0), so the slot reads "Delegating" while
+/// plus `internal/skill/tools.go`), so the slot reads "Delegating" while
 /// the hook-invisible subagent works. `run_skill` is excluded: it is only
-/// sometimes a subagent and the args don't say which.
+/// sometimes a subagent and the args don't say which. `task` is pinned live by
+/// `fixtures/reasonix/delegation-recorded`.
 const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "security_review"];
 
 /// Decode one Reasonix hook payload (already identified by
 /// `_pixtuoid_source == "reasonix"`). Envelope verified against
-/// `internal/hook/hook.go` @v1.2.0. An unregistered event bails rather than
+/// `internal/hook/hook.go`. An unregistered event bails rather than
 /// dropping silently, so registered-vs-decoded drift is loud.
 ///
 /// The activity arms prepend an [`AgentEvent::Identity`] (#221) because
