@@ -42,8 +42,10 @@ shift 2
 
 # One prompt for every source, so captures stay comparable: reading the SAME file
 # twice around a list forces both shapes the composed fixtures got wrong — tools
-# that interleave, and a tool id that repeats.
-PROMPT='Read NOTE.txt, then list this directory, then read NOTE.txt again.'
+# that interleave, and a tool id that repeats. `CAPTURE_PROMPT` overrides it for a
+# scenario the shared one cannot reach — a permission gate needs a tool the CLI
+# refuses to run unasked.
+PROMPT="${CAPTURE_PROMPT:-Read NOTE.txt, then list this directory, then read NOTE.txt again.}"
 orig_cmd="$*"
 cmd=()
 for a in "$@"; do cmd+=("${a//\{prompt\}/$PROMPT}"); done
@@ -125,6 +127,10 @@ trap 'exit 143' TERM
 STARTED="$SB/started"
 touch "$STARTED"
 printf 'pong\n' >"$WS/NOTE.txt"
+# A gate is a per-CLI RULE, and it belongs in the sandbox: opencode auto-approves
+# a trusted workspace, and CC does not register `PermissionRequest` at all. Copied
+# in declaratively rather than run, so a seed cannot become a second capture path.
+[ -z "${CAPTURE_SEED:-}" ] || cp -R "$CAPTURE_SEED"/. "$WS"/
 git init -q "$WS"
 git -C "$WS" add -A
 git -C "$WS" -c user.email=fixture@pixtuoid -c user.name=fixture commit -qm init
@@ -212,6 +218,14 @@ if [ "$kind" = transcript ]; then
     out="$dest/$(basename "$fresh")"
     cp "$fresh" "$out"
     n="$(grep -c . "$out")"
+    # A source can be BOTH. CC's tool run is in the transcript but its permission
+    # gate is a hook event, so keeping only the transcript threw away the very
+    # bytes the gate scenario exists for.
+    if [ -s "$RAW" ]; then
+        hooks_out="$dest/hook-payloads.jsonl"
+        [ ! -e "$hooks_out" ] || hooks_out="$hooks_out.new"
+        jq -c . "$RAW" >"$hooks_out"
+    fi
 else
     if [ ! -s "$RAW" ]; then
         echo "captured nothing — the CLI fired no hook at all; check the invocation ran a real turn" >&2
@@ -236,6 +250,7 @@ jq -n --arg cli "$(basename "${cmd[0]}")" --arg version "$ver" \
     '{origin:"recorded", cli:$cli, version:$version, captured:$captured, command:$command}' >"$prov"
 
 echo "wrote $out ($n payloads, CLI exit $rc) + $prov"
+[ -z "${hooks_out:-}" ] || echo "also wrote $hooks_out ($(grep -c . "$hooks_out") hook payloads)"
 
 # An interactive capture runs a SHELL, so the probe above identifies the shell and
 # not the CLI under test — say so rather than let a wrong `cli`/`version` sit in a
@@ -250,7 +265,7 @@ esac
 # inside a captured `ls -la`.
 pii="$HOME"
 if [ -n "${USER:-}" ]; then pii="$pii|$USER"; fi
-if grep -qE "$pii" "$out"; then
+if grep -qE "$pii" "$out" "${hooks_out:-$out}"; then
     echo "WARNING: the capture embeds your home path or username — redact before committing" >&2
 fi
 # A non-zero CLI means the turn was cut short, so the capture is a PARTIAL wire.

@@ -1,4 +1,0 @@
-{"hook_event_name":"SessionStart","session_id":"01000000-0000-7000-8000-0000000000cd","transcript_path":"{{TRANSCRIPT_PATH}}","cwd":"/home/user/demo-project","source":"startup"}
-{"hook_event_name":"PreToolUse","session_id":"01000000-0000-7000-8000-0000000000cd","transcript_path":"{{TRANSCRIPT_PATH}}","cwd":"/home/user/demo-project","tool_name":"Bash","tool_input":{"command":"rm -rf ./build"},"tool_use_id":"toolu_demo0000000000000002"}
-{"hook_event_name":"Notification","session_id":"01000000-0000-7000-8000-0000000000cd","transcript_path":"{{TRANSCRIPT_PATH}}","cwd":"/home/user/demo-project","message":"Claude needs your permission to use Bash"}
-{"hook_event_name":"PostToolUse","session_id":"01000000-0000-7000-8000-0000000000cd","transcript_path":"{{TRANSCRIPT_PATH}}","tool_name":"Bash","tool_use_id":"toolu_demo0000000000000002"}

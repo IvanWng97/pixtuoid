@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "claude",
+  "version": "2.1.233 (Claude Code)",
+  "captured": "2026-08-15",
+  "command": "claude --permission-mode manual (interactive TUI, driven under a pty), with a project-local .claude/settings.json registering PermissionRequest",
+  "note": "The gate is `PermissionRequest`, NOT `Notification`: the only Notification this run fired was the idle `Claude is waiting for your input`. The composed fixture's belief that a permission arrives as Notification is what let install/claude.rs ship without registering PermissionRequest at all — the decoder has always handled it, the bytes just never arrived. Home path redacted to /Users/dev."
+}
