@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "omp",
+  "version": "17.3.4",
+  "captured": "2026-08-15",
+  "command": "omp --auto-approve (interactive TUI, driven under a pty), asked to delegate a repo-wide investigation with its `task` tool",
+  "note": "The PARENT transcript. omp writes a session as `<ts>_<id>.jsonl` for the parent and `<ts>_<id>/<TaskName>.jsonl` for each child, and the child is newer — so a birth-time harvest takes the child and the `task` call looks absent. That is exactly what made three earlier runs read as 'omp refused to delegate'; it had delegated every time."
+}

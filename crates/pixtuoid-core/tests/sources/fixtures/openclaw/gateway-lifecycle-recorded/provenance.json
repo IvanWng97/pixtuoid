@@ -3,6 +3,6 @@
   "cli": "openclaw",
   "version": "2026.7.1 (2d2ddc4)",
   "captured": "2026-08-15",
-  "command": "openclaw gateway --port 19099 --force --allow-unconfigured, one `openclaw agent --agent main` turn, then SIGTERM",
-  "note": "The real presence pair, with the gatewayPort the daemon identity keys on. The plugin registers four MORE hooks (session_start/session_end/before_agent_run/agent_end) and none fired: `openclaw agent` does not open a session on the hooked path, and all six names still exist in 2026.7.1 — so this is flow coverage, not drift. The composed gateway_lifecycle keeps those arms. The turn also spawned a Claude Code backend whose OWN hooks reached the recorder through the inherited PIXTUOID_SOCKET; they are filtered out here, since a fixture holding another CLI's wire is fiction."
+  "command": "openclaw gateway --port 19099 --force --allow-unconfigured, one `openclaw tui --session <fresh>` turn, then SIGTERM",
+  "note": "All SIX hooks the plugin registers, from one run. The turn has to go through `openclaw tui`, not `openclaw agent`: the four session hooks fire from the gateway's get-reply path, which `agent` never enters — an earlier capture got only the gateway pair and read like drift. `session_start` additionally needs a FRESH session key; a reused one resumes and stays silent. Note the order: `session_end` lands AFTER `gateway_stop`, because shutdown is what closes the session. The turn also spawned a Claude Code backend whose own hooks reached the recorder through the inherited PIXTUOID_SOCKET; filtered out."
 }

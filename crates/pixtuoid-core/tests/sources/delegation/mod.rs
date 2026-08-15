@@ -13,6 +13,7 @@ use std::path::Path;
 
 use pixtuoid_core::source::copilot::decode_copilot_line;
 use pixtuoid_core::source::decoder::decode_hook_payload;
+use pixtuoid_core::source::omp::decode_omp_line;
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 
 fn lines(cli: &str, name: &str) -> Vec<String> {
@@ -51,6 +52,19 @@ fn copilot_events() -> Vec<AgentEvent> {
         .collect()
 }
 
+fn omp_events() -> Vec<AgentEvent> {
+    // omp writes the PARENT as `<ts>_<id>.jsonl` and each child inside a
+    // same-named DIR, so the id comes from this file's own stem.
+    let logical = "2026-08-15T18-35-53-366Z_01a006b5-8096-7000-9fed-3dc3604e8efb.jsonl";
+    lines("omp", "parent.jsonl")
+        .iter()
+        .flat_map(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).expect("valid transcript json");
+            decode_omp_line(logical, "omp", v).expect("captured omp line must decode")
+        })
+        .collect()
+}
+
 fn tasks(evs: &[AgentEvent]) -> usize {
     evs.iter()
         .filter(|e| {
@@ -70,6 +84,7 @@ fn every_name_keyed_source_mints_exactly_one_task_from_its_capture() {
     for (cli, evs) in [
         ("opencode", opencode_events()),
         ("copilot", copilot_events()),
+        ("omp", omp_events()),
     ] {
         assert_eq!(
             tasks(&evs),
@@ -80,16 +95,21 @@ fn every_name_keyed_source_mints_exactly_one_task_from_its_capture() {
 }
 
 #[test]
-fn the_delegation_run_puts_more_than_one_agent_on_the_floor() {
-    for (cli, evs) in [
-        ("opencode", opencode_events()),
-        ("copilot", copilot_events()),
+fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
+    // Not cosmetic: where the child is ANNOUNCED in the parent's own stream, the
+    // capture is two sprites and cannot sit under the conformance one-AgentId
+    // rule. omp announces nothing — its child is a sibling transcript the
+    // watcher discovers — so its parent capture is a single agent.
+    for (cli, evs, in_band) in [
+        ("opencode", opencode_events(), true),
+        ("copilot", copilot_events(), true),
+        ("omp", omp_events(), false),
     ] {
         let ids: std::collections::BTreeSet<_> = evs.iter().map(AgentEvent::agent_id).collect();
-        assert!(
+        assert_eq!(
             ids.len() >= 2,
-            "{cli}: a delegation is a parent AND a child — this is why the capture \
-             cannot live under the conformance one-AgentId rule, got {}",
+            in_band,
+            "{cli}: in-band child announcement is {in_band}, got {} agent(s)",
             ids.len()
         );
     }
@@ -103,6 +123,7 @@ fn an_ordinary_tool_never_carries_the_task_detail() {
     for (cli, evs) in [
         ("opencode", opencode_events()),
         ("copilot", copilot_events()),
+        ("omp", omp_events()),
     ] {
         let starts = evs
             .iter()

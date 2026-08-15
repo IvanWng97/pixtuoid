@@ -424,8 +424,8 @@ fn lobster_px(
 /// `runtime/driver.rs` uses — NEVER `Reducer::apply`, which is `AgentId`-pure.
 #[test]
 fn openclaw_presence_envelope_renders_a_lobster() {
-    let hooks =
-        core_fixtures_root().join("fixtures/openclaw/gateway_lifecycle/hook-payloads.jsonl");
+    let hooks = core_fixtures_root()
+        .join("fixtures/openclaw/gateway-lifecycle-recorded/hook-payloads.jsonl");
 
     // The fixture's last two envelopes are session_end → gateway_stop, which would
     // leave the daemon Down; stop before them so the asserted scene is a LIVE
