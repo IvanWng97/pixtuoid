@@ -36,6 +36,12 @@ for the bytes: a capture carries production's own `_shim_ts_ms` / `_pid` stamps
 touched — the hook it already has is the one that runs, so a DISCONNECTED source
 is refused before the turn is spent rather than after.
 
+**A gate needs its own sandbox and its own prompt.** `CAPTURE_SEED=<dir>` is
+copied into the sandbox workspace before the run — the place a per-CLI ask rule
+belongs, since opencode auto-approves a trusted workspace and CC does not register
+`PermissionRequest` unless asked. `CAPTURE_PROMPT` replaces the shared prompt for
+a scenario it cannot reach. Neither touches the user's own config.
+
 A composed fixture kept for a reason says so in its note: `opencode/session-run`
 is retained because an auto-approving run emits no permission event for `Waiting`
 to ride.
@@ -63,6 +69,13 @@ install one before concluding anything about the decode one:
 | `KNOWN_*` | `source/<cli>.rs` | which shapes we recognise — what counts as drift |
 | `*_KNOWN_OMITTED` | `scripts/check_upstream_drift.py` | upstream has it, we deliberately skip it |
 
+An event the decoder handles but `*_EVENTS` never registers is a SHIPPING bug no
+test can see, because every test asserts our own belief about the wire: CC's
+permission gate is `PermissionRequest`, the decoder had read it for years, and
+`install/claude.rs` registered four tool events without it — so a session parked
+on a permission prompt rendered as working, indefinitely. Only a capture of a
+gated run says which of the two lists is wrong.
+
 Each fixture is a directory:
 
 ```
@@ -77,6 +90,16 @@ tests/sources/fixtures/<source>/<scenario>/
 A scenario ships the transports its source actually has: both files
 (CC/Codex), transcript-only (antigravity — no hooks), or hook-payloads-only
 (reasonix — hook-only, no watchable JSONL).
+
+**A transcript whose id comes from its PARENT DIR must keep that dir.** grok and
+copilot are the two (`path.parent()` in their `*_id_from_path`); everything else
+keys on the filename. Flattened, the session id becomes the SCENARIO NAME, and
+the hook-vs-JSONL coalesce assertion then compares a real id against a directory
+name — `grok/permission-flow` passed for months only because its hooks were
+composed to declare `sessionId: "permission-flow"`. So a recorded grok scenario
+nests: `<scenario>/<session-uuid>/updates.jsonl`. The recorder decides this by
+asking `corpus_check --list` whether the basename repeats across sessions, and
+the harness recurses to find it.
 
 (This tree is **conformance-scanned ONLY** — `conformance.rs` asserts every dir
 here is a registered source. Single-owner fixtures read by one module — decode's
