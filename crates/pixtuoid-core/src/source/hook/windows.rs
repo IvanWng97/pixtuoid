@@ -151,6 +151,7 @@ impl Listener {
         pid_watch: Option<super::HookPidWatch>,
         presence_tx: Option<super::PresenceSender>,
     ) -> Result<()> {
+        let dedup = super::dedup::DeliveryDedup::default();
         let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
         loop {
             let permit = match Arc::clone(&sem).acquire_owned().await {
@@ -189,7 +190,7 @@ impl Listener {
                 let _permit = permit;
                 let _ = tokio::time::timeout(
                     CONN_TIMEOUT,
-                    handle_conn(conn, tx, pid_watch, presence_tx),
+                    handle_conn(conn, tx, pid_watch, presence_tx, Some(dedup)),
                 )
                 .await;
             });

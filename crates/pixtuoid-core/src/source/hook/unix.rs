@@ -281,6 +281,9 @@ impl Listener {
         presence_tx: Option<super::PresenceSender>,
     ) -> Result<()> {
         let sem = Arc::new(Semaphore::new(MAX_CONCURRENT_CONNS));
+        // ONE per listener: a hook invocation is one connection, so this is the
+        // only level at which a re-delivery is visible at all.
+        let dedup = super::dedup::DeliveryDedup::default();
         let mut backoff = AcceptBackoff::default();
         let mut accept_health = FailureLatch::default();
         loop {
@@ -299,11 +302,12 @@ impl Listener {
                     let tx = tx.clone();
                     let pid_watch = pid_watch.clone();
                     let presence_tx = presence_tx.clone();
+                    let dedup = dedup.clone();
                     tokio::spawn(async move {
                         let _permit = permit;
                         let _ = tokio::time::timeout(
                             CONN_TIMEOUT,
-                            handle_conn(stream, tx, pid_watch, presence_tx),
+                            handle_conn(stream, tx, pid_watch, presence_tx, Some(dedup)),
                         )
                         .await;
                     });
