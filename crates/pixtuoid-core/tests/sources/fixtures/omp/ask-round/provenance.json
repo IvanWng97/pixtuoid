@@ -1,4 +1,0 @@
-{
-  "origin": "unknown",
-  "note": "the format quirks (the `pad` key) reads as a real session, but no capture record exists \u2014 re-record to settle it; the ids are hand-built"
-}

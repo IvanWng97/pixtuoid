@@ -269,12 +269,9 @@ const NO_WIRE_EVIDENCE_YET: &[&str] = &["openclaw"];
 /// way to leave a fixture unexplained, so the set is pinned: a NEW fixture is
 /// `recorded` or `composed`, and re-recording one of these deletes its entry.
 const UNVERIFIED_PROVENANCE: &[&str] = &[
-    "antigravity/tool-run",
-    "copilot/permission",
+    // Not re-recordable: its cwd is a real Windows path with a space and parens,
+    // which is what makes it the Windows arm of the cwd-extractor test.
     "copilot/tool-run",
-    "omp/2026-07-10T18-00-00-000Z_01990000-0000-7000-8000-000000000001",
-    "omp/ask-round",
-    "omp/tool-run",
 ];
 
 /// Sources whose `unknown` scenarios now sit BESIDE a recorded one, so the

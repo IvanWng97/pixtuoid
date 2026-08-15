@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "copilot",
+  "version": "unknown",
+  "captured": "2026-08-15",
+  "command": "copilot (interactive TUI, driven under a pty)",
+  "note": "copilot's gate is `permission.requested`, carrying data.permissionRequest.kind = \"shell\" for an `rm` — the shape source/copilot.rs already decodes to Waiting { reason: \"permission: shell\" }. Nested under the session uuid because copilot keys its session on the transcript's PARENT DIR. Home path redacted to /Users/dev."
+}
