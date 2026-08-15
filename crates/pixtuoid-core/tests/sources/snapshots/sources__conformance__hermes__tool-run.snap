@@ -8,6 +8,10 @@ expression: events
     session_id: 20260814_160213_3e22b6
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
+- ModelInfo:
+    agent_id: 16541491197388335030
+    model: gpt-4o-mini
+    effort: ~
 - Identity:
     agent_id: 16541491197388335030
     source: hermes
@@ -68,3 +72,7 @@ expression: events
 - SessionEnd:
     agent_id: 16541491197388335030
     as_child: false
+- ModelInfo:
+    agent_id: 16541491197388335030
+    model: gpt-4o-mini
+    effort: ~

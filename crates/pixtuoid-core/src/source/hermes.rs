@@ -30,6 +30,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -129,7 +130,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         )
     };
 
-    match event {
+    let decoded: Result<Vec<AgentEvent>> = match event {
         "on_session_start" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
@@ -172,7 +173,23 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 crate::source::decoder::display_safe(other)
             )
         }
+    };
+    let mut evs = decoded?;
+    // hermes nests it one level down and only the session events carry it, so a
+    // top-level read finds nothing and a tool event must not clear it.
+    if let Some(model) = obj
+        .get("extra")
+        .and_then(|e| e.get("model"))
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 fn hermes_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
@@ -191,6 +208,22 @@ mod tests {
 
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    #[test]
+    fn session_start_reports_the_model_from_extra() {
+        // The shape from fixtures/hermes/tool-run: hermes nests it one level down,
+        // and only the session events carry it.
+        let evs = decode_all(json!({
+            "hook_event_name": "on_session_start", "session_id": "s1", "cwd": "/repo",
+            "extra": {"model": "gpt-4o-mini"}
+        }));
+        assert!(
+            evs.iter().any(
+                |e| matches!(e, AgentEvent::ModelInfo { model: Some(m), .. } if m == "gpt-4o-mini")
+            ),
+            "extra.model must reach ModelInfo, got {evs:?}"
+        );
     }
 
     #[test]

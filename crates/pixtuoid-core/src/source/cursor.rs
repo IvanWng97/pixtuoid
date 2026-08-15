@@ -61,6 +61,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -118,7 +119,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         )
     };
 
-    match event {
+    let decoded: Result<Vec<AgentEvent>> = match event {
         "sessionStart" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
@@ -170,7 +171,24 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 crate::source::decoder::display_safe(other)
             )
         }
+    };
+    let mut evs = decoded?;
+    // Cursor stamps the model on EVERY event, and it changes within one session
+    // (a `sessionStart` on `composer-2.5-fast` whose tool calls run on
+    // `composer-2.5`), so reading it once at the start would show the wrong one
+    // for the rest of the turn.
+    if let Some(model) = obj
+        .get("model")
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
@@ -199,6 +217,28 @@ mod tests {
     /// The payload's MAIN event — the LAST one (activity arms prepend an Identity).
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    #[test]
+    fn every_event_carries_the_model_and_it_can_change_mid_session() {
+        // Both shapes from fixtures/cursor/tool-run: a session opens on the
+        // `-fast` composer and the tool events run on the full one.
+        let start = decode_all(json!({
+            "hook_event_name": "sessionStart", "session_id": "s1",
+            "workspace_roots": ["/repo"], "model": "composer-2.5-fast"
+        }));
+        let tool = decode_all(json!({
+            "hook_event_name": "preToolUse", "session_id": "s1",
+            "workspace_roots": ["/repo"], "tool_name": "read", "model": "composer-2.5"
+        }));
+        let model_of = |evs: &[AgentEvent]| {
+            evs.iter().find_map(|e| match e {
+                AgentEvent::ModelInfo { model, .. } => model.clone(),
+                _ => None,
+            })
+        };
+        assert_eq!(model_of(&start).as_deref(), Some("composer-2.5-fast"));
+        assert_eq!(model_of(&tool).as_deref(), Some("composer-2.5"));
     }
 
     #[test]

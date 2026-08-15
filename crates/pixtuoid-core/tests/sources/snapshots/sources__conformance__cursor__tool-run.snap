@@ -8,6 +8,10 @@ expression: events
     session_id: a46da57b-26eb-4188-b248-a94127226f2b
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5-fast
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -19,6 +23,10 @@ expression: events
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -27,6 +35,10 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -38,6 +50,10 @@ expression: events
     detail:
       Generic:
         display: "Shell: ls -la /private/tmp/pixtuoid-capture/pro…"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -46,6 +62,10 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -57,6 +77,10 @@ expression: events
     detail:
       Generic:
         display: "Shell: ls /private/tmp/pixtuoid-capture/proj"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -65,6 +89,10 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -76,6 +104,10 @@ expression: events
     detail:
       Generic:
         display: "Grep: /private/tmp/pixtuoid-capture/proj"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -87,6 +119,10 @@ expression: events
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -95,6 +131,10 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -103,6 +143,10 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -114,6 +158,10 @@ expression: events
     detail:
       Generic:
         display: "Shell: ls"
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - Identity:
     agent_id: 6817933303663452000
     source: cursor
@@ -122,6 +170,14 @@ expression: events
 - ActivityEnd:
     agent_id: 6817933303663452000
     tool_use_id: ~
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5
+    effort: ~
 - SessionEnd:
     agent_id: 6817933303663452000
     as_child: false
+- ModelInfo:
+    agent_id: 6817933303663452000
+    model: composer-2.5-fast
+    effort: ~
