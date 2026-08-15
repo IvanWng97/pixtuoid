@@ -33,6 +33,84 @@
 # runs.
 set -euo pipefail
 
+# ── the decisions, as functions so `--selftest` can drive them ───────────────
+# Every one of these was a defect first: the empty-array call, the swallowed
+# exit 3, the developer's own transcript, the inherited CLAUDE_CODE_* var, the
+# file the source does not read. A capture costs a billed turn, so the logic
+# that decides what a capture IS gets tested without one.
+
+# The agent's own env reaches the CLI under test: a nested `claude` inherited
+# CLAUDE_CODE_CHILD_SESSION and turned its transcript saving OFF, leaving nothing
+# to harvest. Scrub the whole namespace, not the one variable that bit.
+agent_env_names() {
+    while IFS='=' read -r k _; do
+        case "$k" in CLAUDECODE | CLAUDE_CODE_*) printf '%s\n' "$k" ;; esac
+    done < <(env)
+}
+
+# The transcript this run CREATED: BIRTH time, not mtime. A live agent session is
+# appended to forever and is therefore always the newest by mtime — that harvest
+# once picked up 4155 lines of the developer's own session.
+newest_born_after() {
+    local t="$1"
+    while IFS= read -r f; do
+        [ -e "$f" ] || continue
+        printf '%s %s\n' "$(stat -f %B "$f")" "$f"
+    done | awk -v t="$t" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-
+}
+
+# A source whose transcripts all share ONE basename keys its session on the
+# PARENT dir, so flattening the capture would rename the session after the
+# scenario. Asked of the source's own file list, never a table of which sources.
+basename_repeats() {
+    [ "$(grep -c "/$1\$" || true)" -gt 1 ]
+}
+
+if [ "${1:-}" = "--selftest" ]; then
+    fail=0
+    check() { if [ "$2" = "$3" ]; then printf '  ok   %s\n' "$1"; else
+        printf '  FAIL %s: got %q want %q\n' "$1" "$2" "$3"
+        fail=1
+    fi; }
+
+    # The empty-array call: stock macOS bash 3.2 errors on `"${arr[@]}"` under
+    # `set -u`, and `:-` passes one empty ARGV string instead of nothing.
+    empty=()
+    check "empty scrub runs the CLI" "$(env ${empty[@]+"${empty[@]}"} echo ran)" "ran"
+    one=(-u FOO)
+    # shellcheck disable=SC2016  # the inner $FOO must reach the CHILD, unexpanded
+    check "non-empty scrub still applies" "$(FOO=x env ${one[@]+"${one[@]}"} sh -c 'echo ${FOO-unset}')" "unset"
+
+    # Birth-time selection, and the `|| true` that keeps a lister's exit 3 from
+    # killing the run after the turn was already billed.
+    td="$(mktemp -d)"
+    : >"$td/old"
+    sleep 1
+    : >"$td/new"
+    t="$(stat -f %B "$td/new")"
+    check "picks the file born at/after t" "$(printf '%s\n%s\n' "$td/old" "$td/new" | newest_born_after "$t")" "$td/new"
+    check "no candidate is empty, not fatal" "$(printf '%s\n' "$td/old" | newest_born_after "$t")" ""
+    check "a lister exiting 3 still reaches the message" "$( (sh -c 'exit 3' || true) | newest_born_after "$t")" ""
+
+    # Parent-dir nesting, decided by the source's own list.
+    check "repeated basename nests" "$(printf 'a/u.jsonl\nb/u.jsonl\n' | { basename_repeats u.jsonl && echo yes || echo no; })" "yes"
+    check "unique basename stays flat" "$(printf 'a/x.jsonl\nb/y.jsonl\n' | { basename_repeats x.jsonl && echo yes || echo no; })" "no"
+
+    # The env scrub names the whole agent namespace, not the one variable that
+    # bit (CLAUDE_CODE_CHILD_SESSION turned a nested claude's transcript off).
+    # Membership, not the exact set: running INSIDE an agent session the real
+    # environment already carries a dozen of these, and an exact-set assertion
+    # would pass only off-agent.
+    export CLAUDE_CODE_SELFTEST_X=1
+    check "scrub names an agent var" "$(agent_env_names | grep -c '^CLAUDE_CODE_SELFTEST_X$' || true)" "1"
+    unset CLAUDE_CODE_SELFTEST_X
+    check "scrub leaves other vars alone" "$(PATH_LIKE=1 agent_env_names | grep -c PATH_LIKE || true)" "0"
+
+    rm -rf "$td"
+    [ "$fail" -eq 0 ] && echo "capture-fixture selftest: ok"
+    exit "$fail"
+fi
+
 [ $# -ge 3 ] || {
     echo "usage: capture-fixture <source-id> <scenario> <cmd...>   ('{prompt}' expands)" >&2
     exit 2
@@ -178,9 +256,9 @@ count() { grep -c . "$RAW" || true; }
 # and turned its transcript saving OFF, so the run left nothing to harvest. Scrub
 # the whole namespace rather than the one variable that bit.
 scrub=()
-while IFS='=' read -r k _; do
-    case "$k" in CLAUDECODE | CLAUDE_CODE_*) scrub+=(-u "$k") ;; esac
-done < <(env)
+while IFS= read -r k; do
+    scrub+=(-u "$k")
+done < <(agent_env_names)
 
 echo "capturing $id/$scenario — one real model turn"
 rc=0
@@ -221,8 +299,7 @@ if [ "$kind" = transcript ]; then
     # and under `pipefail` that would kill the script HERE — after the turn was
     # already billed — instead of reaching the message below that says so.
     fresh="$( ("$ROSTER" --list "$id" "$root" 2>/dev/null || true) |
-        while IFS= read -r f; do printf '%s %s\n' "$(stat -f %B "$f")" "$f"; done |
-        awk -v t="$born_after" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-)"
+        newest_born_after "$born_after")"
     if [ -z "$fresh" ]; then
         echo "captured nothing — no new transcript under $root; did the turn run?" >&2
         exit 1
@@ -232,7 +309,7 @@ if [ "$kind" = transcript ]; then
     # scenario. Asking `--list` whether the name repeats beats knowing which
     # sources those are.
     base="$(basename "$fresh")"
-    if [ "$("$ROSTER" --list "$id" "$root" 2>/dev/null | grep -c "/$base\$")" -gt 1 ]; then
+    if basename_repeats "$base" < <("$ROSTER" --list "$id" "$root" 2>/dev/null || true); then
         out="$dest/$(basename "$(dirname "$fresh")")/$base"
         mkdir -p "$(dirname "$out")"
     else

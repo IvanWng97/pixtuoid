@@ -318,6 +318,9 @@ lint:
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
+    run tuidrive just tuidrive-selftest   & pids+=($!)
+    run capture just capture-selftest     & pids+=($!)
+    run fixmeta just fixture-metadata     & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1377,6 +1380,44 @@ comment-lint-replay n="20":
 [doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
 gitenv-selftest:
     python3 scripts/gitenv.py --selftest
+
+# The pty driver's pure halves — the ANSI stripper, the composer comparison, the
+# gate/menu wording. Each of those was a lost BILLED turn before it was code, and
+# each fails silently: a broken stripper just stops matching, and the capture
+# comes back empty blaming the CLI. Runs in `lint`; CI's hygiene job enumerates
+# it separately.
+[group('meta')]
+[doc("Self-test the TUI capture driver's pure logic")]
+tuidrive-selftest:
+    python3 scripts/lib/tuidrive.py --selftest
+
+# The recorder's own decisions — the empty-array call, the swallowed exit 3, the
+# birth-time pick, the env scrub, the parent-dir nesting. All five were defects
+# before they were functions, and a capture costs a BILLED turn, so the logic
+# that decides what a capture IS is tested without one. Runs in `lint`; CI's
+# hygiene job enumerates it separately.
+[group('meta')]
+[doc("Self-test the fixture recorder's decisions")]
+capture-selftest:
+    bash scripts/capture-fixture.sh --selftest
+
+# The half of the fixture-age report that runs ANYWHERE: the fields it reads
+# (`cli`/`version`/`captured` on every recorded scenario) must be present and
+# parseable, so the advisory below cannot rot into a report about nothing.
+# Runs in `lint`; CI's hygiene job enumerates it separately.
+[group('meta')]
+[doc("Assert every recorded fixture declares the metadata the age report reads")]
+fixture-metadata:
+    python3 scripts/fixture-age.py --check-metadata
+
+# Which recorded fixtures have drifted from the CLI that produced them — version
+# first (the sharp signal), age second. LOCAL and advisory: CI has none of these
+# CLIs to compare against, and a stale fixture is a re-capture candidate, not a
+# defect. Exit 3 = candidates found (the `corpus-all` convention).
+[group('rust')]
+[doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
+fixture-age *args:
+    python3 scripts/fixture-age.py {{ args }}
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing

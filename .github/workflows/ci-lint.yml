@@ -133,6 +133,9 @@ jobs:
       - run: just gen-guides-check
       - run: just env-paths
       - run: just gitenv-selftest
+      - run: just tuidrive-selftest
+      - run: just capture-selftest
+      - run: just fixture-metadata
 
   msrv:
     name: msrv
