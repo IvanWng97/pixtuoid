@@ -60,6 +60,12 @@ a decoder that bails on it is correct and a fixture containing it is fiction.
 Learned by getting it wrong: a capture off a 12-event debug tee looked like proof
 that the decoder mishandled three events pixtuoid never even subscribes to.
 
+The same trap has a second door: a CLI that SPAWNS another CLI. The OpenClaw
+gateway runs its agent turn on a Claude Code backend, which inherits
+`PIXTUOID_SOCKET` and sends its own unstamped CC hooks to the recorder — six of
+the eight payloads in that capture were Claude Code's. Filter a capture to the
+source's own stamp before committing it.
+
 Three lists describe each CLI and they answer different questions — read the
 install one before concluding anything about the decode one:
 
