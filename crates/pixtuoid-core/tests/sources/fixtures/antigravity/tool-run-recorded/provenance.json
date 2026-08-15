@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "agy",
+  "version": "unknown",
+  "captured": "2026-08-14",
+  "command": "agy -p '<read/list/read>' \u2014 headless antigravity auto-DENIES the `command` permission it cannot prompt for, so a capture ends on a denied run_command; the list_dir calls before it are real"
+}

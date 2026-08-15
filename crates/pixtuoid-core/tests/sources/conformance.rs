@@ -265,6 +265,11 @@ const UNVERIFIED_PROVENANCE: &[&str] = &[
     "omp/tool-run",
 ];
 
+/// Sources whose `unknown` scenarios now sit BESIDE a recorded one, so the
+/// decoder is pinned against bytes nobody composed even where the older fixture's
+/// origin stays unprovable.
+const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["antigravity", "copilot", "omp"];
+
 /// Every scenario declares where its bytes came from, because nothing IN them
 /// separates a capture from a composition — a redacted cwd and an invented one
 /// look alike. A composed fixture pins its author's belief and the decoder then
@@ -333,6 +338,12 @@ fn every_scenario_declares_its_provenance() {
         "the `unknown` set is pinned — record one and drop its entry, or explain a new \
          fixture as recorded|composed"
     );
+    for src in UNKNOWN_BUT_BACKED_BY_A_CAPTURE {
+        assert!(
+            recorded.contains(*src),
+            "{src} is listed as backed by a capture but has no recorded scenario"
+        );
+    }
     for src in registry::registered_source_names().filter(|s| is_hook_only(s)) {
         assert_eq!(
             NO_WIRE_EVIDENCE_YET.contains(&src),

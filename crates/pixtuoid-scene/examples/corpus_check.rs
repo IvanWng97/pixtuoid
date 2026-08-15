@@ -194,6 +194,20 @@ fn main() {
         }
         return;
     }
+    // The resolved transcript root for one source, so a capture shell can find the
+    // file a CLI just wrote without a second copy of any per-CLI path. Exit 3 (as
+    // an absent corpus does) when this host cannot resolve one.
+    if let Some(i) = args.iter().position(|a| a == "--root") {
+        let Some(src) = args.get(i + 1) else {
+            eprintln!("usage: corpus_check --root <source>");
+            std::process::exit(2);
+        };
+        match pixtuoid_core::source::resolved_source_root(src) {
+            Some(r) => println!("{}", r.display()),
+            None => std::process::exit(3),
+        }
+        return;
+    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     if positional.is_empty() {

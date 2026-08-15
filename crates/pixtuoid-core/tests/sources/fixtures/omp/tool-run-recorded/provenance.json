@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "omp",
+  "version": "omp/17.3.4",
+  "captured": "2026-08-14",
+  "command": "omp -p {prompt}"
+}

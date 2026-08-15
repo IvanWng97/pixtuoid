@@ -43,10 +43,13 @@ for a in "$@"; do cmd+=("${a//\{prompt\}/$PROMPT}"); done
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PIX="$REPO/target/release/pixtuoid"
-[ -x "$PIX" ] || {
-    echo "missing $PIX — run: just build --release" >&2
-    exit 2
-}
+ROSTER="$REPO/target/release/examples/corpus_check"
+for b in "$PIX" "$ROSTER"; do
+    [ -x "$b" ] || {
+        echo "missing $b — run: just build --release --examples" >&2
+        exit 2
+    }
+done
 for b in jq python3; do
     command -v "$b" >/dev/null || {
         echo "$b is required — run: just setup-tools" >&2
@@ -54,12 +57,23 @@ for b in jq python3; do
     }
 done
 
-# The CLI's OWN installed hook is what runs, so a disconnected source would spend
-# the turn and capture nothing.
+# A transcript-bearing source's evidence is the FILE the CLI writes, not a hook —
+# omp ships no shell-hook target at all — so the two are captured differently and
+# the roster, not a list here, decides which.
+root=""
+if root="$("$ROSTER" --root "$id" 2>/dev/null)"; then
+    kind=transcript
+else
+    kind=hook
+    root=""
+fi
+
+# A hook capture rides the CLI's OWN installed hook, so a disconnected source
+# would spend the turn and capture nothing.
 connected="$("$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id == $i) | .connected')"
-case "$connected" in
-true) ;;
-false)
+case "$connected:$kind" in
+true:* | *:transcript) ;;
+false:*)
     echo "'$id' is not connected — run: pixtuoid connect $id" >&2
     exit 2
     ;;
@@ -74,6 +88,12 @@ out="$dest/hook-payloads.jsonl"
 # A re-record of an existing scenario is drift EVIDENCE, so it lands beside the
 # original to be diffed rather than overwriting a committed, redacted capture.
 if [ -e "$out" ]; then out="$out.new"; fi
+# A transcript keeps the CLI's own filename, so it cannot land beside a committed
+# one: the harness requires exactly one transcript per scenario dir.
+if [ "$kind" = transcript ] && [ -n "$(find "$dest" -name '*.jsonl' ! -name hook-payloads.jsonl 2>/dev/null)" ]; then
+    echo "$dest already holds a transcript — pick a new scenario name" >&2
+    exit 2
+fi
 
 # A FIXED generic path, because every payload embeds its own cwd and
 # transcript_path: capturing somewhere already generic is what lets the bytes
@@ -95,6 +115,8 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
+STARTED="$SB/started"
+touch "$STARTED"
 printf 'pong\n' >"$WS/NOTE.txt"
 git init -q "$WS"
 git -C "$WS" add -A
@@ -146,16 +168,31 @@ while [ "$quiet" -lt "$QUIET_ROUNDS" ] && [ "$round" -lt "$MAX_ROUNDS" ]; do
     sleep "$SETTLE_S"
 done
 
-if [ ! -s "$RAW" ]; then
-    echo "captured nothing — the CLI fired no hook at all; check the invocation ran a real turn" >&2
-    exit 1
-fi
-# jq validates every payload and flattens it to the one line JSONL wants. The
-# shim already stamped `_pixtuoid_source`, so nothing here edits the bytes.
-jq -c . "$RAW" >"$SB/harvest.jsonl"
-n="$(grep -c . "$SB/harvest.jsonl")"
 mkdir -p "$dest"
-cp "$SB/harvest.jsonl" "$out"
+if [ "$kind" = transcript ]; then
+    # The transcript this run wrote: the newest `.jsonl` under the source's OWN
+    # root that postdates the start marker. The root comes from the registry, so
+    # no per-CLI path lives here.
+    fresh="$(find "$root" -type f -name '*.jsonl' -newer "$STARTED" -exec stat -f '%m %N' {} + 2>/dev/null |
+        sort -rn | head -1 | cut -d' ' -f2-)"
+    if [ -z "$fresh" ]; then
+        echo "captured nothing — no new transcript under $root; did the turn run?" >&2
+        exit 1
+    fi
+    out="$dest/$(basename "$fresh")"
+    cp "$fresh" "$out"
+    n="$(grep -c . "$out")"
+else
+    if [ ! -s "$RAW" ]; then
+        echo "captured nothing — the CLI fired no hook at all; check the invocation ran a real turn" >&2
+        exit 1
+    fi
+    # jq validates every payload and flattens it to the one line JSONL wants. The
+    # shim already stamped `_pixtuoid_source`, so nothing here edits the bytes.
+    jq -c . "$RAW" >"$SB/harvest.jsonl"
+    n="$(grep -c . "$SB/harvest.jsonl")"
+    cp "$SB/harvest.jsonl" "$out"
+fi
 
 # The provenance the conformance gate requires. `--version` is a guess about a
 # CLI whose flags this script deliberately does not model, so a failure records
@@ -190,8 +227,7 @@ fi
 if [ "$rc" -ne 0 ]; then
     echo "WARNING: the CLI exited $rc — this capture may be truncated" >&2
 fi
-if [ "$out" = "$dest/hook-payloads.jsonl" ]; then
-    echo "next: just test conformance   then   cargo insta review"
-else
-    echo "next: diff $dest/hook-payloads.jsonl $out"
-fi
+case "$out" in
+*.new) echo "next: diff ${out%.new} $out" ;;
+*) echo "next: just test conformance   then   cargo insta review" ;;
+esac

@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "copilot",
+  "version": "unknown",
+  "captured": "2026-08-14",
+  "command": "copilot -p '{prompt}' --allow-all-tools"
+}
