@@ -167,9 +167,18 @@ until [ -S "$SOCK" ]; do sleep 0.1; done
 
 count() { grep -c . "$RAW" || true; }
 
+# The capture is launched from inside an agent session, and that agent's own env
+# reaches the CLI under test: a nested `claude` inherited CLAUDE_CODE_CHILD_SESSION
+# and turned its transcript saving OFF, so the run left nothing to harvest. Scrub
+# the whole namespace rather than the one variable that bit.
+scrub=()
+while IFS='=' read -r k _; do
+    case "$k" in CLAUDECODE | CLAUDE_CODE_*) scrub+=(-u "$k") ;; esac
+done < <(env)
+
 echo "capturing $id/$scenario — one real model turn"
 rc=0
-(cd "$WS" && env PIXTUOID_SOCKET="$SOCK" "${cmd[@]}") || rc=$?
+(cd "$WS" && env "${scrub[@]}" PIXTUOID_SOCKET="$SOCK" "${cmd[@]}") || rc=$?
 
 # A hook can still be in flight when the CLI's own process exits, so wait for a
 # quiet period measured from the LAST PAYLOAD rather than from that exit.
@@ -189,11 +198,13 @@ done
 
 mkdir -p "$dest"
 if [ "$kind" = transcript ]; then
-    # The transcript this run wrote: the newest `.jsonl` under the source's OWN
-    # root that postdates the start marker. The root comes from the registry, so
-    # no per-CLI path lives here.
-    fresh="$(find "$root" -type f -name '*.jsonl' -newer "$STARTED" -exec stat -f '%m %N' {} + 2>/dev/null |
-        sort -rn | head -1 | cut -d' ' -f2-)"
+    # The transcript this run CREATED: birth time, not mtime. The developer's own
+    # Claude Code session is appended to continuously and is therefore always the
+    # newest by mtime — this harvest picked it up once, 4155 lines of it, and only
+    # the PII warning caught it before a commit. A capture is a NEW file.
+    born_after="$(stat -f %B "$STARTED")"
+    fresh="$(find "$root" -type f -name '*.jsonl' -exec stat -f '%B %N' {} + 2>/dev/null |
+        awk -v t="$born_after" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-)"
     if [ -z "$fresh" ]; then
         echo "captured nothing — no new transcript under $root; did the turn run?" >&2
         exit 1

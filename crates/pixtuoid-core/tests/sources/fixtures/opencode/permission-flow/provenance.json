@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "opencode",
+  "version": "1.18.15",
+  "captured": "2026-08-15",
+  "command": "opencode (interactive TUI, driven under a pty) with a project-local {\"permission\":{\"bash\":\"ask\"}}",
+  "note": "opencode auto-approves everything in a trusted workspace \u2014 it deleted the file without asking, twice \u2014 so the gate needs an explicit ask rule, written into the SANDBOX rather than the user's config. The event is `permission.asked`; the composed fixture used the versioned `permission.v2.asked`, and the decoder claims the base name."
+}
