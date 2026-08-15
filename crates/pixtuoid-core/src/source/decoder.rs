@@ -319,6 +319,12 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         }
     };
     let agent_id = AgentId::from_parts(source, id_key);
+    let tool_id_key = desc
+        .and_then(|d| d.hook())
+        .map_or(crate::source::registry::ToolIdKey::ToolUse, |h| {
+            h.tool_id_key
+        })
+        .wire_name();
 
     // The identity context the tool/permission arms attach ahead of their
     // activity event. `cwd` is on the wire for CC tool hooks but absent on e.g.
@@ -387,7 +393,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                     "?"
                 });
             let tool_use_id = obj
-                .get("tool_use_id")
+                .get(tool_id_key)
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![
@@ -403,7 +409,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         }
         "PostToolUse" => {
             let tool_use_id = obj
-                .get("tool_use_id")
+                .get(tool_id_key)
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![

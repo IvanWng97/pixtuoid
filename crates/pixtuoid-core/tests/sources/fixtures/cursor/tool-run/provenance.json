@@ -1,4 +1,7 @@
 {
-  "origin": "composed",
-  "note": "session_id c7cef226-sess, no tool_use_id and strictly sequential tools — the shape cursor/tool-run-real disproves. KEPT anyway: its unpaired Task dispatch is the only thing driving the Delegating class in wire_to_pixels, and the recorded tool-run-real turn never delegated. The real shape of that dispatch is pinned from a capture in tests/sources/cursor/."
+  "origin": "recorded",
+  "cli": "cursor-agent",
+  "version": "2026.08.11-e8db854",
+  "captured": "2026-08-14",
+  "command": "cursor-agent -p --trust '{prompt}'"
 }

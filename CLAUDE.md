@@ -131,6 +131,15 @@ unknown id is a documented no-op. The four shells and the two on-demand tools
 (`just fuzz`, the `corpus_check` census) are mapped in the tests guide; neither
 tool runs in CI.
 
+**Fixtures are RECORDED, not composed.** `just capture-fixture <source>
+<scenario> <cmd…>` runs the real CLI behind a shim that tees what it receives —
+BILLED, and it repoints that CLI's installed hook for the duration. A composed
+fixture pins its author's belief and the decoder then agrees with it, so every
+scenario declares a `provenance.json` that
+`every_scenario_declares_its_provenance` gates. `just corpus-all` is the other
+half, censusing every transcript-bearing source against its real local corpus.
+Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md).
+
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a
 gate). Coverage: `just coverage`. Property invariants use `proptest`.

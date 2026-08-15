@@ -252,6 +252,19 @@ fn every_registered_source_has_a_coalescing_fixture() {
 /// there will ever be, and a new hook-only CLI must not join it by default.
 const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "openclaw", "opencode", "reasonix"];
 
+/// The scenarios that predate the provenance rule and read like real sessions
+/// without a capture record to say so. `unknown` is an admission, not a third
+/// way to leave a fixture unexplained, so the set is pinned: a NEW fixture is
+/// `recorded` or `composed`, and re-recording one of these deletes its entry.
+const UNVERIFIED_PROVENANCE: &[&str] = &[
+    "antigravity/tool-run",
+    "copilot/permission",
+    "copilot/tool-run",
+    "omp/2026-07-10T18-00-00-000Z_01990000-0000-7000-8000-000000000001",
+    "omp/ask-round",
+    "omp/tool-run",
+];
+
 /// Every scenario declares where its bytes came from, because nothing IN them
 /// separates a capture from a composition — a redacted cwd and an invented one
 /// look alike. A composed fixture pins its author's belief and the decoder then
@@ -261,6 +274,7 @@ const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "openclaw", "opencode", "re
 fn every_scenario_declares_its_provenance() {
     let root = fixtures_root();
     let mut recorded: BTreeSet<String> = BTreeSet::new();
+    let mut unknown: BTreeSet<String> = BTreeSet::new();
     for source_dir in sorted_dirs(&root) {
         let source = source_dir
             .file_name()
@@ -298,11 +312,27 @@ fn every_scenario_declares_its_provenance() {
                     path.display()
                 );
             }
-            if origin == "recorded" {
-                recorded.insert(source.clone());
+            match origin {
+                "recorded" => {
+                    recorded.insert(source.clone());
+                }
+                "unknown" => {
+                    let name = scenario_dir.file_name().unwrap().to_string_lossy();
+                    unknown.insert(format!("{source}/{name}"));
+                }
+                _ => {}
             }
         }
     }
+    assert_eq!(
+        unknown,
+        UNVERIFIED_PROVENANCE
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<BTreeSet<_>>(),
+        "the `unknown` set is pinned — record one and drop its entry, or explain a new \
+         fixture as recorded|composed"
+    );
     for src in registry::registered_source_names().filter(|s| is_hook_only(s)) {
         assert_eq!(
             NO_WIRE_EVIDENCE_YET.contains(&src),

@@ -47,6 +47,19 @@ command -v jq >/dev/null || {
     exit 2
 }
 
+# A run repoints a real CLI's installed hook, so the intent is written down
+# BEFORE it happens: `kill -9` skips the EXIT trap, and the only symptom would be
+# that source silently going quiet. Any later run puts it back first.
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/pixtuoid"
+PENDING="$STATE/capture-restore"
+mkdir -p "$STATE"
+if [ -f "$PENDING" ]; then
+    read -r prev_id prev_connected <"$PENDING"
+    echo "a previous capture left $prev_id repointed — restoring it first" >&2
+    if [ "$prev_connected" = true ]; then "$PIX" connect "$prev_id" >/dev/null; else "$PIX" disconnect "$prev_id" >/dev/null; fi
+    rm -f "$PENDING"
+fi
+
 was_connected="$("$PIX" sources --json | jq -r --arg i "$id" '.[] | select(.id == $i) | .connected')"
 [ -n "$was_connected" ] || {
     echo "no source '$id' — see: pixtuoid sources" >&2
@@ -72,6 +85,7 @@ mkdir -p "$SB/bin" "$RAWD" "$WS"
 # edit of our own: `connect` is the install authority, and the pre-state comes
 # from `sources --json`.
 restore() {
+    rm -f "$PENDING"
     if [ "$was_connected" = true ]; then
         "$PIX" connect "$id" >/dev/null || echo "RESTORE FAILED — run: pixtuoid connect $id" >&2
     else
@@ -109,6 +123,7 @@ chmod +x "$SB/bin/pixtuoid-hook"
 # (`BinaryStrategy::EmbedAbsolute`), so a shim on PATH is never consulted. The
 # hook is repointed at the recorder through `PIXTUOID_HOOK`, the override the
 # installer embeds, and this run owns the CLI's real config until `restore`.
+printf '%s %s\n' "$id" "$was_connected" >"$PENDING"
 PIXTUOID_HOOK="$SB/bin/pixtuoid-hook" "$PIX" connect "$id" >/dev/null
 
 # Claimed slots, counted the same way the harvest walks them, so the two cannot

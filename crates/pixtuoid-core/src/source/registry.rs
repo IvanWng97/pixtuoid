@@ -69,10 +69,37 @@ pub enum HookCustom {
     ClaimsAll(fn(&Value) -> Result<Vec<AgentEvent>>),
 }
 
+/// The wire NAME of the per-call tool id in this source's hook envelope, read by
+/// the shared arms. It is a registry row and not a per-source copy of those arms
+/// because reading the wrong name is SILENT — the field is optional, so a
+/// mis-spelling is indistinguishable from an absent id, and every kimi tool call
+/// decoded to `None` for the whole source's life.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToolIdKey {
+    /// `tool_use_id` — Claude Code's spelling, and every CC-shaped envelope's
+    /// but Kimi's.
+    ToolUse,
+    /// `tool_call_id` — Kimi's (capture-verified against kimi-code 0.36.0, which
+    /// never sends `tool_use_id`).
+    ToolCall,
+}
+
+impl ToolIdKey {
+    /// The JSON key to read the per-call id from.
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::ToolUse => "tool_use_id",
+            Self::ToolCall => "tool_call_id",
+        }
+    }
+}
+
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
 pub struct HookDecoding {
     /// The per-session AgentId key strategy, read by the shared arms only.
     pub id_key: IdKey,
+    /// The per-call tool id's wire name, read by the shared arms only.
+    pub tool_id_key: ToolIdKey,
     /// The source's own decoder, dispatched FIRST — before any shared field
     /// requirement — so an alien envelope (no `session_id` at all) can still
     /// decode. `None` = ride the shared arms only.
@@ -393,6 +420,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // The session UUID == the transcript filename stem, so keying on it
             // (not the cwd-derived path) survives a git-worktree cwd-split.
             id_key: IdKey::SessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
             // session AgentId) — inexpressible in the shared arms. The Stop is
             // the ONLY end signal a Workflow-fleet subagent gets (#241).
@@ -426,6 +454,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
         }),
         hook: Some(HookDecoding {
             id_key: IdKey::SessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             // SubagentStart/Stop change the event's SUBJECT — inexpressible in
             // the shared arms.
             custom: Some(HookCustom::Extend(codex::decode_codex_hook_custom)),
@@ -465,6 +494,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
         // payload really does decode via the shared path-keyed arms.
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             custom: None,
         }),
         caps: SourceCaps {
@@ -490,6 +520,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(reasonix::decode_rx_hook_payload)),
         }),
         caps: SourceCaps {
@@ -523,6 +554,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(codewhale::decode_cw_hook_payload)),
         }),
         caps: SourceCaps {
@@ -550,6 +582,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
@@ -633,6 +666,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(cursor::decode_cursor_hook_payload)),
         }),
         caps: SourceCaps {
@@ -668,6 +702,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
@@ -712,6 +747,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
         }),
         hook: Some(HookDecoding {
             id_key: IdKey::SessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,
             custom: Some(HookCustom::ClaimsAll(grok::decode_grok_hook_payload)),
         }),
         caps: SourceCaps {
@@ -793,6 +829,8 @@ const KIMI: SourceDescriptor = SourceDescriptor {
         hook: Some(HookDecoding {
             // session_id is the base field on every Kimi event.
             id_key: IdKey::SessionId,
+            // The ONE source that does not spell the per-call id `tool_use_id`.
+            tool_id_key: ToolIdKey::ToolCall,
             custom: Some(HookCustom::Extend(kimi::decode_kimi_hook_custom)),
         }),
         caps: SourceCaps {

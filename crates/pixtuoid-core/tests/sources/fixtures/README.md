@@ -6,11 +6,12 @@ driven by `tests/sources/conformance.rs`.
 **Record these; do not compose them.** `just capture-fixture <source> <scenario>
 <cmd...>` runs the CLI invocation you give it behind a shim that tees what it
 receives. A hand-written fixture pins whatever its author believed the wire
-looked like, and that belief is what the fixture then teaches every later reader:
-`cursor/tool-run` carries no `tool_use_id` and strictly sequential tools, while a
-real capture shows an id on every `preToolUse` and tools that INTERLEAVE
-(`cursor/tool-run-real`, and #901, which discovered the same gap the expensive
-way).
+looked like, and that belief is what the fixture then teaches every later reader.
+The composed `cursor/tool-run` this replaced carried no `tool_use_id` and
+strictly sequential tools; the capture that replaced it shows an id on every
+`preToolUse` and tools that INTERLEAVE (#901 discovered the same gap the
+expensive way). kimi's composed fixture went further and asserted the decoder's
+own wrong field name back at it.
 
 **Every scenario declares its own provenance**, in `provenance.json` beside the
 payloads, because nothing IN the bytes separates a capture from a composition — a

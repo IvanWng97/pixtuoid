@@ -26,15 +26,16 @@ fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800)
 }
 
-/// The shared core-crate fixtures tree, so these tests decode the SAME captured
-/// wire bytes the conformance harness pins, never a hand-rolled re-encoding.
+/// The core crate's source-test tree, so these tests decode the SAME captured
+/// wire bytes that crate pins, never a hand-rolled re-encoding. It is the tree
+/// and not `fixtures/` alone because a two-session capture cannot live under the
+/// conformance harness's one-AgentId rule.
 fn core_fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("pixtuoid-core")
         .join("tests")
         .join("sources")
-        .join("fixtures")
 }
 
 fn read_nonblank_lines(path: &Path) -> Vec<String> {
@@ -177,77 +178,80 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "claude_code",
             source: "claude-code",
-            fixture: "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
+            fixture: "fixtures/claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "codex",
             source: "codex",
-            fixture: "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
+            fixture: "fixtures/codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "antigravity",
             source: "antigravity",
-            fixture: "antigravity/tool-run/transcript.jsonl",
+            fixture: "fixtures/antigravity/tool-run/transcript.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "copilot",
             source: "copilot",
-            fixture: "copilot/tool-run/events.jsonl",
+            fixture: "fixtures/copilot/tool-run/events.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "omp",
             source: "omp",
-            fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
+            fixture: "fixtures/omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "grok",
             source: "grok",
-            fixture: "grok/tool-run/updates.jsonl",
+            fixture: "fixtures/grok/tool-run/updates.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "reasonix",
             source: "reasonix",
-            fixture: "reasonix/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/reasonix/tool-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "codewhale",
             source: "codewhale",
-            fixture: "codewhale/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/codewhale/tool-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "opencode",
             source: "opencode",
-            fixture: "opencode/session-run/hook-payloads.jsonl",
+            fixture: "fixtures/opencode/session-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
         },
         WireCase {
             name: "cursor",
             source: "cursor",
-            fixture: "cursor/tool-run/hook-payloads.jsonl",
+            // The DELEGATING capture, not the tool-run one: `Delegating` needs a
+            // Task dispatch, and a real cursor turn only delegates when asked.
+            // Two sessions, so it cannot live under `fixtures/`.
+            fixture: "cursor/fixtures/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "hermes",
             source: "hermes",
-            fixture: "hermes/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/hermes/tool-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
@@ -258,7 +262,7 @@ fn agent_cases() -> Vec<WireCase> {
             // Waiting — it auto-approves even `rm -rf`, so `PermissionRequest`
             // only fires for a human at a real TUI. Both fixtures are captures;
             // this is the one whose turn covers both classes.
-            fixture: "kimi/permission-flow/hook-payloads.jsonl",
+            fixture: "fixtures/kimi/permission-flow/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting],
         },
@@ -420,7 +424,8 @@ fn lobster_px(
 /// `runtime/driver.rs` uses — NEVER `Reducer::apply`, which is `AgentId`-pure.
 #[test]
 fn openclaw_presence_envelope_renders_a_lobster() {
-    let hooks = core_fixtures_root().join("openclaw/gateway_lifecycle/hook-payloads.jsonl");
+    let hooks =
+        core_fixtures_root().join("fixtures/openclaw/gateway_lifecycle/hook-payloads.jsonl");
 
     // The fixture's last two envelopes are session_end → gateway_stop, which would
     // leave the daemon Down; stop before them so the asserted scene is a LIVE
