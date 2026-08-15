@@ -28,6 +28,13 @@ redacted cwd and an invented one look alike. `origin` is one of:
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI
 cannot join by default.
 
+**The recorder tees STDIN, so an env-mode source cannot be captured.** codewhale
+passes identity in `DEEPSEEK_*` env vars and the shim never reads stdin for it,
+so its fixture pins the SHIM's synthesized envelope and stays `composed` — a
+permanent entry on that list, not a pending one. A composed fixture kept for a
+reason says so in its note; `opencode/session-run` is the other, retained because
+an auto-approving run emits no permission event for `Waiting` to ride.
+
 Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
 being evidence — the `_pixtuoid_source` tag production's own shim adds downstream
 of the recorder's tee is stamped by the recorder itself, so it is not a hand

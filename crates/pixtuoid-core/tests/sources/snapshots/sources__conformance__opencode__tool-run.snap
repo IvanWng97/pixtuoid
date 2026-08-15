@@ -1,0 +1,67 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityStart:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_0OPp6mWVHrO31cMuZIhb3207
+    detail:
+      Generic:
+        display: "read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityEnd:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_0OPp6mWVHrO31cMuZIhb3207
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityStart:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_ET_ZnCUOd9ADFuYjLm7Vy4F2193
+    detail:
+      Generic:
+        display: "read: /private/tmp/pixtuoid-capture/proj"
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityEnd:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_ET_ZnCUOd9ADFuYjLm7Vy4F2193
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityStart:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_ET_Pxtlu7WlXUZ98pK0hQVe6197
+    detail:
+      Generic:
+        display: "read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- Identity:
+    agent_id: 2400186707517326060
+    source: opencode
+    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    cwd: ~
+- ActivityEnd:
+    agent_id: 2400186707517326060
+    tool_use_id: call_00_ET_Pxtlu7WlXUZ98pK0hQVe6197

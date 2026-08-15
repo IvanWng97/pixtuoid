@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "opencode",
+  "version": "1.18.15",
+  "captured": "2026-08-14",
+  "command": "opencode run {prompt}"
+}

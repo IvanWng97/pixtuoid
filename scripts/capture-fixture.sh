@@ -16,6 +16,10 @@
 # The CLI invocation is yours to pass, not a table this script keeps: a copy of
 # ten CLIs' flags would drift silently, and a drifted row captures the wrong
 # thing while still looking like evidence.
+#
+# It records what the shim reads on STDIN, so an env-mode source is out of scope:
+# codewhale passes identity in `DEEPSEEK_*` env vars and the shim never touches
+# stdin for it, so a capture here would be a file of empty payloads.
 set -euo pipefail
 
 [ $# -ge 3 ] || {
