@@ -1,0 +1,4 @@
+{
+  "origin": "composed",
+  "note": "cwd /Users/dev/zirs, and a minimal field set. KEPT and renamed from tool-run once the recorded capture took that name: its `explore` dispatch is the only Task/Delegating evidence this source has, and two recorded turns asked for a subagent and got `read_file` and `ask` instead."
+}

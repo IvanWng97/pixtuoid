@@ -1,4 +1,7 @@
 {
-  "origin": "composed",
-  "note": "cwd /Users/dev/zirs, and a minimal field set"
+  "origin": "recorded",
+  "cli": "reasonix",
+  "version": "v1.25.2",
+  "captured": "2026-08-14",
+  "command": "reasonix -p '{prompt}'"
 }

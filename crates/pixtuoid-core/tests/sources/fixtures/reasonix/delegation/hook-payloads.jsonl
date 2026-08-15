@@ -1,0 +1,10 @@
+{"event": "SessionStart", "cwd": "/Users/dev/zirs", "_pixtuoid_source": "reasonix"}
+{"event": "UserPromptSubmit", "cwd": "/Users/dev/zirs", "prompt": "Read hello.txt and report how many lines it has. Then run the shell command 'wc -c hello.txt' and tell me the byte count.", "_pixtuoid_source": "reasonix"}
+{"event": "PreToolUse", "cwd": "/Users/dev/zirs", "toolName": "read_file", "toolArgs": {"path": "hello.txt"}, "_pixtuoid_source": "reasonix"}
+{"event": "PostToolUse", "cwd": "/Users/dev/zirs", "toolName": "read_file", "toolArgs": {"path": "hello.txt"}, "_pixtuoid_source": "reasonix"}
+{"event": "PreToolUse", "cwd": "/Users/dev/zirs", "toolName": "bash", "toolArgs": {"command": "wc -c hello.txt"}, "_pixtuoid_source": "reasonix"}
+{"event": "PostToolUse", "cwd": "/Users/dev/zirs", "toolName": "bash", "toolArgs": {"command": "wc -c hello.txt"}, "_pixtuoid_source": "reasonix"}
+{"event": "PreToolUse", "cwd": "/Users/dev/zirs", "toolName": "explore", "toolArgs": {"task": "Investigate the current directory (the workspace root). L..."}, "_pixtuoid_source": "reasonix"}
+{"event": "PostToolUse", "cwd": "/Users/dev/zirs", "toolName": "explore", "toolArgs": {"task": "Investigate the current directory (the workspace root). L..."}, "_pixtuoid_source": "reasonix"}
+{"event": "Stop", "cwd": "/Users/dev/zirs", "_pixtuoid_source": "reasonix"}
+{"event": "SessionEnd", "cwd": "/Users/dev/zirs", "_pixtuoid_source": "reasonix"}

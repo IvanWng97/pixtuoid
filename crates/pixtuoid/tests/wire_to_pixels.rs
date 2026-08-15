@@ -220,7 +220,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "reasonix",
             source: "reasonix",
-            fixture: "fixtures/reasonix/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/reasonix/delegation/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
