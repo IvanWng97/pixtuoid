@@ -207,18 +207,35 @@ fi
 # A FIXED generic path, because every payload embeds its own cwd and
 # transcript_path: capturing somewhere already generic is what lets the bytes
 # ship unedited.
-SB=/tmp/pixtuoid-capture
-WS="$SB/proj"
+# The WORKSPACE path stays generic and fixed — every payload embeds its own cwd
+# and transcript_path, so capturing somewhere already generic is what lets the
+# bytes ship unedited; a `mktemp -d` cwd would bake a random path into them. But
+# a fixed name in shared temp is pre-plantable by another user, so it is REFUSED
+# when it already exists and is not ours, never `rm -rf`'d blind (under /tmp's
+# sticky bit the remove would fail and the capture would land in their dir).
+WS=/tmp/pixtuoid-capture/proj
+if [ -e /tmp/pixtuoid-capture ] && [ ! -O /tmp/pixtuoid-capture ]; then
+    echo "/tmp/pixtuoid-capture exists and is not yours — remove it or run as its owner" >&2
+    exit 2
+fi
+rm -rf /tmp/pixtuoid-capture
+mkdir -p "$WS"
+
+# Everything the capture PRODUCES goes in a private 0700 dir instead: the socket
+# is a rendezvous another user could squat, and the raw capture is the evidence
+# itself. Same reason `e2e-common.sh`'s `e2e_sandbox` is a `mktemp -d`.
+SB="$(mktemp -d)"
 RAW="$SB/captured.jsonl"
 SOCK="$SB/capture.sock"
-rm -rf "$SB"
-mkdir -p "$WS"
 : >"$RAW"
+# The TUI driver's transcript, so two concurrent captures cannot interleave into
+# one world-writable file (and no one can pre-plant a symlink at it).
+export TUIDRIVE_LOG="$SB/tuidrive.log"
 
 listener=""
 cleanup() {
     [ -z "$listener" ] || kill "$listener" 2>/dev/null || true
-    rm -rf "${SB:?}"
+    rm -rf "${SB:?}" /tmp/pixtuoid-capture
 }
 trap cleanup EXIT
 trap 'exit 130' INT

@@ -5,7 +5,8 @@
 only EXISTS in the full-screen TUI — every CLI's `-p`/`run` mode either
 auto-approves or declines without asking, so a permission event has no other
 door. This is that door, and it is blind by nature: everything it sees is logged
-raw to /tmp/tuidrive.log and every answer attempt is announced in order.
+raw to `$TUIDRIVE_LOG` (a private temp file otherwise) and every answer
+attempt is announced in order.
 
     scripts/lib/tuidrive.py "<prompt>" <cmd> [args...]
     DENY_FROM=1 scripts/lib/tuidrive.py ...   # refuse the 2nd gate onward
@@ -37,6 +38,7 @@ import re
 import select
 import struct
 import sys
+import tempfile
 import termios
 import time
 
@@ -79,7 +81,18 @@ def main() -> int:
         sys.exit('usage: tuidrive.py "<prompt>" <cmd> [args...]  |  --selftest')
     prompt, cmd = sys.argv[1], sys.argv[2:]
     deny_from = int(os.environ["DENY_FROM"]) if os.environ.get("DENY_FROM") else None
-    log = open("/tmp/tuidrive.log", "wb", buffering=0)
+    # The caller (capture-fixture.sh) points this into its private 0700 dir. A
+    # fixed name in shared temp lets two concurrent captures interleave into one
+    # file, and another user can pre-plant a symlink there that `open(…, "wb")`
+    # would follow and truncate — the same reason every e2e tier's socket moved
+    # into a `mktemp -d`.
+    log_path = os.environ.get("TUIDRIVE_LOG")
+    if log_path:
+        log = open(log_path, "wb", buffering=0)
+    else:
+        fd, log_path = tempfile.mkstemp(prefix="tuidrive-", suffix=".log")
+        log = os.fdopen(fd, "wb", buffering=0)
+    print(f"driver transcript: {log_path}", flush=True)
 
     def note(msg: str) -> None:
         log.write(f"\n<<< {msg} >>>\n".encode())

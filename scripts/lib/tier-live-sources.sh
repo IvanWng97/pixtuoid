@@ -121,7 +121,10 @@ mkdir -p "$SB/bin"
 ln -sf "$HOOK" "$SB/bin/pixtuoid-hook"
 PATH="$SB/bin:$PATH"
 export PATH
-SHIM_ON_PATH=1
+# Read back rather than assumed: asserting 1 here made the BLOCKED branch below
+# dead code, so a shim that failed to land would have reported the generic
+# "no sprite" instead of the specific reason.
+command -v pixtuoid-hook >/dev/null 2>&1 && SHIM_ON_PATH=1 || SHIM_ON_PATH=0
 
 FAILED=0
 covered=0
