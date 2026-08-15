@@ -584,11 +584,23 @@ corpus-all:
     cc=target/release/examples/corpus_check
     [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
     rc=0
+    uncovered=()
     while IFS=$'\t' read -r id _ kind _; do
         [ "$kind" = transcript ] || continue
         echo "── $id"
-        "$cc" "$id" || rc=1
+        "$cc" "$id"
+        # 3 is "no corpus on this host" — never ran that CLI here. It is NOT a
+        # defect, and it must not read as covered either, so it is reported apart
+        # from both.
+        case $? in
+        0) ;;
+        3) uncovered+=("$id") ;;
+        *) rc=1 ;;
+        esac
     done < <("$cc" --roster)
+    if [ ${#uncovered[@]} -gt 0 ]; then
+        echo "NOT COVERED (no local corpus): ${uncovered[*]}"
+    fi
     exit "$rc"
 
 # Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
