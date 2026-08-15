@@ -249,6 +249,22 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         return Ok(vec![]);
     }
 
+    // The SAME class from the other direction: cursor runs its hook command
+    // 4-6x per event, and only the one that goes through a shell keeps the
+    // `PIXTUOID_SOURCE=` env prefix its install writes. The rest arrive with no
+    // argv and no stamp, land on the claude-code default above — which CC itself
+    // RELIES on, its Unix command being a bare `pixtuoid-hook` — and then bail on
+    // cursor's camelCase event values, ~21 decode errors per turn (measured).
+    // `cursor_version` is the unambiguous fingerprint, and dropping is lossless:
+    // the one stamped copy carries the whole arc.
+    if source == crate::source::claude_code::SOURCE_NAME
+        && obj.contains_key("cursor_version")
+        && !obj.contains_key("_pixtuoid_source")
+    {
+        tracing::trace!("dropping an unstamped cursor hook invocation");
+        return Ok(vec![]);
+    }
+
     // A source's own hook arms run FIRST — before the shared field requirements
     // below — so an alien envelope (Reasonix: camelCase, `event` discriminator,
     // no `session_id` at all) or a subject-changing event (SubagentStart/Stop,
@@ -1810,6 +1826,49 @@ mod tests {
         assert!(evs
             .iter()
             .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess")));
+    }
+
+    /// cursor's UNSTAMPED invocations: measured at 4-6 per event against a
+    /// wrapper on the shim, only one of which keeps the `PIXTUOID_SOURCE=` prefix.
+    /// The rest used to reach CC's arms and bail, ~21 decode errors a turn.
+    #[test]
+    fn an_unstamped_cursor_invocation_is_dropped_quietly() {
+        let unstamped = json!({
+            "hook_event_name": "preToolUse",
+            "session_id": "s1",
+            "cursor_version": "2026.08.11-e8db854",
+            "workspace_roots": ["/w"],
+            "tool_name": "Read",
+            "tool_use_id": "t1",
+        });
+        assert!(
+            decode_hook_payload(unstamped.clone())
+                .expect("must not error")
+                .is_empty(),
+            "an unstamped cursor envelope is a duplicate of the stamped one"
+        );
+
+        // The STAMPED copy is the one that must survive — dropping both would
+        // erase cursor from the office entirely.
+        let mut stamped = unstamped;
+        stamped["_pixtuoid_source"] = json!("cursor");
+        assert!(
+            !decode_hook_payload(stamped).expect("Ok").is_empty(),
+            "the stamped copy carries the arc"
+        );
+
+        // CC's own Unix command is a BARE `pixtuoid-hook` with no source at all,
+        // so the unstamped default it relies on must be untouched by this guard.
+        let cc = json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "cc1",
+            "cwd": "/w",
+            "tool_name": "Read",
+        });
+        assert!(
+            !decode_hook_payload(cc).expect("Ok").is_empty(),
+            "an unstamped CC payload must still decode as claude-code"
+        );
     }
 
     #[test]

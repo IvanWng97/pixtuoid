@@ -1,4 +1,8 @@
 {
-  "origin": "composed",
-  "note": "session_id f1a2b3c4-sess"
+  "origin": "recorded",
+  "cli": "cursor-agent",
+  "version": "2026.08.11-e8db854",
+  "captured": "2026-08-14",
+  "command": "cursor-agent -p --trust '<read a missing file>'",
+  "note": "29 payloads of which only 15 are distinct: cursor RE-DELIVERS each event 4-6x, which this pins deliberately. The recorder listens at the socket, upstream of `hook::dedup`, so a capture shows the wire as the daemon receives it \u2014 the suppression is downstream and has its own tests."
 }

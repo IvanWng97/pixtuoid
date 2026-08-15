@@ -39,11 +39,20 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
-        if explicit {
-            let p = merge::hook_path_str(resolved)?;
-            return Ok(crate::install::hook_cmd::unix::shell_single_quote(p));
-        }
-        Ok("pixtuoid-hook".to_string())
+        // CC's Unix entry carries no `args` key, so it runs through a SHELL and
+        // the env prefix every other source uses works here too. It was bare for
+        // years, which made "no `_pixtuoid_source`" mean "probably CC" — the
+        // guess `decoder` still has to make for installs written before this, and
+        // the reason an unstamped cursor invocation landed on CC's arms at all.
+        let p = if explicit {
+            merge::hook_path_str(resolved)?
+        } else {
+            "pixtuoid-hook"
+        };
+        return crate::install::hook_cmd::shell_hook_command(
+            p,
+            pixtuoid_core::source::claude_code::SOURCE_NAME,
+        );
     }
     #[cfg(windows)]
     {
@@ -101,16 +110,20 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     match cmd {
         None => ShimRef::Unknown,
         Some(c) => {
-            let c = c.trim();
+            // The Unix form now carries the `PIXTUOID_SOURCE=` prefix every other
+            // source has, so the shared shell-aware reader owns the split; only
+            // the Windows exec form (bare path, no shell) still lands below.
+            // Strip the `PIXTUOID_SOURCE=` prefix the Unix form now carries, then
+            // reverse the POSIX escaping through the shared helper: a naive
+            // `trim_matches('\'')` mangles an embedded `'\''`. A bare `.exe`, an
+            // unquoted path, or a half-quoted string passes through literal.
+            let c = crate::install::verify::posix_unquote_if_quoted(
+                crate::install::verify::strip_env_prefix(c.trim()),
+            );
             if c == "pixtuoid-hook" {
                 ShimRef::BareName
             } else {
-                // Reverse the POSIX escaping through the shared helper: a naive
-                // `trim_matches('\'')` mangles an embedded `'\''`. A bare `.exe`, an
-                // unquoted path, or a half-quoted string passes through literal.
-                ShimRef::Absolute(std::path::PathBuf::from(
-                    crate::install::verify::posix_unquote_if_quoted(c),
-                ))
+                ShimRef::Absolute(std::path::PathBuf::from(c))
             }
         }
     }
@@ -369,18 +382,24 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn hook_command_explicit_path_is_embedded_on_unix() {
+    fn hook_command_explicit_path_is_embedded_and_stamped_on_unix() {
         let cmd = hook_command(Path::new("/opt/custom/pixtuoid-hook"), true).unwrap();
-        assert_eq!(cmd, "'/opt/custom/pixtuoid-hook'");
+        assert_eq!(
+            cmd,
+            "PIXTUOID_SOURCE=claude-code '/opt/custom/pixtuoid-hook'"
+        );
         let spaced = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), true).unwrap();
-        assert_eq!(spaced, "'/Users/Jane Doe/bin/pixtuoid-hook'");
+        assert_eq!(
+            spaced,
+            "PIXTUOID_SOURCE=claude-code '/Users/Jane Doe/bin/pixtuoid-hook'"
+        );
     }
 
     #[cfg(unix)]
     #[test]
-    fn hook_command_auto_resolved_stays_bare_on_unix() {
+    fn hook_command_auto_resolved_carries_the_source_on_unix() {
         let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
-        assert_eq!(cmd, "pixtuoid-hook");
+        assert_eq!(cmd, "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'");
     }
 
     #[cfg(unix)]

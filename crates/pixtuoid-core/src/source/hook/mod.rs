@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncReadExt, BufReader};
-use tracing::{debug, trace, warn};
+use tracing::{debug, warn};
 
 use crate::source::decoder::{checked_pid, decode_hook_payload};
 use crate::source::registry::SourceDescriptor;
@@ -20,7 +20,6 @@ mod windows;
 #[cfg(windows)]
 use windows as imp;
 
-mod dedup;
 mod pid_watch;
 pub(crate) use pid_watch::HookPidWatch;
 
@@ -234,7 +233,6 @@ pub(crate) async fn handle_conn(
     tx: TaggedSender,
     pid_watch: Option<HookPidWatch>,
     presence_tx: Option<PresenceSender>,
-    dedup: Option<dedup::DeliveryDedup>,
 ) {
     let reader = BufReader::new(stream.take(MAX_CONN_BYTES));
     let mut lines = reader.lines();
@@ -277,16 +275,6 @@ pub(crate) async fn handle_conn(
                             Err(e) => warn!("daemon presence decode error: {e}"),
                         }
                         // A daemon produces no AgentEvents — never the agent arms.
-                        continue;
-                    }
-                }
-                // A CLI may run one hook command several times for ONE event
-                // (cursor does, 4-6x). Only a payload carrying its source's own
-                // per-call id is judged here, so two genuine calls can never
-                // collide — see `dedup`.
-                if let Some(d) = dedup.as_ref() {
-                    if !d.accept(&v) {
-                        trace!("duplicate hook delivery dropped");
                         continue;
                     }
                 }
@@ -521,7 +509,7 @@ mod tests {
         let (mut client, server) = tokio::io::duplex(4096);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
 
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         client
             .write_all(
                 b"{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
@@ -537,47 +525,6 @@ mod tests {
         task.await.unwrap();
     }
 
-    /// The wiring the unit tests cannot reach: a re-delivered payload must die
-    /// HERE, before decode, or it becomes a second `ActivityStart` and a second
-    /// `tool_call_count`. Two genuine calls follow, to pin that the gate did not
-    /// simply swallow the tool.
-    #[tokio::test]
-    async fn handle_conn_drops_a_redelivered_tool_call() {
-        let (mut client, server) = tokio::io::duplex(4096);
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(16);
-        let task = tokio::spawn(handle_conn(
-            server,
-            tx,
-            None,
-            None,
-            Some(dedup::DeliveryDedup::default()),
-        ));
-
-        let call = |id: &str, ts: u64| {
-            format!(
-                "{{\"_pixtuoid_source\":\"cursor\",\"hook_event_name\":\"preToolUse\",\
-                 \"session_id\":\"s1\",\"tool_name\":\"Read\",\"tool_use_id\":\"{id}\",\
-                 \"_shim_ts_ms\":{ts}}}\n"
-            )
-        };
-        client.write_all(call("t1", 1).as_bytes()).await.unwrap();
-        client.write_all(call("t1", 2).as_bytes()).await.unwrap();
-        client.write_all(call("t2", 3).as_bytes()).await.unwrap();
-        drop(client);
-        task.await.unwrap();
-
-        let mut starts = 0;
-        while let Ok((_, ev)) = rx.try_recv() {
-            if matches!(ev, AgentEvent::ActivityStart { .. }) {
-                starts += 1;
-            }
-        }
-        assert_eq!(
-            starts, 2,
-            "the re-delivery of t1 must not become a second call"
-        );
-    }
-
     /// The writer is SPAWNED because the payload is ~20× the duplex buffer, so
     /// `write_all` only completes as `handle_conn` drains it: written inline,
     /// anything that stops the drain parks the await forever and the test fails
@@ -586,7 +533,7 @@ mod tests {
     async fn handle_conn_ceiling_leaves_headroom_over_the_shim_line_cap() {
         let (mut client, server) = tokio::io::duplex(64 * 1024);
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         let pad = "x".repeat((1 << 20) + (1 << 18));
         let line = format!(
             "{{\"hook_event_name\":\"SessionStart\",\"session_id\":\"s1\",\
@@ -614,7 +561,7 @@ mod tests {
         let (ptx, mut prx) =
             tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
 
-        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx), None));
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
         client
             .write_all(
                 b"{\"_pixtuoid_source\":\"openclaw\",\"type\":\"gateway_start\",\
@@ -672,7 +619,7 @@ mod tests {
             tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
 
         // Spawn with the presence channel ACTIVE so the demux block is entered.
-        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx), None));
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
         client
             .write_all(
                 b"{\"_pixtuoid_source\":\"opencode\",\"type\":\"session.created\",\
@@ -709,7 +656,7 @@ mod tests {
 
         let timed_out = tokio::time::timeout(
             std::time::Duration::from_millis(50),
-            handle_conn(server, tx, None, None, None),
+            handle_conn(server, tx, None, None),
         )
         .await
         .is_err();
@@ -746,7 +693,7 @@ mod tests {
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
         drop(client);
-        handle_conn(server, tx, None, None, None).await;
+        handle_conn(server, tx, None, None).await;
 
         assert!(rx.try_recv().is_ok());
         assert!(rx.try_recv().is_ok());
@@ -774,7 +721,7 @@ mod tests {
         let pid = child.id();
 
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None, None));
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
         // TWO payloads: the CLI's own pid rides every hook event, and that
         // repeat is what arms the watch (#896).
         let line = format!(
@@ -831,7 +778,7 @@ mod tests {
         let pid = wrapper.id();
 
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None, None));
+        let task = tokio::spawn(handle_conn(server, tx, Some(watch), None));
         let line = format!(
             "{{\"_pixtuoid_source\":\"cursor\",\"hook_event_name\":\"preToolUse\",\
              \"session_id\":\"sess-A\",\"workspace_roots\":[\"/repo\"],\
@@ -862,7 +809,7 @@ mod tests {
     async fn handle_conn_never_stamps_a_transcript_family_identity_pid() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         let me = std::process::id();
         let line = format!(
             "{{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"ses-cc\",\
@@ -889,7 +836,7 @@ mod tests {
     async fn handle_conn_stamps_identity_pid_even_without_a_pid_watch() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let (mut client, server) = tokio::io::duplex(4096);
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         // i32::MAX as the pid: the stamp path does a REAL kernel marker read,
         // and an allocatable pid can be a live process on a busy CI host — an
         // unallocatable one guarantees `started: None`.
@@ -920,7 +867,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let (logs, _guard) = capture_warns();
 
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         client
             .write_all(b"{\"hook_event_name\":\"BogusEvent\",\"session_id\":\"s1\"}\n")
             .await
@@ -954,7 +901,7 @@ mod tests {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
         let (logs, _guard) = capture_warns();
 
-        let task = tokio::spawn(handle_conn(server, tx, None, None, None));
+        let task = tokio::spawn(handle_conn(server, tx, None, None));
         client.write_all(b"   \n").await.unwrap();
         client
             .write_all(
@@ -986,7 +933,7 @@ mod tests {
         let (ptx, mut prx) =
             tokio::sync::mpsc::unbounded_channel::<crate::source::daemon::PresenceMsg>();
 
-        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx), None));
+        let task = tokio::spawn(handle_conn(server, tx, None, Some(ptx)));
         // An object without `type` — the openclaw decoder errs on it.
         client
             .write_all(b"{\"_pixtuoid_source\":\"openclaw\"}\n")
@@ -1023,7 +970,7 @@ mod tests {
         let (logs, _guard) = capture_warns();
 
         client.write_all(PRE_TOOL_USE_LINE).await.unwrap();
-        handle_conn(server, tx, None, None, None).await;
+        handle_conn(server, tx, None, None).await;
 
         let out = logs.contents();
         assert!(

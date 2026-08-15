@@ -31,11 +31,14 @@
 //!   otherwise buy is inert here anyway: hook-wins dedup needs a second
 //!   transport, and precise wait-resolution needs permission events this source
 //!   never emits. Pinned by `tool_use_id_is_dropped_even_though_the_wire_has_one`.
-//! - **cursor RE-DELIVERS every event 4-6x** with the standard install (counted
-//!   against a wrapper on the shim, no recorder in the loop; an unrelated hook
-//!   entry in the same config ran once). Each copy is byte-identical down to
-//!   `tool_use_id`, so `hook::dedup` drops it on that id — which is also why
-//!   dropping the id from the DECODED event, above, costs nothing here.
+//! - **cursor runs its hook command 4-6x per event, and only ONE of those keeps
+//!   the `PIXTUOID_SOURCE=` env prefix** its install writes — the others arrive
+//!   with no argv and no stamp (counted against a wrapper on the shim, no
+//!   recorder in the loop; an unrelated hook entry in the same config ran once).
+//!   Unstamped, they fall to the claude-code default and bail on these camelCase
+//!   event values, so `decoder`'s cross-fire guard drops them on `cursor_version`.
+//!   Lossless: the one stamped copy carries the whole arc, which
+//!   `cursor/tool-failure` pins byte for byte — 29 payloads, 8 of them stamped.
 //! - **Subagents render FLAT, never nested — the parent-link is genuinely
 //!   absent.** Each child runs as an INDEPENDENT session and NOTHING links it to
 //!   its parent: `subagentStart`/`subagentStop` don't fire (capture-verified:
