@@ -11,11 +11,8 @@
 
 use std::path::Path;
 
-use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::grok::decode_grok_line;
-use pixtuoid_core::source::{AgentEvent, ToolDetail, Transport};
-use pixtuoid_core::state::reducer::Reducer;
-use pixtuoid_core::state::{ActivityState, SceneState};
+use pixtuoid_core::harness::{Drive, Driven};
+use pixtuoid_core::source::{AgentEvent, ToolDetail};
 use pixtuoid_core::AgentId;
 
 const PARENT: &str = "01a006a5-e63d-7543-b1af-da3127a85c3b";
@@ -33,85 +30,55 @@ fn lines(name: &str) -> Vec<String> {
         .collect()
 }
 
-fn hook_events() -> Vec<AgentEvent> {
-    lines("hook-payloads.jsonl")
-        .iter()
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid hook json");
-            decode_hook_payload(v).expect("captured grok hook payload must decode")
-        })
-        .collect()
+fn hooks() -> Driven {
+    let d = Drive::hooks().lines(lines("hook-payloads.jsonl"));
+    d.assert_clean("grok delegation hooks");
+    d
 }
 
-fn seed(agent_id: AgentId) -> AgentEvent {
-    AgentEvent::SessionStart {
-        agent_id,
-        source: "grok".into(),
-        session_id: PARENT.into(),
-        cwd: std::path::PathBuf::from("/private/tmp/pixtuoid-capture/proj"),
-        parent_id: None,
-    }
-}
-
-fn transcript_events() -> Vec<AgentEvent> {
-    // The path is what grok keys the session on (its PARENT dir), so it has to
-    // reproduce the real layout rather than name the fixture file.
-    let logical = format!("{PARENT}/updates.jsonl");
-    lines("parent-updates.jsonl")
-        .iter()
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid transcript json");
-            decode_grok_line(&logical, "grok", v).expect("captured grok line must decode")
-        })
-        .collect()
+/// SEEDED, and via the harness rather than a hand-built `SessionStart`: the
+/// parent registers from the watcher's first-sight seed keyed by grok's own
+/// registry row, so this cannot drift from what production does. The logical
+/// path reproduces grok's real layout because the id comes from the PARENT dir.
+fn transcript() -> Driven {
+    let d = Drive::transcript("grok", &format!("{PARENT}/updates.jsonl"))
+        .expect("grok has a line decoder")
+        .seeded()
+        .lines(lines("parent-updates.jsonl"));
+    d.assert_clean("grok delegation transcript");
+    d
 }
 
 #[test]
 fn a_blocking_spawn_is_a_task_and_the_parent_goes_delegating() {
-    let parent = AgentId::from_parts("grok", PARENT);
-    let mut scene = SceneState::uniform(8);
-    let mut r = Reducer::new();
-    let now = std::time::SystemTime::now();
-
-    // The parent is registered by the watcher's first-sight seed, not by its own
-    // transcript: a JSONL event for an unknown id is a documented no-op.
-    r.apply(&mut scene, seed(parent), now, Transport::Jsonl);
-    for ev in transcript_events() {
-        r.apply(&mut scene, ev, now, Transport::Jsonl);
-    }
-
-    let slot = scene.agents.get(&parent).expect("parent registers");
-    // Delegating is not its own variant — it is the Task detail on Active.
-    match &slot.state {
-        ActivityState::Active { detail, .. } => {
-            assert_eq!(detail.as_deref(), Some("Delegating"))
-        }
-        other => panic!("a blocking spawn must park the parent in Delegating, got {other:?}"),
-    }
+    let d = transcript();
+    assert!(
+        d.reached
+            .contains(&pixtuoid_core::harness::Reach::Delegating),
+        "a blocking spawn must drive the parent through Delegating, reached {:?}",
+        d.reached
+    );
 }
 
 #[test]
 fn the_transcripts_spawn_line_registers_the_child_under_its_parent() {
-    let parent = AgentId::from_parts("grok", PARENT);
-    let child = AgentId::from_parts("grok", CHILD);
-    let mut scene = SceneState::uniform(8);
-    let mut r = Reducer::new();
-    let now = std::time::SystemTime::now();
-
-    for ev in transcript_events() {
-        r.apply(&mut scene, ev, now, Transport::Jsonl);
-    }
-
-    let slot = scene
+    let d = transcript();
+    let child = d
+        .scene
         .agents
-        .get(&child)
-        .expect("subagent_spawned registers");
-    assert_eq!(slot.parent_id, Some(parent), "child links to its parent");
+        .get(&AgentId::from_parts("grok", CHILD))
+        .expect("subagent_spawned registers the child");
+    assert_eq!(
+        child.parent_id,
+        Some(AgentId::from_parts("grok", PARENT)),
+        "child links to its parent"
+    );
 }
 
 #[test]
 fn only_the_blocking_spawn_carries_the_task_detail() {
-    let tasks = transcript_events()
+    let tasks = transcript()
+        .events
         .iter()
         .filter(|e| {
             matches!(
@@ -130,19 +97,22 @@ fn only_the_blocking_spawn_carries_the_task_detail() {
 }
 
 #[test]
-fn the_child_ends_on_its_own_subagent_stop_not_the_parents() {
+fn subagent_stop_ends_the_child_and_stamps_it_as_a_child() {
+    // grok puts the CHILD's own sessionId on `subagent_stop` — the parent's
+    // `session_end` is a separate event later in the same capture, so "the child
+    // ended" has to be read off the child's id, not off the scene being empty.
+    let ends: Vec<_> = hooks()
+        .events
+        .iter()
+        .filter_map(|e| match e {
+            AgentEvent::SessionEnd { agent_id, as_child } => Some((*agent_id, *as_child)),
+            _ => None,
+        })
+        .collect();
     let child = AgentId::from_parts("grok", CHILD);
-    let mut scene = SceneState::uniform(8);
-    let mut r = Reducer::new();
-    let now = std::time::SystemTime::now();
-
-    for ev in hook_events() {
-        r.apply(&mut scene, ev, now, Transport::Hook);
-    }
-
-    let slot = scene.agents.get(&child).expect("subagent_start registers");
     assert!(
-        slot.exiting_at.is_some(),
-        "subagent_stop carries the CHILD's own sessionId and must end it"
+        ends.contains(&(child, true)),
+        "subagent_stop must end the CHILD with the as_child stamp the reducer's \
+         child ledger keys on, got {ends:?}"
     );
 }

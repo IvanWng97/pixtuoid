@@ -277,7 +277,7 @@ const UNVERIFIED_PROVENANCE: &[&str] = &[
 /// Sources whose `unknown` scenarios now sit BESIDE a recorded one, so the
 /// decoder is pinned against bytes nobody composed even where the older fixture's
 /// origin stays unprovable.
-const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["antigravity", "copilot", "omp"];
+const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 
 /// Every scenario declares where its bytes came from, because nothing IN them
 /// separates a capture from a composition — a redacted cwd and an invented one
@@ -325,6 +325,35 @@ fn a_parent_dir_keyed_transcript_is_nested_under_its_session_id() {
                 );
             }
         }
+    }
+}
+
+/// The conformance tree is not the only place captures live: five sibling
+/// modules keep their own, and the gate above cannot see them — four shipped for
+/// months with no provenance at all. A capture tree declares its origin wherever
+/// it sits.
+#[test]
+fn every_single_owner_capture_tree_declares_its_provenance() {
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+    for entry in sorted_dirs(&sources) {
+        let fixtures = entry.join("fixtures");
+        // `decode/` holds hand-built decoder inputs, not captures; `fixtures/`
+        // itself is the conformance tree the sibling test already gates.
+        let name = entry.file_name().unwrap().to_string_lossy().into_owned();
+        if !fixtures.is_dir() || name == "decode" || name == "fixtures" {
+            continue;
+        }
+        let own = fixtures.join("provenance.json");
+        let nested: Vec<_> = sorted_dirs(&fixtures)
+            .into_iter()
+            .map(|d| d.join("provenance.json"))
+            .collect();
+        assert!(
+            own.exists() || (!nested.is_empty() && nested.iter().all(|p| p.exists())),
+            "{}: a capture tree must declare its origin — add provenance.json here, \
+             or one per sub-tree",
+            fixtures.display()
+        );
     }
 }
 
@@ -391,10 +420,22 @@ fn every_scenario_declares_its_provenance() {
         "the `unknown` set is pinned — record one and drop its entry, or explain a new \
          fixture as recorded|composed"
     );
+    // BOTH directions: the one-way check let two members survive after their
+    // `unknown` scenarios were recorded away, so the list claimed a reassurance
+    // about sources that no longer had anything to reassure about.
+    let unknown_sources: BTreeSet<&str> = UNVERIFIED_PROVENANCE
+        .iter()
+        .filter_map(|s| s.split('/').next())
+        .collect();
     for src in UNKNOWN_BUT_BACKED_BY_A_CAPTURE {
         assert!(
             recorded.contains(*src),
             "{src} is listed as backed by a capture but has no recorded scenario"
+        );
+        assert!(
+            unknown_sources.contains(src),
+            "{src} has no `unknown` scenario left — drop its \
+             UNKNOWN_BUT_BACKED_BY_A_CAPTURE entry"
         );
     }
     for src in registry::registered_source_names().filter(|s| is_hook_only(s)) {

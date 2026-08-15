@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "cursor-agent",
+  "version": "unknown",
+  "captured": "unknown",
+  "command": "see the module header",
+  "note": "A real `cursor-agent -p` turn asked for a subagent. Pins the two wire premises `source/cursor.rs` documents and declines to fix: the flat render, and the `Task` id that never pairs."
+}

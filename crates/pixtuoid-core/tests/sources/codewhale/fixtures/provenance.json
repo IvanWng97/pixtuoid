@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "codewhale",
+  "version": "unknown",
+  "captured": "unknown",
+  "command": "see the module header",
+  "note": "Captured from a real CodeWhale subagent run (spawn/complete), sanitized. Predates the socket recorder, hence no shim stamps."
+}
