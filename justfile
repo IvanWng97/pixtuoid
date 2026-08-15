@@ -319,7 +319,6 @@ lint:
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
-    run capture just capture-selftest     & pids+=($!)
     run fixmeta just fixture-metadata     & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -574,7 +573,8 @@ comment-lint *args:
 [group('rust')]
 [doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
 capture-fixture source scenario *cmd:
-    scripts/capture-fixture.sh {{ source }} {{ scenario }} {{ cmd }}
+    cargo run --release -q -p pixtuoid-core --example capture_fixture -- \
+        {{ source }} {{ scenario }} {{ cmd }}
 
 # The corpus census, every transcript-bearing source in one pass — the drift half
 # of the pair: fixtures catch a decode regression, real bytes catch the wire
@@ -1391,15 +1391,6 @@ gitenv-selftest:
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
-# The recorder's own decisions — the empty-array call, the swallowed exit 3, the
-# birth-time pick, the env scrub, the parent-dir nesting. All five were defects
-# before they were functions, and a capture costs a BILLED turn, so the logic
-# that decides what a capture IS is tested without one. Runs in `lint`; CI's
-# hygiene job enumerates it separately.
-[group('meta')]
-[doc("Self-test the fixture recorder's decisions")]
-capture-selftest:
-    bash scripts/capture-fixture.sh --selftest
 
 # The half of the fixture-age report that runs ANYWHERE: the fields it reads
 # (`cli`/`version`/`captured` on every recorded scenario) must be present and

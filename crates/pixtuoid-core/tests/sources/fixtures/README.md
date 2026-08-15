@@ -27,7 +27,15 @@ redacted cwd and an invented one look alike. `origin` is one of:
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI
 cannot join by default.
 
-**The recorder records at the shim's OUTPUT**, via a `PIXTUOID_SOCKET` listener,
+**The recorder is `pixtuoid-core/examples/capture_fixture.rs`** — Rust, because
+the shell version it replaces accumulated nine defects that were bash semantics
+rather than recording logic (an empty array under `set -u`, `pipefail` eating a
+lister's exit 3, `head -1` taking SIGPIPE past ~700 files, macOS-only `stat`,
+three world-writable temp paths), none of which could fail in a selftest small
+enough to run in CI. Its decisions are ordinary `#[test]`s now, so `just test`
+covers them.
+
+**It records at the shim's OUTPUT**, via a `PIXTUOID_SOCKET` listener,
 which is the seam that does not care how the payload reached the shim: codewhale
 passes identity in `DEEPSEEK_*` env vars and the shim never reads stdin for it, so
 recording the INPUT would have captured a file of empty payloads. Two consequences
@@ -104,8 +112,8 @@ the hook-vs-JSONL coalesce assertion then compares a real id against a directory
 name — `grok/permission-flow` passed for months only because its hooks were
 composed to declare `sessionId: "permission-flow"`. So a recorded grok scenario
 nests: `<scenario>/<session-uuid>/updates.jsonl`. The recorder decides this by
-asking `corpus_check --list` whether the basename repeats across sessions, and
-the harness recurses to find it.
+asking the registry's own `path_filter_for` whether the basename repeats across
+sessions, and the harness recurses to find it.
 
 (This tree is **conformance-scanned ONLY** — `conformance.rs` asserts every dir
 here is a registered source. Single-owner fixtures read by one module — decode's
