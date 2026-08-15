@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "claude",
+  "version": "2.1.233 (Claude Code)",
+  "captured": "2026-08-14",
+  "command": "claude -p {prompt} --allowedTools Read Bash"
+}

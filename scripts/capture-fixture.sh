@@ -16,6 +16,13 @@
 # ten CLIs' flags would drift silently, and a drifted row captures the wrong
 # thing while still looking like evidence.
 #
+# ⚠ Verify a capture against an INDEPENDENT observer before trusting it. cursor
+#   invokes the pixtuoid hook FOUR times per event while this listener is the
+#   endpoint, and once when its own unrelated debug tee is watching the same run —
+#   an observer effect this recorder has not explained, so cursor's fixtures are
+#   not captured this way. Nothing else shows it (opencode 10 unique of 10 lines;
+#   codewhale's repeats are its minimal envelope, not duplicates).
+#
 # It records at the SHIM'S OUTPUT, by pointing `PIXTUOID_SOCKET` at a listener of
 # our own — the one seam that does not care how the payload reached the shim.
 # Recording its INPUT cannot cover every source: codewhale is env-mode (identity
@@ -124,24 +131,36 @@ git -C "$WS" -c user.email=fixture@pixtuoid -c user.name=fixture commit -qm init
 
 # One connection per event (`transport::send_line` connects, writes one line,
 # closes), so a whole payload arrives per accept and cannot interleave with
-# another — no locking, and accept order IS wire order.
+# another. THREADED, and that is not an optimization: the shim write-times-out
+# under a watchdog, and a CLI whose hook then fails RETRIES it — a serial
+# listener made cursor fire the same `tool_use_id` four times, which its own
+# unrelated debug tee (one line, same run) proved was the recorder's doing.
 python3 - "$SOCK" "$RAW" <<'PY' &
-import socket
+import socketserver
 import sys
+import threading
 
 sock, out = sys.argv[1], sys.argv[2]
-srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-srv.bind(sock)
-srv.listen(64)
-with open(out, "ab", buffering=0) as f:
-    while True:
-        conn, _ = srv.accept()
+lock = threading.Lock()
+f = open(out, "ab", buffering=0)
+
+
+class Handler(socketserver.BaseRequestHandler):
+    def handle(self):
         buf = b""
-        while chunk := conn.recv(65536):
+        while chunk := self.request.recv(65536):
             buf += chunk
-        conn.close()
         if buf:
-            f.write(buf if buf.endswith(b"\n") else buf + b"\n")
+            with lock:
+                f.write(buf if buf.endswith(b"\n") else buf + b"\n")
+
+
+class Server(socketserver.ThreadingUnixStreamServer):
+    daemon_threads = True
+    request_queue_size = 64
+
+
+Server(sock, Handler).serve_forever()
 PY
 listener=$!
 until [ -S "$SOCK" ]; do sleep 0.1; done

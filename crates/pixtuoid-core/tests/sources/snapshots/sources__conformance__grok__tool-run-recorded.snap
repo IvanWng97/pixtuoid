@@ -1,0 +1,34 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 1281726481071525244
+    tool_use_id: call-bd65c18c-2dfa-4a7f-9c22-be373608a597-0
+    detail:
+      Generic:
+        display: read_file
+- ActivityEnd:
+    agent_id: 1281726481071525244
+    tool_use_id: call-bd65c18c-2dfa-4a7f-9c22-be373608a597-0
+- ActivityStart:
+    agent_id: 1281726481071525244
+    tool_use_id: call-795cca12-1399-40b5-b115-fba6d13e5c48-1
+    detail:
+      Generic:
+        display: list_dir
+- ActivityEnd:
+    agent_id: 1281726481071525244
+    tool_use_id: call-795cca12-1399-40b5-b115-fba6d13e5c48-1
+- ActivityStart:
+    agent_id: 1281726481071525244
+    tool_use_id: call-fe2d87a7-0725-4303-b919-436e3bb4131e-2
+    detail:
+      Generic:
+        display: read_file
+- ActivityEnd:
+    agent_id: 1281726481071525244
+    tool_use_id: call-fe2d87a7-0725-4303-b919-436e3bb4131e-2
+- ActivityEnd:
+    agent_id: 1281726481071525244
+    tool_use_id: ~
