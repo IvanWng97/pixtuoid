@@ -4,8 +4,7 @@ Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
 **Record these; do not compose them.** `just capture-fixture <source> <scenario>
-<cmd...>` runs the CLI invocation you give it behind a shim that tees what it
-receives. A hand-written fixture pins whatever its author believed the wire
+<cmd...>` runs the CLI invocation you give it and records what its hooks send. A hand-written fixture pins whatever its author believed the wire
 looked like, and that belief is what the fixture then teaches every later reader.
 The composed `cursor/tool-run` this replaced carried no `tool_use_id` and
 strictly sequential tools; the capture that replaced it shows an id on every
@@ -28,17 +27,21 @@ redacted cwd and an invented one look alike. `origin` is one of:
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI
 cannot join by default.
 
-**The recorder tees STDIN, so an env-mode source cannot be captured.** codewhale
-passes identity in `DEEPSEEK_*` env vars and the shim never reads stdin for it,
-so its fixture pins the SHIM's synthesized envelope and stays `composed` — a
-permanent entry on that list, not a pending one. A composed fixture kept for a
-reason says so in its note; `opencode/session-run` is the other, retained because
-an auto-approving run emits no permission event for `Waiting` to ride.
+**The recorder records at the shim's OUTPUT**, via a `PIXTUOID_SOCKET` listener,
+which is the seam that does not care how the payload reached the shim: codewhale
+passes identity in `DEEPSEEK_*` env vars and the shim never reads stdin for it, so
+recording the INPUT would have captured a file of empty payloads. Two consequences
+for the bytes: a capture carries production's own `_shim_ts_ms` / `_pid` stamps
+(fixtures older than this seam do not), and the CLI's installed config is never
+touched — the hook it already has is the one that runs, so a DISCONNECTED source
+is refused before the turn is spent rather than after.
+
+A composed fixture kept for a reason says so in its note: `opencode/session-run`
+is retained because an auto-approving run emits no permission event for `Waiting`
+to ride.
 
 Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
-being evidence — the `_pixtuoid_source` tag production's own shim adds downstream
-of the recorder's tee is stamped by the recorder itself, so it is not a hand
-edit. PII is not always a field you can drop — cursor's arrives as a `user_email`
+being evidence. PII is not always a field you can drop — cursor's arrives as a `user_email`
 key, kimi's as the owner column inside a captured `ls -la` `tool_output` — so
 read a capture before committing it rather than trusting a key-name filter.
 

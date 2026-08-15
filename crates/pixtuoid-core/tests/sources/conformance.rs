@@ -249,9 +249,7 @@ fn every_registered_source_has_a_coalescing_fixture() {
 
 /// Hook-only sources with no recorded scenario. The list only SHRINKS — a hook
 /// event is transient, so for these the fixture is the only wire evidence there
-/// will ever be, and a new hook-only CLI must not join it by default. `codewhale`
-/// is here permanently, not pending: it is the one env-mode source, so the shim
-/// never reads stdin and a recorder that tees stdin has nothing to capture.
+/// will ever be, and a new hook-only CLI must not join it by default.
 const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "openclaw", "reasonix"];
 
 /// The scenarios that predate the provenance rule and read like real sessions

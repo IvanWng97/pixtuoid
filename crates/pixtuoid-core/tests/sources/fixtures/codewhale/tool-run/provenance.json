@@ -1,4 +1,4 @@
 {
   "origin": "composed",
-  "note": "cwd /Users/dev/cwproj, and every payload carries only event+cwd. CANNOT be recorded by capture-fixture: codewhale is the one env-mode source \u2014 the shim reads DEEPSEEK_* env vars and never touches stdin (pixtuoid-hook/src/main.rs), so a stdin tee sees nothing \u2014 and headless `codewhale exec` fires no hooks at all (source/codewhale.rs). What a fixture can pin here is the SHIM's synthesized envelope, which is what this is."
+  "note": "cwd /Users/dev/cwproj, and every payload carries only event+cwd. Recordable, but only from an INTERACTIVE TUI turn: headless `codewhale exec` fires no hooks at all (source/codewhale.rs), and `codewhale run` is the TUI launcher rather than a second headless path. Drive it by hand the way kimi/permission-flow was: `just capture-fixture codewhale tool-run \"$SHELL\"`."
 }
