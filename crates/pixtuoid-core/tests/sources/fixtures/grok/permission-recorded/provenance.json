@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "grok",
+  "version": "grok --permission-mode default",
+  "captured": "2026-08-15",
+  "command": "grok --permission-mode default (interactive TUI, driven under a pty)",
+  "note": "The gate arrives as a notification envelope with notificationType `permission_prompt` (the idle one that follows is `idle_prompt`) — grok registers Notification and PermissionDenied, so this wiring was already right. The transcript is `updates.jsonl`: grok writes five jsonl siblings per session and the one-line rewind_points.jsonl is the newest, which is why the harvest now asks corpus_check --list instead of the filesystem. Home path redacted to /Users/dev."
+}

@@ -80,16 +80,28 @@ impl Decoded {
 /// for a JSONL-bearing source — two would make selection (and the snapshot)
 /// depend on `read_dir` order, zero would skip its LineDecoder entirely.
 fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension().and_then(|s| s.to_str()) == Some("jsonl")
-                && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
-        })
-        .collect();
+    let mut out = Vec::new();
+    push_transcripts(dir, &mut out);
     out.sort();
     out
+}
+
+/// Recurses, because a path-keyed source needs the fixture to REPRODUCE the
+/// shape its id comes from: grok keys on the parent-dir name, so a flat
+/// `<scenario>/updates.jsonl` yields the scenario name as the session id, and
+/// the composed fixture that "passed" the coalesce assertion did so only by
+/// declaring `sessionId: "permission-flow"` in its hooks to match.
+fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
+    for e in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
+        let p = e.path();
+        if p.is_dir() {
+            push_transcripts(&p, out);
+        } else if p.extension().and_then(|s| s.to_str()) == Some("jsonl")
+            && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
+        {
+            out.push(p);
+        }
+    }
 }
 
 fn transcript_in(dir: &Path) -> PathBuf {

@@ -208,14 +208,28 @@ if [ "$kind" = transcript ]; then
     # Claude Code session is appended to continuously and is therefore always the
     # newest by mtime — this harvest picked it up once, 4155 lines of it, and only
     # the PII warning caught it before a commit. A capture is a NEW file.
+    # `--list` is the source's OWN path filter, not a guess: grok writes five
+    # jsonl siblings per session and the one-line `rewind_points.jsonl` wins on
+    # birth time, while the transcript it actually tails is `updates.jsonl`.
     born_after="$(stat -f %B "$STARTED")"
-    fresh="$(find "$root" -type f -name '*.jsonl' -exec stat -f '%B %N' {} + 2>/dev/null |
+    fresh="$("$ROSTER" --list "$id" "$root" 2>/dev/null |
+        while IFS= read -r f; do printf '%s %s\n' "$(stat -f %B "$f")" "$f"; done |
         awk -v t="$born_after" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-)"
     if [ -z "$fresh" ]; then
         echo "captured nothing — no new transcript under $root; did the turn run?" >&2
         exit 1
     fi
-    out="$dest/$(basename "$fresh")"
+    # A source whose transcripts all share ONE basename keys its session on the
+    # PARENT dir, so flattening the capture would rename the session after the
+    # scenario. Asking `--list` whether the name repeats beats knowing which
+    # sources those are.
+    base="$(basename "$fresh")"
+    if [ "$("$ROSTER" --list "$id" "$root" 2>/dev/null | grep -c "/$base\$")" -gt 1 ]; then
+        out="$dest/$(basename "$(dirname "$fresh")")/$base"
+        mkdir -p "$(dirname "$out")"
+    else
+        out="$dest/$base"
+    fi
     cp "$fresh" "$out"
     n="$(grep -c . "$out")"
     # A source can be BOTH. CC's tool run is in the transcript but its permission
