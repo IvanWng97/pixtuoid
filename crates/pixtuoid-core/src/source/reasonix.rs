@@ -10,14 +10,12 @@
 //! {"event":"PreToolUse","cwd":"/repo","toolName":"bash","toolArgs":{"command":"ls"}}
 //! ```
 //!
-//! camelCase fields, `event` discriminator (not `hook_event_name`), and — the
-//! load-bearing difference — **no session id, no transcript path, no tool-call
-//! id anywhere** (`internal/hook/hook.go` Payload; pinned by the recorded
-//! fixtures, not by a version stamp nothing re-checks).
-//! The only situating field is `cwd` (the workspace root), so the AgentId is
-//! keyed on it — two concurrent Reasonix sessions in ONE project deliberately
-//! render as one sprite, and either session's `SessionEnd` walks that shared
-//! sprite out (it walks back in on the other's next `UserPromptSubmit`).
+//! camelCase fields, `event` discriminator (not `hook_event_name`), and no
+//! transcript path or tool-call id anywhere (`internal/hook/hook.go` Payload).
+//! It DOES carry `sessionId` — 44/44 payloads across the recorded fixtures — so
+//! that is the AgentId key, cwd only as the fallback for a build that omits it.
+//! Keying on the workspace instead would merge two sessions in ONE project into
+//! a single sprite (the Cursor lesson; `hermes.rs` states it too).
 //!
 //! Why no JSONL transport: v2 session files are FULL-REWRITTEN (tmp+rename)
 //! once per turn — zero mid-turn writes, so a tail watcher shows nothing while
@@ -59,18 +57,25 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("event")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("reasonix payload missing event"))?;
-    // `cwd` is the ONLY identity a Reasonix hook carries — an empty one would
-    // mint a phantom agent that nothing else coalesces with.
+    // An empty cwd would mint a phantom agent that nothing else coalesces with.
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
-    let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
+    // `sessionId` where the build offers it, cwd otherwise: keying on the
+    // workspace merges two sessions in ONE project into a single sprite, and
+    // either one's end walks the shared sprite out (the Cursor lesson, which
+    // `hermes.rs` states too). v1.2.0 carried no id, which is why this keyed on
+    // cwd; v1.25.2 stamps one on every payload.
+    let key = obj
+        .get("sessionId")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(cwd);
+    let agent_id = AgentId::from_parts(SOURCE_NAME, key);
 
-    // No upstream session id exists; the cwd IS the session key, and the
-    // SessionStart arm below must key it identically or coalescing breaks.
-    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, cwd, Some(cwd.into()));
+    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key, Some(cwd.into()));
 
     match event {
         // The `UserPromptSubmit` duplicate is the RESURRECT path — a
@@ -79,7 +84,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         "SessionStart" | "UserPromptSubmit" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
-            session_id: cwd.to_string(),
+            session_id: key.to_string(),
             cwd: cwd.into(),
             parent_id: None,
         }]),
@@ -203,6 +208,30 @@ mod tests {
 
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    #[test]
+    fn two_sessions_in_one_workspace_stay_two_agents() {
+        // v1.25.2 stamps `sessionId` on every payload (44/44 across the recorded
+        // fixtures); keying on cwd merged them into one sprite.
+        let ev = |sid: &str| {
+            decode_rx_hook_payload(&json!({
+                "event": "SessionStart", "cwd": "/repo", "sessionId": sid
+            }))
+            .expect("decodes")
+            .remove(0)
+        };
+        let (a, b) = (ev("s-1"), ev("s-2"));
+        assert_ne!(a.agent_id(), b.agent_id(), "one project, two sessions");
+        assert_eq!(a.agent_id(), AgentId::from_parts(SOURCE_NAME, "s-1"));
+    }
+
+    #[test]
+    fn a_build_without_a_session_id_still_keys_on_cwd() {
+        let ev = decode_rx_hook_payload(&json!({"event": "SessionStart", "cwd": "/repo"}))
+            .expect("decodes")
+            .remove(0);
+        assert_eq!(ev.agent_id(), AgentId::from_parts(SOURCE_NAME, "/repo"));
     }
 
     #[test]

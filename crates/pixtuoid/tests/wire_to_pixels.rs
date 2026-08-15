@@ -199,7 +199,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "copilot",
             source: "copilot",
-            fixture: "fixtures/copilot/tool-run/events.jsonl",
+            fixture: "fixtures/copilot/tool-run/65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3/events.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },

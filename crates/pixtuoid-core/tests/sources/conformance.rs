@@ -284,6 +284,50 @@ const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["antigravity", "copilot", "om
 /// look alike. A composed fixture pins its author's belief and the decoder then
 /// agrees with it: kimi's shipped four confident per-call ids for a field kimi
 /// never sends.
+/// A source whose id comes from the transcript's PARENT DIR needs the fixture to
+/// reproduce that dir, or the session id silently becomes the SCENARIO NAME. The
+/// README states the rule; this is what makes it fail. Asked of the registry's
+/// own `id_from_path`, so a future parent-dir-keyed source is covered without an
+/// edit here.
+#[test]
+fn a_parent_dir_keyed_transcript_is_nested_under_its_session_id() {
+    let root = fixtures_root();
+    for source_dir in sorted_dirs(&root) {
+        let source = source_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        if is_hook_only(&source) || is_daemon(&source) {
+            continue;
+        }
+        let derive = registry::id_deriver_for(&source);
+        // The probe names a dir that no scenario could be called; a filename-keyed
+        // deriver ignores it, a parent-dir-keyed one hands it straight back.
+        const PROBE: &str = "0000-parent-probe";
+        if derive(Path::new(&format!("{PROBE}/x.jsonl"))) != PROBE {
+            continue;
+        }
+        for scenario_dir in sorted_dirs(&source_dir) {
+            let scenario = scenario_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            for t in transcripts_in(&scenario_dir) {
+                let parent = t.parent().unwrap().file_name().unwrap().to_string_lossy();
+                assert_ne!(
+                    parent,
+                    scenario,
+                    "{}: {source} keys the session on the transcript's PARENT DIR, so a flat \
+                     fixture makes the scenario name the session id — nest it under the real id",
+                    t.display()
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn every_scenario_declares_its_provenance() {
     let root = fixtures_root();

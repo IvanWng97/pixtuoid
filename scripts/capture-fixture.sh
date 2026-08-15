@@ -184,7 +184,12 @@ done < <(env)
 
 echo "capturing $id/$scenario — one real model turn"
 rc=0
-(cd "$WS" && env "${scrub[@]}" PIXTUOID_SOCKET="$SOCK" "${cmd[@]}") || rc=$?
+# `${scrub[@]+…}`, not `${scrub[@]:-}`: on stock macOS bash 3.2 an EMPTY array
+# under `set -u` is an unbound-variable error (the normal case — nothing to
+# scrub outside an agent session), and `:-` would instead pass one empty ARGV
+# string. Either way the CLI never launches and the harvest blames the
+# invocation.
+(cd "$WS" && env ${scrub[@]+"${scrub[@]}"} PIXTUOID_SOCKET="$SOCK" "${cmd[@]}") || rc=$?
 
 # A hook can still be in flight when the CLI's own process exits, so wait for a
 # quiet period measured from the LAST PAYLOAD rather than from that exit.
@@ -212,7 +217,10 @@ if [ "$kind" = transcript ]; then
     # jsonl siblings per session and the one-line `rewind_points.jsonl` wins on
     # birth time, while the transcript it actually tails is `updates.jsonl`.
     born_after="$(stat -f %B "$STARTED")"
-    fresh="$("$ROSTER" --list "$id" "$root" 2>/dev/null |
+    # `|| true` on the pipeline: `--list` exits 3 for "no .jsonl under this root",
+    # and under `pipefail` that would kill the script HERE — after the turn was
+    # already billed — instead of reaching the message below that says so.
+    fresh="$( ("$ROSTER" --list "$id" "$root" 2>/dev/null || true) |
         while IFS= read -r f; do printf '%s %s\n' "$(stat -f %B "$f")" "$f"; done |
         awk -v t="$born_after" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-)"
     if [ -z "$fresh" ]; then
