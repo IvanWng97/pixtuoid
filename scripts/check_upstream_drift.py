@@ -841,8 +841,18 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
             "could not locate the codex `match (outer, inner)` decode block in "
             "source/codex.rs — the transcript decoder was refactored; update the parser."
         )
-    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block))
-    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', block))
+    # An arm may name several inner types at once — `("response_item",
+    # "function_call" | "custom_tool_call")` — and reading only the single-literal
+    # form silently drops every alternative, which is the watch going quiet rather
+    # than red.
+    def inner_types(outer: str) -> set[str]:
+        arms = re.findall(
+            r'\(\s*"' + outer + r'"\s*,\s*((?:"\w+"\s*\|\s*)*"\w+")\s*\)', block
+        )
+        return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
+
+    event_msg = inner_types("event_msg")
+    response_item = inner_types("response_item")
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "

@@ -164,7 +164,12 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // upstream's own serde alias, accepted so a future serializer flip to
         // the alias form still drives Active/Idle.
         ("event_msg", "task_started") | ("event_msg", "turn_started") => vec![start()],
-        ("response_item", "function_call") => {
+        // `custom_tool_call` is the SAME item under codex's custom-tool API — same
+        // `name`, same `call_id`, an `input` string where the other has
+        // `arguments` — and it is what a modern session actually serializes. Left
+        // out, every tool call in a real rollout decoded to nothing and the turn
+        // showed Active from `task_started` alone (capture-verified, codex 2026-08).
+        ("response_item", "function_call" | "custom_tool_call") => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {
                     agent_id,
@@ -178,6 +183,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // Each is an ActivityStart so the reducer clears any Waiting set by the
         // permission gate.
         ("response_item", "function_call_output")
+        | ("response_item", "custom_tool_call_output")
         | ("event_msg", "exec_command_end")
         | ("event_msg", "patch_apply_end") => {
             vec![start()]
@@ -288,7 +294,7 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
         .and_then(|p| p.get("name"))
         .and_then(|s| s.as_str())
         .unwrap_or_else(|| {
-            crate::source::drift::missing_field(SOURCE_NAME, "function_call", "name");
+            crate::source::drift::missing_field(SOURCE_NAME, "tool call", "name");
             "tool"
         });
     AgentEvent::ActivityStart {
@@ -422,6 +428,33 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// Captured off codex 2026-08: a real rollout serializes its tool calls as
+    /// `custom_tool_call`, never the `function_call` the composed fixture used, so
+    /// reading only the latter let four tool calls decode to nothing while the
+    /// turn still showed Active from `task_started`.
+    #[test]
+    fn a_custom_tool_call_is_a_tool_call() {
+        let out = ev(json!({"type":"response_item","payload":{
+            "type":"custom_tool_call","call_id":"call_x","name":"exec","input":"ls"}}));
+        match out.as_slice() {
+            [AgentEvent::ActivityStart {
+                detail: Some(d), ..
+            }] => {
+                assert!(
+                    format!("{d:?}").contains("exec"),
+                    "tool name must reach the detail: {d:?}"
+                )
+            }
+            other => panic!("expected an ActivityStart carrying the tool, got {other:?}"),
+        }
+        let resumed = ev(json!({"type":"response_item","payload":{
+            "type":"custom_tool_call_output","call_id":"call_x","output":"ok"}}));
+        assert!(
+            matches!(resumed.as_slice(), [AgentEvent::ActivityStart { .. }]),
+            "its output must resume work like function_call_output does"
+        );
     }
 
     #[test]
