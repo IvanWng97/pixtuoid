@@ -35,11 +35,31 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "crates/pixtuoid-core/tests/sources"
-# provenance `cli` is the command as invoked; a few differ from the source id.
-VERSION_FLAG = {"claude": ["--version"], "codex": ["--version"], "opencode": ["--version"],
-                "openclaw": ["--version"], "reasonix": ["--version"], "omp": ["--version"],
-                "cursor-agent": ["--version"], "copilot": ["--version"], "kimi": ["--version"],
-                "grok": ["--version"], "hermes": ["--version"], "codewhale": ["--version"]}
+ROSTER = ROOT / "target/release/examples/corpus_check"
+
+
+def version_probes() -> dict[str, list[str]]:
+    """The registry's OWN probes, read through `corpus_check --roster` column 5.
+
+    A hand-copied table here shipped already missing `agy`, silently — the exact
+    "reuse an authority, never re-copy it" rule the root CLAUDE.md states. An
+    unbuilt roster degrades to no version comparison rather than a wrong one.
+    """
+    if not ROSTER.is_file():
+        return {}
+    try:
+        out = subprocess.run([str(ROSTER), "--roster"], capture_output=True, text=True,
+                             timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    probes = {}
+    for line in out.stdout.splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 5 and cols[4] != "-":
+            argv = cols[4].split()
+            probes[argv[0]] = argv[1:]
+    return probes
+
 
 
 def provenances():
@@ -50,11 +70,11 @@ def provenances():
             yield p, {"_unparseable": str(e)}
 
 
-def local_version(cli: str) -> str | None:
-    if cli not in VERSION_FLAG or not shutil.which(cli):
+def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
+    if cli not in probes or not shutil.which(cli):
         return None
     try:
-        out = subprocess.run([cli, *VERSION_FLAG[cli]], capture_output=True, text=True,
+        out = subprocess.run([cli, *probes[cli]], capture_output=True, text=True,
                              timeout=20, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -95,6 +115,9 @@ def check_metadata() -> int:
 
 
 def report(max_age_days: int) -> int:
+    probes = version_probes()
+    if not probes:
+        print("  (corpus_check not built — version drift not checked; `just build --release --examples`)")
     today = dt.date.today()
     stale = []
     rows = []
@@ -110,7 +133,7 @@ def report(max_age_days: int) -> int:
                 age = (today - dt.date.fromisoformat(captured)).days
             except ValueError:
                 age = "?"
-        live = local_version(cli)
+        live = local_version(cli, probes)
         drift = ""
         if live and pinned != "unknown":
             a, b = semverish(pinned), semverish(live)

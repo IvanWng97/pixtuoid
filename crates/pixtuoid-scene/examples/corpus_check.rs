@@ -189,8 +189,15 @@ fn main() {
             } else {
                 "hook"
             };
+            // Column 5 is the registry's OWN version probe, so a consumer reads
+            // it here rather than keeping a second copy — a hand-copied table
+            // shipped already missing one row, silently.
+            let probe = d
+                .version_probe
+                .map(|p| p.join(" "))
+                .unwrap_or_else(|| "-".into());
             println!(
-                "{name}\t{}\t{kind}\t{}",
+                "{name}\t{}\t{kind}\t{}\t{probe}",
                 d.label_prefix,
                 d.home_env.unwrap_or("-")
             );

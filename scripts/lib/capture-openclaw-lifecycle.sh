@@ -19,8 +19,12 @@ PROMPT="${1:?prompt}"
 PORT="${OC_PORT:-19099}"
 SESSION="${OC_SESSION:-pixcap-$(date +%s)}"
 DRIVER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/tuidrive.py"
+# Beside the recorder's own private sandbox, never a fixed shared-temp name: the
+# same symlink-followable, concurrently-clobbered class the recorder's socket and
+# the driver's transcript were both moved out of.
+LOGS="$(dirname "${TUIDRIVE_LOG:-$(mktemp -d)/x}")"
 
-openclaw gateway --port "$PORT" --force --allow-unconfigured >/tmp/openclaw-gw.log 2>&1 &
+openclaw gateway --port "$PORT" --force --allow-unconfigured >"$LOGS/openclaw-gw.log" 2>&1 &
 gw=$!
 trap 'kill -TERM "$gw" 2>/dev/null' EXIT
 
@@ -29,7 +33,7 @@ for _ in $(seq 1 60); do
     sleep 1
 done
 
-python3 "$DRIVER" "$PROMPT" openclaw tui --session "$SESSION" >/tmp/openclaw-tui.log 2>&1
+python3 "$DRIVER" "$PROMPT" openclaw tui --session "$SESSION" >"$LOGS/openclaw-tui.log" 2>&1
 echo "tui rc=$?"
 
 # SIGTERM, not kill: `gateway_stop` is a clean-shutdown hook.

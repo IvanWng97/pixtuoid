@@ -13,8 +13,11 @@ set -uo pipefail
 
 PORT="${OC_PORT:-4103}"
 BASE="http://127.0.0.1:$PORT"
+# See the sibling script: a fixed shared-temp log is the class the recorder's own
+# socket and the driver's transcript were moved out of.
+LOGS="$(dirname "${TUIDRIVE_LOG:-$(mktemp -d)/x}")"
 
-opencode serve --port "$PORT" >/tmp/opencode-serve.log 2>&1 &
+opencode serve --port "$PORT" >"$LOGS/opencode-serve.log" 2>&1 &
 srv=$!
 trap 'kill -TERM "$srv" 2>/dev/null' EXIT
 

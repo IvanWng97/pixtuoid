@@ -335,6 +335,12 @@ fn run_cli(cmd: &[String], ws: &Path, sock: &Path) -> std::io::Result<std::proce
     c.args(&cmd[1..])
         .current_dir(ws)
         .env("PIXTUOID_SOCKET", sock);
+    // The driver and the per-CLI cycle scripts write their transcripts beside the
+    // socket, in this run's private sandbox — a fixed shared-temp name is
+    // symlink-followable and two concurrent captures would interleave into it.
+    if let Some(dir) = sock.parent() {
+        c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
+    }
     for k in agent_env_names(std::env::vars().map(|(k, _)| k)) {
         c.env_remove(k);
     }
