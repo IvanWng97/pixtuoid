@@ -25,6 +25,8 @@ tests/
 │   │   └── fixtures/…        so it is two sprites and cannot live under the one-AgentId rule
 │   ├── grok/mod.rs           grok's DELEGATING capture, both transports of ONE run — same
 │   │   └── fixtures/…        two-sprite reason; only a `background: false` spawn mints Task
+│   ├── delegation/mod.rs     the NAME-KEYED family (a tool literally called `task`): opencode,
+│   │   └── fixtures/<cli>/   copilot. Grouped by CAPABILITY — one rule, one table
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
 │       └── <scenario>/provenance.json   recorded | composed | unknown — REQUIRED, see fixtures/README.md

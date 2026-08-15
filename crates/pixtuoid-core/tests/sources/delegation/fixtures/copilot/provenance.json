@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "copilot",
+  "version": "unknown",
+  "captured": "2026-08-15",
+  "command": "copilot (interactive TUI, driven under a pty), prompted to delegate with its `task` tool",
+  "note": "First real bytes through copilot's Task path — claimed by NAME (`task`), deliberately not by a `subagent_type` key, so a model-authored arg cannot spoof an ordinary tool into a delegation and drain active_tasks. Nested under the session uuid because copilot keys on the transcript's PARENT DIR."
+}
