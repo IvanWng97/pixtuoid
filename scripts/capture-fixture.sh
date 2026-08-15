@@ -170,6 +170,15 @@ jq -n --arg cli "$(basename "${cmd[0]}")" --arg version "$ver" \
 
 echo "wrote $out ($n payloads, CLI exit $rc) + $prov"
 
+# An interactive capture runs a SHELL, so the probe above identifies the shell and
+# not the CLI under test — say so rather than let a wrong `cli`/`version` sit in a
+# file whose whole job is provenance.
+case "$(basename "${cmd[0]}")" in
+*sh)
+    echo "NOTE: $prov names $(basename "${cmd[0]}") — an interactive capture cannot probe the CLI; fix cli/version/command by hand" >&2
+    ;;
+esac
+
 # PII is not always a key you can drop — kimi's arrived as the owner column
 # inside a captured `ls -la`.
 pii="$HOME"

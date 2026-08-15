@@ -250,7 +250,7 @@ fn every_registered_source_has_a_coalescing_fixture() {
 /// Hook-only sources with no recorded scenario. The list only SHRINKS — a hook
 /// event is transient, so for these the fixture is the only wire evidence there
 /// will ever be, and a new hook-only CLI must not join it by default.
-const NO_WIRE_EVIDENCE_YET: &[&str] = &["codewhale", "openclaw", "reasonix"];
+const NO_WIRE_EVIDENCE_YET: &[&str] = &["openclaw", "reasonix"];
 
 /// The scenarios that predate the provenance rule and read like real sessions
 /// without a capture record to say so. `unknown` is an admission, not a third

@@ -1,4 +1,7 @@
 {
-  "origin": "composed",
-  "note": "cwd /Users/dev/cwproj, and every payload carries only event+cwd. Recordable, but only from an INTERACTIVE TUI turn: headless `codewhale exec` fires no hooks at all (source/codewhale.rs), and `codewhale run` is the TUI launcher rather than a second headless path. Drive it by hand the way kimi/permission-flow was: `just capture-fixture codewhale tool-run \"$SHELL\"`."
+  "origin": "recorded",
+  "cli": "codewhale",
+  "version": "0.9.7 (5e3ac84c5cb9)",
+  "captured": "2026-08-14",
+  "command": "codewhale (interactive TUI \u2014 `exec` fires no hooks and `run` is the TUI launcher)"
 }
