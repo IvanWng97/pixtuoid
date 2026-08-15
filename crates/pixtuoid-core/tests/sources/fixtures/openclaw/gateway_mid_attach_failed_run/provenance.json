@@ -1,4 +1,4 @@
 {
   "origin": "composed",
-  "note": "gateway id gwcap7"
+  "note": "Kept for ONE field now that mid-attach-recorded holds the real shape: `agent_end` with success=false. A run that fails is the half no capture has produced — `--timeout-ms 1` returns success=true, and the honest ways to break a run (bogus provider, killed model) all mean writing to someone's real openclaw config. The no-gateway_start half is recorded next door."
 }
