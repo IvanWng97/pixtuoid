@@ -113,6 +113,14 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
     check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
+    # Synthetic, so the control survives codex.rs dropping its own `|` arm.
+    synthetic = '("response_item", "alpha" | "beta" | "gamma") => {} ("response_item", "solo") => {}'
+    check(
+        d.match_arm_inner_types(synthetic, "response_item") == {"alpha", "beta", "gamma", "solo"},
+        f"match_arm_inner_types must read every `|` alternative, got "
+        f"{d.match_arm_inner_types(synthetic, 'response_item')!r}",
+    )
+    check("custom_tool_call" in ri, f"codex response_item reads BOTH halves of its `|` arm: {ri!r}")
     offenders = [m for m in (ev | ri) if not re.match(r"^[a-z][a-z_]*$", m)]
     check(not offenders, f"codex rollout members are snake_case; offenders={offenders}")
 
@@ -1248,6 +1256,29 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         )
 
 
+def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
+    """A name in both is inert today and fail-open tomorrow: unregister it and
+    the sweep stays silent, because the ledger still excuses it."""
+    ours = d.read_our_names(d.Report())
+    for ledger, field in (
+        ("CODEX_KNOWN_OMITTED", "codex"),
+        ("CC_KNOWN_OMITTED", "cc"),
+        ("REASONIX_KNOWN_OMITTED", "reasonix"),
+        ("CODEWHALE_KNOWN_OMITTED", "codewhale"),
+        ("GROK_KNOWN_OMITTED", "grok"),
+    ):
+        registered = getattr(ours, field)
+        check(registered is not None, f"the `{field}` reader must still parse")
+        both = sorted((registered or set()) & getattr(d, ledger))
+        check(
+            not both,
+            f"{ledger} lists {both}, which our own `{field}` install target "
+            f"also REGISTERS. "
+            f"Drop it from the ledger (and its rationale) — leaving it there "
+            f"means dropping the registration later raises nothing.",
+        )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -1272,6 +1303,7 @@ def main() -> int:
         test_ts_comment_strip_survives_a_quote_detector_line,
         test_rust_comment_strip_is_not_confused_by_lifetimes,
         test_omp_env_sweeps_fire_and_stay_silent,
+        test_no_ledger_excuses_a_hook_we_actually_register,
     ):
         t()
     if FAILS:

@@ -12,17 +12,8 @@
 //! the whole source's life because fixture and decoder shared one wrong field
 //! name. So these are recorded, never composed.
 //!
-//! **Why this is Rust and not the shell script it replaces.** The shell version
-//! accumulated nine defects that were all bash semantics rather than recording
-//! logic: an empty array under `set -u` (which stopped the CLI launching for
-//! anyone outside an agent session), `pipefail` swallowing a lister's exit 3
-//! after the turn was billed, `head -1` taking SIGPIPE once a corpus passed ~700
-//! files (same failure, same place, found later), `stat -f %B` being macOS-only,
-//! and three world-writable temp paths. None of them could fail in a selftest
-//! small enough to run in CI. Here they are absent by construction: no arrays,
-//! no pipelines, `Metadata::created()` for birth time, `TempDir` for a private
-//! 0700 sandbox — and the decisions are ordinary `#[test]`s that `just test`
-//! already runs, rather than a bespoke `--selftest` wired into two gates.
+//! Why this is Rust and not the shell script it replaces:
+//! `tests/sources/fixtures/README.md`, "Why the recorder is a Rust example".
 //!
 //! It records at the SHIM'S OUTPUT, by pointing `PIXTUOID_SOCKET` at a listener
 //! of our own — the one seam that does not care how the payload reached the

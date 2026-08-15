@@ -249,16 +249,8 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         return Ok(vec![]);
     }
 
-    // The SAME class from the other direction: cursor runs its hook command
-    // 4-6x per event, and only the one that goes through a shell keeps the
-    // `PIXTUOID_SOURCE=` env prefix its install writes. The rest arrive with no
-    // argv and no stamp, land on the claude-code default above — which every
-    // install written BEFORE this version still relies on, CC's Unix command
-    // having been a bare `pixtuoid-hook` until it gained the same env prefix
-    // every other source uses — and then bail on
-    // cursor's camelCase event values, ~21 decode errors per turn (measured).
-    // `cursor_version` is the unambiguous fingerprint, and dropping is lossless:
-    // the one stamped copy carries the whole arc.
+    // The SAME class from the other direction — cursor's unstamped duplicates,
+    // whose count and losslessness are in `source/cursor.rs`'s module doc.
     if source == crate::source::claude_code::SOURCE_NAME
         && obj.contains_key("cursor_version")
         && !obj.contains_key("_pixtuoid_source")
@@ -1830,9 +1822,7 @@ mod tests {
             .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess")));
     }
 
-    /// cursor's UNSTAMPED invocations: measured at 4-6 per event against a
-    /// wrapper on the shim, only one of which keeps the `PIXTUOID_SOURCE=` prefix.
-    /// The rest used to reach CC's arms and bail, ~21 decode errors a turn.
+    /// cursor's UNSTAMPED invocations, which used to reach CC's arms and bail.
     #[test]
     fn an_unstamped_cursor_invocation_is_dropped_quietly() {
         let unstamped = json!({

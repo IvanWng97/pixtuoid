@@ -3,6 +3,6 @@
   "cli": "opencode",
   "version": "1.18.15",
   "captured": "2026-08-15",
-  "command": "opencode serve, then POST /session and DELETE /session/<id> against it",
+  "command": "scripts/lib/capture-opencode-session.sh — opencode serve, then POST /session and DELETE /session/<id> against it",
   "note": "`session.deleted` is reachable ONLY through the server's HTTP API. The plugin listens on opencode's in-process event bus, and `opencode session delete` edits the SQLite store from its own process — verified to fire NOTHING even with a plugin-loaded `serve` running. Costs no model turn: a session's creation and deletion are the whole scenario, which is why this is two payloads and not a run."
 }

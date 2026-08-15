@@ -187,15 +187,23 @@ for id in "${wanted[@]}"; do
     # failure says WHICH half broke.
     seen=0
     drove=0
+    # `[^],]*`, not `[^]]*`: entries are comma-joined, so a class stopping only
+    # at `]` walks into the next agent and passes this source on its state.
+    state_re="agents=\[[^]]*${prefix}[·@][^],]*:(active|waiting)"
+    timed_out=1
     for _ in $(seq 1 "$TURN_TIMEOUT"); do
         grep -q "agents=\[[^]]*${prefix}[·@]" "$OUT" 2>/dev/null && seen=1
-        grep -qE "agents=\[[^]]*${prefix}[·@][^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
-        [ "$drove" = 1 ] && break
+        grep -qE "$state_re" "$OUT" 2>/dev/null && drove=1
+        [ "$drove" = 1 ] && {
+            timed_out=0
+            break
+        }
         kill -0 "$CLIPID" 2>/dev/null || {
             # The CLI finished; give the watcher a beat to observe its last write.
             sleep 3
             grep -q "agents=\[[^]]*${prefix}[·@]" "$OUT" 2>/dev/null && seen=1
-            grep -qE "agents=\[[^]]*${prefix}[·@][^]]*:(active|waiting)" "$OUT" 2>/dev/null && drove=1
+            grep -qE "$state_re" "$OUT" 2>/dev/null && drove=1
+            timed_out=0
             break
         }
         sleep 1
@@ -207,8 +215,9 @@ for id in "${wanted[@]}"; do
 
     # A CLI that failed on ITS OWN account (no credit, no API key, not logged in)
     # says nothing about pixtuoid. Reporting that as a decode failure would be the
-    # same lie as calling an unrunnable check a pass.
-    if [ "$drove" = 0 ] && [ "$seen" = 0 ] && [ "$cli_rc" -ne 0 ]; then
+    # same lie as calling an unrunnable check a pass. `timed_out` guards it: the
+    # timeout path arrives here with `cli_rc=143` from OUR OWN kill.
+    if [ "$timed_out" = 0 ] && [ "$drove" = 0 ] && [ "$seen" = 0 ] && [ "$cli_rc" -ne 0 ]; then
         echo "  BLOCKED $id — the CLI itself failed (exit $cli_rc), not a pixtuoid result"
         tail -2 "$SB/$id.log" | sed 's/^/      /'
         declare_uncovered="$declare_uncovered $id"
@@ -225,6 +234,11 @@ for id in "${wanted[@]}"; do
         covered=$((covered + 1))
     elif [ "$seen" = 1 ]; then
         echo "  FAIL $id — ${prefix} registered but never left idle (tool-detail decode?)" >&2
+        FAILED=1
+    elif [ "$timed_out" = 1 ]; then
+        echo "  FAIL $id — no ${prefix} sprite after ${TURN_TIMEOUT}s (this tier killed the CLI)" >&2
+        echo "  --- $bin output tail ---" >&2
+        tail -5 "$SB/$id.log" >&2
         FAILED=1
     else
         echo "  FAIL $id — no ${prefix} sprite after its turn" >&2

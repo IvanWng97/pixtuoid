@@ -149,7 +149,7 @@ carry a per-scenario catalogue plus one blanket claim that everything here was
 "derived from real sessions, then sanitized"; both are retired. The blanket
 claim was the thing the provenance rule replaced (it could not distinguish a
 capture from a composition, which is the whole problem), and the catalogue
-described four scenarios that no longer exist — a list of directories rots the
+described five scenarios that no longer exist — a list of directories rots the
 moment one is re-recorded under a better name.
 
 Two scenarios carry a fact BEYOND their own decode, so they are named here where
@@ -165,3 +165,19 @@ someone changing the tree will see it:
   `registry_cwd_extractor_matches_each_sources_real_head_shape`. A macOS capture
   cannot reproduce it, which is why it stays `unknown` rather than being
   re-recorded.
+
+## Why the recorder is a Rust example
+
+`just capture-fixture` drives `pixtuoid-core/examples/capture_fixture.rs`. It
+was a shell script first, and that version accumulated nine defects that were
+all bash semantics rather than recording logic: an empty array under `set -u`
+(which stopped the CLI launching for anyone outside an agent session),
+`pipefail` swallowing a lister's exit 3 after the turn was billed, `head -1`
+taking SIGPIPE once a corpus passed ~700 files (same failure, same place, found
+later), `stat -f %B` being macOS-only, and three world-writable temp paths.
+
+None of them could fail in a selftest small enough to run in CI — which is the
+argument, not the count. In Rust they are absent by construction: no arrays, no
+pipelines, `Metadata::created()` for birth time, `TempDir` for a private 0700
+sandbox — and the decisions are ordinary `#[test]`s that `just test` already
+runs, rather than a bespoke `--selftest` wired into two gates.

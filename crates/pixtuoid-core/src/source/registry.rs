@@ -73,7 +73,9 @@ pub enum HookCustom {
 /// the shared arms. It is a registry row and not a per-source copy of those arms
 /// because reading the wrong name is SILENT — the field is optional, so a
 /// mis-spelling is indistinguishable from an absent id, and every kimi tool call
-/// decoded to `None` for the whole source's life.
+/// decoded to `None` for the whole source's life. Moot for a
+/// [`HookCustom::ClaimsAll`] source, exactly as [`IdKey`] is — pick `ToolUse`
+/// with an `// inert` comment there.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ToolIdKey {
     /// `tool_use_id` — Claude Code's spelling, and every CC-shaped envelope's
@@ -520,7 +522,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(reasonix::decode_rx_hook_payload)),
         }),
         caps: SourceCaps {
@@ -554,7 +556,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(codewhale::decode_cw_hook_payload)),
         }),
         caps: SourceCaps {
@@ -582,7 +584,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
@@ -666,7 +668,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(cursor::decode_cursor_hook_payload)),
         }),
         caps: SourceCaps {
@@ -702,7 +704,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
@@ -746,8 +748,8 @@ const GROK: SourceDescriptor = SourceDescriptor {
             cwd_extractor: grok::extract_grok_cwd,
         }),
         hook: Some(HookDecoding {
-            id_key: IdKey::SessionId, // inert: custom claims all
-            tool_id_key: ToolIdKey::ToolUse,
+            id_key: IdKey::SessionId,        // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse, // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(grok::decode_grok_hook_payload)),
         }),
         caps: SourceCaps {

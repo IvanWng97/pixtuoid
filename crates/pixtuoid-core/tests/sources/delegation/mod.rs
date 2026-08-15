@@ -1,13 +1,5 @@
 //! The NAME-KEYED delegation family: sources whose subagent dispatch is a tool
-//! literally called `task`. Grouped by capability rather than by CLI, because
-//! the contract under test is one rule shared by all of them. Where the child is
-//! ANNOUNCED in the parent's own stream (opencode, copilot) the capture is two
-//! sprites and the conformance harness's one-AgentId rule cannot hold it; omp
-//! announces nothing — its child is a sibling transcript the watcher discovers —
-//! so its parent capture is a single agent. The test below asserts that split
-//! rather than assuming it.
-//!
-//! The rule is the point: these sources claim the Task detail by tool NAME and
+//! literally called `task`. They claim the Task detail by tool NAME and
 //! deliberately NOT by the presence of a `subagent_type` key, so a
 //! model-authored argument on an ordinary tool cannot spoof a delegation, seed
 //! `active_tasks`, and cascade a real child out on drain.
@@ -118,23 +110,81 @@ fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
     }
 }
 
+/// The call id sitting beside a `task` tool name in the SAME raw object.
+fn task_call_ids(raw: &[String]) -> std::collections::BTreeSet<String> {
+    fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+        match v {
+            serde_json::Value::Object(o) => {
+                let names = ["tool", "toolName", "name"];
+                let ids = ["toolCallId", "callID", "call_id", "id"];
+                if names
+                    .iter()
+                    .any(|k| o.get(*k).and_then(|n| n.as_str()) == Some("task"))
+                {
+                    if let Some(id) = ids.iter().find_map(|k| o.get(*k).and_then(|i| i.as_str())) {
+                        out.insert(id.to_string());
+                    }
+                }
+                o.values().for_each(|c| walk(c, out));
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|c| walk(c, out)),
+            _ => {}
+        }
+    }
+    let mut out = std::collections::BTreeSet::new();
+    for l in raw {
+        walk(
+            &serde_json::from_str(l).expect("valid capture json"),
+            &mut out,
+        );
+    }
+    out
+}
+
 #[test]
-fn an_ordinary_tool_never_carries_the_task_detail() {
-    // The anti-spoof half of the rule, asserted against the same real runs: the
-    // captures contain bash/read/glob calls, and exactly none of them may claim
-    // Task just because a delegation happened in the same session.
-    for (cli, evs) in [
-        ("opencode", opencode_events()),
-        ("copilot", copilot_events()),
-        ("omp", omp_events()),
+fn the_task_detail_lands_on_the_call_actually_named_task() {
+    // It has to BIND: counting one Task and one ordinary tool passes just as
+    // well when the decoder tags the bash call and leaves the dispatch bare.
+    for (cli, evs, raw) in [
+        (
+            "opencode",
+            opencode_events(),
+            lines("opencode", "hook-payloads.jsonl"),
+        ),
+        (
+            "copilot",
+            copilot_events(),
+            lines("copilot", "events.jsonl"),
+        ),
+        ("omp", omp_events(), lines("omp", "parent.jsonl")),
     ] {
-        let starts = evs
-            .iter()
-            .filter(|e| matches!(e, AgentEvent::ActivityStart { .. }))
-            .count();
+        let dispatch = task_call_ids(&raw);
         assert!(
-            starts > tasks(&evs),
+            !dispatch.is_empty(),
+            "{cli}: the capture must name a `task` call, else this rule is untested"
+        );
+        let starts: Vec<(&Option<String>, bool)> = evs
+            .iter()
+            .filter_map(|e| match e {
+                AgentEvent::ActivityStart {
+                    tool_use_id,
+                    detail,
+                    ..
+                } => Some((tool_use_id, matches!(detail, Some(ToolDetail::Task)))),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            starts.len() > tasks(&evs),
             "{cli}: the capture must also hold ordinary tools, else the rule is untested"
         );
+        for (id, is_task) in &starts {
+            let named_task = id.as_deref().is_some_and(|i| dispatch.contains(i));
+            assert_eq!(
+                *is_task, named_task,
+                "{cli}: the Task detail must sit on the `task` call ({dispatch:?}) and \
+                 on no other — start {id:?} claims Task={is_task}"
+            );
+        }
     }
 }

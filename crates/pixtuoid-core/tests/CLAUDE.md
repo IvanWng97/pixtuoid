@@ -71,7 +71,8 @@ tests/
 
 Everything that feeds real wire bytes through the production path rides
 `pixtuoid_core::harness::Drive` (core's dev-only `harness` feature): this
-suite's `conformance.rs`, `pixtuoid/tests/wire_to_pixels.rs`, and the two
+suite's `conformance.rs` and `sources/grok/mod.rs`,
+`pixtuoid/tests/wire_to_pixels.rs`, and the two
 on-demand tools (`examples/decoder_fuzz.rs`,
 `pixtuoid-scene/examples/corpus_check.rs`). `benches/decode_reduce.rs` rides it
 too but SYNTHESIZES its lines — a bench-shaped fixture under `sources/fixtures/`

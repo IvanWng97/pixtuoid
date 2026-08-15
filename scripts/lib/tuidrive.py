@@ -28,7 +28,7 @@ Four things here were each a lost turn before they were code:
 Per-CLI knowledge that does NOT belong here — which flag, which subcommand,
 which mode gates — lives in the caller, because a table of ten CLIs' flags in
 one file drifts silently and a drifted row captures the wrong thing while still
-looking like evidence. See `fixtures/README.md`.
+looking like evidence. The callers are the `capture-*.sh` siblings here.
 """
 
 import fcntl
@@ -53,6 +53,9 @@ GATE = re.compile(
 # bare y/n gate wants the letter.
 MENU = re.compile(rb"1\s*[.)]\s*\S", re.I)
 ANSWERS = [b"y\r", b"\r", b"1\r", b"\x1b[A\r"]
+# One billed turn's ceiling, and how long a TUI gets to paint before we type into it.
+RUN_BUDGET_S = 300
+SETTLE_S = 3
 
 
 def squash(b: bytes) -> bytes:
@@ -70,6 +73,8 @@ def selftest() -> int:
     assert not GATE.search(b"reading NOTE.txt")
     assert MENU.search(b"  1. Yes, continue")
     assert not MENU.search(b"press enter")
+    # A fifth answer must become reachable by adding it, not by also finding the clamp.
+    assert ANSWERS[min(len(ANSWERS) + 5, len(ANSWERS) - 1)] == ANSWERS[-1]
     print("tuidrive selftest: ok")
     return 0
 
@@ -81,11 +86,8 @@ def main() -> int:
         sys.exit('usage: tuidrive.py "<prompt>" <cmd> [args...]  |  --selftest')
     prompt, cmd = sys.argv[1], sys.argv[2:]
     deny_from = int(os.environ["DENY_FROM"]) if os.environ.get("DENY_FROM") else None
-    # The caller (capture-fixture.sh) points this into its private 0700 dir. A
-    # fixed name in shared temp lets two concurrent captures interleave into one
-    # file, and another user can pre-plant a symlink there that `open(…, "wb")`
-    # would follow and truncate — the same reason every e2e tier's socket moved
-    # into a `mktemp -d`.
+    # The recorder points this into its private 0700 dir; a fixed shared-temp
+    # name is both clobberable and symlink-followable.
     log_path = os.environ.get("TUIDRIVE_LOG")
     if log_path:
         log = open(log_path, "wb", buffering=0)
@@ -107,7 +109,8 @@ def main() -> int:
 
     seen = b""  # rolling window: a dialog's text arrives split across reads
     state = "settling"
-    deadline = time.time() + 300
+    deadline = time.time() + RUN_BUDGET_S
+    settle_until = time.time() + SETTLE_S
     next_answer = last_gate = typed_at = last_submit = submits = 0
 
     while time.time() < deadline:
@@ -126,7 +129,7 @@ def main() -> int:
                 if deny_from is not None and next_answer >= deny_from:
                     reply = b"\x1b"
                 else:
-                    reply = b"\r" if MENU.search(seen) else ANSWERS[min(next_answer, 3)]
+                    reply = b"\r" if MENU.search(seen) else ANSWERS[min(next_answer, len(ANSWERS) - 1)]
                 time.sleep(0.8)
                 note(f"gate seen, sending {reply!r}")
                 os.write(fd, reply)
@@ -134,8 +137,8 @@ def main() -> int:
                 last_gate = now
                 seen = b""
                 if state == "settling":
-                    deadline = max(deadline, now + 297)
-        if state == "settling" and now > deadline - 297:
+                    settle_until = now + SETTLE_S
+        if state == "settling" and now > settle_until:
             note("typing the prompt")
             os.write(fd, prompt.encode())
             time.sleep(1.0)

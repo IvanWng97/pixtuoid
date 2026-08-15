@@ -281,9 +281,9 @@ const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 
 /// A source whose id comes from the transcript's PARENT DIR needs the fixture to
 /// reproduce that dir, or the session id silently becomes the SCENARIO NAME. The
-/// README states the rule; this is what makes it fail. Asked of the registry's
-/// own `id_from_path`, so a future parent-dir-keyed source is covered without an
-/// edit here.
+/// README states the rule; this is what makes it fail. The probe catches a
+/// deriver that returns the parent VERBATIM; one that DERIVES from it (omp's
+/// `stem_chain` shape) reads as filename-keyed and is skipped.
 #[test]
 fn a_parent_dir_keyed_transcript_is_nested_under_its_session_id() {
     let root = fixtures_root();

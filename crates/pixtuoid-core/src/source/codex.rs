@@ -273,9 +273,9 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
 /// rollout. A `custom_tool_call` carries `input` — a JS snippet, not JSON args —
 /// and a recorded escalated run on that surface shows no marker anywhere, so
 /// there the gate exists ONLY on the hook wire (`PermissionRequest`). Which
-/// surface a turn takes is model-chosen, so neither is dead: a census of 104
-/// local rollouts found 47 real `require_escalated` calls, and codex 0.147.0's
-/// system prompt still instructs the model to send exactly this parameter.
+/// surface a turn takes is model-chosen, so neither is dead: a local rollout
+/// census found real `require_escalated` calls, and codex 0.147.0's system
+/// prompt still instructs the model to send exactly this parameter.
 fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
     let Some(args_str) = payload
         .and_then(|p| p.get("arguments"))

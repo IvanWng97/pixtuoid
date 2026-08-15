@@ -22,8 +22,8 @@
 //!   `postToolUseFailure` on the same id, and tools INTERLEAVE (a Read and a
 //!   Shell overlap), so the id looks like exactly what the reducer's per-call
 //!   machinery wants. The trap is `Task`: it fires `preToolUse` and NEVER a
-//!   post (capture-verified — the one unpaired id in a delegating run, while
-//!   `subagentStart`/`subagentStop` stay silent). Passing the id through would
+//!   post (capture-verified — every unpaired id in a delegating run is a `Task`,
+//!   while `subagentStart`/`subagentStop` stay silent). Passing the id through would
 //!   satisfy `track_active_tasks`' `Some(tuid)` + `is_task()` arm, insert a
 //!   tuid nothing ever drains, and strand the parent Delegating for the rest of
 //!   the session — `apply_activity_end` re-enters Delegating on every later

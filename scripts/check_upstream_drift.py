@@ -93,14 +93,14 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 # activity a visualizer cares about.
 CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 
-# CC hooks we DELIBERATELY do not register: per-turn/content noise, permission
-# detail already covered by Notification, task/teammate bookkeeping,
-# environment/config plumbing, compaction internals.
+# CC hooks we DELIBERATELY do not register: per-turn/content noise, the DENIAL
+# half of the permission pair (the gate itself, `PermissionRequest`, IS
+# registered), task/teammate bookkeeping, environment/config plumbing,
+# compaction internals.
 CC_KNOWN_OMITTED = {
     "Setup",
     "UserPromptSubmit",
     "UserPromptExpansion",
-    "PermissionRequest",
     "PermissionDenied",
     "PostToolUseFailure",
     "PostToolBatch",
@@ -826,6 +826,12 @@ def read_codex_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/codex.rs", "CODEX_EVENTS")
 
 
+def match_arm_inner_types(block: str, outer: str) -> set[str]:
+    """Every inner `type` an `(outer, …)` arm names, `|` alternatives included."""
+    arms = re.findall(r'\(\s*"' + outer + r'"\s*,\s*((?:"\w+"\s*\|\s*)*"\w+")\s*\)', block)
+    return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
+
+
 def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     """The (event_msg, response_item) inner `type` strings the codex TRANSCRIPT
     decoder matches on. These are registered NOWHERE and the decoder's
@@ -841,18 +847,8 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
             "could not locate the codex `match (outer, inner)` decode block in "
             "source/codex.rs — the transcript decoder was refactored; update the parser."
         )
-    # An arm may name several inner types at once — `("response_item",
-    # "function_call" | "custom_tool_call")` — and reading only the single-literal
-    # form silently drops every alternative, which is the watch going quiet rather
-    # than red.
-    def inner_types(outer: str) -> set[str]:
-        arms = re.findall(
-            r'\(\s*"' + outer + r'"\s*,\s*((?:"\w+"\s*\|\s*)*"\w+")\s*\)', block
-        )
-        return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
-
-    event_msg = inner_types("event_msg")
-    response_item = inner_types("response_item")
+    event_msg = match_arm_inner_types(block, "event_msg")
+    response_item = match_arm_inner_types(block, "response_item")
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "

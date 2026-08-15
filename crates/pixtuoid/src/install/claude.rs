@@ -115,9 +115,6 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
     match cmd {
         None => ShimRef::Unknown,
         Some(c) => {
-            // The Unix form now carries the `PIXTUOID_SOURCE=` prefix every other
-            // source has, so the shared shell-aware reader owns the split; only
-            // the Windows exec form (bare path, no shell) still lands below.
             // Strip the `PIXTUOID_SOURCE=` prefix the Unix form now carries, then
             // reverse the POSIX escaping through the shared helper: a naive
             // `trim_matches('\'')` mangles an embedded `'\''`. A bare `.exe`, an

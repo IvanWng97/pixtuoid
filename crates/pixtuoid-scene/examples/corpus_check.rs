@@ -13,8 +13,8 @@
 //! Usage: `corpus_check <source> [root] [--json]` — plus three listing modes the
 //! shells read instead of keeping their own copy of the roster or of any per-CLI
 //! path: `--roster` (id/prefix/kind/home-env rows), `--root <source>` (the
-//! resolved transcript root), `--list <source> [root]` (the files the WATCHER
-//! would walk), and `--sources` (transcript-bearing ids, for a human).
+//! resolved transcript root), and `--list <source> [root]` (the files the
+//! WATCHER would walk).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -169,14 +169,6 @@ fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.iter().any(|a| a == "--sources") {
-        for name in registry::registered_source_names() {
-            if Drive::transcript(name, "/probe.jsonl").is_some() {
-                println!("{name}");
-            }
-        }
-        return;
-    }
     // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
     // source without a second copy of the roster or of the badge prefixes.
     if args.iter().any(|a| a == "--roster") {
@@ -248,7 +240,7 @@ fn main() {
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     if positional.is_empty() {
         eprintln!(
-            "usage: corpus_check <source> [root] [--json]  |  --sources  |  \
+            "usage: corpus_check <source> [root] [--json]  |  \
              --root <source>  |  --list <source> [root]"
         );
         std::process::exit(2);
