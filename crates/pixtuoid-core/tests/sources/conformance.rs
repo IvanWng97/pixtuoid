@@ -279,11 +279,6 @@ const UNVERIFIED_PROVENANCE: &[&str] = &[
 /// origin stays unprovable.
 const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 
-/// Every scenario declares where its bytes came from, because nothing IN them
-/// separates a capture from a composition — a redacted cwd and an invented one
-/// look alike. A composed fixture pins its author's belief and the decoder then
-/// agrees with it: kimi's shipped four confident per-call ids for a field kimi
-/// never sends.
 /// A source whose id comes from the transcript's PARENT DIR needs the fixture to
 /// reproduce that dir, or the session id silently becomes the SCENARIO NAME. The
 /// README states the rule; this is what makes it fail. Asked of the registry's
@@ -357,6 +352,11 @@ fn every_single_owner_capture_tree_declares_its_provenance() {
     }
 }
 
+/// Every scenario declares where its bytes came from, because nothing IN them
+/// separates a capture from a composition — a redacted cwd and an invented one
+/// look alike. A composed fixture pins its author's belief and the decoder then
+/// agrees with it: kimi's shipped four confident per-call ids for a field kimi
+/// never sends.
 #[test]
 fn every_scenario_declares_its_provenance() {
     let root = fixtures_root();

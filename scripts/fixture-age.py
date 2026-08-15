@@ -99,6 +99,12 @@ def check_metadata() -> int:
         for field in ("cli", "version", "captured"):
             if not str(prov.get(field, "")).strip():
                 bad.append(f"{rel}: recorded fixture has no `{field}`")
+        # A `version` holding the INVOCATION rather than a version reports a
+        # drift of nothing for as long as it sits there — the live instance was
+        # `"grok --permission-mode default"`.
+        version = str(prov.get("version", ""))
+        if version not in ("", "unknown") and not re.search(r"\d", version):
+            bad.append(f"{rel}: `version` carries no version number: {version!r}")
         captured = str(prov.get("captured", ""))
         if captured and captured != "unknown":
             try:

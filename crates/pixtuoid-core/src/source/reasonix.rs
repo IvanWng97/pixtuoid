@@ -235,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn session_start_keys_on_cwd() {
+    fn session_start_falls_back_to_cwd_without_a_session_id() {
         let ev = decode(json!({
             "event": "SessionStart",
             "cwd": "/Users/dev/zirs"
@@ -453,7 +453,7 @@ mod tests {
     }
 
     #[test]
-    fn all_events_for_one_cwd_share_one_agent_id() {
+    fn without_a_session_id_one_cwd_is_still_one_agent() {
         let events = [
             json!({"event": "SessionStart", "cwd": "/Users/dev/p"}),
             json!({"event": "UserPromptSubmit", "cwd": "/Users/dev/p"}),
@@ -474,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_arms_prepend_identity_with_cwd_keyed_session() {
+    fn activity_arms_prepend_identity_with_the_session_key() {
         let payloads = [
             json!({"event": "PreToolUse", "cwd": "/Users/dev/p", "toolName": "bash",
                    "toolArgs": {"command": "ls"}}),
@@ -496,7 +496,10 @@ mod tests {
                 } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "/Users/dev/p"));
                     assert_eq!(source, SOURCE_NAME);
-                    assert_eq!(session_id, "/Users/dev/p", "cwd IS the session key");
+                    assert_eq!(
+                        session_id, "/Users/dev/p",
+                        "no sessionId on the wire, so cwd is the key"
+                    );
                     assert_eq!(
                         cwd.as_deref(),
                         Some(std::path::Path::new("/Users/dev/p")),

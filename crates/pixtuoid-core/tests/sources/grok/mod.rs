@@ -51,12 +51,24 @@ fn transcript() -> Driven {
 
 #[test]
 fn a_blocking_spawn_is_a_task_and_the_parent_goes_delegating() {
-    let d = transcript();
-    assert!(
-        d.reached
-            .contains(&pixtuoid_core::harness::Reach::Delegating),
-        "a blocking spawn must drive the parent through Delegating, reached {:?}",
-        d.reached
+    // Whose Task it is, asserted on the EVENT rather than on `reached` or on the
+    // final slot: `reached` is a union over every live slot (harness.rs says so)
+    // and this run drives two, while the parent's final state is Idle because the
+    // turn completed. The event carries the agent_id, so it answers the half this
+    // name promises — that the PARENT delegated.
+    let parent = AgentId::from_parts("grok", PARENT);
+    let delegator = transcript().events.into_iter().find_map(|e| match e {
+        AgentEvent::ActivityStart {
+            agent_id,
+            detail: Some(ToolDetail::Task),
+            ..
+        } => Some(agent_id),
+        _ => None,
+    });
+    assert_eq!(
+        delegator,
+        Some(parent),
+        "the blocking spawn's Task must belong to the parent, not the child"
     );
 }
 
