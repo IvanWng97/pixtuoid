@@ -48,14 +48,29 @@ agent_env_names() {
     done < <(env)
 }
 
+# A file's BIRTH time, or empty when this host cannot answer. BSD/macOS spells it
+# `stat -f %B`; GNU spells it `stat -c %W` and returns 0 when the filesystem has
+# no birth time. The harvest REFUSES rather than falling back to mtime: mtime is
+# what made it collect 4155 lines of the developer's own live session, since a
+# session in progress is appended to forever and is therefore always newest.
+birth_time() {
+    local t
+    if t="$(stat -f %B "$1" 2>/dev/null)" && [ -n "$t" ]; then
+        printf '%s\n' "$t"
+    elif t="$(stat -c %W "$1" 2>/dev/null)" && [ -n "$t" ] && [ "$t" != 0 ]; then
+        printf '%s\n' "$t"
+    fi
+}
+
 # The transcript this run CREATED: BIRTH time, not mtime. A live agent session is
 # appended to forever and is therefore always the newest by mtime — that harvest
 # once picked up 4155 lines of the developer's own session.
 newest_born_after() {
-    local t="$1"
+    local t="$1" b
     while IFS= read -r f; do
         [ -e "$f" ] || continue
-        printf '%s %s\n' "$(stat -f %B "$f")" "$f"
+        b="$(birth_time "$f")" || true
+        [ -n "$b" ] && printf '%s %s\n' "$b" "$f"
     done | awk -v t="$t" '$1 >= t' | sort -rn | head -1 | cut -d' ' -f2-
 }
 
@@ -87,7 +102,14 @@ if [ "${1:-}" = "--selftest" ]; then
     : >"$td/old"
     sleep 1
     : >"$td/new"
-    t="$(stat -f %B "$td/new")"
+    t="$(birth_time "$td/new")"
+    if [ -z "$t" ]; then
+        echo "  SKIP birth-time selection: this host's stat reports none (the recorder \
+refuses here too, it does not fall back to mtime)"
+        rm -rf "$td"
+        [ "$fail" -eq 0 ] && echo "capture-fixture selftest: ok (birth-time checks skipped)"
+        exit "$fail"
+    fi
     check "picks the file born at/after t" "$(printf '%s\n%s\n' "$td/old" "$td/new" | newest_born_after "$t")" "$td/new"
     check "no candidate is empty, not fatal" "$(printf '%s\n' "$td/old" | newest_born_after "$t")" ""
     check "a lister exiting 3 still reaches the message" "$( (sh -c 'exit 3' || true) | newest_born_after "$t")" ""
@@ -293,7 +315,12 @@ if [ "$kind" = transcript ]; then
     # `--list` is the source's OWN path filter, not a guess: grok writes five
     # jsonl siblings per session and the one-line `rewind_points.jsonl` wins on
     # birth time, while the transcript it actually tails is `updates.jsonl`.
-    born_after="$(stat -f %B "$STARTED")"
+    born_after="$(birth_time "$STARTED")"
+    if [ -z "$born_after" ]; then
+        echo "this host's stat reports no birth time, so the harvest cannot tell a new \
+transcript from a live session's — capture on macOS, or harvest by hand" >&2
+        exit 2
+    fi
     # `|| true` on the pipeline: `--list` exits 3 for "no .jsonl under this root",
     # and under `pipefail` that would kill the script HERE — after the turn was
     # already billed — instead of reaching the message below that says so.
