@@ -252,8 +252,10 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     // The SAME class from the other direction: cursor runs its hook command
     // 4-6x per event, and only the one that goes through a shell keeps the
     // `PIXTUOID_SOURCE=` env prefix its install writes. The rest arrive with no
-    // argv and no stamp, land on the claude-code default above — which CC itself
-    // RELIES on, its Unix command being a bare `pixtuoid-hook` — and then bail on
+    // argv and no stamp, land on the claude-code default above — which every
+    // install written BEFORE this version still relies on, CC's Unix command
+    // having been a bare `pixtuoid-hook` until it gained the same env prefix
+    // every other source uses — and then bail on
     // cursor's camelCase event values, ~21 decode errors per turn (measured).
     // `cursor_version` is the unambiguous fingerprint, and dropping is lossless:
     // the one stamped copy carries the whole arc.
@@ -1857,8 +1859,9 @@ mod tests {
             "the stamped copy carries the arc"
         );
 
-        // CC's own Unix command is a BARE `pixtuoid-hook` with no source at all,
-        // so the unstamped default it relies on must be untouched by this guard.
+        // An install written before CC's command gained its env prefix sends a
+        // bare, unstamped payload, so the default that catches it must be
+        // untouched by this guard.
         let cc = json!({
             "hook_event_name": "PreToolUse",
             "session_id": "cc1",

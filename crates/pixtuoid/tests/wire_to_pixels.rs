@@ -427,9 +427,9 @@ fn openclaw_presence_envelope_renders_a_lobster() {
     let hooks = core_fixtures_root()
         .join("fixtures/openclaw/gateway-lifecycle-recorded/hook-payloads.jsonl");
 
-    // The fixture's last two envelopes are session_end → gateway_stop, which would
-    // leave the daemon Down; stop before them so the asserted scene is a LIVE
-    // gateway.
+    // The recorded fixture ends gateway_stop → session_end (shutdown is what
+    // closes the session), and either would leave the daemon Down; stop before
+    // both so the asserted scene is a LIVE gateway.
     let lines = read_nonblank_lines(&hooks);
     let mut scene = SceneState::uniform(16);
     let now = t0();

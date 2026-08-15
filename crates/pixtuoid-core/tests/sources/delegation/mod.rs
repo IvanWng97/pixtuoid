@@ -1,8 +1,11 @@
 //! The NAME-KEYED delegation family: sources whose subagent dispatch is a tool
 //! literally called `task`. Grouped by capability rather than by CLI, because
-//! the contract under test is one rule shared by all of them — and because each
-//! of these runs is two sprites (the child is its own session), which the
-//! conformance harness's one-AgentId rule cannot hold.
+//! the contract under test is one rule shared by all of them. Where the child is
+//! ANNOUNCED in the parent's own stream (opencode, copilot) the capture is two
+//! sprites and the conformance harness's one-AgentId rule cannot hold it; omp
+//! announces nothing — its child is a sibling transcript the watcher discovers —
+//! so its parent capture is a single agent. The test below asserts that split
+//! rather than assuming it.
 //!
 //! The rule is the point: these sources claim the Task detail by tool NAME and
 //! deliberately NOT by the presence of a `subagent_type` key, so a

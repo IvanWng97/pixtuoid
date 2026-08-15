@@ -133,67 +133,27 @@ hook-only row, `transcript: None`, ships only `hook-payloads.jsonl` instead
 of a transcript). Run `cargo insta review` to accept the generated snapshot.
 No harness edit, no other test code.
 
-## Provenance
+## Where a scenario's own story lives
 
-These were derived from **real** sessions (so the structure — field names,
-nesting, event order — is authentic), then **sanitized**: every identifier and
-value that could be real or personal (UUIDs, `cwd`/paths, timestamps,
-`call_id`/`turn_id`, command output, agent messages) is replaced with a dummy.
-Only the *shape* is load-bearing for decode, so this keeps the test honest while
-committing no real data. UUIDs stay valid (`8-4-4-4-12` hex) and the coalescing
-key is preserved (a fixture's hook `session_id` == its rollout-filename UUID;
-CC's hook `transcript_path` == its transcript via `{{TRANSCRIPT_PATH}}`).
+Each scenario declares itself in its `provenance.json` `note` — that is the
+single place, and it sits beside the bytes it describes. This section used to
+carry a per-scenario catalogue plus one blanket claim that everything here was
+"derived from real sessions, then sanitized"; both are retired. The blanket
+claim was the thing the provenance rule replaced (it could not distinguish a
+capture from a composition, which is the whole problem), and the catalogue
+described four scenarios that no longer exist — a list of directories rots the
+moment one is re-recorded under a better name.
 
-- **`codex/permission-flow/`** — the escalated path: `task_started`,
-  `function_call` with `sandbox_permissions:"require_escalated"` → Waiting,
-  `function_call_output` → resume, `task_complete`. Plus hooks
-  (`UserPromptSubmit`, `PermissionRequest`, `Stop`).
-- **`codex/tool-run/`** — the non-escalated path: a plain `function_call`
-  (no escalation) → working, `function_call_output` → resume, `task_complete`.
-  Hooks: `UserPromptSubmit`, `Stop` (no permission gate).
-- **`claude-code/tool-call/`** — a `Glob` tool_use + its tool_result (attributed
-  to a `code-architect` subagent → `Rename`), with `PreToolUse`/`PostToolUse`
-  hooks. Proves **path-keyed** coalescing.
-- **`reasonix/tool-run/`** — HOOK-ONLY (no transcript): a real session arc —
-  `SessionStart`, `UserPromptSubmit`, a `read_file` and a `bash` tool, an
-  `explore` subagent dispatch (→ `ToolDetail::Task`), `Stop`, `SessionEnd`.
-  Proves **cwd-keyed** coalescing (the only identity Reasonix payloads carry).
-  **Captured from a live Reasonix v1.3.0 session** (Homebrew `esengine/reasonix`,
-  DeepSeek backend) via temporary tee hooks in `~/.reasonix/settings.json`, then
-  sanitized per the provenance bar above: `cwd` normalized to one synthetic path
-  (→ one `AgentId`), verbose/PII fields (`toolResult`, `lastAssistantText`,
-  `turn`) dropped, field names + tool names/args kept verbatim. The
-  `Notification` → Waiting approval-gate arm is NOT in this golden —
-  non-interactive `reasonix run` has no approval gate, so it never fires — that
-  arm is unit-pinned in `source/reasonix.rs` instead (closes #135).
-- **`claude-code/proof-session/`** — the §3 site proof-split timeline: one root
-  session, Read → Edit → Bash over `site/src/components/ElevatorShaft.astro`,
-  self-referentially fixing the elevator-LED-lags-the-statusline desync (its
-  own real bottom-clamp logic — see `Statusline.astro`'s `clampToLastFloorAtBottom`).
-  ALSO read at render time by the `snapshot --proof` site-media renderer
-  (scripts/media.json job `proof`) — its timestamps ARE the clip's beat
-  timings, so retiming this fixture re-times the committed proof.webm. Its
-  visible strings (task phrase, file path, shell command) are pinned disjoint
-  from the statusline ticker's own FALLBACK corpus by
-  `tests/proof_fixture_disjointness.rs` (STATUSLINE-COLLISION handoff,
-  `docs/superpowers/plans/2026-07-05-wb-4-proof.md`) — the two are
-  agent-narration surfaces sharing one viewport at 4F.
-- **`omp/tool-run/`** — captured from a live **omp 16.4.0** `omp -p` run
-  (2026-07-10, the #517 byte-real anchor for `verified_version`), sanitized:
-  the fixed-width `type:"title"` slot, the v3 `session` header,
-  `model_change`/`thinking_level_change` (not sprite-visible), a `bash`
-  toolCall/toolResult round, the duplicate `tool_execution_start` custom
-  entry (deliberately NOT decoded — same tool_use_id would double-count),
-  and the `session_exit` teardown marker (`reason:"dispose"` — the real `-p`
-  teardown reason, vs `"exit command"` interactively).
-- **`omp/ask-round/`** — a real interactive `ask` round (captured 2026-07-05,
-  sanitized; #519): the `ask` toolCall decodes to ActivityStart **then**
-  Waiting (the ellipsize-capped question text), and the answering
-  toolResult's ActivityEnd resolves the Wait via the `gated_before_waiting`
-  binding — the order is the load-bearing contract.
-- **`omp/2026-07-10T18-00-00-000Z_…000001/`** — a real `task`-subagent CHILD
-  transcript (16.4.0): the scenario dir is named as the PARENT session stem
-  because the parent link IS the path nesting (`<parent-stem>/<taskId>.jsonl`)
-  — `omp_id_from_path` keys the chain and the header decode emits a parented
-  SessionStart. Also pins that `session_init` / `developer`-role /
-  `thinking`-block entries decode to nothing.
+Two scenarios carry a fact BEYOND their own decode, so they are named here where
+someone changing the tree will see it:
+
+- **`claude-code/proof-session/`** is read at RENDER time by the `snapshot
+  --proof` site-media renderer (`scripts/media.json` job `proof`) — its
+  timestamps ARE the clip's beat timings, so retiming this fixture re-times the
+  committed `proof.webm`. Its visible strings are pinned disjoint from the
+  statusline ticker's own FALLBACK corpus by `tests/proof_fixture_disjointness.rs`.
+- **`copilot/tool-run/`** is the only fixture carrying a real Windows `cwd` (a
+  path with a space and parens), which makes it the Windows arm of
+  `registry_cwd_extractor_matches_each_sources_real_head_shape`. A macOS capture
+  cannot reproduce it, which is why it stays `unknown` rather than being
+  re-recorded.

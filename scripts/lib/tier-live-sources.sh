@@ -41,8 +41,11 @@ invocation_for() {
     cursor) echo "cursor-agent|-p|" ;;
     hermes) echo "hermes|-z|" ;;
     grok) echo "grok|-p|" ;;
-    # omp and kimi have no entry: neither ships a binary this host can find, so
-    # an invocation here would be invented rather than verified.
+    # Both invocations are the ones their recorded fixtures were captured with
+    # (`fixtures/{kimi,omp}/tool-run*/provenance.json`) — this row is transcribed
+    # from a run that happened, not composed.
+    kimi) echo "kimi|-p|" ;;
+    omp) echo "omp|-p|" ;;
     *) return 1 ;;
     esac
 }

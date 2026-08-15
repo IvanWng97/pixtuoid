@@ -10,8 +10,11 @@
 //! census: decode errors and panics (which ARE bugs, always), how many
 //! transcripts register, how many render, and the provenance spread.
 //!
-//! Usage: `cargo run --release -p pixtuoid-scene --example corpus_check -- \
-//!         <source> <root> [--json]`
+//! Usage: `corpus_check <source> [root] [--json]` — plus three listing modes the
+//! shells read instead of keeping their own copy of the roster or of any per-CLI
+//! path: `--roster` (id/prefix/kind/home-env rows), `--root <source>` (the
+//! resolved transcript root), `--list <source> [root]` (the files the WATCHER
+//! would walk), and `--sources` (transcript-bearing ids, for a human).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -16,12 +16,12 @@
 # ten CLIs' flags would drift silently, and a drifted row captures the wrong
 # thing while still looking like evidence.
 #
-# ⚠ Verify a capture against an INDEPENDENT observer before trusting it. cursor
-#   invokes the pixtuoid hook FOUR times per event while this listener is the
-#   endpoint, and once when its own unrelated debug tee is watching the same run —
-#   an observer effect this recorder has not explained, so cursor's fixtures are
-#   not captured this way. Nothing else shows it (opencode 10 unique of 10 lines;
-#   codewhale's repeats are its minimal envelope, not duplicates).
+# ⚠ A repeated payload is not automatically the recorder's doing. cursor invokes
+#   its hook command several times per event ON ITS OWN — measured against a
+#   wrapper on the shim with no recorder in the loop (`source/cursor.rs`), and
+#   only one copy keeps the `PIXTUOID_SOURCE=` prefix. So a cursor capture is
+#   expected to hold duplicates, and it is still evidence: `cursor/tool-failure`
+#   is recorded through this seam, 29 payloads with 8 stamped.
 #
 # It records at the SHIM'S OUTPUT, by pointing `PIXTUOID_SOCKET` at a listener of
 # our own — the one seam that does not care how the payload reached the shim.
@@ -217,8 +217,7 @@ git -C "$WS" -c user.email=fixture@pixtuoid -c user.name=fixture commit -qm init
 # closes), so a whole payload arrives per accept and cannot interleave with
 # another. THREADED, and that is not an optimization: the shim write-times-out
 # under a watchdog, and a CLI whose hook then fails RETRIES it — a serial
-# listener made cursor fire the same `tool_use_id` four times, which its own
-# unrelated debug tee (one line, same run) proved was the recorder's doing.
+# listener would add its own copies on top of the re-delivery a CLI already does.
 python3 - "$SOCK" "$RAW" <<'PY' &
 import socketserver
 import sys
