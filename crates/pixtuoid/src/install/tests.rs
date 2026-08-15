@@ -1170,6 +1170,11 @@ fn every_target_that_writes_a_config_names_us_in_it() {
     // The invariant `has_hooks`'s unparseable-config fallback rests on: a config we
     // wrote mentions us, so a substring probe answers "is this ours?" when the parse
     // fails. The fixture shim must therefore be named `pixtuoid-hook`, as in prod.
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let oc_home = tempfile::TempDir::new().unwrap();
+    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
     let tmpdir = tempfile::TempDir::new().unwrap();
     let hook = tmpdir.path().join("pixtuoid-hook");
     std::fs::write(&hook, b"#!/bin/sh\n").unwrap();

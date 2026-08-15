@@ -345,6 +345,21 @@ pub(crate) fn install_target(
     // merge is a no-op (heals a deleted plugin file).
     if let Some(make) = t.extra_artifacts {
         for (p, c) in make(&binary)? {
+            // An extra artifact's dir comes from the CLI's own state resolver, not
+            // the `--config` override a test isolates itself with, so a test that
+            // forgets to redirect that resolver writes the developer's REAL plugin
+            // and bakes its TempDir shim path into it. Silent twice over: CI has no
+            // such dir to corrupt, and OpenClaw's plugin swallows spawn errors by
+            // design (invariant #5), so the only symptom is a mascot that stops
+            // appearing — `every_target_that_writes_a_config_names_us_in_it` did
+            // this on every local `just test`.
+            #[cfg(test)]
+            assert!(
+                p.starts_with(std::env::temp_dir()),
+                "a test is about to write {} outside the temp dir — redirect the target's \
+                 own state resolver (OpenClaw: OPENCLAW_STATE_DIR) at a TempDir first",
+                p.display()
+            );
             if let Some(dir) = p.parent() {
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating plugin dir {}", dir.display()))?;
