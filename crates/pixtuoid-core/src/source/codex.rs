@@ -269,13 +269,13 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
 /// "require_escalated"`) is an approval gate → Waiting. A bare `justification`
 /// is intentionally NOT a signal: Codex emits it on auto-approved commands too,
 /// so keying on it would false-Wait.
-/// UNPROVEN on the current wire, and deliberately not guessed: this reads
-/// `arguments`, which only the `function_call` shape has. A modern
-/// `custom_tool_call` carries `input` — a JS snippet, not JSON args — so where
-/// its escalation signal lives is unknown, and a `codex exec --sandbox read-only`
-/// that was refused a write produced no approval item at all to learn from. The
-/// Waiting path therefore rests on the older shape until a capture of a real
-/// escalation says otherwise.
+/// Codex has TWO tool surfaces and only this one marks escalation in the
+/// rollout. A `custom_tool_call` carries `input` — a JS snippet, not JSON args —
+/// and a recorded escalated run on that surface shows no marker anywhere, so
+/// there the gate exists ONLY on the hook wire (`PermissionRequest`). Which
+/// surface a turn takes is model-chosen, so neither is dead: a census of 104
+/// local rollouts found 47 real `require_escalated` calls, and codex 0.147.0's
+/// system prompt still instructs the model to send exactly this parameter.
 fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
     let Some(args_str) = payload
         .and_then(|p| p.get("arguments"))
