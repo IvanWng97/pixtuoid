@@ -23,6 +23,8 @@ tests/
 │   │   └── fixtures/hook-payloads.jsonl   codewhale's OWN data (single-owner; NOT scanned)
 │   ├── cursor/mod.rs         cursor's DELEGATING capture: a child is an independent session,
 │   │   └── fixtures/…        so it is two sprites and cannot live under the one-AgentId rule
+│   ├── grok/mod.rs           grok's DELEGATING capture, both transports of ONE run — same
+│   │   └── fixtures/…        two-sprite reason; only a `background: false` spawn mints Task
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
 │       └── <scenario>/provenance.json   recorded | composed | unknown — REQUIRED, see fixtures/README.md
@@ -58,7 +60,7 @@ tests/
 ## Governing principle
 
 - **Code groups by capability/layer**, not by CLI. Only the subagent-lifecycle
-  tests are single-CLI (`sources/{claude,codex,codewhale,cursor}`); decode/conformance are cross-CLI.
+  tests are single-CLI (`sources/{claude,codex,codewhale,cursor,grok}`); decode/conformance are cross-CLI.
 - **Data scopes to the binary that reads it, sub-grouped by CLI.** A fixture read
   by one test module lives *with that module* at `sources/<module>/fixtures/`;
   fixtures the conformance harness iterates live in `sources/fixtures/<source>/`.
