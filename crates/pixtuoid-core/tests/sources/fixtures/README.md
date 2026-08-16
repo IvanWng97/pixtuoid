@@ -56,8 +56,14 @@ to ride.
 
 Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
 being evidence. PII is not always a field you can drop — cursor's arrives as a `user_email`
-key, kimi's as the owner column inside a captured `ls -la` `tool_output` — so
+key, kimi's as the owner column inside a captured `ls -la` `tool_output`, and
+codex's as a `world_state` inventory of every skill installed on the host — so
 read a capture before committing it rather than trusting a key-name filter.
+The recorder's `warn_on_pii` sees only `$HOME`/`$USER`/`$LOGNAME`, and no size
+heuristic can stand in for the read: legitimate copilot lines run to 39 KB, wider
+than the 27 KB `world_state` dump that had to go. A line the decoder IGNORES is
+the cheap case — drop it and re-run the golden; byte-identical means the
+redaction cost no evidence.
 
 **Capture only what pixtuoid's OWN hook registration receives.** A machine can
 carry other tools' hooks on the same events — a debug tee, another integration —
@@ -181,3 +187,7 @@ argument, not the count. In Rust they are absent by construction: no arrays, no
 pipelines, `Metadata::created()` for birth time, `TempDir` for a private 0700
 sandbox — and the decisions are ordinary `#[test]`s that `just test` already
 runs, rather than a bespoke `--selftest` wired into two gates.
+
+That last clause is only true because `Cargo.toml` declares `[[example]]
+test = true`. Without it an example is not a test target: the tests compile and
+never run, which is how they shipped at first.

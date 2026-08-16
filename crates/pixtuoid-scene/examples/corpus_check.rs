@@ -10,11 +10,9 @@
 //! census: decode errors and panics (which ARE bugs, always), how many
 //! transcripts register, how many render, and the provenance spread.
 //!
-//! Usage: `corpus_check <source> [root] [--json]` — plus three listing modes the
-//! shells read instead of keeping their own copy of the roster or of any per-CLI
-//! path: `--roster` (id/prefix/kind/home-env rows), `--root <source>` (the
-//! resolved transcript root), and `--list <source> [root]` (the files the
-//! WATCHER would walk).
+//! Usage: `corpus_check <source> [root] [--json]`, plus `--roster` — the
+//! id/prefix/kind/home-env/version-probe rows, read by the shells and by
+//! `fixture-age.py` instead of keeping a second copy of the roster.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -196,53 +194,10 @@ fn main() {
         }
         return;
     }
-    // The resolved transcript root for one source, so a capture shell can find the
-    // file a CLI just wrote without a second copy of any per-CLI path. Exit 3 (as
-    // an absent corpus does) when this host cannot resolve one.
-    if let Some(i) = args.iter().position(|a| a == "--root") {
-        let Some(src) = args.get(i + 1) else {
-            eprintln!("usage: corpus_check --root <source>");
-            std::process::exit(2);
-        };
-        match pixtuoid_core::source::resolved_source_root(src) {
-            Some(r) => println!("{}", r.display()),
-            None => std::process::exit(3),
-        }
-        return;
-    }
-    // The transcripts the WATCHER would read, so a capture shell picks the file
-    // the source actually tails rather than the newest one it finds: grok writes
-    // five siblings per session and only `updates.jsonl` is the transcript.
-    if let Some(i) = args.iter().position(|a| a == "--list") {
-        let Some(src) = args.get(i + 1) else {
-            eprintln!("usage: corpus_check --list <source> [root]");
-            std::process::exit(2);
-        };
-        let root = match args.get(i + 2).filter(|a| !a.starts_with("--")) {
-            Some(r) => PathBuf::from(r),
-            None => match pixtuoid_core::source::resolved_source_root(src) {
-                Some(r) => r,
-                None => std::process::exit(3),
-            },
-        };
-        let mut files = Vec::new();
-        walk(src, &root, &mut files);
-        files.sort();
-        for f in &files {
-            println!("{}", f.display());
-        }
-        if files.is_empty() {
-            std::process::exit(3);
-        }
-        return;
-    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
     if positional.is_empty() {
-        eprintln!(
-            "usage: corpus_check <source> [root] [--json]  |  \
-             --root <source>  |  --list <source> [root]"
-        );
+        eprintln!("usage: corpus_check <source> [root] [--json]  |  --roster");
         std::process::exit(2);
     }
     let source = positional[0].as_str();

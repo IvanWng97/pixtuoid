@@ -33,7 +33,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
     io::home_relative_checked(".claude/settings.json")
 }
 
-/// Unix: the bare name, so CC PATH-resolves it and a binary upgrade applies without a
+/// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
+/// carries, so CC PATH-resolves it and a binary upgrade applies without a
 /// rewrite. An explicit `--hook-path` overrides that — the user passed it precisely
 /// because the binary is off-PATH — and is single-quoted, since CC runs shell-form
 /// commands through a shell.

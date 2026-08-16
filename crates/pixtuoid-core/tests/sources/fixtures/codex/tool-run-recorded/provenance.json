@@ -3,5 +3,6 @@
   "cli": "codex",
   "version": "codex-cli 0.147.0",
   "captured": "2026-08-14",
-  "command": "codex exec {prompt}"
+  "command": "codex exec {prompt}",
+  "note": "Redacted: the `world_state` line, 26.8 KB of it, listed 57 installed skill names with their paths plus the host timezone. `world_state` is in codex's ignored set, so dropping the line left the golden snapshot byte-identical — which is how the redaction was shown to cost no evidence."
 }

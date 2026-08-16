@@ -310,6 +310,9 @@ mod recorder {
         let _ = std::fs::remove_dir_all(base);
         std::fs::create_dir_all(&ws)?;
         std::fs::write(ws.join("NOTE.txt"), "pong\n")?;
+        if let Some(seed) = std::env::var_os("CAPTURE_SEED") {
+            copy_tree(Path::new(&seed), &ws)?;
+        }
         for cmd in [
             vec!["init", "-q"],
             vec!["add", "-A"],
@@ -330,6 +333,23 @@ mod recorder {
                 .status();
         }
         Ok(ws)
+    }
+
+    /// A per-CLI ask rule (CC's `.claude/settings.json`, opencode's
+    /// `opencode.json`) is what makes a gate fire at all, so it seeds the
+    /// sandbox rather than the user's own config.
+    fn copy_tree(from: &Path, to: &Path) -> std::io::Result<()> {
+        for entry in std::fs::read_dir(from)? {
+            let entry = entry?;
+            let dest = to.join(entry.file_name());
+            if entry.file_type()?.is_dir() {
+                std::fs::create_dir_all(&dest)?;
+                copy_tree(&entry.path(), &dest)?;
+            } else {
+                std::fs::copy(entry.path(), &dest)?;
+            }
+        }
+        Ok(())
     }
 
     #[cfg(unix)]
@@ -586,6 +606,20 @@ mod recorder {
             let mut seen = 0;
             walk(d.path(), &mut |_| seen += 1);
             assert_eq!(seen, 1, "the symlinked copy must not be walked twice");
+        }
+
+        #[test]
+        fn the_seed_lands_in_the_sandbox_including_a_dotted_config_dir() {
+            let src = tempfile::tempdir().expect("src");
+            let dst = tempfile::tempdir().expect("dst");
+            std::fs::create_dir_all(src.path().join(".claude")).expect("mkdir");
+            std::fs::write(src.path().join(".claude/settings.json"), "{}").expect("write");
+            std::fs::write(src.path().join("opencode.json"), "{}").expect("write");
+
+            copy_tree(src.path(), dst.path()).expect("copy");
+
+            assert!(dst.path().join(".claude/settings.json").is_file());
+            assert!(dst.path().join("opencode.json").is_file());
         }
 
         #[test]
