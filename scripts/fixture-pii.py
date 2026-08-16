@@ -49,11 +49,18 @@ FOREIGN_HOME = re.compile(
 def main() -> int:
     bad: list[str] = []
     scanned = 0
+    # EVERY committed text file, not a suffix allowlist: the tree also holds 34
+    # `.snap` files, which are the DECODED output of these fixtures — PII in a
+    # capture lands there too — plus `.rs` and `.md`. A suffix list is a place to
+    # forget one.
     for f in sorted(FIXTURES.rglob("*")):
-        if not f.is_file() or f.suffix not in (".jsonl", ".json", ".txt"):
+        if not f.is_file():
             continue
         try:
-            body = f.read_text(errors="replace")
+            raw = f.read_bytes()
+            if b"\0" in raw[:8192]:
+                continue  # binary; nothing here is text to leak
+            body = raw.decode("utf-8", errors="replace")
         except OSError as e:
             bad.append(f"{f.relative_to(ROOT)}: unreadable ({e})")
             continue
@@ -75,14 +82,19 @@ def main() -> int:
     for line in bad:
         print(f"  {line}", file=sys.stderr)
     if bad:
+        # The remedy differs by file class, and naming only one of them sends the
+        # reader somewhere that does not exist: a `.rs` test or a `.snap` has no
+        # provenance to annotate.
         print(
-            f"fixture PII: {len(bad)} problem(s) — redact, and say so in that "
-            f"scenario's provenance `note`",
+            f"fixture PII: {len(bad)} problem(s). For a CAPTURE: redact the bytes and "
+            f"say so in that scenario's provenance `note`. For a `.snap`: fix the "
+            f"fixture it decodes and re-accept it. For a `.rs`/`.md`: use a "
+            f"placeholder: /Users/dev, dev@example.com, mcp__example__tool.",
             file=sys.stderr,
         )
         return 1
     # A pass over an empty population says nothing; the corpus is 200+ files.
-    if scanned < 100:
+    if scanned < 140:
         print(f"fixture PII: only scanned {scanned} files — the walk found almost "
               f"nothing, so this pass says nothing about the corpus", file=sys.stderr)
         return 1

@@ -1,3 +1,4 @@
+mod captures;
 mod claude;
 mod codewhale;
 mod codex;

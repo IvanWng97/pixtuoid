@@ -33,8 +33,10 @@ import shutil
 import subprocess
 import sys
 
-ROOT = pathlib.Path(__file__).resolve().parent.parent
-FIXTURES = ROOT / "crates/pixtuoid-core/tests/sources"
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
+from captures import ROOT, SOURCES, every_capture  # noqa: E402
+
+FIXTURES = SOURCES
 ROSTER = ROOT / "target/release/examples/corpus_check"
 
 
@@ -67,20 +69,6 @@ def version_probes() -> dict[str, list[str]]:
 
 
 
-def provenances():
-    for p in sorted(FIXTURES.rglob("provenance.json")):
-        try:
-            prov = json.loads(p.read_text())
-        except (OSError, json.JSONDecodeError) as e:
-            yield p, {"_unparseable": str(e)}
-            continue
-        # Valid JSON that is not an object (`null`, `[]`, a bare number) would
-        # otherwise reach the field reads and crash the whole sweep on one file,
-        # replacing every other file's diagnostic with a traceback.
-        if not isinstance(prov, dict):
-            yield p, {"_unusable": f"top level is {type(prov).__name__}, not an object"}
-            continue
-        yield p, prov
 
 
 def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
@@ -126,27 +114,11 @@ def semverish(s: str) -> str | None:
     return runs[0][2]
 
 
-# Module dirs whose name is NOT the registered source id. Every other
-# single-owner tree's dir name IS its source.
-MODULE_TO_SOURCE = {"claude": "claude-code"}
 
 
-def source_of(prov_dir: pathlib.Path) -> str | None:
-    """The registered source a provenance dir belongs to, from the LAYOUT.
-
-    `fixtures/<source>/<scenario>/` -> the parent; `<module>/fixtures/` -> the
-    module; `<module>/fixtures/<sub>/` -> the sub-dir.
-    """
-    parts = prov_dir.relative_to(FIXTURES).parts
-    if not parts:
-        return None
-    if parts[0] == "fixtures":
-        return parts[1] if len(parts) > 1 else None
-    name = parts[2] if len(parts) > 2 else parts[0]
-    return MODULE_TO_SOURCE.get(name, name)
 
 
-def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
+def cross_check(c) -> list[str]:
     """Falsify what the bytes can answer. A provenance whose every field is
     unverifiable is a claim, not a record — a wholly false one (`cli: codex`,
     `version: 0.0.0-A-LIE`) passed every gate in this tree until this ran.
@@ -158,8 +130,8 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     """
     out = []
     stamps, dates = set(), set()
-    hooks = prov_dir / "hook-payloads.jsonl"
-    if hooks.is_file():
+    hooks = c.hook_payloads()
+    if hooks is not None:
         for line in hooks.read_text(errors="ignore").splitlines():
             if not line.strip():
                 continue
@@ -179,7 +151,7 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     # codex and omp name their transcripts by capture instant, which is the only
     # date evidence in a transcript-only fixture — 12 of these trees ship no hook
     # payloads at all, and the whole function used to return [] for every one.
-    for f in prov_dir.rglob("*.jsonl"):
+    for f in c.wire_files():
         m = re.match(r"(?:rollout-)?(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}", f.name)
         if m:
             dates.add(m.group(1))
@@ -189,10 +161,10 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     # Both layouts do: `fixtures/<source>/<scenario>/` puts it in the parent, and
     # a single-owner `<module>/fixtures/` in the module — the earlier "not the
     # source id for all of them" was true of exactly ONE module, `claude`.
-    elif len(stamps) == 1 and (expect := source_of(prov_dir)):
+    elif len(stamps) == 1 and (expect := c.source):
         if (only := next(iter(stamps))) != expect:
             out.append(f"payloads are stamped `{only}` but this tree is `{expect}`")
-    captured = str(prov.get("captured", ""))
+    captured = c.field("captured")
     if dates and captured not in ("", "unknown") and captured not in dates:
         out.append(
             f"`captured` {captured} contradicts the shim stamps in the bytes "
@@ -221,15 +193,12 @@ def check_metadata() -> int:
     """The half that runs everywhere: the report's inputs must exist and parse."""
     bad = []
     seen = 0
-    for p, prov in provenances():
-        rel = p.relative_to(ROOT)
-        if "_unparseable" in prov:
-            bad.append(f"{rel}: not valid JSON ({prov['_unparseable']})")
+    for c in every_capture():
+        rel, prov = c.rel, c.provenance
+        if c.unusable:
+            bad.append(f"{rel}: {c.unusable}")
             continue
-        if "_unusable" in prov:
-            bad.append(f"{rel}: {prov['_unusable']}")
-            continue
-        origin = prov.get("origin")
+        origin = c.origin
         # A single field switched the entire check off: an absent or misspelled
         # `origin` fell through to `continue` and every other field went
         # unvalidated. The Rust schema gate closes this for the conformance tree
@@ -257,7 +226,7 @@ def check_metadata() -> int:
                 dt.date.fromisoformat(captured)
             except ValueError:
                 bad.append(f"{rel}: `captured` is not an ISO date: {captured!r}")
-        for problem in cross_check(p.parent, prov):
+        for problem in cross_check(c):
             bad.append(f"{rel}: {problem}")
     for line in bad:
         print(f"  {line}", file=sys.stderr)
@@ -287,12 +256,12 @@ def report(max_age_days: int) -> int:
     stale = []
     unchecked: list[tuple[str, str]] = []
     rows = []
-    for p, prov in provenances():
-        if prov.get("origin") != "recorded":
+    for c in every_capture():
+        if not c.is_recorded:
             continue
-        rel = p.parent.relative_to(FIXTURES)
-        cli, pinned = prov.get("cli", "?"), str(prov.get("version", "unknown"))
-        captured = str(prov.get("captured", "unknown"))
+        rel = c.dir.relative_to(FIXTURES)
+        cli, pinned = c.field("cli") or "?", c.field("version") or "unknown"
+        captured = c.field("captured") or "unknown"
         age = "?"
         if captured != "unknown":
             try:
