@@ -1,6 +1,6 @@
 //! THE enumeration of committed captures, and the rules every capture obeys.
 //!
-//! There used to be four walks of this tree with three different populations
+//! There used to be several walks of this tree with three different populations
 //! (34 / 42 / 24), so each rule landed on whichever subset its author happened
 //! to pick. That is one root cause behind a finding class that recurred across
 //! four review rounds — "the fix landed on half the population": `cli` reached 34
@@ -244,6 +244,45 @@ fn the_walk_sees_every_provenance_on_disk() {
         "the layout names {walked} captures but {on_disk} provenance.json files exist — \
          a file outside every layout shape is one no rule applies to"
     );
+    // Provenance counting alone cannot see an orphan that declares NOTHING: a
+    // `.jsonl` dropped straight into `fixtures/<source>/`, or a whole unregistered
+    // `fixtures/<name>/` dir, contributes no provenance to either side and the
+    // suite stays green over bytes no rule reads. So account for the WIRE files
+    // too — every one on disk must belong to a capture the walk returned.
+    let mut wire_on_disk: BTreeSet<PathBuf> = BTreeSet::new();
+    fn wire(dir: &Path, out: &mut BTreeSet<PathBuf>) {
+        for e in read_dir_or_panic(dir) {
+            let p = e.path();
+            if p.is_dir() {
+                wire(&p, out);
+            } else if p.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                out.insert(p);
+            }
+        }
+    }
+    wire(&sources_root(), &mut wire_on_disk);
+    let claimed: BTreeSet<PathBuf> = every_capture()
+        .iter()
+        .flat_map(|c| {
+            let mut fs = transcripts_in(&c.dir);
+            fs.extend(c.hook_payloads());
+            fs
+        })
+        .collect();
+    let orphans: Vec<String> = wire_on_disk
+        .difference(&claimed)
+        .map(|p| {
+            p.strip_prefix(sources_root())
+                .unwrap_or(p)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "wire bytes no capture claims, so nothing decodes or scans them:\n  {}",
+        orphans.join("\n  ")
+    );
     // DERIVED, not hand-picked. Three siblings of this floor were three
     // hand-picked constants for one idea (20 vs 37, 40 vs 42, 140 vs 146) — two of
     // them one routine fixture cleanup away from firing and blaming the walk. What
@@ -295,7 +334,7 @@ const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 const NO_WIRE_EVIDENCE_YET: &[&str] = &[];
 
 /// `provenance.schema.json` — the ONE statement of what each origin requires,
-/// read by this gate, `fixture-age.py --check-metadata`, and the README table.
+/// read by this gate and the README table.
 struct ProvenanceSchema(serde_json::Value);
 
 impl ProvenanceSchema {
@@ -477,7 +516,7 @@ fn banner_version(line: &str) -> Option<&str> {
 /// rewrite gets wrong — see the loop.
 #[test]
 fn banner_version_matches_doctors_documented_cases() {
-    for (banner, want) in [
+    let cases = [
         ("Built 2026.06.04 — v1.2.3", Some("1.2.3")),
         ("2026.06.04", Some("2026.06.04")),
         ("codex-cli 0.147.0", Some("0.147.0")),
@@ -489,15 +528,29 @@ fn banner_version_matches_doctors_documented_cases() {
         // The shape that caught the mirror drifting: doctor keeps a trailing-dot
         // run and filters empty parts after, so this is a version to both.
         ("2. ", Some("2.")),
-    ] {
+        // A major no `u64` holds: doctor's `parse::<u64>()` fails and SKIPS the
+        // run, so a banner offering only that one has no version at all.
+        ("tool 99999999999999999999.1.0", None),
+    ];
+    for (banner, want) in cases {
         assert_eq!(banner_version(banner), want, "{banner:?}");
     }
-    let doctor = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixtuoid/src/doctor.rs");
-    let body = std::fs::read_to_string(&doctor).expect("doctor.rs");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let body = std::fs::read_to_string(root.join("crates/pixtuoid/src/doctor.rs")).expect("doctor");
     assert!(
         body.contains(&format!("IMPLAUSIBLE_MAJOR: u64 = {IMPLAUSIBLE_MAJOR};")),
         "doctor.rs's IMPLAUSIBLE_MAJOR drifted from this mirror"
     );
+    // The Python mirror cannot be EXECUTED from here — a cross-runtime spawn is
+    // what reddened the Windows jobs — but its case table can be pinned to this
+    // one by reading it, which is where the two last diverged.
+    let py = std::fs::read_to_string(root.join("scripts/fixture-age.py")).expect("fixture-age.py");
+    for (banner, _) in cases {
+        assert!(
+            py.contains(&format!("{banner:?}")),
+            "fixture-age.py's selftest is missing this mirror's case {banner:?}"
+        );
+    }
 }
 
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
@@ -545,7 +598,7 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         // used when a source has nothing dated.
         let mut dated: Vec<&(String, String)> = versions
             .iter()
-            .filter(|(when, _)| when.len() == 10 && when.starts_with("20"))
+            .filter(|(when, _)| is_iso_date(when))
             .collect();
         dated.sort();
         // No all-undated fallback: it was unreachable (every version-bearing
@@ -584,7 +637,7 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
     // Keyed off `sources_root()`, not `fixtures_root()`: the `?` on the narrower
     // prefix silently dropped all 7 single-owner captures INSIDE a rule whose
     // signature says "every capture" — a subset created by a path operation is
-    // harder to see than the six walks this file replaced.
+    // harder to see than the separate walks this file replaced.
     let unknown: BTreeSet<String> = captures
         .iter()
         .filter(|c| c.origin() == "unknown")
@@ -868,16 +921,34 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
 /// `tool_id_key` picks the JSON key a per-call id is read from, and its own doc
 /// names the danger: reading the wrong name is SILENT — every kimi tool call
 /// decoded to `None` for the whole source's life. The compiler forces a CHOICE
-/// (11 rows set it) and nothing forced the right one: the conformance snapshots
+/// and nothing forced the right one: the conformance snapshots
 /// catch a change to an EXISTING source, but a NEW source's snapshot is generated
 /// from whatever key its author copied and accepted at `cargo insta review`.
 ///
 /// The captures answer it directly: whatever key a real payload carries its tool
 /// id under IS that source's key.
+///
+/// A source is exempt only by NAME here, never by a property the test infers: a
+/// `custom` decoder that claims every payload makes the key inert, but "claims
+/// every payload" is the row author's intent, not something the row states.
+const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
+    // `// inert: custom claims all` in their registry row — the shared arms that
+    // read `tool_id_key` never run, so no capture can exercise it.
+    "codewhale",
+    "grok",
+    "hermes",
+    "opencode",
+    "reasonix",
+    // LIVE (`custom: None`) and simply unexercised: a real hook spec with no
+    // install target, so nothing can send us one. The only entry here a capture
+    // would remove.
+    "antigravity",
+];
+
 #[test]
 fn each_sources_tool_id_key_is_the_one_its_captures_carry() {
     const KEYS: &[&str] = &["tool_use_id", "tool_call_id"];
-    let mut checked = 0usize;
+    let mut proven: BTreeSet<String> = BTreeSet::new();
     for c in every_capture() {
         let Some(hooks) = c.hook_payloads() else {
             continue;
@@ -907,13 +978,28 @@ fn each_sources_tool_id_key_is_the_one_its_captures_carry() {
                 );
             }
             if v.get(want).is_some() {
-                checked += 1;
+                proven.insert(c.source.clone());
             }
         }
     }
+    let mut wrong: Vec<String> = Vec::new();
+    for name in registry::registered_source_names() {
+        let Some(d) = registry::descriptor_for(name) else {
+            continue;
+        };
+        if d.hook().is_none() {
+            continue;
+        }
+        match (proven.contains(name), TOOL_ID_KEY_UNPROVEN.contains(&name)) {
+            (false, false) => wrong.push(format!("{name}: add a capture or roster it")),
+            (true, true) => wrong.push(format!("{name}: proven — drop it from the roster")),
+            _ => {}
+        }
+    }
     assert!(
-        checked > 0,
-        "no captured payload carried a tool id under its source's registered key, \
-         so this proved nothing — the walk or the key vocabulary moved"
+        wrong.is_empty(),
+        "a hook row's tool_id_key is proven by real bytes or it names why it cannot \
+         be, never both and never neither:\n  {}",
+        wrong.join("\n  ")
     );
 }

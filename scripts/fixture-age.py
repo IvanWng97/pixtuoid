@@ -15,13 +15,11 @@ Two axes, in order of sharpness:
 2. **Age** — a recorded fixture older than `--max-age-days`.
 
 Advisory by design, exit 3 for "candidates found" (the `corpus-all` convention:
-a stale fixture is a re-capture candidate, not a defect). `--check-metadata` is
-the half that runs everywhere and DOES fail: it asserts the fields this report
-reads are present and parseable, so the data the advisory depends on cannot rot
-into uselessness.
+a stale fixture is a re-capture candidate, not a defect). The capture-tree RULES
+are not advisory and are not here — they are Rust tests in
+`tests/sources/captures.rs`, so they ride `just test` on all three platforms.
 
     scripts/fixture-age.py                     # the report
-    scripts/fixture-age.py --check-metadata    # the hard half (CI-safe)
 """
 
 import argparse
@@ -94,9 +92,10 @@ def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
 
 # A dotted-run major at or above this looks like a YEAR/date token, not a semver
 # major. MIRRORS `doctor::parse_version`'s const of the same name — the pair is
-# pinned by this file's `selftest()`, which `--check-metadata` runs, because the two
-# compare the SAME `--version` banners across a language boundary.
+# pinned by this file's `selftest()`, because the two compare the SAME
+# `--version` banners across a language boundary.
 IMPLAUSIBLE_MAJOR = 1000
+U64_MAX = 2**64 - 1
 
 def semverish(s: str) -> str | None:
     """The version in a `--version` banner, by `doctor::parse_version`'s rule.
@@ -110,8 +109,13 @@ def semverish(s: str) -> str | None:
         if "." not in run:
             continue
         major = int(run.split(".")[0])
+        # Both mirror `parse_version`'s `u64` parse, which SKIPS a run it cannot
+        # hold, and its raw-run return. Trimming trailing dots here is what made
+        # this half read `2. ` as `2` while the other two read `2.`.
+        if major > U64_MAX:
+            continue
         v_prefixed = m.start() > 0 and s[m.start() - 1] in "vV"
-        runs.append((v_prefixed, major, run.rstrip(".")))
+        runs.append((v_prefixed, major, run))
     if not runs:
         return None
     for vp, _, run in runs:
@@ -181,8 +185,9 @@ def report(max_age_days: int) -> int:
     return 0
 
 def selftest() -> int:
-    """The pure logic this script's two gates ride on, with the parser's own
-    documented cases. Runs inside `--check-metadata`, so it cannot rot unrun."""
+    """The pure logic this script's report rides on, with the parser's own
+    documented cases. `main()` runs it before every report and short-circuits on
+    failure, so it cannot rot unrun."""
     bad = []
     # The FIRST case is the one the naive `\d+\.\d+` form gets wrong, and is
     # verbatim the banner `doctor::parse_version`'s doc names.
@@ -195,6 +200,8 @@ def selftest() -> int:
         ("2026.08.11-e8db854", "2026.08.11"),
         ("omp/17.3.4", "17.3.4"),
         ("no version here", None),
+        ("2. ", "2."),
+        ("tool 99999999999999999999.1.0", None),
     ]:
         got = semverish(banner)
         if got != want:

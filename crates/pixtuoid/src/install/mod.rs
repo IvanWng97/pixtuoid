@@ -136,7 +136,9 @@ pub(crate) fn verify_target(
     //
     // INVARIANT (#387): a NEW code-shipping path added to `install_target` MUST gain
     // a matching check here, or it ships the silent-dead class for a 3rd
-    // code-artifact target.
+    // code-artifact target. Where the artifact IS the target's own config file it
+    // has no `extra_artifacts` to ride this loop, so the check belongs in that
+    // target's `verify_schema` instead — opencode's plugin is the one such shape.
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
@@ -151,11 +153,8 @@ pub(crate) fn verify_target(
                     if !intended.contains(verify::BAKED_HOOK_MARKER) {
                         continue;
                     }
-                    match io::read_config(&p)
-                        .ok()
-                        .as_deref()
-                        .and_then(verify::baked_hook_path)
-                    {
+                    let installed = io::read_config(&p).unwrap_or_default();
+                    match verify::baked_hook_path(&installed) {
                         Some(baked) => {
                             check_shim_binary(&baked, &mut issues);
                             // A config-shaped target names the EVENTS an old
@@ -166,15 +165,13 @@ pub(crate) fn verify_target(
                             // connected with forever and doctor says fine.
                             // Compared modulo the baked path, which is the one
                             // line that legitimately differs from `intended`.
-                            if let Ok(installed) = io::read_config(&p) {
-                                if strip_baked_line(&installed) != strip_baked_line(&intended) {
-                                    issues.push(format!(
-                                        "{} differs from the plugin this pixtuoid ships — it \
-                                         predates an upgrade, so anything added since is not \
-                                         forwarded. Reconnect the source to refresh it.",
-                                        verify::display_safe(&p)
-                                    ));
-                                }
+                            if strip_baked_line(&installed) != strip_baked_line(&intended) {
+                                issues.push(format!(
+                                    "{} differs from the plugin this pixtuoid ships — it \
+                                     predates an upgrade, so anything added since is not \
+                                     forwarded. Reconnect the source to refresh it.",
+                                    verify::display_safe(&p)
+                                ));
                             }
                         }
                         None => notes.push(format!(

@@ -184,6 +184,14 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         // atexit. Mapping it to SessionEnd walked the agent out of the office at
         // every turn: `approval-recorded` is ONE session with TWO of these and a
         // tool call 5.9 s after the first, past the 4.5 s exit grace.
+        // THE session end, as `on_session_end` is not: `lifecycle.py::finalize_session`
+        // hard-closes the Relay conversation under the SAME `session_id` it sends
+        // us, so the id in the payload is the one being terminated. Its sibling
+        // `on_session_reset` is deliberately NOT here — see the omit ledger.
+        "on_session_finalize" => Ok(vec![AgentEvent::SessionEnd {
+            agent_id,
+            as_child: false,
+        }]),
         "on_session_end" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,

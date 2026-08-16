@@ -151,6 +151,7 @@ jobs:
       # already rides `just test` in windows-test, macos-test and coverage —
       # three platforms instead of this job's one, and no toolchain in a lint job.
       - run: just fixture-pii
+      - run: just fixture-pii-selftest
 
   msrv:
     name: msrv

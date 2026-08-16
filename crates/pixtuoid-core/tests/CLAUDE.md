@@ -9,12 +9,13 @@ is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
 tests/
 ├── sources/main.rs           the source/decode layer (1 binary)
 │   ├── captures.rs          THE walk (`every_capture()`) + every provenance RULE.
-│   │                         One enumeration per language: six walks with three
+│   │                         ONE enumeration, no mirror: separate walks with three
 │   │                         populations is why "the fix landed on half the
-│   │                         population" recurred across four review rounds. Its
-│   │                         Python twin is `scripts/lib/captures.py`, pinned by
-│   │                         `the_two_capture_walks_agree` (unix-only — the gates
-│   │                         that drive the Python half run in ubuntu `hygiene`)
+│   │                         population" recurred across four review rounds, and a
+│   │                         Python twin of the walk was a second copy of the same
+│   │                         hazard. The rules are Rust so they ride `just test` on
+│   │                         all three platforms; `fixture-age.py` keeps only the
+│   │                         advisory age report
 │   ├── decode/mod.rs         cross-CLI decoder unit tests
 │   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (NOT a capture — hand-built
 │   │                         decoder inputs, so `capture_dirs()` skips `decode/`)

@@ -290,7 +290,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -320,6 +320,7 @@ lint:
     run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
+    run piiself just fixture-pii-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -1212,7 +1213,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -1411,7 +1412,8 @@ tuidrive-selftest:
 # fixtures/provenance.schema.json requires, and a recorded one's claims are
 # falsified by its own bytes. They are RUST TESTS (`tests/sources/captures.rs`)
 # and so already ride `just test` on all three platforms; this recipe is the
-# named entry point for `lint` and for a human who wants just this answer.
+# named entry point for a human who wants only this answer. `lint` no longer
+# runs it — `just test` does, on all three.
 #
 # They were Python until #929. Moving them deleted the mirror walk that half had
 # to keep in step with the Rust one, and with it a cross-runtime spawn that would
@@ -1442,6 +1444,63 @@ fixture-pii:
     tree=crates/pixtuoid-core/tests/sources
     gitleaks dir "$tree" -c .gitleaks.toml          --no-banner --redact
     gitleaks dir "$tree" -c .gitleaks-identity.toml --no-banner --redact
+
+# Prove both configs can FAIL, and that neither fires on the paths a fixture or a
+# CI-path assertion legitimately carries. The direction that matters is "must
+# fire": an identity rule moved into `.gitleaks.toml` is silently waived there by
+# the default global allowlist, and `fixture-pii` would still exit 0 — the exact
+# half-dead state this pair was split to prevent. Credential probes are assembled
+# at RUNTIME so no token-shaped literal is ever committed.
+[group('meta')]
+[doc('Prove the fixture-pii configs red on a leak and green on a legitimate path')]
+fixture-pii-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+    mkdir -p "$d/probe" "$d/quiet"
+    # ONE probe per file, and the assertion is the exact SET of files each config
+    # reports — not "did it find something". A config whose rules are half dead
+    # still fires on its surviving rule, so an aggregate check greens on the very
+    # state this exists to catch.
+    printf '/home/alice\n'          > "$d/probe/identity-home.txt"
+    printf '/Users/bob/notes.txt\n' > "$d/probe/identity-users.txt"
+    # A username that STARTS with a placeholder token, and the Windows separator:
+    # both sailed through the first form of this rule.
+    printf '/Users/dev-ops\n'  > "$d/probe/identity-prefix.txt"
+    printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
+    printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
+    printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"
+    # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
+    # allowlist waives AWS's own documentation key, so that one proves nothing.
+    printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
+    printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
+        > "$d/quiet/identity.txt"
+    printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
+    printf 'msg_%s\n%s\n' "0123456789abcdefghij" "20260815_120000_a1b2c3" > "$d/quiet/cred.txt"
+    fired() {
+        gitleaks dir "$2" -c "$1" --no-banner --redact --report-format json \
+            --report-path "$d/out.json" >/dev/null 2>&1 || true
+        jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
+    }
+    fail=0
+    # The credential config does NOT own the identity class — its default global
+    # allowlist waives filesystem-shaped strings, which is why the pair is split.
+    for spec in ".gitleaks.toml=cred-aws.txt" \
+                ".gitleaks-identity.toml=identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+        cfg=${spec%%=*}; want=${spec#*=}
+        got=$(fired "$cfg" "$d/probe")
+        if [ "$got" != "$want" ]; then
+            echo "fixture-pii-selftest: FAIL — $cfg reported [$got], want [$want]" >&2
+            fail=1
+        fi
+        got=$(fired "$cfg" "$d/quiet")
+        if [ -n "$got" ]; then
+            echo "fixture-pii-selftest: FAIL — $cfg fired on legitimate paths [$got]" >&2
+            fail=1
+        fi
+    done
+    [ "$fail" -eq 0 ] || exit 1
+    echo "fixture-pii-selftest: OK (each rule reds on its own probe, green on legitimate paths)"
 
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these

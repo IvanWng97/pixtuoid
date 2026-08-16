@@ -466,7 +466,11 @@ mod recorder {
     /// Identity/inventory keys whose VALUES are the capturer's, not the wire's.
     /// `user_email` alone was the first cut and it saw none of the MCP-server and
     /// skill roster that shipped in nine fixtures — a different namespace, same
-    /// class. Shared with `just fixture-pii`, which re-scans the COMMITTED tree.
+    /// class. `just fixture-pii` re-scans the committed tree for the same class
+    /// but NOT from this list: as gitleaks rules these KEYS fire on every one of
+    /// the tree's own `dev@example.com` redactions, so that pass matches the
+    /// VALUE shapes instead. A key here with no value shape (`obsidian`,
+    /// `account_id`) is refused only at capture time.
     const PII_MARKERS: &[&str] = &[
         "user_email",
         "\"email\"",

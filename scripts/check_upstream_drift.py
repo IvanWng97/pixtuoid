@@ -140,6 +140,18 @@ LEDGERED_BUT_DECODABLE = {
 # The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
 # a value it is only observing), and Kanban/gateway bookkeeping — none of them a
 # lifecycle signal a visualizer renders.
+#
+# `on_session_finalize` was here under that same sentence until #929, and none of
+# those four buckets described it: it is the SESSION end, which is a lifecycle
+# signal a visualizer very much renders. The omission was self-sealing — a shell
+# hook fires only if registered, so no capture could ever show one while it sat
+# on this list. Registered now.
+#
+# Its sibling `on_session_reset` STAYS omitted, and not as noise: it fires AFTER
+# the rotation and carries the NEW session id (`slash_commands.py` sends
+# `session_id=_new_sid` under the comment "new session guaranteed to exist"), so
+# decoding it as an end would walk out a session that just started. `/new` fires
+# `on_session_finalize` for the outgoing id first, which is the one we want.
 # Registered hermes events for which upstream treating them as BLOCKING would let
 # our silent exit 0 ANSWER a decision rather than merely observe one. Only the
 # approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
@@ -147,11 +159,10 @@ LEDGERED_BUT_DECODABLE = {
 HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
 
 HERMES_KNOWN_OMITTED = {
+    "on_session_reset",
     "subagent_start",
     "subagent_stop",
     "post_approval_response",
-    "on_session_finalize",
-    "on_session_reset",
     "on_interim_message",
     "on_stream_start",
     "on_stream_delta",

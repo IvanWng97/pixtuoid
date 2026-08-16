@@ -286,8 +286,8 @@ Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_dri
 (wire-format drift); `just fixture-age` (which RECORDED fixtures pin a CLI version that
 has since moved — LOCAL-only, because CI has none of these CLIs installed to compare
 against; exit 3 = re-capture candidates, and it reports a third lane for the ones it
-could not compare at all rather than counting them as fresh — its `--check-metadata`
-report is advisory; the capture-tree RULES are not — see `just fixture-metadata` and `just fixture-pii` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
+could not compare at all rather than counting them as fresh — the report is
+advisory; the capture-tree RULES are not — see `just fixture-metadata` and `just fixture-pii` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —
@@ -450,7 +450,7 @@ you:
    — label prefix (2 chars), the line decoder, hook keying (`IdKey` + an
    optional custom hook decoder), `tool_id_key` (the JSON key the per-call id
    arrives under — verify it against a CAPTURED tool call rather than copying a
-   neighbour: 10 of 11 rows are `ToolUse`, and kimi's `ToolCall` cost a whole
+   neighbour: `ToolUse` is the common case, and kimi's `ToolCall` cost a whole
    source's tool ids before a capture showed it; pinned by
    `each_sources_tool_id_key_is_the_one_its_captures_carry`), truthful
    capability flags (`has_exit_signal`,

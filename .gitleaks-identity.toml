@@ -27,9 +27,33 @@ regex = '''mcp__[A-Za-z0-9_-]+'''
   regexes = ['''mcp__example[A-Za-z0-9_-]*''']
 
 [[rules]]
+id = "pixtuoid-recorder-email"
+description = "An email address that is not a bot or placeholder"
+# Matches the VALUE, not the key. A `user_email`/`account_id` KEY rule fires 54
+# times on this tree's own legitimately-redacted `dev@example.com`, which is why
+# the recorder's key markers do not survive as gitleaks rules — the refusal at
+# capture time still uses them, this pass re-checks the class by its shape.
+regex = '''[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'''
+  [[rules.allowlists]]
+  regexTarget = "match"
+  regexes = [
+    '''@(?:users\.)?noreply\.github\.com$''',
+    '''@example\.''',
+    '''@localhost$''',
+  ]
+
+[[rules]]
+id = "pixtuoid-recorder-bearer"
+description = "A bearer credential in a captured header"
+regex = '''Bearer\s+[A-Za-z0-9._~+/=-]{20,}'''
+
+[[rules]]
 id = "pixtuoid-foreign-home"
 description = "A home path outside the /Users/dev redaction placeholder"
-regex = '''/(?:Users|home)/[A-Za-z0-9._-]+'''
+# Both separators: the one capture carrying a real Windows `cwd` cannot be
+# re-recorded (the recorder is Unix-only), so a forward-slash-only rule is blind
+# to exactly the tree that can never be regenerated.
+regex = '''(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)[A-Za-z0-9._-]+'''
   [[rules.allowlists]]
   regexTarget = "match"
   # `dev` is this repo's declared redaction placeholder. The rest name no person:
@@ -37,6 +61,12 @@ regex = '''/(?:Users|home)/[A-Za-z0-9._-]+'''
   # devcontainers, plus `linuxbrew` and macOS's `Shared`. Without them a fixture
   # or a `.rs` path assertion carrying an ordinary CI path cannot be committed,
   # and the remedy text would tell its author to break a Linux-path assertion.
+  #
+  # ANCHORED, and the trailing `[._-]*` is not decoration: `.` and `-` are inside
+  # the rule's own class, so a bare `\b` ends the match at the first one and
+  # waives `/Users/dev-ops` and `/Users/first.last` — the ordinary shape on
+  # directory-bound macOS. The run is what keeps the nine provenance notes that
+  # end a sentence with "/Users/dev." passing.
   regexes = [
-    '''/(?:Users|home)/(?:dev|me|user|you|test|runner|ubuntu|vscode|linuxbrew|Shared)\b''',
+    '''^(?i)(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)(?:dev|me|user|you|test|runner|ubuntu|vscode|linuxbrew|Shared)[._-]*$''',
   ]

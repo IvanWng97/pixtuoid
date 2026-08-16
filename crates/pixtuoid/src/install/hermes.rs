@@ -38,6 +38,11 @@ const HERMES_EVENTS: &[&str] = &[
     "pre_approval_request",
     "post_tool_call",
     "on_session_end",
+    // The SESSION end that `on_session_end` turned out not to be (that one fires
+    // per TURN). The omission was self-sealing: a shell hook fires only if
+    // registered, so no capture could ever have shown us one while it sat on the
+    // omit list.
+    "on_session_finalize",
 ];
 
 /// The shim returns within its 200ms send bound, so 5s is generous headroom (Hermes
@@ -471,6 +476,7 @@ mod tests {
                 "on_session_start",
                 "pre_tool_call",
                 "pre_approval_request",
+                "on_session_finalize",
                 "post_tool_call",
                 "on_session_end",
             ]),

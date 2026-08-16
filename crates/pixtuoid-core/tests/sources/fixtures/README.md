@@ -34,10 +34,10 @@ tell an edited capture from an untouched one, which is the distinction the whole
 mechanism exists to make.
 
 The table above is not the schema — [`provenance.schema.json`](provenance.schema.json)
-is, and the three readers (this table, `every_capture_declares_a_valid_origin_with_its_required_fields`,
-`fixture-age.py --check-metadata`) all read it. They each carried their own copy
-until #929, and the Python one — the only gate over the single-owner trees — was
-already missing `command`.
+is, and both readers (this table and
+`every_capture_declares_a_valid_origin_with_its_required_fields`) read it. They
+each carried their own copy until #929, and the one that owned the single-owner
+trees was already missing `command`.
 
 `every_capture_declares_a_valid_origin_with_its_required_fields` enforces the schema, and its
 `NO_WIRE_EVIDENCE_YET` list — the hook-only sources with no recorded scenario at
