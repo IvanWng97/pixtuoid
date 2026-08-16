@@ -1309,9 +1309,19 @@ def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
     version of this gate missed: it checked the ledgers against what we REGISTER,
     which is empty by construction, while the incident was a ledgered name our
     DECODER had an arm for and we never received."""
-    src = (REPO_ROOT / "crates/pixtuoid-core/src/source/decoder.rs").read_text()
-    arms = set(re.findall(r'^\s*"([A-Za-z]+)"\s*(?:\||=>)', src, re.M))
-    check(len(arms) > 5, f"the decoder-arm reader found {len(arms)} arms; it went stale")
+    # EVERY source file, not just the shared arms, and a name shape that admits
+    # snake_case: `[A-Za-z]+` over `decoder.rs` alone saw only the 11 CamelCase
+    # CC-shaped arms, so this gate was structurally blind to the six sources
+    # whose events are snake_case — `pre_approval_request` in a ledger passed it.
+    arms: set[str] = set()
+    src_dir = REPO_ROOT / "crates/pixtuoid-core/src/source"
+    for f in sorted(src_dir.rglob("*.rs")):
+        arms |= set(
+            re.findall(r'^\s*"([A-Za-z][A-Za-z0-9_.]*)"\s*(?:\||=>)', f.read_text(), re.M)
+        )
+    check(len(arms) > 30, f"the decoder-arm reader found {len(arms)} arms; it went stale")
+    for shape in ("PreToolUse", "pre_tool_call", "session.start"):
+        check(shape in arms, f"the arm reader must see the {shape!r} shape; got {len(arms)} arms")
 
     ledgered = set()
     for name in dir(d):

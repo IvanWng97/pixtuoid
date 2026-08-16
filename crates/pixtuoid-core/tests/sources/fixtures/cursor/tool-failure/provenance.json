@@ -4,5 +4,5 @@
   "version": "2026.08.11-e8db854",
   "captured": "2026-08-14",
   "command": "cursor-agent -p --trust '<read a missing file>'",
-  "note": "29 payloads, 25 distinct, 8 carrying the `_pixtuoid_source` stamp: cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes. The unstamped copies are what `decoder`'s cross-fire guard drops on `cursor_version`, and the stamped ones carry the whole arc — both halves are pinned here."
+  "note": "29 payloads, 25 distinct, 8 carrying the `_pixtuoid_source` stamp: cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes. The unstamped copies are what `decoder`'s cross-fire guard drops on `cursor_version`, and the stamped ones carry the whole arc — both halves are pinned here. Redacted: home path rewritten to /Users/dev; an account address rewritten to dev@. The bytes are otherwise verbatim."
 }

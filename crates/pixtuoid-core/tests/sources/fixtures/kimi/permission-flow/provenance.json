@@ -3,5 +3,6 @@
   "cli": "kimi",
   "version": "0.36.0",
   "captured": "2026-08-14",
-  "command": "kimi (interactive TUI \u2014 `-p` auto-approves, so PermissionRequest never fires)"
+  "command": "kimi (interactive TUI — `-p` auto-approves, so PermissionRequest never fires)",
+  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
 }

@@ -101,7 +101,10 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 #                       sources that need it; registering it would double-fire.
 #   UserPromptSubmit  — per-turn content noise, and the reducer must never key
 #                       lifecycle on user-authored content (the `/exit` matcher).
-LEDGERED_BUT_DECODABLE = {"Stop", "UserPromptSubmit"}
+#   SubagentStop      — reasonix's, which "carries no ids". The decoder arm of
+#                       that NAME belongs to claude_code, a different source; the
+#                       arm reader is name-based and cannot tell them apart.
+LEDGERED_BUT_DECODABLE = {"Stop", "UserPromptSubmit", "SubagentStop"}
 
 # Codex hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity a visualizer cares about.

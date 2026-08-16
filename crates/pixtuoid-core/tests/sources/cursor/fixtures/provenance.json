@@ -4,5 +4,5 @@
   "version": "unknown",
   "captured": "unknown",
   "command": "see the module header",
-  "note": "A real `cursor-agent -p` turn asked for a subagent. Pins the two wire premises `source/cursor.rs` documents and declines to fix: the flat render, and the `Task` id that never pairs."
+  "note": "A real `cursor-agent -p` turn asked for a subagent. Pins the two wire premises `source/cursor.rs` documents and declines to fix: the flat render, and the `Task` id that never pairs. Redacted: home path rewritten to /Users/dev; an account address rewritten to dev@. The bytes are otherwise verbatim."
 }

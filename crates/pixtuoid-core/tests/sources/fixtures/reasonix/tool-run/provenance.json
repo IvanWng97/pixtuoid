@@ -3,5 +3,6 @@
   "cli": "reasonix",
   "version": "v1.25.2",
   "captured": "2026-08-14",
-  "command": "reasonix -p '{prompt}'"
+  "command": "reasonix -p '{prompt}'",
+  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
 }

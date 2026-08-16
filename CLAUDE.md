@@ -140,6 +140,8 @@ scenario declares a `provenance.json` that
 `every_scenario_declares_its_provenance` gates. `just corpus-all` is the other
 half, censusing every transcript-bearing source against its real local corpus.
 Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md).
+A recorded fixture pins ONE version of one CLI's wire; `just fixture-age` says which
+ones the local CLI has moved past (advisory, LOCAL-only — CI has none of them installed).
 
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a

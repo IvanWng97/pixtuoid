@@ -61,6 +61,14 @@ A composed fixture kept for a reason says so in its note: `opencode/session-run`
 is retained because an auto-approving run emits no permission event for `Waiting`
 to ride.
 
+**Re-recording an existing scenario needs a hand.** The recorder never
+overwrites committed bytes — it writes `<name>.new` beside them, so a re-record
+can be diffed rather than trusted. Nothing READS a `.new`: `conformance.rs` walks
+`*.jsonl` and opens `provenance.json` by exact name, and `fixture-age.py`
+rglobs the same. So a re-record that you do not promote costs a billed turn and
+changes nothing while the suite stays green. Diff the pair, then `mv` the `.new`
+over the old one or delete it.
+
 **A capture can only be recorded on Unix.** The recorder listens on a
 `UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm
 and `just capture-fixture` exits 2 there. Windows wire evidence therefore cannot

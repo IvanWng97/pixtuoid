@@ -279,6 +279,109 @@ const UNVERIFIED_PROVENANCE: &[&str] = &[
 /// origin stays unprovable.
 const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 
+/// A `recorded` fixture whose bytes were EDITED must say so. Nothing in the
+/// bytes separates a capture from a composition — which is the whole reason
+/// provenance exists — so a redaction sentinel with a silent `note` is the one
+/// state the mechanism cannot tolerate. Sentinels, not a `/Users/dev` grep: the
+/// sweep that keyed on that alone missed kimi's, whose redaction is the owner
+/// column inside a captured `ls -la` and is the case the README names.
+#[test]
+fn a_recorded_capture_that_was_edited_says_so() {
+    const SENTINELS: &[&str] = &[
+        "/Users/dev",
+        " dev  wheel",
+        " dev  staff",
+        "[redacted",
+        "dev@",
+    ];
+    let mut silent = Vec::new();
+    let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");
+    let mut stack = vec![sources.clone()];
+    while let Some(dir) = stack.pop() {
+        let prov = dir.join("provenance.json");
+        if let Ok(body) = std::fs::read_to_string(&prov) {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) {
+                if v.get("origin").and_then(|o| o.as_str()) == Some("recorded") {
+                    let note = v
+                        .get("note")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    let declares = note.contains("redact") || note.contains("verbatim");
+                    let edited = std::fs::read_dir(&dir)
+                        .into_iter()
+                        .flatten()
+                        .flatten()
+                        .any(|e| {
+                            let p = e.path();
+                            p.extension().and_then(|x| x.to_str()) == Some("jsonl")
+                                && std::fs::read_to_string(&p)
+                                    .map(|b| SENTINELS.iter().any(|s| b.contains(s)))
+                                    .unwrap_or(false)
+                        });
+                    if edited && !declares {
+                        silent.push(dir.strip_prefix(&sources).unwrap().to_path_buf());
+                    }
+                }
+            }
+        }
+        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                stack.push(p);
+            }
+        }
+    }
+    assert!(
+        silent.is_empty(),
+        "these `recorded` fixtures carry a redaction sentinel and no `note` saying so — \
+         a reader cannot tell an edited capture from an untouched one: {silent:?}"
+    );
+}
+
+/// `verified_version` means "the version whose wire we have SEEN". A recorded
+/// scenario IS that sighting, so the two must not disagree — `doctor`'s
+/// "newer than verified" warning is structurally silent at `unknown` and would
+/// otherwise warn a user running the exact version we hold a capture from.
+#[test]
+fn a_recorded_capture_anchors_its_sources_verified_version() {
+    let root = fixtures_root();
+    for source_dir in sorted_dirs(&root) {
+        let source = source_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        let Some(d) = registry::descriptor_for(&source) else {
+            continue;
+        };
+        let mut recorded_with_a_version = false;
+        for scenario in sorted_dirs(&source_dir) {
+            let Ok(body) = std::fs::read_to_string(scenario.join("provenance.json")) else {
+                continue;
+            };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&body) else {
+                continue;
+            };
+            if v.get("origin").and_then(|o| o.as_str()) != Some("recorded") {
+                continue;
+            }
+            let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+            if version.chars().any(|c| c.is_ascii_digit()) {
+                recorded_with_a_version = true;
+            }
+        }
+        if recorded_with_a_version {
+            assert_ne!(
+                d.verified_version, "unknown",
+                "{source}: a recorded capture pins a real version, so the registry's \
+                 `verified_version` must name it — at \"unknown\" doctor's drift \
+                 category is silent for this source"
+            );
+        }
+    }
+}
+
 /// A source whose id comes from the transcript's PARENT DIR needs the fixture to
 /// reproduce that dir, or the session id silently becomes the SCENARIO NAME. The
 /// README states the rule; this is what makes it fail. The probe catches a

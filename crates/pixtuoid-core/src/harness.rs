@@ -395,12 +395,10 @@ fn shape_of(line: &str) -> String {
 /// Every `.jsonl` under `root` that this source's registry `path_filter` admits,
 /// recursed without following a symlinked entry.
 ///
-/// One implementation for the census and the recorder, because both act on the
-/// answer and the recorder COMMITS one of these files as a golden. It applies
-/// the same four predicates as the production `jsonl::walk::walk_jsonl` but is
-/// a SEPARATE copy of them, kept in step by hand — a fifth predicate added
-/// there and not here lets the recorder commit a file production never reads
-/// (#931).
+/// The per-entry rule is `admit::classify`, shared with the production watcher —
+/// the recorder COMMITS one of these files as a golden, so a predicate it did
+/// not apply would let a fixture teach the decoder a shape production never
+/// reads. Only the traversal is local.
 pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
     fn walk(admits: &dyn Fn(&Path) -> bool, dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {

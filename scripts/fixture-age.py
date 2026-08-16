@@ -145,6 +145,7 @@ def report(max_age_days: int) -> int:
         print("  (corpus_check not built — version drift not checked; `just build --release --examples`)")
     today = dt.date.today()
     stale = []
+    unchecked: list[tuple[str, str]] = []
     rows = []
     for p, prov in provenances():
         if prov.get("origin") != "recorded":
@@ -160,6 +161,13 @@ def report(max_age_days: int) -> int:
                 age = "?"
         live = local_version(cli, probes)
         drift = ""
+        # A fixture we could not compare is neither fresh nor stale, and folding
+        # it into "none stale" is the false green `corpus-all` already refuses
+        # with its NOT COVERED lane.
+        if pinned == "unknown":
+            unchecked.append((str(rel), "no version pinned"))
+        elif live is None:
+            unchecked.append((str(rel), f"{cli} not installed here"))
         if live and pinned != "unknown":
             a, b = semverish(pinned), semverish(live)
             if a and b and a != b:
@@ -173,13 +181,19 @@ def report(max_age_days: int) -> int:
     w = max((len(r[0]) for r in rows), default=10)
     for rel, cli, pinned, age, drift in rows:
         print(f"  {rel:<{w}}  {cli:<12} {pinned:<24} {age:>4}d  {drift}")
+    if unchecked:
+        print(f"\n{len(unchecked)} not comparable:", file=sys.stderr)
+        for rel, why in unchecked:
+            print(f"  {rel}  ({why})", file=sys.stderr)
     if stale:
         print(f"\n{len(stale)} fixture(s) worth re-capturing:", file=sys.stderr)
         for s in stale:
             print(f"  {s}", file=sys.stderr)
         print("\n  just capture-fixture <source> <scenario> <cmd…>   (BILLED)", file=sys.stderr)
         return 3
-    print(f"\n{len(rows)} recorded fixture(s), none stale")
+    print(
+        f"\n{len(rows)} recorded, {len(stale)} stale, {len(unchecked)} not comparable"
+    )
     return 0
 
 
