@@ -18,6 +18,10 @@ import typing
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# A `__pycache__` hit made this gate test a DIFFERENT file than the one on disk:
+# restoring a same-size checker inside one mtime tick left the .pyc valid, and a
+# reverted mutation kept failing. A gate that can read stale bytes is not a gate.
+sys.dont_write_bytecode = True
 import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
@@ -1365,6 +1369,61 @@ def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
     )
 
 
+def test_every_ledger_has_a_missing_registration_row() -> None:
+    """The ratchet the hand-written arms could not have: a source whose ledger
+    exists but whose row does not would have a ledger nothing consults, and the
+    direction would be silently absent for it — which is how five of ten came to
+    be missing it before #932."""
+    ours = d.read_our_names(d.Report())
+    ledgers = {n for n in dir(d) if n.endswith("_KNOWN_OMITTED")}
+    rowed = {row.ledger_name for row in d.UNREGISTERED.values()}
+    check(
+        ledgers == rowed,
+        f"every *_KNOWN_OMITTED needs an UNREGISTERED row; "
+        f"ledger-without-row {sorted(ledgers - rowed)}, "
+        f"row-without-ledger {sorted(rowed - ledgers)}",
+    )
+    for source, row in sorted(d.UNREGISTERED.items()):
+        # The row names its ledger twice — once to resolve, once for the message.
+        check(
+            getattr(d, row.ledger_name) == set(row.ledger),
+            f"{source}: row's ledger is not {row.ledger_name}",
+        )
+        # A declared floor at or below the derived one is DEAD: it reads as
+        # protection and `max()` already exceeds it. Three rows shipped that way.
+        handled = len(getattr(ours, source) or ())
+        check(
+            row.floor == 0 or row.floor > handled,
+            f"{source}: declared floor {row.floor} is dead — we already handle "
+            f"{handled}, so the derived minimum covers it. Measure the document "
+            f"or declare 0.",
+        )
+        check(bool(row.offers and row.declared_in and row.handle),
+              f"{source}: row has an empty message field")
+
+
+def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
+    """A row declaring `floor=1` would re-open the hole the floors exist to close,
+    so the sweep raises the declared floor to what we already handle. Proven by
+    running the sweep, not by reading the max()."""
+    rep = d.Report()
+    ours = {f"ev{i}" for i in range(9)}
+    # Row floor is 5 for codex; nine registered names must lift it past a
+    # seven-name parse.
+    d.sweep_unregistered("codex", {f"ev{i}" for i in range(7)}, ours, rep)
+    check(
+        any("SKIPPED for codex" in f for f in rep.blind),
+        f"a parse smaller than our own registered set must file probe health: {rep.blind}",
+    )
+    rep2 = d.Report()
+    d.sweep_unregistered("codex", ours | {"brand_new"}, ours, rep2)
+    check(not rep2.blind, f"a parse at/above the floor must not file blind: {rep2.blind}")
+    check(
+        any("brand_new" in f for f in rep2.review),
+        f"and must review the unhandled name: {rep2.review}",
+    )
+
+
 def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
     """A name in both is inert today and fail-open tomorrow: unregister it and
     the sweep stays silent, because the ledger still excuses it."""
@@ -1423,6 +1482,8 @@ def main() -> int:
         test_omp_env_sweeps_fire_and_stay_silent,
         test_every_block_reader_strips_comments_before_counting_braces,
         test_the_hermes_approval_gate_stays_observer_only,
+        test_every_ledger_has_a_missing_registration_row,
+        test_the_floor_can_never_be_weaker_than_what_we_register,
         test_no_ledger_excuses_a_hook_we_actually_register,
         test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
     ):

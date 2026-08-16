@@ -33,6 +33,12 @@ the home path; the bytes are otherwise verbatim. Without the note a reader canno
 tell an edited capture from an untouched one, which is the distinction the whole
 mechanism exists to make.
 
+The table above is not the schema — [`provenance.schema.json`](provenance.schema.json)
+is, and the three readers (this table, `every_scenario_declares_its_provenance`,
+`fixture-age.py --check-metadata`) all read it. They each carried their own copy
+until #929, and the Python one — the only gate over the single-owner trees — was
+already missing `command`.
+
 `every_scenario_declares_its_provenance` enforces the schema, and its
 `NO_WIRE_EVIDENCE_YET` list — the hook-only sources with no recorded scenario at
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI

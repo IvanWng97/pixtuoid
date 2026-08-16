@@ -1,0 +1,17 @@
+{
+  "$comment": "THE statement of what a provenance.json must carry. Read by the Rust gate (every_scenario_declares_its_provenance), the Python gate (fixture-age.py --check-metadata) and the README table, each of which used to state it separately — two of the three had already drifted, and the weaker one owned the wider population.",
+  "origins": {
+    "recorded": {
+      "required": ["cli", "version", "captured", "command"],
+      "means": "real wire bytes; the recorder writes this file itself"
+    },
+    "composed": {
+      "required": ["note"],
+      "means": "hand-written, and the note says how you can tell"
+    },
+    "unknown": {
+      "required": ["note"],
+      "means": "predates the rule; nobody recorded where it came from"
+    }
+  }
+}

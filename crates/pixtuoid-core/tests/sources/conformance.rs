@@ -502,6 +502,65 @@ fn every_single_owner_capture_tree_declares_its_provenance() {
     }
 }
 
+/// `provenance.schema.json` — the ONE statement of what each origin requires.
+/// This gate, `fixture-age.py --check-metadata` and the README table each used to
+/// carry their own copy; the Python one was missing `command` while owning the
+/// single-owner trees no Rust gate reaches.
+struct ProvenanceSchema(serde_json::Value);
+
+impl ProvenanceSchema {
+    fn path() -> PathBuf {
+        fixtures_root().join("provenance.schema.json")
+    }
+
+    fn load() -> Self {
+        let p = Self::path();
+        let body =
+            std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+        Self(serde_json::from_str(&body).unwrap_or_else(|e| panic!("{}: {e}", p.display())))
+    }
+
+    fn origins(&self) -> &serde_json::Map<String, serde_json::Value> {
+        self.0["origins"].as_object().expect("origins is an object")
+    }
+
+    fn required(&self, origin: &str) -> Option<Vec<String>> {
+        Some(
+            self.origins().get(origin)?["required"]
+                .as_array()
+                .expect("required is an array")
+                .iter()
+                .map(|v| v.as_str().expect("required member is a string").to_string())
+                .collect(),
+        )
+    }
+}
+
+/// The README's table is prose a human reads instead of the JSON, so it is the
+/// copy most likely to rot — it stated the schema for its own audience while the
+/// gates drifted underneath it.
+#[test]
+fn the_readme_states_the_schema_the_gates_enforce() {
+    let schema = ProvenanceSchema::load();
+    let readme = std::fs::read_to_string(fixtures_root().join("README.md")).expect("README");
+    for (origin, spec) in schema.origins() {
+        let fields = schema.required(origin).expect("origin in its own table");
+        let row = format!(
+            "| `{origin}` | {} | {} |",
+            fields
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            spec["means"].as_str().expect("means is a string")
+        );
+        assert!(
+            readme.contains(&row),
+            "fixtures/README.md must carry this row verbatim:\n  {row}"
+        );
+    }
+}
+
 /// Every scenario declares where its bytes came from, because nothing IN them
 /// separates a capture from a composition — a redacted cwd and an invented one
 /// look alike. A composed fixture pins its author's belief and the decoder then
@@ -510,6 +569,7 @@ fn every_single_owner_capture_tree_declares_its_provenance() {
 #[test]
 fn every_scenario_declares_its_provenance() {
     let root = fixtures_root();
+    let schema = ProvenanceSchema::load();
     let mut recorded: BTreeSet<String> = BTreeSet::new();
     let mut unknown: BTreeSet<String> = BTreeSet::new();
     for source_dir in sorted_dirs(&root) {
@@ -532,15 +592,13 @@ fn every_scenario_declares_its_provenance() {
                 .get("origin")
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or_default();
-            let required: &[&str] = match origin {
-                "recorded" => &["cli", "version", "captured", "command"],
-                "composed" | "unknown" => &["note"],
-                other => panic!(
-                    "{}: origin {other:?} is not recorded | composed | unknown",
+            let required = schema.required(origin).unwrap_or_else(|| {
+                panic!(
+                    "{}: origin {origin:?} is not recorded | composed | unknown",
                     path.display()
-                ),
-            };
-            for key in required {
+                )
+            });
+            for key in &required {
                 assert!(
                     doc.get(key)
                         .and_then(serde_json::Value::as_str)

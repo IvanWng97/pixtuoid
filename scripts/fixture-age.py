@@ -94,9 +94,36 @@ def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
     return (out.stdout or out.stderr).strip().splitlines()[0] if (out.stdout or out.stderr) else None
 
 
+# A dotted-run major at or above this looks like a YEAR/date token, not a semver
+# major. MIRRORS `doctor::parse_version`'s const of the same name — the pair is
+# pinned by `test_semverish_matches_doctors_documented_cases`, because the two
+# compare the SAME `--version` banners across a language boundary.
+IMPLAUSIBLE_MAJOR = 1000
+
+
 def semverish(s: str) -> str | None:
-    m = re.search(r"\d+\.\d+(?:\.\d+)?", s or "")
-    return m.group(0) if m else None
+    """The version in a `--version` banner, by `doctor::parse_version`'s rule.
+
+    The naive first-dotted-run this replaced is the form that parser documents
+    as wrong: a banner may print a build DATE before the semver.
+    """
+    runs = []
+    for m in re.finditer(r"\d[\d.]*", s or ""):
+        run = m.group(0)
+        if "." not in run:
+            continue
+        major = int(run.split(".")[0])
+        v_prefixed = m.start() > 0 and s[m.start() - 1] in "vV"
+        runs.append((v_prefixed, major, run.rstrip(".")))
+    if not runs:
+        return None
+    for vp, _, run in runs:
+        if vp:
+            return run
+    for _, major, run in runs:
+        if major < IMPLAUSIBLE_MAJOR:
+            return run
+    return runs[0][2]
 
 
 def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
@@ -154,6 +181,17 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     return out
 
 
+# `provenance.schema.json` is the ONE statement of what each origin requires —
+# this gate owns the single-owner trees no Rust gate reaches, and it shipped
+# without `command` while the Rust gate and the README both required it.
+SCHEMA = json.loads((FIXTURES / "fixtures/provenance.schema.json").read_text())["origins"]
+ORIGINS = frozenset(SCHEMA)
+
+
+def required(origin: str) -> list[str]:
+    return SCHEMA[origin]["required"]
+
+
 # Below this the walk found almost nothing, so a pass says nothing about the
 # corpus — the vacuous-pass floor its sibling in the drift selftest already has.
 MIN_PROVENANCES = 20
@@ -176,18 +214,17 @@ def check_metadata() -> int:
         # `origin` fell through to `continue` and every other field went
         # unvalidated. The Rust schema gate closes this for the conformance tree
         # only — the single-owner trees are checked here or nowhere.
-        if origin not in ("recorded", "composed", "unknown"):
-            bad.append(f"{rel}: `origin` is {origin!r}, not recorded/composed/unknown")
+        if origin not in ORIGINS:
+            bad.append(
+                f"{rel}: `origin` is {origin!r}, not " + "/".join(sorted(ORIGINS))
+            )
             continue
+        for field in required(origin):
+            if not str(prov.get(field, "")).strip():
+                bad.append(f"{rel}: {origin} fixture has no `{field}`")
         if origin != "recorded":
             continue
         seen += 1
-        # `command` is in the Rust gate's required set too; leaving it out here
-        # meant the single-owner trees — the ones this half exists to cover —
-        # could drop the field that says how to re-record the capture.
-        for field in ("cli", "version", "captured", "command"):
-            if not str(prov.get(field, "")).strip():
-                bad.append(f"{rel}: recorded fixture has no `{field}`")
         # A `version` holding the INVOCATION rather than a version reports a
         # drift of nothing for as long as it sits there — the live instance was
         # `"grok --permission-mode default"`.
@@ -280,13 +317,52 @@ def report(max_age_days: int) -> int:
     return 0
 
 
+def selftest() -> int:
+    """The pure logic this script's two gates ride on, with the parser's own
+    documented cases. Runs inside `--check-metadata`, so it cannot rot unrun."""
+    bad = []
+    # The FIRST case is the one the naive `\d+\.\d+` form gets wrong, and is
+    # verbatim the banner `doctor::parse_version`'s doc names.
+    for banner, want in [
+        ("Built 2026.06.04 — v1.2.3", "1.2.3"),
+        ("2026.06.04", "2026.06.04"),
+        ("codex-cli 0.147.0", "0.147.0"),
+        ("Hermes Agent v0.20.1 (2026.8.13)", "0.20.1"),
+        ("grok 0.2.102 (ab5ebf69acec) [stable]", "0.2.102"),
+        ("2026.08.11-e8db854", "2026.08.11"),
+        ("omp/17.3.4", "17.3.4"),
+        ("no version here", None),
+    ]:
+        got = semverish(banner)
+        if got != want:
+            bad.append(f"semverish({banner!r}) = {got!r}, want {want!r}")
+
+    doctor = ROOT / "crates/pixtuoid/src/doctor.rs"
+    m = re.search(r"const IMPLAUSIBLE_MAJOR: u64 = (\d+);", doctor.read_text())
+    if m is None:
+        bad.append("doctor.rs no longer declares IMPLAUSIBLE_MAJOR — the mirror is unpinned")
+    elif int(m.group(1)) != IMPLAUSIBLE_MAJOR:
+        bad.append(
+            f"IMPLAUSIBLE_MAJOR drifted: doctor.rs says {m.group(1)}, this says "
+            f"{IMPLAUSIBLE_MAJOR}"
+        )
+
+    for line in bad:
+        print(f"  {line}", file=sys.stderr)
+    if bad:
+        print(f"fixture-age selftest: {len(bad)} failure(s)", file=sys.stderr)
+    return 1 if bad else 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--check-metadata", action="store_true",
                     help="assert the fields this report reads are present and parseable")
     ap.add_argument("--max-age-days", type=int, default=180)
     args = ap.parse_args()
-    return check_metadata() if args.check_metadata else report(args.max_age_days)
+    if not args.check_metadata:
+        return report(args.max_age_days)
+    return selftest() or check_metadata()
 
 
 if __name__ == "__main__":

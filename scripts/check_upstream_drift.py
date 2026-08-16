@@ -241,10 +241,6 @@ OPENCODE_KNOWN_OMITTED = {
 # and `preCompact` carry no state a sprite renders. Registering a blocking hook is
 # not forbidden outright — `preToolUse` blocks too — the question is whether a
 # silent success is the right answer for that particular gate.
-# The floor each reader must clear before its parse is believed; below it the
-# sweep files probe health instead of reading "upstream has nothing new".
-OPENCODE_EVENT_FLOOR = 5
-
 CURSOR_KNOWN_OMITTED = {
     # Tool-adjacent detail already carried by the preToolUse/postToolUse pair we
     # DO register — a second event per call would add a shim invocation and no
@@ -519,6 +515,128 @@ GROK_ACTIVE_SESSIONS_URL = (
 # activity. SubagentEnd/SubagentStop are BOTH registered (upstream's finish site
 # fires one spelling, the docs name the other), so neither belongs here.
 GROK_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
+
+class Unregistered(typing.NamedTuple):
+    """One source's MISSING-REGISTRATION direction, as a ROW rather than a copy.
+
+    Each of the four defects the hand-written arms shipped was the same shape —
+    one of five sites missing what the other four had (a floor, a reused body, a
+    place in the ledger gate, a reader that could see the whole vocabulary). A
+    row cannot be missing a field.
+    """
+
+    ledger_name: str
+    """Resolved through `globals()`, and pinned to `ledger` by the selftest."""
+    ledger: frozenset[str]
+    floor: int
+    """Below this the parse is not believed: the sweep files probe health rather
+    than reading an empty diff as "upstream has nothing new". A number here is a
+    MEASUREMENT of that document, taken when the row was written; `0` claims only
+    the derived minimum."""
+    offers: str
+    declared_in: str
+    handle: str
+    """How this source HANDLES an event, in the reviewer's words: `register it in
+    KIMI_EVENTS`, `subscribe to it in the plugin`."""
+    advice: str = ""
+
+
+UNREGISTERED: dict[str, Unregistered] = {
+    "hermes": Unregistered(
+        "HERMES_KNOWN_OMITTED",
+        frozenset(HERMES_KNOWN_OMITTED),
+        10,
+        "the Hermes event set upstream actually offers",
+        "VALID_HOOKS in hermes_cli/plugins.py",
+        "register it in HERMES_EVENTS",
+        " An event we could receive and do not is invisible to every test "
+        "(#930 was this shape).",
+    ),
+    "openclaw": Unregistered(
+        "OPENCLAW_KNOWN_OMITTED",
+        frozenset(OPENCLAW_KNOWN_OMITTED),
+        10,
+        "the OpenClaw hook set upstream actually offers",
+        "the `PluginHookName` union in src/plugins/hook-types.ts",
+        "register it in the plugin",
+        " Decide whether the lobster's presence should react to it.",
+    ),
+    "opencode": Unregistered(
+        "OPENCODE_KNOWN_OMITTED",
+        frozenset(OPENCODE_KNOWN_OMITTED),
+        0,
+        "the opencode event set upstream actually defines",
+        "the `define({ type: … })` calls in its two event modules",
+        "subscribe to it in the plugin",
+    ),
+    "cursor": Unregistered(
+        "CURSOR_KNOWN_OMITTED",
+        frozenset(CURSOR_KNOWN_OMITTED),
+        0,
+        "the cursor hook set the docs actually list",
+        "cursor.com/docs/hooks",
+        "register it in CURSOR_EVENTS",
+        " Check whether it is a DECISION hook before registering: the shim "
+        "always exits 0.",
+    ),
+    "kimi": Unregistered(
+        "KIMI_KNOWN_OMITTED",
+        frozenset(KIMI_KNOWN_OMITTED),
+        0,
+        "the kimi hook set the docs actually list",
+        "the Event Reference table in kimi-code's hooks.md",
+        "register it in KIMI_EVENTS",
+    ),
+    # These five had this direction before #932, each guarding only on "the
+    # parser returned nothing" — a reader that returns a SMALL WRONG set passed
+    # and reported an empty diff. Rows give them the floor they lacked.
+    "codex": Unregistered(
+        "CODEX_KNOWN_OMITTED",
+        frozenset(CODEX_KNOWN_OMITTED),
+        0,
+        "the Codex `HookEventName` enum",
+        "codex-rs/protocol/src/protocol.rs",
+        "register it in CODEX_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "cc": Unregistered(
+        "CC_KNOWN_OMITTED",
+        frozenset(CC_KNOWN_OMITTED),
+        0,
+        "the CC hook-event summary table",
+        "code.claude.com/docs/en/hooks.md",
+        "register it in install/claude.rs EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "reasonix": Unregistered(
+        "REASONIX_KNOWN_OMITTED",
+        frozenset(REASONIX_KNOWN_OMITTED),
+        0,
+        "the Reasonix `Event` consts",
+        "internal/hook/hook.go",
+        "register it in REASONIX_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "codewhale": Unregistered(
+        "CODEWHALE_KNOWN_OMITTED",
+        frozenset(CODEWHALE_KNOWN_OMITTED),
+        0,
+        "the CodeWhale `HookEvent` enum",
+        "crates/tui/src/hooks/config.rs",
+        "register it in CODEWHALE_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "grok": Unregistered(
+        "GROK_KNOWN_OMITTED",
+        frozenset(GROK_KNOWN_OMITTED),
+        0,
+        "the grok hook-event vocabulary",
+        "xai-grok-hooks/src/event.rs",
+        "register it in GROK_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+}
+
 # Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
 # fields are camelCase via struct-level rename_all, so the wire name never appears
 # literally and the `pub <ident>:` declarations are what to check; PAYLOAD fields
@@ -1574,6 +1692,41 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
 )
 
 
+def sweep_unregistered(
+    source: str,
+    upstream: set[str],
+    ours: set[str],
+    report: Report,
+    *,
+    also_handled: set[str] = frozenset(),
+) -> None:
+    """The MISSING-REGISTRATION direction for one source, off its `UNREGISTERED`
+    row: what upstream offers that we neither handle nor ledger.
+
+    The EXTRACTION stays at each call site — the readers genuinely differ (a TS
+    union, a python set literal, two doc tables) and each belongs beside its
+    regex. Everything after it is identical, and was the part that drifted.
+    """
+    row = UNREGISTERED[source]
+    # A reader that finds fewer names than we already handle is broken by
+    # definition — every registered event exists upstream, or the vanish
+    # direction would have fired. The declared floor may only be STRICTER.
+    floor = max(row.floor, len(ours))
+    if len(upstream) < floor:
+        report.add_blind(
+            row.offers,
+            row.declared_in,
+            f"the reader returned {len(upstream)} names (floor {floor}), so the "
+            f"missing-registration direction was SKIPPED for {source}.",
+        )
+        return
+    for ev in sorted(upstream - ours - also_handled - row.ledger):
+        report.add_review(
+            f"new {source} event `{ev}` upstream — we neither {row.handle} nor list "
+            f"it in {row.ledger_name}.{row.advice}"
+        )
+
+
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from our own source, ISOLATING each reader.
 
@@ -1625,12 +1778,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
-                for ev in sorted(upstream - ours.codex - CODEX_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new Codex hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + CODEX_EVENTS, "
-                        f"or add it to CODEX_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("codex", upstream, ours.codex, report)
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
@@ -1739,12 +1887,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - ours.reasonix - REASONIX_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new Reasonix hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + REASONIX_EVENTS, "
-                        f"or add it to REASONIX_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("reasonix", upstream, ours.reasonix, report)
                 for field in sorted(REASONIX_PAYLOAD_FIELDS):
                     if f'json:"{field}' not in text:
                         report.add_breaking(
@@ -1771,12 +1914,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream HookEvent — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - ours.codewhale - CODEWHALE_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new CodeWhale hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
-                        f"or add it to CODEWHALE_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("codewhale", upstream, ours.codewhale, report)
         # Its own fetch of a SEPARATE file, so a failure to read the executor
         # can't be mistaken for every env var vanishing.
         exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", report)
@@ -1826,19 +1964,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         for body in parts:
             if body:
                 upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
-        if len(upstream_oc) < OPENCODE_EVENT_FLOOR:
-            report.add_blind(
-                "the opencode event set upstream actually defines",
-                "the `define({ type: … })` calls in its two event modules",
-                f"the reader returned {len(upstream_oc)} names, so the "
-                f"missing-registration direction was SKIPPED for opencode.",
-            )
-        else:
-            for ev in sorted(upstream_oc - ours.opencode - OPENCODE_KNOWN_OMITTED):
-                report.add_review(
-                    f"new opencode event `{ev}` upstream — we neither subscribe to it "
-                    f"in the plugin nor list it in OPENCODE_KNOWN_OMITTED."
-                )
+        sweep_unregistered("opencode", upstream_oc, ours.opencode, report)
 
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
@@ -1859,12 +1985,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
-                for ev in sorted(upstream - ours.grok - GROK_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new grok hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + GROK_EVENTS, or "
-                        f"add it to GROK_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("grok", upstream, ours.grok, report)
             for ident in sorted(GROK_ENVELOPE_IDENTS):
                 if not re.search(rf"(?m)^\s*pub {ident}:", text):
                     report.add_breaking(
@@ -2153,20 +2274,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 )
                 if slug == name.lower()
             }
-            if len(upstream_cur) < 4:
-                report.add_blind(
-                    "the cursor hook set the docs actually list",
-                    "cursor.com/docs/hooks",
-                    f"the doc reader returned {len(upstream_cur)} names, so the "
-                    f"missing-registration direction was SKIPPED for cursor.",
-                )
-            else:
-                for ev in sorted(upstream_cur - ours.cursor - CURSOR_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new cursor hook `{ev}` in the docs — we neither register it "
-                        f"nor list it in CURSOR_KNOWN_OMITTED. Check whether it is a "
-                        f"DECISION hook before registering: the shim always exits 0."
-                    )
+            sweep_unregistered("cursor", upstream_cur, ours.cursor, report)
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -2183,21 +2291,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
             )
             upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
-            if len(upstream) < 10:
-                report.add_blind(
-                    "the OpenClaw hook set upstream actually offers",
-                    "the `PluginHookName` union in src/plugins/hook-types.ts",
-                    f"the union reader returned {len(upstream)} names, so the "
-                    f"missing-registration direction was SKIPPED for openclaw.",
-                )
-            else:
-                for ev in sorted(upstream - ours.openclaw - OPENCLAW_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new OpenClaw hook `{ev}` in the PluginHookName union — we "
-                        f"neither register it in the plugin nor list it in "
-                        f"OPENCLAW_KNOWN_OMITTED. Decide whether the lobster's presence "
-                        f"should react to it."
-                    )
+            sweep_unregistered("openclaw", upstream, ours.openclaw, report)
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
@@ -2274,21 +2368,11 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             unsupported = python_set_literal(
                 plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
             )
-            if len(valid) < 10:
-                report.add_blind(
-                    "the Hermes event set upstream actually offers",
-                    "VALID_HOOKS in hermes_cli/plugins.py",
-                    f"the set reader returned {len(valid)} entries, so the "
-                    f"missing-registration direction was SKIPPED for hermes.",
-                )
-            else:
-                for ev in sorted(valid - unsupported - ours.hermes - HERMES_KNOWN_OMITTED):
-                    report.add_review(
-                        f"Hermes hook `{ev}` is in upstream VALID_HOOKS and shell-"
-                        f"registerable, and we neither register it in HERMES_EVENTS nor "
-                        f"list it in HERMES_KNOWN_OMITTED. An event we could receive and "
-                        f"do not is invisible to every test (#930 was this shape)."
-                    )
+            # `unsupported` is upstream's OWN "not reachable from a shell hook"
+            # set, so those are handled, not omissions.
+            sweep_unregistered(
+                "hermes", valid, ours.hermes, report, also_handled=unsupported
+            )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
             for field in sorted(HERMES_PAYLOAD_FIELDS):
@@ -2332,20 +2416,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 if ref >= 0
                 else set()
             )
-            if len(upstream_kimi) < 8:
-                report.add_blind(
-                    "the kimi hook set the docs actually list",
-                    "the Event Reference table in kimi-code's hooks.md",
-                    f"the table reader returned {len(upstream_kimi)} names, so the "
-                    f"missing-registration direction was SKIPPED for kimi.",
-                )
-            else:
-                for ev in sorted(upstream_kimi - ours.kimi - KIMI_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new kimi hook `{ev}` in the Event Reference table — we "
-                        f"neither register it in KIMI_EVENTS nor list it in "
-                        f"KIMI_KNOWN_OMITTED."
-                    )
+            sweep_unregistered("kimi", upstream_kimi, ours.kimi, report)
 
     if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
@@ -2382,13 +2453,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-                for ev in sorted(upstream - ours.cc - CC_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new CC hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + "
-                        f"install/claude.rs EVENTS, or add it to "
-                        f"CC_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("cc", upstream, ours.cc, report)
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
 
