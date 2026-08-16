@@ -23,8 +23,13 @@ useDefault = true
 # `generic-api-key` fires 15 times on hermes session ids and copilot message ids.
 [[allowlists]]
 description = "Wire identifiers in recorded fixtures — not credentials"
-regexTarget = "match"
+# `secret`, not `match`, and ANCHORED — the two go together. Unanchored, these
+# waive by SUBSTRING, so a real secret merely PREFIXED with a wire identifier
+# (`msg_` + 40 random chars) is admitted. Anchoring against `match` instead reds
+# all 15 legitimate ids, because the match carries the `"apiCallId":"…"` context
+# while `secret` is exactly the id.
+regexTarget = "secret"
 regexes = [
-  '''msg_[0-9A-Za-z]{20,32}''',
-  '''\d{8}_\d{6}_[0-9a-f]{6}''',
+  '''^msg_[0-9A-Za-z]{20,32}$''',
+  '''^\d{8}_\d{6}_[0-9a-f]{6}$''',
 ]

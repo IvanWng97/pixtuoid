@@ -863,6 +863,50 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
     );
 }
 
+/// EVERY artifact, not just the one that bakes a shim path. The comparison used
+/// to sit inside the marker guard, so an OpenClaw upgrader whose manifest or
+/// `package.json` predated the upgrade got existence-only checking and a green
+/// doctor — the silent-dead class, one artifact short of the invariant.
+#[test]
+fn verify_target_flags_a_stale_code_artifact_for_every_extra_artifacts_target() {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let oc_home = tempfile::TempDir::new().unwrap();
+    let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
+    let exe = std::env::current_exe().unwrap();
+    let mut covered = 0;
+    for &t in target::TARGETS {
+        let Some(make) = t.extra_artifacts else {
+            continue;
+        };
+        for (idx, _) in make(&exe).unwrap().iter().enumerate() {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let cfg = tmp.path().join("config");
+            install_target(t, Some(cfg.clone()), Some(exe.clone())).unwrap();
+            let (p, _) = make(&exe).unwrap().swap_remove(idx);
+            let mut body = std::fs::read_to_string(&p).unwrap();
+            body.push_str("\n// drifted\n");
+            std::fs::write(&p, body).unwrap();
+            let v = verify_target(t, Some(cfg));
+            assert!(
+                v.issues
+                    .iter()
+                    .any(|i| i.contains("differs from the plugin this pixtuoid ships")),
+                "{}: a stale {} must be a HARD verify issue — got {:?}",
+                t.name,
+                p.display(),
+                v.issues
+            );
+            covered += 1;
+        }
+    }
+    assert!(
+        covered >= 3,
+        "expected OpenClaw's three artifacts to be swept, saw {covered} — did the roster change?"
+    );
+}
+
 /// The baked `const HOOK_PATH` line is the ONE line that legitimately differs
 /// between an installed artifact and what this binary renders, so the staleness
 /// comparison must ignore exactly it and nothing else.
@@ -888,6 +932,17 @@ const F = [\"a\"];
         strip_baked_line(rendered),
         strip_baked_line(&older),
         "a plugin missing an event MUST read as stale"
+    );
+
+    // The "and only it" half. opencode's template MENTIONS `const HOOK_PATH` in a
+    // comment above the binding, so an unanchored filter strips that line too and
+    // a change confined to it reads as identical — the same mention-vs-declaration
+    // trap `verify::baked_hook_path` anchors against.
+    let with_note = |note: &str| format!("// {note} const HOOK_PATH\n{rendered}");
+    assert_ne!(
+        strip_baked_line(&with_note("documents")),
+        strip_baked_line(&with_note("redocuments")),
+        "a change confined to a line MENTIONING the marker must still read as stale"
     );
 }
 

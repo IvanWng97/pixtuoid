@@ -1476,6 +1476,34 @@ def test_no_decoder_read_is_unaccounted_for() -> None:
         # Only the DECODER body: the test module re-reads these keys in fixtures.
         src = src.split("#[cfg(test)]", 1)[0]
         reads = set(re.findall(r'\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))
+        # A read behind a CONST is the same read: openclaw's
+        # `obj.get(GATEWAY_PORT_FIELD)` was neither watched nor ledgered and this
+        # passed, which made the invariant in the docstring false.
+        consts = dict(re.findall(r'const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]*)"', src))
+        unresolved = set()
+        for name in re.findall(r"\.get\(([A-Z][A-Z0-9_]{2,})\)", src):
+            reads.add(consts[name]) if name in consts else unresolved.add(name)
+        check(
+            not unresolved,
+            f"{source}: decoder reads a key from {sorted(unresolved)}, which this sweep "
+            f"cannot resolve to a field name — define it as a `const NAME: &str` in the "
+            f"same file, or the read is unwatchable",
+        )
+        # A key-reading HELPER hides its literals from the shape above: copilot's
+        # `str_at(v, "sessionId")` is seven top-level reads that were watched only
+        # by luck, since nothing here could see them.
+        for helper in set(re.findall(r"fn\s+([a-z_][a-z0-9_]*)[^(]*\([^)]*key:\s*&str", src)):
+            reads |= set(
+                re.findall(rf'\b{helper}\([^,()]*,\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)', src)
+            )
+        # No vacuity floor was the second half: a decoder the scrape cannot read at
+        # all yields an empty set, and the source passes having been checked for
+        # nothing.
+        check(
+            bool(reads),
+            f"{source}: this sweep found NO payload read at all, so it proved nothing — "
+            f"the decoder's read shape moved past what it can see",
+        )
         # Nested reads chain off a top-level one (`.get("extra").and_then(|e|
         # e.get("description"))`), and only the top level is a watchable field.
         nested = set(re.findall(r'\.and_then\(\|[a-z]\| [a-z]\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))

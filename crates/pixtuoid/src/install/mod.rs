@@ -148,32 +148,36 @@ pub(crate) fn verify_target(
                         missing.push(p);
                         continue;
                     }
+                    let Ok(installed) = io::read_config(&p) else {
+                        notes.push(format!("could not read {}", verify::display_safe(&p)));
+                        continue;
+                    };
+                    // A config-shaped target names the EVENTS an old install is
+                    // missing; a code artifact has no per-event config, so the
+                    // equivalent is the file. Nothing re-installs on a pixtuoid
+                    // upgrade, so without this an upgrader runs the plugin they
+                    // connected with forever and doctor says fine.
+                    //
+                    // EVERY artifact, above the marker guard: nested inside it this
+                    // covered only the one file that bakes a shim path, while
+                    // OpenClaw's manifest (`activation`, `configSchema`) and its
+                    // `package.json` (the entry-point list OpenClaw reads) got
+                    // existence-only. `strip_baked_line` is a no-op without a marker.
+                    if strip_baked_line(&installed) != strip_baked_line(&intended) {
+                        issues.push(format!(
+                            "{} differs from the plugin this pixtuoid ships — it \
+                             predates an upgrade, so anything added since is not \
+                             forwarded. Reconnect the source to refresh it.",
+                            verify::display_safe(&p)
+                        ));
+                    }
                     // Existence misses a shim that MOVED — a green doctor over a
                     // plugin whose every forward fails — so stat the baked path too.
                     if !intended.contains(verify::BAKED_HOOK_MARKER) {
                         continue;
                     }
-                    let installed = io::read_config(&p).unwrap_or_default();
                     match verify::baked_hook_path(&installed) {
-                        Some(baked) => {
-                            check_shim_binary(&baked, &mut issues);
-                            // A config-shaped target names the EVENTS an old
-                            // install is missing; a code artifact has no
-                            // per-event config, so the equivalent is the file.
-                            // Nothing re-installs on a pixtuoid upgrade, so
-                            // without this an upgrader runs the plugin they
-                            // connected with forever and doctor says fine.
-                            // Compared modulo the baked path, which is the one
-                            // line that legitimately differs from `intended`.
-                            if strip_baked_line(&installed) != strip_baked_line(&intended) {
-                                issues.push(format!(
-                                    "{} differs from the plugin this pixtuoid ships — it \
-                                     predates an upgrade, so anything added since is not \
-                                     forwarded. Reconnect the source to refresh it.",
-                                    verify::display_safe(&p)
-                                ));
-                            }
-                        }
+                        Some(baked) => check_shim_binary(&baked, &mut issues),
                         None => notes.push(format!(
                             "could not read the baked shim path from {}",
                             verify::display_safe(&p)
@@ -194,7 +198,10 @@ pub(crate) fn verify_target(
 fn strip_baked_line(content: &str) -> String {
     content
         .lines()
-        .filter(|l| !l.contains(verify::BAKED_HOOK_MARKER))
+        // The DECLARATION, anchored exactly as `verify::baked_hook_path` anchors:
+        // `contains` also strips opencode's comment ABOVE the binding, so a change
+        // confined to that comment was invisible to the staleness compare.
+        .filter(|l| !l.trim_start().starts_with(verify::BAKED_HOOK_MARKER))
         .collect::<Vec<_>>()
         .join("\n")
 }

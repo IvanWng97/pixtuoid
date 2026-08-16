@@ -289,11 +289,17 @@ fn the_walk_sees_every_provenance_on_disk() {
     // the floor actually means is "the walk found the tree": every registered
     // source has at least one capture, so a walk that found the tree sees at least
     // as many captures as there are sources.
-    let sources = registry::registered_source_names().count();
+    // The PREMISE, not its count consequence: "at least as many captures as
+    // sources" leaves 29 of 42 free to vanish before it fires, and it is the
+    // per-source statement that makes every rule below non-vacuous.
+    let covered: BTreeSet<String> = every_capture().into_iter().map(|c| c.source).collect();
+    let bare: Vec<&str> = registry::registered_source_names()
+        .filter(|n| !covered.contains(*n))
+        .collect();
     assert!(
-        on_disk >= sources,
-        "only {on_disk} captures for {sources} registered sources; the walk is \
-         looking at the wrong tree, so every rule below would pass vacuously"
+        bare.is_empty(),
+        "registered sources with no capture at all: {bare:?} — every rule below is \
+         silent for them"
     );
 }
 
@@ -422,13 +428,26 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
 /// column inside a captured `ls -la`.
 #[test]
 fn a_recorded_capture_that_was_edited_says_so() {
-    const SENTINELS: &[&str] = &[
-        "/Users/dev",
-        " dev  wheel",
-        " dev  staff",
-        "[redacted",
-        "dev@",
-    ];
+    // The path placeholders are READ from the scanner's own allowlist rather than
+    // copied: one hand-copy here knew only `/Users/dev`, so a capture redacted the
+    // Linux way (`/home/dev`) was edited-but-silent to this gate and clean to
+    // `just fixture-pii` — nine of the ten accepted placeholders were undeclarable.
+    let allow = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
+    )
+    .expect(".gitleaks-identity.toml");
+    let names = allow
+        .split("(?:dev|")
+        .nth(1)
+        .and_then(|s| s.split(')').next())
+        .expect("the placeholder alternation moved — re-derive this from the rule");
+    let mut sentinels: Vec<String> = Vec::new();
+    for root in ["/Users/", "/home/"] {
+        for who in std::iter::once("dev").chain(names.split('|')) {
+            sentinels.push(format!("{root}{who}"));
+        }
+    }
+    sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
     // A word ending the clause right before "redact" that inverts it.
     const NEGATIONS: &[&str] = &["no", "not", "nothing", "never", "without"];
     let mut silent = Vec::new();
@@ -437,13 +456,19 @@ fn a_recorded_capture_that_was_edited_says_so() {
         // "verbatim" USED to satisfy this, which let a note assert the OPPOSITE
         // of what the bytes show. A bare `contains` re-opens that hole one word
         // over — "unredacted", "nothing redacted".
-        let declares = note.match_indices("redact").any(|(at, _)| {
-            let before = note[..at].trim_end();
-            !before.ends_with("un") && !NEGATIONS.iter().any(|n| before.ends_with(n))
+        // "sanitiz" as well as "redact": the two oldest single-owner captures say
+        // "sanitized to synthetic ids and a generic cwd", which tells a reader
+        // exactly what this gate exists to tell them. A one-word vocabulary would
+        // have had them edit an honest note to satisfy the checker.
+        let declares = ["redact", "sanitiz"].iter().any(|stem| {
+            note.match_indices(stem).any(|(at, _)| {
+                let before = note[..at].trim_end();
+                !before.ends_with("un") && !NEGATIONS.iter().any(|n| before.ends_with(n))
+            })
         });
         let edited = c.wire_files().iter().any(|p| {
             std::fs::read_to_string(p)
-                .map(|b| SENTINELS.iter().any(|s| b.contains(s)))
+                .map(|b| sentinels.iter().any(|s| b.contains(s.as_str())))
                 .unwrap_or(false)
         });
         if edited && !declares {
@@ -553,6 +578,24 @@ fn banner_version_matches_doctors_documented_cases() {
     }
 }
 
+/// A banner's version as a comparable tuple. Missing parts are 0 so `1.2` and
+/// `1.2.0` order alike; a banner with no version at all sorts below every real
+/// one rather than winning a `max`.
+fn semver_order(banner: &str) -> (u64, u64, u64) {
+    let Some(run) = banner_version(banner) else {
+        return (0, 0, 0);
+    };
+    let mut parts = run
+        .split('.')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u64>().unwrap_or(0));
+    (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    )
+}
+
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
 /// scenario IS that sighting, so the two must not disagree — `doctor`'s "newer
 /// than verified" warning is structurally silent at `unknown` and would
@@ -590,36 +633,35 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             );
             continue;
         };
-        // The NEWEST capture, not `any`: hermes holds 0.20.0 and 0.20.1, and
-        // `any` let the older one anchor forever — precisely the stale pin this
-        // test exists to prevent. ISO dates sort lexically, but an UNDATED
-        // capture cannot say which sighting is most recent (and `"unknown"`
-        // sorts above every date), so it is excluded from the ordering and only
-        // used when a source has nothing dated.
-        let mut dated: Vec<&(String, String)> = versions
+        // The HIGHEST version, not `any` and not the newest DATE. `any` let
+        // hermes' 0.20.0 anchor forever beside its 0.20.1 — the stale pin this
+        // test exists to prevent. But ordering by date says a contributor who
+        // records a fresh scenario on a machine whose CLI has NOT been updated
+        // must move `verified_version` DOWN, discarding a sighting this tree
+        // still holds and re-arming doctor's "newer than verified" for everyone
+        // on the higher one. "The version whose wire we have SEEN" is a max.
+        let dated: Vec<&(String, String)> = versions
             .iter()
             .filter(|(when, _)| is_iso_date(when))
             .collect();
-        dated.sort();
-        // No all-undated fallback: it was unreachable (every version-bearing
-        // capture carries an ISO `captured`) and it re-admitted `any`, which is
-        // the exact stale-anchor bug four lines up. A source that loses its dated
-        // captures should fail here, loudly, rather than quietly weaken the rule.
-        let newest = &dated
-            .last()
-            .unwrap_or_else(|| {
-                panic!(
-                    "{source}: has recorded versions but none with an ISO `captured`, so \
-                     nothing says which sighting is most recent"
-                )
-            })
+        // Every version-bearing capture carries an ISO `captured`; a source that
+        // loses that should fail here, loudly, rather than quietly weaken the rule.
+        assert!(
+            !dated.is_empty(),
+            "{source}: has recorded versions but none with an ISO `captured`, so nothing \
+             dates the sightings"
+        );
+        let highest = &dated
+            .iter()
+            .max_by_key(|c| semver_order(&c.1))
+            .expect("non-empty")
             .1;
         assert!(
-            banner_version(newest) == Some(d.verified_version),
-            "{source}: `verified_version` is {:?}, but the newest recorded capture \
-             ({newest:?}) pins {:?} — the most recent sighting is the one that counts",
+            banner_version(highest) == Some(d.verified_version),
+            "{source}: `verified_version` is {:?}, but the highest recorded capture \
+             ({highest:?}) pins {:?} — the newest wire we hold is the one that counts",
             d.verified_version,
-            banner_version(newest).unwrap_or("nothing")
+            banner_version(highest).unwrap_or("nothing")
         );
     }
 }
@@ -834,6 +876,13 @@ fn is_iso_date(s: &str) -> bool {
     if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
         return false;
     }
+    // `u32::from_str` accepts a leading sign, so "+026-08-15" parsed as year 26.
+    if b.iter()
+        .enumerate()
+        .any(|(i, c)| i != 4 && i != 7 && !c.is_ascii_digit())
+    {
+        return false;
+    }
     let num = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
     let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else {
         return false;
@@ -854,6 +903,17 @@ fn is_iso_date(s: &str) -> bool {
 fn utc_date(ms: i64) -> String {
     let mut days = ms.div_euclid(86_400_000);
     let (mut y, mut m) = (1970i64, 1i64);
+    // A pre-epoch stamp is not a real `_shim_ts_ms`, but a corrupt one must still
+    // render a well-formed date: the forward walk alone fell straight through and
+    // emitted "1970-01--1" into a diagnostic whose whole job is to be read.
+    while days < 0 {
+        y -= 1;
+        days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+            366
+        } else {
+            365
+        };
+    }
     loop {
         let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
         let len = if leap { 366 } else { 365 };
@@ -897,6 +957,11 @@ fn date_prefix(name: &str) -> Option<String> {
 #[test]
 fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
     assert_eq!(utc_date(0), "1970-01-01");
+    // Pre-epoch: impossible for a real stamp, but a corrupt one must not put a
+    // malformed string into the diagnostic that reports it.
+    assert_eq!(utc_date(-1), "1969-12-31");
+    assert_eq!(utc_date(-86_400_001), "1969-12-30");
+    assert!(!is_iso_date("+026-08-15"), "a signed year is not ISO");
     assert_eq!(utc_date(1_786_854_010_213), "2026-08-16");
     // 2024-02-29T00:00:00Z — a real leap day, and the day after it.
     assert_eq!(utc_date(1_709_164_800_000), "2024-02-29");

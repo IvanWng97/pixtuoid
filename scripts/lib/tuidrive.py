@@ -51,11 +51,13 @@ GATE = re.compile(
 )
 # A numbered menu confirms on Enter (its first option is pre-highlighted); a
 # bare y/n gate wants the letter.
-# LINE-ANCHORED: a menu's `1.` starts its line. Unanchored, this matched `1.2`
-# inside `version 1.2.3` — so a TUI printing a version banner read as a numbered
-# menu and the driver answered a y/n gate with the wrong key, which is the
-# documented silent-failure mode this regex exists to prevent.
-MENU = re.compile(rb"(?m)^\s*1\s*[.)]\s*\S", re.I)
+# LINE-ANCHORED, and the two quantifiers do different jobs. `[^\w\n]*` admits the
+# selection cursor or box border a real full-screen TUI paints before the option
+# (`❯ 1. Yes`, `│ 1. Allow │`); an `\s*` prefix rejected all of those, which
+# trades in the EXPENSIVE direction per the cost note above. `\s+` after the
+# separator is what rejects a version: `1.2.3` fails it at line start too, which a
+# line anchor alone did not.
+MENU = re.compile(rb"(?m)^[^\w\n]*1\s*[.)]\s+\S", re.I)
 ANSWERS = [b"y\r", b"\r", b"1\r", b"\x1b[A\r"]
 # One billed turn's ceiling, and how long a TUI gets to paint before we type into it.
 RUN_BUDGET_S = 300
@@ -96,12 +98,31 @@ def selftest() -> int:
     for wording in [b"Do you want to proceed?", b"Allow this command?", b"(y/n)", b"trust"]:
         assert GATE.search(wording), wording
     assert not GATE.search(b"reading NOTE.txt")
-    assert MENU.search(b"  1. Yes, continue")
-    assert MENU.search(b"1) Approve")
+    # Every case carries a PREFIX shape: an `\s*`-anchored form passed the two
+    # bare ones while missing all five cursor/box forms a real TUI paints, and a
+    # miss is the expensive direction (a billed turn), not the cheap one.
+    for menu in [
+        b"  1. Yes, continue",
+        b"1) Approve",
+        "❯ 1. Yes".encode(),
+        b"> 1. Yes, proceed",
+        "│ 1. Yes, allow      │".encode(),
+        "│ ❯ 1. Yes  │".encode(),
+        "• 1) Approve".encode(),
+    ]:
+        assert MENU.search(menu), menu
     assert not MENU.search(b"press enter")
-    # DISCRIMINATING cases: `rb"1[.]"` passed the two above while matching these,
-    # which sends Enter into a y/n gate — the documented silent-failure mode.
-    for prose in [b"version 1.2.3", b"step 1. first", b"took 1.5s"]:
+    # DISCRIMINATING cases: `rb"1[.]"` passed the menus above while matching these,
+    # which sends Enter into a y/n gate — the documented silent-failure mode. The
+    # last three start the line, so a line anchor alone does not reject them.
+    for prose in [
+        b"version 1.2.3",
+        b"step 1. first",
+        b"took 1.5s",
+        b"1.2.3",
+        b"1.0.0 released",
+        b"1.x",
+    ]:
         assert not MENU.search(prose), prose
 
     # The ladder BY VALUE. Asserting `answer_for(0) == ANSWERS[0]` is

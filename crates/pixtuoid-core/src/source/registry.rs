@@ -565,9 +565,12 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
             // message_submit re-emits SessionStart, so a swept-but-live session
             // walks back in on the next prompt.
             resurrects_on_prompt: true,
-            // Conservative ASSUMPTION — no live capture exercised a dispatch.
-            // `true` can only over-retain a dead Delegating slot, never reap a
-            // live one.
+            // Conservative, and the open question is narrower than "no capture":
+            // the recorded `codewhale/fixtures` DOES hold a real dispatch, but
+            // only its BOUNDARIES (`subagent_spawn`, `subagent_complete`). What
+            // this flag asks is whether the child's work fires anything BETWEEN
+            // them — nothing we hold answers that, and `true` can only over-retain
+            // a dead Delegating slot, never reap a live one.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,

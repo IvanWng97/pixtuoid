@@ -13,11 +13,13 @@
 //! decoder claims EVERY event (`.map(Some)`, never `Ok(None)`).
 //!
 //! `extra.tool_call_id` IS on the wire — capture-verified on BOTH tool events, and
-//! they pair — and dropped anyway: with only the four `HERMES_EVENTS` registered
-//! there is no permission event to resolve, no subagent event to drain and no second
-//! transport to dedup against, so the reducer's per-call machinery has nothing to do
-//! with it (the same reasoning `cursor.rs` spells out at length). Pinned by
-//! `pre_tool_call_is_activity_start_with_no_tool_id`.
+//! they pair — and dropped anyway. The original reason (no permission event to
+//! resolve) died when `pre_approval_request` was registered: there IS one now, and
+//! it carries a pairing id. What survives is that with no subagent event to drain
+//! and no second transport to dedup against, a hermes `Waiting` is cleared by the
+//! tuid-less hook escape in `wait_resolved_by` — every hermes event is Hook
+//! transport — so a per-call id would only re-derive the answer that path already
+//! gives. Pinned by `pre_tool_call_is_activity_start_with_no_tool_id`.
 //!
 //! `subagent_stop` is deliberately absent from `HERMES_EVENTS`: the SHELL-hook payload
 //! carries a parent id but NO child session/agent id, so a decode could only end a
@@ -192,10 +194,17 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             agent_id,
             as_child: false,
         }]),
-        "on_session_end" => Ok(vec![AgentEvent::ActivityEnd {
-            agent_id,
-            tool_use_id: None,
-        }]),
+        // An ACTIVITY arm since it turned out to be a turn boundary, so it takes
+        // the class's Identity with it: for a tool-less chat turn this is the ONLY
+        // event the session emits, and a daemon attaching mid-session would
+        // otherwise register nothing at all until the next tool call.
+        "on_session_end" => Ok(vec![
+            identity(),
+            AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: None,
+            },
+        ]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
             bail!(
@@ -420,6 +429,7 @@ mod tests {
             json!({"hook_event_name": "pre_tool_call", "session_id": "s", "cwd": "/repo",
                    "tool_name": "terminal", "tool_input": {"command": "ls"}}),
             json!({"hook_event_name": "post_tool_call", "session_id": "s", "cwd": "/repo", "tool_name": "terminal"}),
+            json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/repo"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);
@@ -443,10 +453,12 @@ mod tests {
     }
 
     #[test]
+    /// The partition is by decoded CLASS, not by wire name — `on_session_end`
+    /// moved to the activity arms and its Identity had to move with it.
     fn session_events_carry_no_identity() {
         for payload in [
             json!({"hook_event_name": "on_session_start", "session_id": "s", "cwd": "/r"}),
-            json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/r"}),
+            json!({"hook_event_name": "on_session_finalize", "session_id": "s", "cwd": "/r"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);

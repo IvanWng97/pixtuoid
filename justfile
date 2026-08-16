@@ -1422,7 +1422,15 @@ tuidrive-selftest:
 [group('meta')]
 [doc("Assert every capture declares its provenance and its claims are falsifiable")]
 fixture-metadata:
-    cargo test -p pixtuoid-core --test sources captures:: -- --nocapture
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A filter that matches NOTHING exits 0 having run no rule, so rename the
+    # module and this named gate passes vacuously — the class the file's own
+    # floors exist to prevent. Count what ran and require it.
+    out=$(cargo test -p pixtuoid-core --test sources captures:: -- --nocapture 2>&1) || { echo "$out"; exit 1; }
+    echo "$out"
+    ran=$(echo "$out" | sed -n 's/^test result: ok\. \([0-9]*\) passed.*/\1/p' | head -1)
+    [ "${ran:-0}" -gt 0 ] || { echo "fixture-metadata: the \`captures::\` filter matched no test — the module moved" >&2; exit 1; }
 
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
@@ -1473,6 +1481,9 @@ fixture-pii-selftest:
     # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
     # allowlist waives AWS's own documentation key, so that one proves nothing.
     printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
+    # A real secret wearing a wire identifier's PREFIX. The allowlists waived this
+    # by substring until they were anchored against `secret` rather than `match`.
+    printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
     printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
         > "$d/quiet/identity.txt"
     printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
@@ -1485,7 +1496,7 @@ fixture-pii-selftest:
     fail=0
     # The credential config does NOT own the identity class — its default global
     # allowlist waives filesystem-shaped strings, which is why the pair is split.
-    for spec in ".gitleaks.toml=cred-aws.txt" \
+    for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
                 ".gitleaks-identity.toml=identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
         got=$(fired "$cfg" "$d/probe")

@@ -47,6 +47,11 @@ expression: events
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~
+- Identity:
+    agent_id: 18079134507292421312
+    source: hermes
+    session_id: 20260815_211942_c387aa
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~
@@ -73,6 +78,11 @@ expression: events
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~
+- Identity:
+    agent_id: 18079134507292421312
+    source: hermes
+    session_id: 20260815_211942_c387aa
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~

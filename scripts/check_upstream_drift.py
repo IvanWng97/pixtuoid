@@ -478,7 +478,10 @@ PAYLOAD_READS_NOT_WATCHED = {
     # None appears in the documents we fetch (verified: 0 occurrences), so watching
     # one would be a permanent false alarm.
     "hermes": {"hook_event_name"},
-    "openclaw": {"type"},
+    # `gatewayPort` is watched HARDER than a field-name sweep can: it is the
+    # daemon's whole instance identity, so `OPENCLAW_GATEWAY_PORT_TYPES` watches
+    # the upstream TYPES that carry it. A second watch here would be a copy.
+    "openclaw": {"type", "gatewayPort"},
     "copilot": {"type"},
     "opencode": {"type", "properties"},
     # Fields OUR side synthesises, so nothing upstream can rename them: `_pid` is
