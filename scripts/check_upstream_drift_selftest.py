@@ -402,6 +402,7 @@ def test_every_const_array_reader_uses_the_shared_parser() -> None:
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
+    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}',
     d.CODEWHALE_EXECUTOR_URL: "pub fn to_env_vars(&self) -> HashMap<String, String> {",
     d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
     d.OPENCODE_EVENT_URLS[1]: "\nexport const Event = {\n  Asked,\n}",

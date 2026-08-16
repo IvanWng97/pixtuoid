@@ -104,7 +104,58 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 #   SubagentStop      — reasonix's, which "carries no ids". The decoder arm of
 #                       that NAME belongs to claude_code, a different source; the
 #                       arm reader is name-based and cannot tell them apart.
-LEDGERED_BUT_DECODABLE = {"Stop", "UserPromptSubmit", "SubagentStop"}
+#   subagent_start /  — hermes's. Adjudicated in `source/hermes.rs`'s module doc:
+#   subagent_stop     the SHELL payload carries a parent id but no CHILD id, so a
+#                     decode could only end a child that was never started. The
+#                     arms of those names belong to other sources.
+LEDGERED_BUT_DECODABLE = {
+    "Stop",
+    "UserPromptSubmit",
+    "SubagentStop",
+    "subagent_start",
+    "subagent_stop",
+}
+
+# Hermes hooks we DELIBERATELY do not register. The subagent pair is adjudicated
+# in `source/hermes.rs`'s module doc: the SHELL payload carries a parent id but no
+# CHILD id, so a decode could only end a child that was never started — the
+# in-process plugin API that does carry one never reaches a shell command's stdin.
+# The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
+# a value it is only observing), and Kanban/gateway bookkeeping — none of them a
+# lifecycle signal a visualizer renders.
+HERMES_KNOWN_OMITTED = {
+    "subagent_start",
+    "subagent_stop",
+    "post_approval_response",
+    "on_session_finalize",
+    "on_session_reset",
+    "on_interim_message",
+    "on_stream_start",
+    "on_stream_delta",
+    "on_stream_end",
+    "pre_llm_call",
+    "post_llm_call",
+    "pre_api_request",
+    "post_api_request",
+    "api_request_error",
+    "pre_command",
+    "pre_verify",
+    "pre_transcription",
+    "on_skill_lifecycle",
+    "transform_llm_output",
+    "transform_terminal_output",
+    "transform_tool_result",
+    "gateway_platform_event",
+    "pre_gateway_dispatch",
+    "kanban_task_blocked",
+    "kanban_task_claimed",
+    "kanban_task_completed",
+    "on_kanban_dispatch_tick",
+    "on_kanban_task_updated",
+    "on_kanban_worker_exited",
+    "on_kanban_worker_spawned",
+    "on_kanban_worker_stale_claim",
+}
 
 # Codex hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity a visualizer cares about.
@@ -272,6 +323,14 @@ OPENCLAW_PATHS_URL = (
 # The canonical Hermes shell-hook event set is the KEYS of `_DEFAULT_PAYLOADS`.
 # ONE-DIRECTIONAL: an event WE REGISTER vanishing means the shell hook we install
 # into config.yaml fires nothing (no sprite).
+# `_DEFAULT_PAYLOADS` holds only the events with a synthetic payload; the real
+# set is `VALID_HOOKS` one file over, and `SHELL_UNSUPPORTED_HOOKS` says which
+# of those a SHELL hook cannot serve. Both are needed to ask "is there an event
+# upstream fires that we could register and don't" — the direction that shipped
+# `pre_approval_request` unregistered (#930).
+HERMES_PLUGINS_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
+)
 HERMES_HOOK_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/hooks.py"
 )
@@ -479,6 +538,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
     HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
+    HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
     # HERMES_HOME and delegates to the platform default), so it owns both names.
@@ -1097,6 +1157,32 @@ def openclaw_plugin_default_port() -> str | None:
     m = re.search(r"const DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", src)
     return m.group(1) if m else None
 
+
+
+def python_set_literal(src: str, decl: str) -> set[str]:
+    """The string members of a `NAME: Set[str] = { … }` block.
+
+    Brace-BALANCED, not a fixed window, and `#` comments stripped first: upstream
+    interleaves multi-line prose in these blocks, and one of those comments quotes
+    `{"action": "continue"}`, which a naive scan reads as two event names.
+    """
+    i = src.find(decl)
+    if i < 0:
+        return set()
+    j = src.find("{", i)
+    depth = 0
+    for k in range(j, len(src)):
+        if src[k] == "{":
+            depth += 1
+        elif src[k] == "}":
+            depth -= 1
+            if depth == 0:
+                body = src[j + 1 : k]
+                break
+    else:
+        return set()
+    code = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
+    return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code))
 
 def read_hermes_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/hermes.rs", "HERMES_EVENTS")
@@ -1978,6 +2064,27 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — the shim's silent "
                         f"exit 0 would ANSWER a real approval prompt. Unregister it in "
                         f"install/hermes.rs, or make the shim decline explicitly."
+                    )
+        plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
+        if plugins is not None:
+            valid = python_set_literal(plugins, "VALID_HOOKS: Set[str] = {")
+            unsupported = python_set_literal(
+                plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
+            )
+            if len(valid) < 10:
+                report.add_blind(
+                    "the Hermes event set upstream actually offers",
+                    "VALID_HOOKS in hermes_cli/plugins.py",
+                    f"the set reader returned {len(valid)} entries, so the "
+                    f"missing-registration direction was SKIPPED for hermes.",
+                )
+            else:
+                for ev in sorted(valid - unsupported - ours.hermes - HERMES_KNOWN_OMITTED):
+                    report.add_review(
+                        f"Hermes hook `{ev}` is in upstream VALID_HOOKS and shell-"
+                        f"registerable, and we neither register it in HERMES_EVENTS nor "
+                        f"list it in HERMES_KNOWN_OMITTED. An event we could receive and "
+                        f"do not is invisible to every test (#930 was this shape)."
                     )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
