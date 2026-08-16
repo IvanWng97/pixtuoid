@@ -586,6 +586,11 @@ corpus-all:
     set -uo pipefail
     cc=target/release/examples/corpus_check
     [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
+    # Read the roster BEFORE the loop: as a process substitution its exit status
+    # is unobservable, so a roster that died fed an empty loop and the census
+    # reported "everything clean" having censused nothing.
+    roster="$("$cc" --roster)" || { echo "corpus_check --roster failed" >&2; exit 2; }
+    [ -n "$roster" ] || { echo "corpus_check --roster returned no rows" >&2; exit 2; }
     rc=0
     uncovered=()
     while IFS=$'\t' read -r id _ kind _; do
@@ -600,7 +605,7 @@ corpus-all:
         3) uncovered+=("$id") ;;
         *) rc=1 ;;
         esac
-    done < <("$cc" --roster)
+    done <<<"$roster"
     if [ ${#uncovered[@]} -gt 0 ]; then
         echo "NOT COVERED (no local corpus): ${uncovered[*]}"
     fi

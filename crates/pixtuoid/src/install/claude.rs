@@ -417,9 +417,6 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn claude_shim_ref_survives_an_event_suffix_it_does_not_write_today() {
-        // The reason this delegates to `shell_shim_ref` instead of parsing the
-        // prefix itself: a private copy would bake the flag into the PathBuf and
-        // `doctor` would report a working install as moved.
         use crate::install::verify::ShimRef;
         let entry = serde_json::json!({
             "hooks": [{ "command": "PIXTUOID_SOURCE=claude-code '/opt/pixtuoid-hook' --event PreToolUse" }]

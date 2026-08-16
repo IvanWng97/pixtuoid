@@ -64,7 +64,9 @@ mod recorder {
             std::process::exit(2);
         }
         let (source, scenario) = (args[0].clone(), args[1].clone());
-        let prompt = std::env::var("CAPTURE_PROMPT").unwrap_or_else(|_| DEFAULT_PROMPT.to_string());
+        // Set-but-empty is unset: `CAPTURE_PROMPT=` would otherwise expand
+        // `{prompt}` to nothing and record `"prompt": ""` as if it were a choice.
+        let prompt = nonempty_env("CAPTURE_PROMPT").unwrap_or_else(|| DEFAULT_PROMPT.to_string());
         let cmd: Vec<String> = args[2..]
             .iter()
             .map(|a| a.replace("{prompt}", &prompt))
@@ -123,8 +125,8 @@ mod recorder {
             &cmd,
             &args[2..],
             &[
-                ("prompt", std::env::var("CAPTURE_PROMPT").ok()),
-                ("seed", std::env::var("CAPTURE_SEED").ok()),
+                ("prompt", nonempty_env("CAPTURE_PROMPT")),
+                ("seed", nonempty_env("CAPTURE_SEED")),
             ],
         )?;
         for p in &wrote {
@@ -411,6 +413,10 @@ mod recorder {
             );
         }
         Ok(())
+    }
+
+    fn nonempty_env(key: &str) -> Option<String> {
+        std::env::var(key).ok().filter(|s| !s.trim().is_empty())
     }
 
     fn today() -> String {

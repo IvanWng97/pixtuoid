@@ -67,28 +67,25 @@ mod tests {
         std::fs::create_dir(&real_dir).expect("mkdir");
         std::fs::write(&real_file, "{}").expect("write");
         let (dir_link, file_link) = (d.path().join("dl"), d.path().join("fl.jsonl"));
-        #[cfg(unix)]
-        {
-            std::os::unix::fs::symlink(&real_dir, &dir_link).expect("symlink");
-            std::os::unix::fs::symlink(&real_file, &file_link).expect("symlink");
-            let yes = |_: &Path| true;
-            assert_eq!(
-                classify(&meta_of(&dir_link), &dir_link, &yes),
-                Entry::SkipSymlink
-            );
-            assert_eq!(
-                classify(&meta_of(&file_link), &file_link, &yes),
-                Entry::SkipSymlink
-            );
-            assert_eq!(
-                classify(&meta_of(&real_dir), &real_dir, &yes),
-                Entry::Recurse
-            );
-            assert_eq!(
-                classify(&meta_of(&real_file), &real_file, &yes),
-                Entry::Take
-            );
-        }
+        std::os::unix::fs::symlink(&real_dir, &dir_link).expect("symlink");
+        std::os::unix::fs::symlink(&real_file, &file_link).expect("symlink");
+        let yes = |_: &Path| true;
+        assert_eq!(
+            classify(&meta_of(&dir_link), &dir_link, &yes),
+            Entry::SkipSymlink
+        );
+        assert_eq!(
+            classify(&meta_of(&file_link), &file_link, &yes),
+            Entry::SkipSymlink
+        );
+        assert_eq!(
+            classify(&meta_of(&real_dir), &real_dir, &yes),
+            Entry::Recurse
+        );
+        assert_eq!(
+            classify(&meta_of(&real_file), &real_file, &yes),
+            Entry::Take
+        );
     }
 
     #[test]

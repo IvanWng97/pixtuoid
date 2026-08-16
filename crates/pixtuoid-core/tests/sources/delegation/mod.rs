@@ -6,9 +6,7 @@
 
 use std::path::Path;
 
-use pixtuoid_core::source::copilot::decode_copilot_line;
-use pixtuoid_core::source::decoder::decode_hook_payload;
-use pixtuoid_core::source::omp::decode_omp_line;
+use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 
 fn lines(cli: &str, name: &str) -> Vec<String> {
@@ -25,39 +23,31 @@ fn lines(cli: &str, name: &str) -> Vec<String> {
 }
 
 fn opencode_events() -> Vec<AgentEvent> {
-    lines("opencode", "hook-payloads.jsonl")
-        .iter()
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid hook json");
-            decode_hook_payload(v).expect("captured opencode payload must decode")
-        })
-        .collect()
+    let d = Drive::hooks().lines(lines("opencode", "hook-payloads.jsonl"));
+    d.assert_clean("opencode delegation hooks");
+    d.events
 }
 
 fn copilot_events() -> Vec<AgentEvent> {
     // copilot keys the session on the transcript's PARENT dir, so the logical
     // path has to carry the session id the capture ran under.
     let logical = "d28d6fbd-b0cb-421a-abaa-1240ee4dae97/events.jsonl";
-    lines("copilot", "events.jsonl")
-        .iter()
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid transcript json");
-            decode_copilot_line(logical, "copilot", v).expect("captured copilot line must decode")
-        })
-        .collect()
+    let d = Drive::transcript("copilot", logical)
+        .expect("copilot has a line decoder")
+        .lines(lines("copilot", "events.jsonl"));
+    d.assert_clean("copilot delegation transcript");
+    d.events
 }
 
 fn omp_events() -> Vec<AgentEvent> {
     // omp writes the PARENT as `<ts>_<id>.jsonl` and each child inside a
     // same-named DIR, so the id comes from this file's own stem.
     let logical = "2026-08-15T18-35-53-366Z_01a006b5-8096-7000-9fed-3dc3604e8efb.jsonl";
-    lines("omp", "parent.jsonl")
-        .iter()
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid transcript json");
-            decode_omp_line(logical, "omp", v).expect("captured omp line must decode")
-        })
-        .collect()
+    let d = Drive::transcript("omp", logical)
+        .expect("omp has a line decoder")
+        .lines(lines("omp", "parent.jsonl"));
+    d.assert_clean("omp delegation transcript");
+    d.events
 }
 
 fn tasks(evs: &[AgentEvent]) -> usize {

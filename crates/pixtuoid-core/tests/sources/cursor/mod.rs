@@ -9,16 +9,25 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use pixtuoid_core::source::decoder::decode_hook_payload;
+use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::AgentEvent;
 
-fn payloads() -> Vec<serde_json::Value> {
+fn lines() -> Vec<String> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/sources/cursor/fixtures/hook-payloads.jsonl");
     std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
         .lines()
         .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// The RAW envelopes, for the one assertion that is about the WIRE rather than
+/// about what we decode from it.
+fn payloads() -> Vec<serde_json::Value> {
+    lines()
+        .iter()
         .map(|l| serde_json::from_str(l).expect("valid hook json"))
         .collect()
 }
@@ -27,13 +36,13 @@ fn payloads() -> Vec<serde_json::Value> {
 fn a_delegating_run_is_two_unlinked_sessions() {
     let mut ids = BTreeSet::new();
     let mut starts = 0;
-    for v in payloads() {
-        for ev in decode_hook_payload(v).expect("cursor hook payload must decode") {
-            ids.insert(ev.agent_id());
-            if let AgentEvent::SessionStart { parent_id, .. } = ev {
-                starts += 1;
-                assert_eq!(parent_id, None, "cursor carries no parent link on the wire");
-            }
+    let d = Drive::hooks().lines(lines());
+    d.assert_clean("cursor delegation hooks");
+    for ev in d.events {
+        ids.insert(ev.agent_id());
+        if let AgentEvent::SessionStart { parent_id, .. } = ev {
+            starts += 1;
+            assert_eq!(parent_id, None, "cursor carries no parent link on the wire");
         }
     }
     assert_eq!(ids.len(), 2, "parent + subagent, keyed apart by session_id");

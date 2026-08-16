@@ -307,7 +307,10 @@ fn a_recorded_capture_that_was_edited_says_so() {
                         .and_then(|n| n.as_str())
                         .unwrap_or("")
                         .to_ascii_lowercase();
-                    let declares = note.contains("redact") || note.contains("verbatim");
+                    // "verbatim" USED to satisfy this, which let a note assert the
+                    // OPPOSITE of what the bytes show; every edited fixture in the
+                    // tree says "redact" too, so the arm only ever widened the hole.
+                    let declares = note.contains("redact");
                     // RECURSIVE: a parent-dir-keyed source nests its transcript one
                     // level down, and `a_parent_dir_keyed_transcript_is_nested_under_
                     // its_session_id` FORCES new fixtures into that shape — so a flat
@@ -334,9 +337,24 @@ fn a_recorded_capture_that_was_edited_says_so() {
     }
     assert!(
         silent.is_empty(),
-        "these `recorded` fixtures carry a redaction sentinel and no `note` saying so — \
-         a reader cannot tell an edited capture from an untouched one: {silent:?}"
+        "these `recorded` fixtures carry a redaction sentinel and no `note` claiming a \
+         redaction — a reader cannot tell an edited capture from an untouched one, and a \
+         note calling these bytes verbatim is worse than a silent one: {silent:?}"
     );
+}
+
+/// The version-ish words in a `--version` line, with a leading `v` dropped:
+/// `Hermes Agent v0.20.1 (2026.8.13)` -> `{Hermes, Agent, 0.20.1, 2026.8.13}`.
+/// `-` separates because cursor ships `2026.08.11-e8db854` against a registry
+/// pinning `2026.08.11`.
+fn version_tokens(line: &str) -> std::collections::HashSet<&str> {
+    line.split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
+        .filter(|t| !t.is_empty())
+        .map(|t| match t.strip_prefix('v') {
+            Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => rest,
+            _ => t,
+        })
+        .collect()
 }
 
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
@@ -398,9 +416,12 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         // 2.1.233, and three of the anchors this rule exists to hold were STALE
         // rather than unknown, so they were never in its range at all. The
         // registry field holds a bare version; a provenance holds the CLI's whole
-        // `--version` line, so the anchor must APPEAR in one of them.
+        // `--version` line, so the anchor must be one of its TOKENS — `contains`
+        // let the stale prefix "0.14" anchor against a 0.147.0 capture.
         assert!(
-            recorded.iter().any(|v| v.contains(d.verified_version)),
+            recorded
+                .iter()
+                .any(|v| version_tokens(v).contains(d.verified_version)),
             "{source}: `verified_version` is {:?}, which appears in none of this \
              source's recorded captures {recorded:?} — the field means \"the version \
              whose wire we have SEEN\"",
@@ -530,6 +551,22 @@ fn every_scenario_declares_its_provenance() {
             }
             match origin {
                 "recorded" => {
+                    // `cli` was the one required field nothing could falsify, so a
+                    // provenance naming a DIFFERENT CLI than the tree it sits in
+                    // passed everywhere. The registry's probe argv[0] is the name
+                    // the user types (`agy`, `cursor-agent`), which is what a
+                    // capture command starts with.
+                    let probe = registry::descriptor_for(&source).and_then(|d| d.version_probe);
+                    let declared = doc.get("cli").and_then(serde_json::Value::as_str);
+                    if let (Some(probe), Some(cli)) = (probe, declared) {
+                        assert_eq!(
+                            cli,
+                            probe[0],
+                            "{}: `cli` is {cli:?} but this tree is {source}, whose binary is {:?}",
+                            path.display(),
+                            probe[0]
+                        );
+                    }
                     recorded.insert(source.clone());
                 }
                 "unknown" => {

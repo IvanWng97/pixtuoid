@@ -852,6 +852,18 @@ mod tests {
             apply(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
             apply(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(1));
             assert_eq!(st(&s, src), DaemonState::Idle);
+
+            let mut s = SceneState::default();
+            apply(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            apply(
+                &mut s,
+                src,
+                DaemonPresenceUpdate::RunStarted {
+                    run_key: "r1".into(),
+                },
+                ms(1),
+            );
+            assert_eq!(st(&s, src), DaemonState::Busy);
         }
     }
 

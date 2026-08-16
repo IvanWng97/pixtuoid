@@ -52,6 +52,11 @@ def version_probes() -> dict[str, list[str]]:
                              timeout=30, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.SubprocessError):
         return {}
+    # A roster that RAN and FAILED used to read as "not built", so the report
+    # printed a false diagnosis of why it was comparing nothing.
+    if out.returncode != 0:
+        print(f"corpus_check --roster exited {out.returncode}", file=sys.stderr)
+        raise SystemExit(2)
     probes = {}
     for line in out.stdout.splitlines():
         cols = line.split("\t")
@@ -99,37 +104,47 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     unverifiable is a claim, not a record — a wholly false one (`cli: codex`,
     `version: 0.0.0-A-LIE`) passed every gate in this tree until this ran.
 
-    Only two axes are answerable in-repo, and only where the shim stamped them:
-    the payloads' own `_pixtuoid_source`, and `_shim_ts_ms` vs `captured`.
+    Three axes are answerable in-repo: the payloads' own `_pixtuoid_source`,
+    `captured` vs the shim's `_shim_ts_ms`, and `captured` vs a capture date the
+    recording CLI put in a TRANSCRIPT FILENAME. `cli` is checked in Rust, where
+    the registry's probe argv is in scope (`every_scenario_declares_its_provenance`).
     """
     out = []
-    hooks = prov_dir / "hook-payloads.jsonl"
-    if not hooks.is_file():
-        return out
     stamps, dates = set(), set()
-    for line in hooks.read_text(errors="ignore").splitlines():
-        if not line.strip():
-            continue
-        try:
-            o = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(o, dict):
-            if o.get("_pixtuoid_source"):
-                stamps.add(o["_pixtuoid_source"])
-            if isinstance(o.get("_shim_ts_ms"), int):
-                dates.add(
-                    dt.datetime.fromtimestamp(o["_shim_ts_ms"] / 1000, dt.UTC)
-                    .date()
-                    .isoformat()
-                )
-    # The stamp must name ONE source. Which one is not answerable here: a
-    # conformance scenario sits under `fixtures/<source>/`, a single-owner tree
-    # under `<module>/fixtures/`, so the parent name is the id in one layout and
-    # the literal "fixtures" in the other. A capture that scooped up a second
-    # CLI's hooks is the failure this can see, and it sees it either way.
+    hooks = prov_dir / "hook-payloads.jsonl"
+    if hooks.is_file():
+        for line in hooks.read_text(errors="ignore").splitlines():
+            if not line.strip():
+                continue
+            try:
+                o = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(o, dict):
+                if o.get("_pixtuoid_source"):
+                    stamps.add(o["_pixtuoid_source"])
+                if isinstance(o.get("_shim_ts_ms"), int):
+                    dates.add(
+                        dt.datetime.fromtimestamp(o["_shim_ts_ms"] / 1000, dt.UTC)
+                        .date()
+                        .isoformat()
+                    )
+    # codex and omp name their transcripts by capture instant, which is the only
+    # date evidence in a transcript-only fixture — 12 of these trees ship no hook
+    # payloads at all, and the whole function used to return [] for every one.
+    for f in prov_dir.rglob("*.jsonl"):
+        m = re.match(r"(?:rollout-)?(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}", f.name)
+        if m:
+            dates.add(m.group(1))
     if len(stamps) > 1:
         out.append(f"payloads carry TWO sources ({sorted(stamps)}) — a capture scooped up another CLI")
+    # Under `fixtures/<source>/<scenario>/` the id IS the grandparent dir, so a
+    # single WRONG stamp is answerable too. The single-owner trees (`<module>/
+    # fixtures/`) key by module name, which is not the source id for all of them.
+    elif len(stamps) == 1 and prov_dir.parent.parent.name == "fixtures":
+        expect = prov_dir.parent.name
+        if (only := next(iter(stamps))) != expect:
+            out.append(f"payloads are stamped `{only}` but this tree is `{expect}`")
     captured = str(prov.get("captured", ""))
     if dates and captured not in ("", "unknown") and captured not in dates:
         out.append(
@@ -167,7 +182,10 @@ def check_metadata() -> int:
         if origin != "recorded":
             continue
         seen += 1
-        for field in ("cli", "version", "captured"):
+        # `command` is in the Rust gate's required set too; leaving it out here
+        # meant the single-owner trees — the ones this half exists to cover —
+        # could drop the field that says how to re-record the capture.
+        for field in ("cli", "version", "captured", "command"):
             if not str(prov.get(field, "")).strip():
                 bad.append(f"{rel}: recorded fixture has no `{field}`")
         # A `version` holding the INVOCATION rather than a version reports a

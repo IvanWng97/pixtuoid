@@ -440,6 +440,61 @@ fn lobster_px(
         .count()
 }
 
+/// Drives one openclaw capture through the presence seam and hands back what the
+/// office would paint. `stop_at` ends the stream before a type, as the lobster
+/// test does to stay inside the live window.
+fn openclaw_state(scenario: &str, stop_at: &[&str]) -> pixtuoid_core::state::DaemonState {
+    let hooks =
+        core_fixtures_root().join(format!("fixtures/openclaw/{scenario}/hook-payloads.jsonl"));
+    let mut scene = SceneState::uniform(16);
+    let now = t0();
+    for line in &read_nonblank_lines(&hooks) {
+        let v: serde_json::Value = serde_json::from_str(line).expect("openclaw hook json");
+        let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if stop_at.contains(&ty) {
+            break;
+        }
+        let decoded = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
+            .expect("decode_openclaw_hook_payload");
+        let key = pixtuoid_core::source::daemon::DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            decoded.instance.clone(),
+        );
+        for update in decoded.updates {
+            apply_presence(&mut scene, &key, update, now);
+        }
+    }
+    let (_, _, presence) = scene
+        .daemons()
+        .find(|(source, _, _)| *source == pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .expect("openclaw presence must be populated");
+    presence.display_state()
+}
+
+/// pixtuoid usually starts AFTER the gateway, so `gateway_start` is the one
+/// envelope a real attach never sees. Both captures here open on `session_start`;
+/// the failed run is the only bytes anyone has of `agent_end` with success=false.
+#[test]
+fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
+    use pixtuoid_core::state::DaemonState;
+    assert_eq!(
+        openclaw_state("mid-attach-recorded", &["agent_end"]),
+        DaemonState::Busy,
+        "a mid-attach stream carries no gateway_start, so the session envelopes must \
+         materialize the instance themselves and put the run in flight on it"
+    );
+    assert_eq!(
+        openclaw_state("mid-attach-recorded", &[]),
+        DaemonState::Idle,
+        "and agent_end must retire that run"
+    );
+    assert_eq!(
+        openclaw_state("gateway-mid-attach-failed-run", &["session_end"]),
+        DaemonState::Degraded,
+        "agent_end success=false is the model backend breaking, not the gateway dying"
+    );
+}
+
 /// The daemon/presence class: `apply_presence` is the sibling-channel seam
 /// `runtime/driver.rs` uses — NEVER `Reducer::apply`, which is `AgentId`-pure.
 #[test]

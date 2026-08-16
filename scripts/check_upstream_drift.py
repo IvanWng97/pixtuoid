@@ -170,7 +170,7 @@ HERMES_KNOWN_OMITTED = {
 
 # OpenClaw hooks we DELIBERATELY do not register. It is a DAEMON source — the
 # lobster renders gateway PRESENCE (up / busy / down + a session count), and the
-# six we register are exactly the four axes `decode_openclaw_presence` projects.
+# six we register are exactly the four axes `decode_openclaw_hook_payload` projects.
 # The rest are the AGENT's turn machinery inside the gateway: prompt/model
 # resolution, the LLM call, compaction, message and reply plumbing, cron, skills,
 # and the subagent trio. The subagent three are omitted on a premise this tree has
@@ -431,7 +431,7 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
-# Payload FIELD names decode_openclaw_presence reads: `runId` (the in-flight run
+# Payload FIELD names decode_openclaw_hook_payload reads: `runId` (the in-flight run
 # key), `sessionId` (fallback key + label), `success` (agent_end → Degraded gate).
 # `success` is a common word, so a rename of it could be masked by an unrelated
 # occurrence; the distinctive `runId`/`sessionId` carry the check.
@@ -2201,7 +2201,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
-                        f"OpenClaw field `{field}` (read by decode_openclaw_presence) is "
+                        f"OpenClaw field `{field}` (read by decode_openclaw_hook_payload) is "
                         f"GONE from src/plugins/hook-types.ts — renamed; the decoder reads "
                         f"None (wrong run-key / no Degraded gate / no presence)."
                     )
