@@ -280,6 +280,11 @@ HERMES_SHELL_HOOK_URL = (
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+# Registering `pre_approval_request` is safe ONLY while it stays observer-only:
+# upstream's `_BLOCKING_EVENTS` decides whether a hook's exit code can stall the
+# decision, and the shim always exits 0. If the approval gate joins that set, our
+# silent success starts answering a real prompt.
+HERMES_NONBLOCKING_EVENTS = {"pre_approval_request"}
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.
@@ -1954,6 +1959,22 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"hermes_cli/hooks.py _DEFAULT_PAYLOADS — likely renamed; Hermes still "
                         f"runs but the shell hook we install into config.yaml fires nothing "
                         f"(no sprite / no activity)."
+                    )
+            for ev in sorted(HERMES_NONBLOCKING_EVENTS):
+                blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", text)
+                if blocking is None:
+                    report.add_blind(
+                        "whether Hermes still treats the approval gate as observer-only",
+                        "_BLOCKING_EVENTS in hermes_cli/hooks.py",
+                        "We register `pre_approval_request` because a hook's exit code "
+                        "cannot affect it. If that set moved or was renamed, the premise "
+                        "is unchecked.",
+                    )
+                elif f'"{ev}"' in blocking.group(1):
+                    report.add_breaking(
+                        f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — the shim's silent "
+                        f"exit 0 would ANSWER a real approval prompt. Unregister it in "
+                        f"install/hermes.rs, or make the shim decline explicitly."
                     )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:

@@ -345,8 +345,8 @@ pub(crate) fn install_target(
     // merge is a no-op (heals a deleted plugin file).
     if let Some(make) = t.extra_artifacts {
         for (p, c) in make(&binary)? {
-            // Silent twice over if it fires for real: CI has no such dir to
-            // corrupt, and OpenClaw's plugin swallows spawn errors (invariant #5).
+            // A real write here would be invisible: CI has no such dir, and the
+            // shim exits 0 by invariant #5 so nothing downstream reports it.
             #[cfg(test)]
             assert!(
                 p.starts_with(std::env::temp_dir()),
