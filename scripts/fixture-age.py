@@ -139,9 +139,15 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
     return out
 
 
+# Below this the walk found almost nothing, so a pass says nothing about the
+# corpus — the vacuous-pass floor its sibling in the drift selftest already has.
+MIN_PROVENANCES = 20
+
+
 def check_metadata() -> int:
     """The half that runs everywhere: the report's inputs must exist and parse."""
     bad = []
+    seen = 0
     for p, prov in provenances():
         rel = p.relative_to(ROOT)
         if "_unparseable" in prov:
@@ -160,6 +166,7 @@ def check_metadata() -> int:
             continue
         if origin != "recorded":
             continue
+        seen += 1
         for field in ("cli", "version", "captured"):
             if not str(prov.get(field, "")).strip():
                 bad.append(f"{rel}: recorded fixture has no `{field}`")
@@ -182,7 +189,15 @@ def check_metadata() -> int:
     if bad:
         print(f"fixture metadata: {len(bad)} problem(s)", file=sys.stderr)
         return 1
-    print("fixture metadata: ok")
+    if seen < MIN_PROVENANCES:
+        print(
+            f"fixture metadata: only {seen} recorded provenance(s) under {FIXTURES} — "
+            f"expected at least {MIN_PROVENANCES}; the walk found almost nothing, so "
+            f"this pass says nothing about the corpus.",
+            file=sys.stderr,
+        )
+        return 1
+    print(f"fixture metadata: ok ({seen} recorded)")
     return 0
 
 

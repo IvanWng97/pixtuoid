@@ -241,9 +241,30 @@ OPENCODE_KNOWN_OMITTED = {
 # and `preCompact` carry no state a sprite renders. Registering a blocking hook is
 # not forbidden outright — `preToolUse` blocks too — the question is whether a
 # silent success is the right answer for that particular gate.
+# The floor each reader must clear before its parse is believed; below it the
+# sweep files probe health instead of reading "upstream has nothing new".
+OPENCODE_EVENT_FLOOR = 5
+
 CURSOR_KNOWN_OMITTED = {
-    "beforeShellExecution",
+    # Tool-adjacent detail already carried by the preToolUse/postToolUse pair we
+    # DO register — a second event per call would add a shim invocation and no
+    # state the office renders.
     "afterFileEdit",
+    "afterMCPExecution",
+    "afterShellExecution",
+    "afterTabFileEdit",
+    "beforeReadFile",
+    "beforeTabFileRead",
+    # Turn-level narration and prompt content, not lifecycle.
+    "afterAgentResponse",
+    "afterAgentThought",
+    "beforeSubmitPrompt",
+    "workspaceOpen",
+    # cursor's subagents render FLAT and the parent link is genuinely absent —
+    # `source/cursor.rs`'s sharp edge; these two carry no child id to fix that.
+    "subagentStart",
+    "subagentStop",
+    # A compaction internal.
     "preCompact",
 }
 
@@ -1272,27 +1293,28 @@ def openclaw_plugin_default_port() -> str | None:
 def python_set_literal(src: str, decl: str) -> set[str]:
     """The string members of a `NAME: Set[str] = { … }` block.
 
-    Brace-BALANCED, not a fixed window, and `#` comments stripped first: upstream
-    interleaves multi-line prose in these blocks, and one of those comments quotes
-    `{"action": "continue"}`, which a naive scan reads as two event names.
+    Comments are stripped BEFORE the brace scan, for the reason `_enum_body` and
+    `rust_block_after` both state: a brace inside a comment moves the bounds. The
+    first cut scanned raw source, and upstream interleaves prose here — one of its
+    comments quotes `{"action": "continue"}`, and a stray `}` truncated the set
+    SILENTLY while the size floor still passed.
     """
     i = src.find(decl)
     if i < 0:
         return set()
-    j = src.find("{", i)
+    code = "\n".join(line.split("#", 1)[0] for line in src[i:].splitlines())
+    j = code.find("{")
+    if j < 0:
+        return set()
     depth = 0
-    for k in range(j, len(src)):
-        if src[k] == "{":
+    for k in range(j, len(code)):
+        if code[k] == "{":
             depth += 1
-        elif src[k] == "}":
+        elif code[k] == "}":
             depth -= 1
             if depth == 0:
-                body = src[j + 1 : k]
-                break
-    else:
-        return set()
-    code = "\n".join(line.split("#", 1)[0] for line in body.splitlines())
-    return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code))
+                return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code[j + 1 : k]))
+    return set()
 
 def read_hermes_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/hermes.rs", "HERMES_EVENTS")
@@ -1797,12 +1819,21 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
         # The other direction. Wire names live in `define({ type: "…" })`; the
         # exported `Event` object holds only the symbols.
+        # `parts` already holds both bodies — re-fetching doubled the requests and
+        # filed probe health twice per URL under two labels, so one failure read as
+        # two findings in the issue.
         upstream_oc: set[str] = set()
-        for u in OPENCODE_EVENT_URLS:
-            body = fetch_anchored(u, "opencode events", report)
+        for body in parts:
             if body:
                 upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
-        if upstream_oc:
+        if len(upstream_oc) < OPENCODE_EVENT_FLOOR:
+            report.add_blind(
+                "the opencode event set upstream actually defines",
+                "the `define({ type: … })` calls in its two event modules",
+                f"the reader returned {len(upstream_oc)} names, so the "
+                f"missing-registration direction was SKIPPED for opencode.",
+            )
+        else:
             for ev in sorted(upstream_oc - ours.opencode - OPENCODE_KNOWN_OMITTED):
                 report.add_review(
                     f"new opencode event `{ev}` upstream — we neither subscribe to it "
@@ -2109,13 +2140,19 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
             # The other direction. The docs name hooks inline, so the set is the
             # camelCase vocabulary rather than a quoted literal list.
-            upstream_cur = set(
-                re.findall(
-                    r"\b(pre[A-Z][a-zA-Z]+|post[A-Z][a-zA-Z]+|beforeShellExecution"
-                    r"|afterFileEdit|stop)\b",
-                    text,
+            # The docs' OWN hook index, not a guess at cursor's naming. A closed
+            # prefix list could not contain `sessionStart`/`sessionEnd` — names
+            # CURSOR_EVENTS registers, so we know cursor fires them — and a bare
+            # `<code>` scrape drags in config keys and literals (`timeout`,
+            # `true`, `curl`). Each hook's own anchor is `href="#<lowercased>"`
+            # around its name, which is the one shape that selects hooks alone.
+            upstream_cur = {
+                name
+                for slug, name in re.findall(
+                    r'href="#([a-z]+)"[^>]*>([a-z][a-zA-Z]+)</a>', text
                 )
-            )
+                if slug == name.lower()
+            }
             if len(upstream_cur) < 4:
                 report.add_blind(
                     "the cursor hook set the docs actually list",

@@ -308,17 +308,17 @@ fn a_recorded_capture_that_was_edited_says_so() {
                         .unwrap_or("")
                         .to_ascii_lowercase();
                     let declares = note.contains("redact") || note.contains("verbatim");
-                    let edited = std::fs::read_dir(&dir)
-                        .into_iter()
-                        .flatten()
-                        .flatten()
-                        .any(|e| {
-                            let p = e.path();
-                            p.extension().and_then(|x| x.to_str()) == Some("jsonl")
-                                && std::fs::read_to_string(&p)
-                                    .map(|b| SENTINELS.iter().any(|s| b.contains(s)))
-                                    .unwrap_or(false)
-                        });
+                    // RECURSIVE: a parent-dir-keyed source nests its transcript one
+                    // level down, and `a_parent_dir_keyed_transcript_is_nested_under_
+                    // its_session_id` FORCES new fixtures into that shape — so a flat
+                    // read_dir was blind to exactly the fixtures the sibling gate makes.
+                    let mut bytes = transcripts_in(&dir);
+                    bytes.push(dir.join("hook-payloads.jsonl"));
+                    let edited = bytes.iter().any(|p| {
+                        std::fs::read_to_string(p)
+                            .map(|b| SENTINELS.iter().any(|s| b.contains(s)))
+                            .unwrap_or(false)
+                    });
                     if edited && !declares {
                         silent.push(dir.strip_prefix(&sources).unwrap().to_path_buf());
                     }

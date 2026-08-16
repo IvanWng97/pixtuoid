@@ -1139,6 +1139,27 @@ def _drive_hermes(hooks_body: str) -> tuple[list[str], list[str]]:
     )
 
 
+def test_every_block_reader_strips_comments_before_counting_braces() -> None:
+    """The rule two of the three readers state in their own docstrings, and the
+    third re-broke: a brace inside a comment moves the bounds. The dangerous
+    outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
+    still passes and the tail of the set silently leaves the sweep."""
+    clean = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n    "b_two",\n}\n'
+    want = {"a_one", "b_two"}
+    check(d.python_set_literal(clean, "VALID_HOOKS: Set[str] = {") == want, "clean baseline")
+    for label, comment in (
+        ("unmatched open", '    # returns {"action": "continue"\n'),
+        ("stray close", "    # anything else } lets the turn finish\n"),
+        ("both", '    # {"a": 1} and a trailing }\n'),
+    ):
+        poisoned = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
+        got = d.python_set_literal(poisoned, "VALID_HOOKS: Set[str] = {")
+        check(
+            got == want,
+            f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
+        )
+
+
 def test_the_hermes_approval_gate_stays_observer_only() -> None:
     """Registering `pre_approval_request` is safe ONLY while a hook's exit code
     cannot affect it, and the shim always exits 0. Three outcomes, because the
@@ -1400,6 +1421,7 @@ def main() -> int:
         test_ts_comment_strip_survives_a_quote_detector_line,
         test_rust_comment_strip_is_not_confused_by_lifetimes,
         test_omp_env_sweeps_fire_and_stay_silent,
+        test_every_block_reader_strips_comments_before_counting_braces,
         test_the_hermes_approval_gate_stays_observer_only,
         test_no_ledger_excuses_a_hook_we_actually_register,
         test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
