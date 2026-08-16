@@ -315,6 +315,12 @@ CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 # half of the permission pair (the gate itself, `PermissionRequest`, IS
 # registered), task/teammate bookkeeping, environment/config plumbing,
 # compaction internals.
+#
+# `PostToolUseFailure` is NONE of those buckets and every sibling that has the
+# event registers it (cursor, kimi, grok). CC is the exception because it has a
+# second transport: the JSONL `tool_result` arm emits `ActivityEnd` regardless of
+# `is_error`, so a failed tool already closes. The hook would only duplicate it,
+# and the cost of skipping it is the JSONL lag, not a stuck sprite.
 CC_KNOWN_OMITTED = {
     "Setup",
     "UserPromptSubmit",

@@ -3,17 +3,16 @@
 #
 # Deliberately NOT `useDefault = true`, and that is the whole reason this is a
 # second file rather than two more rules in `.gitleaks.toml`. gitleaks' default
-# GLOBAL allowlist waives anything shaped like a filesystem path:
+# GLOBAL allowlist waives anything shaped like a filesystem path, and a global
+# allowlist outranks a rule-scoped one — verified by running these rules merged
+# into the default corpus and again alone: `/home/alice` and `/home/alice/src/x.rs`
+# are reported only when alone. So under the default corpus the home rule was HALF
+# DEAD: every `/home/<person>`, bare or with a path, was waived.
 #
-#     '''^/Users/(?i)[a-z0-9]+/[\w .-/]+$'''
-#     '''^/(?:bin|etc|home|opt|tmp|usr|var)/[\w ./-]+$'''
-#
-# and a global allowlist takes precedence over a rule-scoped one — verified by
-# running the same rule with and without `useDefault`: `/home/alice` and
-# `/home/ubuntu` are reported only without it. So under the default corpus this
-# rule was HALF DEAD: every `/home/<person>` and every `/Users/<person>/<path>`
-# was waived, and only a bare `/Users/<person>` still fired — which happened to
-# be the one case it was first tested with.
+# `/Users/<person>` fired in BOTH forms, with or without a trailing path — the
+# rule's match stops at the username, so it never satisfies the default's
+# two-segment `^/Users/…/…$` anchor. An earlier version of this note claimed
+# otherwise; the measurement above is what reproduces.
 #
 # `.gitleaks.toml` keeps `useDefault` for the credential sweep, where waiving
 # paths is correct. `just fixture-pii` runs both.
