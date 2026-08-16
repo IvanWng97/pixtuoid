@@ -348,18 +348,67 @@ fn a_recorded_capture_that_was_edited_says_so() {
     );
 }
 
-/// The version-ish words in a `--version` line, with a leading `v` dropped:
-/// `Hermes Agent v0.20.1 (2026.8.13)` -> `{Hermes, Agent, 0.20.1, 2026.8.13}`.
-/// `-` separates because cursor ships `2026.08.11-e8db854` against a registry
-/// pinning `2026.08.11`.
-fn version_tokens(line: &str) -> std::collections::HashSet<&str> {
-    line.split(|c: char| !c.is_ascii_alphanumeric() && c != '.')
-        .filter(|t| !t.is_empty())
-        .map(|t| match t.strip_prefix('v') {
-            Some(rest) if rest.starts_with(|c: char| c.is_ascii_digit()) => rest,
-            _ => t,
-        })
-        .collect()
+/// A dotted-run major at or above this reads as a YEAR/date token rather than a
+/// semver major. MIRRORS `doctor::parse_version`'s const of the same name; the
+/// pair is pinned by `banner_version_matches_doctors_documented_cases`.
+const IMPLAUSIBLE_MAJOR: u64 = 1000;
+
+/// THE version in a `--version` banner, by `doctor::parse_version`'s rule:
+/// prefer a `v`-prefixed run, else the first with a plausible major, else the
+/// first. One token, not a set — `{Hermes, Agent, 0.20.1, 2026.8.13}` let a
+/// registry pin the DATE, a git sha (`e8db854`), or the word `Agent`.
+fn banner_version(line: &str) -> Option<&str> {
+    let mut runs: Vec<(bool, u64, &str)> = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+            i += 1;
+        }
+        let run = line[start..i].trim_end_matches('.');
+        if !run.contains('.') {
+            continue;
+        }
+        let Ok(major) = run.split('.').next().unwrap_or("").parse::<u64>() else {
+            continue;
+        };
+        let v_prefixed = start > 0 && matches!(bytes[start - 1], b'v' | b'V');
+        runs.push((v_prefixed, major, run));
+    }
+    runs.iter()
+        .find(|(vp, ..)| *vp)
+        .or_else(|| runs.iter().find(|(_, maj, _)| *maj < IMPLAUSIBLE_MAJOR))
+        .or_else(|| runs.first())
+        .map(|(.., run)| *run)
+}
+
+/// The cases `doctor::parse_version`'s own doc names, so the mirror above cannot
+/// drift from the parser it copies.
+#[test]
+fn banner_version_matches_doctors_documented_cases() {
+    for (banner, want) in [
+        ("Built 2026.06.04 — v1.2.3", Some("1.2.3")),
+        ("2026.06.04", Some("2026.06.04")),
+        ("codex-cli 0.147.0", Some("0.147.0")),
+        ("Hermes Agent v0.20.1 (2026.8.13)", Some("0.20.1")),
+        ("grok 0.2.102 (ab5ebf69acec) [stable]", Some("0.2.102")),
+        ("2026.08.11-e8db854", Some("2026.08.11")),
+        ("omp/17.3.4", Some("17.3.4")),
+        ("no version here", None),
+    ] {
+        assert_eq!(banner_version(banner), want, "{banner:?}");
+    }
+    let doctor = Path::new(env!("CARGO_MANIFEST_DIR")).join("../pixtuoid/src/doctor.rs");
+    let body = std::fs::read_to_string(&doctor).expect("doctor.rs");
+    assert!(
+        body.contains(&format!("IMPLAUSIBLE_MAJOR: u64 = {IMPLAUSIBLE_MAJOR};")),
+        "doctor.rs's IMPLAUSIBLE_MAJOR drifted from this mirror"
+    );
 }
 
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
@@ -378,7 +427,9 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         let Some(d) = registry::descriptor_for(&source) else {
             continue;
         };
-        let mut recorded: Vec<String> = Vec::new();
+        // (captured, version), sorted so the newest sighting is last. ISO dates
+        // sort lexically.
+        let mut recorded: Vec<(String, String)> = Vec::new();
         let mut scenarios_with_a_recorded_origin = 0usize;
         for scenario in sorted_dirs(&source_dir) {
             let Ok(body) = std::fs::read_to_string(scenario.join("provenance.json")) else {
@@ -393,7 +444,12 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
             scenarios_with_a_recorded_origin += 1;
             if version.chars().any(|c| c.is_ascii_digit()) {
-                recorded.push(version.to_string());
+                let captured = v
+                    .get("captured")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                recorded.push((captured, version.to_string()));
             }
         }
         // A source with captures but NO version among them cannot anchor anything,
@@ -423,14 +479,19 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         // registry field holds a bare version; a provenance holds the CLI's whole
         // `--version` line, so the anchor must be one of its TOKENS — `contains`
         // let the stale prefix "0.14" anchor against a 0.147.0 capture.
-        assert!(
-            recorded
-                .iter()
-                .any(|v| version_tokens(v).contains(d.verified_version)),
-            "{source}: `verified_version` is {:?}, which appears in none of this \
-             source's recorded captures {recorded:?} — the field means \"the version \
-             whose wire we have SEEN\"",
-            d.verified_version
+        // The NEWEST capture, not `any`: hermes holds 0.20.0 and 0.20.1, and
+        // `any` let the older one anchor forever — which is precisely the stale
+        // pin this test's docstring says it prevents.
+        recorded.sort();
+        let newest = &recorded.last().expect("non-empty").1;
+        assert_eq!(
+            banner_version(newest),
+            Some(d.verified_version),
+            "{source}: `verified_version` is {:?}, but the newest recorded capture \
+             ({newest:?}) pins {:?} — the field means \"the version whose wire we \
+             have SEEN\", and the most recent sighting is the one that counts",
+            d.verified_version,
+            banner_version(newest).unwrap_or("nothing")
         );
     }
 }
@@ -534,22 +595,26 @@ fn every_single_owner_capture_tree_declares_its_provenance() {
             } else {
                 source
             };
-            let (Some(d), Some(cli)) = (
-                registry::descriptor_for(source),
-                doc.get("cli").and_then(serde_json::Value::as_str),
-            ) else {
-                continue;
-            };
-            if let Some(probe) = d.version_probe {
-                assert_eq!(
-                    cli,
-                    probe[0],
-                    "{}: `cli` is {cli:?} but this tree is {source}, whose binary is {:?}",
-                    prov.display(),
-                    probe[0]
-                );
-            }
+            cli_matches_its_trees_binary(source, &doc, &prov);
         }
+    }
+}
+
+/// `cli` was the one required field nothing could falsify, so a provenance naming
+/// a DIFFERENT CLI than the tree it sits in passed every gate. The registry's
+/// probe argv[0] is the name the user types (`agy`, `cursor-agent`), which is what
+/// a capture command starts with — so the tree itself answers the field.
+fn cli_matches_its_trees_binary(source: &str, doc: &serde_json::Value, at: &Path) {
+    let probe = registry::descriptor_for(source).and_then(|d| d.version_probe);
+    let declared = doc.get("cli").and_then(serde_json::Value::as_str);
+    if let (Some(probe), Some(cli)) = (probe, declared) {
+        assert_eq!(
+            cli,
+            probe[0],
+            "{}: `cli` is {cli:?} but this tree is {source}, whose binary is {:?}",
+            at.display(),
+            probe[0]
+        );
     }
 }
 
@@ -686,22 +751,7 @@ fn every_scenario_declares_its_provenance() {
             }
             match origin {
                 "recorded" => {
-                    // `cli` was the one required field nothing could falsify, so a
-                    // provenance naming a DIFFERENT CLI than the tree it sits in
-                    // passed everywhere. The registry's probe argv[0] is the name
-                    // the user types (`agy`, `cursor-agent`), which is what a
-                    // capture command starts with.
-                    let probe = registry::descriptor_for(&source).and_then(|d| d.version_probe);
-                    let declared = doc.get("cli").and_then(serde_json::Value::as_str);
-                    if let (Some(probe), Some(cli)) = (probe, declared) {
-                        assert_eq!(
-                            cli,
-                            probe[0],
-                            "{}: `cli` is {cli:?} but this tree is {source}, whose binary is {:?}",
-                            path.display(),
-                            probe[0]
-                        );
-                    }
+                    cli_matches_its_trees_binary(&source, &doc, &path);
                     recorded.insert(source.clone());
                 }
                 "unknown" => {

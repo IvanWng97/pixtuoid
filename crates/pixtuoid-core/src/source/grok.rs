@@ -196,9 +196,7 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             }
         }
         // Turn end, identity-LESS: an end for an unknown agent proves nothing
-        // worth registering. Upstream splits the turn-end by CAUSE — `stop` is a
-        // clean end, `stop_failure` an API error, `stop_cancelled` an interrupt —
-        // and all three end the turn.
+        // worth registering. All three of upstream's turn-end causes land here.
         "stop" | "stop_failure" | "stop_cancelled" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
@@ -759,8 +757,8 @@ mod tests {
     }
 
     #[test]
-    fn stop_and_stop_failure_are_identityless_turn_ends() {
-        for event in ["stop", "stop_failure"] {
+    fn the_three_turn_end_causes_are_identityless_turn_ends() {
+        for event in ["stop", "stop_failure", "stop_cancelled"] {
             let evs = decode_all(envelope(event));
             assert_eq!(evs.len(), 1, "{event}: exactly one event");
             assert!(

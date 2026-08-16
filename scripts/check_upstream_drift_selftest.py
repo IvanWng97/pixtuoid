@@ -1506,6 +1506,16 @@ def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
         any("SKIPPED for codex" in f for f in rep.blind),
         f"a parse smaller than our own registered set must file probe health: {rep.blind}",
     )
+    # The DECLARED half, which codex (floor 0) cannot exercise: deleting
+    # `max(row.floor, …)` outright left this test green.
+    hermes = d.OurNames(hermes={f"h{i}" for i in range(5)})
+    rep_h = d.Report()
+    check(
+        not d.parse_is_believable("hermes", {f"h{i}" for i in range(6)}, hermes, rep_h),
+        "a 6-name parse must fail hermes's DECLARED floor of 30, not just its 5 handled",
+    )
+    check(rep_h.blind, "and say why")
+
     rep2 = d.Report()
     up = ours.codex | {"brand_new"}
     check(d.parse_is_believable("codex", up, ours, rep2), "at/above the floor must be believed")

@@ -1706,9 +1706,11 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
     row = UNREGISTERED[source]
     # The row key IS the `OurNames` field — pinned by the selftest's census.
     handled = getattr(ours, source) or set()
-    # A reader that finds fewer names than we already handle is broken by
-    # definition: every registered event exists upstream, or the vanish direction
-    # would have fired. A row may declare a STRICTER floor, never a weaker one.
+    # A reader that finds fewer names than we already handle is broken, or — where
+    # the two directions read different populations (cursor's anchor index, kimi's
+    # Event Reference table, against a vanish half that searches raw prose) — it is
+    # degraded. Probe health is the right answer to both. A row may declare a
+    # STRICTER floor, never a weaker one.
     floor = max(row.floor, len(handled))
     if len(upstream) < floor:
         report.add_blind(
