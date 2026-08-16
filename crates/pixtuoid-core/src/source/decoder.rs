@@ -1710,12 +1710,15 @@ mod tests {
                 }),
             ),
             (
+                // Fixed, not Wire: hermes's `pre_approval_request` carries no
+                // prompt text, so the reason is a literal and an over-cap wire
+                // value must not be able to leak in through a later change.
                 hermes::SOURCE_NAME,
-                ReasonKind::NoWaiting,
+                ReasonKind::Fixed,
                 Box::new(|| {
                     hermes::decode_hermes_hook_payload(&json!({
-                        "hook_event_name":"pre_tool_call","session_id":"s","cwd":"/r",
-                        "tool_name":"bash","tool_input":{"command":"ls"},"message":raw}))
+                        "hook_event_name":"pre_approval_request","session_id":"s","cwd":"/r",
+                        "message":raw}))
                     .expect("hermes decodes")
                 }),
             ),

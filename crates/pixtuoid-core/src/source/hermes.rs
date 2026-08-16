@@ -162,6 +162,16 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 tool_use_id: None,
             },
         ]),
+        // Observer-only upstream (return values ignored, and `_BLOCKING_EVENTS`
+        // is `{pre_tool_call}` alone), so the shim's silent exit-0 cannot stall
+        // the approval flow. Fixed reason: hermes carries no prompt text here.
+        "pre_approval_request" => Ok(vec![
+            identity(),
+            AgentEvent::Waiting {
+                agent_id,
+                reason: "permission".to_string(),
+            },
+        ]),
         "on_session_end" => Ok(vec![AgentEvent::SessionEnd {
             agent_id,
             as_child: false,

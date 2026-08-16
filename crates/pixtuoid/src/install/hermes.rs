@@ -30,6 +30,10 @@ use crate::install::SENTINEL_KEY;
 const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
     "pre_tool_call",
+    // The approval gate. Observer-only upstream, so registering it cannot affect
+    // the decision — unregistered, a session parked on an approval prompt kept
+    // rendering as whatever `pre_tool_call` left it (#930).
+    "pre_approval_request",
     "post_tool_call",
     "on_session_end",
 ];
