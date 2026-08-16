@@ -63,11 +63,8 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
-    // `sessionId` where the build offers it, cwd otherwise: keying on the
-    // workspace merges two sessions in ONE project into a single sprite, and
-    // either one's end walks the shared sprite out (the Cursor lesson, which
-    // `hermes.rs` states too). v1.2.0 carried no id, which is why this keyed on
-    // cwd; v1.25.2 stamps one on every payload.
+    // Merged on cwd, either session's end walks the shared sprite out. Older
+    // builds carried no id, which is why the cwd fallback stays.
     let key = obj
         .get("sessionId")
         .and_then(|s| s.as_str())
@@ -212,8 +209,7 @@ mod tests {
 
     #[test]
     fn two_sessions_in_one_workspace_stay_two_agents() {
-        // v1.25.2 stamps `sessionId` on every payload (44/44 across the recorded
-        // fixtures); keying on cwd merged them into one sprite.
+        // Pinned against fixtures/reasonix/delegation-recorded.
         let ev = |sid: &str| {
             decode_rx_hook_payload(&json!({
                 "event": "SessionStart", "cwd": "/repo", "sessionId": sid

@@ -437,10 +437,8 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         _ => Ok(vec![]),
     };
     let mut evs = decoded?;
-    // The model rides `_meta` on an ORDINARY update. `model_changed` exists but a
-    // normal session never sends one — 0 across every recorded capture, which
-    // carry the model on `user_message_chunk` instead — so keying model info on
-    // that tag alone left grok's flame dark for every real run.
+    // The model rides `_meta` on an ORDINARY update; keying on the
+    // `model_changed` tag a real session never sends left the flame dark.
     if let Some(model) = update
         .get("_meta")
         .and_then(|m| m.get("modelId"))

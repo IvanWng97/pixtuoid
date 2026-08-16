@@ -164,11 +164,8 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // upstream's own serde alias, accepted so a future serializer flip to
         // the alias form still drives Active/Idle.
         ("event_msg", "task_started") | ("event_msg", "turn_started") => vec![start()],
-        // `custom_tool_call` is the SAME item under codex's custom-tool API — same
-        // `name`, same `call_id`, an `input` string where the other has
-        // `arguments` — and it is what a modern session actually serializes. Left
-        // out, every tool call in a real rollout decoded to nothing and the turn
-        // showed Active from `task_started` alone (capture-verified, codex 2026-08).
+        // `custom_tool_call` is the SAME item under codex's custom-tool API and is
+        // what a modern session serializes — `a_custom_tool_call_is_a_tool_call`.
         ("response_item", "function_call" | "custom_tool_call") => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {

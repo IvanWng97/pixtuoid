@@ -173,10 +173,8 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         }
     };
     let mut evs = decoded?;
-    // Cursor stamps the model on EVERY event, and it changes within one session
-    // (a `sessionStart` on `composer-2.5-fast` whose tool calls run on
-    // `composer-2.5`), so reading it once at the start would show the wrong one
-    // for the rest of the turn.
+    // Re-read per event: the model changes mid-session, so reading it once
+    // would show the wrong one for the rest of the turn.
     if let Some(model) = obj
         .get("model")
         .and_then(|m| m.as_str())
