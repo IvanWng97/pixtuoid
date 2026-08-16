@@ -118,7 +118,15 @@ mod recorder {
             std::process::exit(1);
         }
 
-        write_provenance(&dest, &cmd, &args[2..])?;
+        write_provenance(
+            &dest,
+            &cmd,
+            &args[2..],
+            &[
+                ("prompt", std::env::var("CAPTURE_PROMPT").ok()),
+                ("seed", std::env::var("CAPTURE_SEED").ok()),
+            ],
+        )?;
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
@@ -354,7 +362,12 @@ mod recorder {
         Ok(out)
     }
 
-    fn write_provenance(dest: &Path, cmd: &[String], raw: &[String]) -> std::io::Result<()> {
+    fn write_provenance(
+        dest: &Path,
+        cmd: &[String],
+        raw: &[String],
+        overrides: &[(&str, Option<String>)],
+    ) -> std::io::Result<()> {
         let cli = Path::new(&cmd[0])
             .file_name()
             .and_then(|s| s.to_str())
@@ -367,13 +380,23 @@ mod recorder {
             .and_then(|o| String::from_utf8(o.stdout).ok())
             .and_then(|s| s.lines().next().map(str::to_string))
             .unwrap_or_else(|| "unknown".into());
-        let prov = serde_json::json!({
+        let mut prov = serde_json::json!({
             "origin": "recorded",
             "cli": cli,
             "version": version.trim(),
             "captured": today(),
             "command": raw.join(" "),
         });
+        // `command` is the UN-expanded argv, so a scenario driven by an override
+        // records a `{prompt}` placeholder and nothing else says what ran. Only
+        // written when set, so the already-committed records stay schema-clean.
+        if let Some(map) = prov.as_object_mut() {
+            for (key, value) in overrides {
+                if let Some(v) = value {
+                    map.insert((*key).into(), serde_json::Value::String(v.clone()));
+                }
+            }
+        }
         let out = no_clobber(dest.join("provenance.json"));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
         if cli.ends_with("sh") {
@@ -567,6 +590,34 @@ mod recorder {
                 owned_by_us(&link),
                 "the link is ours; only its target belongs to root"
             );
+        }
+
+        #[test]
+        fn provenance_records_an_override_only_when_it_was_actually_set() {
+            // Both directions: the already-committed records predate these
+            // fields and must stay schema-clean, so an unset override writes
+            // nothing at all.
+            let read = |d: &Path| -> serde_json::Value {
+                serde_json::from_str(
+                    &std::fs::read_to_string(d.join("provenance.json")).expect("read"),
+                )
+                .expect("json")
+            };
+            let argv = ["true".to_string()];
+
+            let bare = tempfile::tempdir().expect("tempdir");
+            write_provenance(bare.path(), &argv, &argv, &[("prompt", None)]).expect("write");
+            assert!(read(bare.path()).get("prompt").is_none());
+
+            let set = tempfile::tempdir().expect("tempdir");
+            write_provenance(
+                set.path(),
+                &argv,
+                &argv,
+                &[("prompt", Some("read NOTE.txt".into()))],
+            )
+            .expect("write");
+            assert_eq!(read(set.path())["prompt"], "read NOTE.txt");
         }
 
         #[test]

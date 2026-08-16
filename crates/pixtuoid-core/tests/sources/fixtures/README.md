@@ -33,13 +33,9 @@ redacted cwd and an invented one look alike. `origin` is one of:
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI
 cannot join by default.
 
-**The recorder is `pixtuoid-core/examples/capture_fixture.rs`** — Rust, because
-the shell version it replaces accumulated nine defects that were bash semantics
-rather than recording logic (an empty array under `set -u`, `pipefail` eating a
-lister's exit 3, `head -1` taking SIGPIPE past ~700 files, macOS-only `stat`,
-three world-writable temp paths), none of which could fail in a selftest small
-enough to run in CI. Its decisions are ordinary `#[test]`s now, so `just test`
-covers them.
+**The recorder is `pixtuoid-core/examples/capture_fixture.rs`** — Rust rather
+than the shell script it replaces, for the reasons under "Why the recorder is a
+Rust example" below.
 
 **It records at the shim's OUTPUT**, via a `PIXTUOID_SOCKET` listener,
 which is the seam that does not care how the payload reached the shim: codewhale
@@ -187,8 +183,8 @@ someone changing the tree will see it:
 ## Why the recorder is a Rust example
 
 `just capture-fixture` drives `pixtuoid-core/examples/capture_fixture.rs`. It
-was a shell script first, and that version accumulated nine defects that were
-all bash semantics rather than recording logic: an empty array under `set -u`
+was a shell script first, and every defect that version accumulated was bash
+semantics rather than recording logic: an empty array under `set -u`
 (which stopped the CLI launching for anyone outside an agent session),
 `pipefail` swallowing a lister's exit 3 after the turn was billed, `head -1`
 taking SIGPIPE once a corpus passed ~700 files (same failure, same place, found

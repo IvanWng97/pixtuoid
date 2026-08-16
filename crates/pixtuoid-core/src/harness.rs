@@ -392,14 +392,15 @@ fn shape_of(line: &str) -> String {
     format!("type={ty:?} keys=[{keys}]")
 }
 
-/// Every `.jsonl` under `root` that this source's registry `path_filter` admits
-/// — the files the WATCHER would walk, recursed without following a directory
-/// symlink.
+/// Every `.jsonl` under `root` that this source's registry `path_filter` admits,
+/// recursed without following a symlinked entry.
 ///
-/// One implementation because both readers act on the answer: the census
-/// reports on these files and the recorder COMMITS one of them as a golden. A
-/// second copy that missed a new sibling exclusion would record the wrong file,
-/// and the fixture would then teach the decoder that shape.
+/// One implementation for the census and the recorder, because both act on the
+/// answer and the recorder COMMITS one of these files as a golden. It applies
+/// the same four predicates as the production `jsonl::walk::walk_jsonl` but is
+/// a SEPARATE copy of them, kept in step by hand — a fifth predicate added
+/// there and not here lets the recorder commit a file production never reads
+/// (#931).
 pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
     fn walk(admits: &dyn Fn(&Path) -> bool, dir: &Path, out: &mut Vec<PathBuf>) {
         let Ok(rd) = std::fs::read_dir(dir) else {

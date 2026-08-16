@@ -21,6 +21,12 @@ PIX="$REPO/target/release/pixtuoid"
 HOOK="$REPO/target/release/pixtuoid-hook"
 ROSTER_BIN="$REPO/target/release/examples/corpus_check"
 e2e_require_bin "$PIX" "$HOOK" "$ROSTER_BIN"
+# Unguarded, an absent jq empties `present_ids` and every source reads as
+# "its CLI is not installed here" — a full SKIP sweep that still exits 0.
+command -v jq >/dev/null 2>&1 || {
+    echo "missing jq — brew install jq" >&2
+    exit 2
+}
 
 # The per-CLI knowledge that is genuinely ours: a headless invocation's
 # SUBCOMMAND and flags are as source-specific as the decoder. The BINARY name is
@@ -254,10 +260,15 @@ echo "--- scene timeline ---"
 grep 'agents=' "$OUT" | tail -5 | sed 's/^/    /'
 echo "live-sources: $covered source(s) rendered from a real CLI turn"
 [ -n "$declare_uncovered" ] && echo "live-sources: NOT COVERED —$declare_uncovered"
-if [ "$FAILED" = 0 ]; then
-    echo "live-sources: PASS"
-else
+if [ "$FAILED" != 0 ]; then
     echo "live-sources: FAIL" >&2
+elif [ "$covered" -eq 0 ]; then
+    # `corpus-all`'s convention: an absent CLI is not a defect, but it is not
+    # coverage either, and a green here reads as "every source works".
+    echo "live-sources: NOTHING RAN — no source reached a real turn" >&2
+    FAILED=2
+else
+    echo "live-sources: PASS"
 fi
 trap - EXIT
 cleanup
