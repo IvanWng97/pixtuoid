@@ -138,11 +138,6 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     }
 }
 
-/// Collect the transcripts under `root` the WATCHER would walk — same extension
-/// gate, same registry `path_filter`, same refusal to follow a symlinked entry
-/// (so a planted dir link can't recurse a loop or drag a foreign tree in).
-/// Walking the unfiltered set would make the census a superset of production:
-/// duplicate transcripts counted twice, rewrite-on-resume siblings replayed as
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // id, label prefix, transcript? — so a shell tier can attribute a sprite to its

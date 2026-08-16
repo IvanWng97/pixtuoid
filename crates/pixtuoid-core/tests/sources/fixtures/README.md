@@ -4,8 +4,14 @@ Golden fixtures for the per-CLI decode + hook↔JSONL **coalescing** contract,
 driven by `tests/sources/conformance.rs`.
 
 **Record these; do not compose them.** `just capture-fixture <source> <scenario>
-<cmd...>` runs the CLI invocation you give it and records what its hooks send. A hand-written fixture pins whatever its author believed the wire
-looked like, and that belief is what the fixture then teaches every later reader.
+<cmd...>` runs the CLI invocation you give it and records what its hooks send.
+
+```text
+just capture-fixture kimi tool-run kimi -p '{prompt}'
+just capture-fixture openclaw lifecycle scripts/lib/capture-openclaw-lifecycle.sh '{prompt}'
+```
+
+A hand-written fixture pins whatever its author believed the wire looked like, and that belief is what the fixture then teaches every later reader.
 The composed `cursor/tool-run` this replaced carried no `tool_use_id` and
 strictly sequential tools; the capture that replaced it shows an id on every
 `preToolUse` and tools that INTERLEAVE (#901 discovered the same gap the

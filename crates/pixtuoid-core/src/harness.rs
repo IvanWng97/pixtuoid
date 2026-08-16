@@ -430,13 +430,9 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
 mod tests {
     use super::*;
 
-    /// The walk both readers now share: the census REPORTS on these files and the
-    /// recorder COMMITS one as a golden, so its shape is pinned here rather than
-    /// beside either caller.
     #[test]
     fn the_walk_scales_past_the_size_that_broke_the_shell_version() {
-        // The shell harvest took SIGPIPE once a corpus passed ~700 files, after the
-        // turn was already billed. There is no pipe here — a pin on the SHAPE.
+        // No pipe here — this pins the SHAPE, not a buffer size.
         let d = tempfile::tempdir().expect("tempdir");
         for i in 0..1200 {
             std::fs::write(d.path().join(format!("f{i}.jsonl")), "{}").expect("write");
@@ -461,9 +457,7 @@ mod tests {
 
     #[test]
     fn the_walk_applies_the_sources_own_path_filter() {
-        // grok writes five jsonl siblings per session and only `updates.jsonl` is
-        // the transcript — the reason this reads the registry rather than the
-        // extension alone.
+        // grok writes five jsonl siblings per session; one is the transcript.
         let d = tempfile::tempdir().expect("tempdir");
         for name in ["updates.jsonl", "rewind_points.jsonl", "notes.txt"] {
             std::fs::write(d.path().join(name), "{}").expect("write");

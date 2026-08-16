@@ -89,6 +89,20 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
     "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
+# The dangerous subset of the *_KNOWN_OMITTED ledgers: names our DECODER has an
+# arm for, that we nonetheless do not register. That combination is what shipped
+# the PermissionRequest bug — the sweep subtracts the ledger, so an event we can
+# read but never receive raises nothing, and no test can see it because every
+# test asserts our own belief about the wire. Shrink-only: each entry states why
+# NOT registering is right, and a new one cannot appear silently.
+#
+#   Stop              — a turn boundary, not a tool call. `ActivityEnd` with no
+#                       tuid is already synthesized by the reap ladder for the
+#                       sources that need it; registering it would double-fire.
+#   UserPromptSubmit  — per-turn content noise, and the reducer must never key
+#                       lifecycle on user-authored content (the `/exit` matcher).
+LEDGERED_BUT_DECODABLE = {"Stop", "UserPromptSubmit"}
+
 # Codex hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity a visualizer cares about.
 CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}

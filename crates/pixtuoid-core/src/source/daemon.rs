@@ -235,7 +235,7 @@ pub fn apply_presence(
             })
     };
     let was_down = p.liveness == DaemonLiveness::Down;
-    // Proof-of-life ONLY. On the ordinary clean stop a `PidExited` arrives AFTER
+    // Proof-of-life ONLY. A `PidExited` on the ordinary clean stop lands after
     // `GatewayDown` already cleared `current_pid`, so its arm is a no-op — yet
     // stamping the clock here would restart the walk-out the renderer times off
     // `last_seen` (and push out the sweep's removal), making the mascot vanish and
@@ -262,9 +262,12 @@ pub fn apply_presence(
         SessionEnded => {
             // Saturating: a pre-attach session_start we never saw must not underflow.
             p.active_sessions = p.active_sessions.saturating_sub(1);
-            if p.liveness == DaemonLiveness::Down {
-                p.liveness = DaemonLiveness::UP;
-            }
+            // Deliberately does NOT resurrect, unlike its sibling arms: the
+            // recorded clean shutdown is `gateway_stop` then `session_end` 2 ms
+            // later (fixtures/openclaw/gateway-lifecycle-recorded), so undoing
+            // Down here renders a stopped gateway alive until the 5-minute TTL.
+            // A session CLOSING is not proof the gateway continues; if it does,
+            // its next start/run says so.
         }
         RunStarted { run_key } => {
             // Stamped with THIS observation, so the run ages on its own clock.
@@ -824,7 +827,8 @@ mod tests {
     }
 
     #[test]
-    fn session_ended_resurrects_from_down() {
+    fn session_end_after_a_gateway_stop_leaves_it_down() {
+        // The recorded clean shutdown's own order, 2 ms apart.
         for src in SOURCES {
             let mut s = SceneState::default();
             apply(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
@@ -832,14 +836,26 @@ mod tests {
             apply(&mut s, src, DaemonPresenceUpdate::SessionEnded, ms(1));
             assert_eq!(
                 st(&s, src),
-                DaemonState::Idle,
-                "a session_end event implies up (resurrects from Down)"
+                DaemonState::Down,
+                "a stopped gateway must not walk back in on its trailing session_end"
             );
             assert_eq!(
                 sessions(&s, src),
                 0,
                 "saturating — the pre-attach session_start miss must not underflow"
             );
+        }
+    }
+
+    #[test]
+    fn a_real_event_still_resurrects_a_down_gateway() {
+        // The resurrect that IS wanted: a TTL-downed gateway that turns out to
+        // be alive says so with a session START, not a session end.
+        for src in SOURCES {
+            let mut s = SceneState::default();
+            apply(&mut s, src, DaemonPresenceUpdate::GatewayDown, ms(0));
+            apply(&mut s, src, DaemonPresenceUpdate::SessionStarted, ms(1));
+            assert_eq!(st(&s, src), DaemonState::Idle);
         }
     }
 

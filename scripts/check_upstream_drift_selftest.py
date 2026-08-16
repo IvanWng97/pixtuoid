@@ -22,6 +22,8 @@ import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
 
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+
 READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
 
@@ -1256,6 +1258,35 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         )
 
 
+def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
+    """The shape that shipped the PermissionRequest bug, and the one the FIRST
+    version of this gate missed: it checked the ledgers against what we REGISTER,
+    which is empty by construction, while the incident was a ledgered name our
+    DECODER had an arm for and we never received."""
+    src = (REPO_ROOT / "crates/pixtuoid-core/src/source/decoder.rs").read_text()
+    arms = set(re.findall(r'^\s*"([A-Za-z]+)"\s*(?:\||=>)', src, re.M))
+    check(len(arms) > 5, f"the decoder-arm reader found {len(arms)} arms; it went stale")
+
+    ledgered = set()
+    for name in dir(d):
+        if name.endswith("_KNOWN_OMITTED"):
+            ledgered |= getattr(d, name)
+    live = arms & ledgered
+    check(
+        live <= d.LEDGERED_BUT_DECODABLE,
+        f"{sorted(live - d.LEDGERED_BUT_DECODABLE)} sit in a *_KNOWN_OMITTED ledger "
+        f"AND have a decoder arm — the sweep subtracts the ledger, so an event we "
+        f"can read but never registered raises nothing. Register it, or add it to "
+        f"LEDGERED_BUT_DECODABLE with the reason NOT registering is right.",
+    )
+    dead = sorted(d.LEDGERED_BUT_DECODABLE - live)
+    check(
+        not dead,
+        f"LEDGERED_BUT_DECODABLE lists {dead}, which no longer sits in a ledger "
+        f"with a decoder arm — drop the entry, the list is shrink-only.",
+    )
+
+
 def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
     """A name in both is inert today and fail-open tomorrow: unregister it and
     the sweep stays silent, because the ledger still excuses it."""
@@ -1304,6 +1335,7 @@ def main() -> int:
         test_rust_comment_strip_is_not_confused_by_lifetimes,
         test_omp_env_sweeps_fire_and_stay_silent,
         test_no_ledger_excuses_a_hook_we_actually_register,
+        test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
     ):
         t()
     if FAILS:

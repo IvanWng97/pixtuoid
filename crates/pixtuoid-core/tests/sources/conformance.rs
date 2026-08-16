@@ -323,10 +323,9 @@ fn a_parent_dir_keyed_transcript_is_nested_under_its_session_id() {
     }
 }
 
-/// The conformance tree is not the only place captures live: five sibling
-/// modules keep their own, and the gate above cannot see them — four shipped for
-/// months with no provenance at all. A capture tree declares its origin wherever
-/// it sits.
+/// The conformance tree is not the only place captures live: sibling modules
+/// keep their own and the gate above cannot see them. A capture tree declares
+/// its origin wherever it sits.
 #[test]
 fn every_single_owner_capture_tree_declares_its_provenance() {
     let sources = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources");

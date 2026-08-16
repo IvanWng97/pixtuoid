@@ -1,25 +1,13 @@
 //! Record a conformance fixture from the bytes a real agent CLI actually sent.
+//! Worked examples, the rules, and why this is Rust and not the shell script it
+//! replaces: `tests/sources/fixtures/README.md`.
 //!
 //! ⚠ BILLED — runs one real model turn on that provider's account.
 //!
-//! ```text
-//! just capture-fixture kimi tool-run kimi -p '{prompt}'
-//! just capture-fixture openclaw lifecycle scripts/lib/capture-openclaw-lifecycle.sh '{prompt}'
-//! ```
-//!
-//! A composed fixture pins whatever its author believed the wire looked like,
-//! and the decoder then agrees with it: kimi's per-call id decoded as `None` for
-//! the whole source's life because fixture and decoder shared one wrong field
-//! name. So these are recorded, never composed.
-//!
-//! Why this is Rust and not the shell script it replaces:
-//! `tests/sources/fixtures/README.md`, "Why the recorder is a Rust example".
-//!
-//! It records at the SHIM'S OUTPUT, by pointing `PIXTUOID_SOCKET` at a listener
-//! of our own — the one seam that does not care how the payload reached the
-//! shim. Recording its INPUT cannot cover every source: codewhale is env-mode
-//! (identity in `DEEPSEEK_*`, and the shim never touches stdin when `--event` is
-//! present), so a stdin tee captures a file of empty payloads.
+//! It records the SHIM'S OUTPUT, by pointing `PIXTUOID_SOCKET` at a listener of
+//! our own — the one seam that does not care how the payload reached the shim.
+//! Recording its INPUT cannot cover every source: codewhale is env-mode, so a
+//! stdin tee captures a file of empty payloads.
 
 #[cfg(not(unix))]
 fn main() {
@@ -322,10 +310,12 @@ mod recorder {
         Ok(())
     }
 
+    /// `symlink_metadata`, not `metadata`: the squat this refuses IS a planted
+    /// entry, and following it would stat the target the attacker chose.
     #[cfg(unix)]
     fn owned_by_us(p: &Path) -> bool {
         use std::os::unix::fs::MetadataExt;
-        std::fs::metadata(p)
+        std::fs::symlink_metadata(p)
             .map(|m| m.uid() == rustix::process::getuid().as_raw())
             .unwrap_or(false)
     }
@@ -561,6 +551,22 @@ mod recorder {
                 })
                 .collect();
             assert!(newest_born_after(&all, SystemTime::UNIX_EPOCH).is_some());
+        }
+
+        #[test]
+        fn ownership_is_judged_on_the_link_itself_not_on_what_it_points_at() {
+            // The squat this refuses is a link PLANTED by another user, which a
+            // unit test cannot create — so pin the discriminator instead: a link
+            // WE own pointing at a root-owned dir must read as ours. Under
+            // `fs::metadata` it would stat the target and read as root's, which
+            // is how a planted link would have slipped past the refusal.
+            let d = tempfile::tempdir().expect("tempdir");
+            let link = d.path().join("to-root-owned");
+            std::os::unix::fs::symlink("/usr", &link).expect("symlink");
+            assert!(
+                owned_by_us(&link),
+                "the link is ours; only its target belongs to root"
+            );
         }
 
         #[test]
