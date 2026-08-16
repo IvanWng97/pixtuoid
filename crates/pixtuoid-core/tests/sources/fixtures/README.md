@@ -54,6 +54,12 @@ A composed fixture kept for a reason says so in its note: `opencode/session-run`
 is retained because an auto-approving run emits no permission event for `Waiting`
 to ride.
 
+**A capture can only be recorded on Unix.** The recorder listens on a
+`UnixListener`; the Windows shim speaks a named pipe, so there is no Windows arm
+and `just capture-fixture` exits 2 there. Windows wire evidence therefore cannot
+be re-recorded on demand — which is why `copilot/tool-run`, the one fixture
+carrying a real Windows `cwd`, stays `unknown` rather than being replaced.
+
 Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
 being evidence. PII is not always a field you can drop — cursor's arrives as a `user_email`
 key, kimi's as the owner column inside a captured `ls -la` `tool_output`, and

@@ -428,8 +428,9 @@ fn openclaw_presence_envelope_renders_a_lobster() {
         .join("fixtures/openclaw/gateway-lifecycle-recorded/hook-payloads.jsonl");
 
     // The recorded fixture ends gateway_stop → session_end (shutdown is what
-    // closes the session), and either would leave the daemon Down; stop before
-    // both so the asserted scene is a LIVE gateway.
+    // closes the session). `gateway_stop` is the arm that enters Down, and
+    // `session_end` would resurrect it — so replaying either makes the liveness
+    // assertion below pass for the wrong reason. Stop before both.
     let lines = read_nonblank_lines(&hooks);
     let mut scene = SceneState::uniform(16);
     let now = t0();

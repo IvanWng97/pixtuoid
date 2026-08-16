@@ -23,7 +23,10 @@
 
 #[cfg(not(unix))]
 fn main() {
+    // Non-zero like every other "cannot do the job" path here: a caller that
+    // scripts this must not read a silent no-capture as a successful one.
     eprintln!("capture-fixture records at the shim's Unix-socket output; run it on macOS or Linux");
+    std::process::exit(2);
 }
 
 #[cfg(unix)]

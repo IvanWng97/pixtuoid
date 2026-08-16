@@ -66,6 +66,10 @@ tests/
 - **Data scopes to the binary that reads it, sub-grouped by CLI.** A fixture read
   by one test module lives *with that module* at `sources/<module>/fixtures/`;
   fixtures the conformance harness iterates live in `sources/fixtures/<source>/`.
+  Two single-owner trees have a second, CROSS-CRATE reader:
+  `pixtuoid/tests/wire_to_pixels.rs` roots at `sources/` rather than
+  `sources/fixtures/` because it needs the two-sprite captures (cursor's and the
+  delegation family's) that the conformance one-AgentId rule cannot host.
 
 ## The one pipeline
 
