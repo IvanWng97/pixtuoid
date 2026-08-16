@@ -262,12 +262,8 @@ pub fn apply_presence(
         SessionEnded => {
             // Saturating: a pre-attach session_start we never saw must not underflow.
             p.active_sessions = p.active_sessions.saturating_sub(1);
-            // Deliberately does NOT resurrect, unlike its sibling arms: the
-            // recorded clean shutdown is `gateway_stop` then `session_end` 2 ms
-            // later (fixtures/openclaw/gateway-lifecycle-recorded), so undoing
-            // Down here renders a stopped gateway alive until the 5-minute TTL.
-            // A session CLOSING is not proof the gateway continues; if it does,
-            // its next start/run says so.
+            // Deliberately does NOT resurrect, unlike its sibling arms — see
+            // SHARP-EDGES.md; pinned by `session_end_after_a_gateway_stop_leaves_it_down`.
         }
         RunStarted { run_key } => {
             // Stamped with THIS observation, so the run ages on its own clock.

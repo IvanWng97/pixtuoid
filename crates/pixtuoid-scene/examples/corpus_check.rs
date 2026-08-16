@@ -152,9 +152,7 @@ fn main() {
             } else {
                 "hook"
             };
-            // Column 5 is the registry's OWN version probe, so a consumer reads
-            // it here rather than keeping a second copy — a hand-copied table
-            // shipped already missing one row, silently.
+            // Column 5 is the registry's OWN version probe.
             let probe = d
                 .version_probe
                 .map(|p| p.join(" "))

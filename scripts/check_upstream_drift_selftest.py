@@ -1117,6 +1117,52 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     return [x for x in report.breaking if kind in x]
 
 
+def _drive_hermes(hooks_body: str) -> tuple[list[str], list[str]]:
+    """Run the hermes block over a stubbed `hooks.py`, returning (breaking, blind)."""
+
+    def stub(url: str) -> str:
+        if url == d.HERMES_HOOK_URL:
+            return hooks_body
+        raise urllib.error.URLError("not stubbed")
+
+    real = d.fetch
+    d.fetch = stub
+    try:
+        report = d.Report()
+        d.run_checks(d.OurNames(hermes={"pre_approval_request"}), report=report)
+    finally:
+        d.fetch = real
+    return (
+        [x for x in report.breaking if "_BLOCKING_EVENTS" in x],
+        [x for x in report.blind if "observer-only" in x],
+    )
+
+
+def test_the_hermes_approval_gate_stays_observer_only() -> None:
+    """Registering `pre_approval_request` is safe ONLY while a hook's exit code
+    cannot affect it, and the shim always exits 0. Three outcomes, because the
+    dangerous one is the checker going quiet rather than red."""
+    head = '_DEFAULT_PAYLOADS = {"pre_approval_request": {}}\n'
+
+    breaking, blind = _drive_hermes(head + '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n')
+    check(not breaking and not blind, f"observer-only upstream stays silent: {breaking} {blind}")
+
+    breaking, _ = _drive_hermes(
+        head + '_BLOCKING_EVENTS = frozenset({"pre_tool_call", "pre_approval_request"})\n'
+    )
+    check(
+        len(breaking) == 1,
+        f"the gate joining _BLOCKING_EVENTS must be BREAKING — our exit 0 would "
+        f"answer a real prompt. Got {breaking}",
+    )
+
+    _, blind = _drive_hermes(head + 'BLOCKING = frozenset({"pre_tool_call"})\n')
+    check(
+        len(blind) == 1,
+        f"a renamed/moved constant must report PROBE HEALTH, not read as safe. Got {blind}",
+    )
+
+
 def test_ts_comment_strip_survives_a_quote_detector_line() -> None:
     """A `"`-only scanner desynchronises on `'"'` and leaks the REST OF THE FILE's
     comments back into the "code" every presence sweep reads. upstream `env.ts`
@@ -1334,6 +1380,7 @@ def main() -> int:
         test_ts_comment_strip_survives_a_quote_detector_line,
         test_rust_comment_strip_is_not_confused_by_lifetimes,
         test_omp_env_sweeps_fire_and_stay_silent,
+        test_the_hermes_approval_gate_stays_observer_only,
         test_no_ledger_excuses_a_hook_we_actually_register,
         test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
     ):

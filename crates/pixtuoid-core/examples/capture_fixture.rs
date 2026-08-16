@@ -562,8 +562,7 @@ mod recorder {
 
         #[test]
         fn birth_time_selection_scales_past_the_size_that_broke_the_shell_version() {
-            // The shell harvest took SIGPIPE once a corpus passed ~700 files, after
-            // the turn was already billed. A regression pin on the SHAPE.
+            // A pin on the SHAPE, not on a buffer size.
             let d = tempfile::tempdir().expect("tempdir");
             let mut all: Vec<PathBuf> = (0..1200)
                 .map(|i| {
