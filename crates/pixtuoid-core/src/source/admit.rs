@@ -55,6 +55,10 @@ mod tests {
         std::fs::symlink_metadata(p).expect("symlink_metadata")
     }
 
+    // Whole test Unix-gated: a Windows directory symlink needs a different API
+    // and a privilege this suite does not assume, and gating only the CREATION
+    // left the assertions claiming a platform they never ran on.
+    #[cfg(unix)]
     #[test]
     fn a_symlink_is_skipped_whether_it_names_a_dir_or_a_file() {
         let d = tempfile::tempdir().expect("tempdir");
