@@ -58,6 +58,11 @@ RUN_BUDGET_S = 300
 SETTLE_S = 3
 
 
+def answer_for(n: int) -> bytes:
+    """Clamped: a fifth answer becomes reachable by adding it to ANSWERS."""
+    return ANSWERS[min(n, len(ANSWERS) - 1)]
+
+
 def squash(b: bytes) -> bytes:
     """A TUI redraws its composer padded and wrapped, so compare without spaces."""
     return b"".join(b.split())
@@ -73,8 +78,8 @@ def selftest() -> int:
     assert not GATE.search(b"reading NOTE.txt")
     assert MENU.search(b"  1. Yes, continue")
     assert not MENU.search(b"press enter")
-    # A fifth answer must become reachable by adding it, not by also finding the clamp.
-    assert ANSWERS[min(len(ANSWERS) + 5, len(ANSWERS) - 1)] == ANSWERS[-1]
+    assert answer_for(0) == ANSWERS[0]
+    assert answer_for(99) == ANSWERS[-1]
     print("tuidrive selftest: ok")
     return 0
 
@@ -129,7 +134,7 @@ def main() -> int:
                 if deny_from is not None and next_answer >= deny_from:
                     reply = b"\x1b"
                 else:
-                    reply = b"\r" if MENU.search(seen) else ANSWERS[min(next_answer, len(ANSWERS) - 1)]
+                    reply = b"\r" if MENU.search(seen) else answer_for(next_answer)
                 time.sleep(0.8)
                 note(f"gate seen, sending {reply!r}")
                 os.write(fd, reply)

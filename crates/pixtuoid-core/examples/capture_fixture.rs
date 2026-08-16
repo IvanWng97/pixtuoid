@@ -105,7 +105,7 @@ mod recorder {
         if let Some(root) = root.as_deref() {
             // A source can be BOTH: CC's tool run is in the transcript while its
             // permission gate is a hook event, so the two are harvested together.
-            let candidates = transcripts_under(&source, root);
+            let candidates = pixtuoid_core::harness::transcripts_under(&source, root);
             match newest_born_after(&candidates, started) {
                 Some(fresh) => wrote.push(place_transcript(&fresh, &candidates, &dest)?),
                 None if payloads.is_empty() => {
@@ -174,39 +174,6 @@ mod recorder {
             .filter(|p| p.file_name() == Some(name))
             .count()
             > 1
-    }
-
-    fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
-        // The registry's own filter, so this cannot drift from what the watcher
-        // walks: grok writes five jsonl siblings per session and only one is the
-        // transcript.
-        let admits = registry::path_filter_for(source);
-        let mut out = Vec::new();
-        walk(root, &mut |p| {
-            if p.extension().and_then(|e| e.to_str()) == Some("jsonl") && admits(p) {
-                out.push(p.to_path_buf());
-            }
-        });
-        out
-    }
-
-    fn walk(dir: &Path, f: &mut dyn FnMut(&Path)) {
-        let Ok(rd) = std::fs::read_dir(dir) else {
-            return;
-        };
-        for e in rd.flatten() {
-            let p = e.path();
-            // symlink_metadata: a planted dir link must not recurse a loop or drag a
-            // foreign tree in — the same refusal `corpus_check`'s walk makes.
-            let Ok(meta) = std::fs::symlink_metadata(&p) else {
-                continue;
-            };
-            if meta.is_dir() {
-                walk(&p, f);
-            } else if meta.is_file() {
-                f(&p);
-            }
-        }
     }
 
     fn place_transcript(
@@ -356,7 +323,7 @@ mod recorder {
     fn owned_by_us(p: &Path) -> bool {
         use std::os::unix::fs::MetadataExt;
         std::fs::metadata(p)
-            .map(|m| m.uid() == unsafe { libc::getuid() })
+            .map(|m| m.uid() == rustix::process::getuid().as_raw())
             .unwrap_or(false)
     }
 
@@ -579,33 +546,18 @@ mod recorder {
         }
 
         #[test]
-        fn the_walk_scales_past_the_size_that_broke_the_shell_version() {
+        fn birth_time_selection_scales_past_the_size_that_broke_the_shell_version() {
             // The shell harvest took SIGPIPE once a corpus passed ~700 files, after
-            // the turn was already billed. There is no pipe here, so this is a
-            // regression pin on the SHAPE, not on a buffer size.
+            // the turn was already billed. A regression pin on the SHAPE.
             let d = tempfile::tempdir().expect("tempdir");
-            for i in 0..1200 {
-                std::fs::write(d.path().join(format!("f{i}.jsonl")), "{}").expect("write");
-            }
-            let mut seen = 0;
-            walk(d.path(), &mut |_| seen += 1);
-            assert_eq!(seen, 1200);
             let all: Vec<PathBuf> = (0..1200)
-                .map(|i| d.path().join(format!("f{i}.jsonl")))
+                .map(|i| {
+                    let p = d.path().join(format!("f{i}.jsonl"));
+                    std::fs::write(&p, "{}").expect("write");
+                    p
+                })
                 .collect();
             assert!(newest_born_after(&all, SystemTime::UNIX_EPOCH).is_some());
-        }
-
-        #[test]
-        fn the_walk_does_not_follow_a_directory_symlink() {
-            let d = tempfile::tempdir().expect("tempdir");
-            let real = d.path().join("real");
-            std::fs::create_dir(&real).expect("mkdir");
-            std::fs::write(real.join("a.jsonl"), "{}").expect("write");
-            std::os::unix::fs::symlink(&real, d.path().join("link")).expect("symlink");
-            let mut seen = 0;
-            walk(d.path(), &mut |_| seen += 1);
-            assert_eq!(seen, 1, "the symlinked copy must not be walked twice");
         }
 
         #[test]

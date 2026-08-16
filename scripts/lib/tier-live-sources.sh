@@ -22,30 +22,31 @@ HOOK="$REPO/target/release/pixtuoid-hook"
 ROSTER_BIN="$REPO/target/release/examples/corpus_check"
 e2e_require_bin "$PIX" "$HOOK" "$ROSTER_BIN"
 
-# The one place per-CLI knowledge lives, and it is unavoidable: a headless
-# invocation is as source-specific as the decoder. A source absent here is
-# reported as uncovered, never silently skipped.
-# "<bin>|<subcommand-or-flag>|<extra flags>". The extra field exists because a
-# headless turn that a permission prompt auto-denies produces no tool call, and a
-# tool call is half of what this tier measures — scope the grant to reading.
+# The per-CLI knowledge that is genuinely ours: a headless invocation's
+# SUBCOMMAND and flags are as source-specific as the decoder. The BINARY name is
+# not — the registry owns it as `version_probe`, read below from `--roster`
+# field 5, because a hand-copied binary table here shipped missing `agy` once.
+# "<subcommand-or-flag>|<extra flags>". The extra field exists because a headless
+# turn that a permission prompt auto-denies produces no tool call, and a tool
+# call is half of what this tier measures — scope the grant to reading.
 invocation_for() {
     case "$1" in
     # --allowedTools is VARIADIC, so it must follow the prompt or it eats it.
-    claude-code) echo "claude|-p|--allowedTools Read" ;;
-    codex) echo "codex|exec|" ;;
-    antigravity) echo "agy|-p|" ;;
-    reasonix) echo "reasonix|-p|" ;;
-    codewhale) echo "codewhale|exec|" ;;
-    opencode) echo "opencode|run|" ;;
-    copilot) echo "copilot|-p|" ;;
-    cursor) echo "cursor-agent|-p|" ;;
-    hermes) echo "hermes|-z|" ;;
-    grok) echo "grok|-p|" ;;
+    claude-code) echo "-p|--allowedTools Read" ;;
+    codex) echo "exec|" ;;
+    antigravity) echo "-p|" ;;
+    reasonix) echo "-p|" ;;
+    codewhale) echo "exec|" ;;
+    opencode) echo "run|" ;;
+    copilot) echo "-p|" ;;
+    cursor) echo "-p|" ;;
+    hermes) echo "-z|" ;;
+    grok) echo "-p|" ;;
     # Both invocations are the ones their recorded fixtures were captured with
     # (`fixtures/{kimi,omp}/tool-run*/provenance.json`) — this row is transcribed
     # from a run that happened, not composed.
-    kimi) echo "kimi|-p|" ;;
-    omp) echo "omp|-p|" ;;
+    kimi) echo "-p|" ;;
+    omp) echo "-p|" ;;
     *) return 1 ;;
     esac
 }
@@ -168,7 +169,8 @@ for id in "${wanted[@]}"; do
         fi
     fi
 
-    IFS='|' read -r bin sub extra <<<"$spec"
+    bin="$("$ROSTER_BIN" --roster | awk -F'\t' -v i="$id" '$1==i{split($5,a," "); print a[1]}')"
+    IFS='|' read -r sub extra <<<"$spec"
     if ! command -v "$bin" >/dev/null 2>&1; then
         echo "  BLOCKED $id — '$bin' is not on PATH here"
         declare_uncovered="$declare_uncovered $id"

@@ -392,9 +392,86 @@ fn shape_of(line: &str) -> String {
     format!("type={ty:?} keys=[{keys}]")
 }
 
+/// Every `.jsonl` under `root` that this source's registry `path_filter` admits
+/// — the files the WATCHER would walk, recursed without following a directory
+/// symlink.
+///
+/// One implementation because both readers act on the answer: the census
+/// reports on these files and the recorder COMMITS one of them as a golden. A
+/// second copy that missed a new sibling exclusion would record the wrong file,
+/// and the fixture would then teach the decoder that shape.
+pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
+    fn walk(admits: &dyn Fn(&Path) -> bool, dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(rd) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            let Ok(meta) = std::fs::symlink_metadata(&p) else {
+                continue;
+            };
+            if meta.is_dir() {
+                walk(admits, &p, out);
+            } else if meta.is_file()
+                && p.extension().and_then(|x| x.to_str()) == Some("jsonl")
+                && admits(&p)
+            {
+                out.push(p);
+            }
+        }
+    }
+    let admits = registry::path_filter_for(source);
+    let mut out = Vec::new();
+    walk(&admits, root, &mut out);
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The walk both readers now share: the census REPORTS on these files and the
+    /// recorder COMMITS one as a golden, so its shape is pinned here rather than
+    /// beside either caller.
+    #[test]
+    fn the_walk_scales_past_the_size_that_broke_the_shell_version() {
+        // The shell harvest took SIGPIPE once a corpus passed ~700 files, after the
+        // turn was already billed. There is no pipe here — a pin on the SHAPE.
+        let d = tempfile::tempdir().expect("tempdir");
+        for i in 0..1200 {
+            std::fs::write(d.path().join(format!("f{i}.jsonl")), "{}").expect("write");
+        }
+        assert_eq!(transcripts_under("claude-code", d.path()).len(), 1200);
+    }
+
+    #[test]
+    fn the_walk_does_not_follow_a_directory_symlink() {
+        let d = tempfile::tempdir().expect("tempdir");
+        let real = d.path().join("real");
+        std::fs::create_dir(&real).expect("mkdir");
+        std::fs::write(real.join("a.jsonl"), "{}").expect("write");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&real, d.path().join("link")).expect("symlink");
+        assert_eq!(
+            transcripts_under("claude-code", d.path()).len(),
+            1,
+            "the symlinked copy must not be walked twice"
+        );
+    }
+
+    #[test]
+    fn the_walk_applies_the_sources_own_path_filter() {
+        // grok writes five jsonl siblings per session and only `updates.jsonl` is
+        // the transcript — the reason this reads the registry rather than the
+        // extension alone.
+        let d = tempfile::tempdir().expect("tempdir");
+        for name in ["updates.jsonl", "rewind_points.jsonl", "notes.txt"] {
+            std::fs::write(d.path().join(name), "{}").expect("write");
+        }
+        let got = transcripts_under("grok", d.path());
+        assert_eq!(got.len(), 1, "only the transcript is admitted, got {got:?}");
+        assert!(got[0].ends_with("updates.jsonl"));
+    }
 
     /// A CC transcript line carrying only tool activity — nothing in it
     /// registers a session.

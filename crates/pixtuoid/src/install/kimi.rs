@@ -504,7 +504,7 @@ command = "terminal-notifier -message done"
                 "session_id": "s",
                 "cwd": "/repo",
                 "tool_name": "Bash",
-                "tool_use_id": "t1",
+                "tool_call_id": "t1",
                 "_pixtuoid_source": SOURCE_NAME,
             });
             assert!(

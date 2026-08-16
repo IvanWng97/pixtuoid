@@ -143,28 +143,6 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 /// (so a planted dir link can't recurse a loop or drag a foreign tree in).
 /// Walking the unfiltered set would make the census a superset of production:
 /// duplicate transcripts counted twice, rewrite-on-resume siblings replayed as
-/// fresh events, foreign-schema journals decoded as garbage.
-fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
-    let admits = registry::path_filter_for(source);
-    let Ok(rd) = std::fs::read_dir(root) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        let Ok(meta) = std::fs::symlink_metadata(&p) else {
-            continue;
-        };
-        if meta.is_dir() {
-            walk(source, &p, out);
-        } else if meta.is_file()
-            && p.extension().and_then(|x| x.to_str()) == Some("jsonl")
-            && admits(&p)
-        {
-            out.push(p);
-        }
-    }
-}
-
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
@@ -225,9 +203,7 @@ fn main() {
             }
         },
     };
-
-    let mut files = Vec::new();
-    walk(source, &root, &mut files);
+    let mut files = pixtuoid_core::harness::transcripts_under(source, &root);
     files.sort();
     if files.is_empty() {
         // 3, not 2: an absent corpus is a coverage gap a caller may accept.
