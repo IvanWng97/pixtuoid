@@ -28,6 +28,11 @@ redacted cwd and an invented one look alike. `origin` is one of:
 | `composed` | `note` | hand-written, and the note says how you can tell |
 | `unknown` | `note` | predates the rule; nobody recorded where it came from |
 
+**A redacted capture says so in its `note`.** The convention is `/Users/dev` for
+the home path; the bytes are otherwise verbatim. Without the note a reader cannot
+tell an edited capture from an untouched one, which is the distinction the whole
+mechanism exists to make.
+
 `every_scenario_declares_its_provenance` enforces the schema, and its
 `NO_WIRE_EVIDENCE_YET` list — the hook-only sources with no recorded scenario at
 all — only shrinks: recording one forces its entry out, and a new hook-only CLI
@@ -48,8 +53,8 @@ is refused before the turn is spent rather than after.
 
 **A gate needs its own sandbox and its own prompt.** `CAPTURE_SEED=<dir>` is
 copied into the sandbox workspace before the run — the place a per-CLI ask rule
-belongs, since opencode auto-approves a trusted workspace and CC does not register
-`PermissionRequest` unless asked. `CAPTURE_PROMPT` replaces the shared prompt for
+belongs, since opencode auto-approves a trusted workspace and CC only FIRES
+`PermissionRequest` when a project rule makes the tool ask. `CAPTURE_PROMPT` replaces the shared prompt for
 a scenario it cannot reach. Neither touches the user's own config.
 
 A composed fixture kept for a reason says so in its note: `opencode/session-run`

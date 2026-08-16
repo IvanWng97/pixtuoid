@@ -105,7 +105,15 @@ def check_metadata() -> int:
         if "_unusable" in prov:
             bad.append(f"{rel}: {prov['_unusable']}")
             continue
-        if prov.get("origin") != "recorded":
+        origin = prov.get("origin")
+        # A single field switched the entire check off: an absent or misspelled
+        # `origin` fell through to `continue` and every other field went
+        # unvalidated. The Rust schema gate closes this for the conformance tree
+        # only — the single-owner trees are checked here or nowhere.
+        if origin not in ("recorded", "composed", "unknown"):
+            bad.append(f"{rel}: `origin` is {origin!r}, not recorded/composed/unknown")
+            continue
+        if origin != "recorded":
             continue
         for field in ("cli", "version", "captured"):
             if not str(prov.get(field, "")).strip():

@@ -441,13 +441,16 @@ mod tests {
         assert_eq!(transcripts_under("claude-code", d.path()).len(), 1200);
     }
 
+    // Unix-only: creating a directory symlink on Windows needs a separate API and
+    // a privilege this suite does not assume, and asserting without one made the
+    // test claim a platform it never exercised.
+    #[cfg(unix)]
     #[test]
     fn the_walk_does_not_follow_a_directory_symlink() {
         let d = tempfile::tempdir().expect("tempdir");
         let real = d.path().join("real");
         std::fs::create_dir(&real).expect("mkdir");
         std::fs::write(real.join("a.jsonl"), "{}").expect("write");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&real, d.path().join("link")).expect("symlink");
         assert_eq!(
             transcripts_under("claude-code", d.path()).len(),

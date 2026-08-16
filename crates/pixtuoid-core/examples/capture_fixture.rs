@@ -566,14 +566,23 @@ mod recorder {
             // The shell harvest took SIGPIPE once a corpus passed ~700 files, after
             // the turn was already billed. A regression pin on the SHAPE.
             let d = tempfile::tempdir().expect("tempdir");
-            let all: Vec<PathBuf> = (0..1200)
+            let mut all: Vec<PathBuf> = (0..1200)
                 .map(|i| {
                     let p = d.path().join(format!("f{i}.jsonl"));
                     std::fs::write(&p, "{}").expect("write");
                     p
                 })
                 .collect();
-            assert!(newest_born_after(&all, SystemTime::UNIX_EPOCH).is_some());
+            // Created last, and placed FIRST, so returning `candidates.first()`
+            // or swapping max for min are both caught.
+            std::thread::sleep(std::time::Duration::from_millis(20));
+            let newest = d.path().join("zzz-newest.jsonl");
+            std::fs::write(&newest, "{}").expect("write");
+            all.insert(0, newest.clone());
+            assert_eq!(
+                newest_born_after(&all, SystemTime::UNIX_EPOCH),
+                Some(newest)
+            );
         }
 
         #[test]

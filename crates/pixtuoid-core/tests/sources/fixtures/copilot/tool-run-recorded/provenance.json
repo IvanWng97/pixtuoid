@@ -3,5 +3,6 @@
   "cli": "copilot",
   "version": "unknown",
   "captured": "2026-08-14",
-  "command": "copilot -p '{prompt}' --allow-all-tools"
+  "command": "copilot -p '{prompt}' --allow-all-tools",
+  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim."
 }

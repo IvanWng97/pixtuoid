@@ -3,5 +3,6 @@
   "cli": "cursor-agent",
   "version": "2026.08.11-e8db854",
   "captured": "2026-08-14",
-  "command": "cursor-agent -p --trust '{prompt}'"
+  "command": "cursor-agent -p --trust '{prompt}'",
+  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim."
 }
