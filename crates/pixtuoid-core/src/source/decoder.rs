@@ -1710,15 +1710,15 @@ mod tests {
                 }),
             ),
             (
-                // Fixed, not Wire: hermes's `pre_approval_request` carries no
-                // prompt text, so the reason is a literal and an over-cap wire
-                // value must not be able to leak in through a later change.
+                // Wire: the recorded gate carries its WHY on `extra.description`
+                // ("delete in root path"), so the reason must route through
+                // `ellipsize` like every other wire-minted one.
                 hermes::SOURCE_NAME,
-                ReasonKind::Fixed,
+                ReasonKind::Wire,
                 Box::new(|| {
                     hermes::decode_hermes_hook_payload(&json!({
                         "hook_event_name":"pre_approval_request","session_id":"s","cwd":"/r",
-                        "message":raw}))
+                        "extra":{"description":raw}}))
                     .expect("hermes decodes")
                 }),
             ),

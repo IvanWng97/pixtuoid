@@ -164,14 +164,18 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         ]),
         // Observer-only upstream (return values ignored, and `_BLOCKING_EVENTS`
         // is `{pre_tool_call}` alone), so the shim's silent exit-0 cannot stall
-        // the approval flow. Fixed reason: hermes carries no prompt text here.
-        "pre_approval_request" => Ok(vec![
-            identity(),
-            AgentEvent::Waiting {
-                agent_id,
-                reason: "permission".to_string(),
-            },
-        ]),
+        // the decision. `tool_name` is null here and the WHY rides
+        // `extra.description` — capture-verified, `approval-recorded`.
+        "pre_approval_request" => {
+            let reason = obj
+                .get("extra")
+                .and_then(|e| e.get("description"))
+                .and_then(|d| d.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|d| crate::source::decoder::ellipsize(d, MAX_DECODED_FIELD_CHARS))
+                .unwrap_or_else(|| "permission".to_string());
+            Ok(vec![identity(), AgentEvent::Waiting { agent_id, reason }])
+        }
         "on_session_end" => Ok(vec![AgentEvent::SessionEnd {
             agent_id,
             as_child: false,

@@ -256,6 +256,16 @@ fn agent_cases() -> Vec<WireCase> {
             must_reach: &[Reach::Active],
         },
         WireCase {
+            // The gate fires TWICE for one command, so this also drives the
+            // reducer path where a re-notified Waiting must not clear the gate
+            // the first one set.
+            name: "hermes_approval",
+            source: "hermes",
+            fixture: "fixtures/hermes/approval-recorded/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[Reach::Waiting],
+        },
+        WireCase {
             name: "kimi",
             source: "kimi",
             // The permission fixture, because a HEADLESS kimi run cannot reach
@@ -272,11 +282,13 @@ fn agent_cases() -> Vec<WireCase> {
 /// Look up one matrix case by its registered source name — never a positional
 /// index into `agent_cases()`, where an insertion would silently shift every
 /// downstream case onto the wrong fixture.
-fn agent_case(source: &str) -> WireCase {
+fn agent_case(name: &str) -> WireCase {
+    // Keyed on `name`, not `source`: a source may have more than one case (hermes
+    // has a tool run and an approval gate) and `name` is the unique one.
     agent_cases()
         .into_iter()
-        .find(|c| c.source == source)
-        .unwrap_or_else(|| panic!("no wire-to-pixels case for source {source:?}"))
+        .find(|c| c.name == name)
+        .unwrap_or_else(|| panic!("no wire-to-pixels case named {name:?}"))
 }
 
 /// The matrix is truth-complete: a newly registered source with no wire case
@@ -285,12 +297,15 @@ fn agent_case(source: &str) -> WireCase {
 fn wire_matrix_covers_every_registered_source() {
     use std::collections::BTreeSet;
 
-    let agents: BTreeSet<&str> = agent_cases().iter().map(|c| c.source).collect();
+    // Uniqueness is on NAME, which is what `agent_case` looks up — a source may
+    // legitimately have two cases (hermes: a tool run and an approval gate).
+    let names: BTreeSet<&str> = agent_cases().iter().map(|c| c.name).collect();
     assert_eq!(
-        agents.len(),
+        names.len(),
         agent_cases().len(),
-        "duplicate agent_cases rows for one source"
+        "two agent_cases rows share a `name`, so one is unreachable"
     );
+    let agents: BTreeSet<&str> = agent_cases().iter().map(|c| c.source).collect();
     for source in &agents {
         let d = registry::descriptor_for(source)
             .unwrap_or_else(|| panic!("matrix source {source:?} is not in the registry"));
@@ -334,7 +349,7 @@ fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
 
 #[test]
 fn claude_code_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_case("claude-code"));
+    assert_renders_a_sprite(&agent_case("claude_code"));
 }
 
 #[test]
@@ -385,6 +400,11 @@ fn cursor_hook_envelope_renders_a_painted_sprite() {
 #[test]
 fn hermes_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("hermes"));
+}
+
+#[test]
+fn hermes_approval_gate_renders_a_waiting_sprite() {
+    assert_renders_a_sprite(&agent_case("hermes_approval"));
 }
 
 #[test]
