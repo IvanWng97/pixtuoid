@@ -113,22 +113,76 @@ fn source_of(dir: &Path) -> Option<String> {
     Some(mapped.to_string())
 }
 
-/// THE walk. Every `provenance.json` in the tree, with the source its layout
-/// names. Sorted, so failures name captures in a stable order.
-pub(crate) fn every_capture() -> Vec<Capture> {
-    let root = sources_root();
+/// Every dir the LAYOUT says is a capture — before asking whether it declares
+/// anything. This is the half that makes `provenance.json` mandatory: a walk
+/// that enumerated the FILES could not see a capture that declares nothing, so
+/// deleting a provenance made the suite greener.
+///
+/// A `<module>/fixtures/` tree declares EITHER at its root OR once per sub-dir;
+/// both shapes are in the tree today (`codex/fixtures` vs `delegation/fixtures/*`).
+fn capture_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
-    let mut stack = vec![root.clone()];
-    while let Some(dir) = stack.pop() {
-        for e in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
-            if e.path().is_dir() {
-                stack.push(e.path());
-            }
-        }
-        let prov = dir.join("provenance.json");
-        if !prov.is_file() {
+    for source_dir in sorted_dirs(&fixtures_root()) {
+        out.extend(sorted_dirs(&source_dir));
+    }
+    for module in sorted_dirs(&sources_root()) {
+        let name = module
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let fixtures = module.join("fixtures");
+        // `decode/` holds hand-built decoder INPUTS, not captures — they are
+        // composed on purpose and have no wire to be provenance about. `fixtures/`
+        // itself is the conformance subtree, already covered above.
+        if name == "decode" || name == "fixtures" || !fixtures.is_dir() {
             continue;
         }
+        if fixtures.join("provenance.json").is_file() {
+            out.push(fixtures);
+        } else {
+            // No root declaration, so every sub-tree must carry one — and there
+            // must BE sub-trees. Without this, deleting a root provenance from a
+            // tree that has no sub-dirs makes the whole capture vanish from the
+            // population instead of failing.
+            let subs = sorted_dirs(&fixtures);
+            assert!(
+                !subs.is_empty(),
+                "{}: a capture tree must declare its origin — add provenance.json \
+                 here, or one per sub-tree",
+                fixtures.display()
+            );
+            out.extend(subs);
+        }
+    }
+    out.sort();
+    out
+}
+
+fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    out.sort();
+    out
+}
+
+/// THE walk. Every capture the layout names, each REQUIRED to declare itself.
+/// Sorted, so failures name captures in a stable order.
+pub(crate) fn every_capture() -> Vec<Capture> {
+    let mut out = Vec::new();
+    for dir in capture_dirs() {
+        let prov = dir.join("provenance.json");
+        assert!(
+            prov.is_file(),
+            "{}: a capture must declare its origin — add provenance.json here, or \
+             one per sub-tree. Nothing else in the bytes separates a capture from a \
+             composition, which is the whole reason provenance exists.",
+            dir.display()
+        );
         let body = std::fs::read_to_string(&prov)
             .unwrap_or_else(|e| panic!("read {}: {e}", prov.display()));
         let provenance: serde_json::Value = serde_json::from_str(&body)
@@ -147,7 +201,6 @@ pub(crate) fn every_capture() -> Vec<Capture> {
             provenance,
         });
     }
-    out.sort_by(|a, b| a.dir.cmp(&b.dir));
     out
 }
 
@@ -168,11 +221,14 @@ fn the_walk_sees_every_provenance_on_disk() {
     }
     let mut on_disk = 0;
     count(&sources_root(), &mut on_disk);
+    // The two sides are derived DIFFERENTLY on purpose: `capture_dirs()` from the
+    // LAYOUT, this counter from the FILES. Counting the same predicate twice was
+    // a tautology that a deleted provenance decremented on both sides.
     let walked = every_capture().len();
     assert_eq!(
         walked, on_disk,
-        "the walk sees {walked} captures but {on_disk} provenance.json files exist — \
-         the difference is captures no rule applies to"
+        "the layout names {walked} captures but {on_disk} provenance.json files exist — \
+         a file outside every layout shape is one no rule applies to"
     );
     assert!(
         on_disk >= 40,
@@ -206,7 +262,7 @@ fn every_captures_layout_names_a_registered_source() {
 const UNVERIFIED_PROVENANCE: &[&str] = &[
     // Not re-recordable: its cwd is a real Windows path with a space and parens,
     // which is what makes it the Windows arm of the cwd-extractor test.
-    "copilot/tool-run",
+    "fixtures/copilot/tool-run",
 ];
 
 /// Sources whose `unknown` scenarios now sit BESIDE a recorded one.
@@ -484,12 +540,19 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
         .filter(|c| c.is_recorded())
         .map(|c| c.source.as_str())
         .collect();
+    // Keyed off `sources_root()`, not `fixtures_root()`: the `?` on the narrower
+    // prefix silently dropped all 7 single-owner captures INSIDE a rule whose
+    // signature says "every capture" — a subset created by a path operation is
+    // harder to see than the six walks this file replaced.
     let unknown: BTreeSet<String> = captures
         .iter()
         .filter(|c| c.origin() == "unknown")
-        .filter_map(|c| {
-            let rel = c.dir.strip_prefix(fixtures_root()).ok()?;
-            Some(rel.to_string_lossy().replace('\\', "/"))
+        .map(|c| {
+            c.dir
+                .strip_prefix(sources_root())
+                .expect("every capture is under tests/sources")
+                .to_string_lossy()
+                .replace('\\', "/")
         })
         .collect();
     assert_eq!(
@@ -506,7 +569,10 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
     // about sources that no longer had anything to reassure about.
     let unknown_sources: BTreeSet<&str> = UNVERIFIED_PROVENANCE
         .iter()
-        .filter_map(|s| s.split('/').next())
+        .filter_map(|s| {
+            s.strip_prefix("fixtures/")
+                .and_then(|r| r.split('/').next())
+        })
         .collect();
     for src in UNKNOWN_BUT_BACKED_BY_A_CAPTURE {
         assert!(

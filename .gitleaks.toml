@@ -1,0 +1,47 @@
+# Secret + recorder-identity scanning for the COMMITTED fixture tree.
+#
+# `just fixture-pii` points this at `crates/pixtuoid-core/tests/sources`, and
+# only there: the two custom rules below key on shapes that are leaks in a
+# RECORDED CAPTURE and ordinary code everywhere else — `/Users/<name>` appears
+# 259k times across the workspace's own sources, docs and tests.
+#
+# This replaced a hand-rolled scanner that admitted a real GitHub PAT, a GitLab
+# PAT and a Stripe live key (measured, all three), because it only ever knew the
+# five patterns its author thought of. `useDefault` brings gitleaks' whole
+# corpus; the rules below add the class gitleaks cannot know: the RECORDER's own
+# machine identity, which is not a credential and so is invisible to every
+# secret scanner including GitGuardian's.
+
+[extend]
+useDefault = true
+
+# Wire identifiers that captured bytes legitimately carry. Without these,
+# `generic-api-key` fires 15 times on hermes session ids and copilot message ids.
+[[allowlists]]
+description = "Wire identifiers in recorded fixtures — not credentials"
+regexTarget = "match"
+regexes = [
+  '''msg_[0-9A-Za-z]{20,32}''',
+  '''\d{8}_\d{6}_[0-9a-f]{6}''',
+]
+
+# Go's RE2 has no lookahead, so "anything except the placeholder" is a rule plus
+# a rule-scoped allowlist rather than one negated regex.
+
+[[rules]]
+id = "pixtuoid-recorder-identity"
+description = "The recorder's own machine identity: a real MCP server/tool name"
+regex = '''mcp__[A-Za-z0-9_-]+'''
+  [[rules.allowlists]]
+  regexTarget = "match"
+  regexes = ['''mcp__example[A-Za-z0-9_-]*''']
+
+[[rules]]
+id = "pixtuoid-foreign-home"
+description = "A home path outside the /Users/dev redaction placeholder"
+regex = '''/(?:Users|home)/[A-Za-z0-9._-]+'''
+  [[rules.allowlists]]
+  regexTarget = "match"
+  # `dev` is the declared placeholder; the rest are conventions predating it in
+  # hand-composed fixtures.
+  regexes = ['''/(?:Users|home)/(?:dev|me|user|you|test|runner)\b''']

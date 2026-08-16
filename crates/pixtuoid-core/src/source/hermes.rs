@@ -176,9 +176,17 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .unwrap_or_else(|| "permission".to_string());
             Ok(vec![identity(), AgentEvent::Waiting { agent_id, reason }])
         }
-        "on_session_end" => Ok(vec![AgentEvent::SessionEnd {
+        // A TURN boundary, not the session's end — upstream's own doc says it is
+        // "emitted from agent/turn_finalizer.py" carrying `turn_id`/`completed`
+        // ("True when the turn produced a final response"), and turn_finalizer's
+        // comment adds that "run_conversation() is called once per user message
+        // in multi-turn sessions" with real session cleanup left to the CLI's
+        // atexit. Mapping it to SessionEnd walked the agent out of the office at
+        // every turn: `approval-recorded` is ONE session with TWO of these and a
+        // tool call 5.9 s after the first, past the 4.5 s exit grace.
+        "on_session_end" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
-            as_child: false,
+            tool_use_id: None,
         }]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
@@ -326,17 +334,58 @@ mod tests {
         ));
     }
 
+    /// The name says session; upstream's emitter and payload say TURN. Mapping it
+    /// to `SessionEnd` swept the slot at every turn boundary — hermes was invisible
+    /// while the user read or typed.
     #[test]
-    fn on_session_end_maps_to_session_end() {
+    fn on_session_end_is_a_turn_boundary_not_the_sessions_end() {
         let ev =
             decode(json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/r"}));
-        assert!(matches!(
-            ev,
-            AgentEvent::SessionEnd {
-                as_child: false,
-                ..
-            }
-        ));
+        assert!(
+            matches!(
+                ev,
+                AgentEvent::ActivityEnd {
+                    tool_use_id: None,
+                    ..
+                }
+            ),
+            "got {ev:?}"
+        );
+    }
+
+    /// The shape `hermes/tool-run` could never show, because a one-shot capture
+    /// ends its only turn and its session together. `approval-recorded` is the
+    /// multi-turn capture that falsifies it: one session_id, one pid, TWO
+    /// `on_session_end`, and work after the first.
+    #[test]
+    fn a_second_turn_in_one_session_does_not_end_the_session() {
+        let sid = "sess-multi";
+        let mut evs = Vec::new();
+        for name in [
+            "on_session_start",
+            "pre_tool_call",
+            "post_tool_call",
+            "on_session_end",
+            "pre_tool_call",
+            "post_tool_call",
+            "on_session_end",
+        ] {
+            evs.extend(
+                decode_hermes_hook_payload(
+                    &json!({"hook_event_name": name, "session_id": sid, "cwd": "/r"}),
+                )
+                .expect("decodes"),
+            );
+        }
+        let ids: std::collections::BTreeSet<_> = evs.iter().map(AgentEvent::agent_id).collect();
+        assert_eq!(ids.len(), 1, "one session must stay one AgentId");
+        assert_eq!(
+            evs.iter()
+                .filter(|e| matches!(e, AgentEvent::SessionEnd { .. }))
+                .count(),
+            0,
+            "a turn boundary must not end the session: {evs:?}"
+        );
     }
 
     #[test]

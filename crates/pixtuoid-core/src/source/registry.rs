@@ -708,13 +708,13 @@ const HERMES: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
-            // `on_session_end` fires on clean completion — best-effort counts.
-            // The payload carries no pid, but the shim stamps one, so an abrupt
-            // exit rides it — falling to the stale-sweep where no `ExitWatch`
-            // backend exists (Windows / pre-5.3 Linux), where the walk does not
-            // recognise the runner's wrapper, or before two consecutive payloads
-            // corroborate the pid (#896).
-            has_exit_signal: true,
+            // NO end signal of any kind on the wire: `on_session_end` is a TURN
+            // boundary (see `source/hermes.rs`), and hermes has no transcript. A
+            // closed session is reaped by the pid exit-watch where a backend
+            // exists, else by the stale-sweep. The field is protocol, not policy,
+            // so it says none — `short_idle_reap` is unchanged either way here,
+            // because `resurrects_on_prompt` is false.
+            has_exit_signal: false,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.
             delegations_are_hook_silent: false,

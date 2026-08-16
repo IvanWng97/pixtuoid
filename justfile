@@ -1199,7 +1199,10 @@ setup-tools:
     # ast-grep backs the `comment-lint` advisory (structural Rust + Python rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
     # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema; do
+    # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
+    # recipe cannot run at all (it does not degrade to a weaker scan, because a
+    # weaker scan is what it replaced).
+    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -1418,11 +1421,14 @@ fixture-metadata:
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
 # a fixture added by hand, edited later, or captured before the check existed is
 # covered too — both classes that slipped through on #929.
+# gitleaks, not a hand-rolled scanner: the one this replaced admitted a real
+# GitHub PAT, GitLab PAT and Stripe key, because it only knew the five patterns
+# its author thought of. Config + the WHY: `.gitleaks.toml`.
 # Runs in `lint`; CI's hygiene job enumerates it separately.
 [group('meta')]
-[doc("Re-scan the committed fixture tree for the recorder's own identity")]
+[doc("Scan the committed fixture tree for secrets and the recorder's identity")]
 fixture-pii:
-    python3 scripts/fixture-pii.py
+    @gitleaks dir crates/pixtuoid-core/tests/sources -c .gitleaks.toml --no-banner --redact
 
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these

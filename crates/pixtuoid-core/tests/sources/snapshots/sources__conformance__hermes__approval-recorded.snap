@@ -47,9 +47,9 @@ expression: events
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~
-- SessionEnd:
+- ActivityEnd:
     agent_id: 18079134507292421312
-    as_child: false
+    tool_use_id: ~
 - ModelInfo:
     agent_id: 18079134507292421312
     model: gpt-4o-mini
@@ -73,9 +73,9 @@ expression: events
 - ActivityEnd:
     agent_id: 18079134507292421312
     tool_use_id: ~
-- SessionEnd:
+- ActivityEnd:
     agent_id: 18079134507292421312
-    as_child: false
+    tool_use_id: ~
 - ModelInfo:
     agent_id: 18079134507292421312
     model: gpt-4o-mini
