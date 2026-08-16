@@ -114,6 +114,17 @@ LEDGERED_BUT_DECODABLE = {
     "SubagentStop",
     "subagent_start",
     "subagent_stop",
+    # openclaw's plugin hook. The arm of that name is grok's ACP session-update
+    # tag — a third cross-source collision, and the reader is name-based.
+    "subagent_spawned",
+    # kimi's SubagentStart — a fourth cross-source name collision; the arm of
+    # that name is claude_code's.
+    "SubagentStart",
+    # kimi's `Notification` is NOT CC's. Upstream: "triggered when a background
+    # task status changes (observation only)", e.g. `task.completed` — while the
+    # shared arm decodes CC's, which is the idle permission prompt. Registering
+    # it would mint a Waiting from a finished background task.
+    "Notification",
 }
 
 # Hermes hooks we DELIBERATELY do not register. The subagent pair is adjudicated
@@ -155,6 +166,100 @@ HERMES_KNOWN_OMITTED = {
     "on_kanban_worker_exited",
     "on_kanban_worker_spawned",
     "on_kanban_worker_stale_claim",
+}
+
+# OpenClaw hooks we DELIBERATELY do not register. It is a DAEMON source — the
+# lobster renders gateway PRESENCE (up / busy / down + a session count), and the
+# six we register are exactly the four axes `decode_openclaw_presence` projects.
+# The rest are the AGENT's turn machinery inside the gateway: prompt/model
+# resolution, the LLM call, compaction, message and reply plumbing, cron, skills,
+# and the subagent trio. A gateway serving a subagent is already Busy from
+# `before_agent_run`, so modelling them would add no presence state — and each
+# extra registered hook is another shim invocation per turn.
+OPENCLAW_KNOWN_OMITTED = {
+    "after_compaction",
+    "after_tool_call",
+    "agent_turn_prepare",
+    "before_agent_finalize",
+    "before_agent_reply",
+    "before_compaction",
+    "before_dispatch",
+    "before_install",
+    "before_message_write",
+    "before_model_resolve",
+    "before_prompt_build",
+    "before_reset",
+    "before_tool_call",
+    "channel_pairing_requested",
+    "cron_changed",
+    "cron_reconciled",
+    "heartbeat_prompt_contribution",
+    "inbound_claim",
+    "llm_input",
+    "llm_output",
+    "message_received",
+    "message_sending",
+    "message_sent",
+    "model_call_ended",
+    "model_call_started",
+    "reply_dispatch",
+    "reply_payload_sending",
+    "resolve_exec_env",
+    "skill_changed",
+    "skill_proposal_changed",
+    "skill_proposal_evaluate",
+    "subagent_delivery_target",
+    "subagent_ended",
+    "subagent_progress",
+    "subagent_spawned",
+    "tool_result_persist",
+}
+
+# opencode events we DELIBERATELY do not register. `message.part.updated` is the
+# tool-activity carrier and the session/permission pair are the lifecycle; the
+# rest are per-token deltas and content bookkeeping a sprite does not render.
+# `session.error` and `session.updated` are the two worth revisiting if the
+# office ever grows a distressed/renamed state.
+OPENCODE_KNOWN_OMITTED = {
+    "message.part.delta",
+    "message.part.removed",
+    "message.removed",
+    "message.updated",
+    "permission.v2.replied",
+    "session.diff",
+    "session.error",
+    "session.updated",
+}
+
+# cursor hooks we DELIBERATELY do not register. `beforeShellExecution` and
+# `afterFileEdit` are DECISION hooks — cursor blocks on their exit code, and the
+# shim's always-exit-0 contract (invariant #5) would silently approve. That is
+# the one class we must never register, not a scope cut. `preCompact` is a
+# compaction internal.
+CURSOR_KNOWN_OMITTED = {
+    "beforeShellExecution",
+    "afterFileEdit",
+    "preCompact",
+}
+
+# kimi hooks we DELIBERATELY do not register: per-turn/prompt noise, compaction
+# internals, background-task and heartbeat bookkeeping. The subagent pair is
+# omitted for kimi's own reason — see `source/kimi.rs` — and `PermissionResult`
+# is the post-decision half of the gate whose ASK half (`PermissionRequest`) we
+# do register.
+KIMI_KNOWN_OMITTED = {
+    "UserPromptSubmit",
+    "UserPromptQueued",
+    "TurnStarted",
+    "PermissionResult",
+    "SessionHeartbeat",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskStarted",
+    "Interrupt",
+    "PreCompact",
+    "PostCompact",
+    "Notification",
 }
 
 # Codex hooks we DELIBERATELY do not register: compaction internals, not agent
@@ -1685,6 +1790,20 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"no-link / no-activity)."
                     )
 
+        # The other direction. Wire names live in `define({ type: "…" })`; the
+        # exported `Event` object holds only the symbols.
+        upstream_oc: set[str] = set()
+        for u in OPENCODE_EVENT_URLS:
+            body = fetch_anchored(u, "opencode events", report)
+            if body:
+                upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
+        if upstream_oc:
+            for ev in sorted(upstream_oc - ours.opencode - OPENCODE_KNOWN_OMITTED):
+                report.add_review(
+                    f"new opencode event `{ev}` upstream — we neither subscribe to it "
+                    f"in the plugin nor list it in OPENCODE_KNOWN_OMITTED."
+                )
+
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
         if text is not None:
@@ -1983,6 +2102,29 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"cursor.com/docs/hooks — likely renamed; the CLI still fires it but "
                         f"the decoder maps it to nothing (no sprite / no activity)."
                     )
+            # The other direction. The docs name hooks inline, so the set is the
+            # camelCase vocabulary rather than a quoted literal list.
+            upstream_cur = set(
+                re.findall(
+                    r"\b(pre[A-Z][a-zA-Z]+|post[A-Z][a-zA-Z]+|beforeShellExecution"
+                    r"|afterFileEdit|stop)\b",
+                    text,
+                )
+            )
+            if len(upstream_cur) < 4:
+                report.add_blind(
+                    "the cursor hook set the docs actually list",
+                    "cursor.com/docs/hooks",
+                    f"the doc reader returned {len(upstream_cur)} names, so the "
+                    f"missing-registration direction was SKIPPED for cursor.",
+                )
+            else:
+                for ev in sorted(upstream_cur - ours.cursor - CURSOR_KNOWN_OMITTED):
+                    report.add_review(
+                        f"new cursor hook `{ev}` in the docs — we neither register it "
+                        f"nor list it in CURSOR_KNOWN_OMITTED. Check whether it is a "
+                        f"DECISION hook before registering: the shim always exits 0."
+                    )
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -1994,6 +2136,25 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
                         f"the plugin registers a hook OpenClaw never fires, so the lobster "
                         f"mascot silently stops reacting (no presence)."
+                    )
+            union = re.search(
+                r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
+            )
+            upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
+            if len(upstream) < 10:
+                report.add_blind(
+                    "the OpenClaw hook set upstream actually offers",
+                    "the `PluginHookName` union in src/plugins/hook-types.ts",
+                    f"the union reader returned {len(upstream)} names, so the "
+                    f"missing-registration direction was SKIPPED for openclaw.",
+                )
+            else:
+                for ev in sorted(upstream - ours.openclaw - OPENCLAW_KNOWN_OMITTED):
+                    report.add_review(
+                        f"new OpenClaw hook `{ev}` in the PluginHookName union — we "
+                        f"neither register it in the plugin nor list it in "
+                        f"OPENCLAW_KNOWN_OMITTED. Decide whether the lobster's presence "
+                        f"should react to it."
                     )
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
@@ -2120,6 +2281,28 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"kimi-code docs/en/customization/hooks.md — likely renamed; "
                         f"Kimi still fires it but the decoder maps it to nothing "
                         f"(no sprite / no activity)."
+                    )
+            # The other direction, off the doc's own "Event Reference" table —
+            # its first column is the authoritative set.
+            ref = text.find("## Event Reference")
+            upstream_kimi = (
+                set(re.findall(r"^\|\s*`([A-Za-z]+)`\s*\|", text[ref:], re.M))
+                if ref >= 0
+                else set()
+            )
+            if len(upstream_kimi) < 8:
+                report.add_blind(
+                    "the kimi hook set the docs actually list",
+                    "the Event Reference table in kimi-code's hooks.md",
+                    f"the table reader returned {len(upstream_kimi)} names, so the "
+                    f"missing-registration direction was SKIPPED for kimi.",
+                )
+            else:
+                for ev in sorted(upstream_kimi - ours.kimi - KIMI_KNOWN_OMITTED):
+                    report.add_review(
+                        f"new kimi hook `{ev}` in the Event Reference table — we "
+                        f"neither register it in KIMI_EVENTS nor list it in "
+                        f"KIMI_KNOWN_OMITTED."
                     )
 
     if ours.dispatch_names is not None:
