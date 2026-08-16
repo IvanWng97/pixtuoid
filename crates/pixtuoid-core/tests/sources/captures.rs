@@ -739,8 +739,8 @@ fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
             }
         }
         // codex and omp name their transcripts by capture instant, which is the
-        // only date evidence in a transcript-only fixture — 12 of these trees
-        // ship no hook payloads at all.
+        // only date evidence a transcript-only fixture has — and most of this
+        // tree's captures ship no hook payloads at all.
         for f in c.wire_files() {
             if let Some(d) = date_prefix(&f.file_name().unwrap_or_default().to_string_lossy()) {
                 dates.insert(d);
@@ -863,4 +863,57 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
     );
     assert_eq!(date_prefix("events.jsonl"), None);
     assert_eq!(date_prefix("2026-13-45T00-00-00-x.jsonl"), None);
+}
+
+/// `tool_id_key` picks the JSON key a per-call id is read from, and its own doc
+/// names the danger: reading the wrong name is SILENT — every kimi tool call
+/// decoded to `None` for the whole source's life. The compiler forces a CHOICE
+/// (11 rows set it) and nothing forced the right one: the conformance snapshots
+/// catch a change to an EXISTING source, but a NEW source's snapshot is generated
+/// from whatever key its author copied and accepted at `cargo insta review`.
+///
+/// The captures answer it directly: whatever key a real payload carries its tool
+/// id under IS that source's key.
+#[test]
+fn each_sources_tool_id_key_is_the_one_its_captures_carry() {
+    const KEYS: &[&str] = &["tool_use_id", "tool_call_id"];
+    let mut checked = 0usize;
+    for c in every_capture() {
+        let Some(hooks) = c.hook_payloads() else {
+            continue;
+        };
+        let Some(d) = registry::descriptor_for(&c.source) else {
+            continue;
+        };
+        let Some(want) = d.hook().map(|h| h.tool_id_key.wire_name()) else {
+            continue;
+        };
+        for line in std::fs::read_to_string(&hooks)
+            .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+        {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            for wrong in KEYS.iter().filter(|k| **k != want) {
+                assert!(
+                    v.get(wrong).is_none(),
+                    "{}: a payload carries `{wrong}` but {} is registered as \
+                     `{want}` — the per-call id would decode to None for every \
+                     tool call this source ever makes",
+                    hooks.display(),
+                    c.source
+                );
+            }
+            if v.get(want).is_some() {
+                checked += 1;
+            }
+        }
+    }
+    assert!(
+        checked > 0,
+        "no captured payload carried a tool id under its source's registered key, \
+         so this proved nothing — the walk or the key vocabulary moved"
+    );
 }

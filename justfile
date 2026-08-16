@@ -1433,7 +1433,15 @@ fixture-metadata:
 [group('meta')]
 [doc("Scan the committed fixture tree for secrets and the recorder's identity")]
 fixture-pii:
-    @gitleaks dir crates/pixtuoid-core/tests/sources -c .gitleaks.toml --no-banner --redact
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # TWO passes, and the split is load-bearing: the credential sweep wants
+    # gitleaks' default allowlist (which waives filesystem-shaped strings), and
+    # the identity rules are destroyed by it — a global allowlist outranks a
+    # rule-scoped one. `.gitleaks-identity.toml` carries the proof.
+    tree=crates/pixtuoid-core/tests/sources
+    gitleaks dir "$tree" -c .gitleaks.toml          --no-banner --redact
+    gitleaks dir "$tree" -c .gitleaks-identity.toml --no-banner --redact
 
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these

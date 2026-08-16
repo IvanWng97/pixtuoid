@@ -86,9 +86,12 @@ being evidence. PII is not always a field you can drop — cursor's arrives as a
 key, kimi's as the owner column inside a captured `ls -la` `tool_output`, and
 codex's as a `world_state` inventory of every skill installed on the host — so
 read a capture before committing it rather than trusting a key-name filter.
-The recorder's `warn_on_pii` sees only `$HOME`/`$USER`/`$LOGNAME`, and no size
-heuristic can stand in for the read: legitimate copilot lines run to 39 KB, wider
-than the 27 KB `world_state` dump that had to go. A line the decoder IGNORES is
+The recorder's `scan_for_pii` sees `$HOME`/`$USER`/`$LOGNAME` AND the
+`PII_MARKERS` identity keys, and `just fixture-pii` re-scans the committed tree
+with gitleaks — but none of them reaches a value it cannot name, which is why a
+capture still gets read. No size heuristic can stand in for that read either:
+legitimate copilot lines run to 39 KB, wider than the `world_state` dump that had
+to go. A line the decoder IGNORES is
 the cheap case — drop it and re-run the golden; byte-identical means the
 redaction cost no evidence.
 

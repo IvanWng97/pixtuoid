@@ -51,7 +51,11 @@ GATE = re.compile(
 )
 # A numbered menu confirms on Enter (its first option is pre-highlighted); a
 # bare y/n gate wants the letter.
-MENU = re.compile(rb"1\s*[.)]\s*\S", re.I)
+# LINE-ANCHORED: a menu's `1.` starts its line. Unanchored, this matched `1.2`
+# inside `version 1.2.3` — so a TUI printing a version banner read as a numbered
+# menu and the driver answered a y/n gate with the wrong key, which is the
+# documented silent-failure mode this regex exists to prevent.
+MENU = re.compile(rb"(?m)^\s*1\s*[.)]\s*\S", re.I)
 ANSWERS = [b"y\r", b"\r", b"1\r", b"\x1b[A\r"]
 # One billed turn's ceiling, and how long a TUI gets to paint before we type into it.
 RUN_BUDGET_S = 300
@@ -69,7 +73,23 @@ def squash(b: bytes) -> bytes:
 
 
 def selftest() -> int:
-    """The pure halves, which are the ones that go wrong silently."""
+    """The pure halves, which are the ones that go wrong silently.
+
+    `assert` is compiled OUT under `PYTHONOPTIMIZE`/`-O`, which would make this
+    REQUIRED gate print "ok" having checked nothing — so the first thing it does
+    is prove assertions are live.
+    """
+    try:
+        assert False  # noqa: B011
+    except AssertionError:
+        pass
+    else:
+        print(
+            "tuidrive selftest: assertions are disabled (PYTHONOPTIMIZE/-O), so this "
+            "gate would pass without checking anything",
+            file=sys.stderr,
+        )
+        return 1
     assert ANSI.sub(b"", b"\x1b[1;32mhi\x1b[0m") == b"hi"
     assert ANSI.sub(b"", b"\x1b]0;title\x07go") == b"go"
     assert squash(b"de lete  NO\nTE") == b"deleteNOTE"
@@ -77,9 +97,23 @@ def selftest() -> int:
         assert GATE.search(wording), wording
     assert not GATE.search(b"reading NOTE.txt")
     assert MENU.search(b"  1. Yes, continue")
+    assert MENU.search(b"1) Approve")
     assert not MENU.search(b"press enter")
-    assert answer_for(0) == ANSWERS[0]
-    assert answer_for(99) == ANSWERS[-1]
+    # DISCRIMINATING cases: `rb"1[.]"` passed the two above while matching these,
+    # which sends Enter into a y/n gate — the documented silent-failure mode.
+    for prose in [b"version 1.2.3", b"step 1. first", b"took 1.5s"]:
+        assert not MENU.search(prose), prose
+
+    # The ladder BY VALUE. Asserting `answer_for(0) == ANSWERS[0]` is
+    # self-referential: three of the four rungs could be deleted and this stayed
+    # green, while the escalation each rung exists for silently stopped happening.
+    assert [answer_for(i) for i in range(len(ANSWERS))] == [
+        b"y\r",
+        b"\r",
+        b"1\r",
+        b"\x1b[A\r",
+    ], ANSWERS
+    assert answer_for(99) == b"\x1b[A\r", "past the last rung must clamp, not wrap"
     print("tuidrive selftest: ok")
     return 0
 

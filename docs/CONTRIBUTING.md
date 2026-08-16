@@ -448,7 +448,12 @@ you:
 
 4. **Add ONE `SourceDescriptor` row** in `crates/pixtuoid-core/src/source/registry.rs`
    — label prefix (2 chars), the line decoder, hook keying (`IdKey` + an
-   optional custom hook decoder), truthful capability flags (`has_exit_signal`,
+   optional custom hook decoder), `tool_id_key` (the JSON key the per-call id
+   arrives under — verify it against a CAPTURED tool call rather than copying a
+   neighbour: 10 of 11 rows are `ToolUse`, and kimi's `ToolCall` cost a whole
+   source's tool ids before a capture showed it; pinned by
+   `each_sources_tool_id_key_is_the_one_its_captures_carry`), truthful
+   capability flags (`has_exit_signal`,
    `resurrects_on_prompt`, `delegations_are_hook_silent`), plus
    `verified_version` ("unknown" until a byte-real capture anchors it — pinned
    non-empty by `every_descriptor_has_a_verified_version`) and `version_probe`
