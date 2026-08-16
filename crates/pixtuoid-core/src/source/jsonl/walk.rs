@@ -161,12 +161,17 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             return;
         }
     };
-    if meta.file_type().is_symlink() {
+    use crate::source::admit::{classify, Entry};
+    // One rule, shared with the offline drivers so a fixture can never be
+    // recorded from a file production would not read (#931). The traversal
+    // below — and the cursor retirement above — stay here.
+    let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
+    if entry == Entry::SkipSymlink {
         // debug!, not warn!: a persistent symlink would re-warn every 250ms.
         debug!("skipping symlinked entry {}", path.display());
         return;
     }
-    if meta.is_dir() {
+    if entry == Entry::Recurse {
         match tokio::fs::read_dir(path).await {
             Ok(mut read) => loop {
                 match read.next_entry().await {
@@ -189,12 +194,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
         return;
     }
-    if path.extension().and_then(|s| s.to_str()) != Some("jsonl") {
-        return;
-    }
-    // Per-source file filter: antigravity skips the duplicate
-    // `transcript_full.jsonl` sibling so one conversation doesn't double-render.
-    if !(decoders.path_filter)(path) {
+    if entry != Entry::Take {
         return;
     }
 

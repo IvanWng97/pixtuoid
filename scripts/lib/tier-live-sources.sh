@@ -60,7 +60,7 @@ invocation_for() {
 # One turn, three things verified: the session registers, a TOOL call drives the
 # per-source tool-detail decode (where the decoders differ most), and the slot
 # returns. Asking for a file READ rather than a shell command keeps it inside
-# every CLI's default permissions, so no turn is spent on a approval prompt.
+# every CLI's default permissions, so no turn is spent on an approval prompt.
 PROMPT='Read the file NOTE.txt in the current directory and reply with only its contents.'
 TURN_TIMEOUT=180
 

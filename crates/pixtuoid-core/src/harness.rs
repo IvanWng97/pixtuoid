@@ -411,13 +411,10 @@ pub fn transcripts_under(source: &str, root: &Path) -> Vec<PathBuf> {
             let Ok(meta) = std::fs::symlink_metadata(&p) else {
                 continue;
             };
-            if meta.is_dir() {
-                walk(admits, &p, out);
-            } else if meta.is_file()
-                && p.extension().and_then(|x| x.to_str()) == Some("jsonl")
-                && admits(&p)
-            {
-                out.push(p);
+            match crate::source::admit::classify(&meta, &p, admits) {
+                crate::source::admit::Entry::Recurse => walk(admits, &p, out),
+                crate::source::admit::Entry::Take => out.push(p),
+                _ => {}
             }
         }
     }

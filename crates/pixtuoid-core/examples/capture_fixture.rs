@@ -138,7 +138,7 @@ mod recorder {
         Ok(())
     }
 
-    // ── the decisions, each an ordinary #[test] below ────────────────────────────
+    // ── the decisions ────────────────────────────────────────────────────────────
 
     /// The agent's own env reaches the CLI under test: a nested `claude` inherited
     /// `CLAUDE_CODE_CHILD_SESSION` and turned its transcript saving OFF, so the run
@@ -152,7 +152,7 @@ mod recorder {
 
     /// The transcript this run CREATED: BIRTH time, not mtime. A live agent session
     /// is appended to forever and is therefore always newest by mtime — that once
-    /// harvested 4155 lines of the developer's own session.
+    /// harvested the developer's own live session.
     fn newest_born_after(candidates: &[PathBuf], after: SystemTime) -> Option<PathBuf> {
         candidates
             .iter()
@@ -353,8 +353,7 @@ mod recorder {
         let out = no_clobber(dest.join("hook-payloads.jsonl"));
         let mut f = std::fs::File::create(&out)?;
         for p in payloads {
-            // Validate and flatten to the one line JSONL wants. The shim already
-            // stamped `_pixtuoid_source`, so nothing here edits the bytes.
+            // The shim already stamped `_pixtuoid_source`; nothing here edits the bytes.
             let v: serde_json::Value = serde_json::from_str(p.trim())
                 .unwrap_or_else(|e| panic!("a captured payload is not JSON: {e}: {p:?}"));
             writeln!(f, "{}", serde_json::to_string(&v)?)?;
