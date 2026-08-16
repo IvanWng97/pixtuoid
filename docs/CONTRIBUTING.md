@@ -280,7 +280,8 @@ Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_dri
 (wire-format drift); `just fixture-age` (which RECORDED fixtures pin a CLI version that
 has since moved — LOCAL-only, because CI has none of these CLIs installed to compare
 against; exit 3 = re-capture candidates, and it reports a third lane for the ones it
-could not compare at all rather than counting them as fresh); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
+could not compare at all rather than counting them as fresh — its `--check-metadata`
+half is NOT advisory, see `just fixture-metadata` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —

@@ -140,13 +140,11 @@ LEDGERED_BUT_DECODABLE = {
 # The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
 # a value it is only observing), and Kanban/gateway bookkeeping — none of them a
 # lifecycle signal a visualizer renders.
-# Upstream's own statement of the premise, verbatim from the VALID_HOOKS comment
-# that introduces the approval hooks: "Observers only: return values are ignored.
-# Plugins cannot veto or pre-answer an approval from these hooks". Whitespace is
-# loose because the sentence wraps.
-HERMES_OBSERVER_ONLY_CLAIM = re.compile(
-    r"cannot\s+veto\s+or\s+#?\s*pre-answer\s+an\s+approval", re.S
-)
+# Registered hermes events for which upstream treating them as BLOCKING would let
+# our silent exit 0 ANSWER a decision rather than merely observe one. Only the
+# approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
+# fine — a tool gate is not a permission answer.
+HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
 
 HERMES_KNOWN_OMITTED = {
     "subagent_start",
@@ -477,9 +475,6 @@ HERMES_SHELL_HOOK_URL = (
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
-# Registering `pre_approval_request` is safe ONLY while it stays observer-only,
-# and the shim always exits 0. Upstream states the premise itself, next to the
-# approval hooks in VALID_HOOKS — see HERMES_OBSERVER_ONLY_CLAIM.
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.
@@ -551,7 +546,7 @@ UNREGISTERED: dict[str, Unregistered] = {
     "hermes": Unregistered(
         "HERMES_KNOWN_OMITTED",
         frozenset(HERMES_KNOWN_OMITTED),
-        10,
+        30,
         "the Hermes event set upstream actually offers",
         "VALID_HOOKS in hermes_cli/plugins.py",
         "register it in HERMES_EVENTS",
@@ -561,7 +556,7 @@ UNREGISTERED: dict[str, Unregistered] = {
     "openclaw": Unregistered(
         "OPENCLAW_KNOWN_OMITTED",
         frozenset(OPENCLAW_KNOWN_OMITTED),
-        10,
+        35,
         "the OpenClaw hook set upstream actually offers",
         "the `PluginHookName` union in src/plugins/hook-types.ts",
         "register it in the plugin",
@@ -1698,35 +1693,53 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
 )
 
 
+def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report: Report) -> bool:
+    """The floor, asked BEFORE EITHER direction — files probe health and returns
+    False when the parse is too small to believe.
+
+    It used to gate only the review half. The VANISH half — which files ⛔ "fix
+    the decoder", the highest severity this report has — was gated on bare
+    non-emptiness, so a reader returning 12 of 37 names could file five ⛔ against
+    working decoders and only then be stopped. That is not hypothetical: #929's
+    false ⛔ against `pre_approval_request` came from exactly a partial document.
+    """
+    row = UNREGISTERED[source]
+    # The row key IS the `OurNames` field — pinned by the selftest's census.
+    handled = getattr(ours, source) or set()
+    # A reader that finds fewer names than we already handle is broken by
+    # definition: every registered event exists upstream, or the vanish direction
+    # would have fired. A row may declare a STRICTER floor, never a weaker one.
+    floor = max(row.floor, len(handled))
+    if len(upstream) < floor:
+        report.add_blind(
+            row.offers,
+            row.declared_in,
+            f"the reader returned {len(upstream)} names (floor {floor}), so BOTH "
+            f"drift directions were SKIPPED for {source}.",
+        )
+        return False
+    return True
+
+
 def sweep_unregistered(
     source: str,
     upstream: set[str],
-    ours: set[str],
+    ours: OurNames,
     report: Report,
     *,
     also_handled: set[str] = frozenset(),
 ) -> None:
     """The MISSING-REGISTRATION direction for one source, off its `UNREGISTERED`
-    row: what upstream offers that we neither handle nor ledger.
+    row: what upstream offers that we neither handle nor ledger. Call only behind
+    `parse_is_believable`, which owns the floor for BOTH directions.
 
     The EXTRACTION stays at each call site — the readers genuinely differ (a TS
     union, a python set literal, two doc tables) and each belongs beside its
     regex. Everything after it is identical, and was the part that drifted.
     """
     row = UNREGISTERED[source]
-    # A reader that finds fewer names than we already handle is broken by
-    # definition — every registered event exists upstream, or the vanish
-    # direction would have fired. The declared floor may only be STRICTER.
-    floor = max(row.floor, len(ours))
-    if len(upstream) < floor:
-        report.add_blind(
-            row.offers,
-            row.declared_in,
-            f"the reader returned {len(upstream)} names (floor {floor}), so the "
-            f"missing-registration direction was SKIPPED for {source}.",
-        )
-        return
-    for ev in sorted(upstream - ours - also_handled - row.ledger):
+    handled = getattr(ours, source) or set()
+    for ev in sorted(upstream - handled - also_handled - row.ledger):
         report.add_review(
             f"new {source} event `{ev}` upstream — we neither {row.handle} nor list "
             f"it in {row.ledger_name}.{row.advice}"
@@ -1776,7 +1789,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "codex-rs/protocol/src/protocol.rs",
                     "The Codex hook-event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("codex", upstream, ours, report):
                 for ev in sorted(ours.codex):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1784,7 +1797,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
-                sweep_unregistered("codex", upstream, ours.codex, report)
+                sweep_unregistered("codex", upstream, ours, report)
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
@@ -1888,7 +1901,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "internal/hook/hook.go",
                     "The Reasonix event AND payload-field watches were SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("reasonix", upstream, ours, report):
                 for ev in sorted(ours.reasonix):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1896,7 +1909,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                sweep_unregistered("reasonix", upstream, ours.reasonix, report)
+                sweep_unregistered("reasonix", upstream, ours, report)
                 for field in sorted(REASONIX_PAYLOAD_FIELDS):
                     if f'json:"{field}' not in text:
                         report.add_breaking(
@@ -1915,7 +1928,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "crates/tui/src/hooks/config.rs",
                     "The CodeWhale event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("codewhale", upstream, ours, report):
                 for ev in sorted(ours.codewhale):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1923,7 +1936,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream HookEvent — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                sweep_unregistered("codewhale", upstream, ours.codewhale, report)
+                sweep_unregistered("codewhale", upstream, ours, report)
         # Its own fetch of a SEPARATE file, so a failure to read the executor
         # can't be mistaken for every env var vanishing.
         exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", report)
@@ -1973,7 +1986,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         for body in parts:
             if body:
                 upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
-        sweep_unregistered("opencode", upstream_oc, ours.opencode, report)
+        # This source's VANISH half scans the raw document rather than this
+        # parsed set, so the belief test gates the set-driven half only.
+        if parse_is_believable("opencode", upstream_oc, ours, report):
+            sweep_unregistered("opencode", upstream_oc, ours, report)
 
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
@@ -1986,7 +2002,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "xai-grok-hooks/src/event.rs",
                     "The grok event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("grok", upstream, ours, report):
                 for ev in sorted(ours.grok):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1994,7 +2010,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
-                sweep_unregistered("grok", upstream, ours.grok, report)
+                sweep_unregistered("grok", upstream, ours, report)
             for ident in sorted(GROK_ENVELOPE_IDENTS):
                 if not re.search(rf"(?m)^\s*pub {ident}:", text):
                     report.add_breaking(
@@ -2283,7 +2299,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 )
                 if slug == name.lower()
             }
-            sweep_unregistered("cursor", upstream_cur, ours.cursor, report)
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("cursor", upstream_cur, ours, report):
+                sweep_unregistered("cursor", upstream_cur, ours, report)
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -2300,7 +2319,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
             )
             upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
-            sweep_unregistered("openclaw", upstream, ours.openclaw, report)
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("openclaw", upstream, ours, report):
+                sweep_unregistered("openclaw", upstream, ours, report)
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
@@ -2356,20 +2378,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             # the `hermes hooks test` FIXTURE set, which does not list every
             # hook — and filed a ⛔ against `pre_approval_request`, an event this
             # repo holds a recorded capture of. #793's rule, on our own report.
-            # The observer-only premise for `pre_approval_request`, checked where
-            # upstream STATES it. `_BLOCKING_EVENTS` in hooks.py was the old
-            # anchor and no longer exists — a permanent probe-health line that
-            # left the premise unchecked rather than verified.
-            if not HERMES_OBSERVER_ONLY_CLAIM.search(plugins):
-                report.add_blind(
-                    "whether Hermes still treats the approval hooks as observer-only",
-                    "the VALID_HOOKS comment in hermes_cli/plugins.py",
-                    "We register `pre_approval_request` because a plugin cannot veto or "
-                    "pre-answer an approval — upstream's own words. If that sentence "
-                    "went away, the premise behind an always-exit-0 shim on a "
-                    "PERMISSION hook is unchecked.",
-                )
-            if valid:
+            if parse_is_believable("hermes", valid, ours, report):
                 for ev in sorted(ours.hermes - valid):
                     report.add_breaking(
                         f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
@@ -2377,13 +2386,46 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"still runs but the shell hook we install into config.yaml fires "
                         f"nothing (no sprite / no activity)."
                     )
-            # `unsupported` is upstream's OWN "not reachable from a shell hook"
-            # set, so those are handled, not omissions.
-            sweep_unregistered(
-                "hermes", valid, ours.hermes, report, also_handled=unsupported
-            )
+                # The MIRROR of `also_handled`: upstream reclassifying something we
+                # REGISTER as shell-unserviceable is the fail-silent case this
+                # block's own message describes, and nothing looked for it.
+                for ev in sorted(ours.hermes & unsupported):
+                    report.add_breaking(
+                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is now in "
+                        f"SHELL_UNSUPPORTED_HOOKS — a shell hook cannot serve it, so the "
+                        f"command we install into config.yaml fires nothing (no sprite / "
+                        f"no activity)."
+                    )
+                # `unsupported` is upstream's OWN "not reachable from a shell hook"
+                # set, so those are handled, not omissions.
+                sweep_unregistered(
+                    "hermes", valid, ours, report, also_handled=unsupported
+                )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
+            # We install a SHELL hook, so the only thing that can make our
+            # always-exit-0 shim answer an approval is `_BLOCKING_EVENTS` — the set
+            # gating `returncode == BLOCK_EXIT_CODE`. It MOVED here from
+            # hermes_cli/hooks.py; #929 read the stale pin as a deletion and
+            # replaced it with a prose anchor in plugins.py, which governs PYTHON
+            # PLUGIN return values — a mechanism pixtuoid does not use.
+            blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)
+            if blocking is None:
+                report.add_blind(
+                    "whether a hermes shell hook can stall an approval",
+                    "_BLOCKING_EVENTS in agent/shell_hooks.py",
+                    "The blocking-event set moved or was renamed, so the premise behind "
+                    "an always-exit-0 shim on a PERMISSION hook is unchecked.",
+                )
+            else:
+                for ev in sorted(HERMES_BLOCKING_UNSAFE & ours.hermes):
+                    if f'"{ev}"' in blocking.group(1):
+                        report.add_breaking(
+                            f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — a shell hook's "
+                            f"exit code can stall it, so the shim's silent exit 0 would "
+                            f"ANSWER a real approval prompt. Unregister it in "
+                            f"install/hermes.rs, or make the shim decline explicitly."
+                        )
             for field in sorted(HERMES_PAYLOAD_FIELDS):
                 if f'"{field}"' not in shell:
                     report.add_breaking(
@@ -2425,7 +2467,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 if ref >= 0
                 else set()
             )
-            sweep_unregistered("kimi", upstream_kimi, ours.kimi, report)
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("kimi", upstream_kimi, ours, report):
+                sweep_unregistered("kimi", upstream_kimi, ours, report)
 
     if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
@@ -2454,7 +2499,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "hooks.md",
                     "The CC event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("cc", upstream, ours, report):
                 for ev in sorted(ours.cc):
                     if ev not in upstream:
                         report.add_breaking(
@@ -2462,7 +2507,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-                sweep_unregistered("cc", upstream, ours.cc, report)
+                sweep_unregistered("cc", upstream, ours, report)
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
 

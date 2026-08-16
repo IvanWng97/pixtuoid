@@ -668,9 +668,9 @@ command = "echo hi"
     #[test]
     fn codewhale_events_pins_the_exact_registered_set() {
         // Deleting a registered event ships GREEN — cargo-mutants does not mutate
-        // slice initializers and nothing else asserts the SET. The bool is the
-        // second half of the pin: it says whether the event is BLOCKING upstream,
-        // and flipping one silently changes what the shim's exit 0 answers.
+        // slice initializers and nothing else asserts the SET. The bool is pinned
+        // too: it is `env_mode`, and flipping one silently changes the installed
+        // command string (whether `--event <name>` is baked in).
         use std::collections::BTreeSet;
         assert_eq!(
             CODEWHALE_EVENTS.iter().copied().collect::<BTreeSet<_>>(),

@@ -135,6 +135,7 @@ jobs:
       - run: just gitenv-selftest
       - run: just tuidrive-selftest
       - run: just fixture-metadata
+      - run: just fixture-pii
 
   msrv:
     name: msrv

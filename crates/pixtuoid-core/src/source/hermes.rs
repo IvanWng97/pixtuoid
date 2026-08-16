@@ -162,10 +162,10 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 tool_use_id: None,
             },
         ]),
-        // Observer-only upstream — "Plugins cannot veto or pre-answer an approval
-        // from these hooks", verbatim beside them in `VALID_HOOKS` — so the shim's
-        // silent exit-0 cannot stall the decision. `tool_name` is null here and
-        // the WHY rides `extra.description` — capture-verified, `approval-recorded`.
+        // Observer-only for a SHELL hook: `_BLOCKING_EVENTS` in upstream's
+        // `agent/shell_hooks.py` is `{pre_tool_call}` alone, so our silent exit-0
+        // cannot stall the decision. `tool_name` is null here and the WHY rides
+        // `extra.description` — capture-verified, `approval-recorded`.
         "pre_approval_request" => {
             let reason = obj
                 .get("extra")

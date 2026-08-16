@@ -1124,24 +1124,28 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     return [x for x in report.breaking if kind in x]
 
 
-def _drive_hermes(plugins_body: str) -> tuple[list[str], list[str]]:
-    """Run the hermes block over a stubbed `plugins.py`, returning (breaking, blind)."""
+def _drive_hermes(
+    plugins_body: str, shell_body: str = "", ours: "d.OurNames | None" = None
+) -> tuple[list[str], list[str]]:
+    """Run the hermes block over stubbed upstream, returning (breaking, blind)."""
 
     def stub(url: str) -> str:
         if url == d.HERMES_PLUGINS_URL:
             return plugins_body
+        if url == d.HERMES_SHELL_HOOK_URL and shell_body:
+            return shell_body
         raise urllib.error.URLError("not stubbed")
 
     real = d.fetch
     d.fetch = stub
     try:
         report = d.Report()
-        d.run_checks(d.OurNames(hermes={"pre_approval_request"}), report=report)
+        d.run_checks(ours or d.OurNames(hermes={"pre_approval_request"}), report=report)
     finally:
         d.fetch = real
     return (
-        [x for x in report.breaking if "Hermes hook" in x],
-        [x for x in report.blind if "observer-only" in x],
+        [x for x in report.breaking if "Hermes" in x],
+        [x for x in report.blind if "hermes" in x.lower()],
     )
 
 
@@ -1167,33 +1171,53 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
 
 
 def test_the_hermes_approval_gate_stays_observer_only() -> None:
-    """Registering `pre_approval_request` is safe ONLY while a plugin cannot
-    answer an approval, and the shim always exits 0. Three outcomes, because the
-    dangerous one is the checker going quiet rather than red.
+    """Registering `pre_approval_request` is safe ONLY while a SHELL hook's exit
+    code cannot stall one, and the shim always exits 0. Three outcomes, because
+    the dangerous one is the checker going quiet rather than red.
 
-    The anchor is upstream's own sentence in the VALID_HOOKS comment. The old one,
-    `_BLOCKING_EVENTS` in hooks.py, no longer exists at all — it had become a
-    permanent probe-health line, which reads as "unchecked", not as "safe"."""
-    claim = (
-        "        # Observers only: return values are ignored. Plugins cannot veto or\n"
-        "        # pre-answer an approval from these hooks.\n"
+    The anchor is `_BLOCKING_EVENTS` in `agent/shell_hooks.py` — the frozenset
+    that gates `returncode == BLOCK_EXIT_CODE`. #929 briefly replaced it with a
+    prose sentence in plugins.py after misreading a MOVED declaration as a
+    deleted one; that sentence governs Python PLUGIN return values, which is not
+    the mechanism we install."""
+    # 30 filler names + the two that matter: below the declared floor the gate
+    # correctly refuses to believe the parse and NEITHER direction runs, so a
+    # too-small stub would test the floor instead of the thing under test.
+    filler = "".join(f'    "on_filler_{i}",\n' for i in range(30))
+    hooks = (
+        'VALID_HOOKS: Set[str] = {\n    "pre_approval_request",\n'
+        '    "pre_tool_call",\n' + filler + "}\n"
     )
-    hooks = 'VALID_HOOKS: Set[str] = {\n    "pre_approval_request",\n    "pre_tool_call",\n}\n'
+    # The real shell_hooks.py carries BOTH the payload keys and the blocking set,
+    # so a stub with only one of them fails the sibling check for the wrong reason.
+    payload = (
+        "def _serialize_payload(event: str) -> str:\n"
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i}\n'
+    )
 
-    breaking, blind = _drive_hermes(claim + hooks)
+    safe = payload + '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
+    breaking, blind = _drive_hermes(hooks, safe)
     check(not breaking and not blind, f"observer-only upstream stays silent: {breaking} {blind}")
 
-    _, blind = _drive_hermes(hooks)
-    check(
-        len(blind) == 1,
-        f"the claim going away must report PROBE HEALTH, not read as safe. Got {blind}",
-    )
-
-    # The other half of the premise: the hook leaving upstream's vocabulary is a
-    # VERIFIED change, because VALID_HOOKS is the declaration that owns it.
-    breaking, _ = _drive_hermes(claim + 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}\n')
+    unsafe = payload + '_BLOCKING_EVENTS = frozenset({"pre_tool_call", "pre_approval_request"})\n'
+    breaking, _ = _drive_hermes(hooks, unsafe)
     check(
         len(breaking) == 1,
+        f"the gate joining _BLOCKING_EVENTS must be BREAKING — our exit 0 would "
+        f"answer a real prompt. Got {breaking}",
+    )
+
+    _, blind = _drive_hermes(hooks, payload + 'BLOCKING = frozenset({"pre_tool_call"})\n')
+    check(
+        any("stall an approval" in b for b in blind),
+        f"a renamed/moved constant must report PROBE HEALTH, not read as safe. Got {blind}",
+    )
+
+    # And the vanish direction still owns its own half.
+    gone = 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n' + filler + "}\n"
+    breaking, _ = _drive_hermes(gone, safe)
+    check(
+        any("GONE from VALID_HOOKS" in b for b in breaking),
         f"the gate vanishing from VALID_HOOKS must be BREAKING. Got {breaking}",
     )
 
@@ -1378,6 +1402,64 @@ def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
     )
 
 
+def test_a_partial_parse_files_no_verified_change() -> None:
+    """The direction nobody tested. A reader returning 12 of 37 names used to file
+    up to five ⛔ "registered ... is GONE" against WORKING decoders and only THEN
+    hit the floor — the highest-severity output guarded by the weakest test. #929
+    lived this: its false ⛔ came from a partial document.
+    """
+    ours = d.OurNames(hermes={"pre_approval_request", "pre_tool_call", "on_session_end"})
+    partial = 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}\n'
+    shell = (
+        "def _serialize_payload(event: str) -> str:\n"
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i}\n'
+        '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
+    )
+    breaking, blind = _drive_hermes(partial, shell, ours=ours)
+    check(
+        not any("GONE from VALID_HOOKS" in b for b in breaking),
+        f"a below-floor parse must file ZERO verified-change lines, got {breaking}",
+    )
+    check(blind, "and it must say WHY it skipped")
+
+
+def test_every_unregistered_row_is_actually_swept() -> None:
+    """A row nothing CALLS is a ledger nothing consults with extra steps: the
+    direction is silently absent for that source and every test stays green.
+    The sibling census closes ledger->row; this closes row->call site, which is
+    the half #929 shipped open — deleting kimi's whole call line left rc=0."""
+    src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
+    called = {
+        n.args[0].value
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "sweep_unregistered"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
+    }
+    gated = {
+        n.args[0].value
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "parse_is_believable"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
+    }
+    rows = set(d.UNREGISTERED)
+    check(
+        called == rows,
+        f"rows never swept {sorted(rows - called)}; "
+        f"swept without a row {sorted(called - rows)}",
+    )
+    # `sweep_unregistered` no longer owns the floor, so a sweep reached without
+    # the belief gate runs UNFLOORED — the state the floors exist to prevent.
+    check(
+        gated == rows,
+        f"rows swept without the belief gate {sorted(rows - gated)}; "
+        f"gated without a row {sorted(gated - rows)}",
+    )
+
+
 def test_every_ledger_has_a_missing_registration_row() -> None:
     """The ratchet the hand-written arms could not have: a source whose ledger
     exists but whose row does not would have a ledger nothing consults, and the
@@ -1416,16 +1498,18 @@ def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
     so the sweep raises the declared floor to what we already handle. Proven by
     running the sweep, not by reading the max()."""
     rep = d.Report()
-    ours = {f"ev{i}" for i in range(9)}
-    # Row floor is 5 for codex; nine registered names must lift it past a
-    # seven-name parse.
-    d.sweep_unregistered("codex", {f"ev{i}" for i in range(7)}, ours, rep)
+    # Nine registered names must lift codex's floor past a seven-name parse.
+    ours = d.OurNames(codex={f"ev{i}" for i in range(9)})
+    believed = d.parse_is_believable("codex", {f"ev{i}" for i in range(7)}, ours, rep)
+    check(not believed, "a parse below the floor must not be believed")
     check(
         any("SKIPPED for codex" in f for f in rep.blind),
         f"a parse smaller than our own registered set must file probe health: {rep.blind}",
     )
     rep2 = d.Report()
-    d.sweep_unregistered("codex", ours | {"brand_new"}, ours, rep2)
+    up = ours.codex | {"brand_new"}
+    check(d.parse_is_believable("codex", up, ours, rep2), "at/above the floor must be believed")
+    d.sweep_unregistered("codex", up, ours, rep2)
     check(not rep2.blind, f"a parse at/above the floor must not file blind: {rep2.blind}")
     check(
         any("brand_new" in f for f in rep2.review),
@@ -1491,6 +1575,8 @@ def main() -> int:
         test_omp_env_sweeps_fire_and_stay_silent,
         test_every_block_reader_strips_comments_before_counting_braces,
         test_the_hermes_approval_gate_stays_observer_only,
+        test_a_partial_parse_files_no_verified_change,
+        test_every_unregistered_row_is_actually_swept,
         test_every_ledger_has_a_missing_registration_row,
         test_the_floor_can_never_be_weaker_than_what_we_register,
         test_no_ledger_excuses_a_hook_we_actually_register,

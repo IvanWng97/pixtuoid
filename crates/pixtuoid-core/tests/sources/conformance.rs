@@ -287,6 +287,8 @@ const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
 /// column inside a captured `ls -la` and is the case the README names.
 #[test]
 fn a_recorded_capture_that_was_edited_says_so() {
+    // A word ending the clause right before "redact" that inverts it.
+    const NEGATIONS: &[&str] = &["no", "not", "nothing", "never", "without"];
     const SENTINELS: &[&str] = &[
         "/Users/dev",
         " dev  wheel",
@@ -308,9 +310,12 @@ fn a_recorded_capture_that_was_edited_says_so() {
                         .unwrap_or("")
                         .to_ascii_lowercase();
                     // "verbatim" USED to satisfy this, which let a note assert the
-                    // OPPOSITE of what the bytes show; every edited fixture in the
-                    // tree says "redact" too, so the arm only ever widened the hole.
-                    let declares = note.contains("redact");
+                    // OPPOSITE of what the bytes show. A bare `contains` re-opens
+                    // that hole one word over — "unredacted", "nothing redacted".
+                    let declares = note.match_indices("redact").any(|(at, _)| {
+                        let before = note[..at].trim_end();
+                        !before.ends_with("un") && !NEGATIONS.iter().any(|n| before.ends_with(n))
+                    });
                     // RECURSIVE: a parent-dir-keyed source nests its transcript one
                     // level down, and `a_parent_dir_keyed_transcript_is_nested_under_
                     // its_session_id` FORCES new fixtures into that shape — so a flat
@@ -499,6 +504,52 @@ fn every_single_owner_capture_tree_declares_its_provenance() {
              or one per sub-tree",
             fixtures.display()
         );
+        // The `cli` cross-check reached only the conformance tree, so for these
+        // eight it stayed exactly what its own comment calls the problem: the one
+        // required field nothing could falsify. Only `claude/` needs a mapping —
+        // every other module dir IS its source id.
+        for prov in std::iter::once(own).chain(nested) {
+            let Ok(body) = std::fs::read_to_string(&prov) else {
+                continue;
+            };
+            let Ok(doc) = serde_json::from_str::<serde_json::Value>(&body) else {
+                continue;
+            };
+            if doc.get("origin").and_then(serde_json::Value::as_str) != Some("recorded") {
+                continue;
+            }
+            let dir = prov
+                .parent()
+                .unwrap()
+                .file_name()
+                .unwrap()
+                .to_string_lossy();
+            let source = if dir == "fixtures" {
+                &name
+            } else {
+                dir.as_ref()
+            };
+            let source = if source == "claude" {
+                "claude-code"
+            } else {
+                source
+            };
+            let (Some(d), Some(cli)) = (
+                registry::descriptor_for(source),
+                doc.get("cli").and_then(serde_json::Value::as_str),
+            ) else {
+                continue;
+            };
+            if let Some(probe) = d.version_probe {
+                assert_eq!(
+                    cli,
+                    probe[0],
+                    "{}: `cli` is {cli:?} but this tree is {source}, whose binary is {:?}",
+                    prov.display(),
+                    probe[0]
+                );
+            }
+        }
     }
 }
 
@@ -539,6 +590,32 @@ impl ProvenanceSchema {
 /// The README's table is prose a human reads instead of the JSON, so it is the
 /// copy most likely to rot — it stated the schema for its own audience while the
 /// gates drifted underneath it.
+/// Moving the required list into a DATA file made every provenance gate editable
+/// as prose: emptying `required` and updating the README to match disarms both
+/// gates and reads as documentation maintenance. Widening is free; narrowing has
+/// to come through here.
+#[test]
+fn the_schema_cannot_be_narrowed_by_a_data_edit() {
+    let schema = ProvenanceSchema::load();
+    for (origin, must) in [
+        ("recorded", &["cli", "version", "captured", "command"][..]),
+        ("composed", &["note"][..]),
+        ("unknown", &["note"][..]),
+    ] {
+        let got: BTreeSet<String> = schema
+            .required(origin)
+            .unwrap_or_else(|| panic!("{origin} missing from the schema"))
+            .into_iter()
+            .collect();
+        let want: BTreeSet<String> = must.iter().map(|s| (*s).to_string()).collect();
+        assert!(
+            got.is_superset(&want),
+            "provenance.schema.json narrowed {origin} to {got:?} — it must still \
+             require at least {want:?}"
+        );
+    }
+}
+
 #[test]
 fn the_readme_states_the_schema_the_gates_enforce() {
     let schema = ProvenanceSchema::load();

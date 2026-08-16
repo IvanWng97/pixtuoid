@@ -138,6 +138,26 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     }
 }
 
+/// One `--roster` row: `id \t prefix \t kind \t home_env \t probe`.
+///
+/// Six consumers in three languages index these columns POSITIONALLY
+/// (`fixture-age.py`, four `awk`/`read` sites in `scripts/lib/tier-live-sources.sh`,
+/// and `just corpus-all`), so inserting a column shifts all of them at once and
+/// the degradation is quiet — `fixture-age`'s probe map empties and its report
+/// reads "nothing stale" from having compared nothing. `roster_row_is_a_pinned_contract`
+/// is the pin CLAUDE.md's magic-number rule asks for at a cross-language boundary.
+fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
+    let probe = d
+        .version_probe
+        .map(|p| p.join(" "))
+        .unwrap_or_else(|| "-".into());
+    format!(
+        "{name}\t{}\t{kind}\t{}\t{probe}",
+        d.label_prefix,
+        d.home_env.unwrap_or("-")
+    )
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
@@ -152,16 +172,7 @@ fn main() {
             } else {
                 "hook"
             };
-            // Column 5 is the registry's OWN version probe.
-            let probe = d
-                .version_probe
-                .map(|p| p.join(" "))
-                .unwrap_or_else(|| "-".into());
-            println!(
-                "{name}\t{}\t{kind}\t{}\t{probe}",
-                d.label_prefix,
-                d.home_env.unwrap_or("-")
-            );
+            println!("{}", roster_row(name, d, kind));
         }
         return;
     }
@@ -297,5 +308,37 @@ fn main() {
     // there (the contract is log-and-continue).
     if totals.decode_errors > 0 || !totals.panics.is_empty() {
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn roster_row_is_a_pinned_contract() {
+        let d = registry::descriptor_for("claude-code").expect("registered");
+        assert_eq!(
+            roster_row("claude-code", d, "transcript"),
+            "claude-code\tcc\ttranscript\tCLAUDE_CONFIG_DIR\tclaude --version",
+            "the --roster columns are indexed POSITIONALLY by fixture-age.py, \
+             tier-live-sources.sh and `just corpus-all` — inserting or reordering \
+             one silently empties their parses. Update every consumer in the same \
+             change, then this pin."
+        );
+    }
+
+    #[test]
+    fn every_registered_source_emits_exactly_five_columns() {
+        for name in registry::registered_source_names() {
+            let d = registry::descriptor_for(name).expect("registered");
+            let row = roster_row(name, d, "hook");
+            assert_eq!(
+                row.split('\t').count(),
+                5,
+                "{name}: {row:?} — a row with a different column count breaks the \
+                 positional consumers for that source alone"
+            );
+        }
     }
 }

@@ -52,3 +52,10 @@ criterion  = { package = "codspeed-criterion-compat", version = "5", default-fea
 [[bench]]
 name = "render_frame"
 harness = false
+
+# Without this an example is not a test target, so its `#[test]`s build and never
+# run — the same wiring `pixtuoid-core`'s `capture_fixture` carries. This sibling
+# produces the `--roster` contract six consumers parse positionally.
+[[example]]
+name = "corpus_check"
+test = true

@@ -96,7 +96,7 @@ def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
 
 # A dotted-run major at or above this looks like a YEAR/date token, not a semver
 # major. MIRRORS `doctor::parse_version`'s const of the same name — the pair is
-# pinned by `test_semverish_matches_doctors_documented_cases`, because the two
+# pinned by this file's `selftest()`, which `--check-metadata` runs, because the two
 # compare the SAME `--version` banners across a language boundary.
 IMPLAUSIBLE_MAJOR = 1000
 
@@ -124,6 +124,26 @@ def semverish(s: str) -> str | None:
         if major < IMPLAUSIBLE_MAJOR:
             return run
     return runs[0][2]
+
+
+# Module dirs whose name is NOT the registered source id. Every other
+# single-owner tree's dir name IS its source.
+MODULE_TO_SOURCE = {"claude": "claude-code"}
+
+
+def source_of(prov_dir: pathlib.Path) -> str | None:
+    """The registered source a provenance dir belongs to, from the LAYOUT.
+
+    `fixtures/<source>/<scenario>/` -> the parent; `<module>/fixtures/` -> the
+    module; `<module>/fixtures/<sub>/` -> the sub-dir.
+    """
+    parts = prov_dir.relative_to(FIXTURES).parts
+    if not parts:
+        return None
+    if parts[0] == "fixtures":
+        return parts[1] if len(parts) > 1 else None
+    name = parts[2] if len(parts) > 2 else parts[0]
+    return MODULE_TO_SOURCE.get(name, name)
 
 
 def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
@@ -165,11 +185,11 @@ def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
             dates.add(m.group(1))
     if len(stamps) > 1:
         out.append(f"payloads carry TWO sources ({sorted(stamps)}) — a capture scooped up another CLI")
-    # Under `fixtures/<source>/<scenario>/` the id IS the grandparent dir, so a
-    # single WRONG stamp is answerable too. The single-owner trees (`<module>/
-    # fixtures/`) key by module name, which is not the source id for all of them.
-    elif len(stamps) == 1 and prov_dir.parent.parent.name == "fixtures":
-        expect = prov_dir.parent.name
+    # A single WRONG stamp is answerable wherever the layout names the source.
+    # Both layouts do: `fixtures/<source>/<scenario>/` puts it in the parent, and
+    # a single-owner `<module>/fixtures/` in the module — the earlier "not the
+    # source id for all of them" was true of exactly ONE module, `claude`.
+    elif len(stamps) == 1 and (expect := source_of(prov_dir)):
         if (only := next(iter(stamps))) != expect:
             out.append(f"payloads are stamped `{only}` but this tree is `{expect}`")
     captured = str(prov.get("captured", ""))

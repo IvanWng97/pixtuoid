@@ -132,7 +132,7 @@ mod recorder {
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
-        warn_on_pii(&wrote);
+        refuse_on_pii(&wrote)?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
         }
@@ -463,7 +463,23 @@ mod recorder {
     /// PII is not always a key you can drop — kimi's arrived as the owner column
     /// inside a captured `ls -la`, and a CLI's ACCOUNT identity is a different
     /// namespace from the host's (`user_email` slipped past a `$HOME|$USER` grep).
-    fn warn_on_pii(files: &[PathBuf]) {
+    /// Identity/inventory keys whose VALUES are the capturer's, not the wire's.
+    /// `user_email` alone was the first cut and it saw none of the MCP-server and
+    /// skill roster that shipped in nine fixtures — a different namespace, same
+    /// class. Shared with `just fixture-pii`, which re-scans the COMMITTED tree.
+    const PII_MARKERS: &[&str] = &[
+        "user_email",
+        "\"email\"",
+        "account_id",
+        "mcp__",
+        "obsidian",
+        "api_key",
+        "\"token\"",
+        "Bearer ",
+    ];
+
+    fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
+        let mut found = Vec::new();
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
             if let Ok(v) = std::env::var(var) {
@@ -476,22 +492,39 @@ mod recorder {
             let Ok(body) = std::fs::read_to_string(f) else {
                 continue;
             };
-            let mut hits: Vec<&str> = needles
+            let hits: Vec<&str> = needles
                 .iter()
                 .filter(|n| body.contains(n.as_str()))
                 .map(String::as_str)
                 .collect();
-            if body.contains("@") && body.contains("\"user_email\"") {
-                hits.push("an account email");
+            let mut hits: Vec<String> = hits.into_iter().map(str::to_string).collect();
+            for marker in PII_MARKERS {
+                if body.contains(marker) {
+                    hits.push(format!("a {marker} field"));
+                }
             }
             if !hits.is_empty() {
-                eprintln!(
-                    "WARNING: {} embeds {} — redact before committing",
-                    f.display(),
-                    hits.join(", ")
-                );
+                found.push(format!("{}: {}", f.display(), hits.join(", ")));
             }
         }
+        found
+    }
+
+    /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
+    /// code at 0 on a run that had already written into the repo tree, so the
+    /// capturer had to notice a line scrolling past — and twice did not.
+    fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
+        let found = scan_for_pii(files);
+        if found.is_empty() {
+            return Ok(());
+        }
+        for line in &found {
+            eprintln!("PII: {line}");
+        }
+        Err(std::io::Error::other(
+            "the capture embeds the recorder's own identity — redact those files, \
+             then re-run. The bytes are on disk; nothing was discarded.",
+        ))
     }
 
     fn count_lines(p: &Path) -> usize {

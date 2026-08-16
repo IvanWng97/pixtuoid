@@ -320,6 +320,7 @@ lint:
     run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run fixmeta just fixture-metadata     & pids+=($!)
+    run fixpii  just fixture-pii          & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -592,9 +593,11 @@ corpus-all:
     roster="$("$cc" --roster)" || { echo "corpus_check --roster failed" >&2; exit 2; }
     [ -n "$roster" ] || { echo "corpus_check --roster returned no rows" >&2; exit 2; }
     rc=0
+    n=0
     uncovered=()
     while IFS=$'\t' read -r id _ kind _; do
         [ "$kind" = transcript ] || continue
+        n=$((n + 1))
         echo "── $id"
         "$cc" "$id"
         # 3 is "no corpus on this host" — never ran that CLI here. It is NOT a
@@ -606,6 +609,11 @@ corpus-all:
         *) rc=1 ;;
         esac
     done <<<"$roster"
+    # `-n "$roster"` checked the TEXT; this checks the PARSE. A roster that is
+    # non-empty but yields zero transcript rows — a column insertion, a rename of
+    # the `transcript` literal — reproduces the exact silent-empty census the
+    # guard above was added for.
+    [ "$n" -gt 0 ] || { echo "roster parsed 0 transcript rows — column layout changed?" >&2; exit 2; }
     if [ ${#uncovered[@]} -gt 0 ]; then
         echo "NOT COVERED (no local corpus): ${uncovered[*]}"
     fi
@@ -1397,14 +1405,24 @@ tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
 
-# The half of the fixture-age report that runs ANYWHERE: the fields it reads
-# (`cli`/`version`/`captured` on every recorded scenario) must be present and
-# parseable, so the advisory below cannot rot into a report about nothing.
+# The half of the fixture-age report that runs ANYWHERE: every scenario must
+# carry what fixtures/provenance.schema.json requires for its origin, so the
+# advisory below cannot rot into a report about nothing.
 # Runs in `lint`; CI's hygiene job enumerates it separately.
 [group('meta')]
 [doc("Assert every recorded fixture declares the metadata the age report reads")]
 fixture-metadata:
     python3 scripts/fixture-age.py --check-metadata
+
+# The recorder refuses a capture carrying its own identity, but that check runs
+# ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
+# a fixture added by hand, edited later, or captured before the check existed is
+# covered too — both classes that slipped through on #929.
+# Runs in `lint`; CI's hygiene job enumerates it separately.
+[group('meta')]
+[doc("Re-scan the committed fixture tree for the recorder's own identity")]
+fixture-pii:
+    python3 scripts/fixture-pii.py
 
 # Which recorded fixtures have drifted from the CLI that produced them — version
 # first (the sharp signal), age second. LOCAL and advisory: CI has none of these
