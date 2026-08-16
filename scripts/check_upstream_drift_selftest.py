@@ -413,6 +413,9 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
     d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
     d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
+    d.CODEX_ROLLOUT_ITEM_URL: (
+        "#[serde(rename_all = \"snake_case\")]\npub enum RolloutItem {\n    SessionMeta,\n}"
+    ),
     d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
     d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
     d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",
@@ -427,7 +430,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_ENV_URL: "export function parseEnvFile(filePath: string): Record<string, string> {}",
     d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
-    d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
     d.HERMES_SHELL_HOOK_URL: "def _serialize_payload(event: str) -> str:",
     d.HERMES_HOME_URL: (
         "def _hermes_home_from_env() -> Path:\n"
@@ -616,7 +618,7 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
             f"the stale OWN-source line blames the script, not upstream: {own}",
         )
         # These four sit at the far end of the table.
-        for name in ("CURSOR_HOOKS_URL", "HERMES_HOOK_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
+        for name in ("CURSOR_HOOKS_URL", "HERMES_PLUGINS_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
             check(
                 getattr(d, name) in broken_urls,
                 f"a stale reader in row 1 must not dark {name} in row 10+ "
@@ -1122,12 +1124,12 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     return [x for x in report.breaking if kind in x]
 
 
-def _drive_hermes(hooks_body: str) -> tuple[list[str], list[str]]:
-    """Run the hermes block over a stubbed `hooks.py`, returning (breaking, blind)."""
+def _drive_hermes(plugins_body: str) -> tuple[list[str], list[str]]:
+    """Run the hermes block over a stubbed `plugins.py`, returning (breaking, blind)."""
 
     def stub(url: str) -> str:
-        if url == d.HERMES_HOOK_URL:
-            return hooks_body
+        if url == d.HERMES_PLUGINS_URL:
+            return plugins_body
         raise urllib.error.URLError("not stubbed")
 
     real = d.fetch
@@ -1138,7 +1140,7 @@ def _drive_hermes(hooks_body: str) -> tuple[list[str], list[str]]:
     finally:
         d.fetch = real
     return (
-        [x for x in report.breaking if "_BLOCKING_EVENTS" in x],
+        [x for x in report.breaking if "Hermes hook" in x],
         [x for x in report.blind if "observer-only" in x],
     )
 
@@ -1165,27 +1167,34 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
 
 
 def test_the_hermes_approval_gate_stays_observer_only() -> None:
-    """Registering `pre_approval_request` is safe ONLY while a hook's exit code
-    cannot affect it, and the shim always exits 0. Three outcomes, because the
-    dangerous one is the checker going quiet rather than red."""
-    head = '_DEFAULT_PAYLOADS = {"pre_approval_request": {}}\n'
+    """Registering `pre_approval_request` is safe ONLY while a plugin cannot
+    answer an approval, and the shim always exits 0. Three outcomes, because the
+    dangerous one is the checker going quiet rather than red.
 
-    breaking, blind = _drive_hermes(head + '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n')
+    The anchor is upstream's own sentence in the VALID_HOOKS comment. The old one,
+    `_BLOCKING_EVENTS` in hooks.py, no longer exists at all — it had become a
+    permanent probe-health line, which reads as "unchecked", not as "safe"."""
+    claim = (
+        "        # Observers only: return values are ignored. Plugins cannot veto or\n"
+        "        # pre-answer an approval from these hooks.\n"
+    )
+    hooks = 'VALID_HOOKS: Set[str] = {\n    "pre_approval_request",\n    "pre_tool_call",\n}\n'
+
+    breaking, blind = _drive_hermes(claim + hooks)
     check(not breaking and not blind, f"observer-only upstream stays silent: {breaking} {blind}")
 
-    breaking, _ = _drive_hermes(
-        head + '_BLOCKING_EVENTS = frozenset({"pre_tool_call", "pre_approval_request"})\n'
-    )
-    check(
-        len(breaking) == 1,
-        f"the gate joining _BLOCKING_EVENTS must be BREAKING — our exit 0 would "
-        f"answer a real prompt. Got {breaking}",
-    )
-
-    _, blind = _drive_hermes(head + 'BLOCKING = frozenset({"pre_tool_call"})\n')
+    _, blind = _drive_hermes(hooks)
     check(
         len(blind) == 1,
-        f"a renamed/moved constant must report PROBE HEALTH, not read as safe. Got {blind}",
+        f"the claim going away must report PROBE HEALTH, not read as safe. Got {blind}",
+    )
+
+    # The other half of the premise: the hook leaving upstream's vocabulary is a
+    # VERIFIED change, because VALID_HOOKS is the declaration that owns it.
+    breaking, _ = _drive_hermes(claim + 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}\n')
+    check(
+        len(breaking) == 1,
+        f"the gate vanishing from VALID_HOOKS must be BREAKING. Got {breaking}",
     )
 
 

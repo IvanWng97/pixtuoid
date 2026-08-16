@@ -119,7 +119,7 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
 }
 
 /// The COMPLETE set of codex rollout OUTER `type` discriminators — every
-/// `RolloutItem` variant (`codex-rs/protocol/src/protocol.rs`, `rename_all =
+/// `RolloutItem` variant (`codex-rs/history/src/lib.rs`, `rename_all =
 /// "snake_case"`), NOT just the ones we decode: a listed-but-undecoded outer
 /// must stay SILENT, else the drift breadcrumb floods on lines codex emits
 /// every session. `read_codex_rollout_outers` in `check_upstream_drift.py`
@@ -133,6 +133,7 @@ const KNOWN_OUTERS: &[&str] = &[
     "turn_context",
     "world_state",
     "event_msg",
+    "security_risk_score",
 ];
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events

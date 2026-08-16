@@ -196,8 +196,10 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             }
         }
         // Turn end, identity-LESS: an end for an unknown agent proves nothing
-        // worth registering.
-        "stop" | "stop_failure" => Ok(vec![AgentEvent::ActivityEnd {
+        // worth registering. Upstream splits the turn-end by CAUSE — `stop` is a
+        // clean end, `stop_failure` an API error, `stop_cancelled` an interrupt —
+        // and all three end the turn.
+        "stop" | "stop_failure" | "stop_cancelled" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
         }]),

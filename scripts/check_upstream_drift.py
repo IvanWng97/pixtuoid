@@ -55,6 +55,12 @@ CODEX_PROTOCOL_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/protocol.rs"
 )
+# `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
+# blind rather than wrong — but a blind flood guard is an unwatched one, and this
+# one was hiding an outer we did not know about (`security_risk_score`).
+CODEX_ROLLOUT_ITEM_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
+)
 # The ROLLOUT `response_item` types live in the sibling models.rs
 # (`crate::models::ResponseItem`), NOT protocol.rs.
 CODEX_MODELS_URL = (
@@ -134,6 +140,14 @@ LEDGERED_BUT_DECODABLE = {
 # The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
 # a value it is only observing), and Kanban/gateway bookkeeping — none of them a
 # lifecycle signal a visualizer renders.
+# Upstream's own statement of the premise, verbatim from the VALID_HOOKS comment
+# that introduces the approval hooks: "Observers only: return values are ignored.
+# Plugins cannot veto or pre-answer an approval from these hooks". Whitespace is
+# loose because the sentence wraps.
+HERMES_OBSERVER_ONLY_CLAIM = re.compile(
+    r"cannot\s+veto\s+or\s+#?\s*pre-answer\s+an\s+approval", re.S
+)
+
 HERMES_KNOWN_OMITTED = {
     "subagent_start",
     "subagent_stop",
@@ -447,19 +461,13 @@ OPENCLAW_PATHS_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
 )
 
-# The canonical Hermes shell-hook event set is the KEYS of `_DEFAULT_PAYLOADS`.
-# ONE-DIRECTIONAL: an event WE REGISTER vanishing means the shell hook we install
-# into config.yaml fires nothing (no sprite).
-# `_DEFAULT_PAYLOADS` holds only the events with a synthetic payload; the real
-# set is `VALID_HOOKS` one file over, and `SHELL_UNSUPPORTED_HOOKS` says which
-# of those a SHELL hook cannot serve. Both are needed to ask "is there an event
-# upstream fires that we could register and don't" — the direction that shipped
-# `pre_approval_request` unregistered (#930).
+# BOTH directions ride `VALID_HOOKS`, the declaration that OWNS the vocabulary,
+# with `SHELL_UNSUPPORTED_HOOKS` naming which of those a SHELL hook cannot serve.
+# The vanish half used to read `_DEFAULT_PAYLOADS` one file over — the `hermes
+# hooks test` FIXTURE set, which does not list every hook — and filed a verified
+# ⛔ against `pre_approval_request`, an event this repo holds a capture of.
 HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
-)
-HERMES_HOOK_URL = (
-    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/hooks.py"
 )
 # The shell-hook PAYLOAD is assembled by `_serialize_payload()` in a DIFFERENT
 # file from the event list — two orthogonal checks, two files.
@@ -469,11 +477,9 @@ HERMES_SHELL_HOOK_URL = (
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
 HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
-# Registering `pre_approval_request` is safe ONLY while it stays observer-only:
-# upstream's `_BLOCKING_EVENTS` decides whether a hook's exit code can stall the
-# decision, and the shim always exits 0. If the approval gate joins that set, our
-# silent success starts answering a real prompt.
-HERMES_NONBLOCKING_EVENTS = {"pre_approval_request"}
+# Registering `pre_approval_request` is safe ONLY while it stays observer-only,
+# and the shim always exits 0. Upstream states the premise itself, next to the
+# approval hooks in VALID_HOOKS — see HERMES_OBSERVER_ONLY_CLAIM.
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.
@@ -509,7 +515,7 @@ GROK_NOTIFICATION_URL = (
 )
 GROK_ACTIVE_SESSIONS_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
-    "crates/codegen/xai-grok-shell/src/active_sessions.rs"
+    "crates/codegen/xai-grok-active-sessions/src/lib.rs"
 )
 # grok hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity. SubagentEnd/SubagentStop are BOTH registered (upstream's finish site
@@ -785,8 +791,8 @@ class Anchor(typing.NamedTuple):
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: each anchor is the declaration the checked names live inside.
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
+    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
-    HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
@@ -1801,12 +1807,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
         # The reverse direction (a KNOWN_OUTERS member gone upstream) is a benign
         # stale silent-set entry — review only, never breaking.
-        if text is not None and ours.codex_rollout is not None:
-            up_outers = upstream_codex_enum_types(text, "RolloutItem")
+        if ours.codex_rollout is not None:
+            hist = fetch_anchored(CODEX_ROLLOUT_ITEM_URL, "Codex history", report)
+            up_outers = (
+                upstream_codex_enum_types(hist, "RolloutItem") if hist is not None else None
+            )
             if up_outers is None:
                 report.add_blind(
                     "the Codex `RolloutItem` enum",
-                    "protocol.rs",
+                    "codex-rs/history/src/lib.rs",
                     "The rollout OUTER flood guard was SKIPPED.",
                 )
             elif ours.codex_rollout_outers is not None:
@@ -2336,38 +2345,38 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             )
 
     if ours.hermes is not None:
-        text = fetch_anchored(HERMES_HOOK_URL, "Hermes hooks", report)
-        if text is not None:
-            for ev in sorted(ours.hermes):
-                if f'"{ev}"' not in text:
-                    report.add_breaking(
-                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
-                        f"hermes_cli/hooks.py _DEFAULT_PAYLOADS — likely renamed; Hermes still "
-                        f"runs but the shell hook we install into config.yaml fires nothing "
-                        f"(no sprite / no activity)."
-                    )
-            for ev in sorted(HERMES_NONBLOCKING_EVENTS):
-                blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", text)
-                if blocking is None:
-                    report.add_blind(
-                        "whether Hermes still treats the approval gate as observer-only",
-                        "_BLOCKING_EVENTS in hermes_cli/hooks.py",
-                        "We register `pre_approval_request` because a hook's exit code "
-                        "cannot affect it. If that set moved or was renamed, the premise "
-                        "is unchecked.",
-                    )
-                elif f'"{ev}"' in blocking.group(1):
-                    report.add_breaking(
-                        f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — the shim's silent "
-                        f"exit 0 would ANSWER a real approval prompt. Unregister it in "
-                        f"install/hermes.rs, or make the shim decline explicitly."
-                    )
         plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if plugins is not None:
             valid = python_set_literal(plugins, "VALID_HOOKS: Set[str] = {")
             unsupported = python_set_literal(
                 plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
             )
+            # The vanish direction reads VALID_HOOKS, the declaration that OWNS
+            # the vocabulary. It used to read `_DEFAULT_PAYLOADS` in hooks.py —
+            # the `hermes hooks test` FIXTURE set, which does not list every
+            # hook — and filed a ⛔ against `pre_approval_request`, an event this
+            # repo holds a recorded capture of. #793's rule, on our own report.
+            # The observer-only premise for `pre_approval_request`, checked where
+            # upstream STATES it. `_BLOCKING_EVENTS` in hooks.py was the old
+            # anchor and no longer exists — a permanent probe-health line that
+            # left the premise unchecked rather than verified.
+            if not HERMES_OBSERVER_ONLY_CLAIM.search(plugins):
+                report.add_blind(
+                    "whether Hermes still treats the approval hooks as observer-only",
+                    "the VALID_HOOKS comment in hermes_cli/plugins.py",
+                    "We register `pre_approval_request` because a plugin cannot veto or "
+                    "pre-answer an approval — upstream's own words. If that sentence "
+                    "went away, the premise behind an always-exit-0 shim on a "
+                    "PERMISSION hook is unchecked.",
+                )
+            if valid:
+                for ev in sorted(ours.hermes - valid):
+                    report.add_breaking(
+                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
+                        f"VALID_HOOKS in hermes_cli/plugins.py — likely renamed; Hermes "
+                        f"still runs but the shell hook we install into config.yaml fires "
+                        f"nothing (no sprite / no activity)."
+                    )
             # `unsupported` is upstream's OWN "not reachable from a shell hook"
             # set, so those are handled, not omissions.
             sweep_unregistered(
