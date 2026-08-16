@@ -24,9 +24,11 @@ use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 use crate::install::SENTINEL_KEY;
 
-/// Events we register == events the decoder handles, enforced by
-/// `every_registered_hermes_event_decodes`. Wire values from a real capture — session
-/// events carry the `on_` prefix, tool events don't.
+/// Every event here decodes — `every_registered_hermes_event_decodes` enforces
+/// that direction, and only that one: an event the DECODER handles and this list
+/// omits is the shape that shipped `pre_approval_request` unregistered (#930),
+/// and it is `check_upstream_drift.py`'s job, not this test's. Wire values from a
+/// real capture — session events carry the `on_` prefix, tool events don't.
 const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
     "pre_tool_call",

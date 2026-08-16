@@ -355,7 +355,7 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
         let Some(d) = registry::descriptor_for(&source) else {
             continue;
         };
-        let mut recorded_with_a_version = false;
+        let mut recorded: Vec<String> = Vec::new();
         for scenario in sorted_dirs(&source_dir) {
             let Ok(body) = std::fs::read_to_string(scenario.join("provenance.json")) else {
                 continue;
@@ -368,17 +368,25 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             }
             let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
             if version.chars().any(|c| c.is_ascii_digit()) {
-                recorded_with_a_version = true;
+                recorded.push(version.to_string());
             }
         }
-        if recorded_with_a_version {
-            assert_ne!(
-                d.verified_version, "unknown",
-                "{source}: a recorded capture pins a real version, so the registry's \
-                 `verified_version` must name it — at \"unknown\" doctor's drift \
-                 category is silent for this source"
-            );
+        if recorded.is_empty() {
+            continue;
         }
+        // `!= "unknown"` was the first cut and it could not be falsified: a
+        // `verified_version` of "0.0.0-A-LIE" passed while the captures pinned
+        // 2.1.233, and three of the anchors this rule exists to hold were STALE
+        // rather than unknown, so they were never in its range at all. The
+        // registry field holds a bare version; a provenance holds the CLI's whole
+        // `--version` line, so the anchor must APPEAR in one of them.
+        assert!(
+            recorded.iter().any(|v| v.contains(d.verified_version)),
+            "{source}: `verified_version` is {:?}, which appears in none of this \
+             source's recorded captures {recorded:?} — the field means \"the version \
+             whose wire we have SEEN\"",
+            d.verified_version
+        );
     }
 }
 
