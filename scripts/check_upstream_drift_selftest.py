@@ -1348,13 +1348,22 @@ def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
     """A name in both is inert today and fail-open tomorrow: unregister it and
     the sweep stays silent, because the ledger still excuses it."""
     ours = d.read_our_names(d.Report())
-    for ledger, field in (
-        ("CODEX_KNOWN_OMITTED", "codex"),
-        ("CC_KNOWN_OMITTED", "cc"),
-        ("REASONIX_KNOWN_OMITTED", "reasonix"),
-        ("CODEWHALE_KNOWN_OMITTED", "codewhale"),
-        ("GROK_KNOWN_OMITTED", "grok"),
-    ):
+    # Enumerated, not hand-listed: the sibling test was made exhaustive and this
+    # one was left behind, so five ledgers added later had no teeth here at all.
+    # `cc` is the odd field name — every other ledger's prefix IS its field.
+    fields = {"CC": "cc"}
+    ledgers = sorted(n for n in dir(d) if n.endswith("_KNOWN_OMITTED"))
+    check(len(ledgers) >= 10, f"expected every source's ledger, found {ledgers}")
+    for ledger in ledgers:
+        stem = ledger[: -len("_KNOWN_OMITTED")]
+        field = fields.get(stem, stem.lower())
+        check(
+            hasattr(ours, field),
+            f"{ledger} names no OurNames field ({field!r}) — add the mapping, or the "
+            f"ledger is silently unchecked",
+        )
+        if not hasattr(ours, field):
+            continue
         registered = getattr(ours, field)
         check(registered is not None, f"the `{field}` reader must still parse")
         both = sorted((registered or set()) & getattr(d, ledger))

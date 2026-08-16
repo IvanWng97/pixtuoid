@@ -356,6 +356,7 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             continue;
         };
         let mut recorded: Vec<String> = Vec::new();
+        let mut scenarios_with_a_recorded_origin = 0usize;
         for scenario in sorted_dirs(&source_dir) {
             let Ok(body) = std::fs::read_to_string(scenario.join("provenance.json")) else {
                 continue;
@@ -367,11 +368,29 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
                 continue;
             }
             let version = v.get("version").and_then(|x| x.as_str()).unwrap_or("");
+            scenarios_with_a_recorded_origin += 1;
             if version.chars().any(|c| c.is_ascii_digit()) {
                 recorded.push(version.to_string());
             }
         }
+        // A source with captures but NO version among them cannot anchor anything,
+        // and skipping it is how `verified_version: "0.0.0-A-LIE"` passed for
+        // copilot: three recorded scenarios, all `version: "unknown"`. The field
+        // means "the version whose wire we have SEEN", so where this tree holds no
+        // such evidence it must say `unknown` rather than carry a confident number
+        // no capture backs.
         if recorded.is_empty() {
+            let unbacked = scenarios_with_a_recorded_origin > 0;
+            if unbacked {
+                assert_eq!(
+                    d.verified_version, "unknown",
+                    "{source}: every recorded capture here says `version: unknown`, so \
+                     nothing in this tree anchors {:?}. Re-record with a version, or set \
+                     the field to \"unknown\" — a number no capture backs is the state \
+                     the field was defined to avoid.",
+                    d.verified_version
+                );
+            }
             continue;
         }
         // `!= "unknown"` was the first cut and it could not be falsified: a

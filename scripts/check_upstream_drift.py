@@ -173,9 +173,12 @@ HERMES_KNOWN_OMITTED = {
 # six we register are exactly the four axes `decode_openclaw_presence` projects.
 # The rest are the AGENT's turn machinery inside the gateway: prompt/model
 # resolution, the LLM call, compaction, message and reply plumbing, cron, skills,
-# and the subagent trio. A gateway serving a subagent is already Busy from
-# `before_agent_run`, so modelling them would add no presence state — and each
-# extra registered hook is another shim invocation per turn.
+# and the subagent trio. The subagent three are omitted on a premise this tree has
+# NOT captured: that a gateway serving a subagent already reads Busy. Upstream
+# says `sessions_spawn` is non-blocking and `sessions_yield` ends the turn, so the
+# parent's run may close while the child works — whether the child fires its own
+# `before_agent_run` is undocumented, and our openclaw capture never spawned one.
+# Registering them is a live option the day someone records that turn.
 OPENCLAW_KNOWN_OMITTED = {
     "after_compaction",
     "after_tool_call",
@@ -231,11 +234,13 @@ OPENCODE_KNOWN_OMITTED = {
     "session.updated",
 }
 
-# cursor hooks we DELIBERATELY do not register. `beforeShellExecution` and
-# `afterFileEdit` are DECISION hooks — cursor blocks on their exit code, and the
-# shim's always-exit-0 contract (invariant #5) would silently approve. That is
-# the one class we must never register, not a scope cut. `preCompact` is a
-# compaction internal.
+# cursor hooks we DELIBERATELY do not register. `beforeShellExecution` gates the
+# action on the hook's exit code (upstream: "Exit code 2 - Block the action"), so
+# the shim's always-exit-0 would answer a gate it never read — and unlike the
+# `preToolUse` we DO register, nothing else reports that command. `afterFileEdit`
+# and `preCompact` carry no state a sprite renders. Registering a blocking hook is
+# not forbidden outright — `preToolUse` blocks too — the question is whether a
+# silent success is the right answer for that particular gate.
 CURSOR_KNOWN_OMITTED = {
     "beforeShellExecution",
     "afterFileEdit",

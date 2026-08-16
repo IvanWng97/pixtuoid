@@ -626,7 +626,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
 const COPILOT: SourceDescriptor = SourceDescriptor {
     name: copilot::SOURCE_NAME,
     label_prefix: "cp",
-    verified_version: "1.0.62",
+    verified_version: "unknown",
     version_probe: Some(&["copilot", "--version"]),
     home_env: Some("COPILOT_HOME"),
     kind: SourceKind::Agent {

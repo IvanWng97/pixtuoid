@@ -398,9 +398,15 @@ mod recorder {
         }
         let out = no_clobber(dest.join("provenance.json"));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
-        if cli.ends_with("sh") {
+        // Keyed on the PROBE's outcome, not on the name looking like a script: a
+        // pty driver is `python3`, passes the name test, and its "unknown" then
+        // disarms `a_recorded_capture_anchors_its_sources_verified_version` for
+        // that whole source. Loud, because the record it just wrote is unusable.
+        if version.trim() == "unknown" {
             eprintln!(
-                "NOTE: {} names {cli} — a driver script cannot probe the CLI; fix cli/version by hand",
+                "WARNING: {} records version \"unknown\" — `{cli} --version` did not \
+                 answer (a driver script cannot probe the CLI it drives). Fix `cli` and \
+                 `version` by hand before committing, or the anchor gate skips this source.",
                 out.display()
             );
         }
