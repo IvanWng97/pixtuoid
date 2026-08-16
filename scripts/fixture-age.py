@@ -65,9 +65,17 @@ def version_probes() -> dict[str, list[str]]:
 def provenances():
     for p in sorted(FIXTURES.rglob("provenance.json")):
         try:
-            yield p, json.loads(p.read_text())
-        except json.JSONDecodeError as e:
+            prov = json.loads(p.read_text())
+        except (OSError, json.JSONDecodeError) as e:
             yield p, {"_unparseable": str(e)}
+            continue
+        # Valid JSON that is not an object (`null`, `[]`, a bare number) would
+        # otherwise reach the field reads and crash the whole sweep on one file,
+        # replacing every other file's diagnostic with a traceback.
+        if not isinstance(prov, dict):
+            yield p, {"_unusable": f"top level is {type(prov).__name__}, not an object"}
+            continue
+        yield p, prov
 
 
 def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
@@ -93,6 +101,9 @@ def check_metadata() -> int:
         rel = p.relative_to(ROOT)
         if "_unparseable" in prov:
             bad.append(f"{rel}: not valid JSON ({prov['_unparseable']})")
+            continue
+        if "_unusable" in prov:
+            bad.append(f"{rel}: {prov['_unusable']}")
             continue
         if prov.get("origin") != "recorded":
             continue

@@ -148,16 +148,6 @@ pub(crate) fn flat_json_verify(content: &str, events: &[&str], sentinel: &str) -
     assemble(&missing, any, shim, vec![])
 }
 
-/// Drop the `PIXTUOID_SOURCE=<name> ` prefix `shell_hook_command` writes, leaving
-/// the command word behind it. The Windows exec form has no prefix and passes
-/// through unchanged.
-pub(crate) fn strip_env_prefix(command: &str) -> &str {
-    command
-        .strip_prefix("PIXTUOID_SOURCE=")
-        .and_then(|rest| rest.split_once(' '))
-        .map_or(command, |(_, tail)| tail)
-}
-
 /// Extract the shim path from a shell-form managed command — the form
 /// `hook_cmd::shell_hook_command` writes: Unix `PIXTUOID_SOURCE=<source> '<abs>'`
 /// (single-quoted) and Windows `<abs> --source <source>` (bare), either with an

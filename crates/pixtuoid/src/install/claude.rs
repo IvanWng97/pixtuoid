@@ -115,20 +115,20 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
         .and_then(|c| c.as_str());
     match cmd {
         None => ShimRef::Unknown,
-        Some(c) => {
-            // Strip the `PIXTUOID_SOURCE=` prefix the Unix form now carries, then
-            // reverse the POSIX escaping through the shared helper: a naive
-            // `trim_matches('\'')` mangles an embedded `'\''`. A bare `.exe`, an
-            // unquoted path, or a half-quoted string passes through literal.
-            let c = crate::install::verify::posix_unquote_if_quoted(
-                crate::install::verify::strip_env_prefix(c.trim()),
-            );
-            if c == "pixtuoid-hook" {
-                ShimRef::BareName
-            } else {
-                ShimRef::Absolute(std::path::PathBuf::from(c))
-            }
-        }
+        // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
+        // including any future ` --event` suffix, which a private copy here would
+        // bake into the path. CC alone can answer `BareName`, so that is the one
+        // thing mapped on top.
+        #[cfg(not(windows))]
+        Some(c) => match crate::install::verify::shell_shim_ref(c.trim()) {
+            ShimRef::Absolute(p) if p.as_os_str() == "pixtuoid-hook" => ShimRef::BareName,
+            other => other,
+        },
+        // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
+        // absolute path with neither quoting nor `--source`, so it would fall to
+        // that parser's last-whitespace-token arm and truncate `C:\Program Files\…`.
+        #[cfg(windows)]
+        Some(c) => ShimRef::Absolute(std::path::PathBuf::from(c.trim())),
     }
 }
 
@@ -403,6 +403,31 @@ mod tests {
     fn hook_command_auto_resolved_carries_the_source_on_unix() {
         let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
         assert_eq!(cmd, "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_shim_ref_reads_the_auto_resolved_command_back_as_a_bare_name() {
+        use crate::install::verify::ShimRef;
+        let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
+        let entry = serde_json::json!({ "hooks": [{ "command": cmd }] });
+        assert_eq!(claude_shim_ref(&entry), ShimRef::BareName);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_shim_ref_survives_an_event_suffix_it_does_not_write_today() {
+        // The reason this delegates to `shell_shim_ref` instead of parsing the
+        // prefix itself: a private copy would bake the flag into the PathBuf and
+        // `doctor` would report a working install as moved.
+        use crate::install::verify::ShimRef;
+        let entry = serde_json::json!({
+            "hooks": [{ "command": "PIXTUOID_SOURCE=claude-code '/opt/pixtuoid-hook' --event PreToolUse" }]
+        });
+        assert_eq!(
+            claude_shim_ref(&entry),
+            ShimRef::Absolute(std::path::PathBuf::from("/opt/pixtuoid-hook"))
+        );
     }
 
     #[cfg(unix)]
