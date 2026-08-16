@@ -94,6 +94,51 @@ def semverish(s: str) -> str | None:
     return m.group(0) if m else None
 
 
+def cross_check(prov_dir: pathlib.Path, prov: dict) -> list[str]:
+    """Falsify what the bytes can answer. A provenance whose every field is
+    unverifiable is a claim, not a record — a wholly false one (`cli: codex`,
+    `version: 0.0.0-A-LIE`) passed every gate in this tree until this ran.
+
+    Only two axes are answerable in-repo, and only where the shim stamped them:
+    the payloads' own `_pixtuoid_source`, and `_shim_ts_ms` vs `captured`.
+    """
+    out = []
+    hooks = prov_dir / "hook-payloads.jsonl"
+    if not hooks.is_file():
+        return out
+    stamps, dates = set(), set()
+    for line in hooks.read_text(errors="ignore").splitlines():
+        if not line.strip():
+            continue
+        try:
+            o = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(o, dict):
+            if o.get("_pixtuoid_source"):
+                stamps.add(o["_pixtuoid_source"])
+            if isinstance(o.get("_shim_ts_ms"), int):
+                dates.add(
+                    dt.datetime.fromtimestamp(o["_shim_ts_ms"] / 1000, dt.UTC)
+                    .date()
+                    .isoformat()
+                )
+    # The stamp must name ONE source. Which one is not answerable here: a
+    # conformance scenario sits under `fixtures/<source>/`, a single-owner tree
+    # under `<module>/fixtures/`, so the parent name is the id in one layout and
+    # the literal "fixtures" in the other. A capture that scooped up a second
+    # CLI's hooks is the failure this can see, and it sees it either way.
+    if len(stamps) > 1:
+        out.append(f"payloads carry TWO sources ({sorted(stamps)}) — a capture scooped up another CLI")
+    captured = str(prov.get("captured", ""))
+    if dates and captured not in ("", "unknown") and captured not in dates:
+        out.append(
+            f"`captured` {captured} contradicts the shim stamps in the bytes "
+            f"({sorted(dates)}) — the recorder dates in UTC"
+        )
+    return out
+
+
 def check_metadata() -> int:
     """The half that runs everywhere: the report's inputs must exist and parse."""
     bad = []
@@ -130,6 +175,8 @@ def check_metadata() -> int:
                 dt.date.fromisoformat(captured)
             except ValueError:
                 bad.append(f"{rel}: `captured` is not an ISO date: {captured!r}")
+        for problem in cross_check(p.parent, prov):
+            bad.append(f"{rel}: {problem}")
     for line in bad:
         print(f"  {line}", file=sys.stderr)
     if bad:
@@ -143,7 +190,10 @@ def report(max_age_days: int) -> int:
     probes = version_probes()
     if not probes:
         print("  (corpus_check not built — version drift not checked; `just build --release --examples`)")
-    today = dt.date.today()
+    # UTC, because `captured` is: the recorder stamps `today()` off UTC and the
+    # payloads' own `_shim_ts_ms` are UTC too. A local `date.today()` reported a
+    # fixture recorded hours ago as -1d.
+    today = dt.datetime.now(dt.UTC).date()
     stale = []
     unchecked: list[tuple[str, str]] = []
     rows = []
