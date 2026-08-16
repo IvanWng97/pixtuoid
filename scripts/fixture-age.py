@@ -122,10 +122,6 @@ def semverish(s: str) -> str | None:
             return run
     return runs[0][2]
 
-# Below this the walk found almost nothing, so a pass says nothing about the
-# corpus — the vacuous-pass floor its sibling in the drift selftest already has.
-MIN_PROVENANCES = 20
-
 def report(max_age_days: int) -> int:
     probes = version_probes()
     if not probes:

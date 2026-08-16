@@ -18,6 +18,12 @@ use std::path::{Path, PathBuf};
 use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{registry, AgentEvent};
 
+// ONE set of tree helpers, in `captures.rs`. This file kept byte-identical
+// copies whose `read_dir` SWALLOWED errors where the other panics — an
+// unreadable capture dir made `wire_files()` empty, so the redaction rule
+// passed vacuously for it.
+use super::captures::{fixtures_root, sorted_dirs, transcripts_in};
+
 /// Hook-only-ness comes from the registry row, never a harness-side list — a
 /// second list could mark a JSONL source hook-only and pass the harness without
 /// its LineDecoder ever running.
@@ -32,12 +38,6 @@ fn is_daemon(source: &str) -> bool {
     registry::descriptor_for(source).is_some_and(|d| d.is_daemon())
 }
 
-fn fixtures_root() -> PathBuf {
-    // Conformance scenarios ONLY — single-owner fixtures live with their
-    // module, NOT here.
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures")
-}
-
 fn read_lines(path: &Path) -> Vec<String> {
     std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
@@ -45,16 +45,6 @@ fn read_lines(path: &Path) -> Vec<String> {
         .map(str::to_string)
         .filter(|l| !l.trim().is_empty())
         .collect()
-}
-
-fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_dir())
-        .collect();
-    out.sort();
-    out
 }
 
 struct Decoded {
@@ -73,34 +63,6 @@ impl Decoded {
             .chain(self.hooks.iter())
             .flat_map(|d| d.events.iter().cloned())
             .collect()
-    }
-}
-
-/// A scenario's transcripts: the non-hook `.jsonl` files, sorted. Exactly one
-/// for a JSONL-bearing source — two would make selection (and the snapshot)
-/// depend on `read_dir` order, zero would skip its LineDecoder entirely.
-fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    push_transcripts(dir, &mut out);
-    out.sort();
-    out
-}
-
-/// Recurses, because a path-keyed source needs the fixture to REPRODUCE the
-/// shape its id comes from: grok keys on the parent-dir name, so a flat
-/// `<scenario>/updates.jsonl` yields the scenario name as the session id, and
-/// the composed fixture that "passed" the coalesce assertion did so only by
-/// declaring `sessionId: "permission-flow"` in its hooks to match.
-fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).unwrap().filter_map(Result::ok) {
-        let p = e.path();
-        if p.is_dir() {
-            push_transcripts(&p, out);
-        } else if p.extension().and_then(|s| s.to_str()) == Some("jsonl")
-            && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
-        {
-            out.push(p);
-        }
     }
 }
 

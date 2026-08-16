@@ -244,10 +244,17 @@ fn the_walk_sees_every_provenance_on_disk() {
         "the layout names {walked} captures but {on_disk} provenance.json files exist — \
          a file outside every layout shape is one no rule applies to"
     );
+    // DERIVED, not hand-picked. Three siblings of this floor were three
+    // hand-picked constants for one idea (20 vs 37, 40 vs 42, 140 vs 146) — two of
+    // them one routine fixture cleanup away from firing and blaming the walk. What
+    // the floor actually means is "the walk found the tree": every registered
+    // source has at least one capture, so a walk that found the tree sees at least
+    // as many captures as there are sources.
+    let sources = registry::registered_source_names().count();
     assert!(
-        on_disk >= 40,
-        "only {on_disk} captures found; the walk is looking at the wrong tree, so \
-         every rule below would pass vacuously"
+        on_disk >= sources,
+        "only {on_disk} captures for {sources} registered sources; the walk is \
+         looking at the wrong tree, so every rule below would pass vacuously"
     );
 }
 
@@ -434,11 +441,18 @@ fn banner_version(line: &str) -> Option<&str> {
         while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
             i += 1;
         }
-        let run = line[start..i].trim_end_matches('.');
+        // `contains('.')` on the RAW run and empty parts filtered AFTER, exactly
+        // as `doctor::parse_version` does. Trimming trailing dots first made the
+        // two disagree on `"2. "` — doctor reads 2.0.0, the mirror read nothing.
+        let run = &line[start..i];
         if !run.contains('.') {
             continue;
         }
-        let Ok(major) = run.split('.').next().unwrap_or("").parse::<u64>() else {
+        let Some(Ok(major)) = run
+            .split('.')
+            .find(|p| !p.is_empty())
+            .map(str::parse::<u64>)
+        else {
             continue;
         };
         runs.push((
@@ -454,8 +468,13 @@ fn banner_version(line: &str) -> Option<&str> {
         .map(|(.., run)| *run)
 }
 
-/// The cases `doctor::parse_version`'s own doc names, so the mirror cannot drift
-/// from the parser it copies.
+/// Cases the mirror must agree with `doctor::parse_version` on: the first two are
+/// from that fn's own doc, the rest are real `--version` banners this tree holds
+/// captures of. What is PINNED mechanically is the const — the grep below fails
+/// if `doctor.rs`'s `IMPLAUSIBLE_MAJOR` moves. The ALGORITHM cannot be pinned
+/// from here (`parse_version` is `pub(crate)` in the binary crate), so it is
+/// mirrored statement for statement instead, including the two orderings a
+/// rewrite gets wrong — see the loop.
 #[test]
 fn banner_version_matches_doctors_documented_cases() {
     for (banner, want) in [
@@ -467,6 +486,9 @@ fn banner_version_matches_doctors_documented_cases() {
         ("2026.08.11-e8db854", Some("2026.08.11")),
         ("omp/17.3.4", Some("17.3.4")),
         ("no version here", None),
+        // The shape that caught the mirror drifting: doctor keeps a trailing-dot
+        // run and filters empty parts after, so this is a version to both.
+        ("2. ", Some("2.")),
     ] {
         assert_eq!(banner_version(banner), want, "{banner:?}");
     }
@@ -526,16 +548,21 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             .filter(|(when, _)| when.len() == 10 && when.starts_with("20"))
             .collect();
         dated.sort();
-        let candidates: Vec<&String> = if dated.is_empty() {
-            versions.iter().map(|(_, v)| v).collect()
-        } else {
-            vec![&dated.last().expect("non-empty").1]
-        };
-        let newest = candidates[0];
+        // No all-undated fallback: it was unreachable (every version-bearing
+        // capture carries an ISO `captured`) and it re-admitted `any`, which is
+        // the exact stale-anchor bug four lines up. A source that loses its dated
+        // captures should fail here, loudly, rather than quietly weaken the rule.
+        let newest = &dated
+            .last()
+            .unwrap_or_else(|| {
+                panic!(
+                    "{source}: has recorded versions but none with an ISO `captured`, so \
+                     nothing says which sighting is most recent"
+                )
+            })
+            .1;
         assert!(
-            candidates
-                .iter()
-                .any(|v| banner_version(v) == Some(d.verified_version)),
+            banner_version(newest) == Some(d.verified_version),
             "{source}: `verified_version` is {:?}, but the newest recorded capture \
              ({newest:?}) pins {:?} — the most recent sighting is the one that counts",
             d.verified_version,
