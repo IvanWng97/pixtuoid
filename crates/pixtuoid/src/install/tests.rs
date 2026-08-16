@@ -863,6 +863,34 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
     );
 }
 
+/// The baked `const HOOK_PATH` line is the ONE line that legitimately differs
+/// between an installed artifact and what this binary renders, so the staleness
+/// comparison must ignore exactly it and nothing else.
+#[test]
+fn the_staleness_comparison_ignores_the_baked_path_and_only_it() {
+    let rendered = "// pixtuoid
+const HOOK_PATH = \"pixtuoid-hook\";
+const F = [\"a\"];
+";
+    let installed = "// pixtuoid
+const HOOK_PATH = \"/opt/pixtuoid-hook\";
+const F = [\"a\"];
+";
+    assert_eq!(
+        strip_baked_line(rendered),
+        strip_baked_line(installed),
+        "only the shim path differs, so this must NOT read as stale"
+    );
+
+    // An older pixtuoid's plugin: same shape, one forwarded event short.
+    let older = installed.replace("[\"a\"]", "[]");
+    assert_ne!(
+        strip_baked_line(rendered),
+        strip_baked_line(&older),
+        "a plugin missing an event MUST read as stale"
+    );
+}
+
 /// The collapse itself, which the sweep above deliberately cannot see: it accepts
 /// BOTH forms, so nothing there pins the shortening.
 #[test]

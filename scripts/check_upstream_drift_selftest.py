@@ -1192,7 +1192,7 @@ def test_the_hermes_approval_gate_stays_observer_only() -> None:
     # so a stub with only one of them fails the sibling check for the wrong reason.
     payload = (
         "def _serialize_payload(event: str) -> str:\n"
-        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i}\n'
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i, "extra": e}\n'
     )
 
     safe = payload + '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
@@ -1412,7 +1412,7 @@ def test_a_partial_parse_files_no_verified_change() -> None:
     partial = 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}\n'
     shell = (
         "def _serialize_payload(event: str) -> str:\n"
-        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i}\n'
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i, "extra": e}\n'
         '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
     )
     breaking, blind = _drive_hermes(partial, shell, ours=ours)
@@ -1458,6 +1458,38 @@ def test_every_unregistered_row_is_actually_swept() -> None:
         f"rows swept without the belief gate {sorted(rows - gated)}; "
         f"gated without a row {sorted(gated - rows)}",
     )
+
+
+def test_no_decoder_read_is_unaccounted_for() -> None:
+    """A `*_PAYLOAD_FIELDS` set is trusted to equal the decoder's TOP-LEVEL reads,
+    and nothing checked it — so `sessionId` (reasonix's primary AgentId key) and
+    `extra` (hermes's Waiting reason AND its model flame) sat unwatched. A read
+    that is neither watched nor ledgered fails here, which is the same shape the
+    EVENT sweeps already use for `*_KNOWN_OMITTED`."""
+    root = pathlib.Path(__file__).resolve().parent.parent / "crates/pixtuoid-core/src/source"
+    for source in sorted(
+        n.removesuffix("_PAYLOAD_FIELDS").lower()
+        for n in dir(d)
+        if n.endswith("_PAYLOAD_FIELDS")
+    ):
+        src = (root / f"{source}.rs").read_text()
+        # Only the DECODER body: the test module re-reads these keys in fixtures.
+        src = src.split("#[cfg(test)]", 1)[0]
+        reads = set(re.findall(r'\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))
+        # Nested reads chain off a top-level one (`.get("extra").and_then(|e|
+        # e.get("description"))`), and only the top level is a watchable field.
+        nested = set(re.findall(r'\.and_then\(\|[a-z]\| [a-z]\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))
+        watched = getattr(d, f"{source.upper()}_PAYLOAD_FIELDS")
+        ledgered = d.PAYLOAD_READS_NOT_WATCHED.get(source, set()) | d.PAYLOAD_READS_NOT_WATCHED.get(
+            f"{source}_ours", set()
+        )
+        unaccounted = reads - nested - watched - ledgered
+        check(
+            not unaccounted,
+            f"{source}: decoder reads {sorted(unaccounted)} — watch them in "
+            f"{source.upper()}_PAYLOAD_FIELDS, or say why not in "
+            f"PAYLOAD_READS_NOT_WATCHED",
+        )
 
 
 def test_every_ledger_has_a_missing_registration_row() -> None:
@@ -1587,6 +1619,7 @@ def main() -> int:
         test_the_hermes_approval_gate_stays_observer_only,
         test_a_partial_parse_files_no_verified_change,
         test_every_unregistered_row_is_actually_swept,
+        test_no_decoder_read_is_unaccounted_for,
         test_every_ledger_has_a_missing_registration_row,
         test_the_floor_can_never_be_weaker_than_what_we_register,
         test_no_ledger_excuses_a_hook_we_actually_register,

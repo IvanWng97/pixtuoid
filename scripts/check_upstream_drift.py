@@ -351,7 +351,18 @@ REASONIX_KNOWN_OMITTED = {
 # Payload fields decode_rx_hook_payload reads — a renamed json tag silently
 # zeroes the decode (`event`/`cwd` are load-bearing: a payload lacking them is
 # rejected as malformed).
-REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "subject", "message"}
+REASONIX_PAYLOAD_FIELDS = {
+    "event",
+    "cwd",
+    # The PRIMARY AgentId key since #929 — 44/44 recorded payloads carry it. A
+    # rename here silently reverts reasonix to cwd-keying, merging two sessions in
+    # one repo back into one sprite: the exact bug #929 fixed, with no alarm.
+    "sessionId",
+    "toolName",
+    "toolArgs",
+    "subject",
+    "message",
+}
 
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
@@ -443,6 +454,29 @@ OPENCLAW_HOOK_TYPES_URL = (
 # key), `sessionId` (fallback key + label), `success` (agent_end → Degraded gate).
 # `success` is a common word, so a rename of it could be masked by an unrelated
 # occurrence; the distinctive `runId`/`sessionId` carry the check.
+# Reads that are deliberately NOT watched, per source. The pattern the event
+# sweeps already use: a `.get()` that is neither watched nor ledgered fails
+# `no_decoder_read_is_unaccounted_for`, so adding one forces the decision instead
+# of silently losing coverage — which is how `sessionId` and `extra` came to be
+# missing from the two sets above.
+PAYLOAD_READS_NOT_WATCHED = {
+    # The envelope discriminator. Its disappearance is not a field rename — it
+    # kills every event of the source, and the vanish sweeps already cover it.
+    # ENVELOPE keys, not schema fields. Their disappearance is not a field rename —
+    # it kills every event of that source, which the vanish sweeps already cover.
+    # None appears in the documents we fetch (verified: 0 occurrences), so watching
+    # one would be a permanent false alarm.
+    "hermes": {"hook_event_name"},
+    "openclaw": {"type"},
+    "copilot": {"type"},
+    "opencode": {"type", "properties"},
+    # Fields OUR side synthesises, so nothing upstream can rename them: `_pid` is
+    # the shim's stamp, and `errored` is our JS plugin flattening upstream's
+    # `error` to a bare boolean (verified: 0 occurrences in hook-types.ts, so
+    # watching it would be a permanent false alarm).
+    "openclaw_ours": {"_pid", "errored"},
+}
+
 OPENCLAW_PAYLOAD_FIELDS = {"runId", "sessionId", "success"}
 
 # The gateway PORT is pixtuoid's runtime identity for one gateway, read off
@@ -474,7 +508,16 @@ HERMES_SHELL_HOOK_URL = (
 )
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
-HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+HERMES_PAYLOAD_FIELDS = {
+    "session_id",
+    "cwd",
+    "tool_name",
+    "tool_input",
+    # Carries `description` (the Waiting reason — the whole point of #930) and
+    # `model` (the flame). Only the TOP-LEVEL key is watchable: `_serialize_payload`
+    # builds `extra` per event, so its members are not a fixed upstream set.
+    "extra",
+}
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.

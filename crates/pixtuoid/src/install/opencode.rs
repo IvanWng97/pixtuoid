@@ -118,12 +118,31 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
             "the opencode plugin's shim-path placeholder was never substituted",
         );
     }
-    match crate::install::verify::baked_hook_path(content) {
-        Some(p) => SchemaParse {
-            shim: ShimRef::Absolute(p),
-            ..Default::default()
+    let Some(p) = crate::install::verify::baked_hook_path(content) else {
+        return SchemaParse::broken("could not read HOOK_PATH from the opencode plugin");
+    };
+    // A config-shaped target reports a MISSING EVENT when an old install predates
+    // a registration; a code artifact has no per-event config, so the equivalent
+    // is the whole rendered plugin. Nothing re-installs on a pixtuoid upgrade, so
+    // without this an upgrader keeps their old `FORWARD` set forever and doctor
+    // says fine — and `opencode_plugin_forward_set_is_pinned` makes a change
+    // deliberate on the AUTHORING side while leaving the installed base silent.
+    let stale = render_plugin(&p.to_string_lossy())
+        .map(|want| want.trim() != content.trim())
+        .unwrap_or(false);
+    SchemaParse {
+        shim: ShimRef::Absolute(p),
+        issues: if stale {
+            vec![
+                "the installed opencode plugin differs from this pixtuoid's — it \
+                 predates an upgrade, so events added since are not forwarded. \
+                 Reconnect opencode via the Sources panel."
+                    .to_string(),
+            ]
+        } else {
+            Vec::new()
         },
-        None => SchemaParse::broken("could not read HOOK_PATH from the opencode plugin"),
+        ..Default::default()
     }
 }
 
@@ -134,6 +153,30 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nothing re-installs on a pixtuoid upgrade, so an old plugin runs forever.
+    /// A config-shaped target names its missing EVENTS; this is the code-artifact
+    /// equivalent, and without it doctor reported an outdated `FORWARD` set green.
+    #[test]
+    fn verify_schema_reports_a_plugin_that_predates_this_pixtuoid() {
+        let current = render_plugin("/opt/pixtuoid-hook").expect("render");
+        assert!(
+            verify_schema(&current).issues.is_empty(),
+            "the plugin this binary would install must verify clean"
+        );
+
+        // An older pixtuoid's plugin: same sentinel, same baked path, one event
+        // short — exactly the shape an upgrader keeps.
+        let stale = current.replacen("\"permission.v2.asked\",\n", "", 1);
+        assert_ne!(stale, current, "the mutation must land");
+        let issues = verify_schema(&stale).issues;
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("predates an upgrade") && i.contains("Reconnect opencode")),
+            "a stale plugin must be reported with its remedy, got {issues:?}"
+        );
+    }
 
     #[test]
     fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {

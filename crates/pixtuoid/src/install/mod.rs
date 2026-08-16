@@ -156,7 +156,27 @@ pub(crate) fn verify_target(
                         .as_deref()
                         .and_then(verify::baked_hook_path)
                     {
-                        Some(baked) => check_shim_binary(&baked, &mut issues),
+                        Some(baked) => {
+                            check_shim_binary(&baked, &mut issues);
+                            // A config-shaped target names the EVENTS an old
+                            // install is missing; a code artifact has no
+                            // per-event config, so the equivalent is the file.
+                            // Nothing re-installs on a pixtuoid upgrade, so
+                            // without this an upgrader runs the plugin they
+                            // connected with forever and doctor says fine.
+                            // Compared modulo the baked path, which is the one
+                            // line that legitimately differs from `intended`.
+                            if let Ok(installed) = io::read_config(&p) {
+                                if strip_baked_line(&installed) != strip_baked_line(&intended) {
+                                    issues.push(format!(
+                                        "{} differs from the plugin this pixtuoid ships — it \
+                                         predates an upgrade, so anything added since is not \
+                                         forwarded. Reconnect the source to refresh it.",
+                                        verify::display_safe(&p)
+                                    ));
+                                }
+                            }
+                        }
                         None => notes.push(format!(
                             "could not read the baked shim path from {}",
                             verify::display_safe(&p)
@@ -169,6 +189,17 @@ pub(crate) fn verify_target(
         }
     }
     verify::SchemaVerifyResult { issues, notes }
+}
+
+/// A rendered artifact without its `const HOOK_PATH` line — the only line that
+/// legitimately differs between what is installed (a real shim path) and what
+/// this binary would render (a placeholder).
+fn strip_baked_line(content: &str) -> String {
+    content
+        .lines()
+        .filter(|l| !l.contains(verify::BAKED_HOOK_MARKER))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The HARD issue(s) for missing code artifacts, collapsed when they share a
