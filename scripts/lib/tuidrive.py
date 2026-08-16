@@ -51,13 +51,25 @@ GATE = re.compile(
 )
 # A numbered menu confirms on Enter (its first option is pre-highlighted); a
 # bare y/n gate wants the letter.
-# LINE-ANCHORED, and the two quantifiers do different jobs. `[^\w\n]*` admits the
-# selection cursor or box border a real full-screen TUI paints before the option
-# (`❯ 1. Yes`, `│ 1. Allow │`); an `\s*` prefix rejected all of those, which
-# trades in the EXPENSIVE direction per the cost note above. `\s+` after the
-# separator is what rejects a version: `1.2.3` fails it at line start too, which a
-# line anchor alone did not.
-MENU = re.compile(rb"(?m)^[^\w\n]*1\s*[.)]\s+\S", re.I)
+# LINE-ANCHORED, and each piece rejects a different thing.
+#
+# The prefix class admits the selection cursor or box border a real full-screen
+# TUI paints (`❯ 1. Yes`, `│ 1. Allow │`) — a bare `\s*` rejected every one of
+# those. It EXCLUDES `*#+-` because a plain `[^\w\n]*` then matched ordinary
+# prose in the same buffer: `- 1. Fixed a crash`, `* 1. see the changelog`,
+# `# 1. Overview`. `\s+` after the separator rejects a version, which a line
+# anchor alone did not: `1.2.3` starts a line too.
+#
+# `>` and `|` stay in, and `> 1. quoted prose` is the accepted residual: both are
+# real cursor/border glyphs (`> 1. Yes, proceed` is a measured menu), so no prefix
+# class rejects the prose without rejecting the menu. Don't "fix" it by dropping
+# them — narrow on something other than the prefix if it ever bites.
+#
+# GATE's cost asymmetry above does NOT apply here — do not reuse it as a reason to
+# widen this. A MENU false positive sends Enter into a real y/n gate, which costs
+# the same billed turn a miss does, and worse: on a MENU hit the reply is `\r`
+# whatever `next_answer` is, so a persistent one disables the escalation ladder.
+MENU = re.compile(rb"(?m)^[^\w\n*#+-]*1\s*[.)]\s+\S", re.I)
 ANSWERS = [b"y\r", b"\r", b"1\r", b"\x1b[A\r"]
 # One billed turn's ceiling, and how long a TUI gets to paint before we type into it.
 RUN_BUDGET_S = 300
@@ -99,8 +111,7 @@ def selftest() -> int:
         assert GATE.search(wording), wording
     assert not GATE.search(b"reading NOTE.txt")
     # Every case carries a PREFIX shape: an `\s*`-anchored form passed the two
-    # bare ones while missing all five cursor/box forms a real TUI paints, and a
-    # miss is the expensive direction (a billed turn), not the cheap one.
+    # bare ones while missing every cursor/box form a real TUI paints.
     for menu in [
         b"  1. Yes, continue",
         b"1) Approve",
@@ -122,6 +133,13 @@ def selftest() -> int:
         b"1.2.3",
         b"1.0.0 released",
         b"1.x",
+        # Ordinary prose in the same 4 KB buffer. A `[^\w\n]*` prefix admitted
+        # every one of these, and a MENU hit pins the reply to Enter.
+        b"- 1. Fixed a crash in the watcher",
+        b"* 1. see the changelog",
+        b"  - 1. step one",
+        b"# 1. Overview",
+        b"+ 1. added",
     ]:
         assert not MENU.search(prose), prose
 

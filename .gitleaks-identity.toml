@@ -2,7 +2,7 @@
 # scanner detects, because none of it is a credential.
 #
 # Deliberately NOT `useDefault = true`, and that is the whole reason this is a
-# second file rather than two more rules in `.gitleaks.toml`. gitleaks' default
+# second file rather than more rules in `.gitleaks.toml`. gitleaks' default
 # GLOBAL allowlist waives anything shaped like a filesystem path, and a global
 # allowlist outranks a rule-scoped one — verified by running these rules merged
 # into the default corpus and again alone: `/home/alice` and `/home/alice/src/x.rs`
@@ -28,8 +28,8 @@ regex = '''mcp__[A-Za-z0-9_-]+'''
 [[rules]]
 id = "pixtuoid-recorder-email"
 description = "An email address that is not a bot or placeholder"
-# Matches the VALUE, not the key. A `user_email`/`account_id` KEY rule fires 54
-# times on this tree's own legitimately-redacted `dev@example.com`, which is why
+# Matches the VALUE, not the key. A `user_email`/`account_id` KEY rule fires on
+# every one of this tree's legitimately-redacted `dev@example.com`, which is why
 # the recorder's key markers do not survive as gitleaks rules — the refusal at
 # capture time still uses them, this pass re-checks the class by its shape.
 regex = '''[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'''
@@ -55,17 +55,26 @@ description = "A home path outside the /Users/dev redaction placeholder"
 regex = '''(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)[A-Za-z0-9._-]+'''
   [[rules.allowlists]]
   regexTarget = "match"
-  # `dev` is this repo's declared redaction placeholder. The rest name no person:
-  # `runner` is GitHub Actions, `ubuntu` AWS and Codespaces, `vscode`
-  # devcontainers, plus `linuxbrew` and macOS's `Shared`. Without them a fixture
-  # or a `.rs` path assertion carrying an ordinary CI path cannot be committed,
-  # and the remedy text would tell its author to break a Linux-path assertion.
+  # TWO regexes, not one alternation, and the split is load-bearing beyond this
+  # file: `captures.rs` reads the PLACEHOLDER line to build its redaction
+  # sentinels. Merged, an unedited capture carrying `/home/vscode/proj` read as
+  # EDITED and its honest note read as a silent one — the inversion this whole
+  # mechanism exists to prevent.
+  #
+  # `you` and `test` were placeholders here and are gone: used nowhere, and the
+  # likeliest of the set to BE somebody's account, which `(?i)` would then waive.
   #
   # ANCHORED, and the trailing `[._-]*` is not decoration: `.` and `-` are inside
   # the rule's own class, so a bare `\b` ends the match at the first one and
   # waives `/Users/dev-ops` and `/Users/first.last` — the ordinary shape on
-  # directory-bound macOS. The run is what keeps the nine provenance notes that
+  # directory-bound macOS. The run is what keeps the provenance notes that
   # end a sentence with "/Users/dev." passing.
   regexes = [
-    '''^(?i)(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)(?:dev|me|user|you|test|runner|ubuntu|vscode|linuxbrew|Shared)[._-]*$''',
+    # PLACEHOLDERS — a redaction wrote these, so they ARE evidence of an edit.
+    '''^(?i)(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)(?:dev|me|user)[._-]*$''',
+    # LEGITIMATE HOSTS — infrastructure accounts naming no person, which a real
+    # UNEDITED capture or a Linux-path assertion can carry: `runner` (GitHub
+    # Actions), `ubuntu` (AWS, Codespaces), `vscode` (devcontainers), `linuxbrew`,
+    # macOS's `Shared`.
+    '''^(?i)(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)(?:runner|ubuntu|vscode|linuxbrew|Shared)[._-]*$''',
   ]

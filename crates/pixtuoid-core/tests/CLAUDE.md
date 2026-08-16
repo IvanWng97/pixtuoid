@@ -9,6 +9,9 @@ is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
 tests/
 ├── sources/main.rs           the source/decode layer (1 binary)
 │   ├── captures.rs          THE walk (`every_capture()`) + every provenance RULE.
+│   │                         `conformance.rs` imports its tree helpers, so dropping
+│   │                         `mod captures;` fails to COMPILE rather than quietly
+│   │                         running 13 fewer tests — that coupling is the floor.
 │   │                         ONE enumeration, no mirror: separate walks with three
 │   │                         populations is why "the fix landed on half the
 │   │                         population" recurred across four review rounds, and a
@@ -110,7 +113,13 @@ registry row — see the core guide).
    transcript-bearing source's fixture is additionally driven WITH the
    first-sight seed, so a registry row wired to the wrong `id_from_path` fails
    there rather than shipping as two sprites for one session.
-2. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
+2. **Always:** add a case row + a `#[test] fn` to
+   `pixtuoid/tests/wire_to_pixels.rs` (`wire_matrix_covers_every_registered_source`
+   forces it), and settle `TOOL_ID_KEY_UNPROVEN` in `captures.rs` — a capture
+   carries a tool id under the row's `tool_id_key`, or the source is named there
+   with the reason it cannot. Step 12 of `CONTRIBUTING.md`'s checklist lists the
+   third roster literal, which lives outside this tree.
+3. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
    `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
    register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,
    reasonix) need none — `decode/mod.rs` + `conformance.rs` cover them.

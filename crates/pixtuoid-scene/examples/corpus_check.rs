@@ -140,12 +140,12 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
 
 /// One `--roster` row: `id \t prefix \t kind \t home_env \t probe`.
 ///
-/// Six consumers in three languages index these columns POSITIONALLY
-/// (`fixture-age.py`, four `awk`/`read` sites in `scripts/lib/tier-live-sources.sh`,
-/// and `just corpus-all`), so inserting a column shifts all of them at once and
-/// the degradation is quiet — `fixture-age`'s probe map empties and its report
-/// reads "nothing stale" from having compared nothing. `roster_row_is_a_pinned_contract`
-/// is the pin CLAUDE.md's magic-number rule asks for at a cross-language boundary.
+/// `fixture-age.py`, `scripts/lib/tier-live-sources.sh` and `just corpus-all`
+/// index these columns POSITIONALLY, so inserting a column shifts every one of
+/// them at once and the degradation is quiet — `fixture-age`'s probe map empties
+/// and its report reads "nothing stale" from having compared nothing.
+/// `the_whole_roster_is_pinned_row_by_row` is the pin CLAUDE.md's magic-number
+/// rule asks for at a cross-language boundary.
 fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
     let probe = d
         .version_probe
@@ -314,24 +314,10 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn roster_row_is_a_pinned_contract() {
-        let d = registry::descriptor_for("claude-code").expect("registered");
-        assert_eq!(
-            roster_row("claude-code", d, "transcript"),
-            "claude-code\tcc\ttranscript\tCLAUDE_CONFIG_DIR\tclaude --version",
-            "the --roster columns are indexed POSITIONALLY by fixture-age.py, \
-             tier-live-sources.sh and `just corpus-all` — inserting or reordering \
-             one silently empties their parses. Update every consumer in the same \
-             change, then this pin."
-        );
-    }
-
     #[test]
     /// EVERY row, byte for byte. The arity loop this replaces could not fail from
     /// any data change — `roster_row`'s four `\t` are in its format literal — and
-    /// the single-row pin above left twelve rows unpinned: changing grok's
+    /// the single-row pin it replaces left every other row unpinned: changing grok's
     /// `label_prefix`, a column the shell tiers grep for, was caught only
     /// incidentally by an unrelated badge-colour test.
     fn the_whole_roster_is_pinned_row_by_row() {

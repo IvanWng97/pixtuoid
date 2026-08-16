@@ -1479,10 +1479,21 @@ def test_no_decoder_read_is_unaccounted_for() -> None:
         # A read behind a CONST is the same read: openclaw's
         # `obj.get(GATEWAY_PORT_FIELD)` was neither watched nor ledgered and this
         # passed, which made the invariant in the docstring false.
-        consts = dict(re.findall(r'const\s+([A-Z][A-Z0-9_]*)\s*:\s*&str\s*=\s*"([^"]*)"', src))
+        # Detection is WIDE and resolution is narrow, deliberately: every `.get(x)`
+        # whose argument is not a string literal is caught, and only a same-file
+        # `const … : &str` resolves it. Matching just the shapes we could resolve
+        # let a 2-char const, a path-qualified one, and a helper whose parameter was
+        # not named `key` pass INVISIBLY — neither resolved nor failed.
+        consts = dict(
+            re.findall(r'const\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:\'static\s+)?str\s*=\s*"([^"]*)"', src)
+        )
         unresolved = set()
-        for name in re.findall(r"\.get\(([A-Z][A-Z0-9_]{2,})\)", src):
-            reads.add(consts[name]) if name in consts else unresolved.add(name)
+        for arg in re.findall(r"\.get\(\s*([^)\"][^)]*?)\s*\)", src):
+            tail = arg.split("::")[-1].strip()
+            if tail in consts:
+                reads.add(consts[tail])
+            elif re.fullmatch(r"[A-Z][A-Z0-9_]*", tail):
+                unresolved.add(arg.strip())
         check(
             not unresolved,
             f"{source}: decoder reads a key from {sorted(unresolved)}, which this sweep "
@@ -1490,9 +1501,12 @@ def test_no_decoder_read_is_unaccounted_for() -> None:
             f"same file, or the read is unwatchable",
         )
         # A key-reading HELPER hides its literals from the shape above: copilot's
-        # `str_at(v, "sessionId")` is seven top-level reads that were watched only
-        # by luck, since nothing here could see them.
-        for helper in set(re.findall(r"fn\s+([a-z_][a-z0-9_]*)[^(]*\([^)]*key:\s*&str", src)):
+        # `str_at(v, "sessionId")` hides top-level reads that were watched only by
+        # luck, since nothing here could see them. Keyed on the &Value+&str SHAPE,
+        # not on the parameter being named `key`.
+        for helper in set(
+            re.findall(r"fn\s+([a-z_][a-z0-9_]*)[^(]*\([^)]*&(?:'\w+\s+)?Value[^)]*&str", src)
+        ):
             reads |= set(
                 re.findall(rf'\b{helper}\([^,()]*,\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)', src)
             )

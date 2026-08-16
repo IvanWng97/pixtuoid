@@ -133,6 +133,12 @@ LEDGERED_BUT_DECODABLE = {
     "Notification",
 }
 
+# Registered hermes events for which upstream treating them as BLOCKING would let
+# our silent exit 0 ANSWER a decision rather than merely observe one. Only the
+# approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
+# fine — a tool gate is not a permission answer.
+HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
+
 # Hermes hooks we DELIBERATELY do not register. The subagent pair is adjudicated
 # in `source/hermes.rs`'s module doc: the SHELL payload carries a parent id but no
 # CHILD id, so a decode could only end a child that was never started — the
@@ -152,12 +158,6 @@ LEDGERED_BUT_DECODABLE = {
 # `session_id=_new_sid` under the comment "new session guaranteed to exist"), so
 # decoding it as an end would walk out a session that just started. `/new` fires
 # `on_session_finalize` for the outgoing id first, which is the one we want.
-# Registered hermes events for which upstream treating them as BLOCKING would let
-# our silent exit 0 ANSWER a decision rather than merely observe one. Only the
-# approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
-# fine — a tool gate is not a permission answer.
-HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
-
 HERMES_KNOWN_OMITTED = {
     "on_session_reset",
     "subagent_start",
@@ -316,11 +316,12 @@ CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 # registered), task/teammate bookkeeping, environment/config plumbing,
 # compaction internals.
 #
-# `PostToolUseFailure` is NONE of those buckets and every sibling that has the
-# event registers it (cursor, kimi, grok). CC is the exception because it has a
-# second transport: the JSONL `tool_result` arm emits `ActivityEnd` regardless of
-# `is_error`, so a failed tool already closes. The hook would only duplicate it,
-# and the cost of skipping it is the JSONL lag, not a stuck sprite.
+# `PostToolUseFailure` is NONE of those buckets. Of the sources whose upstream
+# fires it, cursor/kimi/grok register it and CC and reasonix do not, for two
+# DIFFERENT reasons — reasonix's is double-fire, stated with its own ledger below.
+# CC's is a second transport: the JSONL `tool_result` arm emits `ActivityEnd`
+# regardless of `is_error`, so a failed tool already closes and the hook would
+# only duplicate it. The cost of skipping it is the JSONL lag, not a stuck sprite.
 CC_KNOWN_OMITTED = {
     "Setup",
     "UserPromptSubmit",

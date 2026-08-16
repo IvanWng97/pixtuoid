@@ -1,9 +1,9 @@
 # Secret + recorder-identity scanning for the COMMITTED fixture tree.
 #
-# `just fixture-pii` points this at `crates/pixtuoid-core/tests/sources`, and
-# only there: the two custom rules below key on shapes that are leaks in a
-# RECORDED CAPTURE and ordinary code everywhere else — `/Users/<name>` appears
-# 259k times across the workspace's own sources, docs and tests.
+# `just fixture-pii` points this pair at `crates/pixtuoid-core/tests/sources`, and
+# only there: the sibling config's identity rules key on shapes that are leaks in
+# a RECORDED CAPTURE and ordinary code everywhere else, so aiming them at the
+# whole workspace would bury the signal in our own path strings.
 #
 # This replaced a hand-rolled scanner that admitted a real GitHub PAT, a GitLab
 # PAT and a Stripe live key (measured, all three), because it only ever knew the
@@ -20,13 +20,13 @@ useDefault = true
 # fatal for those rules. They live in `.gitleaks-identity.toml`, which says why.
 
 # Wire identifiers that captured bytes legitimately carry. Without these,
-# `generic-api-key` fires 15 times on hermes session ids and copilot message ids.
+# `generic-api-key` fires on every hermes session id and copilot message id.
 [[allowlists]]
 description = "Wire identifiers in recorded fixtures — not credentials"
 # `secret`, not `match`, and ANCHORED — the two go together. Unanchored, these
 # waive by SUBSTRING, so a real secret merely PREFIXED with a wire identifier
 # (`msg_` + 40 random chars) is admitted. Anchoring against `match` instead reds
-# all 15 legitimate ids, because the match carries the `"apiCallId":"…"` context
+# every legitimate id, because the match carries the `"apiCallId":"…"` context
 # while `secret` is exactly the id.
 regexTarget = "secret"
 regexes = [

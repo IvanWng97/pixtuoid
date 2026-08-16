@@ -178,26 +178,28 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .unwrap_or_else(|| "permission".to_string());
             Ok(vec![identity(), AgentEvent::Waiting { agent_id, reason }])
         }
-        // A TURN boundary, not the session's end — upstream's own doc says it is
-        // "emitted from agent/turn_finalizer.py" carrying `turn_id`/`completed`
-        // ("True when the turn produced a final response"), and turn_finalizer's
-        // comment adds that "run_conversation() is called once per user message
-        // in multi-turn sessions" with real session cleanup left to the CLI's
-        // atexit. Mapping it to SessionEnd walked the agent out of the office at
-        // every turn: `approval-recorded` is ONE session with TWO of these and a
-        // tool call 5.9 s after the first, past the 4.5 s exit grace.
         // THE session end, as `on_session_end` is not: `lifecycle.py::finalize_session`
         // hard-closes the Relay conversation under the SAME `session_id` it sends
-        // us, so the id in the payload is the one being terminated. Its sibling
+        // us, so the id in the payload is the one being terminated. Upstream's
+        // atexit-registered `_run_cleanup` fires it with `reason="shutdown"`, which
+        // is why the registry row claims an exit signal. Its sibling
         // `on_session_reset` is deliberately NOT here — see the omit ledger.
         "on_session_finalize" => Ok(vec![AgentEvent::SessionEnd {
             agent_id,
             as_child: false,
         }]),
-        // An ACTIVITY arm since it turned out to be a turn boundary, so it takes
-        // the class's Identity with it: for a tool-less chat turn this is the ONLY
-        // event the session emits, and a daemon attaching mid-session would
-        // otherwise register nothing at all until the next tool call.
+        // A TURN boundary, not the session's end — upstream's own doc says it is
+        // "emitted from agent/turn_finalizer.py" carrying `turn_id`/`completed`
+        // ("True when the turn produced a final response"), and turn_finalizer's
+        // comment adds that "run_conversation() is called once per user message
+        // in multi-turn sessions". Mapping it to SessionEnd walked the agent out of
+        // the office at every turn: `approval-recorded` is ONE session with TWO of
+        // these and a tool call 5.9 s after the first, past the 4.5 s exit grace.
+        //
+        // An ACTIVITY arm, so it takes that class's Identity with it: for a
+        // tool-less chat turn this is the ONLY event the session emits, and a
+        // daemon attaching mid-session would otherwise register nothing at all
+        // until the next tool call.
         "on_session_end" => Ok(vec![
             identity(),
             AgentEvent::ActivityEnd {

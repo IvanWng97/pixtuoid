@@ -1478,15 +1478,23 @@ fixture-pii-selftest:
     printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
     printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
     printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"
+    printf '{"authorization":"Bearer %s"}\n' "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9x" \
+        > "$d/probe/identity-bearer.txt"
     # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
     # allowlist waives AWS's own documentation key, so that one proves nothing.
     printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
     # A real secret wearing a wire identifier's PREFIX. The allowlists waived this
     # by substring until they were anchored against `secret` rather than `match`.
     printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
+    # The RESIDUAL, pinned so it is visible rather than assumed closed: a secret
+    # that lands INSIDE the wire id's own 20-32 length window still rides the
+    # allowlist. Any shape-based waiver admits a secret wearing that shape; what
+    # actually stops this class is the recorder refusing at capture time.
+    printf '{"api_key":"msg_%s"}\n' "Kd8sQm2zXv6bTn4wRj9c" > "$d/quiet/cred-residual.txt"
     printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
         > "$d/quiet/identity.txt"
     printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
+    printf 'Bearer short\n' > "$d/quiet/bearer.txt"
     printf 'msg_%s\n%s\n' "0123456789abcdefghij" "20260815_120000_a1b2c3" > "$d/quiet/cred.txt"
     fired() {
         gitleaks dir "$2" -c "$1" --no-banner --redact --report-format json \
@@ -1497,7 +1505,7 @@ fixture-pii-selftest:
     # The credential config does NOT own the identity class — its default global
     # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
-                ".gitleaks-identity.toml=identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+                ".gitleaks-identity.toml=identity-bearer.txt,identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
         got=$(fired "$cfg" "$d/probe")
         if [ "$got" != "$want" ]; then

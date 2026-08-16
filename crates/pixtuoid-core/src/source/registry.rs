@@ -711,13 +711,13 @@ const HERMES: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
-            // NO end signal of any kind on the wire: `on_session_end` is a TURN
-            // boundary (see `source/hermes.rs`), and hermes has no transcript. A
-            // closed session is reaped by the pid exit-watch where a backend
-            // exists, else by the stale-sweep. The field is protocol, not policy,
-            // so it says none — `short_idle_reap` is unchanged either way here,
-            // because `resurrects_on_prompt` is false.
-            has_exit_signal: false,
+            // `on_session_finalize`, which upstream's atexit-registered
+            // `_run_cleanup` fires with `reason="shutdown"` — so a clean quit DOES
+            // leave an end signal, which is this field's whole question.
+            // `on_session_end` is not it: that one is a TURN boundary (see
+            // `source/hermes.rs`). Policy is unchanged either way here, since
+            // `short_idle_reap` also needs `resurrects_on_prompt`.
+            has_exit_signal: true,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.
             delegations_are_hook_silent: false,

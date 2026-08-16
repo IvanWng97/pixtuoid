@@ -290,7 +290,7 @@ fn the_walk_sees_every_provenance_on_disk() {
     // source has at least one capture, so a walk that found the tree sees at least
     // as many captures as there are sources.
     // The PREMISE, not its count consequence: "at least as many captures as
-    // sources" leaves 29 of 42 free to vanish before it fires, and it is the
+    // sources" leaves most of the corpus free to vanish before it fires, and it is the
     // per-source statement that makes every rule below non-vacuous.
     let covered: BTreeSet<String> = every_capture().into_iter().map(|c| c.source).collect();
     let bare: Vec<&str> = registry::registered_source_names()
@@ -431,7 +431,9 @@ fn a_recorded_capture_that_was_edited_says_so() {
     // The path placeholders are READ from the scanner's own allowlist rather than
     // copied: one hand-copy here knew only `/Users/dev`, so a capture redacted the
     // Linux way (`/home/dev`) was edited-but-silent to this gate and clean to
-    // `just fixture-pii` — nine of the ten accepted placeholders were undeclarable.
+    // `just fixture-pii`. Only the PLACEHOLDER line — the sibling line names
+    // infrastructure accounts a real UNEDITED capture can carry, and reading both
+    // made an honest note look like a silent one.
     let allow = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
     )
@@ -448,6 +450,17 @@ fn a_recorded_capture_that_was_edited_says_so() {
         }
     }
     sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
+    // A path sentinel must end at a real boundary: bare `contains` read any longer
+    // account name that merely STARTS with a placeholder as that placeholder, so an
+    // un-redacted person's path excused itself.
+    let hit = |body: &str, s: &str| {
+        body.match_indices(s).any(|(at, _)| {
+            !s.starts_with('/')
+                || body[at + s.len()..].chars().next().is_none_or(
+                    |c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '_' | '-'),
+                )
+        })
+    };
     // A word ending the clause right before "redact" that inverts it.
     const NEGATIONS: &[&str] = &["no", "not", "nothing", "never", "without"];
     let mut silent = Vec::new();
@@ -456,8 +469,8 @@ fn a_recorded_capture_that_was_edited_says_so() {
         // "verbatim" USED to satisfy this, which let a note assert the OPPOSITE
         // of what the bytes show. A bare `contains` re-opens that hole one word
         // over — "unredacted", "nothing redacted".
-        // "sanitiz" as well as "redact": the two oldest single-owner captures say
-        // "sanitized to synthetic ids and a generic cwd", which tells a reader
+        // "sanitiz" as well as "redact": the oldest single-owner captures declare
+        // their edit with that stem instead, which tells a reader
         // exactly what this gate exists to tell them. A one-word vocabulary would
         // have had them edit an honest note to satisfy the checker.
         let declares = ["redact", "sanitiz"].iter().any(|stem| {
@@ -468,7 +481,7 @@ fn a_recorded_capture_that_was_edited_says_so() {
         });
         let edited = c.wire_files().iter().any(|p| {
             std::fs::read_to_string(p)
-                .map(|b| sentinels.iter().any(|s| b.contains(s.as_str())))
+                .map(|b| sentinels.iter().any(|s| hit(&b, s)))
                 .unwrap_or(false)
         });
         if edited && !declares {
@@ -568,32 +581,33 @@ fn banner_version_matches_doctors_documented_cases() {
     );
     // The Python mirror cannot be EXECUTED from here — a cross-runtime spawn is
     // what reddened the Windows jobs — but its case table can be pinned to this
-    // one by reading it, which is where the two last diverged.
+    // one by reading it. Pin the PAIR, not the banner: the drift this exists for
+    // was a disagreeing EXPECTATION (`"2. "` → `2` there, `2.` here), and a
+    // banner-only check passes with both halves of that drift restored.
     let py = std::fs::read_to_string(root.join("scripts/fixture-age.py")).expect("fixture-age.py");
-    for (banner, _) in cases {
+    for (banner, want) in cases {
+        let want_py = want.map_or_else(|| "None".to_string(), |v| format!("{v:?}"));
         assert!(
-            py.contains(&format!("{banner:?}")),
-            "fixture-age.py's selftest is missing this mirror's case {banner:?}"
+            py.contains(&format!("({banner:?}, {want_py})")),
+            "fixture-age.py's selftest does not carry this mirror's case \
+             ({banner:?}, {want_py}) — a row that is missing OR expects something else"
         );
     }
 }
 
-/// A banner's version as a comparable tuple. Missing parts are 0 so `1.2` and
-/// `1.2.0` order alike; a banner with no version at all sorts below every real
-/// one rather than winning a `max`.
-fn semver_order(banner: &str) -> (u64, u64, u64) {
+/// A banner's version as a comparable list. ALL parts, not a 3-tuple: truncating
+/// tied `2.1.233.4` with `2.1.233.10`, and a tie is decided by capture-dir
+/// iteration order, so adding a scenario could flip which version the gate
+/// demands. A banner with no version sorts below every real one rather than
+/// winning a `max`.
+fn semver_order(banner: &str) -> Vec<u64> {
     let Some(run) = banner_version(banner) else {
-        return (0, 0, 0);
+        return Vec::new();
     };
-    let mut parts = run
-        .split('.')
+    run.split('.')
         .filter(|p| !p.is_empty())
-        .map(|p| p.parse::<u64>().unwrap_or(0));
-    (
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-        parts.next().unwrap_or(0),
-    )
+        .map(|p| p.parse::<u64>().unwrap_or(0))
+        .collect()
 }
 
 /// `verified_version` means "the version whose wire we have SEEN". A recorded
@@ -651,9 +665,17 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             "{source}: has recorded versions but none with an ISO `captured`, so nothing \
              dates the sightings"
         );
+        // Version first, then the ISO `captured` date — the date is the tie-break,
+        // not the ordering. Without it two captures of the SAME version resolve by
+        // capture-dir iteration order, and a pre-release beside its release
+        // (`1.2.3-rc.1` vs `1.2.3`, which parse alike) picks whichever came last.
         let highest = &dated
             .iter()
-            .max_by_key(|c| semver_order(&c.1))
+            .max_by(|a, b| {
+                semver_order(&a.1)
+                    .cmp(&semver_order(&b.1))
+                    .then_with(|| a.0.cmp(&b.0))
+            })
             .expect("non-empty")
             .1;
         assert!(
@@ -677,7 +699,7 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
         .map(|c| c.source.as_str())
         .collect();
     // Keyed off `sources_root()`, not `fixtures_root()`: the `?` on the narrower
-    // prefix silently dropped all 7 single-owner captures INSIDE a rule whose
+    // prefix silently dropped every single-owner capture INSIDE a rule whose
     // signature says "every capture" — a subset created by a path operation is
     // harder to see than the separate walks this file replaced.
     let unknown: BTreeSet<String> = captures
@@ -905,7 +927,7 @@ fn utc_date(ms: i64) -> String {
     let (mut y, mut m) = (1970i64, 1i64);
     // A pre-epoch stamp is not a real `_shim_ts_ms`, but a corrupt one must still
     // render a well-formed date: the forward walk alone fell straight through and
-    // emitted "1970-01--1" into a diagnostic whose whole job is to be read.
+    // emitted a malformed one into a diagnostic whose whole job is to be read.
     while days < 0 {
         y -= 1;
         days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {

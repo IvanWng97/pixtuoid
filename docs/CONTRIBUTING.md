@@ -497,6 +497,15 @@ you:
 11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
     entry, and — if the upstream is open source — a
     `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
+12. **Three edits no failure message spells out**, all of them roster literals a
+    new source is simply absent from:
+    - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`
+      (`pixtuoid-scene/examples/corpus_check.rs`) — add your row;
+    - `TOOL_ID_KEY_UNPROVEN` (`tests/sources/captures.rs`) — either a capture
+      carries a tool id under your registered `tool_id_key`, or you name the
+      source here with the reason it cannot;
+    - a case row AND a `#[test] fn` in `crates/pixtuoid/tests/wire_to_pixels.rs`,
+      forced by `wire_matrix_covers_every_registered_source`.
 
 See "Adding a new agent CLI" in [`CLAUDE.md`](../CLAUDE.md) and
 `crates/pixtuoid-core/CLAUDE.md` for the deeper wiring detail (and the four
