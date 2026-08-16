@@ -66,12 +66,13 @@ fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 Cross-file report/upload semantics that actionlint cannot express are pinned by
 the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
-`just lint` and the CI hygiene job. Two more ride that same hygiene job and so
-gate every PR: `just fixture-metadata` (every recorded capture declares what
-`fixtures/provenance.schema.json` requires for its origin) and `just fixture-pii`
-(gitleaks over the committed capture tree — its default corpus plus two rules for
+`just lint` and the CI hygiene job. `just fixture-pii` rides that job too —
+gitleaks over the committed capture tree, its default corpus plus two rules for
 the RECORDER's own machine identity, a class no secret scanner detects because it
-is not a credential; config and the WHY in `.gitleaks.toml`).
+is not a credential (config and the WHY in `.gitleaks.toml`). The capture-tree
+RULES gate elsewhere and harder: they are Rust tests (`tests/sources/captures.rs`,
+entry point `just fixture-metadata`), so `just test` runs them in windows-test,
+macos-test and coverage — three platforms, not one lint job.
 `just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
 the repository deliberately requires a symbolic ref or SHA (not SHA-only),
 every checkout drops persisted credentials, and accepted analyzer findings use
@@ -286,7 +287,7 @@ Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_dri
 has since moved — LOCAL-only, because CI has none of these CLIs installed to compare
 against; exit 3 = re-capture candidates, and it reports a third lane for the ones it
 could not compare at all rather than counting them as fresh — its `--check-metadata`
-half is NOT advisory, see `just fixture-metadata` and `just fixture-pii` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
+report is advisory; the capture-tree RULES are not — see `just fixture-metadata` and `just fixture-pii` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —

@@ -33,12 +33,27 @@ import shutil
 import subprocess
 import sys
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent / "lib"))
-from captures import ROOT, SOURCES, every_capture  # noqa: E402
-
-FIXTURES = SOURCES
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+FIXTURES = ROOT / "crates/pixtuoid-core/tests/sources"
 ROSTER = ROOT / "target/release/examples/corpus_check"
 
+
+def recorded_provenances():
+    """Every `recorded` provenance, for the REPORT.
+
+    A plain walk, deliberately: this half is a local advisory that reads four
+    fields and never attributes a capture to a source, so it needs none of the
+    layout rules the GATES ride. Those live in ONE place — `tests/sources/
+    captures.rs` — and a mirror here would be a second thing to keep in step for
+    no gate's benefit.
+    """
+    for path in sorted(FIXTURES.rglob("provenance.json")):
+        try:
+            doc = json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(doc, dict) and doc.get("origin") == "recorded":
+            yield path.parent, doc
 
 def version_probes() -> dict[str, list[str]]:
     """The registry's OWN probes, read through `corpus_check --roster` column 5.
@@ -67,10 +82,6 @@ def version_probes() -> dict[str, list[str]]:
             probes[argv[0]] = argv[1:]
     return probes
 
-
-
-
-
 def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
     if cli not in probes or not shutil.which(cli):
         return None
@@ -81,13 +92,11 @@ def local_version(cli: str, probes: dict[str, list[str]]) -> str | None:
         return None
     return (out.stdout or out.stderr).strip().splitlines()[0] if (out.stdout or out.stderr) else None
 
-
 # A dotted-run major at or above this looks like a YEAR/date token, not a semver
 # major. MIRRORS `doctor::parse_version`'s const of the same name — the pair is
 # pinned by this file's `selftest()`, which `--check-metadata` runs, because the two
 # compare the SAME `--version` banners across a language boundary.
 IMPLAUSIBLE_MAJOR = 1000
-
 
 def semverish(s: str) -> str | None:
     """The version in a `--version` banner, by `doctor::parse_version`'s rule.
@@ -113,137 +122,9 @@ def semverish(s: str) -> str | None:
             return run
     return runs[0][2]
 
-
-
-
-
-
-def cross_check(c) -> list[str]:
-    """Falsify what the bytes can answer. A provenance whose every field is
-    unverifiable is a claim, not a record — a wholly false one (`cli: codex`,
-    `version: 0.0.0-A-LIE`) passed every gate in this tree until this ran.
-
-    Three axes are answerable in-repo: the payloads' own `_pixtuoid_source`,
-    `captured` vs the shim's `_shim_ts_ms`, and `captured` vs a capture date the
-    recording CLI put in a TRANSCRIPT FILENAME. `cli` is checked in Rust, where
-    the registry's probe argv is in scope (`every_scenario_declares_its_provenance`).
-    """
-    out = []
-    stamps, dates = set(), set()
-    hooks = c.hook_payloads()
-    if hooks is not None:
-        for line in hooks.read_text(errors="ignore").splitlines():
-            if not line.strip():
-                continue
-            try:
-                o = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(o, dict):
-                if o.get("_pixtuoid_source"):
-                    stamps.add(o["_pixtuoid_source"])
-                if isinstance(o.get("_shim_ts_ms"), int):
-                    dates.add(
-                        dt.datetime.fromtimestamp(o["_shim_ts_ms"] / 1000, dt.UTC)
-                        .date()
-                        .isoformat()
-                    )
-    # codex and omp name their transcripts by capture instant, which is the only
-    # date evidence in a transcript-only fixture — 12 of these trees ship no hook
-    # payloads at all, and the whole function used to return [] for every one.
-    for f in c.wire_files():
-        m = re.match(r"(?:rollout-)?(\d{4}-\d{2}-\d{2})T\d{2}-\d{2}-\d{2}", f.name)
-        if m:
-            dates.add(m.group(1))
-    if len(stamps) > 1:
-        out.append(f"payloads carry TWO sources ({sorted(stamps)}) — a capture scooped up another CLI")
-    # A single WRONG stamp is answerable wherever the layout names the source.
-    # Both layouts do: `fixtures/<source>/<scenario>/` puts it in the parent, and
-    # a single-owner `<module>/fixtures/` in the module — the earlier "not the
-    # source id for all of them" was true of exactly ONE module, `claude`.
-    elif len(stamps) == 1 and (expect := c.source):
-        if (only := next(iter(stamps))) != expect:
-            out.append(f"payloads are stamped `{only}` but this tree is `{expect}`")
-    captured = c.field("captured")
-    if dates and captured not in ("", "unknown") and captured not in dates:
-        out.append(
-            f"`captured` {captured} contradicts the shim stamps in the bytes "
-            f"({sorted(dates)}) — the recorder dates in UTC"
-        )
-    return out
-
-
-# `provenance.schema.json` is the ONE statement of what each origin requires —
-# this gate owns the single-owner trees no Rust gate reaches, and it shipped
-# without `command` while the Rust gate and the README both required it.
-SCHEMA = json.loads((FIXTURES / "fixtures/provenance.schema.json").read_text())["origins"]
-ORIGINS = frozenset(SCHEMA)
-
-
-def required(origin: str) -> list[str]:
-    return SCHEMA[origin]["required"]
-
-
 # Below this the walk found almost nothing, so a pass says nothing about the
 # corpus — the vacuous-pass floor its sibling in the drift selftest already has.
 MIN_PROVENANCES = 20
-
-
-def check_metadata() -> int:
-    """The half that runs everywhere: the report's inputs must exist and parse."""
-    bad = []
-    seen = 0
-    for c in every_capture():
-        rel, prov = c.rel, c.provenance
-        if c.unusable:
-            bad.append(f"{rel}: {c.unusable}")
-            continue
-        origin = c.origin
-        # A single field switched the entire check off: an absent or misspelled
-        # `origin` fell through to `continue` and every other field went
-        # unvalidated. The Rust schema gate closes this for the conformance tree
-        # only — the single-owner trees are checked here or nowhere.
-        if origin not in ORIGINS:
-            bad.append(
-                f"{rel}: `origin` is {origin!r}, not " + "/".join(sorted(ORIGINS))
-            )
-            continue
-        for field in required(origin):
-            if not str(prov.get(field, "")).strip():
-                bad.append(f"{rel}: {origin} fixture has no `{field}`")
-        if origin != "recorded":
-            continue
-        seen += 1
-        # A `version` holding the INVOCATION rather than a version reports a
-        # drift of nothing for as long as it sits there — the live instance was
-        # `"grok --permission-mode default"`.
-        version = str(prov.get("version", ""))
-        if version not in ("", "unknown") and not re.search(r"\d", version):
-            bad.append(f"{rel}: `version` carries no version number: {version!r}")
-        captured = str(prov.get("captured", ""))
-        if captured and captured != "unknown":
-            try:
-                dt.date.fromisoformat(captured)
-            except ValueError:
-                bad.append(f"{rel}: `captured` is not an ISO date: {captured!r}")
-        for problem in cross_check(c):
-            bad.append(f"{rel}: {problem}")
-    for line in bad:
-        print(f"  {line}", file=sys.stderr)
-    if bad:
-        print(f"fixture metadata: {len(bad)} problem(s)", file=sys.stderr)
-        return 1
-    if seen < MIN_PROVENANCES:
-        print(
-            f"fixture metadata: only {seen} recorded provenance(s) under {FIXTURES} — "
-            f"expected at least {MIN_PROVENANCES}; the walk found almost nothing, so "
-            f"this pass says nothing about the corpus.",
-            file=sys.stderr,
-        )
-        return 1
-    print(f"fixture metadata: ok ({seen} recorded)")
-    return 0
-
 
 def report(max_age_days: int) -> int:
     probes = version_probes()
@@ -256,12 +137,10 @@ def report(max_age_days: int) -> int:
     stale = []
     unchecked: list[tuple[str, str]] = []
     rows = []
-    for c in every_capture():
-        if not c.is_recorded:
-            continue
-        rel = c.dir.relative_to(FIXTURES)
-        cli, pinned = c.field("cli") or "?", c.field("version") or "unknown"
-        captured = c.field("captured") or "unknown"
+    for capture_dir, doc in recorded_provenances():
+        rel = capture_dir.relative_to(FIXTURES)
+        cli, pinned = doc.get("cli") or "?", doc.get("version") or "unknown"
+        captured = doc.get("captured") or "unknown"
         age = "?"
         if captured != "unknown":
             try:
@@ -305,7 +184,6 @@ def report(max_age_days: int) -> int:
     )
     return 0
 
-
 def selftest() -> int:
     """The pure logic this script's two gates ride on, with the parser's own
     documented cases. Runs inside `--check-metadata`, so it cannot rot unrun."""
@@ -342,17 +220,11 @@ def selftest() -> int:
         print(f"fixture-age selftest: {len(bad)} failure(s)", file=sys.stderr)
     return 1 if bad else 0
 
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--check-metadata", action="store_true",
-                    help="assert the fields this report reads are present and parseable")
     ap.add_argument("--max-age-days", type=int, default=180)
     args = ap.parse_args()
-    if not args.check_metadata:
-        return report(args.max_age_days)
-    return selftest() or check_metadata()
-
+    return selftest() or report(args.max_age_days)
 
 if __name__ == "__main__":
     sys.exit(main())

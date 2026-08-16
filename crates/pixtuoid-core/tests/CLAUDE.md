@@ -8,8 +8,16 @@ is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
 ```
 tests/
 ├── sources/main.rs           the source/decode layer (1 binary)
+│   ├── captures.rs          THE walk (`every_capture()`) + every provenance RULE.
+│   │                         One enumeration per language: six walks with three
+│   │                         populations is why "the fix landed on half the
+│   │                         population" recurred across four review rounds. Its
+│   │                         Python twin is `scripts/lib/captures.py`, pinned by
+│   │                         `the_two_capture_walks_agree` (unix-only — the gates
+│   │                         that drive the Python half run in ubuntu `hygiene`)
 │   ├── decode/mod.rs         cross-CLI decoder unit tests
-│   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (single-owner; NOT scanned)
+│   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (NOT a capture — hand-built
+│   │                         decoder inputs, so `capture_dirs()` skips `decode/`)
 │   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta) — a
 │   │                         `harness::Drive` shell (one drive per transport); ALSO pins that a
 │   │                         first-sight SEED keyed by the registry row coalesces with each
@@ -92,7 +100,7 @@ registry row — see the core guide).
 1. **Always:** add `tests/sources/fixtures/<registered-source>/<scenario>/` — at
    minimum a `SessionStart` conformance scenario, RECORDED off the CLI (`just
    capture-fixture <source> <scenario> <cmd…>`), plus the `provenance.json` the
-   recorder writes and `every_scenario_declares_its_provenance` requires. A
+   recorder writes and `every_capture_declares_a_valid_origin_with_its_required_fields` requires. A
    hook-only source's first recorded scenario also drops its
    `NO_WIRE_EVIDENCE_YET` entry. `conformance.rs` auto-discovers the dir;
    `supported_sources_manifest` forces the manifest row; `cargo insta review`

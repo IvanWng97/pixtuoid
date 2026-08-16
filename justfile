@@ -319,7 +319,6 @@ lint:
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
-    run fixmeta just fixture-metadata     & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
@@ -1408,14 +1407,20 @@ tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
 
-# The half of the fixture-age report that runs ANYWHERE: every scenario must
-# carry what fixtures/provenance.schema.json requires for its origin, so the
-# advisory below cannot rot into a report about nothing.
-# Runs in `lint`; CI's hygiene job enumerates it separately.
+# The capture-tree rules — every scenario declares what
+# fixtures/provenance.schema.json requires, and a recorded one's claims are
+# falsified by its own bytes. They are RUST TESTS (`tests/sources/captures.rs`)
+# and so already ride `just test` on all three platforms; this recipe is the
+# named entry point for `lint` and for a human who wants just this answer.
+#
+# They were Python until #929. Moving them deleted the mirror walk that half had
+# to keep in step with the Rust one, and with it a cross-runtime spawn that would
+# have redded the two Windows jobs — GitHub's Windows images ship `python.exe`
+# with no `python3`, and no test job installs Python.
 [group('meta')]
-[doc("Assert every recorded fixture declares the metadata the age report reads")]
+[doc("Assert every capture declares its provenance and its claims are falsifiable")]
 fixture-metadata:
-    python3 scripts/fixture-age.py --check-metadata
+    cargo test -p pixtuoid-core --test sources captures:: -- --nocapture
 
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so

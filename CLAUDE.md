@@ -137,13 +137,15 @@ listener of its own and commits the bytes the shim actually sent — BILLED, and
 it leaves your installed hook config alone. A composed
 fixture pins its author's belief and the decoder then agrees with it, so every
 scenario declares a `provenance.json` that
-`every_scenario_declares_its_provenance` gates. `just corpus-all` is the other
+`every_capture_declares_a_valid_origin_with_its_required_fields` gates (over `every_capture()`, the ONE walk). `just corpus-all` is the other
 half, censusing every transcript-bearing source against its real local corpus.
 Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md).
 A recorded fixture pins ONE version of one CLI's wire; `just fixture-age` says which
 ones the local CLI has moved past (advisory, LOCAL-only — CI has none of them
-installed). Its `--check-metadata` half IS a hard gate, though: `just
-fixture-metadata`, wired into `lint` and CI's hygiene job.
+installed). The capture-tree RULES are a hard gate and live apart from it, as
+Rust tests in `tests/sources/captures.rs` (`just fixture-metadata` is their named
+entry point) — so they ride `just test` on all three platforms rather than one
+lint job. `just fixture-pii` is the other, gitleaks over the same tree.
 
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a

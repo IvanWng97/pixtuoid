@@ -52,10 +52,7 @@ impl Capture {
     /// level down, and a flat read was blind to exactly the fixtures the
     /// nesting rule forces into that shape.
     pub(crate) fn transcripts(&self) -> Vec<PathBuf> {
-        let mut out = Vec::new();
-        push_transcripts(&self.dir, &mut out);
-        out.sort();
-        out
+        transcripts_in(&self.dir)
     }
 
     pub(crate) fn hook_payloads(&self) -> Option<PathBuf> {
@@ -73,7 +70,10 @@ impl Capture {
 }
 
 fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
-    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+    // LOUD, not swallowing: an unreadable capture dir used to make `wire_files()`
+    // return empty, so `a_recorded_capture_that_was_edited_says_so` saw no
+    // sentinels and passed vacuously for that capture.
+    for e in read_dir_or_panic(dir) {
         let p = e.path();
         if p.is_dir() {
             push_transcripts(&p, out);
@@ -83,6 +83,15 @@ fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
             out.push(p);
         }
     }
+}
+
+/// The non-hook `.jsonl` under a dir, recursively. THE collector — `conformance.rs`
+/// used to keep a byte-identical copy with a different error policy.
+pub(crate) fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    push_transcripts(dir, &mut out);
+    out.sort();
+    out
 }
 
 pub(crate) fn sources_root() -> PathBuf {
@@ -158,11 +167,16 @@ fn capture_dirs() -> Vec<PathBuf> {
     out
 }
 
-fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
+pub(crate) fn read_dir_or_panic(dir: &Path) -> Vec<std::fs::DirEntry> {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
+        .map(|e| e.unwrap_or_else(|e| panic!("read_dir entry under {}: {e}", dir.display())))
+        .collect()
+}
+
+pub(crate) fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = read_dir_or_panic(dir)
         .into_iter()
-        .flatten()
-        .flatten()
         .map(|e| e.path())
         .filter(|p| p.is_dir())
         .collect();
@@ -210,7 +224,7 @@ pub(crate) fn every_capture() -> Vec<Capture> {
 #[test]
 fn the_walk_sees_every_provenance_on_disk() {
     fn count(dir: &Path, n: &mut usize) {
-        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        for e in read_dir_or_panic(dir) {
             let p = e.path();
             if p.is_dir() {
                 count(&p, n);
@@ -648,50 +662,178 @@ fn the_readme_states_the_schema_the_gates_enforce() {
     }
 }
 
-/// The two walks must see the SAME population. They exist on both sides of a
-/// language boundary and neither can call the other, so this is the pin the
-/// repo's magic-number rule asks for when a value genuinely crosses one.
+/// A `recorded` provenance must be FALSIFIABLE by its own bytes. One that is not
+/// is a claim, not a record — a wholly false one (`cli: codex`, `version:
+/// 0.0.0-A-LIE`) passed every gate in this tree until an equivalent of this ran.
+///
+/// Three axes the committed bytes can answer, plus the field shapes. `cli` is
+/// `a_recorded_captures_cli_is_its_trees_binary`; this is everything else.
 #[test]
-fn the_two_capture_walks_agree() {
-    let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/lib/captures.py");
-    let out = std::process::Command::new("python3")
-        .arg("-c")
-        .arg(format!(
-            "import sys; sys.dont_write_bytecode=True; sys.path.insert(0, {:?});\n\
-             import captures as C\n\
-             for c in C.every_capture(): print(f'{{c.dir.relative_to(C.SOURCES)}}\\t{{c.source}}')",
-            script.parent().expect("has a parent").to_string_lossy()
-        ))
-        .output()
-        .expect("python3 — the Python gates run in lint and CI, so it is a build dep here");
-    assert!(
-        out.status.success(),
-        "the Python walk failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    let theirs: BTreeSet<String> = String::from_utf8_lossy(&out.stdout)
-        .lines()
-        .map(|l| l.replace('\\', "/"))
-        .collect();
-    let ours: BTreeSet<String> = every_capture()
-        .iter()
-        .map(|c| {
-            format!(
-                "{}\t{}",
-                c.dir
-                    .strip_prefix(sources_root())
-                    .unwrap()
-                    .to_string_lossy()
-                    .replace('\\', "/"),
-                c.source
-            )
-        })
-        .collect();
+fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
+    let mut bad: Vec<String> = Vec::new();
+    for c in every_capture().iter().filter(|c| c.is_recorded()) {
+        let at = c.provenance_path.display();
+
+        // A `version` holding the INVOCATION rather than a version reports a
+        // drift of nothing for as long as it sits there — the live instance was
+        // `"grok --permission-mode default"`.
+        let version = c.field("version").unwrap_or_default();
+        if !version.is_empty()
+            && version != "unknown"
+            && !version.chars().any(|ch| ch.is_ascii_digit())
+        {
+            bad.push(format!(
+                "{at}: `version` carries no version number: {version:?}"
+            ));
+        }
+
+        let captured = c.field("captured").unwrap_or_default();
+        if !captured.is_empty() && captured != "unknown" && !is_iso_date(captured) {
+            bad.push(format!("{at}: `captured` is not an ISO date: {captured:?}"));
+        }
+
+        let mut stamps: BTreeSet<String> = BTreeSet::new();
+        let mut dates: BTreeSet<String> = BTreeSet::new();
+        if let Some(hooks) = c.hook_payloads() {
+            for line in std::fs::read_to_string(&hooks)
+                .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+            {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                if let Some(src) = v.get("_pixtuoid_source").and_then(|s| s.as_str()) {
+                    stamps.insert(src.to_string());
+                }
+                if let Some(ms) = v.get("_shim_ts_ms").and_then(serde_json::Value::as_i64) {
+                    dates.insert(utc_date(ms));
+                }
+            }
+        }
+        // codex and omp name their transcripts by capture instant, which is the
+        // only date evidence in a transcript-only fixture — 12 of these trees
+        // ship no hook payloads at all.
+        for f in c.wire_files() {
+            if let Some(d) = date_prefix(&f.file_name().unwrap_or_default().to_string_lossy()) {
+                dates.insert(d);
+            }
+        }
+
+        if stamps.len() > 1 {
+            bad.push(format!(
+                "{at}: payloads carry TWO sources ({stamps:?}) — a capture scooped up another CLI"
+            ));
+        } else if let Some(only) = stamps.iter().next() {
+            // A single WRONG stamp is answerable wherever the layout names the
+            // source, and BOTH layouts do.
+            if *only != c.source {
+                bad.push(format!(
+                    "{at}: payloads are stamped `{only}` but this tree is `{}`",
+                    c.source
+                ));
+            }
+        }
+        if !dates.is_empty()
+            && !captured.is_empty()
+            && captured != "unknown"
+            && !dates.contains(captured)
+        {
+            bad.push(format!(
+                "{at}: `captured` {captured} contradicts the stamps in the bytes \
+                 ({dates:?}) — the recorder dates in UTC"
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n  "));
+}
+
+/// `YYYY-MM-DD`, validated — not a 10-char string that starts "20".
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
+    let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else {
+        return false;
+    };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let last = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=last).contains(&d)
+}
+
+/// The UTC calendar date of a millisecond epoch stamp. Days-from-epoch, because
+/// the shim stamps UTC and `captured` is UTC.
+fn utc_date(ms: i64) -> String {
+    let mut days = ms.div_euclid(86_400_000);
+    let (mut y, mut m) = (1970i64, 1i64);
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let len = if leap { 366 } else { 365 };
+        if days < len {
+            break;
+        }
+        days -= len;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    loop {
+        let len = match m {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if leap => 29,
+            _ => 28,
+        };
+        if days < len {
+            break;
+        }
+        days -= len;
+        m += 1;
+    }
+    format!("{y:04}-{m:02}-{:02}", days + 1)
+}
+
+/// The `YYYY-MM-DD` a CLI put at the head of a transcript filename, with codex's
+/// `rollout-` prefix: `rollout-2026-08-14T22-19-03-<uuid>.jsonl`.
+fn date_prefix(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("rollout-").unwrap_or(name);
+    let (date, tail) = rest.split_at_checked(10)?;
+    if !tail.starts_with('T') || !is_iso_date(date) {
+        return None;
+    }
+    Some(date.to_string())
+}
+
+/// `utc_date` and `is_iso_date` are hand-rolled (this crate has no chrono), so
+/// they get the cases that break naive versions: a leap day, the day after, a
+/// non-leap Feb 29, and the epoch itself.
+#[test]
+fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
+    assert_eq!(utc_date(0), "1970-01-01");
+    assert_eq!(utc_date(1_786_854_010_213), "2026-08-16");
+    // 2024-02-29T00:00:00Z — a real leap day, and the day after it.
+    assert_eq!(utc_date(1_709_164_800_000), "2024-02-29");
+    assert_eq!(utc_date(1_709_251_200_000), "2024-03-01");
+    assert!(is_iso_date("2024-02-29"), "a real leap day");
+    assert!(!is_iso_date("2026-02-29"), "2026 is not a leap year");
+    assert!(!is_iso_date("2026-13-01") && !is_iso_date("2026-00-10"));
+    assert!(!is_iso_date("2026-08-32") && !is_iso_date("2026-08-00"));
+    assert!(!is_iso_date("2026/08/15") && !is_iso_date("20260815") && !is_iso_date("unknown"));
     assert_eq!(
-        ours,
-        theirs,
-        "the Rust and Python capture walks disagree.\n  only Rust: {:?}\n  only Python: {:?}",
-        ours.difference(&theirs).collect::<Vec<_>>(),
-        theirs.difference(&ours).collect::<Vec<_>>()
+        date_prefix("rollout-2026-08-14T22-19-03-01a0.jsonl").as_deref(),
+        Some("2026-08-14")
     );
+    assert_eq!(
+        date_prefix("2026-08-15T04-14-55-304Z_01a0.jsonl").as_deref(),
+        Some("2026-08-15")
+    );
+    assert_eq!(date_prefix("events.jsonl"), None);
+    assert_eq!(date_prefix("2026-13-45T00-00-00-x.jsonl"), None);
 }
