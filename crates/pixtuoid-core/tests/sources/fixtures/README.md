@@ -109,21 +109,15 @@ gateway runs its agent turn on a Claude Code backend, which inherits
 the eight payloads in that capture were Claude Code's. Filter a capture to the
 source's own stamp before committing it.
 
-Three lists describe each CLI and they answer different questions — read the
-install one before concluding anything about the decode one:
-
-| list | where | question |
-| --- | --- | --- |
-| `*_EVENTS` | `install/<cli>.rs` | which hooks we register — what the CLI sends us |
-| `KNOWN_*` | `source/<cli>.rs` | which shapes we recognise — what counts as drift |
-| `*_KNOWN_OMITTED` | `scripts/check_upstream_drift.py` | upstream has it, we deliberately skip it |
+One list describes each CLI — `*_EVENTS` in `install/<cli>.rs`: which hooks we
+register, and so what the CLI sends us.
 
 An event the decoder handles but `*_EVENTS` never registers is a SHIPPING bug no
 test can see, because every test asserts our own belief about the wire: CC's
 permission gate is `PermissionRequest`, the decoder had read it for years, and
 `install/claude.rs` registered four tool events without it — so a session parked
 on a permission prompt rendered as working, indefinitely. Only a capture of a
-gated run says which of the two lists is wrong.
+gated run says which side is wrong.
 
 Each fixture is a directory:
 

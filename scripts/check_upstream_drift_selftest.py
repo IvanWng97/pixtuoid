@@ -26,7 +26,6 @@ import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
@@ -86,22 +85,19 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     # SINGLETON since CC dropped the `Task` alias, so it floors at 1.
     cases = [
         (d.read_codex_events, r"^[A-Za-z]\w+$", 2),
-        (d.read_codex_rollout_outers, r"^[a-z][a-z_]*$", 4),
-        (d.read_cc_events, r"^[A-Za-z]\w+$", 2),
+            (d.read_cc_events, r"^[A-Za-z]\w+$", 2),
         (d.read_dispatch_names, r"^[A-Za-z]\w+$", 1),
         (d.read_reasonix_events, r"^[A-Za-z]\w+$", 2),
         (d.read_codewhale_events, r"^[a-z][a-z_]*$", 2),
         (d.read_openclaw_events, r"^[a-z][a-z_]*$", 2),
         (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
         (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
-        (d.read_copilot_namespaces, r"^[a-z][a-z_]*$", 20),
-        (d.read_omp_entry_types, r"^[a-z]+$", 3),
-        (d.read_omp_known_types, r"^[a-z][a-z_]*$", 10),
-        (d.read_acp_tags, r"^[a-z][a-z_]*$", 10),
-        (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
+            (d.read_omp_entry_types, r"^[a-z]+$", 3),
+                (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
         (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
         (d.read_grok_events, r"^[A-Z]\w+$", 2),
+        (d.read_acp_decoded_tags, r"^[a-z][a-z_]*$", 2),
     ]
     for reader, shape, floor in cases:
         name = reader.__name__
@@ -111,12 +107,28 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         check(not bad, f"{name}: members match {shape}; offenders={bad}")
 
     # N-of-N: a row with no floor case can return `set()` and pass vacuously.
-    floored = {r.__name__ for r, _, _ in cases} | {"read_codex_rollout_types"}
+    # The two non-set readers carry their floors below, not in `cases`.
+    floored = {r.__name__ for r, _, _ in cases} | {
+        "read_codex_rollout_types",
+        "read_grok_xai_method",
+    }
     unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
     check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
 
-    ev, ri = d.read_codex_rollout_types()
+    ev, ri, outers = d.read_codex_rollout_types()
     check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
+    # The OUTERS ride this reader's parse, so their floor rides its case: a
+    # shrink here is what would make the outer sweep pass while watching less.
+    check(len(outers) >= 3, f"codex outers non-empty (>=3), got {outers!r}")
+    check(
+        all(re.match(r"^[a-z][a-z_]*$", o) for o in outers),
+        f"codex outers are snake_case discriminators: {outers!r}",
+    )
+    xai = d.read_grok_xai_method()
+    check(
+        isinstance(xai, str) and xai.startswith("_") and "/" in xai,
+        f"read_grok_xai_method returns an xAI private method name, got {xai!r}",
+    )
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
     check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
     # Synthetic, so the control survives codex.rs dropping its own `|` arm.
@@ -167,30 +179,6 @@ def test_upstream_parsers_extract_from_a_snippet() -> None:
     check(up == {"session", "tool"}, f"copilot namespaces scoped to SessionEvent union (no Blob leak): {up}")
     check(d.upstream_copilot_namespaces("not json") is None, "copilot namespaces bad json -> None")
     check(d.upstream_copilot_namespaces('{"definitions":{}}') is None, "copilot namespaces no union -> None")
-
-    omp_ts = (
-        'const SESSION_TITLE_SLOT_ENTRY_TYPE = "title";\n'
-        'interface Msg { type: "message"; }\n'
-        'interface Slot { type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE; }\n'
-    )
-    up = d.upstream_omp_entry_types(omp_ts)
-    check(up == {"message", "title"}, f"omp entry types (literal + typeof-resolved): {up}")
-    check(d.upstream_omp_entry_types("no types here") is None, "omp entry types none -> None")
-
-    acp_schema = (
-        '{"$defs":{"SessionUpdate":{"oneOf":['
-        '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
-        '{"properties":{"sessionUpdate":{"const":"user_message_chunk"}}},'
-        '{"$ref":"#/$defs/PlanUpd"}]},'
-        '"PlanUpd":{"properties":{"sessionUpdate":{"const":"plan_update"}}}}}'
-    )
-    up = d.upstream_acp_session_update_tags(acp_schema)
-    check(
-        up == {"tool_call", "user_message_chunk", "plan_update"},
-        f"acp tags (inline const + $ref resolved): {up}",
-    )
-    check(d.upstream_acp_session_update_tags("not json") is None, "acp bad json -> None")
-    check(d.upstream_acp_session_update_tags('{"$defs":{}}') is None, "acp no SessionUpdate -> None")
 
     copilot_fields = '{"definitions":{"A":{"properties":{"agentId":{},"data":{"properties":{"toolCallId":{}}}}}}}'
     up = d.upstream_copilot_field_names(copilot_fields)
@@ -406,6 +394,9 @@ def test_every_const_array_reader_uses_the_shared_parser() -> None:
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
+    d.CODEX_ROLLOUT_ITEM_URL: (
+        "#[serde(rename_all = \"snake_case\")]\npub enum RolloutItem {\n    SessionMeta,\n}"
+    ),
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}',
     d.CODEWHALE_EXECUTOR_URL: "pub fn to_env_vars(&self) -> HashMap<String, String> {",
     d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
@@ -413,8 +404,8 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
     d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
     d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
-    d.CODEX_ROLLOUT_ITEM_URL: (
-        "#[serde(rename_all = \"snake_case\")]\npub enum RolloutItem {\n    SessionMeta,\n}"
+    d.GROK_SESSION_STORAGE_URL: (
+        'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";'
     ),
     d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
     d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
@@ -642,52 +633,6 @@ def _raiser(name: str) -> typing.Callable[[], object]:
     return broken
 
 
-def test_a_stale_flood_guard_skips_its_check_instead_of_flooding() -> None:
-    """The flood guards are one-directional — `up - set()` reports the whole
-    upstream surface as new — so a stale reader must SKIP its check.
-
-    The upstream PARSER is stubbed, not just `fetch`: an unparseable body takes
-    the `is None` probe-health branch and never reaches the guard.
-    """
-    real_fetch, real_readers = d.fetch, d.READERS
-    parsers = ("upstream_omp_entry_types", "upstream_acp_session_update_tags")
-    real_parsers = {n: getattr(d, n) for n in parsers}
-    # Carries omp's ANCHORS pattern: without it `fetch_anchored` files probe
-    # health and the omp guard is never reached (acp rides plain `try_fetch`).
-    d.fetch = lambda _u: "unrelated body\nexport type SessionEntry = never;\n"
-    d.upstream_omp_entry_types = lambda _t: {"phantom_entry_type"}
-    d.upstream_acp_session_update_tags = lambda _t: {"phantom_acp_tag"}
-    try:
-        # Assert on the INJECTED upstream token, not the KNOWN_* name — the
-        # probe-health line quotes KNOWN_* too, so matching that flags a clean run.
-        for field, reader_name, phantom_name in (
-            ("omp_known_types", "read_omp_known_types", "phantom_entry_type"),
-            ("acp_tags", "read_acp_tags", "phantom_acp_tag"),
-        ):
-            d.READERS = tuple(
-                (f, (_raiser(r.__name__) if f == field else r), w) for f, r, w in real_readers
-            )
-            buf, real_stdout = io.StringIO(), sys.stdout
-            sys.stdout = buf
-            try:
-                d.main()
-            finally:
-                sys.stdout = real_stdout
-            out = buf.getvalue()
-            phantom = [ln for ln in out.splitlines() if phantom_name in ln]
-            check(
-                not phantom,
-                f"a stale `{field}` must SKIP its guard, not compare against an "
-                f"empty set: {phantom[:2]}",
-            )
-            named = [ln for ln in out.splitlines() if reader_name in ln]
-            check(len(named) == 1, f"a stale `{field}` files ONE probe-health line: {named}")
-    finally:
-        d.fetch, d.READERS = real_fetch, real_readers
-        for n, fn in real_parsers.items():
-            setattr(d, n, fn)
-
-
 def test_every_reader_row_matches_a_field_on_our_names() -> None:
     """The READERS table is stringly-keyed; nothing else pins it to `OurNames`."""
     rows = {field for field, _, _ in _reader_rows()}
@@ -706,10 +651,9 @@ def test_every_reader_row_matches_a_field_on_our_names() -> None:
     for field, reader_name, what in _reader_rows():
         check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
         check(bool(what.strip()), f"{reader_name} declares what it reads")
-        # `field in reader_name` is too weak: every flood-guard field is a
-        # SUFFIX-EXTENSION of a source field, so the likeliest mispair —
-        # ("copilot", read_copilot_namespaces) — is the one a substring test
-        # cannot see.
+        # `field in reader_name` is too weak: a field that is a PREFIX of another
+        # source's reader name passes a substring test while feeding the wrong
+        # source's names to the sweep below.
         stem = reader_name.removeprefix("read_")
         suffix = stem[len(field):] if stem.startswith(field) else None
         check(
@@ -778,6 +722,43 @@ def test_no_reader_is_called_outside_the_readers_table() -> None:
 
 def _reader_rows() -> list[tuple[str, str, str]]:
     return [(field, reader.__name__, what) for field, reader, what in d.READERS]
+
+
+def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
+    """The `x-method` surface is this check's anchor, because `schema.json` is
+    GENERATED and the key is a generator-emitted vendor extension: absent means the
+    probe landed on a schema that declares no methods (probe health), NOT that ours
+    was renamed. Collapsing those is what made #793 report five phantom renames."""
+    real = d.fetch
+    tags = (
+        '"$defs":{"SessionUpdate":{"oneOf":['
+        '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
+        '{"properties":{"sessionUpdate":{"const":"tool_call_update"}}}]}}'
+    )
+
+    def drive(body: str) -> tuple[list[str], list[str]]:
+        def stub(url: str) -> str:
+            if url in (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL):
+                return body
+            raise urllib.error.URLError("not stubbed")
+
+        d.fetch = stub
+        rep = d.Report()
+        d.run_checks(d.OurNames(acp_decoded_tags={"tool_call", "tool_call_update"}), report=rep)
+        pick = lambda xs: [x for x in xs if "session/update" in x or "x-method" in x]  # noqa: E731
+        return pick(rep.breaking), pick(rep.blind)
+
+    br, bl = drive('{"x-method":"session/update",' + tags + "}")
+    check(not br and not bl, f"an intact schema is silent, got {br} {bl}")
+
+    br, bl = drive('{"x-method":"session/updateV2",' + tags + "}")
+    check(len(br) == 1, f"a RENAMED method is breaking drift, got {br}")
+    check(not bl, f"and not probe health, got {bl}")
+
+    br, bl = drive('{"x-side":"client",' + tags + "}")
+    check(not br, f"a RESTRUCTURE must claim no rename, got {br}")
+    check(len(bl) == 1, f"a RESTRUCTURE is one probe-health line, got {bl}")
+    d.fetch = real
 
 
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
@@ -1105,11 +1086,24 @@ _OMP_ENV_LIVE = (
 )
 
 
-def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
-    """Run the omp block over stubbed upstream files, returning only the lines
-    the `kind` sweep emits — a sibling sweep's noise must not read as this one."""
+_OMP_NAMES = d.OurNames(omp={"session"})
+_GROK_NAMES = d.OurNames(grok=set(), grok_xai_method=d.read_grok_xai_method())
+
+
+def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> list[str]:
+    """Run the checks over stubbed upstream files, returning only the lines the
+    `kind` sweep emits — a sibling sweep's noise must not read as this one.
+
+    `ours` is explicit because each source's block is gated on its own field: a
+    driver that supplied one source's names silently skipped every OTHER block,
+    so the stub was never REQUESTED. The guard below checks exactly that much — a
+    document fetched but never swept reads identically, so a silent arm still
+    needs a paired mutant arm to prove the sweep ran."""
+
+    served: list[str] = []
 
     def stub(url: str) -> str:
+        served.append(url)
         if url in bodies:
             return bodies[url]
         raise urllib.error.URLError("not stubbed")  # -> transient, filtered below
@@ -1118,9 +1112,11 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     d.fetch = stub
     try:
         report = d.Report()
-        d.run_checks(d.OurNames(omp={"session"}), report=report)
+        d.run_checks(ours, report=report)
     finally:
         d.fetch = real
+    unread = sorted(set(bodies) - set(served))
+    check(not unread, f"_drive_upstream never fetched {unread} — the drive was vacuous")
     return [x for x in report.breaking if kind in x]
 
 
@@ -1283,7 +1279,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         check(size >= floor, f"{label} covers the overlay's inputs, got {size}")
 
     for kind in ("omp dotenv locator", "omp dotenv parser", "omp dotenv literal"):
-        got = _drive_omp({d.OMP_ENV_URL: live}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: live}, kind, _OMP_NAMES)
         check(not got, f"{kind}: an unchanged upstream must stay silent, got {got}")
 
     # Each role's message must name ITS OWN requirement, or it sends the
@@ -1291,7 +1287,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     for kind, table in roles:
         other = "parser" if "locator" in kind else "locator"
         for fn, mirror in sorted(table.items()):
-            got = _drive_omp({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind)
+            got = _drive_upstream({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind, _OMP_NAMES)
             check(
                 len(got) == 1
                 and f"`{fn}`" in got[0]
@@ -1301,8 +1297,10 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
             )
 
     for lit in sorted(d.OMP_ENV_LITERALS):
-        got = _drive_omp(
-            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')}, "omp dotenv literal"
+        got = _drive_upstream(
+            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')},
+            "omp dotenv literal",
+            _OMP_NAMES,
         )
         check(
             len(got) == 1 and f"`{lit}`" in got[0],
@@ -1312,7 +1310,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     # Renaming the ANCHOR is a BLIND probe, not a rename line — the louder
     # signal, and the reason `parseEnvFile` is in neither role table.
     gone = live.replace("export function parseEnvFile", "function gone")
-    got = _drive_omp({d.OMP_ENV_URL: gone}, "omp dotenv")
+    got = _drive_upstream({d.OMP_ENV_URL: gone}, "omp dotenv", _OMP_NAMES)
     check(not got, f"an anchor miss must not masquerade as a rename, got {got}")
 
     # The masking regression: the CODE occurrence goes, the comments keep it.
@@ -1322,7 +1320,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     masked = live.replace('getConfigRootDir(), ".env"', 'getConfigRootDir(), ".renamed"')
     masked = masked.replace('getAgentDir(), ".env"', 'getAgentDir(), ".renamed"')
     check('".env"' in masked, "the JSDoc example must survive, or this proves nothing")
-    got = _drive_omp({d.OMP_ENV_URL: masked}, "omp dotenv literal")
+    got = _drive_upstream({d.OMP_ENV_URL: masked}, "omp dotenv literal", _OMP_NAMES)
     check(
         len(got) == 1 and "`.env`" in got[0],
         f"a literal surviving only in JSDoc must still fire, got {got}",
@@ -1335,7 +1333,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
             for ln in live.splitlines(keepends=True)
         )
         check(fn in masked, f"the prose mention of {fn} must survive, or this proves nothing")
-        got = _drive_omp({d.OMP_ENV_URL: masked}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: masked}, kind, _OMP_NAMES)
         check(
             len(got) == 1 and f"`{fn}`" in got[0],
             f"{fn} surviving only in a comment BELOW the quote detector must "
@@ -1350,7 +1348,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         'import {\n\tgetAgentDir,\n\tgetConfigRootDir,\n\trefreshDirsFromEnv as rebuild,\n} from "./dirs";',
     ).replace("refreshDirsFromEnv();", "rebuild(); // refreshDirsFromEnv")
     for kind, _ in roles:
-        got = _drive_omp({d.OMP_ENV_URL: reshaped}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: reshaped}, kind, _OMP_NAMES)
         check(not got, f"{kind}: a reshaped import is not a rename, got {got}")
 
     # Every Rust symbol these messages name must be a REAL fn.
@@ -1361,45 +1359,6 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
             f"fn {sym}(" in omp_rs,
             f"drift messages name `{sym}` — it must exist in source/omp.rs",
         )
-
-
-def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
-    """The shape that shipped the PermissionRequest bug, and the one the FIRST
-    version of this gate missed: it checked the ledgers against what we REGISTER,
-    which is empty by construction, while the incident was a ledgered name our
-    DECODER had an arm for and we never received."""
-    # EVERY source file, not just the shared arms, and a name shape that admits
-    # snake_case: `[A-Za-z]+` over `decoder.rs` alone saw only the 11 CamelCase
-    # CC-shaped arms, so this gate was structurally blind to the six sources
-    # whose events are snake_case — `pre_approval_request` in a ledger passed it.
-    arms: set[str] = set()
-    src_dir = REPO_ROOT / "crates/pixtuoid-core/src/source"
-    for f in sorted(src_dir.rglob("*.rs")):
-        arms |= set(
-            re.findall(r'^\s*"([A-Za-z][A-Za-z0-9_.]*)"\s*(?:\||=>)', f.read_text(), re.M)
-        )
-    check(len(arms) > 30, f"the decoder-arm reader found {len(arms)} arms; it went stale")
-    for shape in ("PreToolUse", "pre_tool_call", "session.start"):
-        check(shape in arms, f"the arm reader must see the {shape!r} shape; got {len(arms)} arms")
-
-    ledgered = set()
-    for name in dir(d):
-        if name.endswith("_KNOWN_OMITTED"):
-            ledgered |= getattr(d, name)
-    live = arms & ledgered
-    check(
-        live <= d.LEDGERED_BUT_DECODABLE,
-        f"{sorted(live - d.LEDGERED_BUT_DECODABLE)} sit in a *_KNOWN_OMITTED ledger "
-        f"AND have a decoder arm — the sweep subtracts the ledger, so an event we "
-        f"can read but never registered raises nothing. Register it, or add it to "
-        f"LEDGERED_BUT_DECODABLE with the reason NOT registering is right.",
-    )
-    dead = sorted(d.LEDGERED_BUT_DECODABLE - live)
-    check(
-        not dead,
-        f"LEDGERED_BUT_DECODABLE lists {dead}, which no longer sits in a ledger "
-        f"with a decoder arm — drop the entry, the list is shrink-only.",
-    )
 
 
 def test_a_partial_parse_files_no_verified_change() -> None:
@@ -1423,49 +1382,11 @@ def test_a_partial_parse_files_no_verified_change() -> None:
     check(blind, "and it must say WHY it skipped")
 
 
-def test_every_unregistered_row_is_actually_swept() -> None:
-    """A row nothing CALLS is a ledger nothing consults with extra steps: the
-    direction is silently absent for that source and every test stays green.
-    The sibling census closes ledger->row; this closes row->call site, which is
-    the half #929 shipped open — deleting kimi's whole call line left rc=0."""
-    src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
-    called = {
-        n.args[0].value
-        for n in ast.walk(ast.parse(src))
-        if isinstance(n, ast.Call)
-        and getattr(n.func, "id", "") == "sweep_unregistered"
-        and n.args
-        and isinstance(n.args[0], ast.Constant)
-    }
-    gated = {
-        n.args[0].value
-        for n in ast.walk(ast.parse(src))
-        if isinstance(n, ast.Call)
-        and getattr(n.func, "id", "") == "parse_is_believable"
-        and n.args
-        and isinstance(n.args[0], ast.Constant)
-    }
-    rows = set(d.UNREGISTERED)
-    check(
-        called == rows,
-        f"rows never swept {sorted(rows - called)}; "
-        f"swept without a row {sorted(called - rows)}",
-    )
-    # `sweep_unregistered` no longer owns the floor, so a sweep reached without
-    # the belief gate runs UNFLOORED — the state the floors exist to prevent.
-    check(
-        gated == rows,
-        f"rows swept without the belief gate {sorted(rows - gated)}; "
-        f"gated without a row {sorted(gated - rows)}",
-    )
-
-
 def test_no_decoder_read_is_unaccounted_for() -> None:
     """A `*_PAYLOAD_FIELDS` set is trusted to equal the decoder's TOP-LEVEL reads,
     and nothing checked it — so `sessionId` (reasonix's primary AgentId key) and
     `extra` (hermes's Waiting reason AND its model flame) sat unwatched. A read
-    that is neither watched nor ledgered fails here, which is the same shape the
-    EVENT sweeps already use for `*_KNOWN_OMITTED`."""
+    that is neither watched nor ledgered fails here."""
     root = pathlib.Path(__file__).resolve().parent.parent / "crates/pixtuoid-core/src/source"
     for source in sorted(
         n.removesuffix("_PAYLOAD_FIELDS").lower()
@@ -1534,39 +1455,6 @@ def test_no_decoder_read_is_unaccounted_for() -> None:
         )
 
 
-def test_every_ledger_has_a_missing_registration_row() -> None:
-    """The ratchet the hand-written arms could not have: a source whose ledger
-    exists but whose row does not would have a ledger nothing consults, and the
-    direction would be silently absent for it — which is how five of ten came to
-    be missing it before #932."""
-    ours = d.read_our_names(d.Report())
-    ledgers = {n for n in dir(d) if n.endswith("_KNOWN_OMITTED")}
-    rowed = {row.ledger_name for row in d.UNREGISTERED.values()}
-    check(
-        ledgers == rowed,
-        f"every *_KNOWN_OMITTED needs an UNREGISTERED row; "
-        f"ledger-without-row {sorted(ledgers - rowed)}, "
-        f"row-without-ledger {sorted(rowed - ledgers)}",
-    )
-    for source, row in sorted(d.UNREGISTERED.items()):
-        # The row names its ledger twice — once to resolve, once for the message.
-        check(
-            getattr(d, row.ledger_name) == set(row.ledger),
-            f"{source}: row's ledger is not {row.ledger_name}",
-        )
-        # A declared floor at or below the derived one is DEAD: it reads as
-        # protection and `max()` already exceeds it. Three rows shipped that way.
-        handled = len(getattr(ours, source) or ())
-        check(
-            row.floor == 0 or row.floor > handled,
-            f"{source}: declared floor {row.floor} is dead — we already handle "
-            f"{handled}, so the derived minimum covers it. Measure the document "
-            f"or declare 0.",
-        )
-        check(bool(row.offers and row.declared_in and row.handle),
-              f"{source}: row has an empty message field")
-
-
 def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
     """A row declaring `floor=1` would re-open the hole the floors exist to close,
     so the sweep raises the declared floor to what we already handle. Proven by
@@ -1593,80 +1481,83 @@ def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
     rep2 = d.Report()
     up = ours.codex | {"brand_new"}
     check(d.parse_is_believable("codex", up, ours, rep2), "at/above the floor must be believed")
-    d.sweep_unregistered("codex", up, ours, rep2)
     check(not rep2.blind, f"a parse at/above the floor must not file blind: {rep2.blind}")
+
+
+def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
+    """`parse_is_believable` reads `PARSE_SOURCES[source]` to say WHICH pin to
+    re-check, so a caller missing from that table raises KeyError — and only on
+    the day a parse actually degrades, which is the day the report matters."""
+    src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
+    callers = set(re.findall(r'parse_is_believable\(\s*"(\w+)"', src))
+    check(callers, "the gate still has callers")
+    missing = sorted(callers - set(d.PARSE_SOURCES))
     check(
-        any("brand_new" in f for f in rep2.review),
-        f"and must review the unhandled name: {rep2.review}",
+        not missing,
+        f"{missing} call parse_is_believable but declare no PARSE_SOURCES row, so a "
+        f"degraded parse would raise KeyError instead of filing probe health.",
+    )
+    stale = sorted(set(d.PARSE_SOURCES) - callers)
+    check(not stale, f"PARSE_SOURCES lists {stale}, which no longer gates anything.")
+    floors = sorted(set(d.PARSE_FLOORS) - callers)
+    check(not floors, f"PARSE_FLOORS declares {floors}, which no longer gates anything.")
+    # The gate must still REFUSE: a floor nothing can fail is not a floor.
+    rep = d.Report()
+    ours = d.OurNames(hermes={f"h{i}" for i in range(4)})
+    check(
+        not d.parse_is_believable("hermes", {"only_one"}, ours, rep),
+        "a one-name parse must fail hermes's declared floor",
+    )
+    check(
+        any("SKIPPED for hermes" in f for f in rep.blind),
+        f"and must name hermes in the probe-health line: {rep.blind}",
     )
 
 
-def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
-    """A name in both is inert today and fail-open tomorrow: unregister it and
-    the sweep stays silent, because the ledger still excuses it."""
-    ours = d.read_our_names(d.Report())
-    # Enumerated, not hand-listed: the sibling test was made exhaustive and this
-    # one was left behind, so five ledgers added later had no teeth here at all.
-    # `cc` is the odd field name — every other ledger's prefix IS its field.
-    fields = {"CC": "cc"}
-    ledgers = sorted(n for n in dir(d) if n.endswith("_KNOWN_OMITTED"))
-    check(len(ledgers) >= 10, f"expected every source's ledger, found {ledgers}")
-    for ledger in ledgers:
-        stem = ledger[: -len("_KNOWN_OMITTED")]
-        field = fields.get(stem, stem.lower())
-        check(
-            hasattr(ours, field),
-            f"{ledger} names no OurNames field ({field!r}) — add the mapping, or the "
-            f"ledger is silently unchecked",
-        )
-        if not hasattr(ours, field):
-            continue
-        registered = getattr(ours, field)
-        check(registered is not None, f"the `{field}` reader must still parse")
-        both = sorted((registered or set()) & getattr(d, ledger))
-        check(
-            not both,
-            f"{ledger} lists {both}, which our own `{field}` install target "
-            f"also REGISTERS. "
-            f"Drop it from the ledger (and its rationale) — leaving it there "
-            f"means dropping the registration later raises nothing.",
-        )
+def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
+    """The value must be read off the declaration, never scanned for."""
+    ours = d.read_grok_xai_method()
+    kind = "xAI method namespace"
+    decl = f'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "{ours}";\n'
+    # The two sites a symbol rename structurally cannot reach — present in BOTH
+    # arms, so the silent arm proves the check is not merely counting them.
+    survivors = f'/// Either "session/update" for ACP or "{ours}" for xAI.\n    r#"{{"method":"{ours}"}}"#;\n'
+    check(
+        not _drive_upstream({d.GROK_SESSION_STORAGE_URL: decl + survivors}, kind, _GROK_NAMES),
+        "an unchanged declaration must stay silent",
+    )
+    moved = decl.replace(ours, f"{ours}/v2") + survivors
+    got = _drive_upstream({d.GROK_SESSION_STORAGE_URL: moved}, kind, _GROK_NAMES)
+    check(
+        len(got) == 1 and f"`{ours}/v2`" in got[0],
+        f"a renamed declaration must fire once, naming the new value; got {got}",
+    )
+    # `re.search` takes the FIRST match, so a commented-out declaration ABOVE the
+    # real one masks the rename unless comments are stripped first.
+    masked = f"// pub const XAI_SESSION_UPDATE_METHOD: &str = \"{ours}\";\n" + moved
+    got = _drive_upstream({d.GROK_SESSION_STORAGE_URL: masked}, kind, _GROK_NAMES)
+    check(
+        len(got) == 1 and f"`{ours}/v2`" in got[0],
+        f"a commented-out declaration must not mask the rename; got {got}",
+    )
 
 
 def main() -> int:
-    for t in (
-        test_try_fetch_classifies_permanent_vs_transient,
-        test_source_parsers_find_nonempty_well_shaped_sets,
-        test_upstream_parsers_extract_from_a_snippet,
-        test_cc_doc_marker_detection_fires_both_directions,
-        test_const_array_parser_ignores_words_quoted_inside_comments,
-        test_parser_never_drops_a_real_event,
-        test_block_scrape_is_bounded_to_the_decoder,
-        test_every_const_array_reader_uses_the_shared_parser,
-        test_anchor_gate_fires_in_both_directions,
-        test_report_is_the_only_way_to_file_a_finding,
-        test_one_stale_reader_does_not_blind_the_sources_after_it,
-        test_every_reader_row_matches_a_field_on_our_names,
-        test_a_stale_flood_guard_skips_its_check_instead_of_flooding,
-        test_no_reader_is_called_outside_the_readers_table,
-        test_793_stale_pin_reads_as_probe_health_not_three_renames,
-        test_every_swept_url_declares_an_anchor,
-        test_report_separates_verified_change_from_probe_health,
-        test_enum_body_survives_struct_variants_and_indentation,
-        test_report_h1_is_the_issue_title_and_carries_the_disposition,
-        test_ts_comment_strip_survives_a_quote_detector_line,
-        test_rust_comment_strip_is_not_confused_by_lifetimes,
-        test_omp_env_sweeps_fire_and_stay_silent,
-        test_every_block_reader_strips_comments_before_counting_braces,
-        test_the_hermes_approval_gate_stays_observer_only,
-        test_a_partial_parse_files_no_verified_change,
-        test_every_unregistered_row_is_actually_swept,
-        test_no_decoder_read_is_unaccounted_for,
-        test_every_ledger_has_a_missing_registration_row,
-        test_the_floor_can_never_be_weaker_than_what_we_register,
-        test_no_ledger_excuses_a_hook_we_actually_register,
-        test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
-    ):
+    # Derived, not hand-listed: a test missing from the runner is inert while
+    # the suite still prints "all checks passed". Derivation cannot see the OTHER
+    # half — a second `def` of the same name replaces the binding — so that is an
+    # AST scan, and it runs HERE rather than as a test because a test detecting
+    # duplicate names is itself shadowable by a duplicate.
+    defined = [
+        n.name
+        for n in ast.parse(pathlib.Path(__file__).read_text()).body
+        if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")
+    ]
+    if dupes := sorted({n for n in defined if defined.count(n) > 1}):
+        print(f"DRIFT SELFTEST FAILED:\n  - test name defined twice, shadowing: {dupes}")
+        return 1
+    tests = tuple(o for n, o in list(globals().items()) if n.startswith("test_"))
+    for t in tests:
         t()
     if FAILS:
         print("DRIFT SELFTEST FAILED:")

@@ -292,9 +292,7 @@ authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirro
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —
 instruction-count simulation, so runner noise doesn't apply, plus heap-allocation
-measurement — and posts trends via the CodSpeed app, still gating nothing); the `risk radar` PR workflow (`scripts/risk-radar.py`) — deterministic
-path matching that posts the documented blast-radius escalations as a sticky PR comment so
-prose-only escalation can't be silently skipped (#198); and `just comment-lint`'s ast-grep
+measurement — and posts trends via the CodSpeed app, still gating nothing); and `just comment-lint`'s ast-grep
 arm, whose npm install keeps it in advisory `ci-supplemental` where a registry outage cannot
 become a required check. A proposal to make that arm BLOCK is priced by `just
 comment-lint-replay N` (#907). Merged is not adjudicated — read the flagged lines before
@@ -403,8 +401,8 @@ you:
    Where does it write transcripts, what does a line look like, does it have
    hooks, what identifies a session? Pin every fact to an upstream file/version
    in your comments — wire formats change without notice (`Task` → `Agent` did),
-   and a guessed format decodes nothing (see the "Keeping the decode mapping
-   current" section in `crates/pixtuoid-core/CLAUDE.md`).
+   and a guessed format decodes nothing (the anchor grade and the three
+   dispositions are in `scripts/check_upstream_drift.py`'s module docstring).
 
    **Audit its HOME RESOLVER in the same pass, per axis** — home order,
    config-dir API, env-override semantics (verbatim vs `~`-expanded; is

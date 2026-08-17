@@ -118,24 +118,6 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
     v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
-/// The COMPLETE set of codex rollout OUTER `type` discriminators — every
-/// `RolloutItem` variant (`codex-rs/history/src/lib.rs`, `rename_all =
-/// "snake_case"`), NOT just the ones we decode: a listed-but-undecoded outer
-/// must stay SILENT, else the drift breadcrumb floods on lines codex emits
-/// every session. `read_codex_rollout_outers` in `check_upstream_drift.py`
-/// alarms in CI when upstream adds a variant this list is missing.
-const KNOWN_OUTERS: &[&str] = &[
-    "session_meta",
-    "response_item",
-    "inter_agent_communication",
-    "inter_agent_communication_metadata",
-    "compacted",
-    "turn_context",
-    "world_state",
-    "event_msg",
-    "security_risk_score",
-];
-
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -247,15 +229,6 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
             } else {
                 vec![]
             }
-        }
-        // An unrecognized OUTER `type` is a structural wire change, and the
-        // only live-stream signal for it: CI's fetch-based check alarms a
-        // VANISHED type, never a brand-new one in a user's own stream. A KNOWN
-        // outer with an unhandled INNER stays silent — codex emits dozens per
-        // session and they would flood the warn-floor.
-        (other, _) if !other.is_empty() && !KNOWN_OUTERS.contains(&other) => {
-            crate::source::drift::unknown_event(source, other);
-            vec![]
         }
         _ => vec![],
     };
@@ -679,45 +652,11 @@ mod tests {
     }
 
     #[test]
-    fn unknown_outer_breadcrumbs_but_known_outer_and_session_meta_stay_silent() {
-        let novel = serde_json::json!({ "type": "brand_new_outer_2027", "payload": {} });
-        let logs = crate::test_capture::capture_logs(|| {
-            let out = decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, novel).unwrap();
-            assert!(
-                out.is_empty(),
-                "an unknown outer decodes to no events: {out:?}"
-            );
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("brand_new_outer_2027"),
-            "a brand-new codex outer must fire the drift breadcrumb, got:\n{logs}"
-        );
-
-        let known_ignored = serde_json::json!({
-            "type": "event_msg",
-            "payload": { "type": "some_ignored_event_2027" },
-        });
-        let quiet = crate::test_capture::capture_logs(|| {
-            decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, known_ignored).unwrap();
-        });
-        assert!(
-            !quiet.contains("unknown_event"),
-            "a known outer with an ignored inner must NOT breadcrumb, got:\n{quiet}"
-        );
-
-        let meta = serde_json::json!({ "type": "session_meta", "payload": { "cwd": "/x" } });
-        let quiet_meta = crate::test_capture::capture_logs(|| {
-            decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, meta).unwrap();
-        });
-        assert!(
-            !quiet_meta.contains("unknown_event"),
-            "session_meta must not breadcrumb, got:\n{quiet_meta}"
-        );
-
-        // The REAL undecoded outers, which the fictional one above cannot
-        // catch: `compacted` fires on every `/compact`, `world_state` on state
-        // patches, so omitting them from KNOWN_OUTERS floods the warn-floor.
+    fn no_rollout_outer_breadcrumbs_however_new() {
         for outer in [
+            "brand_new_outer_2027",
+            "session_meta",
+            "event_msg",
             "compacted",
             "world_state",
             "inter_agent_communication",
@@ -730,8 +669,8 @@ mod tests {
                 decode_codex_line("/x/rollout.jsonl", SOURCE_NAME, line).unwrap();
             });
             assert!(
-                !quiet.contains("unknown_event"),
-                "known outer {outer:?} must NOT breadcrumb (it would flood), got:\n{quiet}"
+                !quiet.contains(crate::source::drift::TARGET),
+                "outer {outer:?} carries nothing we read, so it must stay out of the drift log:\n{quiet}"
             );
         }
     }

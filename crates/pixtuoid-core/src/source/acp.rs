@@ -14,30 +14,6 @@ use serde_json::{Map, Value};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
-/// The COMPLETE latest ACP v1 `sessionUpdate` tag vocabulary
-/// (`schema/v1/schema.unstable.json` — grok pins `features = ["unstable"]`, so the
-/// unstable surface is its real vocabulary; some tags land only on grok's next ACP
-/// bump and are KNOWN early so they never flood). The three per-token
-/// `*_message_chunk` tags MUST stay in this set or the unknown-tag breadcrumb floods
-/// (`drift::unknown_event` has NO dedup). `read_acp_tags` in
-/// `check_upstream_drift.py` pings review when upstream adds a tag, BEFORE it can
-/// flood.
-pub(crate) const KNOWN_ACP_TAGS: &[&str] = &[
-    "user_message_chunk",
-    "agent_message_chunk",
-    "agent_thought_chunk",
-    "tool_call",
-    "tool_call_update",
-    "plan",
-    "plan_update",
-    "plan_removed",
-    "available_commands_update",
-    "current_mode_update",
-    "config_option_update",
-    "session_info_update",
-    "usage_update",
-];
-
 /// Decode one ACP `session/update` notification's `update` object into activity
 /// events; the caller injects `agent_id` and its own `tool_detail` (invariant #3).
 ///
@@ -47,7 +23,6 @@ pub(crate) const KNOWN_ACP_TAGS: &[&str] = &[
 /// are not completions.
 pub(crate) fn decode_session_update(
     agent_id: AgentId,
-    source: &str,
     update: &Map<String, Value>,
     tool_detail: impl Fn(&str, Option<&Value>) -> ToolDetail,
 ) -> Vec<AgentEvent> {
@@ -70,11 +45,6 @@ pub(crate) fn decode_session_update(
             }],
             _ => vec![],
         },
-        t if KNOWN_ACP_TAGS.contains(&t) => vec![],
-        t if !t.is_empty() => {
-            crate::source::drift::unknown_event(source, &format!("session/update:{t}"));
-            vec![]
-        }
         _ => vec![],
     }
 }
@@ -94,7 +64,7 @@ mod tests {
         }
     }
     fn decode(update: Value) -> Vec<AgentEvent> {
-        decode_session_update(agent(), SRC, update.as_object().unwrap(), detail)
+        decode_session_update(agent(), update.as_object().unwrap(), detail)
     }
 
     #[test]
@@ -136,56 +106,27 @@ mod tests {
         );
     }
 
+    /// Blank, per-token and brand-new tags alike decode to nothing IN SILENCE:
+    /// a tag we never read cannot cost us an event, and breadcrumbing one meant
+    /// hand-maintaining the whole v1 vocabulary to hold back a per-token flood.
     #[test]
-    fn an_absent_or_empty_session_update_tag_never_breadcrumbs() {
-        // A missing/blank tag is a MALFORMED notification, not an upstream
-        // vocabulary addition — breadcrumbing it would flood `unknown_event`
-        // (which has no dedup) with a name that names nothing.
-        for update in [json!({}), json!({"sessionUpdate": ""})] {
-            let logs = crate::test_capture::capture_logs(|| {
-                assert!(decode(update.clone()).is_empty());
-            });
-            assert!(
-                !logs.contains("unknown_event"),
-                "an empty tag must stay silent, got:\n{logs}"
-            );
-        }
-    }
-
-    #[test]
-    fn unknown_tag_breadcrumbs_but_known_tags_stay_silent() {
-        let logs = crate::test_capture::capture_logs(|| {
-            assert!(
-                decode(json!({"sessionUpdate": "teleport_update"})).is_empty(),
-                "an unknown tag decodes to no events"
-            );
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("session/update:teleport_update"),
-            "a new ACP tag must breadcrumb the composed name, got:\n{logs}"
-        );
-
-        for tag in KNOWN_ACP_TAGS {
-            let quiet = crate::test_capture::capture_logs(|| {
-                decode(json!({ "sessionUpdate": tag }));
-            });
-            assert!(
-                !quiet.contains("unknown_event"),
-                "known ACP tag {tag:?} must NOT breadcrumb (it would flood), got:\n{quiet}"
-            );
-        }
-    }
-
-    #[test]
-    fn the_per_token_flood_chunks_are_in_the_vocabulary() {
-        for chunk in [
-            "user_message_chunk",
-            "agent_message_chunk",
-            "agent_thought_chunk",
+    fn no_session_update_tag_breadcrumbs_however_new() {
+        for update in [
+            json!({}),
+            json!({"sessionUpdate": ""}),
+            json!({"sessionUpdate": "agent_message_chunk"}),
+            json!({"sessionUpdate": "usage_update"}),
+            json!({"sessionUpdate": "teleport_update"}),
         ] {
+            let logs = crate::test_capture::capture_logs(|| {
+                assert!(
+                    decode(update.clone()).is_empty(),
+                    "{update} decodes to no events"
+                );
+            });
             assert!(
-                KNOWN_ACP_TAGS.contains(&chunk),
-                "{chunk} must stay in KNOWN_ACP_TAGS or the tag tier floods per token"
+                !logs.contains(crate::source::drift::TARGET),
+                "{update} reached the drift log:\n{logs}"
             );
         }
     }

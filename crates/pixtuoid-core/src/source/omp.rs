@@ -467,33 +467,6 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
-/// The COMPLETE `RawFileEntry` union of omp session-entry `type`
-/// discriminators (upstream `session/session-entries.ts`), NOT just the ones we
-/// decode: a `type` OUTSIDE this set breadcrumbs, a KNOWN-but-undecoded one
-/// stays silent, because `drift::unknown_event` has NO dedup and omp writes
-/// those routinely (drift.rs's anti-flood rule). The nested `customType` axis
-/// is deliberately NOT guarded — unbounded and extension-authored. Kept honest
-/// by `read_omp_known_types` in `check_upstream_drift.py`.
-const KNOWN_ENTRY_TYPES: &[&str] = &[
-    "branch_summary",
-    "compaction",
-    "credential_pin",
-    "custom",
-    "custom_message",
-    "label",
-    "message",
-    "mode_change",
-    "model_change",
-    "reset_boundary",
-    "service_tier_change",
-    "session",
-    "session_init",
-    "thinking_level_change",
-    "title",
-    "title_change",
-    "ttsr_injection",
-];
-
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -625,14 +598,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
-        // A `type` OUTSIDE KNOWN_ENTRY_TYPES is a structural wire change — the
-        // live-stream signal for a brand-new omp entry SHAPE that CI's
-        // fetch-based defense can't see in a user's own stream.
-        other if !other.is_empty() && !KNOWN_ENTRY_TYPES.contains(&other) => {
-            crate::source::drift::unknown_event(source, other);
-            vec![]
-        }
-        // KNOWN types that are not sprite-visible, silent so they can't flood.
+        // Not sprite-visible.
         // (model_change stays undecoded even though the burn tier reads model:
         // its value is the provider-prefixed combined form, and every assistant
         // message re-stamps the bare `model` anyway — one turn's lag.)
@@ -1111,20 +1077,9 @@ mod tests {
     }
 
     #[test]
-    fn unknown_entry_type_breadcrumbs_but_known_types_stay_silent() {
-        let novel = r#"{"type":"quantum_entry","id":"x","parentId":null,"timestamp":"t"}"#;
-        let logs = crate::test_capture::capture_logs(|| {
-            assert!(
-                decode(novel).is_empty(),
-                "an unknown entry type decodes to no events"
-            );
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("quantum_entry"),
-            "a brand-new omp entry type must fire the drift breadcrumb, got:\n{logs}"
-        );
-
+    fn no_entry_type_breadcrumbs_however_new() {
         for line in [
+            r#"{"type":"quantum_entry","id":"x","parentId":null,"timestamp":"t"}"#,
             r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"t","pad":"   "}"#,
             r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"m"}"#,
             r#"{"type":"compaction","id":"x","parentId":null,"timestamp":"t","summary":"…"}"#,
@@ -1137,8 +1092,8 @@ mod tests {
                 assert!(decode(line).is_empty());
             });
             assert!(
-                !quiet.contains("unknown_event"),
-                "known omp entry type must NOT breadcrumb (it would flood), got:\n{quiet}"
+                !quiet.contains(crate::source::drift::TARGET),
+                "an entry we read nothing from must stay out of the drift log:\n{quiet}"
             );
         }
     }

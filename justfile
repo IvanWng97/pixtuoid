@@ -30,7 +30,7 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 # workflow `run:` blocks go to actionlint, composite-action ones to
 # `actionlint-composites`. Both are shellcheck-only — shfmt cannot rewrite a
 # scalar in place — so adding a file here is not enough for embedded shell.
-SHELL_SOURCES := "scripts/*.sh scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
+SHELL_SOURCES := "scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
@@ -1529,20 +1529,3 @@ fixture-pii-selftest:
 [doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
 fixture-age *args:
     python3 scripts/fixture-age.py {{ args }}
-
-# Risk radar — show the documented review escalations for the high-risk seams
-# THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing
-# so you know what a reviewer must check; the `risk radar` PR workflow posts the
-# same checklist as a sticky comment. `base` defaults to the branch point.
-[group('meta')]
-[doc('Surface review escalations for the high-risk seams this branch touches')]
-risk-radar base="origin/main":
-    @git diff --name-only {{ base }}...HEAD | python3 scripts/risk-radar.py || true
-
-# Self-test the risk-radar matcher — the gate on its seam map (the `risk radar`
-# workflow runs this before every radar). A broken predicate is a silent
-# escalation miss. Pure Python, no deps, no network.
-[group('meta')]
-[doc('Self-test the risk-radar matcher (seam map predicates)')]
-risk-radar-test:
-    python3 scripts/risk-radar.py --selftest
