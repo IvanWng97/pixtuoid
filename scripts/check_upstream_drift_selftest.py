@@ -1333,6 +1333,68 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         d.load_fragment = real
 
 
+def test_staleness_reports_a_gap_and_never_invents_one() -> None:
+    """The staleness sweep, both directions, offline.
+
+    Its whole value is that it cannot be wrong, so the arms that must stay
+    SILENT matter as much as the one that fires: a prerelease leading the feed
+    (codex ships `-alpha` tags) or a draft must not read as a published version
+    we are behind.
+    """
+    real = d.try_fetch
+    try:
+        def feed(*rels):
+            return json.dumps(list(rels))
+
+        def drive(sources, body):
+            d.try_fetch = lambda url, label, report: body
+            rep = d.Report()
+            d.check_source_staleness(sources, report=rep)
+            return rep
+
+        gh = {"kind": "github", "repo": "o/r", "version_in": "tag"}
+        row = {"s": {"verified_version": "1.2.0", "release_feed": gh}}
+
+        rep = drive(row, feed({"tag_name": "v1.2.0", "body": ""}))
+        check(not rep.review, f"same version must stay silent, got {rep.review}")
+
+        rep = drive(row, feed({"tag_name": "v1.3.0", "body": "fixed a typo"}))
+        check(len(rep.review) == 1 and "1.3.0" in rep.review[0],
+              f"a published gap must fire once naming it, got {rep.review}")
+        check("mention" not in rep.review[0],
+              f"no keyword hit must not claim one: {rep.review[0]}")
+
+        rep = drive(row, feed({"tag_name": "v1.3.0", "body": "renamed the hook payload"}))
+        check("rename" in rep.review[0] and "hook" in rep.review[0],
+              f"wire keywords must be surfaced: {rep.review[0]}")
+
+        # The arms that must NOT fire — this is the class the old watch failed.
+        rep = drive(row, feed({"tag_name": "v9.9.9", "prerelease": True, "body": ""},
+                              {"tag_name": "v1.2.0", "body": ""}))
+        check(not rep.review, f"a prerelease is not a published version: {rep.review}")
+        rep = drive(row, feed({"tag_name": "v9.9.9", "draft": True, "body": ""},
+                              {"tag_name": "v1.2.0", "body": ""}))
+        check(not rep.review, f"a draft is not a published version: {rep.review}")
+        # The unparseable tag must be SKIPPED OVER, not merely rejected at the
+        # end: a feed led by a `pr-…` build with a real newer release behind it
+        # is the shape that tells the two apart.
+        rep = drive(row, feed({"tag_name": "pr-124528-profiles", "body": ""},
+                              {"tag_name": "v1.4.0", "body": ""}))
+        check(len(rep.review) == 1 and "1.4.0" in rep.review[0],
+              f"a non-version tag is skipped and the real release found: {rep.review}")
+
+        # No stream and no pin are REPORTED, never silent — a source nobody can
+        # verify must not look identical to one that is current.
+        rep = drive({"s": {"verified_version": "1.0.0", "release_feed": {"kind": "none"}}}, "")
+        check(len(rep.blind) == 1 and "nothing published" in rep.blind[0],
+              f"an unpublished source reports as such: {rep.blind}")
+        rep = drive({"s": {"verified_version": "unknown", "release_feed": gh}}, "")
+        check(len(rep.blind) == 1 and "unknown" in rep.blind[0],
+              f"a missing pin is reported: {rep.blind}")
+    finally:
+        d.try_fetch = real
+
+
 def main() -> int:
     # Derived, not hand-listed: a test missing from the runner is inert while
     # the suite still prints "all checks passed". Derivation cannot see the OTHER

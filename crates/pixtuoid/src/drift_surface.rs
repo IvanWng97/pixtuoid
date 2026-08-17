@@ -106,4 +106,26 @@ mod tests {
             );
         }
     }
+
+    /// Byte-stability across feature unification. The workspace enables
+    /// serde_json's `preserve_order`, so an object built by `json!({…})` is
+    /// sorted under `cargo test -p` and insertion-ordered under `cargo nextest
+    /// run --workspace`. That difference reached the committed file and made the
+    /// gate above pass one way and fail the other; sorted keys everywhere is
+    /// what makes it a gate rather than a coin flip.
+    #[test]
+    fn every_emitted_object_has_sorted_keys() {
+        fn walk(v: &Value, path: &str) {
+            if let Some(o) = v.as_object() {
+                let keys: Vec<&str> = o.keys().map(String::as_str).collect();
+                let mut sorted = keys.clone();
+                sorted.sort_unstable();
+                assert_eq!(keys, sorted, "{path} emits keys in insertion order");
+                for (k, x) in o {
+                    walk(x, &format!("{path}.{k}"));
+                }
+            }
+        }
+        walk(&surface(), "<root>");
+    }
 }

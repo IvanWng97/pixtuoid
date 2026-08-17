@@ -69,7 +69,51 @@ fn surface() -> Value {
         json!(crate::source::grok::XAI_SESSION_UPDATE_METHOD),
     );
 
-    json!({ "decoded": decoded, "values": values })
+    // The per-source staleness row: what version we last VERIFIED this decoder
+    // and its fixtures against, and where that CLI publishes releases. This is
+    // what lets a watcher say how old our evidence is WITHOUT scraping the
+    // vendor's private file layout.
+    let sources: BTreeMap<&str, Value> = crate::source::registry::REGISTRY
+        .iter()
+        .map(|d| {
+            let mut feed: BTreeMap<&str, Value> = BTreeMap::new();
+            match d.release_feed {
+                crate::source::registry::ReleaseFeed::GitHub { repo, version_in } => {
+                    feed.insert("kind", json!("github"));
+                    feed.insert("repo", json!(repo));
+                    feed.insert(
+                        "version_in",
+                        json!(match version_in {
+                            crate::source::registry::ReleaseField::Tag => "tag",
+                            crate::source::registry::ReleaseField::Name => "name",
+                        }),
+                    );
+                }
+                crate::source::registry::ReleaseFeed::Npm(pkg) => {
+                    feed.insert("kind", json!("npm"));
+                    feed.insert("package", json!(pkg));
+                }
+                crate::source::registry::ReleaseFeed::None => {
+                    feed.insert("kind", json!("none"));
+                }
+            }
+            let mut row: BTreeMap<&str, Value> = BTreeMap::new();
+            row.insert("verified_version", json!(d.verified_version));
+            row.insert("release_feed", json!(feed));
+            (d.name, json!(row))
+        })
+        .collect();
+
+    // EVERY object goes through a BTreeMap, never a `json!` object literal: the
+    // workspace enables serde_json's `preserve_order` (pixtuoid does), and
+    // feature unification hands it to this crate too — so a `json!` map is
+    // sorted under `cargo test -p` and insertion-ordered under `just test`. The
+    // committed file must be byte-stable across both or the gate flaps.
+    let mut root: BTreeMap<&str, Value> = BTreeMap::new();
+    root.insert("decoded", json!(decoded));
+    root.insert("values", json!(values));
+    root.insert("sources", json!(sources));
+    json!(root)
 }
 
 fn fragment_path() -> PathBuf {
@@ -130,5 +174,27 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Byte-stability across feature unification. The workspace enables
+    /// serde_json's `preserve_order`, so an object built by `json!({…})` is
+    /// sorted under `cargo test -p` and insertion-ordered under `cargo nextest
+    /// run --workspace`. That difference reached the committed file and made the
+    /// gate above pass one way and fail the other; sorted keys everywhere is
+    /// what makes it a gate rather than a coin flip.
+    #[test]
+    fn every_emitted_object_has_sorted_keys() {
+        fn walk(v: &Value, path: &str) {
+            if let Some(o) = v.as_object() {
+                let keys: Vec<&str> = o.keys().map(String::as_str).collect();
+                let mut sorted = keys.clone();
+                sorted.sort_unstable();
+                assert_eq!(keys, sorted, "{path} emits keys in insertion order");
+                for (k, x) in o {
+                    walk(x, &format!("{path}.{k}"));
+                }
+            }
+        }
+        walk(&surface(), "<root>");
     }
 }
