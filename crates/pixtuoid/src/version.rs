@@ -73,10 +73,10 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // `match` brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
         "0.17.0" => Some(&[
-            "`validate-pack` now rejects a density variant whose size doesn't match the density its own name claims, and says so at load time too",
-            "Sprite packs may now DECLARE higher-density art — a `desk@4x` alongside `desk`. Nothing paints it yet: this release defines the contract so packs can be authored ahead of the renderer that will use it",
-            "`pixtuoid doctor` gained a `graphics:` row reporting what this terminal COULD paint, and `--graphics off` to skip the query",
-            "Otherwise groundwork: the office looks the same, but its SIZE and its RESOLUTION are now separate — so a later release can draw the same room in more detail instead of more desks",
+            "`pixtuoid doctor` is one report — sources, install health, CLI versions and decode drift, categorized and colorized, each row carrying the thing to run next",
+            "The office reads better — desks face each other across the pods, lamps take over after dark, and a plain 80x24 terminal lays out a real office again instead of refusing",
+            "A fuller band — a bass stem plus kalimba and vibraphone leads join the procedural lofi, over a wider jazz harmony",
+            "Painting a frame costs 45-57% less and is byte-for-byte identical: an idle 360x240 office went 1246 to 542us",
         ]),
         "0.16.0" => Some(&[
             "The office you can hear — press m for procedural lofi that builds with the bustle, plus typing, rain, door and appliance cues. Starts muted; + and - set volume",
