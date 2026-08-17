@@ -9,6 +9,7 @@ use super::walk::{
     TASK_SCAN_BYTES,
 };
 use super::*;
+use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
 use crate::source::decoder::{accept_all_paths, default_id_from_path};
 use crate::source::registry::cwd_extractor_for;
 use crate::source::{AgentEvent, Transport};
@@ -539,8 +540,6 @@ fn cc_metadata_touched_transcript() -> String {
 
 #[tokio::test]
 async fn a_metadata_touched_dead_cc_transcript_is_gated_though_its_mtime_is_fresh() {
-    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
-
     // Wide enough to hold the fixture's 2026 stamps for this suite's lifetime.
     const TEN_YEARS: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
     const ONE_HOUR: Duration = Duration::from_secs(3600);
@@ -587,8 +586,6 @@ async fn a_metadata_touched_dead_cc_transcript_is_gated_though_its_mtime_is_fres
 
 #[tokio::test]
 async fn a_turnless_tail_gates_even_though_the_newest_turn_is_off_window() {
-    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
-
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("buried-turn.jsonl");
     let mut body = String::new();
@@ -692,8 +689,6 @@ async fn an_unnamed_type_carrying_the_turn_payload_revives_a_gated_transcript() 
         "a renamed TURN type carries `message.role`+`content`, so it must revive"
     );
 }
-
-use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
 
 /// The gated-transcript revive harness both revive tests need: append one line,
 /// walk, and report whether the walk re-emitted `SessionStart`. Separate files
@@ -877,8 +872,6 @@ async fn gated_file_oversized_ended_append_stays_unregistered() {
 
 #[tokio::test]
 async fn gated_file_oversized_metadata_only_append_stays_unregistered() {
-    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
-
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("gated-big-sidecar.jsonl");
     let initial = "{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n";

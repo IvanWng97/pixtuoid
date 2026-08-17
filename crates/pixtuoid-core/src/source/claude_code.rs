@@ -1067,9 +1067,6 @@ mod tests {
     #[test]
     fn no_sidecar_line_breadcrumbs_whether_or_not_we_have_seen_its_type() {
         let path = "/x/.claude/projects/p/s.jsonl";
-        // The last case is a real `attachment` line with a brand-new inner
-        // `attachment.type`: the guard reads the top-level `type` and `message`,
-        // so an inner discriminator is not something it can see at all.
         let quiet = crate::test_capture::capture_logs(|| {
             for v in [
                 json!({"type": "quantum-line", "foo": 1}),
@@ -1085,6 +1082,7 @@ mod tests {
                 json!({"type": "pr-link"}),
                 json!({"type": "bridge-session"}),
                 json!({"type": "system", "subtype": "brand_new_subtype_2027"}),
+                // INNER discriminator: the guard reads the top-level `type`.
                 json!({"type": "attachment", "attachment": {"type": "brand_new_kind_2027"}}),
             ] {
                 assert!(

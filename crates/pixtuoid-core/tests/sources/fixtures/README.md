@@ -117,7 +117,7 @@ test can see, because every test asserts our own belief about the wire: CC's
 permission gate is `PermissionRequest`, the decoder had read it for years, and
 `install/claude.rs` registered four tool events without it — so a session parked
 on a permission prompt rendered as working, indefinitely. Only a capture of a
-gated run says which of the two lists is wrong.
+gated run says which side is wrong.
 
 Each fixture is a directory:
 

@@ -401,8 +401,8 @@ you:
    Where does it write transcripts, what does a line look like, does it have
    hooks, what identifies a session? Pin every fact to an upstream file/version
    in your comments — wire formats change without notice (`Task` → `Agent` did),
-   and a guessed format decodes nothing (see the "Keeping the decode mapping
-   current" section in `crates/pixtuoid-core/CLAUDE.md`).
+   and a guessed format decodes nothing (the anchor grade and the three
+   dispositions are in `scripts/check_upstream_drift.py`'s module docstring).
 
    **Audit its HOME RESOLVER in the same pass, per axis** — home order,
    config-dir API, env-override semantics (verbatim vs `~`-expanded; is
