@@ -6,7 +6,7 @@
 //!
 //! Four defenses, weakest last: a SEMANTIC signal beats a hardcoded name
 //! (`make_tool_detail` keys dispatch on `subagent_type`); these breadcrumbs;
-//! `every_registered_*_event_decodes` in `install/`, one per source; and
+//! the `every_registered_*_event_decodes` tests in `install/`; and
 //! `scripts/check_upstream_drift.py` where upstream is fetchable — CC's
 //! transcript and antigravity have no schema, so they stop at this file.
 //!
@@ -17,7 +17,7 @@
 //! the condition that actually costs events instead: a payload we decode having
 //! gone, or an unknown discriminator arriving WITH that payload (CC's
 //! `decode_cc_line`). An unrecognized `hook_event_name` VALUE is safe to name in
-//! the 8 `install/` sources, whose shim only receives hooks they registered. It
+//! the `install/` sources, whose shim only receives hooks they registered. It
 //! catches a re-SPELLING, never a rename: registration is name-keyed, so a
 //! renamed hook never fires at all. That direction is CI's (defense 4).
 //!

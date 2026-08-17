@@ -566,6 +566,26 @@ mod tests {
         };
         let turn = r#","message":{"role":"assistant","content":[]}"#;
 
+        // The scan visits EVERY line: a sidecar before a turn must not end it,
+        // and a typeless line must keep the tail unclassifiable rather than
+        // letting the sidecars around it vouch for a dead session.
+        let two = |a: String, b: String| format!("{a}\n{b}\n").into_bytes();
+        assert!(
+            matches!(
+                cc_activity_recency(&two(line("pr-link", ""), line("assistant", ""))),
+                TailActivity::At(_)
+            ),
+            "a sidecar line before a turn must not stop the scan"
+        );
+        assert_eq!(
+            cc_activity_recency(&two(
+                r#"{"timestamp":"2026-07-29T05:46:24.525Z"}"#.to_string(),
+                line("pr-link", "")
+            )),
+            TailActivity::Unknown,
+            "a typeless line must leave the tail unclassifiable, never SidecarOnly"
+        );
+
         // A renamed turn type keeps its timestamp instead of blanking the tail.
         match cc_activity_recency(line("assistant-v2", turn).as_bytes()) {
             TailActivity::At(_) => {}

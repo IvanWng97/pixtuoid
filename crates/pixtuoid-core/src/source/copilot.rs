@@ -766,7 +766,6 @@ mod tests {
 
     #[test]
     fn no_event_namespace_breadcrumbs_however_new() {
-        // `abort` is the dot-less namespace (the whole `type` IS the family).
         for kind in [
             "telepathy.transmit",
             "assistant.message_delta",

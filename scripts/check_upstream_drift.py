@@ -95,12 +95,6 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
 
 
-
-
-
-
-
-
 REASONIX_HOOK_URL = (
     "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/main-v2/"
     "internal/hook/hook.go"
@@ -292,14 +286,9 @@ KIMI_HOOKS_URL = (
     "docs/en/customization/hooks.md"
 )
 
-# Three depended surfaces in three files: the hook event enum + payload serde,
-# the transcript xAI-extension vocabulary, and the active_sessions.json
-# liveness-registry struct. The ACP half of the transcript vocabulary lives in the
-# external agent-client-protocol crate and is deliberately NOT fetched here — a
-# versioned protocol, pinned in-repo by grok's own wire_tags guard test.
 # `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
-# blind rather than wrong — but a blind flood guard is an unwatched one, and this
-# one was hiding an outer we did not know about (`security_risk_score`).
+# blind rather than wrong — but a blind check is an unwatched one, and this one was
+# hiding an outer we did not know about (`security_risk_score`).
 CODEX_ROLLOUT_ITEM_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
 )
@@ -318,13 +307,9 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
     "agent-client-protocol/main/schema/v1/schema.unstable.json"
 )
 
-# grok's xAI extension namespace, the ONE method name not derivable from the
-# decode block: its `match method` nests a second match whose bare arms
-# over-collect. The ACP-standard `session/update` is deliberately absent — no
-# document declares it, so claiming to watch it would be the false-coverage
-# class this file exists to avoid; the ACP TAGS underneath it are watched below.
-GROK_XAI_METHOD = "_x.ai/session/update"
-
+# Three depended surfaces in three files: the hook event enum + payload serde,
+# the transcript xAI-extension vocabulary, and the active_sessions.json
+# liveness-registry struct.
 GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-hooks/src/event.rs"
@@ -337,8 +322,6 @@ GROK_ACTIVE_SESSIONS_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-active-sessions/src/lib.rs"
 )
-
-
 
 
 # Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
@@ -938,8 +921,6 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     return event_msg, response_item
 
 
-
-
 def read_cc_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/claude.rs", "EVENTS")
 
@@ -1100,8 +1081,6 @@ def read_omp_entry_types() -> set[str]:
     return set(re.findall(r'(?m)^\s*"(\w+)"\s*(?:=>|if\b|$)', m.group(1)))
 
 
-
-
 def read_copilot_events() -> set[str]:
     """The event `type` strings the decoder maps, read from the decoder's own
     `match kind` block. Scoped to that block so the test fixtures below (which
@@ -1111,8 +1090,6 @@ def read_copilot_events() -> set[str]:
     if not m:
         raise RuntimeError("could not locate the `match kind` block in source/copilot.rs")
     return set(re.findall(r'"((?:session|tool|subagent|permission)\.[a-z._]+)"', m.group(1)))
-
-
 
 
 def read_cursor_events() -> set[str]:
@@ -1136,7 +1113,6 @@ def openclaw_plugin_default_port() -> str | None:
         return None
     m = re.search(r"const DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", src)
     return m.group(1) if m else None
-
 
 
 def python_set_literal(src: str, decl: str) -> set[str]:
@@ -1173,8 +1149,6 @@ def read_grok_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/grok.rs", "GROK_EVENTS")
 
 
-
-
 def read_kimi_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/kimi.rs", "KIMI_EVENTS")
 
@@ -1203,8 +1177,6 @@ def upstream_grok_hooks(text: str) -> set[str] | None:
     # carry CamelCase tokens we must not admit.
     found = set(re.findall(r"(?m)^\s*([A-Z]\w+)\s*\{", block))
     return found or None
-
-
 
 
 def _copilot_type_const(sch: object) -> str | None:
@@ -1257,8 +1229,6 @@ def upstream_copilot_namespaces(text: str) -> set[str] | None:
         if c:
             namespaces.add(c.split(".", 1)[0])
     return namespaces or None
-
-
 
 
 def upstream_copilot_field_names(text: str) -> set[str] | None:
@@ -1418,8 +1388,6 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
         )
         return False
     return True
-
-
 
 
 def read_our_names(report: Report) -> OurNames:
@@ -1687,16 +1655,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
-            # The xAI extension namespace is spelled in the notification module;
-            # `session/update` is ACP-standard and checked against the ACP schema.
-            for method in [GROK_XAI_METHOD]:
-                if method not in text:
-                    report.add_breaking(
-                        f"grok method namespace `{method}` is GONE from "
-                        f"extensions/notification.rs — renamed; decode_grok_line gates "
-                        f"every xAI notification before its tag is read (no subagent "
-                        f"link / no model info / no end marker)."
-                    )
             for variant in sorted(GROK_XAI_VARIANTS):
                 if not re.search(rf"(?m)^\s*{variant}\b", text):
                     report.add_breaking(
@@ -1723,9 +1681,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"negative vouch / focus) degrades to mtime gating."
                     )
 
-    # The ACP-standard half of grok's transcript: `session/update` + the two tags
+    # The ACP method `session/update` and the two `sessionUpdate` tags
     # `decode_session_update` turns into events. v1 only — grok does not speak v2.
+    # xAI's OWN `_x.ai/session/update` is deliberately unwatched: its single
+    # upstream occurrence is inside a `///`, so a check would alarm on a comment
+    # reflow rather than a rename.
     up_acp: set[str] = set()
+    acp_method_declared = False
     acp_parsed = False
     for url, label in (
         (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
@@ -1744,6 +1706,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         else:
             up_acp |= tags
             acp_parsed = True
+            # `"x-method": "session/update"` — a machine-readable declaration, so
+            # this rides the same parser gate and needs no anchor of its own.
+            acp_method_declared |= '"session/update"' in acp_text
+    if acp_parsed and not acp_method_declared:
+        report.add_breaking(
+            "the ACP method `session/update` is GONE from the ACP schema — renamed; "
+            "`decode_grok_line` gates on it before any tag is read, so every "
+            "ACP-standard activity event is lost."
+        )
     if acp_parsed:
         for tag in sorted(ours.acp_decoded_tags or ()):
             if tag not in up_acp:
@@ -2104,7 +2075,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
-
 
 
 def main() -> int:
