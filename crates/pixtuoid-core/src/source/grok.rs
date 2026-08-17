@@ -311,14 +311,6 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 }
 
 /// The COMPLETE set of grok transcript `method` namespaces: the ACP standard
-/// `session/update` and the xAI extension `_x.ai/session/update`. A `method`
-/// outside this set is a brand-new top-level wire namespace and breadcrumbs —
-/// the LOW-cardinality axis. An unhandled `sessionUpdate` TAG under a known
-/// method stays SILENT: those chunks stream per token and `drift::unknown_event`
-/// has NO dedup, so breadcrumbing each would flood. (The finer ACP-tag tier
-/// lives in `source/acp.rs`.)
-const KNOWN_METHODS: &[&str] = &["session/update", "_x.ai/session/update"];
-
 /// Decode one `updates.jsonl` line. Envelope: `{"timestamp":<unix-secs>,
 /// "method":…,"params":{"sessionId":…,"update":{"sessionUpdate":"<tag>",…}}}`,
 /// where ACP notifications use camelCase fields and the xAI extension's fields
@@ -348,7 +340,6 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
     let decoded: Result<Vec<AgentEvent>> = match method {
         "session/update" => Ok(crate::source::acp::decode_session_update(
             agent_id,
-            SOURCE_NAME,
             update,
             grok_transcript_tool_detail,
         )),
@@ -428,12 +419,6 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
             // rewind_marker, …), so an unhandled extension tag is a silent skip.
             _ => Ok(vec![]),
         },
-        // An empty-string method (an absent one already bailed) is a degenerate
-        // line, not a new namespace.
-        m if !m.is_empty() && !KNOWN_METHODS.contains(&m) => {
-            crate::source::drift::unknown_event(SOURCE_NAME, m);
-            Ok(vec![])
-        }
         _ => Ok(vec![]),
     };
     let mut evs = decoded?;
@@ -1067,35 +1052,6 @@ mod tests {
     }
 
     #[test]
-    fn a_known_or_empty_method_never_breadcrumbs_as_unknown() {
-        // Every line MUST carry a `sessionUpdate` tag or the decode bails
-        // before the method match and the assertion below proves nothing.
-        let line = |method: &str| {
-            json!({"timestamp": 1721131200u64, "method": method,
-                   "params": {"sessionId": "0197fa30-sess",
-                              "update": {"sessionUpdate": "plan"}}})
-        };
-        for method in ["session/update", "_x.ai/session/update", ""] {
-            let logs = crate::test_capture::capture_logs(|| {
-                let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line(method));
-            });
-            assert!(
-                !logs.contains("unknown_event"),
-                "method {method:?} must stay silent, got:\n{logs}"
-            );
-        }
-        // Positive control: the arm DOES fire for a genuinely new namespace, so
-        // the silence asserted above is a decision and not an early return.
-        let logs = crate::test_capture::capture_logs(|| {
-            let _ = decode_grok_line(TRANSCRIPT, SOURCE_NAME, line("_x.ai/teleport"));
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("_x.ai/teleport"),
-            "an unknown method must breadcrumb, got:\n{logs}"
-        );
-    }
-
-    #[test]
     fn model_info_surfaces_when_only_one_of_model_or_effort_is_present() {
         for (field, value) in [("model_id", "grok-4"), ("reasoning_effort", "high")] {
             let evs = decode_line(json!({
@@ -1398,45 +1354,28 @@ mod tests {
         }
     }
 
+    /// Nothing on grok's TRANSCRIPT axis breadcrumbs — not a new method, not a
+    /// new ACP tag, not a per-token chunk. grok is open source and its three
+    /// depended surfaces are all fetched by `check_upstream_drift.py`, which
+    /// alarms when a name we DECODE vanishes; a name we never read is noise on
+    /// both sides.
     #[test]
-    fn unknown_method_and_acp_tag_breadcrumb_but_chunks_and_xai_stay_silent() {
-        let novel = json!({"timestamp": 1721131200u64, "method": "_x.ai/session/telemetry",
-                           "params": {"sessionId": "s", "update": {"sessionUpdate": "beam"}}});
-        let logs = crate::test_capture::capture_logs(|| {
-            assert!(
-                decode_line(novel).is_empty(),
-                "an unknown method decodes to no events"
-            );
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("_x.ai/session/telemetry"),
-            "a brand-new grok method must fire the drift breadcrumb, got:\n{logs}"
-        );
-
-        let tag_logs = crate::test_capture::capture_logs(|| {
-            assert!(decode_line(acp_line(
-                json!({"sessionUpdate": "future_acp_capability_2027"})
-            ))
-            .is_empty());
-        });
-        assert!(
-            tag_logs.contains("unknown_event")
-                && tag_logs.contains("session/update:future_acp_capability_2027"),
-            "a brand-new ACP sessionUpdate tag must breadcrumb via the shared acp decode, got:\n{tag_logs}"
-        );
-
+    fn no_transcript_line_breadcrumbs_however_new_its_method_or_tag() {
         for v in [
+            json!({"timestamp": 1721131200u64, "method": "_x.ai/session/telemetry",
+                   "params": {"sessionId": "s", "update": {"sessionUpdate": "beam"}}}),
+            acp_line(json!({"sessionUpdate": "future_acp_capability_2027"})),
             acp_line(json!({"sessionUpdate": "agent_message_chunk"})),
             acp_line(json!({"sessionUpdate": "user_message_chunk"})),
             xai_line(json!({"sessionUpdate": "diff_review"})),
             xai_line(json!({"sessionUpdate": "rewind_marker_2027"})),
         ] {
             let quiet = crate::test_capture::capture_logs(|| {
-                assert!(decode_line(v).is_empty());
+                assert!(decode_line(v).is_empty(), "decodes to no events");
             });
             assert!(
-                !quiet.contains("unknown_event"),
-                "a per-token chunk or xAI tag must NOT breadcrumb, got:\n{quiet}"
+                !quiet.contains(crate::source::drift::TARGET),
+                "a transcript line we read nothing from reached the drift log:\n{quiet}"
             );
         }
     }
