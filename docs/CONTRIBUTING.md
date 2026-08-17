@@ -413,8 +413,9 @@ you:
    error (#880). PROBE the installed artifact rather than reading docs: `strings`
    a bun binary, `require()` a napi `.node`, run the bundled interpreter — a case
    matrix settles empty/whitespace/`~`/relative, the cases nobody writes down.
-   Record each verdict, and add a `check_upstream_drift.py` row when the resolver
-   is fetchable source.
+   Record each verdict. No drift row: resolver axes were watched by scraping
+   upstream source, and that half is gone — the probe matrix against the shipped
+   artifact is what settles them.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`
    with a `SOURCE_NAME` const, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`),
    a label deriver, and unit tests for every event mapping. Per-source format
@@ -493,8 +494,12 @@ you:
     the per-theme legibility/distinctness guards, and the site bridge test
     (`pixtuoid-scene/tests/site_badge_colors.rs`) all fail until it exists.
 11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
-    entry, and — if the upstream is open source — a
-    `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
+    entry, and — only if the CLI publishes a machine-readable contract (a JSON
+    schema, or a hooks doc written for consumers) — a
+    `scripts/check_upstream_drift.py` check. Do NOT add one that reads its
+    source tree: that shape was deleted, three of its four alarms having been a
+    moved file or our own comment. A closed CLI is covered by the decoder's own
+    drift breadcrumbs, which `doctor` counts and the TUI footer surfaces.
 12. **Three edits no failure message spells out**, all of them roster literals a
     new source is simply absent from:
     - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`
