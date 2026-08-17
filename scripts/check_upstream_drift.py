@@ -557,29 +557,14 @@ class Report:
         self.errors.append(line)
 
     def add_blind(
-        self,
-        what: str,
-        where: str,
-        consequence: str,
-        *,
-        our_source: bool = False,
-        unpublished: bool = False,
+        self, what: str, where: str, consequence: str, *, our_source: bool = False
     ) -> None:
         """A lookup missed. Composed here so the disclaimer always ships with it.
 
         `our_source=True` when the unreadable thing is OURS — the default wording
-        blames upstream, which nothing verified. `unpublished=True` when there is
-        nothing to look up AT ALL: neither wording fits a CLI that simply cuts no
-        releases, and "our parser is stale" would send the reader to fix a script
-        that is working.
+        blames upstream, which nothing verified.
         """
-        if unpublished:
-            cause = (
-                "There is nothing published to compare against — not a failure, "
-                "a property of how this CLI ships."
-            )
-            action = "Verify it the only way that exists: capture its real bytes on a host that has it."
-        elif our_source:
+        if our_source:
             cause = "Our own parser or constant is stale; nothing upstream was consulted."
             action = "Fix the script — this says nothing about upstream."
         else:
@@ -1233,11 +1218,6 @@ class OurNames:
     hermes: set[str] | None = None
     grok: set[str] | None = None
     grok_xai_method: str | None = None
-    # Not a name set: the per-source `verified_version` + release feed rows,
-    # carried here so `run_checks` reaches them through the SAME isolation the
-    # name fields use — an inline load would unwind to main()'s catch-all and
-    # be filed transient.
-    sources: dict | None = None
     kimi: set[str] | None = None
 
 
@@ -1378,14 +1358,6 @@ def read_our_names(report: Report) -> OurNames:
                 "were SKIPPED. Every OTHER source still ran.",
                 our_source=True,
             )
-        ours.sources = lib.get("sources") or None
-        if ours.sources is None:
-            report.add_blind(
-                "how stale our evidence is for EVERY source",
-                "the emitted drift surface has no `sources` rows",
-                "The staleness sweep was SKIPPED for all sources.",
-                our_source=True,
-            )
         method = lib.get("values", {}).get("grok.xai_session_update_method")
         if method:
             ours.grok_xai_method = method  # type: ignore[assignment]
@@ -1399,124 +1371,6 @@ def read_our_names(report: Report) -> OurNames:
     return ours
 
 
-# ─── staleness: how old is our EVIDENCE, per source ──────────────────────────
-#
-# The question this answers is NOT "did upstream rename something" — that is a
-# claim about a file we do not own, and answering it by scraping the vendor's
-# source tree is what produced three of this watch's four historical alarms
-# (#406 upstream restructured, #793 our pin went stale, #728 our own comment
-# leaked into the parser). It answers "how far has this CLI moved since we last
-# verified our decoder against its real bytes", which is a fact about US and
-# cannot be wrong.
-#
-# A version gap is a RE-CAPTURE trigger, not a verdict: `just capture-fixture`
-# records the new wire and the decoder tests then give the real answer.
-
-GITHUB_API = "https://api.github.com/repos/{repo}/releases?per_page=20"
-NPM_API = "https://registry.npmjs.org/{pkg}"
-
-# Release notes mentioning these are the ones worth re-capturing FIRST.
-WIRE_KEYWORDS = ("hook", "event", "schema", "rename", "breaking", "transcript", "session")
-
-
-def version_tuple(text: str) -> tuple[int, ...] | None:
-    """The first dotted-numeric run in a version string, as ints.
-
-    Upstream version strings are not uniform — `rust-v0.147.0`, `v2026.8.16.2`,
-    `Hermes Agent v0.20.3 (2026.8.16.2)` — so compare the first numeric run and
-    nothing else. Returns None when there is none to compare, which the caller
-    reports as probe health rather than guessing.
-    """
-    m = re.search(r"(\d+(?:\.\d+)+)", text or "")
-    return tuple(int(x) for x in m.group(1).split(".")) if m else None
-
-
-def latest_release(feed: dict, report: Report, source: str) -> tuple[str, str] | None:
-    """`(version_text, notes)` of the newest PUBLISHED release, or None.
-
-    Drafts and prereleases are skipped: codex's feed leads with
-    `rust-v0.148.0-alpha.21` and openclaw's with a `pr-…` build, and treating
-    either as "the current release" would report a gap that does not exist.
-    """
-    kind = feed.get("kind")
-    if kind == "github":
-        raw = try_fetch(GITHUB_API.format(repo=feed["repo"]), f"{source} release feed", report)
-        if raw is None:
-            return None
-        try:
-            rels = json.loads(raw)
-        except json.JSONDecodeError:
-            return None
-        field = "tag_name" if feed.get("version_in") == "tag" else "name"
-        for r in rels:
-            if r.get("draft") or r.get("prerelease"):
-                continue
-            text = r.get(field) or ""
-            if version_tuple(text):
-                return text, r.get("body") or ""
-        return None
-    if kind == "npm":
-        raw = try_fetch(NPM_API.format(pkg=feed["package"]), f"{source} npm feed", report)
-        if raw is None:
-            return None
-        try:
-            return json.loads(raw)["dist-tags"]["latest"], ""
-        except (json.JSONDecodeError, KeyError):
-            return None
-    return None
-
-
-def check_source_staleness(sources: dict, *, report: Report) -> None:
-    """Every source, every run: how stale is what we verified against?
-
-    Sources with no published stream and sources with no pinned version are
-    reported as probe health — "cannot verify" is the truthful answer and the
-    one that gets a fixture recorded. Silence would let a source we have never
-    checked look identical to one that is current.
-    """
-    for source in sorted(sources):
-        row = sources[source]
-        ours, feed = row.get("verified_version", ""), row.get("release_feed", {})
-        if feed.get("kind") == "none":
-            report.add_blind(
-                f"how stale our {source} evidence is",
-                "no published release stream (closed CLI, or a build repo cutting no releases)",
-                f"Nothing can date our {source} decoder from CI.",
-                unpublished=True,
-            )
-            continue
-        mine = version_tuple(ours)
-        if mine is None:
-            report.add_blind(
-                f"how stale our {source} evidence is",
-                f"registry `verified_version` is {ours!r}",
-                f"There is a published feed for {source} but nothing to compare "
-                f"it against. Pin the version a real capture verified.",
-                our_source=True,
-            )
-            continue
-        got = latest_release(feed, report, source)
-        if got is None:
-            report.add_blind(
-                f"how stale our {source} evidence is",
-                "its release feed resolved no published version",
-                f"The {source} staleness check was SKIPPED.",
-            )
-            continue
-        latest, notes = got
-        theirs = version_tuple(latest)
-        if theirs is None or theirs <= mine:
-            continue
-        hits = sorted({k for k in WIRE_KEYWORDS if k in notes.lower()})
-        why = f" Release notes mention {', '.join(hits)}." if hits else ""
-        report.add_review(
-            f"{source}: our decoder + fixtures are verified against {ours}, "
-            f"upstream has published {latest}.{why} Re-capture with "
-            f"`just capture-fixture {source} <scenario> …` and let the decoder "
-            f"tests answer whether the wire moved."
-        )
-
-
 def run_checks(ours: OurNames, *, report: Report) -> None:
     """The upstream comparisons, filing what they find into `report`.
 
@@ -1528,10 +1382,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     costs exactly what it fed. No `read_*` may be called from here: an inline read
     unwinds to that catch-all and is filed TRANSIENT — a warning on a green run —
     which is strictly worse than the probe-health line `read_our_names` files."""
-    # Every source, every run — including those with no contract to compare and
-    # no published feed, which report as probe health rather than silence.
-    if ours.sources is not None:
-        check_source_staleness(ours.sources, report=report)
     # protocol.rs holds BOTH the HookEventName enum and the EventMsg enum.
     if ours.codex is not None or ours.codex_rollout is not None:
         text = try_fetch(CODEX_PROTOCOL_URL, "Codex source", report)

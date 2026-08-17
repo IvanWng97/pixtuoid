@@ -44,7 +44,9 @@ fn surface() -> Value {
     registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
     registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
-    json!({ "registered": registered })
+    let mut root: BTreeMap<&str, Value> = BTreeMap::new();
+    root.insert("registered", json!(registered));
+    json!(root)
 }
 
 fn fragment_path() -> PathBuf {
@@ -108,11 +110,11 @@ mod tests {
     }
 
     /// Byte-stability across feature unification. The workspace enables
-    /// serde_json's `preserve_order`, so an object built by `json!({…})` is
-    /// sorted under `cargo test -p` and insertion-ordered under `cargo nextest
-    /// run --workspace`. That difference reached the committed file and made the
-    /// gate above pass one way and fail the other; sorted keys everywhere is
-    /// what makes it a gate rather than a coin flip.
+    /// serde_json's `preserve_order` (`pixtuoid` asks for it), and feature
+    /// unification hands it to every crate — so an object built by `json!({…})`
+    /// is sorted under `cargo test -p` and insertion-ordered under
+    /// `cargo nextest run --workspace`. That difference reached the committed
+    /// file once and made the gate above pass one way and fail the other.
     #[test]
     fn every_emitted_object_has_sorted_keys() {
         fn walk(v: &Value, path: &str) {

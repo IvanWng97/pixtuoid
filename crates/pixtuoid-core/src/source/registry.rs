@@ -146,40 +146,6 @@ impl SourceCaps {
     }
 }
 
-/// Where a source's PUBLISHED version stream lives, so a watcher can say how
-/// stale [`SourceDescriptor::verified_version`] has become without scraping the
-/// vendor's private file layout.
-///
-/// A release feed is a contract the vendor publishes FOR consumers; a source
-/// tree is not. Watching the tree is what produced three of the drift watch's
-/// four alarms — a moved file and a stale pin read as "upstream renamed it".
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReleaseFeed {
-    /// `owner/repo`, read from the GitHub releases feed.
-    GitHub {
-        /// `owner/repo`.
-        repo: &'static str,
-        /// Which field carries the semver. Hermes tags by DATE (`v2026.8.16.2`)
-        /// and puts the semver in the release NAME, so the field is per-source.
-        version_in: ReleaseField,
-    },
-    /// npm package name, read from the registry's `dist-tags.latest`.
-    Npm(&'static str),
-    /// No published stream — a closed CLI (cursor, antigravity) or a build repo
-    /// that cuts no releases (grok). The watcher reports probe health for these:
-    /// "cannot verify" is the truthful answer, and silence is not.
-    None,
-}
-
-/// Which field of a GitHub release carries the version.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ReleaseField {
-    /// The git tag (`v1.26.0`).
-    Tag,
-    /// The release title, when the tag uses a different scheme.
-    Name,
-}
-
 /// One agent CLI's cross-source facts: `const` data with fn pointers.
 pub struct SourceDescriptor {
     /// Stable lowercase id — MUST equal the module's `SOURCE_NAME`.
@@ -204,10 +170,6 @@ pub struct SourceDescriptor {
     /// `OPENCODE_CONFIG_DIR` and `REASONIX_HOME` are declared there. Where a CLI
     /// has several (omp), this names the most direct one.
     pub home_env: Option<&'static str>,
-    /// Where this CLI publishes releases, for measuring how stale
-    /// `verified_version` is. [`ReleaseFeed::None`] is a real answer, not a
-    /// TODO — it means the watcher must report "cannot verify" for this source.
-    pub release_feed: ReleaseFeed,
     /// What KIND of source this is. Consumers read through the accessors so the
     /// enum shape stays an internal detail.
     pub kind: SourceKind,
@@ -445,7 +407,6 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cc",
     verified_version: "2.1.233",
     version_probe: Some(&["claude", "--version"]),
-    release_feed: ReleaseFeed::Npm("@anthropic-ai/claude-code"),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -483,10 +444,6 @@ const CODEX: SourceDescriptor = SourceDescriptor {
     label_prefix: "cx",
     verified_version: "0.147.0",
     version_probe: Some(&["codex", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "openai/codex",
-        version_in: ReleaseField::Tag,
-    },
     home_env: Some("CODEX_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -522,7 +479,6 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
     label_prefix: "ag",
     verified_version: "unknown",
     version_probe: Some(&["agy", "--version"]),
-    release_feed: ReleaseFeed::None,
     home_env: None,
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -561,10 +517,6 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
     label_prefix: "rx",
     verified_version: "1.25.2",
     version_probe: Some(&["reasonix", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "esengine/DeepSeek-Reasonix",
-        version_in: ReleaseField::Tag,
-    },
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
@@ -599,10 +551,6 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
     label_prefix: "cw",
     verified_version: "0.9.7",
     version_probe: Some(&["codewhale", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "Hmbown/CodeWhale",
-        version_in: ReleaseField::Tag,
-    },
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
@@ -634,10 +582,6 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
     label_prefix: "oc",
     verified_version: "1.18.15",
     version_probe: Some(&["opencode", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "anomalyco/opencode",
-        version_in: ReleaseField::Tag,
-    },
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
@@ -672,10 +616,6 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
     label_prefix: "ok",
     verified_version: "2026.7.1",
     version_probe: Some(&["openclaw", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "openclaw/openclaw",
-        version_in: ReleaseField::Tag,
-    },
     home_env: None,
     kind: SourceKind::Daemon {
         presence_decoder: openclaw::decode_openclaw_hook_payload,
@@ -691,7 +631,6 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
     label_prefix: "cp",
     verified_version: "unknown",
     version_probe: Some(&["copilot", "--version"]),
-    release_feed: ReleaseFeed::Npm("@github/copilot"),
     home_env: Some("COPILOT_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -727,7 +666,6 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
     label_prefix: "cu",
     verified_version: "2026.08.11",
     version_probe: Some(&["cursor-agent", "--version"]),
-    release_feed: ReleaseFeed::None,
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
@@ -764,10 +702,6 @@ const HERMES: SourceDescriptor = SourceDescriptor {
     label_prefix: "hm",
     verified_version: "0.20.1",
     version_probe: Some(&["hermes", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "NousResearch/hermes-agent",
-        version_in: ReleaseField::Name,
-    },
     home_env: Some("HERMES_HOME"),
     kind: SourceKind::Agent {
         transcript: None,
@@ -804,7 +738,6 @@ const GROK: SourceDescriptor = SourceDescriptor {
     label_prefix: "gk",
     verified_version: "0.2.102",
     version_probe: Some(&["grok", "--version"]),
-    release_feed: ReleaseFeed::None,
     home_env: Some("GROK_HOME"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -855,10 +788,6 @@ const OMP: SourceDescriptor = SourceDescriptor {
     label_prefix: "om",
     verified_version: "17.3.4",
     version_probe: Some(&["omp", "--version"]),
-    release_feed: ReleaseFeed::GitHub {
-        repo: "can1357/oh-my-pi",
-        version_in: ReleaseField::Tag,
-    },
     home_env: Some("PI_CODING_AGENT_DIR"),
     kind: SourceKind::Agent {
         transcript: Some(Transcript {
@@ -899,7 +828,6 @@ const KIMI: SourceDescriptor = SourceDescriptor {
     label_prefix: "km",
     verified_version: "0.36.0",
     version_probe: Some(&["kimi", "--version"]),
-    release_feed: ReleaseFeed::Npm("@moonshot-ai/kimi-code"),
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
@@ -966,30 +894,6 @@ mod tests {
                 "source {:?} verified_version is empty — use \"unknown\", not \"\"",
                 d.name
             );
-        }
-    }
-
-    /// A feed is a fetchable address, so its shape has to be right or the watch
-    /// silently resolves nothing. `ReleaseFeed::None` needs no shape check — it
-    /// is compiler-forced (the field has no default), so "we never decided" is
-    /// unrepresentable; what it means is "no published stream exists", and the
-    /// watcher reports that as probe health rather than silence.
-    #[test]
-    fn every_release_feed_is_addressable() {
-        for d in REGISTRY {
-            match d.release_feed {
-                ReleaseFeed::GitHub { repo, .. } => assert!(
-                    repo.split('/').filter(|s| !s.is_empty()).count() == 2,
-                    "source {:?} feed {repo:?} is not owner/repo",
-                    d.name
-                ),
-                ReleaseFeed::Npm(pkg) => assert!(
-                    !pkg.is_empty() && !pkg.contains(char::is_whitespace),
-                    "source {:?} npm package {pkg:?} is not a package name",
-                    d.name
-                ),
-                ReleaseFeed::None => {}
-            }
         }
     }
 
