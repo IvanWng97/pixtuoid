@@ -2,6 +2,8 @@
 
 Indexed one line each in [`CLAUDE.md`](CLAUDE.md). These look like bugs and are deliberate design — read the entry before "fixing" one. An entry states the edge, the WHY, and where the authority lives (the pinning test, the in-code comment, or the issue); the full adjudication history is in the cited issue/PR, not here.
 
+- **Only a wire surface we actually READ may raise a drift alarm — don't add a `KNOWN_*` allowlist of names we ignore.** `drift::unknown_event` has no dedup, so such a list must mirror an upstream vocabulary forever or a harmless upstream ADDITION alarms every user (#935). Where upstream is fetchable the vanished-direction CI check already covers every depended name; where it is not (CC, antigravity), detect by SHAPE — the payload a renamed type still carries. Pinned per source by `no_*_breadcrumbs_however_new`.
+
 - **There is NO core `render` module and no core render trait.** `blit_frame` is the only pre-scene-split render helper that stays. New render targets are thin painters over `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer` (workspace invariant #1) — do not reintroduce a core render seam.
 
 - **`walkable.rs` is coherence-bound to this crate — it did NOT move with the sim-geometry cluster.** `WalkableMask` is a type alias for `Grid<bool>` whose obstacle ops are an inherent `impl Grid<bool>`, and the orphan rule pins an inherent impl to the crate owning the type. A wrapper struct and an extension trait were both adjudicated against — see the comment on the impl. Producers/consumers live in `pixtuoid-scene`.

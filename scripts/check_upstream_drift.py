@@ -55,12 +55,6 @@ CODEX_PROTOCOL_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/protocol.rs"
 )
-# `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
-# blind rather than wrong — but a blind flood guard is an unwatched one, and this
-# one was hiding an outer we did not know about (`security_risk_score`).
-CODEX_ROLLOUT_ITEM_URL = (
-    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
-)
 # The ROLLOUT `response_item` types live in the sibling models.rs
 # (`crate::models::ResponseItem`), NOT protocol.rs.
 CODEX_MODELS_URL = (
@@ -95,43 +89,6 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
     "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
-# The dangerous subset of the *_KNOWN_OMITTED ledgers: names our DECODER has an
-# arm for, that we nonetheless do not register. That combination is what shipped
-# the PermissionRequest bug — the sweep subtracts the ledger, so an event we can
-# read but never receive raises nothing, and no test can see it because every
-# test asserts our own belief about the wire. Shrink-only: each entry states why
-# NOT registering is right, and a new one cannot appear silently.
-#
-#   Stop              — a turn boundary, not a tool call. `ActivityEnd` with no
-#                       tuid is already synthesized by the reap ladder for the
-#                       sources that need it; registering it would double-fire.
-#   UserPromptSubmit  — per-turn content noise, and the reducer must never key
-#                       lifecycle on user-authored content (the `/exit` matcher).
-#   SubagentStop      — reasonix's, which "carries no ids". The decoder arm of
-#                       that NAME belongs to claude_code, a different source; the
-#                       arm reader is name-based and cannot tell them apart.
-#   subagent_start /  — hermes's. Adjudicated in `source/hermes.rs`'s module doc:
-#   subagent_stop     the SHELL payload carries a parent id but no CHILD id, so a
-#                     decode could only end a child that was never started. The
-#                     arms of those names belong to other sources.
-LEDGERED_BUT_DECODABLE = {
-    "Stop",
-    "UserPromptSubmit",
-    "SubagentStop",
-    "subagent_start",
-    "subagent_stop",
-    # openclaw's plugin hook. The arm of that name is grok's ACP session-update
-    # tag — a third cross-source collision, and the reader is name-based.
-    "subagent_spawned",
-    # kimi's SubagentStart — a fourth cross-source name collision; the arm of
-    # that name is claude_code's.
-    "SubagentStart",
-    # kimi's `Notification` is NOT CC's. Upstream: "triggered when a background
-    # task status changes (observation only)", e.g. `task.completed` — while the
-    # shared arm decodes CC's, which is the idle permission prompt. Registering
-    # it would mint a Waiting from a finished background task.
-    "Notification",
-}
 
 # Registered hermes events for which upstream treating them as BLOCKING would let
 # our silent exit 0 ANSWER a decision rather than merely observe one. Only the
@@ -139,232 +96,18 @@ LEDGERED_BUT_DECODABLE = {
 # fine — a tool gate is not a permission answer.
 HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
 
-# Hermes hooks we DELIBERATELY do not register. The subagent pair is adjudicated
-# in `source/hermes.rs`'s module doc: the SHELL payload carries a parent id but no
-# CHILD id, so a decode could only end a child that was never started — the
-# in-process plugin API that does carry one never reaches a shell command's stdin.
-# The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
-# a value it is only observing), and Kanban/gateway bookkeeping — none of them a
-# lifecycle signal a visualizer renders.
-#
-# `on_session_finalize` was here under that same sentence until #929, and none of
-# those four buckets described it: it is the SESSION end, which is a lifecycle
-# signal a visualizer very much renders. The omission was self-sealing — a shell
-# hook fires only if registered, so no capture could ever show one while it sat
-# on this list. Registered now.
-#
-# Its sibling `on_session_reset` STAYS omitted, and not as noise: it fires AFTER
-# the rotation and carries the NEW session id (`slash_commands.py` sends
-# `session_id=_new_sid` under the comment "new session guaranteed to exist"), so
-# decoding it as an end would walk out a session that just started. `/new` fires
-# `on_session_finalize` for the outgoing id first, which is the one we want.
-HERMES_KNOWN_OMITTED = {
-    "on_session_reset",
-    "subagent_start",
-    "subagent_stop",
-    "post_approval_response",
-    "on_interim_message",
-    "on_stream_start",
-    "on_stream_delta",
-    "on_stream_end",
-    "pre_llm_call",
-    "post_llm_call",
-    "pre_api_request",
-    "post_api_request",
-    "api_request_error",
-    "pre_command",
-    "pre_verify",
-    "pre_transcription",
-    "on_skill_lifecycle",
-    "transform_llm_output",
-    "transform_terminal_output",
-    "transform_tool_result",
-    "gateway_platform_event",
-    "pre_gateway_dispatch",
-    "kanban_task_blocked",
-    "kanban_task_claimed",
-    "kanban_task_completed",
-    "on_kanban_dispatch_tick",
-    "on_kanban_task_updated",
-    "on_kanban_worker_exited",
-    "on_kanban_worker_spawned",
-    "on_kanban_worker_stale_claim",
-}
 
-# OpenClaw hooks we DELIBERATELY do not register. It is a DAEMON source — the
-# lobster renders gateway PRESENCE (up / busy / down + a session count), and the
-# six we register are exactly the four axes `decode_openclaw_hook_payload` projects.
-# The rest are the AGENT's turn machinery inside the gateway: prompt/model
-# resolution, the LLM call, compaction, message and reply plumbing, cron, skills,
-# and the subagent trio. The subagent three are omitted on a premise this tree has
-# NOT captured: that a gateway serving a subagent already reads Busy. Upstream
-# says `sessions_spawn` is non-blocking and `sessions_yield` ends the turn, so the
-# parent's run may close while the child works — whether the child fires its own
-# `before_agent_run` is undocumented, and our openclaw capture never spawned one.
-# Registering them is a live option the day someone records that turn.
-OPENCLAW_KNOWN_OMITTED = {
-    "after_compaction",
-    "after_tool_call",
-    "agent_turn_prepare",
-    "before_agent_finalize",
-    "before_agent_reply",
-    "before_compaction",
-    "before_dispatch",
-    "before_install",
-    "before_message_write",
-    "before_model_resolve",
-    "before_prompt_build",
-    "before_reset",
-    "before_tool_call",
-    "channel_pairing_requested",
-    "cron_changed",
-    "cron_reconciled",
-    "heartbeat_prompt_contribution",
-    "inbound_claim",
-    "llm_input",
-    "llm_output",
-    "message_received",
-    "message_sending",
-    "message_sent",
-    "model_call_ended",
-    "model_call_started",
-    "reply_dispatch",
-    "reply_payload_sending",
-    "resolve_exec_env",
-    "skill_changed",
-    "skill_proposal_changed",
-    "skill_proposal_evaluate",
-    "subagent_delivery_target",
-    "subagent_ended",
-    "subagent_progress",
-    "subagent_spawned",
-    "tool_result_persist",
-}
 
-# opencode events we DELIBERATELY do not register. `message.part.updated` is the
-# tool-activity carrier and the session/permission pair are the lifecycle; the
-# rest are per-token deltas and content bookkeeping a sprite does not render.
-# `session.error` and `session.updated` are the two worth revisiting if the
-# office ever grows a distressed/renamed state.
-OPENCODE_KNOWN_OMITTED = {
-    "message.part.delta",
-    "message.part.removed",
-    "message.removed",
-    "message.updated",
-    "permission.v2.replied",
-    "session.diff",
-    "session.error",
-    "session.updated",
-}
 
-# cursor hooks we DELIBERATELY do not register. `beforeShellExecution` gates the
-# action on the hook's exit code (upstream: "Exit code 2 - Block the action"), so
-# the shim's always-exit-0 would answer a gate it never read — and unlike the
-# `preToolUse` we DO register, nothing else reports that command. `afterFileEdit`
-# and `preCompact` carry no state a sprite renders. Registering a blocking hook is
-# not forbidden outright — `preToolUse` blocks too — the question is whether a
-# silent success is the right answer for that particular gate.
-CURSOR_KNOWN_OMITTED = {
-    # Tool-adjacent detail already carried by the preToolUse/postToolUse pair we
-    # DO register — a second event per call would add a shim invocation and no
-    # state the office renders.
-    "afterFileEdit",
-    "afterMCPExecution",
-    "afterShellExecution",
-    "afterTabFileEdit",
-    "beforeReadFile",
-    "beforeTabFileRead",
-    # Turn-level narration and prompt content, not lifecycle.
-    "afterAgentResponse",
-    "afterAgentThought",
-    "beforeSubmitPrompt",
-    "workspaceOpen",
-    # cursor's subagents render FLAT and the parent link is genuinely absent —
-    # `source/cursor.rs`'s sharp edge; these two carry no child id to fix that.
-    "subagentStart",
-    "subagentStop",
-    # A compaction internal.
-    "preCompact",
-}
 
-# kimi hooks we DELIBERATELY do not register: per-turn/prompt noise, compaction
-# internals, background-task and heartbeat bookkeeping. The subagent pair is
-# omitted for kimi's own reason — see `source/kimi.rs` — and `PermissionResult`
-# is the post-decision half of the gate whose ASK half (`PermissionRequest`) we
-# do register.
-KIMI_KNOWN_OMITTED = {
-    "UserPromptSubmit",
-    "UserPromptQueued",
-    "TurnStarted",
-    "PermissionResult",
-    "SessionHeartbeat",
-    "SubagentStart",
-    "SubagentStop",
-    "TaskStarted",
-    "Interrupt",
-    "PreCompact",
-    "PostCompact",
-    "Notification",
-}
 
-# Codex hooks we DELIBERATELY do not register: compaction internals, not agent
-# activity a visualizer cares about.
-CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 
-# CC hooks we DELIBERATELY do not register: per-turn/content noise, the DENIAL
-# half of the permission pair (the gate itself, `PermissionRequest`, IS
-# registered), task/teammate bookkeeping, environment/config plumbing,
-# compaction internals.
-#
-# `PostToolUseFailure` is NONE of those buckets. Of the sources whose upstream
-# fires it, cursor/kimi/grok register it and CC and reasonix do not, for two
-# DIFFERENT reasons — reasonix's is double-fire, stated with its own ledger below.
-# CC's is a second transport: the JSONL `tool_result` arm emits `ActivityEnd`
-# regardless of `is_error`, so a failed tool already closes and the hook would
-# only duplicate it. The cost of skipping it is the JSONL lag, not a stuck sprite.
-CC_KNOWN_OMITTED = {
-    "Setup",
-    "UserPromptSubmit",
-    "UserPromptExpansion",
-    "PermissionDenied",
-    "PostToolUseFailure",
-    "PostToolBatch",
-    "MessageDisplay",
-    "TaskCreated",
-    "TaskCompleted",
-    "Stop",
-    "StopFailure",
-    "TeammateIdle",
-    "InstructionsLoaded",
-    "ConfigChange",
-    "CwdChanged",
-    "DirectoryAdded",
-    "FileChanged",
-    "WorktreeCreate",
-    "WorktreeRemove",
-    "PreCompact",
-    "PostCompact",
-    "Elicitation",
-    "ElicitationResult",
-}
 
 REASONIX_HOOK_URL = (
     "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/main-v2/"
     "internal/hook/hook.go"
 )
 
-# Reasonix hooks we DELIBERATELY do not register: PostLLMCall is per-turn noise,
-# PreCompact a compaction internal, SubagentStop carries no ids. Registering
-# PostToolUseFailure/StopFailure would DOUBLE-FIRE every failed tool/turn — the
-# runner already re-fires the native PostToolUse/Stop hooks we install with the
-# event merely re-labeled.
-REASONIX_KNOWN_OMITTED = {
-    "PostLLMCall",
-    "PreCompact",
-    "SubagentStop",
-    "PostToolUseFailure",
-    "StopFailure",
-}
 
 # Payload fields decode_rx_hook_payload reads — a renamed json tag silently
 # zeroes the decode (`event`/`cwd` are load-bearing: a payload lacking them is
@@ -391,14 +134,6 @@ CODEWHALE_EXECUTOR_URL = (
     "crates/tui/src/hooks/executor.rs"
 )
 
-# CodeWhale hooks we DELIBERATELY do not register (snake_case wire names):
-# turn_end is per-turn telemetry, the rest are not agent activity we show.
-CODEWHALE_KNOWN_OMITTED = {
-    "turn_end",
-    "mode_change",
-    "on_error",
-    "shell_env",
-}
 
 # CodeWhale ENV-MODE identity: the DEEPSEEK_* names our shim folds into the
 # cwd-keyed envelope, set by `HookContext::to_env_vars`. WORKSPACE is
@@ -576,131 +311,9 @@ GROK_ACTIVE_SESSIONS_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-active-sessions/src/lib.rs"
 )
-# grok hooks we DELIBERATELY do not register: compaction internals, not agent
-# activity. SubagentEnd/SubagentStop are BOTH registered (upstream's finish site
-# fires one spelling, the docs name the other), so neither belongs here.
-GROK_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
-
-class Unregistered(typing.NamedTuple):
-    """One source's MISSING-REGISTRATION direction, as a ROW rather than a copy.
-
-    Each of the four defects the hand-written arms shipped was the same shape —
-    one of five sites missing what the other four had (a floor, a reused body, a
-    place in the ledger gate, a reader that could see the whole vocabulary). A
-    row cannot be missing a field.
-    """
-
-    ledger_name: str
-    """Resolved through `globals()`, and pinned to `ledger` by the selftest."""
-    ledger: frozenset[str]
-    floor: int
-    """Below this the parse is not believed: the sweep files probe health rather
-    than reading an empty diff as "upstream has nothing new". A number here is a
-    MEASUREMENT of that document, taken when the row was written; `0` claims only
-    the derived minimum."""
-    offers: str
-    declared_in: str
-    handle: str
-    """How this source HANDLES an event, in the reviewer's words: `register it in
-    KIMI_EVENTS`, `subscribe to it in the plugin`."""
-    advice: str = ""
 
 
-UNREGISTERED: dict[str, Unregistered] = {
-    "hermes": Unregistered(
-        "HERMES_KNOWN_OMITTED",
-        frozenset(HERMES_KNOWN_OMITTED),
-        30,
-        "the Hermes event set upstream actually offers",
-        "VALID_HOOKS in hermes_cli/plugins.py",
-        "register it in HERMES_EVENTS",
-        " An event we could receive and do not is invisible to every test "
-        "(#930 was this shape).",
-    ),
-    "openclaw": Unregistered(
-        "OPENCLAW_KNOWN_OMITTED",
-        frozenset(OPENCLAW_KNOWN_OMITTED),
-        35,
-        "the OpenClaw hook set upstream actually offers",
-        "the `PluginHookName` union in src/plugins/hook-types.ts",
-        "register it in the plugin",
-        " Decide whether the lobster's presence should react to it.",
-    ),
-    "opencode": Unregistered(
-        "OPENCODE_KNOWN_OMITTED",
-        frozenset(OPENCODE_KNOWN_OMITTED),
-        0,
-        "the opencode event set upstream actually defines",
-        "the `define({ type: … })` calls in its two event modules",
-        "subscribe to it in the plugin",
-    ),
-    "cursor": Unregistered(
-        "CURSOR_KNOWN_OMITTED",
-        frozenset(CURSOR_KNOWN_OMITTED),
-        0,
-        "the cursor hook set the docs actually list",
-        "cursor.com/docs/hooks",
-        "register it in CURSOR_EVENTS",
-        " Check whether it is a DECISION hook before registering: the shim "
-        "always exits 0.",
-    ),
-    "kimi": Unregistered(
-        "KIMI_KNOWN_OMITTED",
-        frozenset(KIMI_KNOWN_OMITTED),
-        0,
-        "the kimi hook set the docs actually list",
-        "the Event Reference table in kimi-code's hooks.md",
-        "register it in KIMI_EVENTS",
-    ),
-    # These five had this direction before #932, each guarding only on "the
-    # parser returned nothing" — a reader that returns a SMALL WRONG set passed
-    # and reported an empty diff. Rows give them the floor they lacked.
-    "codex": Unregistered(
-        "CODEX_KNOWN_OMITTED",
-        frozenset(CODEX_KNOWN_OMITTED),
-        0,
-        "the Codex `HookEventName` enum",
-        "codex-rs/protocol/src/protocol.rs",
-        "register it in CODEX_EVENTS",
-        " Add a decoder arm with it.",
-    ),
-    "cc": Unregistered(
-        "CC_KNOWN_OMITTED",
-        frozenset(CC_KNOWN_OMITTED),
-        0,
-        "the CC hook-event summary table",
-        "code.claude.com/docs/en/hooks.md",
-        "register it in install/claude.rs EVENTS",
-        " Add a decoder arm with it.",
-    ),
-    "reasonix": Unregistered(
-        "REASONIX_KNOWN_OMITTED",
-        frozenset(REASONIX_KNOWN_OMITTED),
-        0,
-        "the Reasonix `Event` consts",
-        "internal/hook/hook.go",
-        "register it in REASONIX_EVENTS",
-        " Add a decoder arm with it.",
-    ),
-    "codewhale": Unregistered(
-        "CODEWHALE_KNOWN_OMITTED",
-        frozenset(CODEWHALE_KNOWN_OMITTED),
-        0,
-        "the CodeWhale `HookEvent` enum",
-        "crates/tui/src/hooks/config.rs",
-        "register it in CODEWHALE_EVENTS",
-        " Add a decoder arm with it.",
-    ),
-    "grok": Unregistered(
-        "GROK_KNOWN_OMITTED",
-        frozenset(GROK_KNOWN_OMITTED),
-        0,
-        "the grok hook-event vocabulary",
-        "xai-grok-hooks/src/event.rs",
-        "register it in GROK_EVENTS",
-        " Add a decoder arm with it.",
-    ),
-}
+
 
 # Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
 # fields are camelCase via struct-level rename_all, so the wire name never appears
@@ -740,18 +353,6 @@ GROK_XAI_FIELDS = {
 # rename_all — field idents ARE the wire names). A rename silently degrades the
 # whole liveness ladder to mtime gating.
 GROK_ACTIVE_SESSION_FIELDS = {"session_id", "pid", "cwd", "opened_at"}
-# grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of the
-# v1 stable + v1 unstable tag sets — hence two fetches. v2 is a separate, partly
-# non-overlapping line grok does NOT speak, so fetching it would emit false
-# "adopt terminal_update" noise.
-ACP_V1_SCHEMA_URL = (
-    "https://raw.githubusercontent.com/agentclientprotocol/"
-    "agent-client-protocol/main/schema/v1/schema.json"
-)
-ACP_V1_SCHEMA_UNSTABLE_URL = (
-    "https://raw.githubusercontent.com/agentclientprotocol/"
-    "agent-client-protocol/main/schema/v1/schema.unstable.json"
-)
 
 # omp is TRANSCRIPT-ONLY, and its depended names are split across the upstream
 # files that define them. ONE-DIRECTIONAL like copilot: only a name WE DEPEND ON
@@ -850,7 +451,6 @@ class Anchor(typing.NamedTuple):
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: each anchor is the declaration the checked names live inside.
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
-    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
@@ -893,8 +493,6 @@ UNANCHORED_BY_DESIGN: dict[str, str] = {
     CODEWHALE_HOOK_URL: "parser-gated: upstream_codewhale_hooks -> _enum_body returns None",
     COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates all three sweeps",
     OPENCLAW_PATHS_URL: "value comparison: both sides are read, no presence sweep",
-    ACP_V1_SCHEMA_URL: "parser-gated: upstream_acp_session_update_tags returns None",
-    ACP_V1_SCHEMA_UNSTABLE_URL: "parser-gated: same",
 }
 
 
@@ -1254,13 +852,6 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     return event_msg, response_item
 
 
-def read_codex_rollout_outers() -> set[str]:
-    """The rollout OUTER `type` discriminators the transcript decoder RECOGNIZES.
-
-    The tail breadcrumbs any outer OUTSIDE this set and `drift::unknown_event` has
-    NO dedup, so a new upstream variant would flood the warn-floor on every line
-    of it — the report diffs it against upstream to ping BEFORE that happens."""
-    return rust_const_str_array("crates/pixtuoid-core/src/source/codex.rs", "KNOWN_OUTERS")
 
 
 def read_cc_events() -> set[str]:
@@ -1423,12 +1014,6 @@ def read_omp_entry_types() -> set[str]:
     return set(re.findall(r'(?m)^\s*"(\w+)"\s*(?:=>|if\b|$)', m.group(1)))
 
 
-def read_omp_known_types() -> set[str]:
-    """The COMPLETE session-entry `type` set the transcript tail flood-guards —
-    the full upstream union, NOT just the arms we decode (`read_omp_entry_types`).
-    The tail breadcrumbs a `type` outside it with no dedup, so the report diffs it
-    against upstream to ping BEFORE a new type floods the warn-floor."""
-    return rust_const_str_array("crates/pixtuoid-core/src/source/omp.rs", "KNOWN_ENTRY_TYPES")
 
 
 def read_copilot_events() -> set[str]:
@@ -1442,11 +1027,6 @@ def read_copilot_events() -> set[str]:
     return set(re.findall(r'"((?:session|tool|subagent|permission)\.[a-z._]+)"', m.group(1)))
 
 
-def read_copilot_namespaces() -> set[str]:
-    """The event-`type` NAMESPACE families the transcript tail flood-guards. The
-    tail breadcrumbs a namespace outside this set with no dedup, so the report
-    diffs it against upstream to ping BEFORE a new family floods the warn-floor."""
-    return rust_const_str_array("crates/pixtuoid-core/src/source/copilot.rs", "KNOWN_NAMESPACES")
 
 
 def read_cursor_events() -> set[str]:
@@ -1507,12 +1087,6 @@ def read_grok_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/grok.rs", "GROK_EVENTS")
 
 
-def read_acp_tags() -> set[str]:
-    """The ACP v1 `sessionUpdate` tag vocabulary the shared `source/acp.rs`
-    flood-guards. A tag outside it is breadcrumbed with no dedup (a per-token
-    `*_message_chunk` would flood hardest), so the report diffs it against the
-    live v1 schema to ping BEFORE that happens."""
-    return rust_const_str_array("crates/pixtuoid-core/src/source/acp.rs", "KNOWN_ACP_TAGS")
 
 
 def read_kimi_events() -> set[str]:
@@ -1545,37 +1119,6 @@ def upstream_grok_hooks(text: str) -> set[str] | None:
     return found or None
 
 
-def upstream_acp_session_update_tags(text: str) -> set[str] | None:
-    """The ACP `SessionUpdate` discriminator tags from a v1 JSON schema. Returns
-    None if the schema won't parse or the union is absent → the caller files probe
-    health and SKIPS the check."""
-    try:
-        root = json.loads(text)
-    except json.JSONDecodeError:
-        return None
-    defs = root.get("$defs") or root.get("definitions") or {}
-    if not isinstance(defs, dict):
-        return None
-    su = defs.get("SessionUpdate")
-    members = su.get("oneOf") or su.get("anyOf") if isinstance(su, dict) else None
-    if not isinstance(members, list):
-        return None
-    tags: set[str] = set()
-    for member in members:
-        if not isinstance(member, dict):
-            continue
-        node = member
-        ref = member.get("$ref", "")
-        if ref:
-            node = defs.get(ref.rsplit("/", 1)[-1], {})
-        const = (
-            node.get("properties", {}).get("sessionUpdate", {}).get("const")
-            if isinstance(node, dict)
-            else None
-        )
-        if isinstance(const, str):
-            tags.add(const)
-    return tags or None
 
 
 def _copilot_type_const(sch: object) -> str | None:
@@ -1630,17 +1173,6 @@ def upstream_copilot_namespaces(text: str) -> set[str] | None:
     return namespaces or None
 
 
-def upstream_omp_entry_types(text: str) -> set[str] | None:
-    """The COMPLETE omp session-entry `type` set. Two forms: direct
-    `type: "literal"` discriminators, and `type: typeof CONST` refs whose value is
-    a `CONST = "literal"` binding. Returns None if neither is found → the caller
-    files probe health and SKIPS the check."""
-    literals = set(re.findall(r'type:\s*"(\w+)"', text))
-    for const_name in re.findall(r"type:\s*typeof\s+(\w+)", text):
-        m = re.search(rf'{re.escape(const_name)}\s*=\s*"(\w+)"', text)
-        if m:
-            literals.add(m.group(1))
-    return literals or None
 
 
 def upstream_copilot_field_names(text: str) -> set[str] | None:
@@ -1725,10 +1257,6 @@ class OurNames:
     hermes: set[str] | None = None
     grok: set[str] | None = None
     kimi: set[str] | None = None
-    codex_rollout_outers: set[str] | None = None
-    copilot_namespaces: set[str] | None = None
-    omp_known_types: set[str] | None = None
-    acp_tags: set[str] | None = None
 
 
 # (OurNames field, reader, the surface it reads — the wording of its probe-health
@@ -1750,11 +1278,27 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("hermes", read_hermes_events, "HERMES_EVENTS in install/hermes.rs"),
     ("grok", read_grok_events, "GROK_EVENTS in install/grok.rs"),
     ("kimi", read_kimi_events, "KIMI_EVENTS in install/kimi.rs"),
-    ("codex_rollout_outers", read_codex_rollout_outers, "KNOWN_OUTERS in source/codex.rs"),
-    ("copilot_namespaces", read_copilot_namespaces, "KNOWN_NAMESPACES in source/copilot.rs"),
-    ("omp_known_types", read_omp_known_types, "KNOWN_ENTRY_TYPES in source/omp.rs"),
-    ("acp_tags", read_acp_tags, "KNOWN_ACP_TAGS in source/acp.rs"),
 )
+
+
+# A parse smaller than this is not believed, so BOTH drift directions are SKIPPED
+# for that source and the run files probe health instead. Each number is a
+# MEASUREMENT of the upstream document taken when the row was written; an absent
+# source claims only the derived minimum (what we already handle). #929's false
+# "fix the decoder" against `pre_approval_request` came from a partial document
+# that cleared a bare non-emptiness check.
+PARSE_FLOORS: dict[str, int] = {"hermes": 30}
+
+# The document each floor is measured against — named in the probe-health line so
+# a maintainer knows which pin to re-check.
+PARSE_SOURCES: dict[str, str] = {
+    "codex": "the HookEventName enum in codex-rs/protocol/src/protocol.rs",
+    "cc": "the hook-event summary table in hooks.md",
+    "reasonix": "the Event consts in internal/hook/hook.go",
+    "codewhale": "the HookEvent enum in crates/tui/src/hooks/config.rs",
+    "hermes": "VALID_HOOKS in hermes_cli/plugins.py",
+    "grok": "the event enum in xai-grok-hooks/src/event.rs",
+}
 
 
 def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report: Report) -> bool:
@@ -1767,19 +1311,18 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
     working decoders and only then be stopped. That is not hypothetical: #929's
     false ⛔ against `pre_approval_request` came from exactly a partial document.
     """
-    row = UNREGISTERED[source]
-    # The row key IS the `OurNames` field — pinned by the selftest's census.
+    # The key IS the `OurNames` field — pinned by the selftest's census.
     handled = getattr(ours, source) or set()
     # A reader that finds fewer names than we already handle is broken, or — where
     # the two directions read different populations (cursor's anchor index, kimi's
     # Event Reference table, against a vanish half that searches raw prose) — it is
     # degraded. Probe health is the right answer to both. A row may declare a
     # STRICTER floor, never a weaker one.
-    floor = max(row.floor, len(handled))
+    floor = max(PARSE_FLOORS.get(source, 0), len(handled))
     if len(upstream) < floor:
         report.add_blind(
-            row.offers,
-            row.declared_in,
+            f"the {source} name set upstream actually offers",
+            PARSE_SOURCES[source],
             f"the reader returned {len(upstream)} names (floor {floor}), so BOTH "
             f"drift directions were SKIPPED for {source}.",
         )
@@ -1787,29 +1330,6 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
     return True
 
 
-def sweep_unregistered(
-    source: str,
-    upstream: set[str],
-    ours: OurNames,
-    report: Report,
-    *,
-    also_handled: set[str] = frozenset(),
-) -> None:
-    """The MISSING-REGISTRATION direction for one source, off its `UNREGISTERED`
-    row: what upstream offers that we neither handle nor ledger. Call only behind
-    `parse_is_believable`, which owns the floor for BOTH directions.
-
-    The EXTRACTION stays at each call site — the readers genuinely differ (a TS
-    union, a python set literal, two doc tables) and each belongs beside its
-    regex. Everything after it is identical, and was the part that drifted.
-    """
-    row = UNREGISTERED[source]
-    handled = getattr(ours, source) or set()
-    for ev in sorted(upstream - handled - also_handled - row.ledger):
-        report.add_review(
-            f"new {source} event `{ev}` upstream — we neither {row.handle} nor list "
-            f"it in {row.ledger_name}.{row.advice}"
-        )
 
 
 def read_our_names(report: Report) -> OurNames:
@@ -1863,7 +1383,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
-                sweep_unregistered("codex", upstream, ours, report)
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
@@ -1884,27 +1403,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"renamed; the transcript decoder drops it SILENTLY "
                             f"(`_ => vec![]`, no drift breadcrumb)."
                         )
-        # The reverse direction (a KNOWN_OUTERS member gone upstream) is a benign
-        # stale silent-set entry — review only, never breaking.
-        if ours.codex_rollout is not None:
-            hist = fetch_anchored(CODEX_ROLLOUT_ITEM_URL, "Codex history", report)
-            up_outers = (
-                upstream_codex_enum_types(hist, "RolloutItem") if hist is not None else None
-            )
-            if up_outers is None:
-                report.add_blind(
-                    "the Codex `RolloutItem` enum",
-                    "codex-rs/history/src/lib.rs",
-                    "The rollout OUTER flood guard was SKIPPED.",
-                )
-            elif ours.codex_rollout_outers is not None:
-                for t in sorted(up_outers - ours.codex_rollout_outers):
-                    report.add_review(
-                        f"new Codex rollout OUTER `{t}` upstream (`RolloutItem`) not "
-                        f"in KNOWN_OUTERS (source/codex.rs) — the transcript tail will "
-                        f"breadcrumb EVERY line of it (drift flood); add it to "
-                        f"KNOWN_OUTERS (decode it, or knowingly ignore it)."
-                    )
         # The burn-tier decode is fail-quiet by design (a rename just darkens the
         # model badge/flame), so this watch is its only alarm.
         if text is not None:
@@ -1975,7 +1473,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                sweep_unregistered("reasonix", upstream, ours, report)
                 for field in sorted(REASONIX_PAYLOAD_FIELDS):
                     if f'json:"{field}' not in text:
                         report.add_breaking(
@@ -2002,7 +1499,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream HookEvent — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                sweep_unregistered("codewhale", upstream, ours, report)
         # Its own fetch of a SEPARATE file, so a failure to read the executor
         # can't be mistaken for every env var vanishing.
         exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", report)
@@ -2043,20 +1539,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"no-link / no-activity)."
                     )
 
-        # The other direction. Wire names live in `define({ type: "…" })`; the
-        # exported `Event` object holds only the symbols.
-        # `parts` already holds both bodies — re-fetching doubled the requests and
-        # filed probe health twice per URL under two labels, so one failure read as
-        # two findings in the issue.
-        upstream_oc: set[str] = set()
-        for body in parts:
-            if body:
-                upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
-        # This source's VANISH half scans the raw document rather than this
-        # parsed set, so the belief test gates the set-driven half only.
-        if parse_is_believable("opencode", upstream_oc, ours, report):
-            sweep_unregistered("opencode", upstream_oc, ours, report)
-
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
         if text is not None:
@@ -2076,7 +1558,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
-                sweep_unregistered("grok", upstream, ours, report)
             for ident in sorted(GROK_ENVELOPE_IDENTS):
                 if not re.search(rf"(?m)^\s*pub {ident}:", text):
                     report.add_breaking(
@@ -2126,34 +1607,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"negative vouch / focus) degrades to mtime gating."
                     )
 
-    # Review-class, never breaking: the reverse direction (a KNOWN_ACP_TAGS member
-    # gone upstream) is a benign stale entry.
-    up_acp: set[str] = set()
-    acp_parsed = False
-    for url, label in (
-        (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
-        (ACP_V1_SCHEMA_UNSTABLE_URL, "ACP v1 unstable schema"),
-    ):
-        text = try_fetch(url, label, report)
-        if text is not None:
-            tags = upstream_acp_session_update_tags(text)
-            if tags is None:
-                report.add_blind(
-                    "the ACP `SessionUpdate` oneOf union",
-                    label,
-                    "The ACP tag flood guard was SKIPPED.",
-                )
-            else:
-                up_acp |= tags
-                acp_parsed = True
-    if acp_parsed and ours.acp_tags is not None:
-        for tag in sorted(up_acp - ours.acp_tags):
-            report.add_review(
-                f"new ACP v1 `sessionUpdate` tag `{tag}` upstream not in KNOWN_ACP_TAGS "
-                f"(source/acp.rs) — the ACP tag tier will breadcrumb EVERY line of it "
-                f"(drift flood); add it to KNOWN_ACP_TAGS (decode it, or knowingly ignore it)."
-            )
-
     if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
         # The `SessionEvent` union is this document's ANCHOR: a parseable JSON is
@@ -2200,16 +1653,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"renamed; the decoder reads None (wrong-register / no-link / "
                             f"no tool label / permission never gates)."
                         )
-            # Review-class only: the reverse direction (a KNOWN_NAMESPACES member
-            # gone upstream) is a benign stale entry.
-            if ours.copilot_namespaces is not None:
-                for ns in sorted(up_ns - ours.copilot_namespaces):
-                    report.add_review(
-                        f"new Copilot event NAMESPACE `{ns}` upstream (`SessionEvent`) "
-                        f"not in KNOWN_NAMESPACES (source/copilot.rs) — the transcript "
-                        f"tail will breadcrumb EVERY line of it (drift flood); add it "
-                        f"to KNOWN_NAMESPACES (decode it, or knowingly ignore it)."
-                    )
 
     if ours.omp is not None:
         dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
@@ -2283,21 +1726,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"session-entries.ts property keys — renamed; the decoder "
                         f"reads None (no cwd label / no session_exit end)."
                     )
-            up_types = upstream_omp_entry_types(text)
-            if up_types is None:
-                report.add_blind(
-                    "the omp entry-`type` literals",
-                    "session-entries.ts",
-                    "The omp entry-type flood guard was SKIPPED.",
-                )
-            elif ours.omp_known_types is not None:
-                for t in sorted(up_types - ours.omp_known_types):
-                    report.add_review(
-                        f"new omp entry TYPE `{t}` upstream (session-entries.ts) not "
-                        f"in KNOWN_ENTRY_TYPES (source/omp.rs) — the transcript tail "
-                        f"will breadcrumb EVERY line of it (drift flood); add it to "
-                        f"KNOWN_ENTRY_TYPES (decode it, or knowingly ignore it)."
-                    )
         diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", report)
         if diag is not None and '"session_exit"' not in diag:
             report.add_breaking(
@@ -2352,23 +1780,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
             # The other direction. The docs name hooks inline, so the set is the
             # camelCase vocabulary rather than a quoted literal list.
-            # The docs' OWN hook index, not a guess at cursor's naming. A closed
-            # prefix list could not contain `sessionStart`/`sessionEnd` — names
-            # CURSOR_EVENTS registers, so we know cursor fires them — and a bare
-            # `<code>` scrape drags in config keys and literals (`timeout`,
-            # `true`, `curl`). Each hook's own anchor is `href="#<lowercased>"`
-            # around its name, which is the one shape that selects hooks alone.
-            upstream_cur = {
-                name
-                for slug, name in re.findall(
-                    r'href="#([a-z]+)"[^>]*>([a-z][a-zA-Z]+)</a>', text
-                )
-                if slug == name.lower()
-            }
-            # This source's VANISH half scans the raw document rather than this
-            # parsed set, so the belief test gates the set-driven half only.
-            if parse_is_believable("cursor", upstream_cur, ours, report):
-                sweep_unregistered("cursor", upstream_cur, ours, report)
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -2385,10 +1796,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
             )
             upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
-            # This source's VANISH half scans the raw document rather than this
-            # parsed set, so the belief test gates the set-driven half only.
-            if parse_is_believable("openclaw", upstream, ours, report):
-                sweep_unregistered("openclaw", upstream, ours, report)
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
@@ -2462,11 +1869,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"command we install into config.yaml fires nothing (no sprite / "
                         f"no activity)."
                     )
-                # `unsupported` is upstream's OWN "not reachable from a shell hook"
-                # set, so those are handled, not omissions.
-                sweep_unregistered(
-                    "hermes", valid, ours, report, also_handled=unsupported
-                )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
             # We install a SHELL hook, so the only thing that can make our
@@ -2525,18 +1927,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"Kimi still fires it but the decoder maps it to nothing "
                         f"(no sprite / no activity)."
                     )
-            # The other direction, off the doc's own "Event Reference" table —
-            # its first column is the authoritative set.
-            ref = text.find("## Event Reference")
-            upstream_kimi = (
-                set(re.findall(r"^\|\s*`([A-Za-z]+)`\s*\|", text[ref:], re.M))
-                if ref >= 0
-                else set()
-            )
-            # This source's VANISH half scans the raw document rather than this
-            # parsed set, so the belief test gates the set-driven half only.
-            if parse_is_believable("kimi", upstream_kimi, ours, report):
-                sweep_unregistered("kimi", upstream_kimi, ours, report)
 
     if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
@@ -2573,7 +1963,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-                sweep_unregistered("cc", upstream, ours, report)
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
 
