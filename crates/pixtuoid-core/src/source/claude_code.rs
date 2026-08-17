@@ -143,38 +143,22 @@ pub fn claude_config_dir() -> Option<PathBuf> {
         .map(|d| crate::platform::warn_if_relative_override("CLAUDE_CONFIG_DIR", d))
 }
 
-/// The COMPLETE set of CC transcript top-level `type` discriminators, swept
-/// empirically from a live `~/.claude/projects` corpus. CC is a CLOSED binary
-/// with no fetchable transcript schema, so this axis gets no CI drift-watch and
-/// the runtime breadcrumb in `decode_cc_line` is the SOLE defense — an
-/// unlisted type breadcrumbs until it is named here. Latest format only (legacy
-/// `summary`/`progress` are intentionally absent — a replayed legacy line
-/// breadcrumbs at session-frequency, not a flood).
-const KNOWN_TYPES: &[&str] = &[
-    "agent-name",
-    "ai-title",
-    "assistant",
-    "attachment",
-    "bridge-session",
-    "custom-title",
-    "file-history-delta",
-    "file-history-snapshot",
-    "frame-link",
-    // Appeared 2026-08-16 carrying `cause`/`vetoedAgainstAccountUuid`; nothing
-    // pixtuoid reads. Named here because the breadcrumb is per-LINE and a real
-    // session emitted 296 of them, which is the flood this list's own rationale
-    // says an unlisted type does not produce.
-    "history-suppression",
-    "last-prompt",
-    "mode",
-    "permission-mode",
-    "pr-link",
-    "queue-operation",
-    "relocated",
-    "system",
-    "user",
-    "worktree-state",
-];
+/// The CC transcript types whose `message` payload this module decodes. CC is a
+/// CLOSED binary with no fetchable transcript schema, so it gets no CI
+/// drift-watch and the runtime breadcrumb is the sole defense — but only these
+/// two names can break rendering, so only they may raise one.
+const DECODED_TYPES: &[&str] = &["assistant", "user"];
+
+/// Does this line carry a turn's payload? `message.role` + `message.content` is
+/// what a renamed [`DECODED_TYPES`] member would still arrive with, so it
+/// separates a rename from a merely-new sidecar type WITHOUT mirroring CC's
+/// vocabulary — the mirror is what put a drift alarm in front of every user the
+/// day CC added `history-suppression` (#935).
+fn carries_turn_payload(obj: &serde_json::Map<String, Value>) -> bool {
+    obj.get("message")
+        .and_then(Value::as_object)
+        .is_some_and(|m| m.contains_key("role") && m.contains_key("content"))
+}
 
 /// Decode one CC JSONL transcript line into 0..N AgentEvents.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -189,9 +173,16 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     let mut out = Vec::new();
     let ty = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
-    // Guarded on the LOW-cardinality top-level `type` (session-frequency),
-    // never the HIGH-cardinality inner `attachment.type`, which would flood.
-    if !ty.is_empty() && !KNOWN_TYPES.contains(&ty) {
+    // Both directions of the one rename that can freeze a sprite: the payload
+    // moved out from under the name, or the name moved off the payload. Each
+    // arm is the condition that actually costs us events, so neither can fire
+    // on a line this module still decodes.
+    let message = obj.get("message").and_then(|m| m.as_object());
+    if DECODED_TYPES.contains(&ty) {
+        if message.is_none() {
+            crate::source::drift::missing_field(source, ty, "message");
+        }
+    } else if !ty.is_empty() && carries_turn_payload(obj) {
         crate::source::drift::unknown_event(source, ty);
     }
 
@@ -240,7 +231,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         }
     }
 
-    let Some(message) = obj.get("message").and_then(|m| m.as_object()) else {
+    let Some(message) = message else {
         return Ok(out);
     };
     // Every assistant line carries the model that produced that turn.
@@ -328,12 +319,12 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     Ok(out)
 }
 
-/// The [`KNOWN_TYPES`] subset whose lines are AGENT TURN activity. Everything
-/// else in that list is a session-metadata SIDECAR line, which CC appends to a
-/// transcript for reasons unrelated to the owning process being alive: a
-/// STARTING session writes a metadata run (`bridge-session`, `pr-link`, …) into
-/// an OTHER, long-dead session's transcript, bumping an mtime the first-sight
-/// gate trusted as its liveness proxy.
+/// The CC transcript types whose lines are AGENT TURN activity. Every OTHER
+/// type is a session-metadata SIDECAR line, which CC appends to a transcript for
+/// reasons unrelated to the owning process being alive: a STARTING session
+/// writes a metadata run (`bridge-session`, `pr-link`, …) into an OTHER,
+/// long-dead session's transcript, bumping an mtime the first-sight gate trusted
+/// as its liveness proxy.
 ///
 /// Membership is by TURN-AUTHORSHIP, not by whether we decode the type:
 /// `system` carries no `AgentEvent` but IS the session speaking (it closes live
@@ -366,10 +357,9 @@ pub(crate) fn admits_transcript(path: &Path) -> bool {
 /// window is NOT an alternative: these lines carry file contents, so no fixed
 /// window bounds them.
 ///
-/// An UNRECOGNIZED type degrades to [`TailActivity::Unknown`], never to sidecar
-/// evidence: the day CC renames a turn type, reading it as "not a turn" would
-/// gate every live session at once. The `unknown_event` breadcrumb in
-/// `decode_cc_line` is what drives the fix instead.
+/// An unnamed type still counts as a turn when it carries the turn payload:
+/// the day CC renames one, reading it as "not a turn" would gate every live
+/// session at once.
 ///
 /// Accepted residual: an unvouched live session whose tail is momentarily all
 /// sidecar stays invisible until its next turn. Unvouched covers headless
@@ -382,18 +372,18 @@ pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
     let mut saw_classified = false;
     let mut saw_unclassifiable = false;
     for v in parsed_tail_lines(tail) {
-        // A typeless line, or one whose type we have never seen, classifies as
-        // NOTHING — it is not evidence the recent bytes were metadata.
-        let Some(ty) = v.get("type").and_then(|t| t.as_str()) else {
+        // A typeless line classifies as NOTHING — it is not evidence the recent
+        // bytes were metadata.
+        let Some(obj) = v.as_object() else {
             saw_unclassifiable = true;
             continue;
         };
-        if !KNOWN_TYPES.contains(&ty) {
+        let Some(ty) = obj.get("type").and_then(|t| t.as_str()) else {
             saw_unclassifiable = true;
             continue;
-        }
+        };
         saw_classified = true;
-        if !ACTIVITY_TYPES.contains(&ty) {
+        if !ACTIVITY_TYPES.contains(&ty) && !carries_turn_payload(obj) {
             continue;
         }
         saw_turn = true;
@@ -482,30 +472,62 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// The breadcrumb is per-LINE, so an unlisted type a live CC emits often is a
-    /// flood, not a hint — and `doctor` then points every user at the issue
-    /// tracker on day one. Pinned by shape rather than by name: a type seen 296
-    /// times in one real session belongs in the list.
+    /// A CC type we do not read may never reach `doctor`, however new it is —
+    /// the breadcrumb is per-LINE, so the alarm arrived in front of every user
+    /// the day CC shipped `history-suppression`.
     #[test]
-    fn a_type_the_live_cli_emits_in_bulk_is_named_rather_than_breadcrumbed() {
-        let ty = "history-suppression";
+    fn a_sidecar_type_we_never_decoded_is_silent_however_new() {
+        let out = crate::test_capture::capture_logs(|| {
+            for ty in ["history-suppression", "a-type-cc-has-not-invented-yet"] {
+                let line = json!({"type": ty, "sessionId": "s", "cause": "x"});
+                assert!(
+                    decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
+                        .expect("a sidecar decodes")
+                        .is_empty(),
+                    "{ty} carries nothing we read, so it must decode to no events"
+                );
+            }
+        });
         assert!(
-            KNOWN_TYPES.contains(&ty),
-            "{ty} is emitted by a shipping CC and would breadcrumb once per line"
-        );
-        let line = json!({"type": ty, "sessionId": "s", "cause": "x"});
-        assert!(
-            decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
-                .expect("a known type decodes")
-                .is_empty(),
-            "{ty} carries nothing we read, so it must decode to no events"
+            !out.contains(crate::source::drift::TARGET),
+            "a type we do not read reached the drift log:\n{out}"
         );
     }
 
+    /// The half that still has to alarm: a RENAMED turn type. It is recognised
+    /// by the payload we decode, not by absence from a list, so nothing has to
+    /// track CC's vocabulary for this to fire.
     #[test]
-    fn every_activity_type_is_a_known_type() {
-        for t in ACTIVITY_TYPES {
-            assert!(KNOWN_TYPES.contains(t), "{t} missing from KNOWN_TYPES");
+    fn a_renamed_turn_type_still_alarms_because_it_carries_the_payload_we_read() {
+        let out = crate::test_capture::capture_logs(|| {
+            let line = json!({
+                "type": "assistant-v2",
+                "message": {"role": "assistant", "content": [], "model": "m"},
+            });
+            let _ = decode_cc_line("/p/s.jsonl", SOURCE_NAME, line);
+        });
+        assert!(
+            out.contains(crate::source::drift::TARGET) && out.contains("assistant-v2"),
+            "a renamed turn type went unreported:\n{out}"
+        );
+    }
+
+    /// The inverse rename: the NAME survives and the payload moves. Nothing
+    /// caught this before — `decode_cc_line` returned early on the absent
+    /// `message` without a word.
+    #[test]
+    fn a_decoded_type_that_lost_its_payload_alarms() {
+        let out = crate::test_capture::capture_logs(|| {
+            for ty in DECODED_TYPES {
+                let line = json!({"type": ty, "turn": {"role": "assistant"}});
+                let _ = decode_cc_line("/p/s.jsonl", SOURCE_NAME, line);
+            }
+        });
+        for ty in DECODED_TYPES {
+            assert!(
+                out.contains(ty),
+                "{ty} lost `message` and decoded to nothing, silently:\n{out}"
+            );
         }
     }
 
@@ -939,29 +961,13 @@ mod tests {
     }
 
     #[test]
-    fn unknown_top_level_type_breadcrumbs_but_known_and_inner_attachment_stay_silent() {
+    fn no_sidecar_line_breadcrumbs_whether_or_not_we_have_seen_its_type() {
         let path = "/x/.claude/projects/p/s.jsonl";
-        let logs = crate::test_capture::capture_logs(|| {
-            let out = decode_cc_line(
-                path,
-                "claude-code",
-                json!({"type": "quantum-line", "foo": 1}),
-            )
-            .unwrap();
-            assert!(
-                out.is_empty(),
-                "an unknown top-level type decodes to no events"
-            );
-        });
-        assert!(
-            logs.contains("unknown_event") && logs.contains("quantum-line"),
-            "a brand-new CC top-level type must fire the drift breadcrumb, got:\n{logs}"
-        );
-
         // The last case is a real `attachment` line whose INNER
         // attachment.type is brand-new: only the top-level `type` is guarded.
         let quiet = crate::test_capture::capture_logs(|| {
             for v in [
+                json!({"type": "quantum-line", "foo": 1}),
                 json!({"type": "mode", "mode": "acceptEdits"}),
                 json!({"type": "last-prompt", "prompt": "hi"}),
                 json!({"type": "worktree-state"}),
@@ -971,12 +977,15 @@ mod tests {
                 json!({"type": "system", "subtype": "brand_new_subtype_2027"}),
                 json!({"type": "attachment", "attachment": {"type": "brand_new_kind_2027"}}),
             ] {
-                decode_cc_line(path, "claude-code", v).unwrap();
+                assert!(
+                    decode_cc_line(path, "claude-code", v).unwrap().is_empty(),
+                    "a sidecar line decodes to no events"
+                );
             }
         });
         assert!(
-            !quiet.contains("unknown_event"),
-            "known top-level types + a novel inner attachment.type must NOT breadcrumb, got:\n{quiet}"
+            !quiet.contains(crate::source::drift::TARGET),
+            "a line carrying nothing we read reached the drift log, got:\n{quiet}"
         );
     }
 
