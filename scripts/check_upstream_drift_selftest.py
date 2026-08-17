@@ -1479,9 +1479,9 @@ def test_no_decoder_read_is_unaccounted_for() -> None:
         # A read behind a CONST is the same read: openclaw's
         # `obj.get(GATEWAY_PORT_FIELD)` was neither watched nor ledgered and this
         # passed, which made the invariant in the docstring false.
-        # Detection is WIDE and resolution is narrow, deliberately: every `.get(x)`
-        # whose argument is not a string literal is caught, and only a same-file
-        # `const … : &str` resolves it. Matching just the shapes we could resolve
+        # Detection is WIDE and resolution is narrow, deliberately: a `.get(x)` whose
+        # argument is a SCREAMING_SNAKE name is caught, and only a same-file
+        # `const … : &str` resolves it. A lowercase binding still escapes both arms. Matching just the shapes we could resolve
         # let a 2-char const, a path-qualified one, and a helper whose parameter was
         # not named `key` pass INVISIBLY — neither resolved nor failed.
         consts = dict(

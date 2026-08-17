@@ -198,8 +198,8 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         //
         // An ACTIVITY arm, so it takes that class's Identity with it: for a
         // tool-less chat turn this is the ONLY event the session emits, and a
-        // daemon attaching mid-session would otherwise register nothing at all
-        // until the next tool call.
+        // daemon attaching mid-session would otherwise get the blank `#N` ghost
+        // the module doc names, until the next tool call.
         "on_session_end" => Ok(vec![
             identity(),
             AgentEvent::ActivityEnd {

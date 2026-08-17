@@ -1,11 +1,8 @@
 //! THE enumeration of committed captures, and the rules every capture obeys.
 //!
-//! There used to be several walks of this tree with three different populations
-//! (34 / 42 / 24), so each rule landed on whichever subset its author happened
-//! to pick. That is one root cause behind a finding class that recurred across
-//! four review rounds — "the fix landed on half the population": `cli` reached 34
-//! of 42, the edited-must-declare rule was flat until it was made recursive, the
-//! payload-stamp axis saw 24. Every one was patched where it was found.
+//! There used to be several walks of this tree with different populations, so
+//! each rule landed on whichever subset its author picked — the "fix landed on
+//! half the population" class that recurred across four review rounds.
 //!
 //! So: ONE walk, and `the_walk_sees_every_provenance_on_disk` fails if a capture
 //! falls outside it. A rule written against `every_capture()` cannot cover a
@@ -1005,19 +1002,15 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
     assert_eq!(date_prefix("2026-13-45T00-00-00-x.jsonl"), None);
 }
 
-/// `tool_id_key` picks the JSON key a per-call id is read from, and its own doc
-/// names the danger: reading the wrong name is SILENT — every kimi tool call
-/// decoded to `None` for the whole source's life. The compiler forces a CHOICE
-/// and nothing forced the right one: the conformance snapshots
-/// catch a change to an EXISTING source, but a NEW source's snapshot is generated
-/// from whatever key its author copied and accepted at `cargo insta review`.
+/// Reading the wrong `tool_id_key` is SILENT — every kimi tool call decoded to
+/// `None` for the whole source's life. The compiler forces a CHOICE and nothing
+/// forced the right one: a NEW source's conformance snapshot is generated from
+/// whatever key its author copied. The captures answer it — whatever key a real
+/// payload carries its tool id under IS that source's key.
 ///
-/// The captures answer it directly: whatever key a real payload carries its tool
-/// id under IS that source's key.
-///
-/// A source is exempt only by NAME here, never by a property the test infers: a
-/// `custom` decoder that claims every payload makes the key inert, but "claims
-/// every payload" is the row author's intent, not something the row states.
+/// Exempt only by NAME, never by a property the test infers: `custom` claiming
+/// every payload makes the key inert, but that is the row author's intent rather
+/// than something the row states.
 const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
     // `// inert: custom claims all` in their registry row — the shared arms that
     // read `tool_id_key` never run, so no capture can exercise it.

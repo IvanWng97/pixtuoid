@@ -66,8 +66,8 @@ regex = '''(?:/(?:Users|home)/|[A-Za-z]:\\+Users\\+)[A-Za-z0-9._-]+'''
   #
   # ANCHORED, and the trailing `[._-]*` is not decoration: `.` and `-` are inside
   # the rule's own class, so a bare `\b` ends the match at the first one and
-  # waives `/Users/dev-ops` and `/Users/first.last` — the ordinary shape on
-  # directory-bound macOS. The run is what keeps the provenance notes that
+  # waives any account whose name merely STARTS with a placeholder token —
+  # `/Users/dev-ops`, `/Users/dev.smith`. The run is what keeps the provenance notes that
   # end a sentence with "/Users/dev." passing.
   regexes = [
     # PLACEHOLDERS — a redaction wrote these, so they ARE evidence of an edit.

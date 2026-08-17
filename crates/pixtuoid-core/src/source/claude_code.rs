@@ -160,6 +160,11 @@ const KNOWN_TYPES: &[&str] = &[
     "file-history-delta",
     "file-history-snapshot",
     "frame-link",
+    // Appeared 2026-08-16 carrying `cause`/`vetoedAgainstAccountUuid`; nothing
+    // pixtuoid reads. Named here because the breadcrumb is per-LINE and a real
+    // session emitted 296 of them, which is the flood this list's own rationale
+    // says an unlisted type does not produce.
+    "history-suppression",
     "last-prompt",
     "mode",
     "permission-mode",
@@ -476,6 +481,26 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// The breadcrumb is per-LINE, so an unlisted type a live CC emits often is a
+    /// flood, not a hint — and `doctor` then points every user at the issue
+    /// tracker on day one. Pinned by shape rather than by name: a type seen 296
+    /// times in one real session belongs in the list.
+    #[test]
+    fn a_type_the_live_cli_emits_in_bulk_is_named_rather_than_breadcrumbed() {
+        let ty = "history-suppression";
+        assert!(
+            KNOWN_TYPES.contains(&ty),
+            "{ty} is emitted by a shipping CC and would breadcrumb once per line"
+        );
+        let line = json!({"type": ty, "sessionId": "s", "cause": "x"});
+        assert!(
+            decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
+                .expect("a known type decodes")
+                .is_empty(),
+            "{ty} carries nothing we read, so it must decode to no events"
+        );
+    }
 
     #[test]
     fn every_activity_type_is_a_known_type() {
