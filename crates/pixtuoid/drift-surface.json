@@ -1,0 +1,94 @@
+{
+  "registered": {
+    "claude-code": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "Notification",
+      "PermissionRequest",
+      "SubagentStart",
+      "SubagentStop",
+      "SessionEnd"
+    ],
+    "codewhale": [
+      "session_start",
+      "message_submit",
+      "tool_call_before",
+      "tool_call_after",
+      "session_end",
+      "subagent_spawn",
+      "subagent_complete"
+    ],
+    "codex": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "UserPromptSubmit",
+      "SubagentStart",
+      "SubagentStop",
+      "Stop",
+      "PermissionRequest",
+      "SessionEnd"
+    ],
+    "cursor": [
+      "sessionStart",
+      "preToolUse",
+      "postToolUse",
+      "postToolUseFailure",
+      "stop",
+      "sessionEnd"
+    ],
+    "grok": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PermissionDenied",
+      "Notification",
+      "Stop",
+      "StopFailure",
+      "StopCancelled",
+      "SubagentStart",
+      "SubagentStop",
+      "SubagentEnd",
+      "SessionEnd"
+    ],
+    "hermes": [
+      "on_session_start",
+      "pre_tool_call",
+      "pre_approval_request",
+      "post_tool_call",
+      "on_session_end",
+      "on_session_finalize"
+    ],
+    "kimi": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PermissionRequest",
+      "Stop",
+      "StopFailure",
+      "SessionEnd"
+    ],
+    "openclaw": [
+      "gateway_start",
+      "gateway_stop",
+      "session_start",
+      "session_end",
+      "before_agent_run",
+      "agent_end"
+    ],
+    "reasonix": [
+      "SessionStart",
+      "PreToolUse",
+      "PostToolUse",
+      "PermissionRequest",
+      "UserPromptSubmit",
+      "Stop",
+      "Notification",
+      "SessionEnd"
+    ]
+  }
+}

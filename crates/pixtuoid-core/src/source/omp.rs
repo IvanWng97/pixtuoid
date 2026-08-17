@@ -467,6 +467,20 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
+const SESSION: &str = "session";
+const MESSAGE: &str = "message";
+const CUSTOM: &str = "custom";
+
+/// The session-entry `type` values this decoder maps — this module's row in the
+/// drift surface. Pinned to the arms by
+/// `the_decoded_entry_type_set_is_exactly_what_the_arms_match`.
+///
+/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// production dispatches on, and a second copy of the vocabulary must not be
+/// something the shipped crate can read and drift against.
+#[cfg(test)]
+pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM];
+
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -481,7 +495,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
     let out = match kind {
         // session_id must be the SAME id-deriver key the watcher's first-sight
         // registration uses, so the two SessionStarts agree.
-        "session" => {
+        SESSION => {
             let cwd = obj.get("cwd").and_then(|c| c.as_str()).unwrap_or_else(|| {
                 crate::source::drift::missing_field(source, "session", "cwd");
                 ""
@@ -495,7 +509,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 parent_id,
             }]
         }
-        "message" => {
+        MESSAGE => {
             let Some(msg) = obj.get("message") else {
                 return Ok(vec![]);
             };
@@ -592,7 +606,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
         }
         // Clean teardown marker: reason/kind ignored — every kind
         // ("normal"|"signal"|"fatal"|"process_exit") IS an end.
-        "custom" if obj.get("customType").and_then(|c| c.as_str()) == Some("session_exit") => {
+        CUSTOM if obj.get("customType").and_then(|c| c.as_str()) == Some("session_exit") => {
             vec![AgentEvent::SessionEnd {
                 agent_id: acting,
                 as_child: omp_parent_key_from_path(path).is_some(),
@@ -642,6 +656,35 @@ mod tests {
     const ROOT_KEY: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001";
     const CHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha.jsonl";
     const GRANDCHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha/GoodWolf.jsonl";
+
+    /// The exported set IS the arms. The arms dispatch on the SAME consts, so a
+    /// value cannot drift; this catches a member dropped from the set, or kept
+    /// after its arm went away. `custom` is GUARDED on
+    /// `customType == "session_exit"`, so its payload has to clear the guard —
+    /// a bare `custom` falls through to the catch-all like any unread type.
+    #[test]
+    fn the_decoded_entry_type_set_is_exactly_what_the_arms_match() {
+        let drive = |ty: &str| {
+            let line = match ty {
+                CUSTOM => json!({"type": ty, "id": "x", "parentId": null,
+                                 "timestamp": "t", "customType": "session_exit"}),
+                MESSAGE => json!({"type": ty, "id": "x", "parentId": null, "timestamp": "t",
+                                  "message": {"role": "assistant", "timestamp": 1,
+                                              "model": "anthropic/claude-opus-4-5"}}),
+                _ => json!({"type": ty, "version": 3, "id": "x", "timestamp": "t",
+                            "cwd": "/home/u/proj"}),
+            };
+            let mut evs = 0;
+            let logs = crate::test_capture::capture_logs(|| {
+                evs = decode_omp_line(ROOT, SOURCE_NAME, line).map_or(0, |e| e.len());
+            });
+            evs > 0 || logs.contains(crate::source::drift::TARGET)
+        };
+        for ty in DECODED_ENTRY_TYPES {
+            assert!(drive(ty), "{ty} must reach a real arm");
+        }
+        assert!(!drive("checkpoint"), "an unread entry type reaches neither");
+    }
 
     #[test]
     fn a_root_stem_needs_both_the_date_shape_and_the_uuid_separator() {

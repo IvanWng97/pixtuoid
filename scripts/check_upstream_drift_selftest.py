@@ -11,6 +11,7 @@ from __future__ import annotations
 import ast
 import dataclasses
 import io
+import json
 import pathlib
 import re
 import sys
@@ -80,76 +81,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         d.fetch = real
 
 
-def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
-    # (reader, shape regex, floor). The dispatch-tool name set is a legitimate
-    # SINGLETON since CC dropped the `Task` alias, so it floors at 1.
-    cases = [
-        (d.read_codex_events, r"^[A-Za-z]\w+$", 2),
-            (d.read_cc_events, r"^[A-Za-z]\w+$", 2),
-        (d.read_dispatch_names, r"^[A-Za-z]\w+$", 1),
-        (d.read_reasonix_events, r"^[A-Za-z]\w+$", 2),
-        (d.read_codewhale_events, r"^[a-z][a-z_]*$", 2),
-        (d.read_openclaw_events, r"^[a-z][a-z_]*$", 2),
-        (d.read_opencode_events, r"^[a-z][a-z0-9._]*$", 2),
-        (d.read_copilot_events, r"^[a-z][a-z0-9._]*$", 2),
-            (d.read_omp_entry_types, r"^[a-z]+$", 3),
-                (d.read_cursor_events, r"^[a-zA-Z]\w+$", 2),
-        (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
-        (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
-        (d.read_grok_events, r"^[A-Z]\w+$", 2),
-        (d.read_acp_decoded_tags, r"^[a-z][a-z_]*$", 2),
-    ]
-    for reader, shape, floor in cases:
-        name = reader.__name__
-        got = reader()
-        check(isinstance(got, set) and len(got) >= floor, f"{name}: non-empty (>={floor}), got {got!r}")
-        bad = [m for m in got if not re.match(shape, m)]
-        check(not bad, f"{name}: members match {shape}; offenders={bad}")
-
-    # N-of-N: a row with no floor case can return `set()` and pass vacuously.
-    # The two non-set readers carry their floors below, not in `cases`.
-    floored = {r.__name__ for r, _, _ in cases} | {
-        "read_codex_rollout_types",
-        "read_grok_xai_method",
-    }
-    unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
-    check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
-
-    ev, ri, outers = d.read_codex_rollout_types()
-    check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
-    # The OUTERS ride this reader's parse, so their floor rides its case: a
-    # shrink here is what would make the outer sweep pass while watching less.
-    check(len(outers) >= 3, f"codex outers non-empty (>=3), got {outers!r}")
-    check(
-        all(re.match(r"^[a-z][a-z_]*$", o) for o in outers),
-        f"codex outers are snake_case discriminators: {outers!r}",
-    )
-    xai = d.read_grok_xai_method()
-    check(
-        isinstance(xai, str) and xai.startswith("_") and "/" in xai,
-        f"read_grok_xai_method returns an xAI private method name, got {xai!r}",
-    )
-    check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
-    check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
-    # Synthetic, so the control survives codex.rs dropping its own `|` arm.
-    synthetic = '("response_item", "alpha" | "beta" | "gamma") => {} ("response_item", "solo") => {}'
-    check(
-        d.match_arm_inner_types(synthetic, "response_item") == {"alpha", "beta", "gamma", "solo"},
-        f"match_arm_inner_types must read every `|` alternative, got "
-        f"{d.match_arm_inner_types(synthetic, 'response_item')!r}",
-    )
-    check("custom_tool_call" in ri, f"codex response_item reads BOTH halves of its `|` arm: {ri!r}")
-    offenders = [m for m in (ev | ri) if not re.match(r"^[a-z][a-z_]*$", m)]
-    check(not offenders, f"codex rollout members are snake_case; offenders={offenders}")
-
-    # The port literal is COPIED into the plugin (un-importable from OpenClaw's
-    # state dir) and the live comparison is PR-gated off, so renaming the const
-    # would leave the weekly check comparing nothing.
-    port = d.openclaw_plugin_default_port()
-    check(
-        port is not None and port.isdigit(),
-        f"openclaw_plugin_default_port reads a numeric literal from the plugin, got {port!r}",
-    )
 
 
 def test_upstream_parsers_extract_from_a_snippet() -> None:
@@ -299,48 +230,8 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
 
 
-def test_const_array_parser_ignores_words_quoted_inside_comments() -> None:
-    src = '''
-const DEMO_EVENTS: &[&str] = &[
-    "SessionStart",
-    // upstream's payload carries a reason const "other"; the field is
-    // `hook_event_name:"SessionEnd"` — neither is a registered event here
-    /* a block comment naming "PreToolUse" is not a registration either */
-    "SessionEnd",
-];
-'''
-    got = d.parse_rust_const_str_array(src, "DEMO_EVENTS")
-    check(got == {"SessionStart", "SessionEnd"}, f"comments excluded: {got!r}")
-
-    # An empty set would read as "nothing registered" and silence every
-    # downstream check.
-    check(
-        d.parse_rust_const_str_array(src, "NOPE_EVENTS") is None,
-        "a missing const returns None, never an empty set",
-    )
 
 
-def test_parser_never_drops_a_real_event() -> None:
-    """Each case is a construct that made some formulation of this parser swallow
-    a real entry — a dropped registration is SILENT, unlike a phantom.
-    """
-    cases = [
-        # `//` inside a string literal: a line-comment strip runs to end of line.
-        ('"SessionStart", "a//b", "SessionEnd"', {"SessionStart", "SessionEnd"}),
-        ('"Alpha", "http://x", "Charlie"', {"Alpha", "Charlie"}),
-        # Nested block comments are legal Rust; a non-greedy `/\\*.*?\\*/` closes
-        # at the FIRST `*/` and re-admits words from the comment's tail.
-        ('"Alpha", /* outer /* inner */ names "Phantom" */ "B"', {"Alpha", "B"}),
-        # A `/*` that only ever appears inside a line comment must not open a
-        # block that swallows the entries after it.
-        ('"Alpha",\n // uses /* as a marker\n "Beta", /* real */', {"Alpha", "Beta"}),
-        # Escaped quotes must not end the string early.
-        (r'"Alpha", "say \"Beta\"", "Gamma"', {"Alpha", "Gamma"}),
-        ('"Alpha",\n // see https://x "Notification"\n "Beta"', {"Alpha", "Beta"}),
-    ]
-    for body, want in cases:
-        got = d.parse_rust_const_str_array(f"const E: &[&str] = &[{body}];", "E")
-        check(got == want, f"no real event dropped from `{body}`: {got!r} != {want!r}")
 
 
 def test_block_scrape_is_bounded_to_the_decoder() -> None:
@@ -566,61 +457,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
-def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
-    """A parser that goes stale must dark ITS source, not the rest of the file."""
-    real_fetch, real_readers = d.fetch, d.READERS
-    # Every fetched document lands on the wrong content: a source gone dark
-    # fetches nothing and says nothing.
-    fetched: set[str] = set()
-    d.fetch = lambda u: (fetched.add(u), "unrelated body")[1]
-
-    def run() -> tuple[set[str], str]:
-        fetched.clear()
-        buf, real_stdout = io.StringIO(), sys.stdout
-        sys.stdout = buf
-        try:
-            d.main()
-        finally:
-            sys.stdout = real_stdout
-        return set(fetched), buf.getvalue()
-
-    try:
-        base_urls, _ = run()
-        check(len(base_urls) > 20, f"the baseline exercises the file, got {len(base_urls)} URLs")
-
-        # Inject into the ROW, never `d.read_codex_events` — see the WHY on the
-        # READERS declaration.
-        first_field, first_reader, first_what = d.READERS[0]
-        d.READERS = (
-            (first_field, _raiser(first_reader.__name__), first_what),
-            *d.READERS[1:],
-        )
-        broken_urls, out = run()
-
-        check(
-            first_reader.__name__ in out,
-            f"the injected fault fired and named `{first_reader.__name__}`:\n{out}",
-        )
-        own = [ln for ln in out.splitlines() if first_reader.__name__ in ln]
-        check(
-            len(own) == 1
-            and "Fix the script" in own[0]
-            and "Re-verify upstream by hand" not in own[0],
-            f"the stale OWN-source line blames the script, not upstream: {own}",
-        )
-        # These four sit at the far end of the table.
-        for name in ("CURSOR_HOOKS_URL", "HERMES_PLUGINS_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
-            check(
-                getattr(d, name) in broken_urls,
-                f"a stale reader in row 1 must not dark {name} in row 10+ "
-                f"(fetched {len(broken_urls)} of {len(base_urls)} URLs):\n{out}",
-            )
-        check(
-            "Nothing upstream was checked" not in out,
-            f"a single stale reader must not claim the whole run was blind:\n{out}",
-        )
-    finally:
-        d.fetch, d.READERS = real_fetch, real_readers
 
 
 def _raiser(name: str) -> typing.Callable[[], object]:
@@ -633,95 +469,10 @@ def _raiser(name: str) -> typing.Callable[[], object]:
     return broken
 
 
-def test_every_reader_row_matches_a_field_on_our_names() -> None:
-    """The READERS table is stringly-keyed; nothing else pins it to `OurNames`."""
-    rows = {field for field, _, _ in _reader_rows()}
-    fields = {f.name for f in dataclasses.fields(d.OurNames)}
-    check(
-        rows == fields,
-        f"every READERS row must name an OurNames field and every field must be "
-        f"filled by a row — otherwise the source is silently unchecked with no "
-        f"probe-health line. Mismatched: {rows ^ fields}. Add the missing row or "
-        f"field, or drop the orphan.",
-    )
-    # None, not an empty container: a truthy-empty default sails past `is not None`.
-    fresh = d.OurNames()
-    non_none = sorted(f.name for f in dataclasses.fields(fresh) if getattr(fresh, f.name) is not None)
-    check(not non_none, f"OurNames fields must default to None, got set: {non_none}")
-    for field, reader_name, what in _reader_rows():
-        check(callable(getattr(d, reader_name, None)), f"{reader_name} is a real reader")
-        check(bool(what.strip()), f"{reader_name} declares what it reads")
-        # `field in reader_name` is too weak: a field that is a PREFIX of another
-        # source's reader name passes a substring test while feeding the wrong
-        # source's names to the sweep below.
-        stem = reader_name.removeprefix("read_")
-        suffix = stem[len(field):] if stem.startswith(field) else None
-        check(
-            suffix in READER_NAME_SUFFIXES,
-            f"READERS pairs field `{field}` with `{reader_name}`: the reader's "
-            f"name must be `read_{field}` plus one of {sorted(READER_NAME_SUFFIXES)}. "
-            f"A mispaired row feeds one source's names to another source's sweep, "
-            f"which reports them all as renames. Fix the pairing, or name the "
-            f"field after its reader.",
-        )
 
 
-def test_no_reader_is_called_outside_the_readers_table() -> None:
-    """An inline `read_*()` raise unwinds to `main()`'s catch-all and is filed
-    TRANSIENT — exit 2, a warning on a GREEN run — instead of probe health.
-    """
-    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
-    tree = ast.parse(src)
-    tabled = {row.elts[1].id for row in next(
-        n.value for n in tree.body
-        if isinstance(n, ast.AnnAssign) and getattr(n.target, "id", "") == "READERS"
-    ).elts}
-    check(
-        tabled == {name for _, name, _ in _reader_rows()},
-        "the READERS AST scan agrees with the runtime table",
-    )
-    # Whole module: a `read_*` inside a HELPER that run_checks calls unwinds to
-    # the same catch-all. `read_our_names` is the sanctioned caller.
-    exempt = {"read_our_names"}
-    scan_roots = [
-        n for n in tree.body
-        if isinstance(n, ast.FunctionDef)
-        and n.name not in exempt
-        and not n.name.startswith("read_")
-    ]
-    stray = sorted({
-        f"{n.func.id}:{n.lineno}"
-        for root in scan_roots
-        for n in ast.walk(root)
-        if isinstance(n, ast.Call)
-        and isinstance(n.func, ast.Name)
-        and n.func.id.startswith("read_")
-        and n.func.id not in exempt
-    })
-    check(
-        not stray,
-        f"a `read_*` is called inline instead of being consumed from `ours`, so "
-        f"its failure lands in the TRANSIENT bucket (exit 2, a warning on a green "
-        f"run) instead of probe health: {stray}. Read it from the OurNames field "
-        f"its READERS row fills, and guard on `is not None`.",
-    )
-    # Name-independent twin: the check above keys on the `read_*` convention; a
-    # direct `REPO` read is the form a rename cannot slip past.
-    run_checks = next(
-        n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "run_checks"
-    )
-    repo_reads = sorted(
-        {n.lineno for n in ast.walk(run_checks) if isinstance(n, ast.Name) and n.id == "REPO"}
-    )
-    check(
-        not repo_reads,
-        f"run_checks reads a repo file directly at line(s) {repo_reads} — route it "
-        f"through a READERS row so its failure is isolated probe health.",
-    )
 
 
-def _reader_rows() -> list[tuple[str, str, str]]:
-    return [(field, reader.__name__, what) for field, reader, what in d.READERS]
 
 
 def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
@@ -896,7 +647,7 @@ def test_report_separates_verified_change_from_probe_health() -> None:
     """The two dispositions must not share a heading: the heading is the
     instruction, and a reader who trusts a wrong one edits a decoder (#793).
     """
-    real_run, real_read = d.run_checks, d.read_codex_events
+    real_run = d.run_checks
     try:
         def fake(*a: object, report: d.Report, **k: object) -> None:
             report.add_breaking("VERIFIED-CHANGE-LINE")
@@ -950,7 +701,7 @@ def test_report_separates_verified_change_from_probe_health() -> None:
             "a blind-only report renders ONLY the probe-health section",
         )
     finally:
-        d.run_checks, d.read_codex_events = real_run, real_read
+        d.run_checks = real_run
 
 
 def test_enum_body_survives_struct_variants_and_indentation() -> None:
@@ -1087,7 +838,10 @@ _OMP_ENV_LIVE = (
 
 
 _OMP_NAMES = d.OurNames(omp={"session"})
-_GROK_NAMES = d.OurNames(grok=set(), grok_xai_method=d.read_grok_xai_method())
+_GROK_NAMES = d.OurNames(
+    grok=set(),
+    grok_xai_method=d.load_fragment(d.CORE_LIB_FRAGMENT)["values"]["grok.xai_session_update_method"],
+)
 
 
 def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> list[str]:
@@ -1516,7 +1270,7 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
     """The value must be read off the declaration, never scanned for."""
-    ours = d.read_grok_xai_method()
+    ours = d.load_fragment(d.CORE_LIB_FRAGMENT)["values"]["grok.xai_session_update_method"]
     kind = "xAI method namespace"
     decl = f'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "{ours}";\n'
     # The two sites a symbol rename structurally cannot reach — present in BOTH
@@ -1540,6 +1294,43 @@ def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
         len(got) == 1 and f"`{ours}/v2`" in got[0],
         f"a commented-out declaration must not mask the rename; got {got}",
     )
+
+
+def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
+    """A gap in the emitted surface costs exactly what it feeds.
+
+    The 16 hand-written readers had per-reader `try` for this; the fragments give
+    per-KEY isolation instead, and it has to be the same promise or a single
+    missing row silently darkens the whole watch."""
+    real = d.load_fragment
+    try:
+        full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
+
+        # A row that is present everywhere else goes missing.
+        holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
+        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["copilot.kinds"]
+        d.load_fragment = lambda rel: holed[rel]
+        rep = d.Report()
+        ours = d.read_our_names(rep)
+        check(ours.copilot is None, f"the holed field is dark, got {ours.copilot!r}")
+        for other in ("cc", "codex", "omp", "opencode", "grok"):
+            got = getattr(ours, other)
+            check(got, f"{other} must survive a sibling's gap, got {got!r}")
+        named = [b for b in rep.blind if "copilot" in b]
+        check(len(named) == 1, f"exactly one probe-health line names copilot: {rep.blind}")
+        check(
+            any("our_source" in str(b) or "SKIPPED" in b for b in named),
+            f"the line must read as OUR problem, not upstream's: {named}",
+        )
+
+        # A fragment that does not load at all darkens only what IT feeds.
+        d.load_fragment = lambda rel: (_ for _ in ()).throw(OSError("gone")) if rel == d.CORE_BIN_FRAGMENT else full[rel]
+        rep2 = d.Report()
+        ours2 = d.read_our_names(rep2)
+        check(ours2.cc is None, "a registration field is dark when its fragment is gone")
+        check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
+    finally:
+        d.load_fragment = real
 
 
 def main() -> int:

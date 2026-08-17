@@ -67,13 +67,35 @@ pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let props = props_val.as_object().unwrap_or(&empty);
 
     match event {
-        "session.created" => decode_session_lifecycle(props, false),
-        "session.deleted" => decode_session_lifecycle(props, true),
-        "message.part.updated" => decode_tool_part(props),
-        "permission.asked" | "permission.v2.asked" => decode_permission(props_val),
+        SESSION_CREATED => decode_session_lifecycle(props, false),
+        SESSION_DELETED => decode_session_lifecycle(props, true),
+        MESSAGE_PART_UPDATED => decode_tool_part(props),
+        PERMISSION_ASKED | PERMISSION_V2_ASKED => decode_permission(props_val),
         _ => Ok(vec![]),
     }
 }
+
+const SESSION_CREATED: &str = "session.created";
+const SESSION_DELETED: &str = "session.deleted";
+const MESSAGE_PART_UPDATED: &str = "message.part.updated";
+const PERMISSION_ASKED: &str = "permission.asked";
+const PERMISSION_V2_ASKED: &str = "permission.v2.asked";
+
+/// The hook event types this decoder turns into events — this module's row in
+/// the drift surface. Pinned to the arms above by
+/// `the_decoded_event_set_is_exactly_what_the_arms_match`.
+///
+/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// production dispatches on, and a second copy of the vocabulary must not be
+/// something the shipped crate can read and drift against.
+#[cfg(test)]
+pub(crate) const DECODED_EVENTS: &[&str] = &[
+    SESSION_CREATED,
+    SESSION_DELETED,
+    MESSAGE_PART_UPDATED,
+    PERMISSION_ASKED,
+    PERMISSION_V2_ASKED,
+];
 
 /// `session.created` / `session.deleted` → `{sessionID, info: SessionInfo}`,
 /// where `info.id` is the stable `ses_*` key, `info.directory` the cwd, and
@@ -256,6 +278,32 @@ fn oc_tool_detail(tool: &str, input: Option<&Value>) -> ToolDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exported set IS the arms: every member reaches a real arm and decodes
+    /// to at least one event. The arms dispatch on the SAME consts, so a value
+    /// can no longer drift; what this catches is a member dropped from the set,
+    /// or kept in it after its arm went away.
+    #[test]
+    fn the_decoded_event_set_is_exactly_what_the_arms_match() {
+        let payload = |ev: &str| match ev {
+            MESSAGE_PART_UPDATED => serde_json::json!({"type": ev, "properties": {
+                "sessionID": "ses_x",
+                "part": {"type": "tool", "callID": "c", "tool": "bash",
+                         "state": {"status": "running"}}}}),
+            PERMISSION_ASKED | PERMISSION_V2_ASKED => {
+                serde_json::json!({"type": ev, "properties": {"sessionID": "ses_x"}})
+            }
+            _ => serde_json::json!({"type": ev, "properties": {
+                "sessionID": "ses_m", "info": {"id": "ses_m", "directory": "/repo"}}}),
+        };
+        for ev in DECODED_EVENTS {
+            let got = decode_oc_hook_payload(&payload(ev)).expect("a decoded event decodes");
+            assert!(!got.is_empty(), "{ev} must reach a real arm");
+        }
+        assert!(decode_oc_hook_payload(&payload("session.archived"))
+            .expect("an unhandled type is not an error")
+            .is_empty());
+    }
 
     #[test]
     fn session_created_surfaces_the_model_slug() {

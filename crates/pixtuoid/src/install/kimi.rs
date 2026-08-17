@@ -32,7 +32,7 @@ use pixtuoid_core::source::kimi::SOURCE_NAME;
 /// `every_registered_kimi_event_decodes`. The two `*Failure` variants close a
 /// failed tool/turn via the source's custom `Extend` decoder — a failed tool
 /// fires `PostToolUseFailure`, which must still end the activity.
-const KIMI_EVENTS: &[&str] = &[
+pub(crate) const KIMI_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",

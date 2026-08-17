@@ -9,7 +9,7 @@ use crate::install::merge;
 use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
 
-const EVENTS: &[&str] = &[
+pub(crate) const EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",

@@ -14,6 +14,19 @@ use serde_json::{Map, Value};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
+const TOOL_CALL: &str = "tool_call";
+const TOOL_CALL_UPDATE: &str = "tool_call_update";
+
+/// The `sessionUpdate` tags this decoder turns into events — this module's row
+/// in the drift surface. Pinned to the arms below by
+/// `the_decoded_tag_set_is_exactly_what_the_arms_match`.
+///
+/// Test-gated because the surface emitter is the only reader: the ARMS are what
+/// production dispatches on, and a second copy of the vocabulary must not be
+/// something the shipped crate can read and drift against.
+#[cfg(test)]
+pub(crate) const DECODED_TAGS: &[&str] = &[TOOL_CALL, TOOL_CALL_UPDATE];
+
 /// Decode one ACP `session/update` notification's `update` object into activity
 /// events; the caller injects `agent_id` and its own `tool_detail` (invariant #3).
 ///
@@ -30,7 +43,7 @@ pub(crate) fn decode_session_update(
     let tool_call_id = || str_field("toolCallId").map(String::from);
 
     match str_field("sessionUpdate").unwrap_or("") {
-        "tool_call" => vec![AgentEvent::ActivityStart {
+        TOOL_CALL => vec![AgentEvent::ActivityStart {
             agent_id,
             tool_use_id: tool_call_id(),
             detail: Some(tool_detail(
@@ -38,7 +51,7 @@ pub(crate) fn decode_session_update(
                 update.get("rawInput"),
             )),
         }],
-        "tool_call_update" => match str_field("status") {
+        TOOL_CALL_UPDATE => match str_field("status") {
             Some("completed") | Some("failed") => vec![AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: tool_call_id(),
@@ -104,6 +117,25 @@ mod tests {
         assert!(
             decode(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1"})).is_empty()
         );
+    }
+
+    /// The exported set IS the arms: every member drives the decoder to a real
+    /// event and a non-member decodes to nothing. Without this the const is a
+    /// second copy of the vocabulary, free to drift off the arms it describes —
+    /// and the drift watcher reads the const, not the arms.
+    #[test]
+    fn the_decoded_tag_set_is_exactly_what_the_arms_match() {
+        assert_eq!(DECODED_TAGS, ["tool_call", "tool_call_update"]);
+        for tag in DECODED_TAGS {
+            let update = json!({
+                "sessionUpdate": tag,
+                "toolCallId": "c1",
+                "title": "grep",
+                "status": "completed",
+            });
+            assert!(!decode(update).is_empty(), "{tag} must reach a real arm");
+        }
+        assert!(decode(json!({"sessionUpdate": "tool_call_pending"})).is_empty());
     }
 
     /// Blank, per-token and brand-new tags alike decode to nothing IN SILENCE:

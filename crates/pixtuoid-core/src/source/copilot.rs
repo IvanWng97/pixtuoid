@@ -82,6 +82,38 @@ pub(crate) fn extract_copilot_cwd(v: &Value) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+const SESSION_START: &str = "session.start";
+const TOOL_EXECUTION_START: &str = "tool.execution_start";
+const TOOL_EXECUTION_COMPLETE: &str = "tool.execution_complete";
+const PERMISSION_REQUESTED: &str = "permission.requested";
+const PERMISSION_COMPLETED: &str = "permission.completed";
+const SUBAGENT_STARTED: &str = "subagent.started";
+const SUBAGENT_COMPLETED: &str = "subagent.completed";
+const SUBAGENT_FAILED: &str = "subagent.failed";
+const SESSION_TASK_COMPLETE: &str = "session.task_complete";
+const SESSION_SHUTDOWN: &str = "session.shutdown";
+
+/// The `kind` values this decoder turns into events — this module's row in the
+/// drift surface. Pinned to the arms by
+/// `the_decoded_kind_set_is_exactly_what_the_arms_match`.
+///
+/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// production dispatches on, and a second copy of the vocabulary must not be
+/// something the shipped crate can read and drift against.
+#[cfg(test)]
+pub(crate) const DECODED_KINDS: &[&str] = &[
+    SESSION_START,
+    TOOL_EXECUTION_START,
+    TOOL_EXECUTION_COMPLETE,
+    PERMISSION_REQUESTED,
+    PERMISSION_COMPLETED,
+    SUBAGENT_STARTED,
+    SUBAGENT_COMPLETED,
+    SUBAGENT_FAILED,
+    SESSION_TASK_COMPLETE,
+    SESSION_SHUTDOWN,
+];
+
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files
 /// carry embedded-newline / U+2028 corruption (upstream copilot-cli #2649/#2012).
@@ -103,7 +135,7 @@ pub fn decode_copilot_line(
     };
 
     let out = match kind {
-        "session.start" => {
+        SESSION_START => {
             let session_id = data
                 .and_then(|d| str_at(d, "sessionId"))
                 .unwrap_or_else(|| {
@@ -122,7 +154,7 @@ pub fn decode_copilot_line(
                 parent_id: None,
             }]
         }
-        "tool.execution_start" => {
+        TOOL_EXECUTION_START => {
             let Some(d) = data else {
                 crate::source::drift::missing_field(source, "tool.execution_start", "data");
                 return Ok(vec![]);
@@ -142,7 +174,7 @@ pub fn decode_copilot_line(
                 detail: Some(detail),
             }]
         }
-        "tool.execution_complete" => {
+        TOOL_EXECUTION_COMPLETE => {
             let Some(d) = data else {
                 crate::source::drift::missing_field(source, "tool.execution_complete", "data");
                 return Ok(vec![]);
@@ -171,7 +203,7 @@ pub fn decode_copilot_line(
             }
             out
         }
-        "permission.requested" => {
+        PERMISSION_REQUESTED => {
             let reason = data
                 .and_then(|d| d.get("permissionRequest"))
                 .and_then(|p| str_at(p, "kind"))
@@ -188,7 +220,7 @@ pub fn decode_copilot_line(
         // clears the Waiting gate, so emit nothing (a detail-less ActivityStart
         // here would only inflate tool_call_count). On a DENIAL/cancel no tool
         // runs, so emit the clearing ActivityStart ourselves.
-        "permission.completed" => {
+        PERMISSION_COMPLETED => {
             let approved = data
                 .and_then(|d| d.get("result"))
                 .and_then(|r| str_at(r, "kind"))
@@ -203,7 +235,7 @@ pub fn decode_copilot_line(
                 }]
             }
         }
-        "subagent.started" => {
+        SUBAGENT_STARTED => {
             let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
@@ -230,7 +262,7 @@ pub fn decode_copilot_line(
             }
             evs
         }
-        "subagent.completed" | "subagent.failed" => {
+        SUBAGENT_COMPLETED | SUBAGENT_FAILED => {
             let Some(child_key) = copilot_child_key(&v, data) else {
                 return Ok(vec![]);
             };
@@ -239,7 +271,7 @@ pub fn decode_copilot_line(
                 as_child: true,
             }]
         }
-        "session.task_complete" => vec![AgentEvent::ActivityEnd {
+        SESSION_TASK_COMPLETE => vec![AgentEvent::ActivityEnd {
             agent_id: root,
             tool_use_id: None,
         }],
@@ -249,7 +281,7 @@ pub fn decode_copilot_line(
         // INFERRED snake_case key (from the sibling `cache_read`): no fixture
         // carries a nonzero bucket, and a differently-spelled key only
         // UNDERcounts.
-        "session.shutdown" => {
+        SESSION_SHUTDOWN => {
             let mut evs = vec![AgentEvent::SessionEnd {
                 agent_id: root,
                 as_child: false,
@@ -301,6 +333,35 @@ fn copilot_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The exported set IS the arms. The arms dispatch on the SAME consts, so a
+    /// value cannot drift; this catches a member dropped from the set, or kept
+    /// after its arm went away. The discriminator is REACHING an arm, not
+    /// emitting an event — several arms legitimately decode a well-formed line
+    /// to nothing — so each kind is fed an EMPTY `data`, where every real arm
+    /// breadcrumbs a missing field and the catch-all stays silent.
+    #[test]
+    fn the_decoded_kind_set_is_exactly_what_the_arms_match() {
+        let path = "/p/11111111-2222-3333-4444-555555555555/events.jsonl";
+        let drive = |kind: &str| {
+            let line = serde_json::json!({
+                "type": kind, "data": {"toolCallId": "t1"}, "id": "e1",
+                "timestamp": "ts", "parentId": null,
+            });
+            let mut evs = 0;
+            let logs = crate::test_capture::capture_logs(|| {
+                evs = decode_copilot_line(path, "copilot", line).map_or(0, |e| e.len());
+            });
+            evs > 0 || logs.contains(crate::source::drift::TARGET)
+        };
+        for kind in DECODED_KINDS {
+            assert!(drive(kind), "{kind} must reach a real arm");
+        }
+        assert!(
+            !drive("session.archived"),
+            "an unhandled kind reaches neither"
+        );
+    }
 
     #[test]
     fn execution_complete_surfaces_the_per_tool_model() {

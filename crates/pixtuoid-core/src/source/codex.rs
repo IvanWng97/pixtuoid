@@ -118,6 +118,41 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
     v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
+const EVENT_MSG: &str = "event_msg";
+const RESPONSE_ITEM: &str = "response_item";
+const TURN_CONTEXT: &str = "turn_context";
+
+/// The rollout OUTER discriminators this decoder dispatches on — this module's
+/// row in the drift surface. Test-gated: the surface emitter is the only reader.
+#[cfg(test)]
+pub(crate) const DECODED_OUTERS: &[&str] = &[EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT];
+
+/// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
+/// (the arms below guard on `contains`) and the export source, so there is one
+/// declaration per name and no second copy to drift. Adding a name to a group
+/// changes what decodes AND what the drift surface claims, in one edit.
+const EM_TURN_START: &[&str] = &["task_started", "turn_started"];
+const EM_RESUME: &[&str] = &["exec_command_end", "patch_apply_end"];
+const EM_SEARCH: &[&str] = &["web_search_begin", "web_search_end"];
+const EM_TURN_END: &[&str] = &["task_complete", "turn_complete", "turn_aborted"];
+const EM_TOKENS: &[&str] = &["token_count"];
+
+const RI_TOOL_START: &[&str] = &["function_call", "custom_tool_call"];
+const RI_RESUME: &[&str] = &["function_call_output", "custom_tool_call_output"];
+const RI_SEARCH: &[&str] = &["web_search_call", "tool_search_call", "tool_search_output"];
+
+/// Derived from the SAME group consts the arms guard on — never a hand-kept
+/// mirror. Test-gated: the surface emitter is the only reader.
+#[cfg(test)]
+pub(crate) fn decoded_event_msg() -> Vec<&'static str> {
+    [EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()
+}
+
+#[cfg(test)]
+pub(crate) fn decoded_response_item() -> Vec<&'static str> {
+    [RI_TOOL_START, RI_RESUME, RI_SEARCH].concat()
+}
+
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -146,10 +181,10 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // `task_started` is what codex serializes today; `turn_started` is
         // upstream's own serde alias, accepted so a future serializer flip to
         // the alias form still drives Active/Idle.
-        ("event_msg", "task_started") | ("event_msg", "turn_started") => vec![start()],
+        (EVENT_MSG, i) if EM_TURN_START.contains(&i) => vec![start()],
         // `custom_tool_call` is the SAME item under codex's custom-tool API and is
         // what a modern session serializes — `a_custom_tool_call_is_a_tool_call`.
-        ("response_item", "function_call" | "custom_tool_call") => {
+        (RESPONSE_ITEM, i) if RI_TOOL_START.contains(&i) => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {
                     agent_id,
@@ -162,31 +197,22 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // Resume signals: a command/patch finished running after (auto-)approval.
         // Each is an ActivityStart so the reducer clears any Waiting set by the
         // permission gate.
-        ("response_item", "function_call_output")
-        | ("response_item", "custom_tool_call_output")
-        | ("event_msg", "exec_command_end")
-        | ("event_msg", "patch_apply_end") => {
-            vec![start()]
-        }
+        (RESPONSE_ITEM, i) if RI_RESUME.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_RESUME.contains(&i) => vec![start()],
         // Web/tool search are turn-INTERNAL work pulses that keep the agent
         // Active; only task_complete / turn_aborted end the turn. Both the
         // EventMsg and the raw-Responses-item forms appear in real rollouts.
         // Searching is never permission-prompted — no Waiting branch.
-        ("response_item", "web_search_call")
-        | ("event_msg", "web_search_begin")
-        | ("event_msg", "web_search_end")
-        | ("response_item", "tool_search_call")
-        | ("response_item", "tool_search_output") => vec![start()],
-        ("event_msg", "task_complete")
-        | ("event_msg", "turn_complete")
-        | ("event_msg", "turn_aborted") => vec![end()],
+        (RESPONSE_ITEM, i) if RI_SEARCH.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_SEARCH.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_TURN_END.contains(&i) => vec![end()],
         // `last_token_usage` is that turn's reading; the cumulative twin
         // `total_token_usage` must NOT be read — the reducer accumulates
         // deltas, so summing a running total would double-count. codex's
         // `input_tokens` INCLUDES the cached share (verified), so fresh input
         // = input − cached, saturating because upstream reporting quirks must
         // not wrap; `reasoning_output_tokens` is additive alongside `output`.
-        ("event_msg", "token_count") => {
+        (EVENT_MSG, i) if EM_TOKENS.contains(&i) => {
             let last = payload
                 .and_then(|p| p.get("info"))
                 .and_then(|i| i.get("last_token_usage"))
@@ -211,7 +237,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // turns only, the effort — both RAW verbatim, last-seen-wins, so a
         // mid-session switch tracks. Absent effort ≠ downgrade: the reducer
         // only refreshes on Some.
-        ("turn_context", _) => {
+        (TURN_CONTEXT, _) => {
             let model = payload
                 .and_then(|p| p.get("model"))
                 .and_then(|m| m.as_str())
@@ -296,6 +322,50 @@ pub fn codex_home() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Every exported rollout name reaches a real arm, and a name outside the
+    /// sets reaches none. The OUTERS dispatch on consts so their value cannot
+    /// drift; the inners are a second copy, which is exactly why each is driven
+    /// here rather than merely listed.
+    #[test]
+    fn the_decoded_rollout_sets_are_exactly_what_the_arms_match() {
+        let drive = |outer: &str, inner: &str| {
+            let v = json!({
+                "type": outer,
+                "payload": {"type": inner, "turn_id": "t1", "cwd": "/r",
+                            "name": "bash", "call_id": "c1", "arguments": "{}",
+                            "model": "gpt-5.6-sol", "effort": "xhigh",
+                            "info": {"last_token_usage": {"input_tokens": 1}}},
+            });
+            decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v)
+                .is_ok_and(|e| !e.is_empty())
+        };
+        for inner in decoded_event_msg() {
+            assert!(
+                drive(EVENT_MSG, inner),
+                "event_msg/{inner} must reach an arm"
+            );
+        }
+        for inner in decoded_response_item() {
+            assert!(
+                drive(RESPONSE_ITEM, inner),
+                "response_item/{inner} must reach an arm",
+            );
+        }
+        assert!(
+            drive(TURN_CONTEXT, "anything"),
+            "turn_context matches on `_`"
+        );
+        assert_eq!(DECODED_OUTERS, [EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]);
+        assert!(
+            !drive(EVENT_MSG, "turn_paused"),
+            "an unread inner reaches none"
+        );
+        assert!(
+            !drive("session_meta", "task_started"),
+            "an unread outer reaches none"
+        );
+    }
 
     #[test]
     fn turn_context_surfaces_model_and_effort_verbatim() {

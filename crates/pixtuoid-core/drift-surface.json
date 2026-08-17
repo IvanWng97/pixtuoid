@@ -1,0 +1,64 @@
+{
+  "decoded": {
+    "acp.session_update_tags": [
+      "tool_call",
+      "tool_call_update"
+    ],
+    "codex.event_msg": [
+      "task_started",
+      "turn_started",
+      "exec_command_end",
+      "patch_apply_end",
+      "web_search_begin",
+      "web_search_end",
+      "task_complete",
+      "turn_complete",
+      "turn_aborted",
+      "token_count"
+    ],
+    "codex.response_item": [
+      "function_call",
+      "custom_tool_call",
+      "function_call_output",
+      "custom_tool_call_output",
+      "web_search_call",
+      "tool_search_call",
+      "tool_search_output"
+    ],
+    "codex.rollout_outers": [
+      "event_msg",
+      "response_item",
+      "turn_context"
+    ],
+    "copilot.kinds": [
+      "session.start",
+      "tool.execution_start",
+      "tool.execution_complete",
+      "permission.requested",
+      "permission.completed",
+      "subagent.started",
+      "subagent.completed",
+      "subagent.failed",
+      "session.task_complete",
+      "session.shutdown"
+    ],
+    "decoder.dispatch_names": [
+      "Agent"
+    ],
+    "omp.entry_types": [
+      "session",
+      "message",
+      "custom"
+    ],
+    "opencode.hook_events": [
+      "session.created",
+      "session.deleted",
+      "message.part.updated",
+      "permission.asked",
+      "permission.v2.asked"
+    ]
+  },
+  "values": {
+    "grok.xai_session_update_method": "_x.ai/session/update"
+  }
+}
