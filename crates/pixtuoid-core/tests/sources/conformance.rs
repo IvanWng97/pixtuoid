@@ -18,6 +18,12 @@ use std::path::{Path, PathBuf};
 use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{registry, AgentEvent};
 
+// ONE set of tree helpers, in `captures.rs`. This file kept byte-identical
+// copies whose `read_dir` SWALLOWED errors where the other panics — an
+// unreadable capture dir made `wire_files()` empty, so the redaction rule
+// passed vacuously for it.
+use super::captures::{fixtures_root, sorted_dirs, transcripts_in};
+
 /// Hook-only-ness comes from the registry row, never a harness-side list — a
 /// second list could mark a JSONL source hook-only and pass the harness without
 /// its LineDecoder ever running.
@@ -32,12 +38,6 @@ fn is_daemon(source: &str) -> bool {
     registry::descriptor_for(source).is_some_and(|d| d.is_daemon())
 }
 
-fn fixtures_root() -> PathBuf {
-    // Conformance scenarios ONLY — single-owner fixtures live with their
-    // module, NOT here.
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures")
-}
-
 fn read_lines(path: &Path) -> Vec<String> {
     std::fs::read_to_string(path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
@@ -45,16 +45,6 @@ fn read_lines(path: &Path) -> Vec<String> {
         .map(str::to_string)
         .filter(|l| !l.trim().is_empty())
         .collect()
-}
-
-fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.is_dir())
-        .collect();
-    out.sort();
-    out
 }
 
 struct Decoded {
@@ -74,22 +64,6 @@ impl Decoded {
             .flat_map(|d| d.events.iter().cloned())
             .collect()
     }
-}
-
-/// A scenario's transcripts: the non-hook `.jsonl` files, sorted. Exactly one
-/// for a JSONL-bearing source — two would make selection (and the snapshot)
-/// depend on `read_dir` order, zero would skip its LineDecoder entirely.
-fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
-    let mut out: Vec<PathBuf> = std::fs::read_dir(dir)
-        .unwrap()
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| {
-            p.extension().and_then(|s| s.to_str()) == Some("jsonl")
-                && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
-        })
-        .collect();
-    out.sort();
-    out
 }
 
 fn transcript_in(dir: &Path) -> PathBuf {
@@ -244,6 +218,50 @@ fn every_registered_source_has_a_coalescing_fixture() {
             "registered source {src:?} fixture dir {} has no scenario subdir",
             dir.display()
         );
+    }
+}
+
+/// A source whose id comes from the transcript's PARENT DIR needs the fixture to
+/// reproduce that dir, or the session id silently becomes the SCENARIO NAME. The
+/// README states the rule; this is what makes it fail. The probe catches a
+/// deriver that returns the parent VERBATIM; one that DERIVES from it (omp's
+/// `stem_chain` shape) reads as filename-keyed and is skipped.
+#[test]
+fn a_parent_dir_keyed_transcript_is_nested_under_its_session_id() {
+    let root = fixtures_root();
+    for source_dir in sorted_dirs(&root) {
+        let source = source_dir
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        if is_hook_only(&source) || is_daemon(&source) {
+            continue;
+        }
+        let derive = registry::id_deriver_for(&source);
+        // The probe names a dir that no scenario could be called; a filename-keyed
+        // deriver ignores it, a parent-dir-keyed one hands it straight back.
+        const PROBE: &str = "0000-parent-probe";
+        if derive(Path::new(&format!("{PROBE}/x.jsonl"))) != PROBE {
+            continue;
+        }
+        for scenario_dir in sorted_dirs(&source_dir) {
+            let scenario = scenario_dir
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .into_owned();
+            for t in transcripts_in(&scenario_dir) {
+                let parent = t.parent().unwrap().file_name().unwrap().to_string_lossy();
+                assert_ne!(
+                    parent,
+                    scenario,
+                    "{}: {source} keys the session on the transcript's PARENT DIR, so a flat \
+                     fixture makes the scenario name the session id — nest it under the real id",
+                    t.display()
+                );
+            }
+        }
     }
 }
 

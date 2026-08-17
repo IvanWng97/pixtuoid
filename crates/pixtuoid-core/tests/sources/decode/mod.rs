@@ -1147,20 +1147,24 @@ fn registry_cwd_extractor_matches_each_sources_real_head_shape() {
     let cases: [(&str, &str, Option<&str>); 4] = [
         (
             "claude-code",
-            "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
-            Some("/home/user/demo-project"),
+            "claude-code/permission-recorded/947851e2-a15a-4de8-8375-46e9cddb5c8f.jsonl",
+            Some("/private/tmp/pixtuoid-capture/proj"),
         ),
         (
             "codex",
-            "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
-            Some("/home/user/demo-project"),
+            "codex/permission-recorded/rollout-2026-08-15T06-28-11-01a0059b-cb9d-7a92-8821-85ebb7604464.jsonl",
+            Some("/private/tmp/pixtuoid-capture/proj"),
         ),
         (
             "copilot",
-            "copilot/tool-run/events.jsonl",
+            "copilot/tool-run/65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3/events.jsonl",
             Some(r"d:\contentforge-fullstack (1)"),
         ),
-        ("antigravity", "antigravity/tool-run/transcript.jsonl", None),
+        (
+            "antigravity",
+            "antigravity/tool-run-recorded/transcript.jsonl",
+            None,
+        ),
     ];
     for (source, rel, expected) in cases {
         let extract = pixtuoid_core::source::registry::cwd_extractor_for(source);

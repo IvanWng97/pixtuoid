@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "codex",
+  "version": "0.135",
+  "captured": "unknown",
+  "command": "see the module header",
+  "note": "Captured live (Codex 0.135, gpt-5.5) and sanitized: synthetic UUIDs, generic cwd, the huge `last_assistant_message` truncated. Predates the socket recorder, hence no shim stamps."
+}

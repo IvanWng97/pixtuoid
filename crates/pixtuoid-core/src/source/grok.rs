@@ -196,8 +196,8 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             }
         }
         // Turn end, identity-LESS: an end for an unknown agent proves nothing
-        // worth registering.
-        "stop" | "stop_failure" => Ok(vec![AgentEvent::ActivityEnd {
+        // worth registering. All three of upstream's turn-end causes land here.
+        "stop" | "stop_failure" | "stop_cancelled" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
         }]),
@@ -345,7 +345,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
     };
     let str_field = |key: &str| update.get(key).and_then(|s| s.as_str());
 
-    match method {
+    let decoded: Result<Vec<AgentEvent>> = match method {
         "session/update" => Ok(crate::source::acp::decode_session_update(
             agent_id,
             SOURCE_NAME,
@@ -435,7 +435,23 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
             Ok(vec![])
         }
         _ => Ok(vec![]),
+    };
+    let mut evs = decoded?;
+    // The model rides `_meta` on an ORDINARY update; keying on the
+    // `model_changed` tag a real session never sends left the flame dark.
+    if let Some(model) = update
+        .get("_meta")
+        .and_then(|m| m.get("modelId"))
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 /// grok transcript lines carry NO cwd anywhere in their content — it exists
@@ -631,6 +647,26 @@ mod tests {
     }
 
     #[test]
+    fn an_ordinary_updates_meta_carries_the_model() {
+        // The shape from fixtures/grok/permission-recorded — `model_changed`
+        // never appears in a real session.
+        let evs = decode_line(json!({
+            "method": "session/update",
+            "params": {"sessionId": "s", "update": {
+                "sessionUpdate": "user_message_chunk",
+                "content": {"type": "text", "text": "hi"},
+                "_meta": {"modelId": "grok-4.6"}
+            }}
+        }));
+        assert!(
+            evs.iter().any(
+                |e| matches!(e, AgentEvent::ModelInfo { model: Some(m), .. } if m == "grok-4.6")
+            ),
+            "an update's _meta.modelId must reach ModelInfo, got {evs:?}"
+        );
+    }
+
+    #[test]
     fn session_start_takes_model_id_when_offered() {
         let mut v = envelope("session_start");
         v["modelId"] = json!("grok-4-code");
@@ -721,8 +757,8 @@ mod tests {
     }
 
     #[test]
-    fn stop_and_stop_failure_are_identityless_turn_ends() {
-        for event in ["stop", "stop_failure"] {
+    fn the_three_turn_end_causes_are_identityless_turn_ends() {
+        for event in ["stop", "stop_failure", "stop_cancelled"] {
             let evs = decode_all(envelope(event));
             assert_eq!(evs.len(), 1, "{event}: exactly one event");
             assert!(

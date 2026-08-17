@@ -444,4 +444,28 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn reasonix_events_pins_the_exact_registered_set() {
+        // Deleting a registered event ships GREEN — cargo-mutants does not mutate
+        // `&[&str]` initializers and nothing else asserts the SET, which is how
+        // both of #929's headline registration fixes could be silently removed.
+        // Update this pin deliberately when the roster changes.
+        use std::collections::BTreeSet;
+        assert_eq!(
+            REASONIX_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "SessionStart",
+                "PreToolUse",
+                "PostToolUse",
+                "PermissionRequest",
+                "UserPromptSubmit",
+                "Stop",
+                "Notification",
+                "SessionEnd",
+            ]),
+            "REASONIX_EVENTS membership changed — a registered event that vanishes is a \
+             shipping bug no other test can see."
+        );
+    }
 }

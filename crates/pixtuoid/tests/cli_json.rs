@@ -124,9 +124,9 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
     // Read the fixture BEFORE spawning, so a read panic stays on the near side
     // of the kill.
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../pixtuoid-core/tests/sources/fixtures/codex/permission-flow")
-        .join("rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000001.jsonl");
-    let body = std::fs::read_to_string(&fixture).expect("committed permission-flow fixture");
+        .join("../pixtuoid-core/tests/sources/fixtures/codex/permission-recorded")
+        .join("rollout-2026-08-15T06-28-11-01a0059b-cb9d-7a92-8821-85ebb7604464.jsonl");
+    let body = std::fs::read_to_string(&fixture).expect("committed permission-recorded fixture");
 
     let home = tempfile::tempdir().expect("home");
     let cfg = tempfile::tempdir().expect("config");

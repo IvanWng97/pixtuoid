@@ -1,6 +1,10 @@
+mod captures;
 mod claude;
 mod codewhale;
 mod codex;
 mod conformance;
+mod cursor;
 mod decode;
+mod delegation;
+mod grok;
 mod manager;

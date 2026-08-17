@@ -10,8 +10,9 @@
 //! census: decode errors and panics (which ARE bugs, always), how many
 //! transcripts register, how many render, and the provenance spread.
 //!
-//! Usage: `cargo run --release -p pixtuoid-scene --example corpus_check -- \
-//!         <source> <root> [--json]`
+//! Usage: `corpus_check <source> [root] [--json]`, plus `--roster` — the
+//! id/prefix/kind/home-env/version-probe rows, read by the shells and by
+//! `fixture-age.py` instead of keeping a second copy of the roster.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -137,45 +138,55 @@ fn newest_activity(source: &str, body: &[u8]) -> Option<u64> {
     }
 }
 
-/// Collect the transcripts under `root` the WATCHER would walk — same extension
-/// gate, same registry `path_filter`, same refusal to follow a symlinked entry
-/// (so a planted dir link can't recurse a loop or drag a foreign tree in).
-/// Walking the unfiltered set would make the census a superset of production:
-/// duplicate transcripts counted twice, rewrite-on-resume siblings replayed as
-/// fresh events, foreign-schema journals decoded as garbage.
-fn walk(source: &str, root: &Path, out: &mut Vec<PathBuf>) {
-    let admits = registry::path_filter_for(source);
-    let Ok(rd) = std::fs::read_dir(root) else {
-        return;
-    };
-    for e in rd.flatten() {
-        let p = e.path();
-        let Ok(meta) = std::fs::symlink_metadata(&p) else {
-            continue;
-        };
-        if meta.is_dir() {
-            walk(source, &p, out);
-        } else if meta.is_file()
-            && p.extension().and_then(|x| x.to_str()) == Some("jsonl")
-            && admits(&p)
-        {
-            out.push(p);
-        }
-    }
+/// One `--roster` row: `id \t prefix \t kind \t home_env \t probe`.
+///
+/// `fixture-age.py`, `scripts/lib/tier-live-sources.sh` and `just corpus-all`
+/// index these columns POSITIONALLY, so inserting a column shifts every one of
+/// them at once and the degradation is quiet — `fixture-age`'s probe map empties
+/// and its report reads "nothing stale" from having compared nothing.
+/// `the_whole_roster_is_pinned_row_by_row` is the pin CLAUDE.md's magic-number
+/// rule asks for at a cross-language boundary.
+fn roster_row(name: &str, d: &registry::SourceDescriptor, kind: &str) -> String {
+    let probe = d
+        .version_probe
+        .map(|p| p.join(" "))
+        .unwrap_or_else(|| "-".into());
+    format!(
+        "{name}\t{}\t{kind}\t{}\t{probe}",
+        d.label_prefix,
+        d.home_env.unwrap_or("-")
+    )
 }
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // id, label prefix, transcript? — so a shell tier can attribute a sprite to its
+    // source without a second copy of the roster or of the badge prefixes.
+    if args.iter().any(|a| a == "--roster") {
+        for name in registry::registered_source_names() {
+            let Some(d) = registry::descriptor_for(name) else {
+                continue;
+            };
+            let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
+                "transcript"
+            } else {
+                "hook"
+            };
+            println!("{}", roster_row(name, d, kind));
+        }
+        return;
+    }
     let json = args.iter().any(|a| a == "--json");
     let positional: Vec<&String> = args.iter().filter(|a| !a.starts_with("--")).collect();
-    if positional.len() < 2 {
-        eprintln!("usage: corpus_check <source> <root> [--json]");
+    if positional.is_empty() {
+        eprintln!("usage: corpus_check <source> [root] [--json]  |  --roster");
         std::process::exit(2);
     }
-    let (source, root) = (positional[0].as_str(), PathBuf::from(positional[1]));
+    let source = positional[0].as_str();
 
     // A source with no transcript decoder would otherwise report a clean census
-    // of nothing.
+    // of nothing. Above the root resolution, so a hook-only id reds with this
+    // rather than with a missing-root message.
     if Drive::transcript(source, "/probe.jsonl").is_none() {
         let known: Vec<&str> = registry::registered_source_names().collect();
         eprintln!(
@@ -186,12 +197,22 @@ fn main() {
         std::process::exit(2);
     }
 
-    let mut files = Vec::new();
-    walk(source, &root, &mut files);
+    let root = match positional.get(1) {
+        Some(r) => PathBuf::from(r),
+        None => match pixtuoid_core::source::resolved_source_root(source) {
+            Some(r) => r,
+            None => {
+                eprintln!("error: {source:?} has no resolvable root on this host — pass one");
+                std::process::exit(2);
+            }
+        },
+    };
+    let mut files = pixtuoid_core::harness::transcripts_under(source, &root);
     files.sort();
     if files.is_empty() {
-        eprintln!("error: no .jsonl under {}", root.display());
-        std::process::exit(2);
+        // 3, not 2: an absent corpus is a coverage gap a caller may accept.
+        eprintln!("absent: no .jsonl under {}", root.display());
+        std::process::exit(3);
     }
 
     let pack = load_sprite_pack(None).expect("embedded pack");
@@ -287,5 +308,50 @@ fn main() {
     // there (the contract is log-and-continue).
     if totals.decode_errors > 0 || !totals.panics.is_empty() {
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    /// EVERY row, byte for byte. The arity loop this replaces could not fail from
+    /// any data change — `roster_row`'s four `\t` are in its format literal — and
+    /// the single-row pin it replaces left every other row unpinned: changing grok's
+    /// `label_prefix`, a column the shell tiers grep for, was caught only
+    /// incidentally by an unrelated badge-colour test.
+    fn the_whole_roster_is_pinned_row_by_row() {
+        let rows: Vec<String> = registry::registered_source_names()
+            .filter_map(|name| {
+                let d = registry::descriptor_for(name)?;
+                let kind = if Drive::transcript(name, "/probe.jsonl").is_some() {
+                    "transcript"
+                } else {
+                    "hook"
+                };
+                Some(roster_row(name, d, kind))
+            })
+            .collect();
+        assert_eq!(
+            rows,
+            [
+                "claude-code\tcc\ttranscript\tCLAUDE_CONFIG_DIR\tclaude --version",
+                "codex\tcx\ttranscript\tCODEX_HOME\tcodex --version",
+                "antigravity\tag\ttranscript\t-\tagy --version",
+                "reasonix\trx\thook\t-\treasonix --version",
+                "codewhale\tcw\thook\t-\tcodewhale --version",
+                "opencode\toc\thook\t-\topencode --version",
+                "copilot\tcp\ttranscript\tCOPILOT_HOME\tcopilot --version",
+                "cursor\tcu\thook\t-\tcursor-agent --version",
+                "hermes\thm\thook\tHERMES_HOME\thermes --version",
+                "omp\tom\ttranscript\tPI_CODING_AGENT_DIR\tomp --version",
+                "openclaw\tok\thook\t-\topenclaw --version",
+                "grok\tgk\ttranscript\tGROK_HOME\tgrok --version",
+                "kimi\tkm\thook\t-\tkimi --version",
+            ],
+            "the --roster columns are indexed POSITIONALLY by fixture-age.py, \
+             tier-live-sources.sh and `just corpus-all`. Update every consumer in \
+             the same change, then this pin."
+        );
     }
 }

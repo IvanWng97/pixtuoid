@@ -1,0 +1,3 @@
+{"type":"session_start","sessionId":"a9101161-833f-4f6e-bf96-908eb07c7a46","sessionKey":"agent:main:pixmid-1786822316","gatewayPort":19099,"_pid":67914,"_shim_ts_ms":1786822321407,"_pixtuoid_source":"openclaw"}
+{"type":"before_agent_run","runId":"3823252e-f8bc-4611-b259-68b0d527120d","sessionId":"a9101161-833f-4f6e-bf96-908eb07c7a46","sessionKey":"agent:main:pixmid-1786822316","gatewayPort":19099,"_pid":67914,"_shim_ts_ms":1786822321661,"_pixtuoid_source":"openclaw"}
+{"type":"agent_end","runId":"3823252e-f8bc-4611-b259-68b0d527120d","sessionId":"a9101161-833f-4f6e-bf96-908eb07c7a46","sessionKey":"agent:main:pixmid-1786822316","success":true,"gatewayPort":19099,"_pid":67914,"_shim_ts_ms":1786822335116,"_pixtuoid_source":"openclaw"}

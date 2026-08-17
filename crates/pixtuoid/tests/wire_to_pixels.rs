@@ -26,15 +26,16 @@ fn t0() -> SystemTime {
     SystemTime::UNIX_EPOCH + Duration::from_secs(1_716_286_800)
 }
 
-/// The shared core-crate fixtures tree, so these tests decode the SAME captured
-/// wire bytes the conformance harness pins, never a hand-rolled re-encoding.
+/// The core crate's source-test tree, so these tests decode the SAME captured
+/// wire bytes that crate pins, never a hand-rolled re-encoding. It is the tree
+/// and not `fixtures/` alone because a two-session capture cannot live under the
+/// conformance harness's one-AgentId rule.
 fn core_fixtures_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("..")
         .join("pixtuoid-core")
         .join("tests")
         .join("sources")
-        .join("fixtures")
 }
 
 fn read_nonblank_lines(path: &Path) -> Vec<String> {
@@ -177,84 +178,101 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "claude_code",
             source: "claude-code",
-            fixture: "claude-code/tool-call/01000000-0000-7000-8000-0000000000cc.jsonl",
+            fixture: "fixtures/claude-code/permission-recorded/947851e2-a15a-4de8-8375-46e9cddb5c8f.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "codex",
             source: "codex",
-            fixture: "codex/tool-run/rollout-2026-01-01T00-00-00-01000000-0000-7000-8000-000000000002.jsonl",
+            fixture: "fixtures/codex/permission-recorded/rollout-2026-08-15T06-28-11-01a0059b-cb9d-7a92-8821-85ebb7604464.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "antigravity",
             source: "antigravity",
-            fixture: "antigravity/tool-run/transcript.jsonl",
+            fixture: "fixtures/antigravity/tool-run-recorded/transcript.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "copilot",
             source: "copilot",
-            fixture: "copilot/tool-run/events.jsonl",
+            fixture: "fixtures/copilot/tool-run/65f8cef9-7dd8-46fa-9f6a-78cc95f68ab3/events.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "omp",
             source: "omp",
-            fixture: "omp/tool-run/2026-07-10T08-00-00-000Z_01990000-0000-7000-8000-000000000002.jsonl",
+            fixture: "fixtures/omp/tool-run-recorded/2026-08-15T04-14-55-304Z_01a003a1-4348-7000-b85d-024bb7a3fd7c.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "grok",
             source: "grok",
-            fixture: "grok/tool-run/updates.jsonl",
+            fixture: "fixtures/grok/permission-recorded/01a0059d-ece9-7931-8e07-c91d77ba5943/updates.jsonl",
             wire: Wire::Transcript { seeded: true },
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "reasonix",
             source: "reasonix",
-            fixture: "reasonix/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/reasonix/delegation-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "codewhale",
             source: "codewhale",
-            fixture: "codewhale/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/codewhale/tool-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
             name: "opencode",
             source: "opencode",
-            fixture: "opencode/session-run/hook-payloads.jsonl",
+            fixture: "fixtures/opencode/session-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting, Reach::Delegating],
         },
         WireCase {
             name: "cursor",
             source: "cursor",
-            fixture: "cursor/tool-run/hook-payloads.jsonl",
+            // The DELEGATING capture, not the tool-run one: `Delegating` needs a
+            // Task dispatch, and a real cursor turn only delegates when asked.
+            // Two sessions, so it cannot live under `fixtures/`.
+            fixture: "cursor/fixtures/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "hermes",
             source: "hermes",
-            fixture: "hermes/tool-run/hook-payloads.jsonl",
+            fixture: "fixtures/hermes/tool-run/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
         },
         WireCase {
+            // The gate fires TWICE for one command, so this also drives the
+            // reducer path where a re-notified Waiting must not clear the gate
+            // the first one set.
+            name: "hermes_approval",
+            source: "hermes",
+            fixture: "fixtures/hermes/approval-recorded/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[Reach::Waiting],
+        },
+        WireCase {
             name: "kimi",
             source: "kimi",
-            fixture: "kimi/tool-run/hook-payloads.jsonl",
+            // The permission fixture, because a HEADLESS kimi run cannot reach
+            // Waiting — it auto-approves even `rm -rf`, so `PermissionRequest`
+            // only fires for a human at a real TUI. Both fixtures are captures;
+            // this is the one whose turn covers both classes.
+            fixture: "fixtures/kimi/permission-flow/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active, Reach::Waiting],
         },
@@ -264,11 +282,13 @@ fn agent_cases() -> Vec<WireCase> {
 /// Look up one matrix case by its registered source name — never a positional
 /// index into `agent_cases()`, where an insertion would silently shift every
 /// downstream case onto the wrong fixture.
-fn agent_case(source: &str) -> WireCase {
+fn agent_case(name: &str) -> WireCase {
+    // Keyed on `name`, not `source`: a source may have more than one case (hermes
+    // has a tool run and an approval gate) and `name` is the unique one.
     agent_cases()
         .into_iter()
-        .find(|c| c.source == source)
-        .unwrap_or_else(|| panic!("no wire-to-pixels case for source {source:?}"))
+        .find(|c| c.name == name)
+        .unwrap_or_else(|| panic!("no wire-to-pixels case named {name:?}"))
 }
 
 /// The matrix is truth-complete: a newly registered source with no wire case
@@ -277,12 +297,15 @@ fn agent_case(source: &str) -> WireCase {
 fn wire_matrix_covers_every_registered_source() {
     use std::collections::BTreeSet;
 
-    let agents: BTreeSet<&str> = agent_cases().iter().map(|c| c.source).collect();
+    // Uniqueness is on NAME, which is what `agent_case` looks up — a source may
+    // legitimately have two cases (hermes: a tool run and an approval gate).
+    let names: BTreeSet<&str> = agent_cases().iter().map(|c| c.name).collect();
     assert_eq!(
-        agents.len(),
+        names.len(),
         agent_cases().len(),
-        "duplicate agent_cases rows for one source"
+        "two agent_cases rows share a `name`, so one is unreachable"
     );
+    let agents: BTreeSet<&str> = agent_cases().iter().map(|c| c.source).collect();
     for source in &agents {
         let d = registry::descriptor_for(source)
             .unwrap_or_else(|| panic!("matrix source {source:?} is not in the registry"));
@@ -326,7 +349,7 @@ fn every_agent_source_renders_a_painted_sprite_from_real_wire() {
 
 #[test]
 fn claude_code_transcript_line_renders_a_painted_sprite() {
-    assert_renders_a_sprite(&agent_case("claude-code"));
+    assert_renders_a_sprite(&agent_case("claude_code"));
 }
 
 #[test]
@@ -380,6 +403,11 @@ fn hermes_hook_envelope_renders_a_painted_sprite() {
 }
 
 #[test]
+fn hermes_approval_gate_renders_a_waiting_sprite() {
+    assert_renders_a_sprite(&agent_case("hermes_approval"));
+}
+
+#[test]
 fn kimi_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("kimi"));
 }
@@ -412,15 +440,68 @@ fn lobster_px(
         .count()
 }
 
+/// Drives one openclaw capture through the presence seam and hands back what the
+/// office would paint. `stop_at` ends the stream before a type, as the lobster
+/// test does to stay inside the live window.
+fn openclaw_state(scenario: &str, stop_at: &[&str]) -> pixtuoid_core::state::DaemonState {
+    let hooks =
+        core_fixtures_root().join(format!("fixtures/openclaw/{scenario}/hook-payloads.jsonl"));
+    let mut scene = SceneState::uniform(16);
+    let now = t0();
+    for line in &read_nonblank_lines(&hooks) {
+        let v: serde_json::Value = serde_json::from_str(line).expect("openclaw hook json");
+        let ty = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+        if stop_at.contains(&ty) {
+            break;
+        }
+        let decoded = pixtuoid_core::source::openclaw::decode_openclaw_hook_payload(&v)
+            .expect("decode_openclaw_hook_payload");
+        let key = pixtuoid_core::source::daemon::DaemonInstanceKey::new(
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            decoded.instance.clone(),
+        );
+        for update in decoded.updates {
+            apply_presence(&mut scene, &key, update, now);
+        }
+    }
+    let (_, _, presence) = scene
+        .daemons()
+        .find(|(source, _, _)| *source == pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .expect("openclaw presence must be populated");
+    presence.display_state()
+}
+
+/// pixtuoid usually starts AFTER the gateway, so `gateway_start` is the one
+/// envelope a real attach never sees. Both captures here open on `session_start`;
+/// the failed run is the only bytes anyone has of `agent_end` with success=false.
+#[test]
+fn a_gateway_we_never_saw_start_still_materializes_from_its_session_wire() {
+    use pixtuoid_core::state::DaemonState;
+    assert_eq!(
+        openclaw_state("mid-attach-recorded", &["agent_end"]),
+        DaemonState::Busy,
+        "a mid-attach stream carries no gateway_start, so the session envelopes must \
+         materialize the instance themselves and put the run in flight on it"
+    );
+    assert_eq!(
+        openclaw_state("mid-attach-recorded", &[]),
+        DaemonState::Idle,
+        "and agent_end must retire that run"
+    );
+    assert_eq!(
+        openclaw_state("gateway-mid-attach-failed-run", &["session_end"]),
+        DaemonState::Degraded,
+        "agent_end success=false is the model backend breaking, not the gateway dying"
+    );
+}
+
 /// The daemon/presence class: `apply_presence` is the sibling-channel seam
 /// `runtime/driver.rs` uses — NEVER `Reducer::apply`, which is `AgentId`-pure.
 #[test]
 fn openclaw_presence_envelope_renders_a_lobster() {
-    let hooks = core_fixtures_root().join("openclaw/gateway_lifecycle/hook-payloads.jsonl");
+    let hooks = core_fixtures_root()
+        .join("fixtures/openclaw/gateway-lifecycle-recorded/hook-payloads.jsonl");
 
-    // The fixture's last two envelopes are session_end → gateway_stop, which would
-    // leave the daemon Down; stop before them so the asserted scene is a LIVE
-    // gateway.
     let lines = read_nonblank_lines(&hooks);
     let mut scene = SceneState::uniform(16);
     let now = t0();

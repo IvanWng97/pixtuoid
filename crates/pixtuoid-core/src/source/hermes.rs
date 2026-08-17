@@ -12,6 +12,15 @@
 //! alien to the shared CC-shaped arms, so per the `HookDecoding::custom` contract the
 //! decoder claims EVERY event (`.map(Some)`, never `Ok(None)`).
 //!
+//! `extra.tool_call_id` IS on the wire — capture-verified on BOTH tool events, and
+//! they pair — and dropped anyway. The original reason (no permission event to
+//! resolve) died when `pre_approval_request` was registered: there IS one now, and
+//! it carries a pairing id. What survives is that with no subagent event to drain
+//! and no second transport to dedup against, a hermes `Waiting` is cleared by the
+//! tuid-less hook escape in `wait_resolved_by` — every hermes event is Hook
+//! transport — so a per-call id would only re-derive the answer that path already
+//! gives. Pinned by `pre_tool_call_is_activity_start_with_no_tool_id`.
+//!
 //! `subagent_stop` is deliberately absent from `HERMES_EVENTS`: the SHELL-hook payload
 //! carries a parent id but NO child session/agent id, so a decode could only end a
 //! child that was never started. Hermes's Python PLUGIN API does define a
@@ -23,6 +32,7 @@ use std::path::PathBuf;
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -122,7 +132,7 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         )
     };
 
-    match event {
+    let decoded: Result<Vec<AgentEvent>> = match event {
         "on_session_start" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
@@ -154,10 +164,49 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 tool_use_id: None,
             },
         ]),
-        "on_session_end" => Ok(vec![AgentEvent::SessionEnd {
+        // Observer-only for a SHELL hook: `_BLOCKING_EVENTS` in upstream's
+        // `agent/shell_hooks.py` is `{pre_tool_call}` alone, so our silent exit-0
+        // cannot stall the decision. `tool_name` is null here and the WHY rides
+        // `extra.description` — capture-verified, `approval-recorded`.
+        "pre_approval_request" => {
+            let reason = obj
+                .get("extra")
+                .and_then(|e| e.get("description"))
+                .and_then(|d| d.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|d| crate::source::decoder::ellipsize(d, MAX_DECODED_FIELD_CHARS))
+                .unwrap_or_else(|| "permission".to_string());
+            Ok(vec![identity(), AgentEvent::Waiting { agent_id, reason }])
+        }
+        // THE session end, as `on_session_end` is not: `lifecycle.py::finalize_session`
+        // hard-closes the Relay conversation under the SAME `session_id` it sends
+        // us, so the id in the payload is the one being terminated. Upstream's
+        // atexit-registered `_run_cleanup` fires it with `reason="shutdown"`, which
+        // is why the registry row claims an exit signal. Its sibling
+        // `on_session_reset` is deliberately NOT here — see the omit ledger.
+        "on_session_finalize" => Ok(vec![AgentEvent::SessionEnd {
             agent_id,
             as_child: false,
         }]),
+        // A TURN boundary, not the session's end — upstream's own doc says it is
+        // "emitted from agent/turn_finalizer.py" carrying `turn_id`/`completed`
+        // ("True when the turn produced a final response"), and turn_finalizer's
+        // comment adds that "run_conversation() is called once per user message
+        // in multi-turn sessions". Mapping it to SessionEnd walked the agent out of
+        // the office at every turn: `approval-recorded` is ONE session with TWO of
+        // these and a tool call 5.9 s after the first, past the 4.5 s exit grace.
+        //
+        // An ACTIVITY arm, so it takes that class's Identity with it: for a
+        // tool-less chat turn this is the ONLY event the session emits, and a
+        // daemon attaching mid-session would otherwise get the blank `#N` ghost
+        // the module doc names, until the next tool call.
+        "on_session_end" => Ok(vec![
+            identity(),
+            AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id: None,
+            },
+        ]),
         other => {
             crate::source::drift::unknown_event(SOURCE_NAME, other);
             bail!(
@@ -165,7 +214,23 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 crate::source::decoder::display_safe(other)
             )
         }
+    };
+    let mut evs = decoded?;
+    // hermes nests it one level down and only the session events carry it, so a
+    // top-level read finds nothing and a tool event must not clear it.
+    if let Some(model) = obj
+        .get("extra")
+        .and_then(|e| e.get("model"))
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 fn hermes_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
@@ -184,6 +249,22 @@ mod tests {
 
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    #[test]
+    fn session_start_reports_the_model_from_extra() {
+        // The shape from fixtures/hermes/tool-run: hermes nests it one level down,
+        // and only the session events carry it.
+        let evs = decode_all(json!({
+            "hook_event_name": "on_session_start", "session_id": "s1", "cwd": "/repo",
+            "extra": {"model": "gpt-4o-mini"}
+        }));
+        assert!(
+            evs.iter().any(
+                |e| matches!(e, AgentEvent::ModelInfo { model: Some(m), .. } if m == "gpt-4o-mini")
+            ),
+            "extra.model must reach ModelInfo, got {evs:?}"
+        );
     }
 
     #[test]
@@ -272,17 +353,58 @@ mod tests {
         ));
     }
 
+    /// The name says session; upstream's emitter and payload say TURN. Mapping it
+    /// to `SessionEnd` swept the slot at every turn boundary — hermes was invisible
+    /// while the user read or typed.
     #[test]
-    fn on_session_end_maps_to_session_end() {
+    fn on_session_end_is_a_turn_boundary_not_the_sessions_end() {
         let ev =
             decode(json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/r"}));
-        assert!(matches!(
-            ev,
-            AgentEvent::SessionEnd {
-                as_child: false,
-                ..
-            }
-        ));
+        assert!(
+            matches!(
+                ev,
+                AgentEvent::ActivityEnd {
+                    tool_use_id: None,
+                    ..
+                }
+            ),
+            "got {ev:?}"
+        );
+    }
+
+    /// The shape `hermes/tool-run` could never show, because a one-shot capture
+    /// ends its only turn and its session together. `approval-recorded` is the
+    /// multi-turn capture that falsifies it: one session_id, one pid, TWO
+    /// `on_session_end`, and work after the first.
+    #[test]
+    fn a_second_turn_in_one_session_does_not_end_the_session() {
+        let sid = "sess-multi";
+        let mut evs = Vec::new();
+        for name in [
+            "on_session_start",
+            "pre_tool_call",
+            "post_tool_call",
+            "on_session_end",
+            "pre_tool_call",
+            "post_tool_call",
+            "on_session_end",
+        ] {
+            evs.extend(
+                decode_hermes_hook_payload(
+                    &json!({"hook_event_name": name, "session_id": sid, "cwd": "/r"}),
+                )
+                .expect("decodes"),
+            );
+        }
+        let ids: std::collections::BTreeSet<_> = evs.iter().map(AgentEvent::agent_id).collect();
+        assert_eq!(ids.len(), 1, "one session must stay one AgentId");
+        assert_eq!(
+            evs.iter()
+                .filter(|e| matches!(e, AgentEvent::SessionEnd { .. }))
+                .count(),
+            0,
+            "a turn boundary must not end the session: {evs:?}"
+        );
     }
 
     #[test]
@@ -309,6 +431,7 @@ mod tests {
             json!({"hook_event_name": "pre_tool_call", "session_id": "s", "cwd": "/repo",
                    "tool_name": "terminal", "tool_input": {"command": "ls"}}),
             json!({"hook_event_name": "post_tool_call", "session_id": "s", "cwd": "/repo", "tool_name": "terminal"}),
+            json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/repo"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);
@@ -332,10 +455,12 @@ mod tests {
     }
 
     #[test]
+    /// The partition is by decoded CLASS, not by wire name — `on_session_end`
+    /// moved to the activity arms and its Identity had to move with it.
     fn session_events_carry_no_identity() {
         for payload in [
             json!({"hook_event_name": "on_session_start", "session_id": "s", "cwd": "/r"}),
-            json!({"hook_event_name": "on_session_end", "session_id": "s", "cwd": "/r"}),
+            json!({"hook_event_name": "on_session_finalize", "session_id": "s", "cwd": "/r"}),
         ] {
             let name = payload["hook_event_name"].clone();
             let events = decode_all(payload);

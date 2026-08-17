@@ -18,9 +18,15 @@ import typing
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+# A `__pycache__` hit made this gate test a DIFFERENT file than the one on disk:
+# restoring a same-size checker inside one mtime tick left the .pyc valid, and a
+# reverted mutation kept failing. A gate that can read stale bytes is not a gate.
+sys.dont_write_bytecode = True
 import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
+
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
@@ -113,6 +119,14 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
     check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
+    # Synthetic, so the control survives codex.rs dropping its own `|` arm.
+    synthetic = '("response_item", "alpha" | "beta" | "gamma") => {} ("response_item", "solo") => {}'
+    check(
+        d.match_arm_inner_types(synthetic, "response_item") == {"alpha", "beta", "gamma", "solo"},
+        f"match_arm_inner_types must read every `|` alternative, got "
+        f"{d.match_arm_inner_types(synthetic, 'response_item')!r}",
+    )
+    check("custom_tool_call" in ri, f"codex response_item reads BOTH halves of its `|` arm: {ri!r}")
     offenders = [m for m in (ev | ri) if not re.match(r"^[a-z][a-z_]*$", m)]
     check(not offenders, f"codex rollout members are snake_case; offenders={offenders}")
 
@@ -392,12 +406,16 @@ def test_every_const_array_reader_uses_the_shared_parser() -> None:
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
+    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}',
     d.CODEWHALE_EXECUTOR_URL: "pub fn to_env_vars(&self) -> HashMap<String, String> {",
     d.OPENCODE_EVENT_URLS[0]: "\nexport const Event = {\n  Created,\n}",
     d.OPENCODE_EVENT_URLS[1]: "\nexport const Event = {\n  Asked,\n}",
     d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
     d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
     d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
+    d.CODEX_ROLLOUT_ITEM_URL: (
+        "#[serde(rename_all = \"snake_case\")]\npub enum RolloutItem {\n    SessionMeta,\n}"
+    ),
     d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
     d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
     d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",
@@ -412,7 +430,6 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_ENV_URL: "export function parseEnvFile(filePath: string): Record<string, string> {}",
     d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "gateway_start"',
-    d.HERMES_HOOK_URL: "_DEFAULT_PAYLOADS = {\n    'on_session_start': {},\n}",
     d.HERMES_SHELL_HOOK_URL: "def _serialize_payload(event: str) -> str:",
     d.HERMES_HOME_URL: (
         "def _hermes_home_from_env() -> Path:\n"
@@ -601,7 +618,7 @@ def test_one_stale_reader_does_not_blind_the_sources_after_it() -> None:
             f"the stale OWN-source line blames the script, not upstream: {own}",
         )
         # These four sit at the far end of the table.
-        for name in ("CURSOR_HOOKS_URL", "HERMES_HOOK_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
+        for name in ("CURSOR_HOOKS_URL", "HERMES_PLUGINS_URL", "GROK_HOOK_URL", "KIMI_HOOKS_URL"):
             check(
                 getattr(d, name) in broken_urls,
                 f"a stale reader in row 1 must not dark {name} in row 10+ "
@@ -1107,6 +1124,104 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     return [x for x in report.breaking if kind in x]
 
 
+def _drive_hermes(
+    plugins_body: str, shell_body: str = "", ours: "d.OurNames | None" = None
+) -> tuple[list[str], list[str]]:
+    """Run the hermes block over stubbed upstream, returning (breaking, blind)."""
+
+    def stub(url: str) -> str:
+        if url == d.HERMES_PLUGINS_URL:
+            return plugins_body
+        if url == d.HERMES_SHELL_HOOK_URL and shell_body:
+            return shell_body
+        raise urllib.error.URLError("not stubbed")
+
+    real = d.fetch
+    d.fetch = stub
+    try:
+        report = d.Report()
+        d.run_checks(ours or d.OurNames(hermes={"pre_approval_request"}), report=report)
+    finally:
+        d.fetch = real
+    return (
+        [x for x in report.breaking if "Hermes" in x],
+        [x for x in report.blind if "hermes" in x.lower()],
+    )
+
+
+def test_every_block_reader_strips_comments_before_counting_braces() -> None:
+    """The rule two of the three readers state in their own docstrings, and the
+    third re-broke: a brace inside a comment moves the bounds. The dangerous
+    outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
+    still passes and the tail of the set silently leaves the sweep."""
+    clean = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n    "b_two",\n}\n'
+    want = {"a_one", "b_two"}
+    check(d.python_set_literal(clean, "VALID_HOOKS: Set[str] = {") == want, "clean baseline")
+    for label, comment in (
+        ("unmatched open", '    # returns {"action": "continue"\n'),
+        ("stray close", "    # anything else } lets the turn finish\n"),
+        ("both", '    # {"a": 1} and a trailing }\n'),
+    ):
+        poisoned = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
+        got = d.python_set_literal(poisoned, "VALID_HOOKS: Set[str] = {")
+        check(
+            got == want,
+            f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
+        )
+
+
+def test_the_hermes_approval_gate_stays_observer_only() -> None:
+    """Registering `pre_approval_request` is safe ONLY while a SHELL hook's exit
+    code cannot stall one, and the shim always exits 0. Three outcomes, because
+    the dangerous one is the checker going quiet rather than red.
+
+    The anchor is `_BLOCKING_EVENTS` in `agent/shell_hooks.py` — the frozenset
+    that gates `returncode == BLOCK_EXIT_CODE`. #929 briefly replaced it with a
+    prose sentence in plugins.py after misreading a MOVED declaration as a
+    deleted one; that sentence governs Python PLUGIN return values, which is not
+    the mechanism we install."""
+    # 30 filler names + the two that matter: below the declared floor the gate
+    # correctly refuses to believe the parse and NEITHER direction runs, so a
+    # too-small stub would test the floor instead of the thing under test.
+    filler = "".join(f'    "on_filler_{i}",\n' for i in range(30))
+    hooks = (
+        'VALID_HOOKS: Set[str] = {\n    "pre_approval_request",\n'
+        '    "pre_tool_call",\n' + filler + "}\n"
+    )
+    # The real shell_hooks.py carries BOTH the payload keys and the blocking set,
+    # so a stub with only one of them fails the sibling check for the wrong reason.
+    payload = (
+        "def _serialize_payload(event: str) -> str:\n"
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i, "extra": e}\n'
+    )
+
+    safe = payload + '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
+    breaking, blind = _drive_hermes(hooks, safe)
+    check(not breaking and not blind, f"observer-only upstream stays silent: {breaking} {blind}")
+
+    unsafe = payload + '_BLOCKING_EVENTS = frozenset({"pre_tool_call", "pre_approval_request"})\n'
+    breaking, _ = _drive_hermes(hooks, unsafe)
+    check(
+        len(breaking) == 1,
+        f"the gate joining _BLOCKING_EVENTS must be BREAKING — our exit 0 would "
+        f"answer a real prompt. Got {breaking}",
+    )
+
+    _, blind = _drive_hermes(hooks, payload + 'BLOCKING = frozenset({"pre_tool_call"})\n')
+    check(
+        any("stall an approval" in b for b in blind),
+        f"a renamed/moved constant must report PROBE HEALTH, not read as safe. Got {blind}",
+    )
+
+    # And the vanish direction still owns its own half.
+    gone = 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n' + filler + "}\n"
+    breaking, _ = _drive_hermes(gone, safe)
+    check(
+        any("GONE from VALID_HOOKS" in b for b in breaking),
+        f"the gate vanishing from VALID_HOOKS must be BREAKING. Got {breaking}",
+    )
+
+
 def test_ts_comment_strip_survives_a_quote_detector_line() -> None:
     """A `"`-only scanner desynchronises on `'"'` and leaks the REST OF THE FILE's
     comments back into the "code" every presence sweep reads. upstream `env.ts`
@@ -1248,6 +1363,276 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         )
 
 
+def test_no_ledger_silently_excuses_a_hook_our_decoder_can_read() -> None:
+    """The shape that shipped the PermissionRequest bug, and the one the FIRST
+    version of this gate missed: it checked the ledgers against what we REGISTER,
+    which is empty by construction, while the incident was a ledgered name our
+    DECODER had an arm for and we never received."""
+    # EVERY source file, not just the shared arms, and a name shape that admits
+    # snake_case: `[A-Za-z]+` over `decoder.rs` alone saw only the 11 CamelCase
+    # CC-shaped arms, so this gate was structurally blind to the six sources
+    # whose events are snake_case — `pre_approval_request` in a ledger passed it.
+    arms: set[str] = set()
+    src_dir = REPO_ROOT / "crates/pixtuoid-core/src/source"
+    for f in sorted(src_dir.rglob("*.rs")):
+        arms |= set(
+            re.findall(r'^\s*"([A-Za-z][A-Za-z0-9_.]*)"\s*(?:\||=>)', f.read_text(), re.M)
+        )
+    check(len(arms) > 30, f"the decoder-arm reader found {len(arms)} arms; it went stale")
+    for shape in ("PreToolUse", "pre_tool_call", "session.start"):
+        check(shape in arms, f"the arm reader must see the {shape!r} shape; got {len(arms)} arms")
+
+    ledgered = set()
+    for name in dir(d):
+        if name.endswith("_KNOWN_OMITTED"):
+            ledgered |= getattr(d, name)
+    live = arms & ledgered
+    check(
+        live <= d.LEDGERED_BUT_DECODABLE,
+        f"{sorted(live - d.LEDGERED_BUT_DECODABLE)} sit in a *_KNOWN_OMITTED ledger "
+        f"AND have a decoder arm — the sweep subtracts the ledger, so an event we "
+        f"can read but never registered raises nothing. Register it, or add it to "
+        f"LEDGERED_BUT_DECODABLE with the reason NOT registering is right.",
+    )
+    dead = sorted(d.LEDGERED_BUT_DECODABLE - live)
+    check(
+        not dead,
+        f"LEDGERED_BUT_DECODABLE lists {dead}, which no longer sits in a ledger "
+        f"with a decoder arm — drop the entry, the list is shrink-only.",
+    )
+
+
+def test_a_partial_parse_files_no_verified_change() -> None:
+    """The direction nobody tested. A reader returning 12 of 37 names used to file
+    up to five ⛔ "registered ... is GONE" against WORKING decoders and only THEN
+    hit the floor — the highest-severity output guarded by the weakest test. #929
+    lived this: its false ⛔ came from a partial document.
+    """
+    ours = d.OurNames(hermes={"pre_approval_request", "pre_tool_call", "on_session_end"})
+    partial = 'VALID_HOOKS: Set[str] = {\n    "pre_tool_call",\n}\n'
+    shell = (
+        "def _serialize_payload(event: str) -> str:\n"
+        '    return {"session_id": s, "cwd": c, "tool_name": t, "tool_input": i, "extra": e}\n'
+        '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n'
+    )
+    breaking, blind = _drive_hermes(partial, shell, ours=ours)
+    check(
+        not any("GONE from VALID_HOOKS" in b for b in breaking),
+        f"a below-floor parse must file ZERO verified-change lines, got {breaking}",
+    )
+    check(blind, "and it must say WHY it skipped")
+
+
+def test_every_unregistered_row_is_actually_swept() -> None:
+    """A row nothing CALLS is a ledger nothing consults with extra steps: the
+    direction is silently absent for that source and every test stays green.
+    The sibling census closes ledger->row; this closes row->call site, which is
+    the half #929 shipped open — deleting kimi's whole call line left rc=0."""
+    src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
+    called = {
+        n.args[0].value
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "sweep_unregistered"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
+    }
+    gated = {
+        n.args[0].value
+        for n in ast.walk(ast.parse(src))
+        if isinstance(n, ast.Call)
+        and getattr(n.func, "id", "") == "parse_is_believable"
+        and n.args
+        and isinstance(n.args[0], ast.Constant)
+    }
+    rows = set(d.UNREGISTERED)
+    check(
+        called == rows,
+        f"rows never swept {sorted(rows - called)}; "
+        f"swept without a row {sorted(called - rows)}",
+    )
+    # `sweep_unregistered` no longer owns the floor, so a sweep reached without
+    # the belief gate runs UNFLOORED — the state the floors exist to prevent.
+    check(
+        gated == rows,
+        f"rows swept without the belief gate {sorted(rows - gated)}; "
+        f"gated without a row {sorted(gated - rows)}",
+    )
+
+
+def test_no_decoder_read_is_unaccounted_for() -> None:
+    """A `*_PAYLOAD_FIELDS` set is trusted to equal the decoder's TOP-LEVEL reads,
+    and nothing checked it — so `sessionId` (reasonix's primary AgentId key) and
+    `extra` (hermes's Waiting reason AND its model flame) sat unwatched. A read
+    that is neither watched nor ledgered fails here, which is the same shape the
+    EVENT sweeps already use for `*_KNOWN_OMITTED`."""
+    root = pathlib.Path(__file__).resolve().parent.parent / "crates/pixtuoid-core/src/source"
+    for source in sorted(
+        n.removesuffix("_PAYLOAD_FIELDS").lower()
+        for n in dir(d)
+        if n.endswith("_PAYLOAD_FIELDS")
+    ):
+        src = (root / f"{source}.rs").read_text()
+        # Only the DECODER body: the test module re-reads these keys in fixtures.
+        src = src.split("#[cfg(test)]", 1)[0]
+        reads = set(re.findall(r'\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))
+        # A read behind a CONST is the same read: openclaw's
+        # `obj.get(GATEWAY_PORT_FIELD)` was neither watched nor ledgered and this
+        # passed, which made the invariant in the docstring false.
+        # Detection is WIDE and resolution is narrow, deliberately: a `.get(x)` whose
+        # argument is a SCREAMING_SNAKE name is caught, and only a same-file
+        # `const … : &str` resolves it. A lowercase binding still escapes both arms. Matching just the shapes we could resolve
+        # let a 2-char const, a path-qualified one, and a helper whose parameter was
+        # not named `key` pass INVISIBLY — neither resolved nor failed.
+        consts = dict(
+            re.findall(r'const\s+([A-Z][A-Z0-9_]*)\s*:\s*&(?:\'static\s+)?str\s*=\s*"([^"]*)"', src)
+        )
+        unresolved = set()
+        for arg in re.findall(r"\.get\(\s*([^)\"][^)]*?)\s*\)", src):
+            tail = arg.split("::")[-1].strip()
+            if tail in consts:
+                reads.add(consts[tail])
+            elif re.fullmatch(r"[A-Z][A-Z0-9_]*", tail):
+                unresolved.add(arg.strip())
+        check(
+            not unresolved,
+            f"{source}: decoder reads a key from {sorted(unresolved)}, which this sweep "
+            f"cannot resolve to a field name — define it as a `const NAME: &str` in the "
+            f"same file, or the read is unwatchable",
+        )
+        # A key-reading HELPER hides its literals from the shape above: copilot's
+        # `str_at(v, "sessionId")` hides top-level reads that were watched only by
+        # luck, since nothing here could see them. Keyed on the &Value+&str SHAPE,
+        # not on the parameter being named `key`.
+        for helper in set(
+            re.findall(r"fn\s+([a-z_][a-z0-9_]*)[^(]*\([^)]*&(?:'\w+\s+)?Value[^)]*&str", src)
+        ):
+            reads |= set(
+                re.findall(rf'\b{helper}\([^,()]*,\s*"([A-Za-z_][A-Za-z0-9_]*)"\s*\)', src)
+            )
+        # No vacuity floor was the second half: a decoder the scrape cannot read at
+        # all yields an empty set, and the source passes having been checked for
+        # nothing.
+        check(
+            bool(reads),
+            f"{source}: this sweep found NO payload read at all, so it proved nothing — "
+            f"the decoder's read shape moved past what it can see",
+        )
+        # Nested reads chain off a top-level one (`.get("extra").and_then(|e|
+        # e.get("description"))`), and only the top level is a watchable field.
+        nested = set(re.findall(r'\.and_then\(\|[a-z]\| [a-z]\.get\("([A-Za-z_][A-Za-z0-9_]*)"\)', src))
+        watched = getattr(d, f"{source.upper()}_PAYLOAD_FIELDS")
+        ledgered = d.PAYLOAD_READS_NOT_WATCHED.get(source, set()) | d.PAYLOAD_READS_NOT_WATCHED.get(
+            f"{source}_ours", set()
+        )
+        unaccounted = reads - nested - watched - ledgered
+        check(
+            not unaccounted,
+            f"{source}: decoder reads {sorted(unaccounted)} — watch them in "
+            f"{source.upper()}_PAYLOAD_FIELDS, or say why not in "
+            f"PAYLOAD_READS_NOT_WATCHED",
+        )
+
+
+def test_every_ledger_has_a_missing_registration_row() -> None:
+    """The ratchet the hand-written arms could not have: a source whose ledger
+    exists but whose row does not would have a ledger nothing consults, and the
+    direction would be silently absent for it — which is how five of ten came to
+    be missing it before #932."""
+    ours = d.read_our_names(d.Report())
+    ledgers = {n for n in dir(d) if n.endswith("_KNOWN_OMITTED")}
+    rowed = {row.ledger_name for row in d.UNREGISTERED.values()}
+    check(
+        ledgers == rowed,
+        f"every *_KNOWN_OMITTED needs an UNREGISTERED row; "
+        f"ledger-without-row {sorted(ledgers - rowed)}, "
+        f"row-without-ledger {sorted(rowed - ledgers)}",
+    )
+    for source, row in sorted(d.UNREGISTERED.items()):
+        # The row names its ledger twice — once to resolve, once for the message.
+        check(
+            getattr(d, row.ledger_name) == set(row.ledger),
+            f"{source}: row's ledger is not {row.ledger_name}",
+        )
+        # A declared floor at or below the derived one is DEAD: it reads as
+        # protection and `max()` already exceeds it. Three rows shipped that way.
+        handled = len(getattr(ours, source) or ())
+        check(
+            row.floor == 0 or row.floor > handled,
+            f"{source}: declared floor {row.floor} is dead — we already handle "
+            f"{handled}, so the derived minimum covers it. Measure the document "
+            f"or declare 0.",
+        )
+        check(bool(row.offers and row.declared_in and row.handle),
+              f"{source}: row has an empty message field")
+
+
+def test_the_floor_can_never_be_weaker_than_what_we_register() -> None:
+    """A row declaring `floor=1` would re-open the hole the floors exist to close,
+    so the sweep raises the declared floor to what we already handle. Proven by
+    running the sweep, not by reading the max()."""
+    rep = d.Report()
+    # Nine registered names must lift codex's floor past a seven-name parse.
+    ours = d.OurNames(codex={f"ev{i}" for i in range(9)})
+    believed = d.parse_is_believable("codex", {f"ev{i}" for i in range(7)}, ours, rep)
+    check(not believed, "a parse below the floor must not be believed")
+    check(
+        any("SKIPPED for codex" in f for f in rep.blind),
+        f"a parse smaller than our own registered set must file probe health: {rep.blind}",
+    )
+    # The DECLARED half, which codex (floor 0) cannot exercise: deleting
+    # `max(row.floor, …)` outright left this test green.
+    hermes = d.OurNames(hermes={f"h{i}" for i in range(5)})
+    rep_h = d.Report()
+    check(
+        not d.parse_is_believable("hermes", {f"h{i}" for i in range(6)}, hermes, rep_h),
+        "a 6-name parse must fail hermes's DECLARED floor of 30, not just its 5 handled",
+    )
+    check(rep_h.blind, "and say why")
+
+    rep2 = d.Report()
+    up = ours.codex | {"brand_new"}
+    check(d.parse_is_believable("codex", up, ours, rep2), "at/above the floor must be believed")
+    d.sweep_unregistered("codex", up, ours, rep2)
+    check(not rep2.blind, f"a parse at/above the floor must not file blind: {rep2.blind}")
+    check(
+        any("brand_new" in f for f in rep2.review),
+        f"and must review the unhandled name: {rep2.review}",
+    )
+
+
+def test_no_ledger_excuses_a_hook_we_actually_register() -> None:
+    """A name in both is inert today and fail-open tomorrow: unregister it and
+    the sweep stays silent, because the ledger still excuses it."""
+    ours = d.read_our_names(d.Report())
+    # Enumerated, not hand-listed: the sibling test was made exhaustive and this
+    # one was left behind, so five ledgers added later had no teeth here at all.
+    # `cc` is the odd field name — every other ledger's prefix IS its field.
+    fields = {"CC": "cc"}
+    ledgers = sorted(n for n in dir(d) if n.endswith("_KNOWN_OMITTED"))
+    check(len(ledgers) >= 10, f"expected every source's ledger, found {ledgers}")
+    for ledger in ledgers:
+        stem = ledger[: -len("_KNOWN_OMITTED")]
+        field = fields.get(stem, stem.lower())
+        check(
+            hasattr(ours, field),
+            f"{ledger} names no OurNames field ({field!r}) — add the mapping, or the "
+            f"ledger is silently unchecked",
+        )
+        if not hasattr(ours, field):
+            continue
+        registered = getattr(ours, field)
+        check(registered is not None, f"the `{field}` reader must still parse")
+        both = sorted((registered or set()) & getattr(d, ledger))
+        check(
+            not both,
+            f"{ledger} lists {both}, which our own `{field}` install target "
+            f"also REGISTERS. "
+            f"Drop it from the ledger (and its rationale) — leaving it there "
+            f"means dropping the registration later raises nothing.",
+        )
+
+
 def main() -> int:
     for t in (
         test_try_fetch_classifies_permanent_vs_transient,
@@ -1272,6 +1657,15 @@ def main() -> int:
         test_ts_comment_strip_survives_a_quote_detector_line,
         test_rust_comment_strip_is_not_confused_by_lifetimes,
         test_omp_env_sweeps_fire_and_stay_silent,
+        test_every_block_reader_strips_comments_before_counting_braces,
+        test_the_hermes_approval_gate_stays_observer_only,
+        test_a_partial_parse_files_no_verified_change,
+        test_every_unregistered_row_is_actually_swept,
+        test_no_decoder_read_is_unaccounted_for,
+        test_every_ledger_has_a_missing_registration_row,
+        test_the_floor_can_never_be_weaker_than_what_we_register,
+        test_no_ledger_excuses_a_hook_we_actually_register,
+        test_no_ledger_silently_excuses_a_hook_our_decoder_can_read,
     ):
         t()
     if FAILS:

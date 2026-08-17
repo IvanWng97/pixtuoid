@@ -1,0 +1,4 @@
+{
+  "origin": "composed",
+  "note": "Kept for ONE thing only, now that session-lifecycle-recorded holds real session.created/session.deleted and tool-run holds real message.part.updated: the VERSIONED event name `permission.v2.asked`. Our plugin subscribes to both spellings and the decoder claims the base name, so this fixture is what proves the versioned form still lands on the same arm. The real wire sent the un-versioned `permission.asked` in every capture, so whether upstream ever emits the v2 spelling is unproven — which is exactly why the base-name claiming, and this fixture, stay."
+}

@@ -69,10 +69,39 @@ pub enum HookCustom {
     ClaimsAll(fn(&Value) -> Result<Vec<AgentEvent>>),
 }
 
+/// The wire NAME of the per-call tool id in this source's hook envelope, read by
+/// the shared arms. It is a registry row and not a per-source copy of those arms
+/// because reading the wrong name is SILENT — the field is optional, so a
+/// mis-spelling is indistinguishable from an absent id, and every kimi tool call
+/// decoded to `None` for the whole source's life. Moot for a
+/// [`HookCustom::ClaimsAll`] source, exactly as [`IdKey`] is — pick `ToolUse`
+/// with an `// inert` comment there.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ToolIdKey {
+    /// `tool_use_id` — Claude Code's spelling, and every CC-shaped envelope's
+    /// but Kimi's.
+    ToolUse,
+    /// `tool_call_id` — Kimi's (capture-verified against kimi-code 0.36.0, which
+    /// never sends `tool_use_id`).
+    ToolCall,
+}
+
+impl ToolIdKey {
+    /// The JSON key to read the per-call id from.
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::ToolUse => "tool_use_id",
+            Self::ToolCall => "tool_call_id",
+        }
+    }
+}
+
 /// Per-source hook decoding behaviour beyond the shared CC-shaped arms.
 pub struct HookDecoding {
     /// The per-session AgentId key strategy, read by the shared arms only.
     pub id_key: IdKey,
+    /// The per-call tool id's wire name, read by the shared arms only.
+    pub tool_id_key: ToolIdKey,
     /// The source's own decoder, dispatched FIRST — before any shared field
     /// requirement — so an alien envelope (no `session_id` at all) can still
     /// decode. `None` = ride the shared arms only.
@@ -376,7 +405,7 @@ pub fn daemon_sources() -> impl Iterator<Item = (&'static str, crate::source::da
 const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     name: claude_code::SOURCE_NAME,
     label_prefix: "cc",
-    verified_version: "unknown",
+    verified_version: "2.1.233",
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     kind: SourceKind::Agent {
@@ -393,6 +422,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // The session UUID == the transcript filename stem, so keying on it
             // (not the cwd-derived path) survives a git-worktree cwd-split.
             id_key: IdKey::SessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
             // session AgentId) — inexpressible in the shared arms. The Stop is
             // the ONLY end signal a Workflow-fleet subagent gets (#241).
@@ -412,7 +442,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
 const CODEX: SourceDescriptor = SourceDescriptor {
     name: codex::SOURCE_NAME,
     label_prefix: "cx",
-    verified_version: "unknown",
+    verified_version: "0.147.0",
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
     kind: SourceKind::Agent {
@@ -426,6 +456,7 @@ const CODEX: SourceDescriptor = SourceDescriptor {
         }),
         hook: Some(HookDecoding {
             id_key: IdKey::SessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             // SubagentStart/Stop change the event's SUBJECT — inexpressible in
             // the shared arms.
             custom: Some(HookCustom::Extend(codex::decode_codex_hook_custom)),
@@ -465,6 +496,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
         // payload really does decode via the shared path-keyed arms.
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
+            tool_id_key: ToolIdKey::ToolUse,
             custom: None,
         }),
         caps: SourceCaps {
@@ -483,13 +515,14 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
 const REASONIX: SourceDescriptor = SourceDescriptor {
     name: reasonix::SOURCE_NAME,
     label_prefix: "rx",
-    verified_version: "unknown",
+    verified_version: "1.25.2",
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(reasonix::decode_rx_hook_payload)),
         }),
         caps: SourceCaps {
@@ -516,13 +549,14 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const CODEWHALE: SourceDescriptor = SourceDescriptor {
     name: codewhale::SOURCE_NAME,
     label_prefix: "cw",
-    verified_version: "unknown",
+    verified_version: "0.9.7",
     version_probe: Some(&["codewhale", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(codewhale::decode_cw_hook_payload)),
         }),
         caps: SourceCaps {
@@ -531,9 +565,12 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
             // message_submit re-emits SessionStart, so a swept-but-live session
             // walks back in on the next prompt.
             resurrects_on_prompt: true,
-            // Conservative ASSUMPTION — no live capture exercised a dispatch.
-            // `true` can only over-retain a dead Delegating slot, never reap a
-            // live one.
+            // Conservative, and the open question is narrower than "no capture":
+            // the recorded `codewhale/fixtures` DOES hold a real dispatch, but
+            // only its BOUNDARIES (`subagent_spawn`, `subagent_complete`). What
+            // this flag asks is whether the child's work fires anything BETWEEN
+            // them — nothing we hold answers that, and `true` can only over-retain
+            // a dead Delegating slot, never reap a live one.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
@@ -543,13 +580,14 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
-    verified_version: "unknown",
+    verified_version: "1.18.15",
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
@@ -576,7 +614,7 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
 const OPENCLAW: SourceDescriptor = SourceDescriptor {
     name: openclaw::SOURCE_NAME,
     label_prefix: "ok",
-    verified_version: "2026.6.6",
+    verified_version: "2026.7.1",
     version_probe: Some(&["openclaw", "--version"]),
     home_env: None,
     kind: SourceKind::Daemon {
@@ -591,7 +629,7 @@ const OPENCLAW: SourceDescriptor = SourceDescriptor {
 const COPILOT: SourceDescriptor = SourceDescriptor {
     name: copilot::SOURCE_NAME,
     label_prefix: "cp",
-    verified_version: "1.0.62",
+    verified_version: "unknown",
     version_probe: Some(&["copilot", "--version"]),
     home_env: Some("COPILOT_HOME"),
     kind: SourceKind::Agent {
@@ -626,13 +664,14 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
-    verified_version: "unknown",
+    verified_version: "2026.08.11",
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(cursor::decode_cursor_hook_payload)),
         }),
         caps: SourceCaps {
@@ -661,22 +700,23 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 const HERMES: SourceDescriptor = SourceDescriptor {
     name: hermes::SOURCE_NAME,
     label_prefix: "hm",
-    verified_version: "0.18.0",
+    verified_version: "0.20.1",
     version_probe: Some(&["hermes", "--version"]),
     home_env: Some("HERMES_HOME"),
     kind: SourceKind::Agent {
         transcript: None,
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId, // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse,            // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
-            // `on_session_end` fires on clean completion — best-effort counts.
-            // The payload carries no pid, but the shim stamps one, so an abrupt
-            // exit rides it — falling to the stale-sweep where no `ExitWatch`
-            // backend exists (Windows / pre-5.3 Linux), where the walk does not
-            // recognise the runner's wrapper, or before two consecutive payloads
-            // corroborate the pid (#896).
+            // `on_session_finalize`, which upstream's atexit-registered
+            // `_run_cleanup` fires with `reason="shutdown"` — so a clean quit DOES
+            // leave an end signal, which is this field's whole question.
+            // `on_session_end` is not it: that one is a TURN boundary (see
+            // `source/hermes.rs`). Policy is unchanged either way here, since
+            // `short_idle_reap` also needs `resurrects_on_prompt`.
             has_exit_signal: true,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.
@@ -711,7 +751,8 @@ const GROK: SourceDescriptor = SourceDescriptor {
             cwd_extractor: grok::extract_grok_cwd,
         }),
         hook: Some(HookDecoding {
-            id_key: IdKey::SessionId, // inert: custom claims all
+            id_key: IdKey::SessionId,        // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse, // inert: custom claims all
             custom: Some(HookCustom::ClaimsAll(grok::decode_grok_hook_payload)),
         }),
         caps: SourceCaps {
@@ -745,7 +786,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
-    verified_version: "16.4.0",
+    verified_version: "17.3.4",
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
     kind: SourceKind::Agent {
@@ -785,7 +826,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
 const KIMI: SourceDescriptor = SourceDescriptor {
     name: kimi::SOURCE_NAME,
     label_prefix: "km",
-    verified_version: "unknown",
+    verified_version: "0.36.0",
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -793,6 +834,8 @@ const KIMI: SourceDescriptor = SourceDescriptor {
         hook: Some(HookDecoding {
             // session_id is the base field on every Kimi event.
             id_key: IdKey::SessionId,
+            // The ONE source that does not spell the per-call id `tool_use_id`.
+            tool_id_key: ToolIdKey::ToolCall,
             custom: Some(HookCustom::Extend(kimi::decode_kimi_hook_custom)),
         }),
         caps: SourceCaps {

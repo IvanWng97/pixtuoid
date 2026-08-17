@@ -379,6 +379,58 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
 }
 
 #[test]
+fn a_second_waiting_keeps_the_gate_the_first_one_remembered() {
+    // CC's recorded gate fires PermissionRequest (no tool_use_id) and then, if
+    // the prompt sits, the idle Notification — both decode to Waiting. The
+    // second one must not erase the tool the first remembered, or the approved
+    // tool's PostToolUse resolves nothing and the slot never leaves Waiting.
+    use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let id = AgentId::from_transcript_path("/p/gate.jsonl");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    start(&mut r, &mut scene, id);
+    act_start(
+        &mut r,
+        &mut scene,
+        id,
+        Some("t1"),
+        None,
+        t0,
+        Transport::Hook,
+    );
+    waiting(
+        &mut r,
+        &mut scene,
+        id,
+        "permission",
+        t0 + Duration::from_millis(500),
+        Transport::Hook,
+    );
+    waiting(
+        &mut r,
+        &mut scene,
+        id,
+        "Claude is waiting for your input",
+        t0 + Duration::from_millis(900),
+        Transport::Hook,
+    );
+
+    let end = t0 + Duration::from_millis(1200);
+    act_end(&mut r, &mut scene, id, Some("t1"), end, Transport::Hook);
+    r.tick(
+        &mut scene,
+        end + ACTIVE_GRACE_WINDOW + Duration::from_millis(100),
+    );
+    assert!(
+        matches!(scene.agents.get(&id).unwrap().state, ActivityState::Idle),
+        "the approved tool's end must still resolve the wait, got {:?}",
+        scene.agents.get(&id).unwrap().state
+    );
+}
+
+#[test]
 fn parallel_tool_end_while_waiting_keeps_waiting() {
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);

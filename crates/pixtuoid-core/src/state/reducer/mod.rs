@@ -587,7 +587,11 @@ impl Reducer {
                 self.corr
                     .gated_before_waiting
                     .insert(agent_id, tuid.clone());
-            } else {
+            } else if !matches!(slot.state, ActivityState::Waiting { .. }) {
+                // A Waiting slot re-notified is the SAME gate, not a new one:
+                // CC follows its tool-less PermissionRequest with the idle
+                // Notification, and clearing here loses the tool whose
+                // PostToolUse is the only thing that resolves this wait.
                 self.corr.gated_before_waiting.remove(&agent_id);
             }
             fsm::enter_waiting(slot, Arc::<str>::from(reason), now);

@@ -10,13 +10,12 @@
 //! {"event":"PreToolUse","cwd":"/repo","toolName":"bash","toolArgs":{"command":"ls"}}
 //! ```
 //!
-//! camelCase fields, `event` discriminator (not `hook_event_name`), and — the
-//! load-bearing difference — **no session id, no transcript path, no tool-call
-//! id anywhere** (verified against `internal/hook/hook.go` Payload @v1.2.0).
-//! The only situating field is `cwd` (the workspace root), so the AgentId is
-//! keyed on it — two concurrent Reasonix sessions in ONE project deliberately
-//! render as one sprite, and either session's `SessionEnd` walks that shared
-//! sprite out (it walks back in on the other's next `UserPromptSubmit`).
+//! camelCase fields, `event` discriminator (not `hook_event_name`), and no
+//! transcript path or tool-call id anywhere (`internal/hook/hook.go` Payload).
+//! It DOES carry `sessionId` — 44/44 payloads across the recorded fixtures — so
+//! that is the AgentId key, cwd only as the fallback for a build that omits it.
+//! Keying on the workspace instead would merge two sessions in ONE project into
+//! a single sprite (the Cursor lesson; `hermes.rs` states it too).
 //!
 //! Why no JSONL transport: v2 session files are FULL-REWRITTEN (tmp+rename)
 //! once per turn — zero mid-turn writes, so a tail watcher shows nothing while
@@ -35,14 +34,15 @@ use crate::AgentId;
 pub const SOURCE_NAME: &str = "reasonix";
 
 /// Reasonix tools that dispatch an in-process subagent (`internal/agent/task.go`
-/// plus `internal/skill/tools.go` @v1.2.0), so the slot reads "Delegating" while
+/// plus `internal/skill/tools.go`), so the slot reads "Delegating" while
 /// the hook-invisible subagent works. `run_skill` is excluded: it is only
-/// sometimes a subagent and the args don't say which.
+/// sometimes a subagent and the args don't say which. `task` is pinned live by
+/// `fixtures/reasonix/delegation-recorded`.
 const SUBAGENT_TOOLS: &[&str] = &["task", "explore", "research", "review", "security_review"];
 
 /// Decode one Reasonix hook payload (already identified by
 /// `_pixtuoid_source == "reasonix"`). Envelope verified against
-/// `internal/hook/hook.go` @v1.2.0. An unregistered event bails rather than
+/// `internal/hook/hook.go`. An unregistered event bails rather than
 /// dropping silently, so registered-vs-decoded drift is loud.
 ///
 /// The activity arms prepend an [`AgentEvent::Identity`] (#221) because
@@ -57,18 +57,22 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("event")
         .and_then(|s| s.as_str())
         .ok_or_else(|| anyhow!("reasonix payload missing event"))?;
-    // `cwd` is the ONLY identity a Reasonix hook carries — an empty one would
-    // mint a phantom agent that nothing else coalesces with.
+    // An empty cwd would mint a phantom agent that nothing else coalesces with.
     let cwd = obj
         .get("cwd")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
-    let agent_id = AgentId::from_parts(SOURCE_NAME, cwd);
+    // Merged on cwd, either session's end walks the shared sprite out. Older
+    // builds carried no id, which is why the cwd fallback stays.
+    let key = obj
+        .get("sessionId")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(cwd);
+    let agent_id = AgentId::from_parts(SOURCE_NAME, key);
 
-    // No upstream session id exists; the cwd IS the session key, and the
-    // SessionStart arm below must key it identically or coalescing breaks.
-    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, cwd, Some(cwd.into()));
+    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key, Some(cwd.into()));
 
     match event {
         // The `UserPromptSubmit` duplicate is the RESURRECT path — a
@@ -77,7 +81,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         "SessionStart" | "UserPromptSubmit" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
-            session_id: cwd.to_string(),
+            session_id: key.to_string(),
             cwd: cwd.into(),
             parent_id: None,
         }]),
@@ -129,8 +133,9 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         // The STRUCTURED approval gate: fires BEFORE the prompt with the tool +
         // subject, and ALONGSIDE `Notification` for the same approval — both →
         // Waiting is idempotent (the gated tool's PostToolUse/Stop resolves it).
-        // NOT live-capturable: the gate never fires in headless `reasonix run`
-        // (auto-approve), so this arm is decoded from upstream source.
+        // Capture-verified at v1.25.2: `fixtures/reasonix/permission-flow`. It was
+        // decoded from upstream source and annotated "not live-capturable" until a
+        // seeded ask rule made the gate fire.
         "PermissionRequest" => {
             let tool = obj
                 .get("toolName")
@@ -204,7 +209,30 @@ mod tests {
     }
 
     #[test]
-    fn session_start_keys_on_cwd() {
+    fn two_sessions_in_one_workspace_stay_two_agents() {
+        // Pinned against fixtures/reasonix/delegation-recorded.
+        let ev = |sid: &str| {
+            decode_rx_hook_payload(&json!({
+                "event": "SessionStart", "cwd": "/repo", "sessionId": sid
+            }))
+            .expect("decodes")
+            .remove(0)
+        };
+        let (a, b) = (ev("s-1"), ev("s-2"));
+        assert_ne!(a.agent_id(), b.agent_id(), "one project, two sessions");
+        assert_eq!(a.agent_id(), AgentId::from_parts(SOURCE_NAME, "s-1"));
+    }
+
+    #[test]
+    fn a_build_without_a_session_id_still_keys_on_cwd() {
+        let ev = decode_rx_hook_payload(&json!({"event": "SessionStart", "cwd": "/repo"}))
+            .expect("decodes")
+            .remove(0);
+        assert_eq!(ev.agent_id(), AgentId::from_parts(SOURCE_NAME, "/repo"));
+    }
+
+    #[test]
+    fn session_start_falls_back_to_cwd_without_a_session_id() {
         let ev = decode(json!({
             "event": "SessionStart",
             "cwd": "/Users/dev/zirs"
@@ -422,7 +450,7 @@ mod tests {
     }
 
     #[test]
-    fn all_events_for_one_cwd_share_one_agent_id() {
+    fn without_a_session_id_one_cwd_is_still_one_agent() {
         let events = [
             json!({"event": "SessionStart", "cwd": "/Users/dev/p"}),
             json!({"event": "UserPromptSubmit", "cwd": "/Users/dev/p"}),
@@ -443,7 +471,7 @@ mod tests {
     }
 
     #[test]
-    fn activity_arms_prepend_identity_with_cwd_keyed_session() {
+    fn activity_arms_prepend_identity_with_the_session_key() {
         let payloads = [
             json!({"event": "PreToolUse", "cwd": "/Users/dev/p", "toolName": "bash",
                    "toolArgs": {"command": "ls"}}),
@@ -465,7 +493,10 @@ mod tests {
                 } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "/Users/dev/p"));
                     assert_eq!(source, SOURCE_NAME);
-                    assert_eq!(session_id, "/Users/dev/p", "cwd IS the session key");
+                    assert_eq!(
+                        session_id, "/Users/dev/p",
+                        "no sessionId on the wire, so cwd is the key"
+                    );
                     assert_eq!(
                         cwd.as_deref(),
                         Some(std::path::Path::new("/Users/dev/p")),

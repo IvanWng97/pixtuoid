@@ -83,8 +83,9 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 │                    (`just gen-wasm` → committed site/public/wasm/), not a crates.io artifact.
 │                    Time is a PARAMETER — the engine never reads the clock on wasm.
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named pipe.
-scripts/             gen-media.py + media.json (the ONE driver for all committed art), the three
-                     OpenClaw e2e tiers (see Build & test), check_upstream_drift.py, risk-radar.py.
+scripts/             gen-media.py + media.json (the ONE driver for all committed art), the e2e
+                     tiers under lib/ (three OpenClaw, replay, live-sources — see Build & test),
+                     check_upstream_drift.py, risk-radar.py.
 policy/              policy-as-code: Conftest/OPA structural contracts + yq-extracted
                      action/workflow behavior tests (`policy/ci-observability/`).
 site/                Astro landing page → GitHub Pages. Self-contained Node project, own CI.
@@ -126,9 +127,25 @@ transcript/hook bytes through the production path drives
 `pixtuoid_core::harness::Drive` (core's dev-only `harness` feature, so it never
 enters the published crate). **A driver that keys the first-sight seed any way
 other than the source's registry row registers NOTHING** — a JSONL event for an
-unknown id is a documented no-op. The four shells and the two on-demand tools
+unknown id is a documented no-op. Every shell and the two on-demand tools
 (`just fuzz`, the `corpus_check` census) are mapped in the tests guide; neither
 tool runs in CI.
+
+**Fixtures are RECORDED, not composed.** `just capture-fixture <source>
+<scenario> <cmd…>` runs the real CLI with `PIXTUOID_SOCKET` pointed at a
+listener of its own and commits the bytes the shim actually sent — BILLED, and
+it leaves your installed hook config alone. A composed
+fixture pins its author's belief and the decoder then agrees with it, so every
+scenario declares a `provenance.json` that
+`every_capture_declares_a_valid_origin_with_its_required_fields` gates (over `every_capture()`, the ONE walk). `just corpus-all` is the other
+half, censusing every transcript-bearing source against its real local corpus.
+Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md).
+A recorded fixture pins ONE version of one CLI's wire; `just fixture-age` says which
+ones the local CLI has moved past (advisory, LOCAL-only — CI has none of them
+installed). The capture-tree RULES are a hard gate and live apart from it, as
+Rust tests in `tests/sources/captures.rs` (`just fixture-metadata` is their named
+entry point) — so they ride `just test` on all three platforms rather than one
+lint job. `just fixture-pii` is the other, gitleaks over the same tree.
 
 Mutation testing: `just mutants` (diff-scoped vs origin/main; in CI it is the
 on-demand `mutants.yml`, NOT per-PR — a surviving mutant is a hint, not a
@@ -309,7 +326,7 @@ the render path end to end; the numbers live in `crates/pixtuoid/SHARP-EDGES.md`
 - "How does a CC tool call become a moving sprite?" → `runtime/driver.rs::run_async` → `SourceManager::spawn` → source → decoder → `reducer::Reducer::apply` → `watch` channel → `TuiRenderer::render` → `pixtuoid_scene::pixel_painter::render_to_rgb_buffer` (the world render) → `tui::renderer::draw_scene` (the terminal flush). First half in `pixtuoid-core`; the world render in `pixtuoid-scene`; the flush in `pixtuoid`'s `tui`.
 - Architecture overview + data-flow diagram: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Area-specific answers (layout, sources, install, themes, motion, weather, …) live in each crate's `WHERE-TO-LOOK.md`, indexed by question in its `CLAUDE.md`.
 - One change spanning the Rust lib + the site + the Raycast extension: [`docs/PARALLEL-DELIVERY.md`](docs/PARALLEL-DELIVERY.md). How lessons persist across agent runs: [`docs/KNOWLEDGE-ENGINEERING.md`](docs/KNOWLEDGE-ENGINEERING.md).
-- **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, the three OpenClaw e2e tiers, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
+- **"What do I run, and when?"** — the running order (contract regen, preflight, the merge gate, dogfooding, the e2e tiers under `scripts/lib/`, and the advisory backstops that surface risk but never gate): [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#the-running-order).
 
 ## When refactoring
 

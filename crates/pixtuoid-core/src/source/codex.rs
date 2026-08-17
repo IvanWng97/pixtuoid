@@ -119,7 +119,7 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
 }
 
 /// The COMPLETE set of codex rollout OUTER `type` discriminators — every
-/// `RolloutItem` variant (`codex-rs/protocol/src/protocol.rs`, `rename_all =
+/// `RolloutItem` variant (`codex-rs/history/src/lib.rs`, `rename_all =
 /// "snake_case"`), NOT just the ones we decode: a listed-but-undecoded outer
 /// must stay SILENT, else the drift breadcrumb floods on lines codex emits
 /// every session. `read_codex_rollout_outers` in `check_upstream_drift.py`
@@ -133,6 +133,7 @@ const KNOWN_OUTERS: &[&str] = &[
     "turn_context",
     "world_state",
     "event_msg",
+    "security_risk_score",
 ];
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
@@ -164,7 +165,9 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // upstream's own serde alias, accepted so a future serializer flip to
         // the alias form still drives Active/Idle.
         ("event_msg", "task_started") | ("event_msg", "turn_started") => vec![start()],
-        ("response_item", "function_call") => {
+        // `custom_tool_call` is the SAME item under codex's custom-tool API and is
+        // what a modern session serializes — `a_custom_tool_call_is_a_tool_call`.
+        ("response_item", "function_call" | "custom_tool_call") => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {
                     agent_id,
@@ -178,6 +181,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // Each is an ActivityStart so the reducer clears any Waiting set by the
         // permission gate.
         ("response_item", "function_call_output")
+        | ("response_item", "custom_tool_call_output")
         | ("event_msg", "exec_command_end")
         | ("event_msg", "patch_apply_end") => {
             vec![start()]
@@ -263,6 +267,13 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
 /// "require_escalated"`) is an approval gate → Waiting. A bare `justification`
 /// is intentionally NOT a signal: Codex emits it on auto-approved commands too,
 /// so keying on it would false-Wait.
+/// Codex has TWO tool surfaces and only this one marks escalation in the
+/// rollout. A `custom_tool_call` carries `input` — a JS snippet, not JSON args —
+/// and a recorded escalated run on that surface shows no marker anywhere, so
+/// there the gate exists ONLY on the hook wire (`PermissionRequest`). Which
+/// surface a turn takes is model-chosen, so neither is dead: a local rollout
+/// census found real `require_escalated` calls, and codex 0.147.0's system
+/// prompt still instructs the model to send exactly this parameter.
 fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
     let Some(args_str) = payload
         .and_then(|p| p.get("arguments"))
@@ -288,7 +299,7 @@ fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> 
         .and_then(|p| p.get("name"))
         .and_then(|s| s.as_str())
         .unwrap_or_else(|| {
-            crate::source::drift::missing_field(SOURCE_NAME, "function_call", "name");
+            crate::source::drift::missing_field(SOURCE_NAME, "tool call", "name");
             "tool"
         });
     AgentEvent::ActivityStart {
@@ -422,6 +433,33 @@ mod tests {
                 "{t}"
             );
         }
+    }
+
+    /// Captured off codex 2026-08: a real rollout serializes its tool calls as
+    /// `custom_tool_call`, never the `function_call` the composed fixture used, so
+    /// reading only the latter let four tool calls decode to nothing while the
+    /// turn still showed Active from `task_started`.
+    #[test]
+    fn a_custom_tool_call_is_a_tool_call() {
+        let out = ev(json!({"type":"response_item","payload":{
+            "type":"custom_tool_call","call_id":"call_x","name":"exec","input":"ls"}}));
+        match out.as_slice() {
+            [AgentEvent::ActivityStart {
+                detail: Some(d), ..
+            }] => {
+                assert!(
+                    format!("{d:?}").contains("exec"),
+                    "tool name must reach the detail: {d:?}"
+                )
+            }
+            other => panic!("expected an ActivityStart carrying the tool, got {other:?}"),
+        }
+        let resumed = ev(json!({"type":"response_item","payload":{
+            "type":"custom_tool_call_output","call_id":"call_x","output":"ok"}}));
+        assert!(
+            matches!(resumed.as_slice(), [AgentEvent::ActivityStart { .. }]),
+            "its output must resume work like function_call_output does"
+        );
     }
 
     #[test]

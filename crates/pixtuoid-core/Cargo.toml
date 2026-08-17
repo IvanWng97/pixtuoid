@@ -82,3 +82,8 @@ criterion = { package = "codspeed-criterion-compat", version = "5", default-feat
 name = "decode_reduce"
 harness = false
 
+# Without this an example is not a test target, so its `#[test]`s build and
+# never run — the same wiring `pixtuoid`'s `snapshot` example already carries.
+[[example]]
+name = "capture_fixture"
+test = true

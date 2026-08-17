@@ -3,63 +3,72 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
+- ModelInfo:
+    agent_id: 12415794464165604795
+    model: openrouter/openrouter/auto
+    effort: ~
 - Identity:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 13282019020037904231
-    tool_use_id: t1
+    agent_id: 12415794464165604795
+    tool_use_id: call_c64779ff65cb4f449f7a4460
+    detail:
+      Generic:
+        display: Read
+- Identity:
+    agent_id: 12415794464165604795
+    source: kimi
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 12415794464165604795
+    tool_use_id: call_bf65d3d0385d458e889fb816
     detail:
       Generic:
         display: "Bash: ls -la"
 - Identity:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 13282019020037904231
-    tool_use_id: t1
+    agent_id: 12415794464165604795
+    tool_use_id: call_c64779ff65cb4f449f7a4460
 - Identity:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 12415794464165604795
+    tool_use_id: call_bf65d3d0385d458e889fb816
+- Identity:
+    agent_id: 12415794464165604795
+    source: kimi
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 13282019020037904231
-    tool_use_id: t2
+    agent_id: 12415794464165604795
+    tool_use_id: call_00_T9YQych6eEiYqU8MPm5T1933
     detail:
       Generic:
-        display: "Read: /Users/dev/proj/README.md"
+        display: Read
 - Identity:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
+    session_id: session_6ece1db4-2e7a-4a09-b9f5-6477434563a9
+    cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 13282019020037904231
-    tool_use_id: t2
-- Identity:
-    agent_id: 13282019020037904231
-    source: kimi
-    session_id: session_abc
-    cwd: /Users/dev/proj
-- Waiting:
-    agent_id: 13282019020037904231
-    reason: permission
+    agent_id: 12415794464165604795
+    tool_use_id: call_00_T9YQych6eEiYqU8MPm5T1933
 - ActivityEnd:
-    agent_id: 13282019020037904231
+    agent_id: 12415794464165604795
     tool_use_id: ~
-- ActivityEnd:
-    agent_id: 13282019020037904231
-    tool_use_id: ~
-- SessionEnd:
-    agent_id: 13282019020037904231
-    as_child: false

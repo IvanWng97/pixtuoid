@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "copilot",
+  "version": "unknown",
+  "captured": "2026-08-14",
+  "command": "copilot -p '{prompt}' --allow-all-tools",
+  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim. Redacted: the recorder's own MCP server / skill inventory (tool NAMES only, no credentials) to generic placeholders \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields."
+}

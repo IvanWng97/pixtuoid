@@ -30,7 +30,7 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 # workflow `run:` blocks go to actionlint, composite-action ones to
 # `actionlint-composites`. Both are shellcheck-only — shfmt cannot rewrite a
 # scalar in place — so adding a file here is not enough for embedded shell.
-SHELL_SOURCES := "scripts/*.sh .githooks/* policy/ci-observability/*.sh"
+SHELL_SOURCES := "scripts/*.sh scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
 # nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
@@ -290,7 +290,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee; do
+    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -318,6 +318,9 @@ lint:
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
+    run tuidrive just tuidrive-selftest   & pids+=($!)
+    run fixpii  just fixture-pii          & pids+=($!)
+    run piiself just fixture-pii-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
     [[ $fail -eq 0 ]]
 
@@ -560,6 +563,62 @@ mutants *args:
 comment-lint *args:
     python3 scripts/comment-lint.py {{ args }}
 
+# Record a conformance fixture from bytes a real CLI actually sent. Hook-only
+# sources have no persistent corpus — hook events are transient — so their
+# fixtures are the ONLY wire evidence they have, and the ones this tree has not
+# re-recorded yet were composed by hand. One BILLED model turn per run.
+# `{prompt}` expands to the shared scenario prompt; a custom one has to go
+# through the script directly, since just joins variadic args and loses quoting.
+#   just capture-fixture cursor tool-run cursor-agent -p --trust '{prompt}'
+#   just capture-fixture kimi permission-flow "$SHELL"   # drive the TUI yourself
+[group('rust')]
+[doc('Record a conformance fixture from a real CLI run (BILLED — one model turn)')]
+capture-fixture source scenario *cmd:
+    cargo run --release -q -p pixtuoid-core --example capture_fixture -- \
+        {{ source }} {{ scenario }} {{ cmd }}
+
+# The corpus census, every transcript-bearing source in one pass — the drift half
+# of the pair: fixtures catch a decode regression, real bytes catch the wire
+# changing under us. Roster and roots both come from the registry.
+[group('rust')]
+[doc('Census every transcript-bearing source against its real local corpus')]
+corpus-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cc=target/release/examples/corpus_check
+    [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
+    # Read the roster BEFORE the loop: as a process substitution its exit status
+    # is unobservable, so a roster that died fed an empty loop and the census
+    # reported "everything clean" having censused nothing.
+    roster="$("$cc" --roster)" || { echo "corpus_check --roster failed" >&2; exit 2; }
+    [ -n "$roster" ] || { echo "corpus_check --roster returned no rows" >&2; exit 2; }
+    rc=0
+    n=0
+    uncovered=()
+    while IFS=$'\t' read -r id _ kind _; do
+        [ "$kind" = transcript ] || continue
+        n=$((n + 1))
+        echo "── $id"
+        "$cc" "$id"
+        # 3 is "no corpus on this host" — never ran that CLI here. It is NOT a
+        # defect, and it must not read as covered either, so it is reported apart
+        # from both.
+        case $? in
+        0) ;;
+        3) uncovered+=("$id") ;;
+        *) rc=1 ;;
+        esac
+    done <<<"$roster"
+    # `-n "$roster"` checked the TEXT; this checks the PARSE. A roster that is
+    # non-empty but yields zero transcript rows — a column insertion, a rename of
+    # the `transcript` literal — reproduces the exact silent-empty census the
+    # guard above was added for.
+    [ "$n" -gt 0 ] || { echo "roster parsed 0 transcript rows — column layout changed?" >&2; exit 2; }
+    if [ ${#uncovered[@]} -gt 0 ]; then
+        echo "NOT COVERED (no local corpus): ${uncovered[*]}"
+    fi
+    exit "$rc"
+
 # Never-panic fuzz ONE source's transcript decoder over a JSONL corpus DIR
 # (on-demand; not in preflight/CI — points at local or public real sessions, not
 # committed data). SOURCE is a registered source name (see `registered_source_names`):
@@ -570,7 +629,11 @@ comment-lint *args:
 #   just fuzz codex ~/.codex/sessions          # your Codex rollouts
 #   just fuzz grok ~/.grok/sessions            # grok ACP transcripts
 #   just fuzz omp ~/.omp/agent/sessions        # omp sessions
-#   git clone https://github.com/daaain/claude-code-log /tmp/cc && just fuzz claude-code /tmp/cc/test_data/real_projects
+#   # a PUBLIC real-session corpus, so drift shows up without waiting for your own
+#   # sessions to hit the shape. That repo moved test_data/ -> dev-docs/messages/
+#   # (verified 2026-08-14: 59 lines, 0 decode-err); its codex samples are single
+#   # .json objects, which this recipe's *.jsonl glob does not admit.
+#   git clone --depth 1 https://github.com/daaain/claude-code-log /tmp/ccl && just fuzz claude-code /tmp/ccl/dev-docs/messages
 [group('rust')]
 [doc('Never-panic fuzz a source decoder over a JSONL corpus dir: just fuzz claude-code ~/.claude/projects')]
 fuzz source dir:
@@ -595,7 +658,7 @@ fuzz source dir:
 [group('rust')]
 [doc('Hermetic OpenClaw daemon live-e2e (needs `just build --release`)')]
 openclaw-e2e:
-    scripts/openclaw-live-e2e.sh
+    scripts/lib/tier-openclaw-hermetic.sh
 
 # N REAL `openclaw gateway run` processes, each in its own throwaway
 # OPENCLAW_HOME on its own port, feeding one headless pixtuoid: one
@@ -606,7 +669,7 @@ openclaw-e2e:
 [group('rust')]
 [doc('Multi-gateway live-e2e against the REAL openclaw CLI (needs `just build --release`)')]
 openclaw-multi-e2e *ports:
-    scripts/openclaw-multi-gateway-e2e.sh {{ ports }}
+    scripts/lib/tier-openclaw-multi.sh {{ ports }}
 
 # The EXPENSIVE one: a real `openclaw gateway run` PLUS one real model turn on
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
@@ -617,7 +680,22 @@ openclaw-multi-e2e *ports:
 [group('rust')]
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
 openclaw-backend-e2e:
-    scripts/openclaw-cc-backend-e2e.sh
+    scripts/lib/tier-openclaw-backend.sh
+
+# The broadest tier: launches each installed agent CLI non-interactively and
+# asserts ITS badge renders. One real model turn PER CLI, on each provider's own
+# account — the only proof a real CLI's real output reaches a real sprite.
+[group('rust')]
+[doc('Live multi-source e2e — every installed agent CLI, one BILLED turn each')]
+live-sources *ids:
+    scripts/lib/tier-live-sources.sh {{ ids }}
+
+# Replays a captured rollout through the FULL headless path — real watcher, real
+# socket, only the input is fixed. Recipe-less until now, for the reason above.
+[group('rust')]
+[doc('Replay a captured rollout fixture through a hermetic headless run')]
+replay fixture delay="3":
+    scripts/lib/tier-replay.sh {{ fixture }} {{ delay }}
 
 # Compile the workspace; extra args are forwarded:
 #   just build                                # debug
@@ -1121,7 +1199,10 @@ setup-tools:
     # ast-grep backs the `comment-lint` advisory (structural Rust + Python rules in
     # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
     # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema; do
+    # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
+    # recipe cannot run at all (it does not degrade to a weaker scan, because a
+    # weaker scan is what it replaced).
+    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -1132,7 +1213,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -1315,6 +1396,139 @@ comment-lint-replay n="20":
 [doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
 gitenv-selftest:
     python3 scripts/gitenv.py --selftest
+
+# The pty driver's pure halves — the ANSI stripper, the composer comparison, the
+# gate/menu wording. Each of those was a lost BILLED turn before it was code, and
+# each fails silently: a broken stripper just stops matching, and the capture
+# comes back empty blaming the CLI. Runs in `lint`; CI's hygiene job enumerates
+# it separately.
+[group('meta')]
+[doc("Self-test the TUI capture driver's pure logic")]
+tuidrive-selftest:
+    python3 scripts/lib/tuidrive.py --selftest
+
+
+# The capture-tree rules — every scenario declares what
+# fixtures/provenance.schema.json requires, and a recorded one's claims are
+# falsified by its own bytes. They are RUST TESTS (`tests/sources/captures.rs`)
+# and so already ride `just test` on all three platforms; this recipe is the
+# named entry point for a human who wants only this answer. `lint` no longer
+# runs it — `just test` does, on all three.
+#
+# They were Python until #929. Moving them deleted the mirror walk that half had
+# to keep in step with the Rust one, and with it a cross-runtime spawn that would
+# have redded the two Windows jobs — GitHub's Windows images ship `python.exe`
+# with no `python3`, and no test job installs Python.
+[group('meta')]
+[doc("Assert every capture declares its provenance and its claims are falsifiable")]
+fixture-metadata:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # A filter that matches NOTHING exits 0 having run no rule, so rename the
+    # module and this named gate passes vacuously — the class the file's own
+    # floors exist to prevent. Count what ran and require it.
+    out=$(cargo test -p pixtuoid-core --test sources captures:: -- --nocapture 2>&1) || { echo "$out"; exit 1; }
+    echo "$out"
+    ran=$(echo "$out" | sed -n 's/^test result: ok\. \([0-9]*\) passed.*/\1/p' | head -1)
+    [ "${ran:-0}" -gt 0 ] || { echo "fixture-metadata: the \`captures::\` filter matched no test — the module moved" >&2; exit 1; }
+
+# The recorder refuses a capture carrying its own identity, but that check runs
+# ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
+# a fixture added by hand, edited later, or captured before the check existed is
+# covered too — both classes that slipped through on #929.
+# gitleaks, not a hand-rolled scanner: the one this replaced admitted a real
+# GitHub PAT, GitLab PAT and Stripe key, because it only knew the five patterns
+# its author thought of. Config + the WHY: `.gitleaks.toml`.
+# Runs in `lint`; CI's hygiene job enumerates it separately.
+[group('meta')]
+[doc("Scan the committed fixture tree for secrets and the recorder's identity")]
+fixture-pii:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    # TWO passes, and the split is load-bearing: the credential sweep wants
+    # gitleaks' default allowlist (which waives filesystem-shaped strings), and
+    # the identity rules are destroyed by it — a global allowlist outranks a
+    # rule-scoped one. `.gitleaks-identity.toml` carries the proof.
+    tree=crates/pixtuoid-core/tests/sources
+    gitleaks dir "$tree" -c .gitleaks.toml          --no-banner --redact
+    gitleaks dir "$tree" -c .gitleaks-identity.toml --no-banner --redact
+
+# Prove both configs can FAIL, and that neither fires on the paths a fixture or a
+# CI-path assertion legitimately carries. The direction that matters is "must
+# fire": an identity rule moved into `.gitleaks.toml` is silently waived there by
+# the default global allowlist, and `fixture-pii` would still exit 0 — the exact
+# half-dead state this pair was split to prevent. Credential probes are assembled
+# at RUNTIME so no token-shaped literal is ever committed.
+[group('meta')]
+[doc('Prove the fixture-pii configs red on a leak and green on a legitimate path')]
+fixture-pii-selftest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    d=$(mktemp -d); trap 'rm -rf "$d"' EXIT
+    mkdir -p "$d/probe" "$d/quiet"
+    # ONE probe per file, and the assertion is the exact SET of files each config
+    # reports — not "did it find something". A config whose rules are half dead
+    # still fires on its surviving rule, so an aggregate check greens on the very
+    # state this exists to catch.
+    printf '/home/alice\n'          > "$d/probe/identity-home.txt"
+    printf '/Users/bob/notes.txt\n' > "$d/probe/identity-users.txt"
+    # A username that STARTS with a placeholder token, and the Windows separator:
+    # both sailed through the first form of this rule.
+    printf '/Users/dev-ops\n'  > "$d/probe/identity-prefix.txt"
+    printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
+    printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
+    printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"
+    printf '{"authorization":"Bearer %s"}\n' "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9x" \
+        > "$d/probe/identity-bearer.txt"
+    # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
+    # allowlist waives AWS's own documentation key, so that one proves nothing.
+    printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
+    # A real secret wearing a wire identifier's PREFIX. The allowlists waived this
+    # by substring until they were anchored against `secret` rather than `match`.
+    printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
+    # The RESIDUAL, pinned so it is visible rather than assumed closed: a secret
+    # that lands INSIDE the wire id's own 20-32 length window still rides the
+    # allowlist. Any shape-based waiver admits a secret wearing that shape; what
+    # actually stops this class is the recorder refusing at capture time.
+    printf '{"api_key":"msg_%s"}\n' "Kd8sQm2zXv6bTn4wRj9c" > "$d/quiet/cred-residual.txt"
+    printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
+        > "$d/quiet/identity.txt"
+    printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
+    printf 'Bearer short\n' > "$d/quiet/bearer.txt"
+    printf 'msg_%s\n%s\n' "0123456789abcdefghij" "20260815_120000_a1b2c3" > "$d/quiet/cred.txt"
+    fired() {
+        gitleaks dir "$2" -c "$1" --no-banner --redact --report-format json \
+            --report-path "$d/out.json" >/dev/null 2>&1 || true
+        jq -r '[.[].File | split("/") | last] | unique | join(",")' "$d/out.json"
+    }
+    fail=0
+    # The credential config does NOT own the identity class — its default global
+    # allowlist waives filesystem-shaped strings, which is why the pair is split.
+    for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
+                ".gitleaks-identity.toml=identity-bearer.txt,identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+        cfg=${spec%%=*}; want=${spec#*=}
+        got=$(fired "$cfg" "$d/probe")
+        if [ "$got" != "$want" ]; then
+            echo "fixture-pii-selftest: FAIL — $cfg reported [$got], want [$want]" >&2
+            fail=1
+        fi
+        got=$(fired "$cfg" "$d/quiet")
+        if [ -n "$got" ]; then
+            echo "fixture-pii-selftest: FAIL — $cfg fired on legitimate paths [$got]" >&2
+            fail=1
+        fi
+    done
+    [ "$fail" -eq 0 ] || exit 1
+    echo "fixture-pii-selftest: OK (each rule reds on its own probe, green on legitimate paths)"
+
+# Which recorded fixtures have drifted from the CLI that produced them — version
+# first (the sharp signal), age second. LOCAL and advisory: CI has none of these
+# CLIs to compare against, and a stale fixture is a re-capture candidate, not a
+# defect. Exit 3 = candidates found (the `corpus-all` convention).
+[group('rust')]
+[doc('Report recorded fixtures whose CLI has moved on (advisory, exit 3 = stale)')]
+fixture-age *args:
+    python3 scripts/fixture-age.py {{ args }}
 
 # Risk radar — show the documented review escalations for the high-risk seams
 # THIS branch touches (advisory, deterministic, no LLM). Dogfood before pushing

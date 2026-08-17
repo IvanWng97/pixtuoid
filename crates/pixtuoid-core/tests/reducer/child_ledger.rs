@@ -69,6 +69,48 @@ fn hook_event_after_tombstone_ttl_synthesizes_again() {
     );
 }
 
+/// Past the tombstone the 5 s window is the ONLY guard, and it does not care
+/// which arm arrives: a turn-boundary `ActivityEnd` re-registers exactly as an
+/// `Identity` does. hermes has no other reaper (`resurrects_on_prompt: false`),
+/// so a turn finishing after the user rotates with `/new` leaves the outgoing id
+/// on the floor until the 30-minute stale sweep — the cost of "a hook is proof of
+/// life" for a source with no short reap, NOT something the `identity()` on that
+/// arm introduced.
+#[test]
+fn past_the_tombstone_any_hook_arm_re_registers_including_a_turn_boundary_end() {
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let ended = AgentId::from_parts("hermes", "turn-after-finalize");
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+    let past = t0 + HOOK_SESSION_END_TOMBSTONE_TTL + Duration::from_secs(1);
+
+    sess_end(&mut r, &mut scene, ended, false, t0, Transport::Hook);
+    act_end(&mut r, &mut scene, ended, None, past, Transport::Hook);
+    assert!(
+        scene.agents.contains_key(&ended),
+        "an ActivityEnd past the TTL re-registers — the pre-existing behaviour"
+    );
+
+    let with_id = AgentId::from_parts("hermes", "same-but-with-identity");
+    sess_end(&mut r, &mut scene, with_id, false, t0, Transport::Hook);
+    r.apply(
+        &mut scene,
+        AgentEvent::Identity {
+            agent_id: with_id,
+            source: "hermes".into(),
+            session_id: "same-but-with-identity".into(),
+            cwd: Some(PathBuf::from("/repo")),
+            pid: None,
+        },
+        past,
+        Transport::Hook,
+    );
+    assert!(
+        scene.agents.contains_key(&with_id),
+        "and so does an Identity — the two arms are not distinguishable here"
+    );
+}
+
 #[test]
 fn jsonl_child_session_start_within_tombstone_is_gated_too() {
     let mut scene = SceneState::uniform(4);

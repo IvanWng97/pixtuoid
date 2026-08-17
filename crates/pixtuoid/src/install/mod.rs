@@ -136,7 +136,9 @@ pub(crate) fn verify_target(
     //
     // INVARIANT (#387): a NEW code-shipping path added to `install_target` MUST gain
     // a matching check here, or it ships the silent-dead class for a 3rd
-    // code-artifact target.
+    // code-artifact target. Where the artifact IS the target's own config file it
+    // has no `extra_artifacts` to ride this loop, so the check belongs in that
+    // target's `verify_schema` instead — opencode's plugin is the one such shape.
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {
@@ -146,16 +148,35 @@ pub(crate) fn verify_target(
                         missing.push(p);
                         continue;
                     }
+                    let Ok(installed) = io::read_config(&p) else {
+                        notes.push(format!("could not read {}", verify::display_safe(&p)));
+                        continue;
+                    };
+                    // A config-shaped target names the EVENTS an old install is
+                    // missing; a code artifact has no per-event config, so the
+                    // equivalent is the file. Nothing re-installs on a pixtuoid
+                    // upgrade, so without this an upgrader runs the plugin they
+                    // connected with forever and doctor says fine.
+                    //
+                    // EVERY artifact, above the marker guard: nested inside it this
+                    // covered only the one file that bakes a shim path, while
+                    // OpenClaw's manifest (`activation`, `configSchema`) and its
+                    // `package.json` (the entry-point list OpenClaw reads) got
+                    // existence-only. `strip_baked_line` is a no-op without a marker.
+                    if strip_baked_line(&installed) != strip_baked_line(&intended) {
+                        issues.push(format!(
+                            "{} differs from the plugin this pixtuoid ships — it \
+                             predates an upgrade, so anything added since is not \
+                             forwarded. Reconnect the source to refresh it.",
+                            verify::display_safe(&p)
+                        ));
+                    }
                     // Existence misses a shim that MOVED — a green doctor over a
                     // plugin whose every forward fails — so stat the baked path too.
                     if !intended.contains(verify::BAKED_HOOK_MARKER) {
                         continue;
                     }
-                    match io::read_config(&p)
-                        .ok()
-                        .as_deref()
-                        .and_then(verify::baked_hook_path)
-                    {
+                    match verify::baked_hook_path(&installed) {
                         Some(baked) => check_shim_binary(&baked, &mut issues),
                         None => notes.push(format!(
                             "could not read the baked shim path from {}",
@@ -169,6 +190,20 @@ pub(crate) fn verify_target(
         }
     }
     verify::SchemaVerifyResult { issues, notes }
+}
+
+/// A rendered artifact without its `const HOOK_PATH` line — the only line that
+/// legitimately differs between what is installed (a real shim path) and what
+/// this binary would render (a placeholder).
+fn strip_baked_line(content: &str) -> String {
+    content
+        .lines()
+        // The DECLARATION, anchored exactly as `verify::baked_hook_path` anchors:
+        // `contains` also strips opencode's comment ABOVE the binding, so a change
+        // confined to that comment was invisible to the staleness compare.
+        .filter(|l| !l.trim_start().starts_with(verify::BAKED_HOOK_MARKER))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The HARD issue(s) for missing code artifacts, collapsed when they share a
@@ -345,6 +380,15 @@ pub(crate) fn install_target(
     // merge is a no-op (heals a deleted plugin file).
     if let Some(make) = t.extra_artifacts {
         for (p, c) in make(&binary)? {
+            // A real write here would be invisible: CI has no such dir, and the
+            // shim exits 0 by invariant #5 so nothing downstream reports it.
+            #[cfg(test)]
+            assert!(
+                p.starts_with(std::env::temp_dir()),
+                "a test is about to write {} outside the temp dir — redirect the target's \
+                 own state resolver (OpenClaw: OPENCLAW_STATE_DIR) at a TempDir first",
+                p.display()
+            );
             if let Some(dir) = p.parent() {
                 std::fs::create_dir_all(dir)
                     .with_context(|| format!("creating plugin dir {}", dir.display()))?;

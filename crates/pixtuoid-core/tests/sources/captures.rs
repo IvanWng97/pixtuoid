@@ -1,0 +1,1085 @@
+//! THE enumeration of committed captures, and the rules every capture obeys.
+//!
+//! There used to be several walks of this tree with different populations, so
+//! each rule landed on whichever subset its author picked — the "fix landed on
+//! half the population" class that recurred across four review rounds.
+//!
+//! So: ONE walk, and `the_walk_sees_every_provenance_on_disk` fails if a capture
+//! falls outside it. A rule written against `every_capture()` cannot cover a
+//! subset by accident, because there is no second walk to choose.
+
+use std::collections::BTreeSet;
+use std::path::{Path, PathBuf};
+
+use pixtuoid_core::source::registry;
+
+/// Module dirs whose name is NOT the registered source id. Every other
+/// single-owner tree's dir name IS its source.
+const MODULE_TO_SOURCE: &[(&str, &str)] = &[("claude", "claude-code")];
+
+/// A committed capture: the bytes, the record of where they came from, and the
+/// source the LAYOUT says owns them.
+pub(crate) struct Capture {
+    pub(crate) dir: PathBuf,
+    /// Resolved from the layout, never from the provenance — a record that lies
+    /// about its `cli` must not get to pick which rules apply to it.
+    pub(crate) source: String,
+    pub(crate) provenance_path: PathBuf,
+    pub(crate) provenance: serde_json::Value,
+}
+
+impl Capture {
+    pub(crate) fn origin(&self) -> &str {
+        self.provenance
+            .get("origin")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn is_recorded(&self) -> bool {
+        self.origin() == "recorded"
+    }
+
+    pub(crate) fn field(&self, key: &str) -> Option<&str> {
+        self.provenance.get(key).and_then(serde_json::Value::as_str)
+    }
+
+    /// The scenario's transcripts — every `.jsonl` that is not the hook payload
+    /// file, RECURSIVELY: a parent-dir-keyed source nests its transcript one
+    /// level down, and a flat read was blind to exactly the fixtures the
+    /// nesting rule forces into that shape.
+    pub(crate) fn transcripts(&self) -> Vec<PathBuf> {
+        transcripts_in(&self.dir)
+    }
+
+    pub(crate) fn hook_payloads(&self) -> Option<PathBuf> {
+        let p = self.dir.join("hook-payloads.jsonl");
+        p.is_file().then_some(p)
+    }
+
+    /// Every committed byte of this capture, for the rules that read content
+    /// rather than metadata.
+    pub(crate) fn wire_files(&self) -> Vec<PathBuf> {
+        let mut out = self.transcripts();
+        out.extend(self.hook_payloads());
+        out
+    }
+}
+
+fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
+    // LOUD, not swallowing: an unreadable capture dir used to make `wire_files()`
+    // return empty, so `a_recorded_capture_that_was_edited_says_so` saw no
+    // sentinels and passed vacuously for that capture.
+    for e in read_dir_or_panic(dir) {
+        let p = e.path();
+        if p.is_dir() {
+            push_transcripts(&p, out);
+        } else if p.extension().and_then(|s| s.to_str()) == Some("jsonl")
+            && p.file_name().and_then(|s| s.to_str()) != Some("hook-payloads.jsonl")
+        {
+            out.push(p);
+        }
+    }
+}
+
+/// The non-hook `.jsonl` under a dir, recursively. THE collector — `conformance.rs`
+/// used to keep a byte-identical copy with a different error policy.
+pub(crate) fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    push_transcripts(dir, &mut out);
+    out.sort();
+    out
+}
+
+pub(crate) fn sources_root() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
+}
+
+/// The conformance subtree, whose scenarios the decode harness iterates.
+pub(crate) fn fixtures_root() -> PathBuf {
+    sources_root().join("fixtures")
+}
+
+/// The registered source a capture dir belongs to, from the LAYOUT alone.
+/// Three shapes exist: `fixtures/<source>/<scenario>/`, `<module>/fixtures/`,
+/// and `<module>/fixtures/<sub>/`.
+fn source_of(dir: &Path) -> Option<String> {
+    let rel = dir.strip_prefix(sources_root()).ok()?;
+    let parts: Vec<&str> = rel.iter().filter_map(|s| s.to_str()).collect();
+    let raw = match parts.as_slice() {
+        ["fixtures", source, _scenario] => *source,
+        [_module, "fixtures", sub] => *sub,
+        [module, "fixtures"] => *module,
+        _ => return None,
+    };
+    let mapped = MODULE_TO_SOURCE
+        .iter()
+        .find(|(from, _)| *from == raw)
+        .map_or(raw, |(_, to)| *to);
+    Some(mapped.to_string())
+}
+
+/// Every dir the LAYOUT says is a capture — before asking whether it declares
+/// anything. This is the half that makes `provenance.json` mandatory: a walk
+/// that enumerated the FILES could not see a capture that declares nothing, so
+/// deleting a provenance made the suite greener.
+///
+/// A `<module>/fixtures/` tree declares EITHER at its root OR once per sub-dir;
+/// both shapes are in the tree today (`codex/fixtures` vs `delegation/fixtures/*`).
+fn capture_dirs() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for source_dir in sorted_dirs(&fixtures_root()) {
+        out.extend(sorted_dirs(&source_dir));
+    }
+    for module in sorted_dirs(&sources_root()) {
+        let name = module
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        let fixtures = module.join("fixtures");
+        // `decode/` holds hand-built decoder INPUTS, not captures — they are
+        // composed on purpose and have no wire to be provenance about. `fixtures/`
+        // itself is the conformance subtree, already covered above.
+        if name == "decode" || name == "fixtures" || !fixtures.is_dir() {
+            continue;
+        }
+        if fixtures.join("provenance.json").is_file() {
+            out.push(fixtures);
+        } else {
+            // No root declaration, so every sub-tree must carry one — and there
+            // must BE sub-trees. Without this, deleting a root provenance from a
+            // tree that has no sub-dirs makes the whole capture vanish from the
+            // population instead of failing.
+            let subs = sorted_dirs(&fixtures);
+            assert!(
+                !subs.is_empty(),
+                "{}: a capture tree must declare its origin — add provenance.json \
+                 here, or one per sub-tree",
+                fixtures.display()
+            );
+            out.extend(subs);
+        }
+    }
+    out.sort();
+    out
+}
+
+pub(crate) fn read_dir_or_panic(dir: &Path) -> Vec<std::fs::DirEntry> {
+    std::fs::read_dir(dir)
+        .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
+        .map(|e| e.unwrap_or_else(|e| panic!("read_dir entry under {}: {e}", dir.display())))
+        .collect()
+}
+
+pub(crate) fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
+    let mut out: Vec<PathBuf> = read_dir_or_panic(dir)
+        .into_iter()
+        .map(|e| e.path())
+        .filter(|p| p.is_dir())
+        .collect();
+    out.sort();
+    out
+}
+
+/// THE walk. Every capture the layout names, each REQUIRED to declare itself.
+/// Sorted, so failures name captures in a stable order.
+pub(crate) fn every_capture() -> Vec<Capture> {
+    let mut out = Vec::new();
+    for dir in capture_dirs() {
+        let prov = dir.join("provenance.json");
+        assert!(
+            prov.is_file(),
+            "{}: a capture must declare its origin — add provenance.json here, or \
+             one per sub-tree. Nothing else in the bytes separates a capture from a \
+             composition, which is the whole reason provenance exists.",
+            dir.display()
+        );
+        let body = std::fs::read_to_string(&prov)
+            .unwrap_or_else(|e| panic!("read {}: {e}", prov.display()));
+        let provenance: serde_json::Value = serde_json::from_str(&body)
+            .unwrap_or_else(|e| panic!("{}: not valid JSON: {e}", prov.display()));
+        let source = source_of(&dir).unwrap_or_else(|| {
+            panic!(
+                "{}: no layout rule names this capture's source — it is in NO \
+                 population, so every provenance rule skips it",
+                dir.display()
+            )
+        });
+        out.push(Capture {
+            dir,
+            source,
+            provenance_path: prov,
+            provenance,
+        });
+    }
+    out
+}
+
+/// The completeness pin that makes the single walk load-bearing: a capture the
+/// walk cannot see is one every rule silently skips, which is the failure the
+/// walk exists to make impossible.
+#[test]
+fn the_walk_sees_every_provenance_on_disk() {
+    fn count(dir: &Path, n: &mut usize) {
+        for e in read_dir_or_panic(dir) {
+            let p = e.path();
+            if p.is_dir() {
+                count(&p, n);
+            } else if p.file_name().and_then(|s| s.to_str()) == Some("provenance.json") {
+                *n += 1;
+            }
+        }
+    }
+    let mut on_disk = 0;
+    count(&sources_root(), &mut on_disk);
+    // The two sides are derived DIFFERENTLY on purpose: `capture_dirs()` from the
+    // LAYOUT, this counter from the FILES. Counting the same predicate twice was
+    // a tautology that a deleted provenance decremented on both sides.
+    let walked = every_capture().len();
+    assert_eq!(
+        walked, on_disk,
+        "the layout names {walked} captures but {on_disk} provenance.json files exist — \
+         a file outside every layout shape is one no rule applies to"
+    );
+    // Provenance counting alone cannot see an orphan that declares NOTHING: a
+    // `.jsonl` dropped straight into `fixtures/<source>/`, or a whole unregistered
+    // `fixtures/<name>/` dir, contributes no provenance to either side and the
+    // suite stays green over bytes no rule reads. So account for the WIRE files
+    // too — every one on disk must belong to a capture the walk returned.
+    let mut wire_on_disk: BTreeSet<PathBuf> = BTreeSet::new();
+    fn wire(dir: &Path, out: &mut BTreeSet<PathBuf>) {
+        for e in read_dir_or_panic(dir) {
+            let p = e.path();
+            if p.is_dir() {
+                wire(&p, out);
+            } else if p.extension().and_then(|s| s.to_str()) == Some("jsonl") {
+                out.insert(p);
+            }
+        }
+    }
+    wire(&sources_root(), &mut wire_on_disk);
+    let claimed: BTreeSet<PathBuf> = every_capture()
+        .iter()
+        .flat_map(|c| {
+            let mut fs = transcripts_in(&c.dir);
+            fs.extend(c.hook_payloads());
+            fs
+        })
+        .collect();
+    let orphans: Vec<String> = wire_on_disk
+        .difference(&claimed)
+        .map(|p| {
+            p.strip_prefix(sources_root())
+                .unwrap_or(p)
+                .display()
+                .to_string()
+        })
+        .collect();
+    assert!(
+        orphans.is_empty(),
+        "wire bytes no capture claims, so nothing decodes or scans them:\n  {}",
+        orphans.join("\n  ")
+    );
+    // DERIVED, not hand-picked. Three siblings of this floor were three
+    // hand-picked constants for one idea (20 vs 37, 40 vs 42, 140 vs 146) — two of
+    // them one routine fixture cleanup away from firing and blaming the walk. What
+    // the floor actually means is "the walk found the tree": every registered
+    // source has at least one capture, so a walk that found the tree sees at least
+    // as many captures as there are sources.
+    // The PREMISE, not its count consequence: "at least as many captures as
+    // sources" leaves most of the corpus free to vanish before it fires, and it is the
+    // per-source statement that makes every rule below non-vacuous.
+    let covered: BTreeSet<String> = every_capture().into_iter().map(|c| c.source).collect();
+    let bare: Vec<&str> = registry::registered_source_names()
+        .filter(|n| !covered.contains(*n))
+        .collect();
+    assert!(
+        bare.is_empty(),
+        "registered sources with no capture at all: {bare:?} — every rule below is \
+         silent for them"
+    );
+}
+
+/// Every capture's layout resolves to a REGISTERED source. A dir name that
+/// matches no source is a typo that would otherwise route the capture's rules
+/// to a descriptor lookup that silently returns `None`.
+#[test]
+fn every_captures_layout_names_a_registered_source() {
+    for c in every_capture() {
+        assert!(
+            registry::descriptor_for(&c.source).is_some(),
+            "{}: layout names source {:?}, which is not registered",
+            c.dir.display(),
+            c.source
+        );
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// The rules. Each is an assertion over `every_capture()`, so none can cover a
+// subset by accident — the shape that produced "the fix landed on half the
+// population" in four separate review rounds.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `unknown` scenarios that stay unknown, with the reason. It only SHRINKS.
+const UNVERIFIED_PROVENANCE: &[&str] = &[
+    // Not re-recordable: its cwd is a real Windows path with a space and parens,
+    // which is what makes it the Windows arm of the cwd-extractor test.
+    "fixtures/copilot/tool-run",
+];
+
+/// Sources whose `unknown` scenarios now sit BESIDE a recorded one.
+const UNKNOWN_BUT_BACKED_BY_A_CAPTURE: &[&str] = &["copilot"];
+
+/// Hook-only sources with no recorded scenario. The list only SHRINKS — a hook
+/// event is transient, so for these the fixture is the only wire evidence there
+/// will ever be, and a new hook-only CLI must not join it by default.
+const NO_WIRE_EVIDENCE_YET: &[&str] = &[];
+
+/// `provenance.schema.json` — the ONE statement of what each origin requires,
+/// read by this gate and the README table.
+struct ProvenanceSchema(serde_json::Value);
+
+impl ProvenanceSchema {
+    fn load() -> Self {
+        let p = fixtures_root().join("provenance.schema.json");
+        let body =
+            std::fs::read_to_string(&p).unwrap_or_else(|e| panic!("read {}: {e}", p.display()));
+        Self(serde_json::from_str(&body).unwrap_or_else(|e| panic!("{}: {e}", p.display())))
+    }
+
+    fn origins(&self) -> &serde_json::Map<String, serde_json::Value> {
+        self.0["origins"].as_object().expect("origins is an object")
+    }
+
+    fn required(&self, origin: &str) -> Option<Vec<String>> {
+        Some(
+            self.origins().get(origin)?["required"]
+                .as_array()
+                .expect("required is an array")
+                .iter()
+                .map(|v| {
+                    v.as_str()
+                        .expect("a required member is a string")
+                        .to_string()
+                })
+                .collect(),
+        )
+    }
+}
+
+/// Every scenario declares where its bytes came from, because nothing IN them
+/// separates a capture from a composition — a redacted cwd and an invented one
+/// look alike. A composed fixture pins its author's belief and the decoder then
+/// agrees with it: kimi's shipped four confident per-call ids for a field kimi
+/// never sends.
+#[test]
+fn every_capture_declares_a_valid_origin_with_its_required_fields() {
+    let schema = ProvenanceSchema::load();
+    for c in every_capture() {
+        let required = schema.required(c.origin()).unwrap_or_else(|| {
+            panic!(
+                "{}: origin {:?} is not recorded | composed | unknown",
+                c.provenance_path.display(),
+                c.origin()
+            )
+        });
+        for key in &required {
+            assert!(
+                c.field(key).is_some_and(|s| !s.trim().is_empty()),
+                "{}: origin {:?} requires a non-empty {key:?}",
+                c.provenance_path.display(),
+                c.origin()
+            );
+        }
+    }
+}
+
+/// `cli` was the one required field nothing could falsify, so a provenance
+/// naming a DIFFERENT CLI than the tree it sits in passed every gate. The
+/// registry's probe argv[0] is the name the user types (`agy`, `cursor-agent`),
+/// which is what a capture command starts with.
+#[test]
+fn a_recorded_captures_cli_is_its_trees_binary() {
+    for c in every_capture().iter().filter(|c| c.is_recorded()) {
+        let Some(probe) = registry::descriptor_for(&c.source).and_then(|d| d.version_probe) else {
+            continue;
+        };
+        let Some(cli) = c.field("cli") else { continue };
+        assert_eq!(
+            cli,
+            probe[0],
+            "{}: `cli` is {cli:?} but this tree is {}, whose binary is {:?}",
+            c.provenance_path.display(),
+            c.source,
+            probe[0]
+        );
+    }
+}
+
+/// A `recorded` fixture whose bytes were EDITED must say so. Nothing in the
+/// bytes separates a capture from a composition — which is the whole reason
+/// provenance exists — so a redaction sentinel with a silent `note` is the one
+/// state the mechanism cannot tolerate. Sentinels, not a `/Users/dev` grep: the
+/// sweep that keyed on that alone missed kimi's, whose redaction is the owner
+/// column inside a captured `ls -la`.
+#[test]
+fn a_recorded_capture_that_was_edited_says_so() {
+    // The path placeholders are READ from the scanner's own allowlist rather than
+    // copied: one hand-copy here knew only `/Users/dev`, so a capture redacted the
+    // Linux way (`/home/dev`) was edited-but-silent to this gate and clean to
+    // `just fixture-pii`. Only the PLACEHOLDER line — the sibling line names
+    // infrastructure accounts a real UNEDITED capture can carry, and reading both
+    // made an honest note look like a silent one.
+    let allow = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
+    )
+    .expect(".gitleaks-identity.toml");
+    let names = allow
+        .split("(?:dev|")
+        .nth(1)
+        .and_then(|s| s.split(')').next())
+        .expect("the placeholder alternation moved — re-derive this from the rule");
+    let mut sentinels: Vec<String> = Vec::new();
+    for root in ["/Users/", "/home/"] {
+        for who in std::iter::once("dev").chain(names.split('|')) {
+            sentinels.push(format!("{root}{who}"));
+        }
+    }
+    sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
+    // A path sentinel must end at a real boundary: bare `contains` read any longer
+    // account name that merely STARTS with a placeholder as that placeholder, so an
+    // un-redacted person's path excused itself.
+    let hit = |body: &str, s: &str| {
+        body.match_indices(s).any(|(at, _)| {
+            !s.starts_with('/')
+                || body[at + s.len()..].chars().next().is_none_or(
+                    |c| !matches!(c, 'A'..='Z' | 'a'..='z' | '0'..='9' | '.' | '_' | '-'),
+                )
+        })
+    };
+    // A word ending the clause right before "redact" that inverts it.
+    const NEGATIONS: &[&str] = &["no", "not", "nothing", "never", "without"];
+    let mut silent = Vec::new();
+    for c in every_capture().iter().filter(|c| c.is_recorded()) {
+        let note = c.field("note").unwrap_or_default().to_ascii_lowercase();
+        // "verbatim" USED to satisfy this, which let a note assert the OPPOSITE
+        // of what the bytes show. A bare `contains` re-opens that hole one word
+        // over — "unredacted", "nothing redacted".
+        // "sanitiz" as well as "redact": the oldest single-owner captures declare
+        // their edit with that stem instead, which tells a reader
+        // exactly what this gate exists to tell them. A one-word vocabulary would
+        // have had them edit an honest note to satisfy the checker.
+        let declares = ["redact", "sanitiz"].iter().any(|stem| {
+            note.match_indices(stem).any(|(at, _)| {
+                let before = note[..at].trim_end();
+                !before.ends_with("un") && !NEGATIONS.iter().any(|n| before.ends_with(n))
+            })
+        });
+        let edited = c.wire_files().iter().any(|p| {
+            std::fs::read_to_string(p)
+                .map(|b| sentinels.iter().any(|s| hit(&b, s)))
+                .unwrap_or(false)
+        });
+        if edited && !declares {
+            silent.push(c.dir.strip_prefix(sources_root()).unwrap().to_path_buf());
+        }
+    }
+    assert!(
+        silent.is_empty(),
+        "these `recorded` fixtures carry a redaction sentinel and no `note` claiming a \
+         redaction — a reader cannot tell an edited capture from an untouched one, and a \
+         note calling these bytes verbatim is worse than a silent one: {silent:?}"
+    );
+}
+
+/// A dotted-run major at or above this reads as a YEAR/date token rather than a
+/// semver major. MIRRORS `doctor::parse_version`'s const of the same name; the
+/// pair is pinned by `banner_version_matches_doctors_documented_cases`.
+const IMPLAUSIBLE_MAJOR: u64 = 1000;
+
+/// THE version in a `--version` banner, by `doctor::parse_version`'s rule:
+/// prefer a `v`-prefixed run, else the first with a plausible major, else the
+/// first. One token, not a set — a token SET let a registry pin the build date
+/// (`2026.8.13`), a git sha (`e8db854`), or the word `Agent`.
+fn banner_version(line: &str) -> Option<&str> {
+    let mut runs: Vec<(bool, u64, &str)> = Vec::new();
+    let bytes = line.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if !bytes[i].is_ascii_digit() {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+            i += 1;
+        }
+        // `contains('.')` on the RAW run and empty parts filtered AFTER, exactly
+        // as `doctor::parse_version` does. Trimming trailing dots first made the
+        // two disagree on `"2. "` — doctor reads 2.0.0, the mirror read nothing.
+        let run = &line[start..i];
+        if !run.contains('.') {
+            continue;
+        }
+        let Some(Ok(major)) = run
+            .split('.')
+            .find(|p| !p.is_empty())
+            .map(str::parse::<u64>)
+        else {
+            continue;
+        };
+        runs.push((
+            start > 0 && matches!(bytes[start - 1], b'v' | b'V'),
+            major,
+            run,
+        ));
+    }
+    runs.iter()
+        .find(|(vp, ..)| *vp)
+        .or_else(|| runs.iter().find(|(_, maj, _)| *maj < IMPLAUSIBLE_MAJOR))
+        .or_else(|| runs.first())
+        .map(|(.., run)| *run)
+}
+
+/// Cases the mirror must agree with `doctor::parse_version` on: the first two are
+/// from that fn's own doc, the rest are real `--version` banners this tree holds
+/// captures of. What is PINNED mechanically is the const — the grep below fails
+/// if `doctor.rs`'s `IMPLAUSIBLE_MAJOR` moves. The ALGORITHM cannot be pinned
+/// from here (`parse_version` is `pub(crate)` in the binary crate), so it is
+/// mirrored statement for statement instead, including the two orderings a
+/// rewrite gets wrong — see the loop.
+#[test]
+fn banner_version_matches_doctors_documented_cases() {
+    let cases = [
+        ("Built 2026.06.04 — v1.2.3", Some("1.2.3")),
+        ("2026.06.04", Some("2026.06.04")),
+        ("codex-cli 0.147.0", Some("0.147.0")),
+        ("Hermes Agent v0.20.1 (2026.8.13)", Some("0.20.1")),
+        ("grok 0.2.102 (ab5ebf69acec) [stable]", Some("0.2.102")),
+        ("2026.08.11-e8db854", Some("2026.08.11")),
+        ("omp/17.3.4", Some("17.3.4")),
+        ("no version here", None),
+        // The shape that caught the mirror drifting: doctor keeps a trailing-dot
+        // run and filters empty parts after, so this is a version to both.
+        ("2. ", Some("2.")),
+        // A major no `u64` holds: doctor's `parse::<u64>()` fails and SKIPS the
+        // run, so a banner offering only that one has no version at all.
+        ("tool 99999999999999999999.1.0", None),
+    ];
+    for (banner, want) in cases {
+        assert_eq!(banner_version(banner), want, "{banner:?}");
+    }
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let body = std::fs::read_to_string(root.join("crates/pixtuoid/src/doctor.rs")).expect("doctor");
+    assert!(
+        body.contains(&format!("IMPLAUSIBLE_MAJOR: u64 = {IMPLAUSIBLE_MAJOR};")),
+        "doctor.rs's IMPLAUSIBLE_MAJOR drifted from this mirror"
+    );
+    // The Python mirror cannot be EXECUTED from here — a cross-runtime spawn is
+    // what reddened the Windows jobs — but its case table can be pinned to this
+    // one by reading it. Pin the PAIR, not the banner: the drift this exists for
+    // was a disagreeing EXPECTATION (`"2. "` → `2` there, `2.` here), and a
+    // banner-only check passes with both halves of that drift restored.
+    let py = std::fs::read_to_string(root.join("scripts/fixture-age.py")).expect("fixture-age.py");
+    for (banner, want) in cases {
+        let want_py = want.map_or_else(|| "None".to_string(), |v| format!("{v:?}"));
+        assert!(
+            py.contains(&format!("({banner:?}, {want_py})")),
+            "fixture-age.py's selftest does not carry this mirror's case \
+             ({banner:?}, {want_py}) — a row that is missing OR expects something else"
+        );
+    }
+}
+
+/// A banner's version as a comparable list. ALL parts, not a 3-tuple: truncating
+/// tied `2.1.233.4` with `2.1.233.10`, and a tie is decided by capture-dir
+/// iteration order, so adding a scenario could flip which version the gate
+/// demands. A banner with no version sorts below every real one rather than
+/// winning a `max`.
+fn semver_order(banner: &str) -> Vec<u64> {
+    let Some(run) = banner_version(banner) else {
+        return Vec::new();
+    };
+    run.split('.')
+        .filter(|p| !p.is_empty())
+        .map(|p| p.parse::<u64>().unwrap_or(0))
+        .collect()
+}
+
+/// `verified_version` means "the version whose wire we have SEEN". A recorded
+/// scenario IS that sighting, so the two must not disagree — `doctor`'s "newer
+/// than verified" warning is structurally silent at `unknown` and would
+/// otherwise warn a user running the exact version we hold a capture from.
+#[test]
+fn a_recorded_capture_anchors_its_sources_verified_version() {
+    let mut by_source: std::collections::BTreeMap<String, Vec<(String, String)>> =
+        std::collections::BTreeMap::new();
+    let mut recorded_at_all: BTreeSet<String> = BTreeSet::new();
+    for c in every_capture().iter().filter(|c| c.is_recorded()) {
+        recorded_at_all.insert(c.source.clone());
+        let version = c.field("version").unwrap_or_default();
+        if version.chars().any(|ch| ch.is_ascii_digit()) {
+            by_source.entry(c.source.clone()).or_default().push((
+                c.field("captured").unwrap_or_default().to_string(),
+                version.to_string(),
+            ));
+        }
+    }
+    for source in recorded_at_all {
+        let Some(d) = registry::descriptor_for(&source) else {
+            continue;
+        };
+        let Some(versions) = by_source.get(&source) else {
+            // A source with captures but NO version among them cannot anchor
+            // anything, and skipping it is how `verified_version: "0.0.0-A-LIE"`
+            // passed for copilot: three recorded scenarios, all `unknown`.
+            assert_eq!(
+                d.verified_version, "unknown",
+                "{source}: every recorded capture here says `version: unknown`, so nothing \
+                 in this tree anchors {:?}. Re-record with a version, or set the field to \
+                 \"unknown\" — a number no capture backs is the state the field was defined \
+                 to avoid.",
+                d.verified_version
+            );
+            continue;
+        };
+        // The HIGHEST version, not `any` and not the newest DATE. `any` let
+        // hermes' 0.20.0 anchor forever beside its 0.20.1 — the stale pin this
+        // test exists to prevent. But ordering by date says a contributor who
+        // records a fresh scenario on a machine whose CLI has NOT been updated
+        // must move `verified_version` DOWN, discarding a sighting this tree
+        // still holds and re-arming doctor's "newer than verified" for everyone
+        // on the higher one. "The version whose wire we have SEEN" is a max.
+        let dated: Vec<&(String, String)> = versions
+            .iter()
+            .filter(|(when, _)| is_iso_date(when))
+            .collect();
+        // Every version-bearing capture carries an ISO `captured`; a source that
+        // loses that should fail here, loudly, rather than quietly weaken the rule.
+        assert!(
+            !dated.is_empty(),
+            "{source}: has recorded versions but none with an ISO `captured`, so nothing \
+             dates the sightings"
+        );
+        // Version first, then the ISO `captured` date — the date is the tie-break,
+        // not the ordering. Without it two captures of the SAME version resolve by
+        // capture-dir iteration order, and a pre-release beside its release
+        // (`1.2.3-rc.1` vs `1.2.3`, which parse alike) picks whichever came last.
+        let highest = &dated
+            .iter()
+            .max_by(|a, b| {
+                semver_order(&a.1)
+                    .cmp(&semver_order(&b.1))
+                    .then_with(|| a.0.cmp(&b.0))
+            })
+            .expect("non-empty")
+            .1;
+        assert!(
+            banner_version(highest) == Some(d.verified_version),
+            "{source}: `verified_version` is {:?}, but the highest recorded capture \
+             ({highest:?}) pins {:?} — the newest wire we hold is the one that counts",
+            d.verified_version,
+            banner_version(highest).unwrap_or("nothing")
+        );
+    }
+}
+
+/// The three pinned rosters, over the SAME walk the rules use — they used to be
+/// computed inside one rule's own narrower walk.
+#[test]
+fn the_pinned_provenance_rosters_hold_both_ways() {
+    let captures = every_capture();
+    let recorded: BTreeSet<&str> = captures
+        .iter()
+        .filter(|c| c.is_recorded())
+        .map(|c| c.source.as_str())
+        .collect();
+    // Keyed off `sources_root()`, not `fixtures_root()`: the `?` on the narrower
+    // prefix silently dropped every single-owner capture INSIDE a rule whose
+    // signature says "every capture" — a subset created by a path operation is
+    // harder to see than the separate walks this file replaced.
+    let unknown: BTreeSet<String> = captures
+        .iter()
+        .filter(|c| c.origin() == "unknown")
+        .map(|c| {
+            c.dir
+                .strip_prefix(sources_root())
+                .expect("every capture is under tests/sources")
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    assert_eq!(
+        unknown,
+        UNVERIFIED_PROVENANCE
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect::<BTreeSet<_>>(),
+        "the `unknown` set is pinned — record one and drop its entry, or explain a new \
+         fixture as recorded|composed"
+    );
+    // BOTH directions: the one-way check let two members survive after their
+    // `unknown` scenarios were recorded away, so the list claimed a reassurance
+    // about sources that no longer had anything to reassure about.
+    let unknown_sources: BTreeSet<&str> = UNVERIFIED_PROVENANCE
+        .iter()
+        .filter_map(|s| {
+            s.strip_prefix("fixtures/")
+                .and_then(|r| r.split('/').next())
+        })
+        .collect();
+    for src in UNKNOWN_BUT_BACKED_BY_A_CAPTURE {
+        assert!(
+            recorded.contains(src),
+            "{src} is listed as backed by a capture but has no recorded scenario"
+        );
+        assert!(
+            unknown_sources.contains(src),
+            "{src} has no `unknown` scenario left — drop its \
+             UNKNOWN_BUT_BACKED_BY_A_CAPTURE entry"
+        );
+    }
+    for src in registry::registered_source_names()
+        .filter(|s| registry::descriptor_for(s).is_some_and(|d| d.line_decoder().is_none()))
+    {
+        assert_eq!(
+            NO_WIRE_EVIDENCE_YET.contains(&src),
+            !recorded.contains(src),
+            "{src} is hook-only with recorded={}; either record a scenario and drop its \
+             NO_WIRE_EVIDENCE_YET entry, or add one",
+            recorded.contains(src)
+        );
+    }
+}
+
+/// Moving the required list into a DATA file made every provenance gate editable
+/// as prose: emptying `required` and updating the README to match disarms both
+/// gates and reads as documentation maintenance. Widening is free; narrowing has
+/// to come through here.
+#[test]
+fn the_schema_cannot_be_narrowed_by_a_data_edit() {
+    let schema = ProvenanceSchema::load();
+    for (origin, must) in [
+        ("recorded", &["cli", "version", "captured", "command"][..]),
+        ("composed", &["note"][..]),
+        ("unknown", &["note"][..]),
+    ] {
+        let got: BTreeSet<String> = schema
+            .required(origin)
+            .unwrap_or_else(|| panic!("{origin} missing from the schema"))
+            .into_iter()
+            .collect();
+        let want: BTreeSet<String> = must.iter().map(|s| (*s).to_string()).collect();
+        assert!(
+            got.is_superset(&want),
+            "provenance.schema.json narrowed {origin} to {got:?} — it must still require \
+             at least {want:?}"
+        );
+    }
+}
+
+/// The README's table is prose a human reads instead of the JSON, so it is the
+/// copy most likely to rot.
+#[test]
+fn the_readme_states_the_schema_the_gates_enforce() {
+    let schema = ProvenanceSchema::load();
+    let readme = std::fs::read_to_string(fixtures_root().join("README.md")).expect("README");
+    for (origin, spec) in schema.origins() {
+        let fields = schema.required(origin).expect("origin in its own table");
+        let row = format!(
+            "| `{origin}` | {} | {} |",
+            fields
+                .iter()
+                .map(|f| format!("`{f}`"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            spec["means"].as_str().expect("means is a string")
+        );
+        assert!(
+            readme.contains(&row),
+            "fixtures/README.md must carry this row verbatim:\n  {row}"
+        );
+    }
+}
+
+/// A `recorded` provenance must be FALSIFIABLE by its own bytes. One that is not
+/// is a claim, not a record — a wholly false one (`cli: codex`, `version:
+/// 0.0.0-A-LIE`) passed every gate in this tree until an equivalent of this ran.
+///
+/// Three axes the committed bytes can answer, plus the field shapes. `cli` is
+/// `a_recorded_captures_cli_is_its_trees_binary`; this is everything else.
+#[test]
+fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
+    let mut bad: Vec<String> = Vec::new();
+    for c in every_capture().iter().filter(|c| c.is_recorded()) {
+        let at = c.provenance_path.display();
+
+        // A `version` holding the INVOCATION rather than a version reports a
+        // drift of nothing for as long as it sits there — the live instance was
+        // `"grok --permission-mode default"`.
+        let version = c.field("version").unwrap_or_default();
+        if !version.is_empty()
+            && version != "unknown"
+            && !version.chars().any(|ch| ch.is_ascii_digit())
+        {
+            bad.push(format!(
+                "{at}: `version` carries no version number: {version:?}"
+            ));
+        }
+
+        let captured = c.field("captured").unwrap_or_default();
+        if !captured.is_empty() && captured != "unknown" && !is_iso_date(captured) {
+            bad.push(format!("{at}: `captured` is not an ISO date: {captured:?}"));
+        }
+
+        let mut stamps: BTreeSet<String> = BTreeSet::new();
+        let mut dates: BTreeSet<String> = BTreeSet::new();
+        if let Some(hooks) = c.hook_payloads() {
+            for line in std::fs::read_to_string(&hooks)
+                .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
+                .lines()
+                .filter(|l| !l.trim().is_empty())
+            {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                    continue;
+                };
+                if let Some(src) = v.get("_pixtuoid_source").and_then(|s| s.as_str()) {
+                    stamps.insert(src.to_string());
+                }
+                if let Some(ms) = v.get("_shim_ts_ms").and_then(serde_json::Value::as_i64) {
+                    dates.insert(utc_date(ms));
+                }
+            }
+        }
+        // codex and omp name their transcripts by capture instant, which is the
+        // only date evidence a transcript-only fixture has — and most of this
+        // tree's captures ship no hook payloads at all.
+        for f in c.wire_files() {
+            if let Some(d) = date_prefix(&f.file_name().unwrap_or_default().to_string_lossy()) {
+                dates.insert(d);
+            }
+        }
+
+        if stamps.len() > 1 {
+            bad.push(format!(
+                "{at}: payloads carry TWO sources ({stamps:?}) — a capture scooped up another CLI"
+            ));
+        } else if let Some(only) = stamps.iter().next() {
+            // A single WRONG stamp is answerable wherever the layout names the
+            // source, and BOTH layouts do.
+            if *only != c.source {
+                bad.push(format!(
+                    "{at}: payloads are stamped `{only}` but this tree is `{}`",
+                    c.source
+                ));
+            }
+        }
+        if !dates.is_empty()
+            && !captured.is_empty()
+            && captured != "unknown"
+            && !dates.contains(captured)
+        {
+            bad.push(format!(
+                "{at}: `captured` {captured} contradicts the stamps in the bytes \
+                 ({dates:?}) — the recorder dates in UTC"
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n  "));
+}
+
+/// `YYYY-MM-DD`, validated — not a 10-char string that starts "20".
+fn is_iso_date(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 10 || b[4] != b'-' || b[7] != b'-' {
+        return false;
+    }
+    // `u32::from_str` accepts a leading sign, so "+026-08-15" parsed as year 26.
+    if b.iter()
+        .enumerate()
+        .any(|(i, c)| i != 4 && i != 7 && !c.is_ascii_digit())
+    {
+        return false;
+    }
+    let num = |r: std::ops::Range<usize>| s[r].parse::<u32>().ok();
+    let (Some(y), Some(m), Some(d)) = (num(0..4), num(5..7), num(8..10)) else {
+        return false;
+    };
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let last = match m {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    (1..=last).contains(&d)
+}
+
+/// The UTC calendar date of a millisecond epoch stamp. Days-from-epoch, because
+/// the shim stamps UTC and `captured` is UTC.
+fn utc_date(ms: i64) -> String {
+    let mut days = ms.div_euclid(86_400_000);
+    let (mut y, mut m) = (1970i64, 1i64);
+    // A pre-epoch stamp is not a real `_shim_ts_ms`, but a corrupt one must still
+    // render a well-formed date: the forward walk alone fell straight through and
+    // emitted a malformed one into a diagnostic whose whole job is to be read.
+    while days < 0 {
+        y -= 1;
+        days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
+            366
+        } else {
+            365
+        };
+    }
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let len = if leap { 366 } else { 365 };
+        if days < len {
+            break;
+        }
+        days -= len;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    loop {
+        let len = match m {
+            1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+            4 | 6 | 9 | 11 => 30,
+            2 if leap => 29,
+            _ => 28,
+        };
+        if days < len {
+            break;
+        }
+        days -= len;
+        m += 1;
+    }
+    format!("{y:04}-{m:02}-{:02}", days + 1)
+}
+
+/// The `YYYY-MM-DD` a CLI put at the head of a transcript filename, with codex's
+/// `rollout-` prefix: `rollout-2026-08-14T22-19-03-<uuid>.jsonl`.
+fn date_prefix(name: &str) -> Option<String> {
+    let rest = name.strip_prefix("rollout-").unwrap_or(name);
+    let (date, tail) = rest.split_at_checked(10)?;
+    if !tail.starts_with('T') || !is_iso_date(date) {
+        return None;
+    }
+    Some(date.to_string())
+}
+
+/// `utc_date` and `is_iso_date` are hand-rolled (this crate has no chrono), so
+/// they get the cases that break naive versions: a leap day, the day after, a
+/// non-leap Feb 29, and the epoch itself.
+#[test]
+fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
+    assert_eq!(utc_date(0), "1970-01-01");
+    // Pre-epoch: impossible for a real stamp, but a corrupt one must not put a
+    // malformed string into the diagnostic that reports it.
+    assert_eq!(utc_date(-1), "1969-12-31");
+    assert_eq!(utc_date(-86_400_001), "1969-12-30");
+    assert!(!is_iso_date("+026-08-15"), "a signed year is not ISO");
+    assert_eq!(utc_date(1_786_854_010_213), "2026-08-16");
+    // 2024-02-29T00:00:00Z — a real leap day, and the day after it.
+    assert_eq!(utc_date(1_709_164_800_000), "2024-02-29");
+    assert_eq!(utc_date(1_709_251_200_000), "2024-03-01");
+    assert!(is_iso_date("2024-02-29"), "a real leap day");
+    assert!(!is_iso_date("2026-02-29"), "2026 is not a leap year");
+    assert!(!is_iso_date("2026-13-01") && !is_iso_date("2026-00-10"));
+    assert!(!is_iso_date("2026-08-32") && !is_iso_date("2026-08-00"));
+    assert!(!is_iso_date("2026/08/15") && !is_iso_date("20260815") && !is_iso_date("unknown"));
+    assert_eq!(
+        date_prefix("rollout-2026-08-14T22-19-03-01a0.jsonl").as_deref(),
+        Some("2026-08-14")
+    );
+    assert_eq!(
+        date_prefix("2026-08-15T04-14-55-304Z_01a0.jsonl").as_deref(),
+        Some("2026-08-15")
+    );
+    assert_eq!(date_prefix("events.jsonl"), None);
+    assert_eq!(date_prefix("2026-13-45T00-00-00-x.jsonl"), None);
+}
+
+/// Reading the wrong `tool_id_key` is SILENT — every kimi tool call decoded to
+/// `None` for the whole source's life. The compiler forces a CHOICE and nothing
+/// forced the right one: a NEW source's conformance snapshot is generated from
+/// whatever key its author copied. The captures answer it — whatever key a real
+/// payload carries its tool id under IS that source's key.
+///
+/// Exempt only by NAME, never by a property the test infers: `custom` claiming
+/// every payload makes the key inert, but that is the row author's intent rather
+/// than something the row states.
+const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
+    // `// inert: custom claims all` in their registry row — the shared arms that
+    // read `tool_id_key` never run, so no capture can exercise it.
+    "codewhale",
+    "grok",
+    "hermes",
+    "opencode",
+    "reasonix",
+    // LIVE (`custom: None`) and simply unexercised: a real hook spec with no
+    // install target, so nothing can send us one. The only entry here a capture
+    // would remove.
+    "antigravity",
+];
+
+#[test]
+fn each_sources_tool_id_key_is_the_one_its_captures_carry() {
+    const KEYS: &[&str] = &["tool_use_id", "tool_call_id"];
+    let mut proven: BTreeSet<String> = BTreeSet::new();
+    for c in every_capture() {
+        let Some(hooks) = c.hook_payloads() else {
+            continue;
+        };
+        let Some(d) = registry::descriptor_for(&c.source) else {
+            continue;
+        };
+        let Some(want) = d.hook().map(|h| h.tool_id_key.wire_name()) else {
+            continue;
+        };
+        for line in std::fs::read_to_string(&hooks)
+            .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+        {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+                continue;
+            };
+            for wrong in KEYS.iter().filter(|k| **k != want) {
+                assert!(
+                    v.get(wrong).is_none(),
+                    "{}: a payload carries `{wrong}` but {} is registered as \
+                     `{want}` — the per-call id would decode to None for every \
+                     tool call this source ever makes",
+                    hooks.display(),
+                    c.source
+                );
+            }
+            if v.get(want).is_some() {
+                proven.insert(c.source.clone());
+            }
+        }
+    }
+    let mut wrong: Vec<String> = Vec::new();
+    for name in registry::registered_source_names() {
+        let Some(d) = registry::descriptor_for(name) else {
+            continue;
+        };
+        if d.hook().is_none() {
+            continue;
+        }
+        match (proven.contains(name), TOOL_ID_KEY_UNPROVEN.contains(&name)) {
+            (false, false) => wrong.push(format!("{name}: add a capture or roster it")),
+            (true, true) => wrong.push(format!("{name}: proven — drop it from the roster")),
+            _ => {}
+        }
+    }
+    assert!(
+        wrong.is_empty(),
+        "a hook row's tool_id_key is proven by real bytes or it names why it cannot \
+         be, never both and never neither:\n  {}",
+        wrong.join("\n  ")
+    );
+}

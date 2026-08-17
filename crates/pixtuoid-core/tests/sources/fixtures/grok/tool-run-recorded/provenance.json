@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "grok",
+  "version": "grok 0.2.102 (ab5ebf69acec) [stable]",
+  "captured": "2026-08-14",
+  "command": "grok -p {prompt}",
+  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim."
+}

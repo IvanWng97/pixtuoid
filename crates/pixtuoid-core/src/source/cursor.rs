@@ -22,8 +22,8 @@
 //!   `postToolUseFailure` on the same id, and tools INTERLEAVE (a Read and a
 //!   Shell overlap), so the id looks like exactly what the reducer's per-call
 //!   machinery wants. The trap is `Task`: it fires `preToolUse` and NEVER a
-//!   post (capture-verified — the one unpaired id in a delegating run, while
-//!   `subagentStart`/`subagentStop` stay silent). Passing the id through would
+//!   post (capture-verified — every unpaired id in a delegating run is a `Task`,
+//!   while `subagentStart`/`subagentStop` stay silent). Passing the id through would
 //!   satisfy `track_active_tasks`' `Some(tuid)` + `is_task()` arm, insert a
 //!   tuid nothing ever drains, and strand the parent Delegating for the rest of
 //!   the session — `apply_activity_end` re-enters Delegating on every later
@@ -31,6 +31,14 @@
 //!   otherwise buy is inert here anyway: hook-wins dedup needs a second
 //!   transport, and precise wait-resolution needs permission events this source
 //!   never emits. Pinned by `tool_use_id_is_dropped_even_though_the_wire_has_one`.
+//! - **cursor runs its hook command 4-6x per event, and only ONE of those keeps
+//!   the `PIXTUOID_SOURCE=` env prefix** its install writes — the others arrive
+//!   with no argv and no stamp (counted against a wrapper on the shim, no
+//!   recorder in the loop; an unrelated hook entry in the same config ran once).
+//!   Unstamped, they fall to the claude-code default and bail on these camelCase
+//!   event values, so `decoder`'s cross-fire guard drops them on `cursor_version`.
+//!   Lossless: the one stamped copy carries the whole arc, which
+//!   `cursor/tool-failure` pins byte for byte — 29 payloads, 8 of them stamped.
 //! - **Subagents render FLAT, never nested — the parent-link is genuinely
 //!   absent.** Each child runs as an INDEPENDENT session and NOTHING links it to
 //!   its parent: `subagentStart`/`subagentStop` don't fire (capture-verified:
@@ -53,6 +61,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;
 
+use crate::source::decoder::{ellipsize, MAX_DECODED_FIELD_CHARS};
 use crate::source::{AgentEvent, ToolDetail};
 use crate::AgentId;
 
@@ -110,7 +119,7 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         )
     };
 
-    match event {
+    let decoded: Result<Vec<AgentEvent>> = match event {
         "sessionStart" => Ok(vec![AgentEvent::SessionStart {
             agent_id,
             source: SOURCE_NAME.to_string(),
@@ -162,7 +171,22 @@ pub fn decode_cursor_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 crate::source::decoder::display_safe(other)
             )
         }
+    };
+    let mut evs = decoded?;
+    // Re-read per event: the model changes mid-session, so reading it once
+    // would show the wrong one for the rest of the turn.
+    if let Some(model) = obj
+        .get("model")
+        .and_then(|m| m.as_str())
+        .filter(|s| !s.is_empty())
+    {
+        evs.push(AgentEvent::ModelInfo {
+            agent_id,
+            model: Some(ellipsize(model, MAX_DECODED_FIELD_CHARS)),
+            effort: None,
+        });
     }
+    Ok(evs)
 }
 
 fn cursor_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
@@ -191,6 +215,28 @@ mod tests {
     /// The payload's MAIN event — the LAST one (activity arms prepend an Identity).
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    #[test]
+    fn every_event_carries_the_model_and_it_can_change_mid_session() {
+        // Both shapes from fixtures/cursor/tool-run: a session opens on the
+        // `-fast` composer and the tool events run on the full one.
+        let start = decode_all(json!({
+            "hook_event_name": "sessionStart", "session_id": "s1",
+            "workspace_roots": ["/repo"], "model": "composer-2.5-fast"
+        }));
+        let tool = decode_all(json!({
+            "hook_event_name": "preToolUse", "session_id": "s1",
+            "workspace_roots": ["/repo"], "tool_name": "read", "model": "composer-2.5"
+        }));
+        let model_of = |evs: &[AgentEvent]| {
+            evs.iter().find_map(|e| match e {
+                AgentEvent::ModelInfo { model, .. } => model.clone(),
+                _ => None,
+            })
+        };
+        assert_eq!(model_of(&start).as_deref(), Some("composer-2.5-fast"));
+        assert_eq!(model_of(&tool).as_deref(), Some("composer-2.5"));
     }
 
     #[test]

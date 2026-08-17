@@ -66,7 +66,13 @@ fails on a pending OR orphan `.snap`, the rot plain `cargo test` can't see).
 Cross-file report/upload semantics that actionlint cannot express are pinned by
 the yq + Conftest/OPA policy and real action/workflow behavior tests under
 `policy/ci-observability/`; `just ci-observability` runs them inside both
-`just lint` and the CI hygiene job.
+`just lint` and the CI hygiene job. `just fixture-pii` rides that job too —
+gitleaks over the committed capture tree, its default corpus plus two rules for
+the RECORDER's own machine identity, a class no secret scanner detects because it
+is not a credential (config and the WHY in `.gitleaks.toml`). The capture-tree
+RULES gate elsewhere and harder: they are Rust tests (`tests/sources/captures.rs`,
+entry point `just fixture-metadata`), so `just test` runs them in windows-test,
+macos-test and coverage — three platforms, not one lint job.
 `just zizmor` adds the upstream workflow/action/Dependabot security analyzer:
 the repository deliberately requires a symbolic ref or SHA (not SHA-only),
 every checkout drops persisted credentials, and accepted analyzer findings use
@@ -255,20 +261,33 @@ What to run and when, for an agent-driven change:
 | touched the `--json` / `SourceStatus` / `OutcomeRow` shape | `just gen-contract` | [`CLAUDE.md`](../CLAUDE.md) "Build & test" |
 | before push | `just preflight` | same — including why never to pipe it |
 | before merge | the two-lens review | [Pull requests](#pull-requests) |
-| a source/lifecycle change | dogfood against live CC, or replay hermetically | the three tiers below |
+| a source/lifecycle change | dogfood against live CC, or replay hermetically | the tiers below |
 
-The three OpenClaw e2e tiers, cheapest first — none runs in CI:
+The e2e tiers live under `scripts/lib/`, each its own runnable script — none
+runs in CI. Cheapest first:
 
 - `just openclaw-e2e` — hermetic, crafted envelopes on an isolated socket. Free, no gateway needed.
+- `just replay <fixture>` — a captured rollout through the full headless path (real watcher, real socket; only the input is fixed).
 - `just openclaw-multi-e2e` — N REAL gateways, free, needs `openclaw` on PATH. The tier that catches multi-instance render/crowding.
 - `just openclaw-backend-e2e` — a real gateway AND one BILLED model turn. Run deliberately.
+- `just live-sources [id ...]` — launches each installed agent CLI non-interactively and
+  asserts ITS badge reaches a lifecycle state. The only tier that proves a real CLI's real
+  output becomes a real sprite; `corpus_check` proves decode over stored bytes and the
+  fixtures pin the wire contract. One BILLED turn per CLI, so it checks
+  `sources --json`'s `health` first and skips any source whose integration could not
+  report anyway. Its per-CLI invocation table is irreducible per-source knowledge — a
+  source with no entry is listed under `NOT COVERED`, never skipped silently.
 
 Their `expect_line` pollers are deliberately not shared; the WHY lives at the
-definition in `scripts/openclaw-live-e2e.sh`, where someone about to hoist them
+definition in `scripts/lib/tier-openclaw-hermetic.sh`, where someone about to hoist them
 is already looking.
 
 Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
-(wire-format drift); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
+(wire-format drift); `just fixture-age` (which RECORDED fixtures pin a CLI version that
+has since moved — LOCAL-only, because CI has none of these CLIs installed to compare
+against; exit 3 = re-capture candidates, and it reports a third lane for the ones it
+could not compare at all rather than counting them as fresh — the report is
+advisory; the capture-tree RULES are not — see `just fixture-metadata` and `just fixture-pii` in the gate list above); `just bench` (criterion render-path + wire-path benchmarks — local numbers are the
 authoritative ones, recorded in commit messages; the on-demand `bench.yml` mirrors
 `mutants.yml`'s advisory shape because shared-runner wall-clock is noise per criterion's own
 FAQ, while `codspeed.yml` runs the same benches instrumented per PR in two modes —
@@ -429,7 +448,12 @@ you:
 
 4. **Add ONE `SourceDescriptor` row** in `crates/pixtuoid-core/src/source/registry.rs`
    — label prefix (2 chars), the line decoder, hook keying (`IdKey` + an
-   optional custom hook decoder), truthful capability flags (`has_exit_signal`,
+   optional custom hook decoder), `tool_id_key` (the JSON key the per-call id
+   arrives under — verify it against a CAPTURED tool call rather than copying a
+   neighbour: `ToolUse` is the common case, and kimi's `ToolCall` cost a whole
+   source's tool ids before a capture showed it; pinned by
+   `each_sources_tool_id_key_is_the_one_its_captures_carry`), truthful
+   capability flags (`has_exit_signal`,
    `resurrects_on_prompt`, `delegations_are_hook_silent`), plus
    `verified_version` ("unknown" until a byte-real capture anchors it — pinned
    non-empty by `every_descriptor_has_a_verified_version`) and `version_probe`
@@ -473,6 +497,15 @@ you:
 11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
     entry, and — if the upstream is open source — a
     `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
+12. **Three edits no failure message spells out**, all of them roster literals a
+    new source is simply absent from:
+    - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`
+      (`pixtuoid-scene/examples/corpus_check.rs`) — add your row;
+    - `TOOL_ID_KEY_UNPROVEN` (`tests/sources/captures.rs`) — either a capture
+      carries a tool id under your registered `tool_id_key`, or you name the
+      source here with the reason it cannot;
+    - a case row AND a `#[test] fn` in `crates/pixtuoid/tests/wire_to_pixels.rs`,
+      forced by `wire_matrix_covers_every_registered_source`.
 
 See "Adding a new agent CLI" in [`CLAUDE.md`](../CLAUDE.md) and
 `crates/pixtuoid-core/CLAUDE.md` for the deeper wiring detail (and the four

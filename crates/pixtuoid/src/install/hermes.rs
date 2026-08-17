@@ -24,14 +24,25 @@ use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 use crate::install::SENTINEL_KEY;
 
-/// Events we register == events the decoder handles, enforced by
-/// `every_registered_hermes_event_decodes`. Wire values from a real capture — session
-/// events carry the `on_` prefix, tool events don't.
+/// Every event here decodes — `every_registered_hermes_event_decodes` enforces
+/// that direction, and only that one: an event the DECODER handles and this list
+/// omits is the shape that shipped `pre_approval_request` unregistered (#930),
+/// and it is `check_upstream_drift.py`'s job, not this test's. Wire values from a
+/// real capture — session events carry the `on_` prefix, tool events don't.
 const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
     "pre_tool_call",
+    // The approval gate. Observer-only upstream, so registering it cannot affect
+    // the decision — unregistered, a session parked on an approval prompt kept
+    // rendering as whatever `pre_tool_call` left it (#930).
+    "pre_approval_request",
     "post_tool_call",
     "on_session_end",
+    // The SESSION end that `on_session_end` turned out not to be (that one fires
+    // per TURN). The omission was self-sealing: a shell hook fires only if
+    // registered, so no capture could ever have shown us one while it sat on the
+    // omit list.
+    "on_session_finalize",
 ];
 
 /// The shim returns within its 200ms send bound, so 5s is generous headroom (Hermes
@@ -450,5 +461,27 @@ mod tests {
                  pixtuoid-core source/hermes.rs."
             );
         }
+    }
+
+    #[test]
+    fn hermes_events_pins_the_exact_registered_set() {
+        // Deleting a registered event ships GREEN — cargo-mutants does not mutate
+        // `&[&str]` initializers and nothing else asserts the SET, which is how
+        // both of #929's headline registration fixes could be silently removed.
+        // Update this pin deliberately when the roster changes.
+        use std::collections::BTreeSet;
+        assert_eq!(
+            HERMES_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "on_session_start",
+                "pre_tool_call",
+                "pre_approval_request",
+                "on_session_finalize",
+                "post_tool_call",
+                "on_session_end",
+            ]),
+            "HERMES_EVENTS membership changed — a registered event that vanishes is a \
+             shipping bug no other test can see."
+        );
     }
 }

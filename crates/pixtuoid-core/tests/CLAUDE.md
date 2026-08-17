@@ -8,8 +8,20 @@ is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
 ```
 tests/
 ├── sources/main.rs           the source/decode layer (1 binary)
+│   ├── captures.rs          THE walk (`every_capture()`) + every provenance RULE.
+│   │                         `conformance.rs` imports its tree helpers, so dropping
+│   │                         `mod captures;` fails to COMPILE rather than quietly
+│   │                         running 13 fewer tests — that coupling is the floor.
+│   │                         ONE enumeration, no mirror: separate walks with three
+│   │                         populations is why "the fix landed on half the
+│   │                         population" recurred across four review rounds, and a
+│   │                         Python twin of the walk was a second copy of the same
+│   │                         hazard. The rules are Rust so they ride `just test` on
+│   │                         all three platforms; `fixture-age.py` keeps only the
+│   │                         advisory age report
 │   ├── decode/mod.rs         cross-CLI decoder unit tests
-│   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (single-owner; NOT scanned)
+│   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (NOT a capture — hand-built
+│   │                         decoder inputs, so `capture_dirs()` skips `decode/`)
 │   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta) — a
 │   │                         `harness::Drive` shell (one drive per transport); ALSO pins that a
 │   │                         first-sight SEED keyed by the registry row coalesces with each
@@ -21,8 +33,15 @@ tests/
 │   │   └── fixtures/hook-payloads.jsonl   codex's OWN data (single-owner; NOT scanned)
 │   ├── codewhale/mod.rs      codewhale subagent lifecycle (spawn/complete → child sprite)
 │   │   └── fixtures/hook-payloads.jsonl   codewhale's OWN data (single-owner; NOT scanned)
+│   ├── cursor/mod.rs         cursor's DELEGATING capture: a child is an independent session,
+│   │   └── fixtures/…        so it is two sprites and cannot live under the one-AgentId rule
+│   ├── grok/mod.rs           grok's DELEGATING capture, both transports of ONE run — same
+│   │   └── fixtures/…        two-sprite reason; only a `background: false` spawn mints Task
+│   ├── delegation/mod.rs     the NAME-KEYED family (a tool literally called `task`): opencode,
+│   │   └── fixtures/<cli>/   copilot, omp. Grouped by CAPABILITY — one rule, one table
 │   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
 │   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
+│       └── <scenario>/provenance.json   recorded | composed | unknown — REQUIRED, see fixtures/README.md
 ├── reducer/main.rs           state-machine behavior (1 binary; shared scaffolding lives in main.rs — builders `start`/`delegating_pair` + the apply-DSL `act_start`/`act_end`/`waiting`/`proof_of_life`/`sess_end`)
 │   ├── lifecycle.rs          SessionStart/End arms: registration/capacity, resurrect-in-place, hook synthesis of unknown ids, duplicate-start backfill, `Identity`
 │   ├── activity.rs           per-slot FSM: Active/Idle debounce, Waiting set/resolve gates, active_ms + tool_call_count
@@ -55,16 +74,23 @@ tests/
 ## Governing principle
 
 - **Code groups by capability/layer**, not by CLI. Only the subagent-lifecycle
-  tests are single-CLI (`sources/{claude,codex,codewhale}`); decode/conformance are cross-CLI.
+  tests are single-CLI (`sources/{claude,codex,codewhale,cursor,grok}`); decode/conformance are cross-CLI.
 - **Data scopes to the binary that reads it, sub-grouped by CLI.** A fixture read
   by one test module lives *with that module* at `sources/<module>/fixtures/`;
   fixtures the conformance harness iterates live in `sources/fixtures/<source>/`.
+  Two single-owner trees have a second, CROSS-CRATE reader:
+  `pixtuoid/tests/wire_to_pixels.rs` roots at `sources/` rather than
+  `sources/fixtures/` because it needs the two-sprite captures (cursor's and the
+  delegation family's) that the conformance one-AgentId rule cannot host.
 
 ## The one pipeline
 
 Everything that feeds real wire bytes through the production path rides
 `pixtuoid_core::harness::Drive` (core's dev-only `harness` feature): this
-suite's `conformance.rs`, `pixtuoid/tests/wire_to_pixels.rs`, and the two
+suite's `conformance.rs`, `sources/grok/mod.rs`, `sources/cursor/mod.rs` and
+`sources/delegation/mod.rs` (the last two hardcoded their decoders until #929 —
+a registry row rewired to a different `line_decoder` left all five tests green),
+`pixtuoid/tests/wire_to_pixels.rs`, and the two
 on-demand tools (`examples/decoder_fuzz.rs`,
 `pixtuoid-scene/examples/corpus_check.rs`). `benches/decode_reduce.rs` rides it
 too but SYNTHESIZES its lines — a bench-shaped fixture under `sources/fixtures/`
@@ -76,14 +102,24 @@ registry row — see the core guide).
 ## Adding a new agent CLI — the test steps
 
 1. **Always:** add `tests/sources/fixtures/<registered-source>/<scenario>/` — at
-   minimum a `SessionStart` conformance scenario. `conformance.rs` auto-discovers
-   it; `supported_sources_manifest` forces the manifest row; `cargo insta review`
+   minimum a `SessionStart` conformance scenario, RECORDED off the CLI (`just
+   capture-fixture <source> <scenario> <cmd…>`), plus the `provenance.json` the
+   recorder writes and `every_capture_declares_a_valid_origin_with_its_required_fields` requires. A
+   hook-only source's first recorded scenario also drops its
+   `NO_WIRE_EVIDENCE_YET` entry. `conformance.rs` auto-discovers the dir;
+   `supported_sources_manifest` forces the manifest row; `cargo insta review`
    to accept the new snapshot. The dir name MUST equal the registered source
    name (`registered_source_names()`: `claude-code`, not `claude`). A
    transcript-bearing source's fixture is additionally driven WITH the
    first-sight seed, so a registry row wired to the wrong `id_from_path` fails
    there rather than shipping as two sprites for one session.
-2. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
+2. **Always:** add a case row + a `#[test] fn` to
+   `pixtuoid/tests/wire_to_pixels.rs` (`wire_matrix_covers_every_registered_source`
+   forces it), and settle `TOOL_ID_KEY_UNPROVEN` in `captures.rs` — a capture
+   carries a tool id under the row's `tool_id_key`, or the source is named there
+   with the reason it cannot. Step 12 of `CONTRIBUTING.md`'s checklist lists the
+   third roster literal, which lives outside this tree.
+3. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
    `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
    register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,
    reasonix) need none — `decode/mod.rs` + `conformance.rs` cover them.

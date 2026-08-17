@@ -1,0 +1,7 @@
+{
+  "origin": "recorded",
+  "cli": "hermes",
+  "version": "Hermes Agent v0.20.0 (2026.8.3)",
+  "captured": "2026-08-14",
+  "command": "hermes --accept-hooks -z {prompt}"
+}

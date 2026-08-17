@@ -118,12 +118,31 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
             "the opencode plugin's shim-path placeholder was never substituted",
         );
     }
-    match crate::install::verify::baked_hook_path(content) {
-        Some(p) => SchemaParse {
-            shim: ShimRef::Absolute(p),
-            ..Default::default()
+    let Some(p) = crate::install::verify::baked_hook_path(content) else {
+        return SchemaParse::broken("could not read HOOK_PATH from the opencode plugin");
+    };
+    // A config-shaped target reports a MISSING EVENT when an old install predates
+    // a registration; a code artifact has no per-event config, so the equivalent
+    // is the whole rendered plugin. Nothing re-installs on a pixtuoid upgrade, so
+    // without this an upgrader keeps their old `FORWARD` set forever and doctor
+    // says fine — and `opencode_plugin_forward_set_is_pinned` makes a change
+    // deliberate on the AUTHORING side while leaving the installed base silent.
+    let stale = render_plugin(&p.to_string_lossy())
+        .map(|want| want.trim() != content.trim())
+        .unwrap_or(false);
+    SchemaParse {
+        shim: ShimRef::Absolute(p),
+        issues: if stale {
+            vec![
+                "the installed opencode plugin differs from this pixtuoid's — it \
+                 predates an upgrade, so events added since are not forwarded. \
+                 Reconnect opencode via the Sources panel."
+                    .to_string(),
+            ]
+        } else {
+            Vec::new()
         },
-        None => SchemaParse::broken("could not read HOOK_PATH from the opencode plugin"),
+        ..Default::default()
     }
 }
 
@@ -134,6 +153,30 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Nothing re-installs on a pixtuoid upgrade, so an old plugin runs forever.
+    /// A config-shaped target names its missing EVENTS; this is the code-artifact
+    /// equivalent, and without it doctor reported an outdated `FORWARD` set green.
+    #[test]
+    fn verify_schema_reports_a_plugin_that_predates_this_pixtuoid() {
+        let current = render_plugin("/opt/pixtuoid-hook").expect("render");
+        assert!(
+            verify_schema(&current).issues.is_empty(),
+            "the plugin this binary would install must verify clean"
+        );
+
+        // An older pixtuoid's plugin: same sentinel, same baked path, one event
+        // short — exactly the shape an upgrader keeps.
+        let stale = current.replacen("\"permission.v2.asked\",\n", "", 1);
+        assert_ne!(stale, current, "the mutation must land");
+        let issues = verify_schema(&stale).issues;
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.contains("predates an upgrade") && i.contains("Reconnect opencode")),
+            "a stale plugin must be reported with its remedy, got {issues:?}"
+        );
+    }
 
     #[test]
     fn verify_schema_reports_the_baked_shim_and_every_way_the_plugin_can_be_dead() {
@@ -326,9 +369,50 @@ mod tests {
         assert!(hook_command(bad, false).is_err());
     }
 
-    // The fixtures must stay in sync with `opencode_plugin.ts`'s FORWARD set and
-    // its `message.part.updated` tool gate — those are the source of truth for
-    // what the plugin actually sends.
+    /// The events opencode's plugin actually forwards, read OUT of the template
+    /// rather than hand-copied beside it.
+    fn plugin_forward_set() -> std::collections::BTreeSet<&'static str> {
+        let block = PLUGIN_TEMPLATE
+            .split_once("const FORWARD = new Set<string>([")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(inner, _)| inner)
+            .expect("plugin defines a FORWARD set");
+        block
+            .split(',')
+            .map(|s| s.trim().trim_matches('"'))
+            .filter(|s| !s.is_empty())
+            .collect()
+    }
+
+    /// opencode is the tenth install target, and the nine `*_EVENTS` membership
+    /// pins could not reach it: its registered set is a TS `Set`, not a Rust
+    /// const. Deleting `permission.v2.asked` from the plugin shipped GREEN —
+    /// the same hole `PermissionRequest` and `pre_approval_request` shipped
+    /// through. openclaw's plugin already had this bridge; opencode did not.
+    #[test]
+    fn opencode_plugin_forward_set_is_pinned() {
+        use std::collections::BTreeSet;
+        assert_eq!(
+            plugin_forward_set(),
+            BTreeSet::from([
+                "permission.asked",
+                "permission.v2.asked",
+                "session.created",
+                "session.deleted",
+            ]),
+            "opencode_plugin.ts FORWARD changed — an event dropped here never reaches \
+             the shim, and no other test can see it."
+        );
+        assert!(
+            PLUGIN_TEMPLATE.contains(r#"t === "message.part.updated""#),
+            "the tool-activity gate is the fifth forwarded event and carries no \
+             FORWARD entry; losing it silently ends all opencode tool activity"
+        );
+    }
+
+    /// Every event the PLUGIN forwards must decode — driven off the template's own
+    /// set, so a new `FORWARD` entry with no decoder arm fails here rather than
+    /// silently arriving as an unmapped event.
     #[test]
     fn every_forwarded_opencode_event_decodes() {
         use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -345,6 +429,17 @@ mod tests {
                 "properties": {"sessionID": "ses_1", "part": {"type": "tool", "callID": "c",
                     "tool": "bash", "state": {"status": "running"}}}, "_pixtuoid_source": "opencode"}),
         ];
+        let covered: std::collections::BTreeSet<&str> = payloads
+            .iter()
+            .map(|p| p["type"].as_str().unwrap())
+            .collect();
+        for ev in plugin_forward_set() {
+            assert!(
+                covered.contains(ev),
+                "plugin forwards `{ev}` but this test has no payload for it — the \
+                 hand-listed fixtures drifted from opencode_plugin.ts"
+            );
+        }
         for p in payloads {
             let ty = p["type"].clone();
             assert!(

@@ -14,6 +14,11 @@ const EVENTS: &[&str] = &[
     "PreToolUse",
     "PostToolUse",
     "Notification",
+    // A tool gate arrives as `PermissionRequest`; the only `Notification` a
+    // gated run fires is the idle "Claude is waiting for your input" (captured
+    // in fixtures/claude-code/permission-recorded). The decoder has read this
+    // event since Codex needed it — unregistered, the bytes never came.
+    "PermissionRequest",
     // The ONLY end signal a Workflow-fleet subagent gets: no per-agent Agent
     // tool_use, no transcript end marker.
     "SubagentStart",
@@ -28,7 +33,8 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
     io::home_relative_checked(".claude/settings.json")
 }
 
-/// Unix: the bare name, so CC PATH-resolves it and a binary upgrade applies without a
+/// Unix: the bare name behind the `PIXTUOID_SOURCE=` prefix every other source
+/// carries, so CC PATH-resolves it and a binary upgrade applies without a
 /// rewrite. An explicit `--hook-path` overrides that — the user passed it precisely
 /// because the binary is off-PATH — and is single-quoted, since CC runs shell-form
 /// commands through a shell.
@@ -39,11 +45,20 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 pub(crate) fn hook_command(resolved: &Path, explicit: bool) -> Result<String> {
     #[cfg(not(windows))]
     {
-        if explicit {
-            let p = merge::hook_path_str(resolved)?;
-            return Ok(crate::install::hook_cmd::unix::shell_single_quote(p));
-        }
-        Ok("pixtuoid-hook".to_string())
+        // CC's Unix entry carries no `args` key, so it runs through a SHELL and
+        // the env prefix every other source uses works here too. It was bare for
+        // years, which made "no `_pixtuoid_source`" mean "probably CC" — the
+        // guess `decoder` still has to make for installs written before this, and
+        // the reason an unstamped cursor invocation landed on CC's arms at all.
+        let p = if explicit {
+            merge::hook_path_str(resolved)?
+        } else {
+            "pixtuoid-hook"
+        };
+        crate::install::hook_cmd::shell_hook_command(
+            p,
+            pixtuoid_core::source::claude_code::SOURCE_NAME,
+        )
     }
     #[cfg(windows)]
     {
@@ -100,19 +115,20 @@ fn claude_shim_ref(entry: &Value) -> crate::install::verify::ShimRef {
         .and_then(|c| c.as_str());
     match cmd {
         None => ShimRef::Unknown,
-        Some(c) => {
-            let c = c.trim();
-            if c == "pixtuoid-hook" {
-                ShimRef::BareName
-            } else {
-                // Reverse the POSIX escaping through the shared helper: a naive
-                // `trim_matches('\'')` mangles an embedded `'\''`. A bare `.exe`, an
-                // unquoted path, or a half-quoted string passes through literal.
-                ShimRef::Absolute(std::path::PathBuf::from(
-                    crate::install::verify::posix_unquote_if_quoted(c),
-                ))
-            }
-        }
+        // The SHELL form is `shell_shim_ref`'s own wire format, so it parses it —
+        // including any future ` --event` suffix, which a private copy here would
+        // bake into the path. CC alone can answer `BareName`, so that is the one
+        // thing mapped on top.
+        #[cfg(not(windows))]
+        Some(c) => match crate::install::verify::shell_shim_ref(c.trim()) {
+            ShimRef::Absolute(p) if p.as_os_str() == "pixtuoid-hook" => ShimRef::BareName,
+            other => other,
+        },
+        // NOT that parser: CC's Windows entry is exec form (`args: []`), a bare
+        // absolute path with neither quoting nor `--source`, so it would fall to
+        // that parser's last-whitespace-token arm and truncate `C:\Program Files\…`.
+        #[cfg(windows)]
+        Some(c) => ShimRef::Absolute(std::path::PathBuf::from(c.trim())),
     }
 }
 
@@ -369,18 +385,46 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn hook_command_explicit_path_is_embedded_on_unix() {
+    fn hook_command_explicit_path_is_embedded_and_stamped_on_unix() {
         let cmd = hook_command(Path::new("/opt/custom/pixtuoid-hook"), true).unwrap();
-        assert_eq!(cmd, "'/opt/custom/pixtuoid-hook'");
+        assert_eq!(
+            cmd,
+            "PIXTUOID_SOURCE=claude-code '/opt/custom/pixtuoid-hook'"
+        );
         let spaced = hook_command(Path::new("/Users/Jane Doe/bin/pixtuoid-hook"), true).unwrap();
-        assert_eq!(spaced, "'/Users/Jane Doe/bin/pixtuoid-hook'");
+        assert_eq!(
+            spaced,
+            "PIXTUOID_SOURCE=claude-code '/Users/Jane Doe/bin/pixtuoid-hook'"
+        );
     }
 
     #[cfg(unix)]
     #[test]
-    fn hook_command_auto_resolved_stays_bare_on_unix() {
+    fn hook_command_auto_resolved_carries_the_source_on_unix() {
         let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
-        assert_eq!(cmd, "pixtuoid-hook");
+        assert_eq!(cmd, "PIXTUOID_SOURCE=claude-code 'pixtuoid-hook'");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_shim_ref_reads_the_auto_resolved_command_back_as_a_bare_name() {
+        use crate::install::verify::ShimRef;
+        let cmd = hook_command(Path::new("/usr/local/bin/pixtuoid-hook"), false).unwrap();
+        let entry = serde_json::json!({ "hooks": [{ "command": cmd }] });
+        assert_eq!(claude_shim_ref(&entry), ShimRef::BareName);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn claude_shim_ref_survives_an_event_suffix_it_does_not_write_today() {
+        use crate::install::verify::ShimRef;
+        let entry = serde_json::json!({
+            "hooks": [{ "command": "PIXTUOID_SOURCE=claude-code '/opt/pixtuoid-hook' --event PreToolUse" }]
+        });
+        assert_eq!(
+            claude_shim_ref(&entry),
+            ShimRef::Absolute(std::path::PathBuf::from("/opt/pixtuoid-hook"))
+        );
     }
 
     #[cfg(unix)]
@@ -495,5 +539,29 @@ mod tests {
         }
         let again = merge_install(&out.content, "pixtuoid-hook").unwrap();
         assert!(!again.changed, "second re-run is a semantic no-op");
+    }
+
+    #[test]
+    fn claude_events_pins_the_exact_registered_set() {
+        // Deleting a registered event ships GREEN — cargo-mutants does not mutate
+        // `&[&str]` initializers and nothing else asserts the SET, which is how
+        // both of #929's headline registration fixes could be silently removed.
+        // Update this pin deliberately when the roster changes.
+        use std::collections::BTreeSet;
+        assert_eq!(
+            EVENTS.iter().copied().collect::<BTreeSet<_>>(),
+            BTreeSet::from([
+                "SessionStart",
+                "PreToolUse",
+                "PostToolUse",
+                "Notification",
+                "PermissionRequest",
+                "SubagentStart",
+                "SubagentStop",
+                "SessionEnd",
+            ]),
+            "EVENTS membership changed — a registered event that vanishes is a \
+             shipping bug no other test can see."
+        );
     }
 }

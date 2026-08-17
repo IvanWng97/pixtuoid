@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "opencode",
+  "version": "1.18.15",
+  "captured": "2026-08-15",
+  "command": "opencode (interactive TUI, driven under a pty), prompted to delegate with its `task` tool",
+  "note": "First real bytes through opencode's Task path — the detail is claimed by NAME (`task`), deliberately not by a `subagent_type` key a model could author on an ordinary tool. The child arrives as its own `session.created`."
+}

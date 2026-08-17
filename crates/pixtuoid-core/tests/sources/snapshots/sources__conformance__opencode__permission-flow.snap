@@ -1,0 +1,41 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 16709840404739467265
+    source: opencode
+    session_id: ses_ffa8408aaffeWO4wfr4gCQTIIz
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 16709840404739467265
+    model: deepseek-v4-flash
+    effort: ~
+- Identity:
+    agent_id: 16709840404739467265
+    source: opencode
+    session_id: ses_ffa8408aaffeWO4wfr4gCQTIIz
+    cwd: ~
+- ActivityStart:
+    agent_id: 16709840404739467265
+    tool_use_id: call_00_WYb48sTXRhnIFqfiPgsB4655
+    detail:
+      Generic:
+        display: "bash: rm NOTE.txt"
+- Identity:
+    agent_id: 16709840404739467265
+    source: opencode
+    session_id: ses_ffa8408aaffeWO4wfr4gCQTIIz
+    cwd: ~
+- Waiting:
+    agent_id: 16709840404739467265
+    reason: bash
+- Identity:
+    agent_id: 16709840404739467265
+    source: opencode
+    session_id: ses_ffa8408aaffeWO4wfr4gCQTIIz
+    cwd: ~
+- ActivityEnd:
+    agent_id: 16709840404739467265
+    tool_use_id: call_00_WYb48sTXRhnIFqfiPgsB4655

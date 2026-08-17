@@ -249,6 +249,16 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         return Ok(vec![]);
     }
 
+    // The SAME class from the other direction — cursor's unstamped duplicates,
+    // whose count and losslessness are in `source/cursor.rs`'s module doc.
+    if source == crate::source::claude_code::SOURCE_NAME
+        && obj.contains_key("cursor_version")
+        && !obj.contains_key("_pixtuoid_source")
+    {
+        tracing::trace!("dropping an unstamped cursor hook invocation");
+        return Ok(vec![]);
+    }
+
     // A source's own hook arms run FIRST — before the shared field requirements
     // below — so an alien envelope (Reasonix: camelCase, `event` discriminator,
     // no `session_id` at all) or a subject-changing event (SubagentStart/Stop,
@@ -319,6 +329,12 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         }
     };
     let agent_id = AgentId::from_parts(source, id_key);
+    let tool_id_key = desc
+        .and_then(|d| d.hook())
+        .map_or(crate::source::registry::ToolIdKey::ToolUse, |h| {
+            h.tool_id_key
+        })
+        .wire_name();
 
     // The identity context the tool/permission arms attach ahead of their
     // activity event. `cwd` is on the wire for CC tool hooks but absent on e.g.
@@ -387,7 +403,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                     "?"
                 });
             let tool_use_id = obj
-                .get("tool_use_id")
+                .get(tool_id_key)
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![
@@ -403,7 +419,7 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         }
         "PostToolUse" => {
             let tool_use_id = obj
-                .get("tool_use_id")
+                .get(tool_id_key)
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![
@@ -1694,12 +1710,15 @@ mod tests {
                 }),
             ),
             (
+                // Wire: the recorded gate carries its WHY on `extra.description`
+                // ("delete in root path"), so the reason must route through
+                // `ellipsize` like every other wire-minted one.
                 hermes::SOURCE_NAME,
-                ReasonKind::NoWaiting,
+                ReasonKind::Wire,
                 Box::new(|| {
                     hermes::decode_hermes_hook_payload(&json!({
-                        "hook_event_name":"pre_tool_call","session_id":"s","cwd":"/r",
-                        "tool_name":"bash","tool_input":{"command":"ls"},"message":raw}))
+                        "hook_event_name":"pre_approval_request","session_id":"s","cwd":"/r",
+                        "extra":{"description":raw}}))
                     .expect("hermes decodes")
                 }),
             ),
@@ -1804,6 +1823,48 @@ mod tests {
         assert!(evs
             .iter()
             .all(|e| e.agent_id() == crate::AgentId::from_parts("grok", "0197fa30-sess")));
+    }
+
+    /// cursor's UNSTAMPED invocations, which used to reach CC's arms and bail.
+    #[test]
+    fn an_unstamped_cursor_invocation_is_dropped_quietly() {
+        let unstamped = json!({
+            "hook_event_name": "preToolUse",
+            "session_id": "s1",
+            "cursor_version": "2026.08.11-e8db854",
+            "workspace_roots": ["/w"],
+            "tool_name": "Read",
+            "tool_use_id": "t1",
+        });
+        assert!(
+            decode_hook_payload(unstamped.clone())
+                .expect("must not error")
+                .is_empty(),
+            "an unstamped cursor envelope is a duplicate of the stamped one"
+        );
+
+        // The STAMPED copy is the one that must survive — dropping both would
+        // erase cursor from the office entirely.
+        let mut stamped = unstamped;
+        stamped["_pixtuoid_source"] = json!("cursor");
+        assert!(
+            !decode_hook_payload(stamped).expect("Ok").is_empty(),
+            "the stamped copy carries the arc"
+        );
+
+        // An install written before CC's command gained its env prefix sends a
+        // bare, unstamped payload, so the default that catches it must be
+        // untouched by this guard.
+        let cc = json!({
+            "hook_event_name": "PreToolUse",
+            "session_id": "cc1",
+            "cwd": "/w",
+            "tool_name": "Read",
+        });
+        assert!(
+            !decode_hook_payload(cc).expect("Ok").is_empty(),
+            "an unstamped CC payload must still decode as claude-code"
+        );
     }
 
     #[test]

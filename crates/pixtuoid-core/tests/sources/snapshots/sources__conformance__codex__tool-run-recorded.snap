@@ -1,0 +1,73 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail: ~
+- ModelInfo:
+    agent_id: 16996179452500041108
+    model: gpt-5.6-sol
+    effort: max
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: exec
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail: ~
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 867
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: exec
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail: ~
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 7211
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 7211
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: exec
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail: ~
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 1089
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail:
+      Generic:
+        display: exec
+- ActivityStart:
+    agent_id: 16996179452500041108
+    tool_use_id: ~
+    detail: ~
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 1279
+- Usage:
+    agent_id: 16996179452500041108
+    fresh_tokens: 1557
+- ActivityEnd:
+    agent_id: 16996179452500041108
+    tool_use_id: ~

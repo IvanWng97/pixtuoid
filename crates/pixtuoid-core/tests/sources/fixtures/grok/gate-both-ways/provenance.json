@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "grok",
+  "version": "unknown",
+  "captured": "2026-08-15",
+  "command": "grok --permission-mode default (interactive TUI, driven under a pty), two delete requests, the second REFUSED with Escape",
+  "note": "Holds both arms the approved capture cannot: `permission_denied`, and the `session_end` a clean /exit fires (a SIGINT kill skips it, which is why the earlier grok capture had only `stop`). Together with grok/permission-recorded this replaces the composed clean-exit + permission-flow. Home path redacted to /Users/dev."
+}

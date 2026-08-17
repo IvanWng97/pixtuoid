@@ -1,0 +1,17 @@
+{
+  "$comment": "THE statement of what a provenance.json must carry. Read by the Rust gate (every_capture_declares_a_valid_origin_with_its_required_fields) and the README table, which used to state it separately and had drifted apart.",
+  "origins": {
+    "recorded": {
+      "required": ["cli", "version", "captured", "command"],
+      "means": "real wire bytes; the recorder writes this file itself"
+    },
+    "composed": {
+      "required": ["note"],
+      "means": "hand-written, and the note says how you can tell"
+    },
+    "unknown": {
+      "required": ["note"],
+      "means": "predates the rule; nobody recorded where it came from"
+    }
+  }
+}

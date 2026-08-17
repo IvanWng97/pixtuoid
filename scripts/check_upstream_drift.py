@@ -55,6 +55,12 @@ CODEX_PROTOCOL_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/protocol.rs"
 )
+# `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
+# blind rather than wrong — but a blind flood guard is an unwatched one, and this
+# one was hiding an outer we did not know about (`security_risk_score`).
+CODEX_ROLLOUT_ITEM_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
+)
 # The ROLLOUT `response_item` types live in the sibling models.rs
 # (`crate::models::ResponseItem`), NOT protocol.rs.
 CODEX_MODELS_URL = (
@@ -89,18 +95,237 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
     "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
+# The dangerous subset of the *_KNOWN_OMITTED ledgers: names our DECODER has an
+# arm for, that we nonetheless do not register. That combination is what shipped
+# the PermissionRequest bug — the sweep subtracts the ledger, so an event we can
+# read but never receive raises nothing, and no test can see it because every
+# test asserts our own belief about the wire. Shrink-only: each entry states why
+# NOT registering is right, and a new one cannot appear silently.
+#
+#   Stop              — a turn boundary, not a tool call. `ActivityEnd` with no
+#                       tuid is already synthesized by the reap ladder for the
+#                       sources that need it; registering it would double-fire.
+#   UserPromptSubmit  — per-turn content noise, and the reducer must never key
+#                       lifecycle on user-authored content (the `/exit` matcher).
+#   SubagentStop      — reasonix's, which "carries no ids". The decoder arm of
+#                       that NAME belongs to claude_code, a different source; the
+#                       arm reader is name-based and cannot tell them apart.
+#   subagent_start /  — hermes's. Adjudicated in `source/hermes.rs`'s module doc:
+#   subagent_stop     the SHELL payload carries a parent id but no CHILD id, so a
+#                     decode could only end a child that was never started. The
+#                     arms of those names belong to other sources.
+LEDGERED_BUT_DECODABLE = {
+    "Stop",
+    "UserPromptSubmit",
+    "SubagentStop",
+    "subagent_start",
+    "subagent_stop",
+    # openclaw's plugin hook. The arm of that name is grok's ACP session-update
+    # tag — a third cross-source collision, and the reader is name-based.
+    "subagent_spawned",
+    # kimi's SubagentStart — a fourth cross-source name collision; the arm of
+    # that name is claude_code's.
+    "SubagentStart",
+    # kimi's `Notification` is NOT CC's. Upstream: "triggered when a background
+    # task status changes (observation only)", e.g. `task.completed` — while the
+    # shared arm decodes CC's, which is the idle permission prompt. Registering
+    # it would mint a Waiting from a finished background task.
+    "Notification",
+}
+
+# Registered hermes events for which upstream treating them as BLOCKING would let
+# our silent exit 0 ANSWER a decision rather than merely observe one. Only the
+# approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
+# fine — a tool gate is not a permission answer.
+HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
+
+# Hermes hooks we DELIBERATELY do not register. The subagent pair is adjudicated
+# in `source/hermes.rs`'s module doc: the SHELL payload carries a parent id but no
+# CHILD id, so a decode could only end a child that was never started — the
+# in-process plugin API that does carry one never reaches a shell command's stdin.
+# The rest are per-turn/stream/API noise, transforms (a shell hook cannot rewrite
+# a value it is only observing), and Kanban/gateway bookkeeping — none of them a
+# lifecycle signal a visualizer renders.
+#
+# `on_session_finalize` was here under that same sentence until #929, and none of
+# those four buckets described it: it is the SESSION end, which is a lifecycle
+# signal a visualizer very much renders. The omission was self-sealing — a shell
+# hook fires only if registered, so no capture could ever show one while it sat
+# on this list. Registered now.
+#
+# Its sibling `on_session_reset` STAYS omitted, and not as noise: it fires AFTER
+# the rotation and carries the NEW session id (`slash_commands.py` sends
+# `session_id=_new_sid` under the comment "new session guaranteed to exist"), so
+# decoding it as an end would walk out a session that just started. `/new` fires
+# `on_session_finalize` for the outgoing id first, which is the one we want.
+HERMES_KNOWN_OMITTED = {
+    "on_session_reset",
+    "subagent_start",
+    "subagent_stop",
+    "post_approval_response",
+    "on_interim_message",
+    "on_stream_start",
+    "on_stream_delta",
+    "on_stream_end",
+    "pre_llm_call",
+    "post_llm_call",
+    "pre_api_request",
+    "post_api_request",
+    "api_request_error",
+    "pre_command",
+    "pre_verify",
+    "pre_transcription",
+    "on_skill_lifecycle",
+    "transform_llm_output",
+    "transform_terminal_output",
+    "transform_tool_result",
+    "gateway_platform_event",
+    "pre_gateway_dispatch",
+    "kanban_task_blocked",
+    "kanban_task_claimed",
+    "kanban_task_completed",
+    "on_kanban_dispatch_tick",
+    "on_kanban_task_updated",
+    "on_kanban_worker_exited",
+    "on_kanban_worker_spawned",
+    "on_kanban_worker_stale_claim",
+}
+
+# OpenClaw hooks we DELIBERATELY do not register. It is a DAEMON source — the
+# lobster renders gateway PRESENCE (up / busy / down + a session count), and the
+# six we register are exactly the four axes `decode_openclaw_hook_payload` projects.
+# The rest are the AGENT's turn machinery inside the gateway: prompt/model
+# resolution, the LLM call, compaction, message and reply plumbing, cron, skills,
+# and the subagent trio. The subagent three are omitted on a premise this tree has
+# NOT captured: that a gateway serving a subagent already reads Busy. Upstream
+# says `sessions_spawn` is non-blocking and `sessions_yield` ends the turn, so the
+# parent's run may close while the child works — whether the child fires its own
+# `before_agent_run` is undocumented, and our openclaw capture never spawned one.
+# Registering them is a live option the day someone records that turn.
+OPENCLAW_KNOWN_OMITTED = {
+    "after_compaction",
+    "after_tool_call",
+    "agent_turn_prepare",
+    "before_agent_finalize",
+    "before_agent_reply",
+    "before_compaction",
+    "before_dispatch",
+    "before_install",
+    "before_message_write",
+    "before_model_resolve",
+    "before_prompt_build",
+    "before_reset",
+    "before_tool_call",
+    "channel_pairing_requested",
+    "cron_changed",
+    "cron_reconciled",
+    "heartbeat_prompt_contribution",
+    "inbound_claim",
+    "llm_input",
+    "llm_output",
+    "message_received",
+    "message_sending",
+    "message_sent",
+    "model_call_ended",
+    "model_call_started",
+    "reply_dispatch",
+    "reply_payload_sending",
+    "resolve_exec_env",
+    "skill_changed",
+    "skill_proposal_changed",
+    "skill_proposal_evaluate",
+    "subagent_delivery_target",
+    "subagent_ended",
+    "subagent_progress",
+    "subagent_spawned",
+    "tool_result_persist",
+}
+
+# opencode events we DELIBERATELY do not register. `message.part.updated` is the
+# tool-activity carrier and the session/permission pair are the lifecycle; the
+# rest are per-token deltas and content bookkeeping a sprite does not render.
+# `session.error` and `session.updated` are the two worth revisiting if the
+# office ever grows a distressed/renamed state.
+OPENCODE_KNOWN_OMITTED = {
+    "message.part.delta",
+    "message.part.removed",
+    "message.removed",
+    "message.updated",
+    "permission.v2.replied",
+    "session.diff",
+    "session.error",
+    "session.updated",
+}
+
+# cursor hooks we DELIBERATELY do not register. `beforeShellExecution` gates the
+# action on the hook's exit code (upstream: "Exit code 2 - Block the action"), so
+# the shim's always-exit-0 would answer a gate it never read — and unlike the
+# `preToolUse` we DO register, nothing else reports that command. `afterFileEdit`
+# and `preCompact` carry no state a sprite renders. Registering a blocking hook is
+# not forbidden outright — `preToolUse` blocks too — the question is whether a
+# silent success is the right answer for that particular gate.
+CURSOR_KNOWN_OMITTED = {
+    # Tool-adjacent detail already carried by the preToolUse/postToolUse pair we
+    # DO register — a second event per call would add a shim invocation and no
+    # state the office renders.
+    "afterFileEdit",
+    "afterMCPExecution",
+    "afterShellExecution",
+    "afterTabFileEdit",
+    "beforeReadFile",
+    "beforeTabFileRead",
+    # Turn-level narration and prompt content, not lifecycle.
+    "afterAgentResponse",
+    "afterAgentThought",
+    "beforeSubmitPrompt",
+    "workspaceOpen",
+    # cursor's subagents render FLAT and the parent link is genuinely absent —
+    # `source/cursor.rs`'s sharp edge; these two carry no child id to fix that.
+    "subagentStart",
+    "subagentStop",
+    # A compaction internal.
+    "preCompact",
+}
+
+# kimi hooks we DELIBERATELY do not register: per-turn/prompt noise, compaction
+# internals, background-task and heartbeat bookkeeping. The subagent pair is
+# omitted for kimi's own reason — see `source/kimi.rs` — and `PermissionResult`
+# is the post-decision half of the gate whose ASK half (`PermissionRequest`) we
+# do register.
+KIMI_KNOWN_OMITTED = {
+    "UserPromptSubmit",
+    "UserPromptQueued",
+    "TurnStarted",
+    "PermissionResult",
+    "SessionHeartbeat",
+    "SubagentStart",
+    "SubagentStop",
+    "TaskStarted",
+    "Interrupt",
+    "PreCompact",
+    "PostCompact",
+    "Notification",
+}
+
 # Codex hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity a visualizer cares about.
 CODEX_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
 
-# CC hooks we DELIBERATELY do not register: per-turn/content noise, permission
-# detail already covered by Notification, task/teammate bookkeeping,
-# environment/config plumbing, compaction internals.
+# CC hooks we DELIBERATELY do not register: per-turn/content noise, the DENIAL
+# half of the permission pair (the gate itself, `PermissionRequest`, IS
+# registered), task/teammate bookkeeping, environment/config plumbing,
+# compaction internals.
+#
+# `PostToolUseFailure` is NONE of those buckets. Of the sources whose upstream
+# fires it, cursor/kimi/grok register it and CC and reasonix do not, for two
+# DIFFERENT reasons — reasonix's is double-fire, stated with its own ledger below.
+# CC's is a second transport: the JSONL `tool_result` arm emits `ActivityEnd`
+# regardless of `is_error`, so a failed tool already closes and the hook would
+# only duplicate it. The cost of skipping it is the JSONL lag, not a stuck sprite.
 CC_KNOWN_OMITTED = {
     "Setup",
     "UserPromptSubmit",
     "UserPromptExpansion",
-    "PermissionRequest",
     "PermissionDenied",
     "PostToolUseFailure",
     "PostToolBatch",
@@ -144,7 +369,18 @@ REASONIX_KNOWN_OMITTED = {
 # Payload fields decode_rx_hook_payload reads — a renamed json tag silently
 # zeroes the decode (`event`/`cwd` are load-bearing: a payload lacking them is
 # rejected as malformed).
-REASONIX_PAYLOAD_FIELDS = {"event", "cwd", "toolName", "toolArgs", "subject", "message"}
+REASONIX_PAYLOAD_FIELDS = {
+    "event",
+    "cwd",
+    # The PRIMARY AgentId key since #929 — 44/44 recorded payloads carry it. A
+    # rename here silently reverts reasonix to cwd-keying, merging two sessions in
+    # one repo back into one sprite: the exact bug #929 fixed, with no alarm.
+    "sessionId",
+    "toolName",
+    "toolArgs",
+    "subject",
+    "message",
+}
 
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
@@ -232,10 +468,36 @@ OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
 
-# Payload FIELD names decode_openclaw_presence reads: `runId` (the in-flight run
+# Payload FIELD names decode_openclaw_hook_payload reads: `runId` (the in-flight run
 # key), `sessionId` (fallback key + label), `success` (agent_end → Degraded gate).
 # `success` is a common word, so a rename of it could be masked by an unrelated
 # occurrence; the distinctive `runId`/`sessionId` carry the check.
+# Reads that are deliberately NOT watched, per source. The pattern the event
+# sweeps already use: a `.get()` that is neither watched nor ledgered fails
+# `no_decoder_read_is_unaccounted_for`, so adding one forces the decision instead
+# of silently losing coverage — which is how `sessionId` and `extra` came to be
+# missing from the two sets above.
+PAYLOAD_READS_NOT_WATCHED = {
+    # The envelope discriminator. Its disappearance is not a field rename — it
+    # kills every event of the source, and the vanish sweeps already cover it.
+    # ENVELOPE keys, not schema fields. Their disappearance is not a field rename —
+    # it kills every event of that source, which the vanish sweeps already cover.
+    # None appears in the documents we fetch (verified: 0 occurrences), so watching
+    # one would be a permanent false alarm.
+    "hermes": {"hook_event_name"},
+    # `gatewayPort` is watched HARDER than a field-name sweep can: it is the
+    # daemon's whole instance identity, so `OPENCLAW_GATEWAY_PORT_TYPES` watches
+    # the upstream TYPES that carry it. A second watch here would be a copy.
+    "openclaw": {"type", "gatewayPort"},
+    "copilot": {"type"},
+    "opencode": {"type", "properties"},
+    # Fields OUR side synthesises, so nothing upstream can rename them: `_pid` is
+    # the shim's stamp, and `errored` is our JS plugin flattening upstream's
+    # `error` to a bare boolean (verified: 0 occurrences in hook-types.ts, so
+    # watching it would be a permanent false alarm).
+    "openclaw_ours": {"_pid", "errored"},
+}
+
 OPENCLAW_PAYLOAD_FIELDS = {"runId", "sessionId", "success"}
 
 # The gateway PORT is pixtuoid's runtime identity for one gateway, read off
@@ -252,11 +514,13 @@ OPENCLAW_PATHS_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
 )
 
-# The canonical Hermes shell-hook event set is the KEYS of `_DEFAULT_PAYLOADS`.
-# ONE-DIRECTIONAL: an event WE REGISTER vanishing means the shell hook we install
-# into config.yaml fires nothing (no sprite).
-HERMES_HOOK_URL = (
-    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/hooks.py"
+# BOTH directions ride `VALID_HOOKS`, the declaration that OWNS the vocabulary,
+# with `SHELL_UNSUPPORTED_HOOKS` naming which of those a SHELL hook cannot serve.
+# The vanish half used to read `_DEFAULT_PAYLOADS` one file over — the `hermes
+# hooks test` FIXTURE set, which does not list every hook — and filed a verified
+# ⛔ against `pre_approval_request`, an event this repo holds a capture of.
+HERMES_PLUGINS_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
 )
 # The shell-hook PAYLOAD is assembled by `_serialize_payload()` in a DIFFERENT
 # file from the event list — two orthogonal checks, two files.
@@ -265,7 +529,16 @@ HERMES_SHELL_HOOK_URL = (
 )
 # Field names decode_hermes_hook_payload reads, as dict-key literals in
 # _serialize_payload; a rename → the JSON omits it → the decoder reads None.
-HERMES_PAYLOAD_FIELDS = {"session_id", "cwd", "tool_name", "tool_input"}
+HERMES_PAYLOAD_FIELDS = {
+    "session_id",
+    "cwd",
+    "tool_name",
+    "tool_input",
+    # Carries `description` (the Waiting reason — the whole point of #930) and
+    # `model` (the flame). Only the TOP-LEVEL key is watchable: `_serialize_payload`
+    # builds `extra` per event, so its members are not a fixed upstream set.
+    "extra",
+}
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.
@@ -301,12 +574,134 @@ GROK_NOTIFICATION_URL = (
 )
 GROK_ACTIVE_SESSIONS_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
-    "crates/codegen/xai-grok-shell/src/active_sessions.rs"
+    "crates/codegen/xai-grok-active-sessions/src/lib.rs"
 )
 # grok hooks we DELIBERATELY do not register: compaction internals, not agent
 # activity. SubagentEnd/SubagentStop are BOTH registered (upstream's finish site
 # fires one spelling, the docs name the other), so neither belongs here.
 GROK_KNOWN_OMITTED = {"PreCompact", "PostCompact"}
+
+class Unregistered(typing.NamedTuple):
+    """One source's MISSING-REGISTRATION direction, as a ROW rather than a copy.
+
+    Each of the four defects the hand-written arms shipped was the same shape —
+    one of five sites missing what the other four had (a floor, a reused body, a
+    place in the ledger gate, a reader that could see the whole vocabulary). A
+    row cannot be missing a field.
+    """
+
+    ledger_name: str
+    """Resolved through `globals()`, and pinned to `ledger` by the selftest."""
+    ledger: frozenset[str]
+    floor: int
+    """Below this the parse is not believed: the sweep files probe health rather
+    than reading an empty diff as "upstream has nothing new". A number here is a
+    MEASUREMENT of that document, taken when the row was written; `0` claims only
+    the derived minimum."""
+    offers: str
+    declared_in: str
+    handle: str
+    """How this source HANDLES an event, in the reviewer's words: `register it in
+    KIMI_EVENTS`, `subscribe to it in the plugin`."""
+    advice: str = ""
+
+
+UNREGISTERED: dict[str, Unregistered] = {
+    "hermes": Unregistered(
+        "HERMES_KNOWN_OMITTED",
+        frozenset(HERMES_KNOWN_OMITTED),
+        30,
+        "the Hermes event set upstream actually offers",
+        "VALID_HOOKS in hermes_cli/plugins.py",
+        "register it in HERMES_EVENTS",
+        " An event we could receive and do not is invisible to every test "
+        "(#930 was this shape).",
+    ),
+    "openclaw": Unregistered(
+        "OPENCLAW_KNOWN_OMITTED",
+        frozenset(OPENCLAW_KNOWN_OMITTED),
+        35,
+        "the OpenClaw hook set upstream actually offers",
+        "the `PluginHookName` union in src/plugins/hook-types.ts",
+        "register it in the plugin",
+        " Decide whether the lobster's presence should react to it.",
+    ),
+    "opencode": Unregistered(
+        "OPENCODE_KNOWN_OMITTED",
+        frozenset(OPENCODE_KNOWN_OMITTED),
+        0,
+        "the opencode event set upstream actually defines",
+        "the `define({ type: … })` calls in its two event modules",
+        "subscribe to it in the plugin",
+    ),
+    "cursor": Unregistered(
+        "CURSOR_KNOWN_OMITTED",
+        frozenset(CURSOR_KNOWN_OMITTED),
+        0,
+        "the cursor hook set the docs actually list",
+        "cursor.com/docs/hooks",
+        "register it in CURSOR_EVENTS",
+        " Check whether it is a DECISION hook before registering: the shim "
+        "always exits 0.",
+    ),
+    "kimi": Unregistered(
+        "KIMI_KNOWN_OMITTED",
+        frozenset(KIMI_KNOWN_OMITTED),
+        0,
+        "the kimi hook set the docs actually list",
+        "the Event Reference table in kimi-code's hooks.md",
+        "register it in KIMI_EVENTS",
+    ),
+    # These five had this direction before #932, each guarding only on "the
+    # parser returned nothing" — a reader that returns a SMALL WRONG set passed
+    # and reported an empty diff. Rows give them the floor they lacked.
+    "codex": Unregistered(
+        "CODEX_KNOWN_OMITTED",
+        frozenset(CODEX_KNOWN_OMITTED),
+        0,
+        "the Codex `HookEventName` enum",
+        "codex-rs/protocol/src/protocol.rs",
+        "register it in CODEX_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "cc": Unregistered(
+        "CC_KNOWN_OMITTED",
+        frozenset(CC_KNOWN_OMITTED),
+        0,
+        "the CC hook-event summary table",
+        "code.claude.com/docs/en/hooks.md",
+        "register it in install/claude.rs EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "reasonix": Unregistered(
+        "REASONIX_KNOWN_OMITTED",
+        frozenset(REASONIX_KNOWN_OMITTED),
+        0,
+        "the Reasonix `Event` consts",
+        "internal/hook/hook.go",
+        "register it in REASONIX_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "codewhale": Unregistered(
+        "CODEWHALE_KNOWN_OMITTED",
+        frozenset(CODEWHALE_KNOWN_OMITTED),
+        0,
+        "the CodeWhale `HookEvent` enum",
+        "crates/tui/src/hooks/config.rs",
+        "register it in CODEWHALE_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+    "grok": Unregistered(
+        "GROK_KNOWN_OMITTED",
+        frozenset(GROK_KNOWN_OMITTED),
+        0,
+        "the grok hook-event vocabulary",
+        "xai-grok-hooks/src/event.rs",
+        "register it in GROK_EVENTS",
+        " Add a decoder arm with it.",
+    ),
+}
+
 # Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
 # fields are camelCase via struct-level rename_all, so the wire name never appears
 # literally and the `pub <ident>:` declarations are what to check; PAYLOAD fields
@@ -455,8 +850,9 @@ class Anchor(typing.NamedTuple):
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: each anchor is the declaration the checked names live inside.
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
+    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
-    HERMES_HOOK_URL: Anchor(r"_DEFAULT_PAYLOADS", "`_DEFAULT_PAYLOADS`"),
+    HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
     # HERMES_HOME and delegates to the platform default), so it owns both names.
@@ -826,6 +1222,12 @@ def read_codex_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/codex.rs", "CODEX_EVENTS")
 
 
+def match_arm_inner_types(block: str, outer: str) -> set[str]:
+    """Every inner `type` an `(outer, …)` arm names, `|` alternatives included."""
+    arms = re.findall(r'\(\s*"' + outer + r'"\s*,\s*((?:"\w+"\s*\|\s*)*"\w+")\s*\)', block)
+    return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
+
+
 def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     """The (event_msg, response_item) inner `type` strings the codex TRANSCRIPT
     decoder matches on. These are registered NOWHERE and the decoder's
@@ -841,8 +1243,8 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
             "could not locate the codex `match (outer, inner)` decode block in "
             "source/codex.rs — the transcript decoder was refactored; update the parser."
         )
-    event_msg = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block))
-    response_item = set(re.findall(r'\(\s*"response_item"\s*,\s*"(\w+)"\s*\)', block))
+    event_msg = match_arm_inner_types(block, "event_msg")
+    response_item = match_arm_inner_types(block, "response_item")
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "
@@ -1069,6 +1471,33 @@ def openclaw_plugin_default_port() -> str | None:
     m = re.search(r"const DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", src)
     return m.group(1) if m else None
 
+
+
+def python_set_literal(src: str, decl: str) -> set[str]:
+    """The string members of a `NAME: Set[str] = { … }` block.
+
+    Comments are stripped BEFORE the brace scan, for the reason `_enum_body` and
+    `rust_block_after` both state: a brace inside a comment moves the bounds. The
+    first cut scanned raw source, and upstream interleaves prose here — one of its
+    comments quotes `{"action": "continue"}`, and a stray `}` truncated the set
+    SILENTLY while the size floor still passed.
+    """
+    i = src.find(decl)
+    if i < 0:
+        return set()
+    code = "\n".join(line.split("#", 1)[0] for line in src[i:].splitlines())
+    j = code.find("{")
+    if j < 0:
+        return set()
+    depth = 0
+    for k in range(j, len(code)):
+        if code[k] == "{":
+            depth += 1
+        elif code[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code[j + 1 : k]))
+    return set()
 
 def read_hermes_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/hermes.rs", "HERMES_EVENTS")
@@ -1328,6 +1757,61 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
 )
 
 
+def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report: Report) -> bool:
+    """The floor, asked BEFORE EITHER direction — files probe health and returns
+    False when the parse is too small to believe.
+
+    It used to gate only the review half. The VANISH half — which files ⛔ "fix
+    the decoder", the highest severity this report has — was gated on bare
+    non-emptiness, so a reader returning 12 of 37 names could file five ⛔ against
+    working decoders and only then be stopped. That is not hypothetical: #929's
+    false ⛔ against `pre_approval_request` came from exactly a partial document.
+    """
+    row = UNREGISTERED[source]
+    # The row key IS the `OurNames` field — pinned by the selftest's census.
+    handled = getattr(ours, source) or set()
+    # A reader that finds fewer names than we already handle is broken, or — where
+    # the two directions read different populations (cursor's anchor index, kimi's
+    # Event Reference table, against a vanish half that searches raw prose) — it is
+    # degraded. Probe health is the right answer to both. A row may declare a
+    # STRICTER floor, never a weaker one.
+    floor = max(row.floor, len(handled))
+    if len(upstream) < floor:
+        report.add_blind(
+            row.offers,
+            row.declared_in,
+            f"the reader returned {len(upstream)} names (floor {floor}), so BOTH "
+            f"drift directions were SKIPPED for {source}.",
+        )
+        return False
+    return True
+
+
+def sweep_unregistered(
+    source: str,
+    upstream: set[str],
+    ours: OurNames,
+    report: Report,
+    *,
+    also_handled: set[str] = frozenset(),
+) -> None:
+    """The MISSING-REGISTRATION direction for one source, off its `UNREGISTERED`
+    row: what upstream offers that we neither handle nor ledger. Call only behind
+    `parse_is_believable`, which owns the floor for BOTH directions.
+
+    The EXTRACTION stays at each call site — the readers genuinely differ (a TS
+    union, a python set literal, two doc tables) and each belongs beside its
+    regex. Everything after it is identical, and was the part that drifted.
+    """
+    row = UNREGISTERED[source]
+    handled = getattr(ours, source) or set()
+    for ev in sorted(upstream - handled - also_handled - row.ledger):
+        report.add_review(
+            f"new {source} event `{ev}` upstream — we neither {row.handle} nor list "
+            f"it in {row.ledger_name}.{row.advice}"
+        )
+
+
 def read_our_names(report: Report) -> OurNames:
     """Read every depended name from our own source, ISOLATING each reader.
 
@@ -1371,7 +1855,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "codex-rs/protocol/src/protocol.rs",
                     "The Codex hook-event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("codex", upstream, ours, report):
                 for ev in sorted(ours.codex):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1379,12 +1863,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
-                for ev in sorted(upstream - ours.codex - CODEX_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new Codex hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + CODEX_EVENTS, "
-                        f"or add it to CODEX_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("codex", upstream, ours, report)
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
@@ -1407,12 +1886,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
         # The reverse direction (a KNOWN_OUTERS member gone upstream) is a benign
         # stale silent-set entry — review only, never breaking.
-        if text is not None and ours.codex_rollout is not None:
-            up_outers = upstream_codex_enum_types(text, "RolloutItem")
+        if ours.codex_rollout is not None:
+            hist = fetch_anchored(CODEX_ROLLOUT_ITEM_URL, "Codex history", report)
+            up_outers = (
+                upstream_codex_enum_types(hist, "RolloutItem") if hist is not None else None
+            )
             if up_outers is None:
                 report.add_blind(
                     "the Codex `RolloutItem` enum",
-                    "protocol.rs",
+                    "codex-rs/history/src/lib.rs",
                     "The rollout OUTER flood guard was SKIPPED.",
                 )
             elif ours.codex_rollout_outers is not None:
@@ -1485,7 +1967,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "internal/hook/hook.go",
                     "The Reasonix event AND payload-field watches were SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("reasonix", upstream, ours, report):
                 for ev in sorted(ours.reasonix):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1493,12 +1975,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - ours.reasonix - REASONIX_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new Reasonix hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + REASONIX_EVENTS, "
-                        f"or add it to REASONIX_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("reasonix", upstream, ours, report)
                 for field in sorted(REASONIX_PAYLOAD_FIELDS):
                     if f'json:"{field}' not in text:
                         report.add_breaking(
@@ -1517,7 +1994,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "crates/tui/src/hooks/config.rs",
                     "The CodeWhale event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("codewhale", upstream, ours, report):
                 for ev in sorted(ours.codewhale):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1525,12 +2002,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"GONE from upstream HookEvent — likely renamed; the decoder "
                             f"will silently drop it."
                         )
-                for ev in sorted(upstream - ours.codewhale - CODEWHALE_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new CodeWhale hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + CODEWHALE_EVENTS, "
-                        f"or add it to CODEWHALE_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("codewhale", upstream, ours, report)
         # Its own fetch of a SEPARATE file, so a failure to read the executor
         # can't be mistaken for every env var vanishing.
         exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", report)
@@ -1571,6 +2043,20 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"no-link / no-activity)."
                     )
 
+        # The other direction. Wire names live in `define({ type: "…" })`; the
+        # exported `Event` object holds only the symbols.
+        # `parts` already holds both bodies — re-fetching doubled the requests and
+        # filed probe health twice per URL under two labels, so one failure read as
+        # two findings in the issue.
+        upstream_oc: set[str] = set()
+        for body in parts:
+            if body:
+                upstream_oc |= set(re.findall(r'define\(\{\s*type:\s*"([a-z0-9._]+)"', body))
+        # This source's VANISH half scans the raw document rather than this
+        # parsed set, so the belief test gates the set-driven half only.
+        if parse_is_believable("opencode", upstream_oc, ours, report):
+            sweep_unregistered("opencode", upstream_oc, ours, report)
+
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hooks source", report)
         if text is not None:
@@ -1582,7 +2068,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "xai-grok-hooks/src/event.rs",
                     "The grok event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("grok", upstream, ours, report):
                 for ev in sorted(ours.grok):
                     if ev not in upstream:
                         report.add_breaking(
@@ -1590,12 +2076,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
-                for ev in sorted(upstream - ours.grok - GROK_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new grok hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + GROK_EVENTS, or "
-                        f"add it to GROK_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("grok", upstream, ours, report)
             for ident in sorted(GROK_ENVELOPE_IDENTS):
                 if not re.search(rf"(?m)^\s*pub {ident}:", text):
                     report.add_breaking(
@@ -1869,6 +2350,25 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"cursor.com/docs/hooks — likely renamed; the CLI still fires it but "
                         f"the decoder maps it to nothing (no sprite / no activity)."
                     )
+            # The other direction. The docs name hooks inline, so the set is the
+            # camelCase vocabulary rather than a quoted literal list.
+            # The docs' OWN hook index, not a guess at cursor's naming. A closed
+            # prefix list could not contain `sessionStart`/`sessionEnd` — names
+            # CURSOR_EVENTS registers, so we know cursor fires them — and a bare
+            # `<code>` scrape drags in config keys and literals (`timeout`,
+            # `true`, `curl`). Each hook's own anchor is `href="#<lowercased>"`
+            # around its name, which is the one shape that selects hooks alone.
+            upstream_cur = {
+                name
+                for slug, name in re.findall(
+                    r'href="#([a-z]+)"[^>]*>([a-z][a-zA-Z]+)</a>', text
+                )
+                if slug == name.lower()
+            }
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("cursor", upstream_cur, ours, report):
+                sweep_unregistered("cursor", upstream_cur, ours, report)
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -1881,10 +2381,18 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"the plugin registers a hook OpenClaw never fires, so the lobster "
                         f"mascot silently stops reacting (no presence)."
                     )
+            union = re.search(
+                r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
+            )
+            upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("openclaw", upstream, ours, report):
+                sweep_unregistered("openclaw", upstream, ours, report)
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
-                        f"OpenClaw field `{field}` (read by decode_openclaw_presence) is "
+                        f"OpenClaw field `{field}` (read by decode_openclaw_hook_payload) is "
                         f"GONE from src/plugins/hook-types.ts — renamed; the decoder reads "
                         f"None (wrong run-key / no Degraded gate / no presence)."
                     )
@@ -1925,18 +2433,65 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             )
 
     if ours.hermes is not None:
-        text = fetch_anchored(HERMES_HOOK_URL, "Hermes hooks", report)
-        if text is not None:
-            for ev in sorted(ours.hermes):
-                if f'"{ev}"' not in text:
+        plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
+        if plugins is not None:
+            valid = python_set_literal(plugins, "VALID_HOOKS: Set[str] = {")
+            unsupported = python_set_literal(
+                plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
+            )
+            # The vanish direction reads VALID_HOOKS, the declaration that OWNS
+            # the vocabulary. It used to read `_DEFAULT_PAYLOADS` in hooks.py —
+            # the `hermes hooks test` FIXTURE set, which does not list every
+            # hook — and filed a ⛔ against `pre_approval_request`, an event this
+            # repo holds a recorded capture of. #793's rule, on our own report.
+            if parse_is_believable("hermes", valid, ours, report):
+                for ev in sorted(ours.hermes - valid):
                     report.add_breaking(
                         f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
-                        f"hermes_cli/hooks.py _DEFAULT_PAYLOADS — likely renamed; Hermes still "
-                        f"runs but the shell hook we install into config.yaml fires nothing "
-                        f"(no sprite / no activity)."
+                        f"VALID_HOOKS in hermes_cli/plugins.py — likely renamed; Hermes "
+                        f"still runs but the shell hook we install into config.yaml fires "
+                        f"nothing (no sprite / no activity)."
                     )
+                # The MIRROR of `also_handled`: upstream reclassifying something we
+                # REGISTER as shell-unserviceable is the fail-silent case this
+                # block's own message describes, and nothing looked for it.
+                for ev in sorted(ours.hermes & unsupported):
+                    report.add_breaking(
+                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is now in "
+                        f"SHELL_UNSUPPORTED_HOOKS — a shell hook cannot serve it, so the "
+                        f"command we install into config.yaml fires nothing (no sprite / "
+                        f"no activity)."
+                    )
+                # `unsupported` is upstream's OWN "not reachable from a shell hook"
+                # set, so those are handled, not omissions.
+                sweep_unregistered(
+                    "hermes", valid, ours, report, also_handled=unsupported
+                )
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
+            # We install a SHELL hook, so the only thing that can make our
+            # always-exit-0 shim answer an approval is `_BLOCKING_EVENTS` — the set
+            # gating `returncode == BLOCK_EXIT_CODE`. It MOVED here from
+            # hermes_cli/hooks.py; #929 read the stale pin as a deletion and
+            # replaced it with a prose anchor in plugins.py, which governs PYTHON
+            # PLUGIN return values — a mechanism pixtuoid does not use.
+            blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)
+            if blocking is None:
+                report.add_blind(
+                    "whether a hermes shell hook can stall an approval",
+                    "_BLOCKING_EVENTS in agent/shell_hooks.py",
+                    "The blocking-event set moved or was renamed, so the premise behind "
+                    "an always-exit-0 shim on a PERMISSION hook is unchecked.",
+                )
+            else:
+                for ev in sorted(HERMES_BLOCKING_UNSAFE & ours.hermes):
+                    if f'"{ev}"' in blocking.group(1):
+                        report.add_breaking(
+                            f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — a shell hook's "
+                            f"exit code can stall it, so the shim's silent exit 0 would "
+                            f"ANSWER a real approval prompt. Unregister it in "
+                            f"install/hermes.rs, or make the shim decline explicitly."
+                        )
             for field in sorted(HERMES_PAYLOAD_FIELDS):
                 if f'"{field}"' not in shell:
                     report.add_breaking(
@@ -1970,6 +2525,18 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"Kimi still fires it but the decoder maps it to nothing "
                         f"(no sprite / no activity)."
                     )
+            # The other direction, off the doc's own "Event Reference" table —
+            # its first column is the authoritative set.
+            ref = text.find("## Event Reference")
+            upstream_kimi = (
+                set(re.findall(r"^\|\s*`([A-Za-z]+)`\s*\|", text[ref:], re.M))
+                if ref >= 0
+                else set()
+            )
+            # This source's VANISH half scans the raw document rather than this
+            # parsed set, so the belief test gates the set-driven half only.
+            if parse_is_believable("kimi", upstream_kimi, ours, report):
+                sweep_unregistered("kimi", upstream_kimi, ours, report)
 
     if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
@@ -1998,7 +2565,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "hooks.md",
                     "The CC event watch was SKIPPED.",
                 )
-            else:
+            elif parse_is_believable("cc", upstream, ours, report):
                 for ev in sorted(ours.cc):
                     if ev not in upstream:
                         report.add_breaking(
@@ -2006,13 +2573,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"EVENTS) is GONE from hooks.md — likely renamed; "
                             f"the decoder will silently drop it."
                         )
-                for ev in sorted(upstream - ours.cc - CC_KNOWN_OMITTED):
-                    report.add_review(
-                        f"new CC hook `{ev}` upstream — we neither register nor "
-                        f"intentionally omit it (add a decoder arm + "
-                        f"install/claude.rs EVENTS, or add it to "
-                        f"CC_KNOWN_OMITTED)."
-                    )
+                sweep_unregistered("cc", upstream, ours, report)
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
 

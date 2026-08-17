@@ -1,0 +1,8 @@
+{
+  "origin": "recorded",
+  "cli": "omp",
+  "version": "omp/17.3.4",
+  "captured": "2026-08-15",
+  "command": "omp -p {prompt}",
+  "note": "`captured` was 2026-08-14, the LOCAL date, while the transcript omp named and stamped itself 2026-08-15T04:14 UTC. The schema is UTC; reasonix/tool-run carried the same slip."
+}
