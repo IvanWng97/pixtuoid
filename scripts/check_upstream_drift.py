@@ -286,9 +286,8 @@ KIMI_HOOKS_URL = (
     "docs/en/customization/hooks.md"
 )
 
-# `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
-# blind rather than wrong — but a blind check is an unwatched one, and this one was
-# hiding an outer we did not know about (`security_risk_score`).
+# `RolloutItem` lives in the history crate, NOT protocol.rs — a stale pin here goes
+# blind rather than wrong, which reads as green.
 CODEX_ROLLOUT_ITEM_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
 )
@@ -894,9 +893,9 @@ def read_codex_rollout_outers() -> set[str]:
 
 
 def read_acp_decoded_tags() -> set[str]:
-    """The `sessionUpdate` tags `decode_session_update` turns into events —
-    DERIVED. Line-anchored because the block nests a `match status` whose arms
-    are `Some("…")`-wrapped and must not be collected."""
+    """The `sessionUpdate` tags `decode_session_update` turns into events, DERIVED
+    from its own match block. Line-anchored so a nested match's arms can never be
+    collected, whatever shape they take."""
     src = (REPO / "crates/pixtuoid-core/src/source/acp.rs").read_text()
     block = rust_block_after(
         strip_rust_comments(src), r'match str_field\("sessionUpdate"\)'
@@ -1706,6 +1705,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     # upstream occurrence is inside a `///`, so a check would alarm on a comment
     # reflow rather than a rename.
     up_acp: set[str] = set()
+    acp_method_surface = False
     acp_method_declared = False
     acp_parsed = False
     for url, label in (
@@ -1725,14 +1725,26 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         else:
             up_acp |= tags
             acp_parsed = True
-            # `"x-method": "session/update"` — a machine-readable declaration, so
-            # this rides the same parser gate and needs no anchor of its own.
+            # `"x-method"` is the surface that OWNS the method names, and it is a
+            # generator-emitted vendor extension — a codegen change can move it
+            # wholesale. Its PRESENCE is this check's anchor: absent, the probe
+            # landed on a schema that no longer declares methods (probe health);
+            # present without ours, the name is genuinely gone.
+            acp_method_surface |= '"x-method"' in acp_text
             acp_method_declared |= '"session/update"' in acp_text
-    if acp_parsed and not acp_method_declared:
+    if acp_parsed and not acp_method_surface:
+        report.add_blind(
+            "the ACP `x-method` declarations",
+            "the ACP v1 schemas",
+            "The ACP method watch was SKIPPED — the schema parses but declares no "
+            "methods at all, so this is a restructure, NOT evidence of a rename.",
+        )
+    elif acp_parsed and not acp_method_declared:
         report.add_breaking(
             "the ACP method `session/update` is GONE from the ACP schema — renamed; "
-            "`decode_grok_line` gates on it before any tag is read, so every "
-            "ACP-standard activity event is lost."
+            "`decode_grok_line` gates whether the tag is INTERPRETED, so every "
+            "ACP-standard activity event is silently lost (`_ => Ok(vec![])`, no "
+            "breadcrumb)."
         )
     if acp_parsed:
         for tag in sorted(ours.acp_decoded_tags or ()):

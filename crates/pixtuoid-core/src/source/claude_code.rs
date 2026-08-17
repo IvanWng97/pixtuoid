@@ -577,14 +577,16 @@ mod tests {
             ),
             "a sidecar line before a turn must not stop the scan"
         );
-        assert_eq!(
-            cc_activity_recency(&two(
-                r#"{"timestamp":"2026-07-29T05:46:24.525Z"}"#.to_string(),
-                line("pr-link", "")
-            )),
-            TailActivity::Unknown,
-            "a typeless line must leave the tail unclassifiable, never SidecarOnly"
-        );
+        // Both bails, because they are separate lines of code: a valid-JSON
+        // NON-object, and an object with no `type`. Either must leave the tail
+        // unclassifiable — `SidecarOnly` gates the session, `Unknown` does not.
+        for odd in [r#"{"timestamp":"2026-07-29T05:46:24.525Z"}"#, "42"] {
+            assert_eq!(
+                cc_activity_recency(&two(odd.to_string(), line("pr-link", ""))),
+                TailActivity::Unknown,
+                "{odd} must leave the tail unclassifiable, never SidecarOnly"
+            );
+        }
 
         // A renamed turn type keeps its timestamp instead of blanking the tail.
         match cc_activity_recency(line("assistant-v2", turn).as_bytes()) {
@@ -1065,8 +1067,9 @@ mod tests {
     #[test]
     fn no_sidecar_line_breadcrumbs_whether_or_not_we_have_seen_its_type() {
         let path = "/x/.claude/projects/p/s.jsonl";
-        // The last case is a real `attachment` line whose INNER
-        // attachment.type is brand-new: neither axis carries a turn payload.
+        // The last case is a real `attachment` line with a brand-new inner
+        // `attachment.type`: the guard reads the top-level `type` and `message`,
+        // so an inner discriminator is not something it can see at all.
         let quiet = crate::test_capture::capture_logs(|| {
             for v in [
                 json!({"type": "quantum-line", "foo": 1}),

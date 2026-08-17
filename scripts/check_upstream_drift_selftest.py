@@ -710,6 +710,43 @@ def _reader_rows() -> list[tuple[str, str, str]]:
     return [(field, reader.__name__, what) for field, reader, what in d.READERS]
 
 
+def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
+    """The `x-method` surface is this check's anchor, because `schema.json` is
+    GENERATED and the key is a generator-emitted vendor extension: absent means the
+    probe landed on a schema that declares no methods (probe health), NOT that ours
+    was renamed. Collapsing those is what made #793 report five phantom renames."""
+    real = d.fetch
+    tags = (
+        '"$defs":{"SessionUpdate":{"oneOf":['
+        '{"properties":{"sessionUpdate":{"const":"tool_call"}}},'
+        '{"properties":{"sessionUpdate":{"const":"tool_call_update"}}}]}}'
+    )
+
+    def drive(body: str) -> tuple[list[str], list[str]]:
+        def stub(url: str) -> str:
+            if url in (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL):
+                return body
+            raise urllib.error.URLError("not stubbed")
+
+        d.fetch = stub
+        rep = d.Report()
+        d.run_checks(d.OurNames(acp_decoded_tags={"tool_call", "tool_call_update"}), report=rep)
+        pick = lambda xs: [x for x in xs if "session/update" in x or "x-method" in x]  # noqa: E731
+        return pick(rep.breaking), pick(rep.blind)
+
+    br, bl = drive('{"x-method":"session/update",' + tags + "}")
+    check(not br and not bl, f"an intact schema is silent, got {br} {bl}")
+
+    br, bl = drive('{"x-method":"session/updateV2",' + tags + "}")
+    check(len(br) == 1, f"a RENAMED method is breaking drift, got {br}")
+    check(not bl, f"and not probe health, got {bl}")
+
+    br, bl = drive('{"x-side":"client",' + tags + "}")
+    check(not br, f"a RESTRUCTURE must claim no rename, got {br}")
+    check(len(bl) == 1, f"a RESTRUCTURE is one probe-health line, got {bl}")
+    d.fetch = real
+
+
 def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
     """The #793 regression: the old path kept returning 200 as a `mod`/`pub use`
     facade, so the fetch succeeded, all three `DEEPSEEK_*` names were absent, and
@@ -1461,6 +1498,7 @@ def main() -> int:
         test_one_stale_reader_does_not_blind_the_sources_after_it,
         test_every_reader_row_matches_a_field_on_our_names,
         test_no_reader_is_called_outside_the_readers_table,
+        test_the_acp_method_check_separates_a_rename_from_a_restructure,
         test_793_stale_pin_reads_as_probe_health_not_three_renames,
         test_every_swept_url_declares_an_anchor,
         test_report_separates_verified_change_from_probe_health,
