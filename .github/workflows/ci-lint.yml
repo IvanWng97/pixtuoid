@@ -142,6 +142,7 @@ jobs:
       - run: just ci-observability
       - run: just json-schemas
       - run: just links
+      - run: just drift-selftest
       - run: just gen-guides-check
       - run: just env-paths
       - run: just gitenv-selftest

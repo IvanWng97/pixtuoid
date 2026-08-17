@@ -52,7 +52,7 @@ const SUBAGENT_TOOLS: &[&str] = &["task"];
 ///
 /// An unmapped `type` is a benign skip (`Ok(vec![])`), not an error: the
 /// plugin's forward filter lives in JS, so the Rust decoder can't assert 1:1.
-/// A rename surfaces as the hook plane's `unknown_event`, not as a bail here.
+/// Upstream drift is caught by `check_upstream_drift.py`, not a bail here.
 pub fn decode_oc_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let obj = v
         .as_object()

@@ -21,7 +21,7 @@ git hooks call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + gen-guides-check + gitenv-selftest + env-paths + prose) → NOTE: `prose` fetches `origin/main`, so preflight now needs network → clippy → hack → test
+just preflight    # full pre-push gate: lint (fmt + machete + deny + arch + shfmt + shellcheck + actionlint + actionlint-composites + zizmor + ci-observability + json-schemas + links + drift-selftest + gen-guides-check + gitenv-selftest + env-paths + prose) → NOTE: `prose` fetches `origin/main`, so preflight now needs network → clippy → hack → test
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 ```
@@ -282,7 +282,8 @@ Their `expect_line` pollers are deliberately not shared; the WHY lives at the
 definition in `scripts/lib/tier-openclaw-hermetic.sh`, where someone about to hoist them
 is already looking.
 
-Advisory backstops that surface risk but NEVER gate: `just fixture-age` (which RECORDED fixtures pin a CLI version that
+Advisory backstops that surface risk but NEVER gate: `scripts/check_upstream_drift.py`
+(wire-format drift); `just fixture-age` (which RECORDED fixtures pin a CLI version that
 has since moved — LOCAL-only, because CI has none of these CLIs installed to compare
 against; exit 3 = re-capture candidates, and it reports a third lane for the ones it
 could not compare at all rather than counting them as fresh — the report is
@@ -412,7 +413,8 @@ you:
    error (#880). PROBE the installed artifact rather than reading docs: `strings`
    a bun binary, `require()` a napi `.node`, run the bundled interpreter — a case
    matrix settles empty/whitespace/`~`/relative, the cases nobody writes down.
-   Record each verdict.
+   Record each verdict, and add a `check_upstream_drift.py` row when the resolver
+   is fetchable source.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`
    with a `SOURCE_NAME` const, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`),
    a label deriver, and unit tests for every event mapping. Per-source format
@@ -491,7 +493,8 @@ you:
     the per-theme legibility/distinctness guards, and the site bridge test
     (`pixtuoid-scene/tests/site_badge_colors.rs`) all fail until it exists.
 11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
-    entry.
+    entry, and — if the upstream is open source — a
+    `scripts/check_upstream_drift.py` check so a silent rename pages us weekly.
 12. **Three edits no failure message spells out**, all of them roster literals a
     new source is simply absent from:
     - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`

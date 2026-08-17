@@ -2,8 +2,9 @@
 """Report which recorded fixtures have drifted from the CLI that produced them.
 
 A recorded fixture pins ONE version of one CLI's wire. Nothing else in the tree
-notices when that CLI moves: the conformance snapshots watch our decoders, and
-`captured` was prose with no reader. codex switched its whole tool surface between 2026-07-25 and 2026-08-14
+notices when that CLI moves: `check_upstream_drift.py` watches upstream SOURCE,
+the conformance snapshots watch our decoders, and `captured` was prose with no
+reader. codex switched its whole tool surface between 2026-07-25 and 2026-08-14
 and the corpus said nothing — that switch was found by accident.
 
 Two axes, in order of sharpness:

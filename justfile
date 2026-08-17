@@ -314,6 +314,7 @@ lint:
     run ci-obs  just ci-observability     & pids+=($!)
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
+    run drift   just drift-selftest       & pids+=($!)
     run guides  just gen-guides-check     & pids+=($!)
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
@@ -1282,6 +1283,15 @@ gen-guides-check:
     # fires/does-not-fire contract broke reports a clean pass on garbage.
     python3 scripts/gen-guides.py --selftest
     python3 scripts/gen-guides.py --check
+
+# Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
+# is a silent monitor death (the script returns empty / raises, the weekly job
+# alarms on junk or watches nothing); this pins the parsers + the fetch
+# classifier. Pure Python, no deps, no network.
+[group('meta')]
+[doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
+drift-selftest:
+    python3 scripts/check_upstream_drift_selftest.py
 
 # Both-directions pins for the ast-grep rules themselves: `valid:` cases must
 # stay silent, `invalid:` must fire. Snapshots skipped — the cases assert
