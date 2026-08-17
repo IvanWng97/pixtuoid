@@ -98,7 +98,6 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         (d.read_hermes_events, r"^[a-z][a-z_]*$", 2),
         (d.read_kimi_events, r"^[A-Za-z]\w+$", 2),
         (d.read_grok_events, r"^[A-Z]\w+$", 2),
-        (d.read_codex_rollout_outers, r"^[a-z][a-z_]*$", 3),
         (d.read_acp_decoded_tags, r"^[a-z][a-z_]*$", 2),
     ]
     for reader, shape, floor in cases:
@@ -113,8 +112,15 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
     check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
 
-    ev, ri = d.read_codex_rollout_types()
+    ev, ri, outers = d.read_codex_rollout_types()
     check(len(ev) >= 2 and len(ri) >= 2, f"read_codex_rollout_types non-empty: ev={ev!r} ri={ri!r}")
+    # The OUTERS ride this reader's parse, so their floor rides its case: a
+    # shrink here is what would make the outer sweep pass while watching less.
+    check(len(outers) >= 3, f"codex outers non-empty (>=3), got {outers!r}")
+    check(
+        all(re.match(r"^[a-z][a-z_]*$", o) for o in outers),
+        f"codex outers are snake_case discriminators: {outers!r}",
+    )
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
     check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
     # Synthetic, so the control survives codex.rs dropping its own `|` arm.

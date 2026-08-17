@@ -881,17 +881,6 @@ def match_arm_inner_types(block: str, outer: str) -> set[str]:
     return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
 
 
-def read_codex_rollout_outers() -> set[str]:
-    """The OUTER discriminators `decode_codex_line` matches — DERIVED from the
-    same block the inner reader parses, so it cannot drift from the arms and a
-    name nothing matches (`session_meta`) cannot sit in it unnoticed."""
-    src = (REPO / "crates/pixtuoid-core/src/source/codex.rs").read_text()
-    block = rust_block_after(strip_rust_comments(src), r"match \(outer, inner\)")
-    if block is None:
-        raise RuntimeError("could not locate the codex decode block; update the parser.")
-    return set(re.findall(r'\(\s*"(\w+)"\s*,', block))
-
-
 def read_acp_decoded_tags() -> set[str]:
     """The `sessionUpdate` tags `decode_session_update` turns into events, DERIVED
     from its own match block. Line-anchored so a nested match's arms can never be
@@ -905,8 +894,8 @@ def read_acp_decoded_tags() -> set[str]:
     return set(re.findall(r'(?m)^\s*"([^"]+)"\s*(?:\|\s*"[^"]+"\s*)*=>', block))
 
 
-def read_codex_rollout_types() -> tuple[set[str], set[str]]:
-    """The (event_msg, response_item) inner `type` strings the codex TRANSCRIPT
+def read_codex_rollout_types() -> tuple[set[str], set[str], set[str]]:
+    """The (event_msg, response_item, OUTERS) the codex TRANSCRIPT
     decoder matches on. These are registered NOWHERE and the decoder's
     `_ => vec![]` drops an unrecognized one SILENTLY (no `unknown_event`
     breadcrumb, unlike the hook decoders), so this positive check is the only
@@ -922,13 +911,16 @@ def read_codex_rollout_types() -> tuple[set[str], set[str]]:
         )
     event_msg = match_arm_inner_types(block, "event_msg")
     response_item = match_arm_inner_types(block, "response_item")
+    # The OUTERS ride the SAME parse: two readers on one anchor can only fail
+    # together, so they would file two probe-health lines for one refactor.
+    outers = set(re.findall(r'\(\s*"(\w+)"\s*,', block))
     if not event_msg or not response_item:
         raise RuntimeError(
             "could not locate codex ('event_msg'|'response_item', …) decode arms "
             "in source/codex.rs — the transcript decoder was refactored; update "
             "the parser."
         )
-    return event_msg, response_item
+    return event_msg, response_item, outers
 
 
 def read_cc_events() -> set[str]:
@@ -1310,8 +1302,7 @@ class OurNames:
     stale parser darkens exactly what it fed and nothing else."""
 
     codex: set[str] | None = None
-    codex_rollout: tuple[set[str], set[str]] | None = None
-    codex_rollout_outers: set[str] | None = None
+    codex_rollout: tuple[set[str], set[str], set[str]] | None = None
     acp_decoded_tags: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
@@ -1334,7 +1325,6 @@ class OurNames:
 READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
     ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
-    ("codex_rollout_outers", read_codex_rollout_outers, "the outer arms in source/codex.rs"),
     ("acp_decoded_tags", read_acp_decoded_tags, "the sessionUpdate arms in source/acp.rs"),
     ("cc", read_cc_events, "EVENTS in install/claude.rs"),
     ("dispatch_names", read_dispatch_names, "the dispatch tool names in source/decoder.rs"),
@@ -1460,7 +1450,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 "The rollout OUTER watch was SKIPPED.",
             )
         elif up_outers is not None:
-            for outer in sorted(ours.codex_rollout_outers or ()):
+            for outer in sorted(ours.codex_rollout[2] if ours.codex_rollout else ()):
                 if outer not in up_outers:
                     report.add_breaking(
                         f"Codex rollout OUTER `{outer}` (matched in source/codex.rs) is "
@@ -1470,7 +1460,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
-            event_msg_ours, _ = ours.codex_rollout
+            event_msg_ours, _, _ = ours.codex_rollout
             up_ev = upstream_codex_enum_types(text, "EventMsg")
             if up_ev is None:
                 report.add_blind(
@@ -1507,7 +1497,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"silently dark for codex agents)."
                         )
         if ours.codex_rollout is not None:
-            _, response_item_ours = ours.codex_rollout
+            _, response_item_ours, _ = ours.codex_rollout
             models = try_fetch(CODEX_MODELS_URL, "Codex models", report)
             if models is not None:
                 up_ri = upstream_codex_enum_types(models, "ResponseItem")

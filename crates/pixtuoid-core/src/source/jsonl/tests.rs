@@ -693,6 +693,8 @@ async fn an_unnamed_type_carrying_the_turn_payload_revives_a_gated_transcript() 
     );
 }
 
+use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
 /// The gated-transcript revive harness both revive tests need: append one line,
 /// walk, and report whether the walk re-emitted `SessionStart`. Separate files
 /// because a revival is once-per-transcript; the closure has no such constraint.
@@ -715,12 +717,12 @@ fn revive_walker(
                 f.write_all(line.as_bytes()).unwrap();
                 f.sync_all().unwrap();
             }
-            crate::source::jsonl::tests::walk_once_with_recency(
+            walk_once_with_recency(
                 &path,
                 Duration::from_secs(3600),
-                crate::source::claude_code::decode_cc_line,
-                crate::source::claude_code::cc_session_ended,
-                crate::source::claude_code::cc_activity_recency,
+                decode_cc_line,
+                cc_session_ended,
+                cc_activity_recency,
                 &cursors,
                 &seen,
             )
