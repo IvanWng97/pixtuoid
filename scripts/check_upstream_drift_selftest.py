@@ -108,7 +108,11 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
         check(not bad, f"{name}: members match {shape}; offenders={bad}")
 
     # N-of-N: a row with no floor case can return `set()` and pass vacuously.
-    floored = {r.__name__ for r, _, _ in cases} | {"read_codex_rollout_types"}
+    # The two non-set readers carry their floors below, not in `cases`.
+    floored = {r.__name__ for r, _, _ in cases} | {
+        "read_codex_rollout_types",
+        "read_grok_xai_method",
+    }
     unfloored = sorted({r.__name__ for _, r, _ in d.READERS} - floored)
     check(not unfloored, f"a READERS reader has no non-empty floor case: {unfloored}")
 
@@ -120,6 +124,11 @@ def test_source_parsers_find_nonempty_well_shaped_sets() -> None:
     check(
         all(re.match(r"^[a-z][a-z_]*$", o) for o in outers),
         f"codex outers are snake_case discriminators: {outers!r}",
+    )
+    xai = d.read_grok_xai_method()
+    check(
+        isinstance(xai, str) and xai.startswith("_") and "/" in xai,
+        f"read_grok_xai_method returns an xAI private method name, got {xai!r}",
     )
     check("task_started" in ev, f"codex event_msg has task_started: {ev!r}")
     check("function_call" in ri, f"codex response_item has function_call: {ri!r}")
@@ -1078,11 +1087,22 @@ _OMP_ENV_LIVE = (
 )
 
 
-def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
-    """Run the omp block over stubbed upstream files, returning only the lines
-    the `kind` sweep emits — a sibling sweep's noise must not read as this one."""
+_OMP_NAMES = d.OurNames(omp={"session"})
+_GROK_NAMES = d.OurNames(grok=set(), grok_xai_method=d.read_grok_xai_method())
+
+
+def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> list[str]:
+    """Run the checks over stubbed upstream files, returning only the lines the
+    `kind` sweep emits — a sibling sweep's noise must not read as this one.
+
+    `ours` is explicit because each source's block is gated on its own field: a
+    driver that supplied one source's names silently skipped every OTHER block,
+    so the stub was never fetched and the drive passed by testing nothing."""
+
+    served: list[str] = []
 
     def stub(url: str) -> str:
+        served.append(url)
         if url in bodies:
             return bodies[url]
         raise urllib.error.URLError("not stubbed")  # -> transient, filtered below
@@ -1091,9 +1111,11 @@ def _drive_omp(bodies: dict[str, str], kind: str) -> list[str]:
     d.fetch = stub
     try:
         report = d.Report()
-        d.run_checks(d.OurNames(omp={"session"}), report=report)
+        d.run_checks(ours, report=report)
     finally:
         d.fetch = real
+    unread = sorted(set(bodies) - set(served))
+    check(not unread, f"_drive_upstream never fetched {unread} — the drive was vacuous")
     return [x for x in report.breaking if kind in x]
 
 
@@ -1256,7 +1278,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         check(size >= floor, f"{label} covers the overlay's inputs, got {size}")
 
     for kind in ("omp dotenv locator", "omp dotenv parser", "omp dotenv literal"):
-        got = _drive_omp({d.OMP_ENV_URL: live}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: live}, kind, _OMP_NAMES)
         check(not got, f"{kind}: an unchanged upstream must stay silent, got {got}")
 
     # Each role's message must name ITS OWN requirement, or it sends the
@@ -1264,7 +1286,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     for kind, table in roles:
         other = "parser" if "locator" in kind else "locator"
         for fn, mirror in sorted(table.items()):
-            got = _drive_omp({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind)
+            got = _drive_upstream({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind, _OMP_NAMES)
             check(
                 len(got) == 1
                 and f"`{fn}`" in got[0]
@@ -1274,8 +1296,10 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
             )
 
     for lit in sorted(d.OMP_ENV_LITERALS):
-        got = _drive_omp(
-            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')}, "omp dotenv literal"
+        got = _drive_upstream(
+            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')},
+            "omp dotenv literal",
+            _OMP_NAMES,
         )
         check(
             len(got) == 1 and f"`{lit}`" in got[0],
@@ -1285,7 +1309,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     # Renaming the ANCHOR is a BLIND probe, not a rename line — the louder
     # signal, and the reason `parseEnvFile` is in neither role table.
     gone = live.replace("export function parseEnvFile", "function gone")
-    got = _drive_omp({d.OMP_ENV_URL: gone}, "omp dotenv")
+    got = _drive_upstream({d.OMP_ENV_URL: gone}, "omp dotenv", _OMP_NAMES)
     check(not got, f"an anchor miss must not masquerade as a rename, got {got}")
 
     # The masking regression: the CODE occurrence goes, the comments keep it.
@@ -1295,7 +1319,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
     masked = live.replace('getConfigRootDir(), ".env"', 'getConfigRootDir(), ".renamed"')
     masked = masked.replace('getAgentDir(), ".env"', 'getAgentDir(), ".renamed"')
     check('".env"' in masked, "the JSDoc example must survive, or this proves nothing")
-    got = _drive_omp({d.OMP_ENV_URL: masked}, "omp dotenv literal")
+    got = _drive_upstream({d.OMP_ENV_URL: masked}, "omp dotenv literal", _OMP_NAMES)
     check(
         len(got) == 1 and "`.env`" in got[0],
         f"a literal surviving only in JSDoc must still fire, got {got}",
@@ -1308,7 +1332,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
             for ln in live.splitlines(keepends=True)
         )
         check(fn in masked, f"the prose mention of {fn} must survive, or this proves nothing")
-        got = _drive_omp({d.OMP_ENV_URL: masked}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: masked}, kind, _OMP_NAMES)
         check(
             len(got) == 1 and f"`{fn}`" in got[0],
             f"{fn} surviving only in a comment BELOW the quote detector must "
@@ -1323,7 +1347,7 @@ def test_omp_env_sweeps_fire_and_stay_silent() -> None:
         'import {\n\tgetAgentDir,\n\tgetConfigRootDir,\n\trefreshDirsFromEnv as rebuild,\n} from "./dirs";',
     ).replace("refreshDirsFromEnv();", "rebuild(); // refreshDirsFromEnv")
     for kind, _ in roles:
-        got = _drive_omp({d.OMP_ENV_URL: reshaped}, kind)
+        got = _drive_upstream({d.OMP_ENV_URL: reshaped}, kind, _OMP_NAMES)
         check(not got, f"{kind}: a reshaped import is not a rename, got {got}")
 
     # Every Rust symbol these messages name must be a REAL fn.
@@ -1489,8 +1513,30 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
     )
 
 
+def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
+    """The value must be read off the declaration, never scanned for: an IDE
+    symbol rename updates every ident reference and leaves the literal standing
+    in a `///` and a `#[cfg(test)]` fixture, so `"…" in text` never fires."""
+    ours = d.read_grok_xai_method()
+    kind = "xAI method namespace"
+    decl = f'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "{ours}";\n'
+    # The two sites a symbol rename structurally cannot reach — present in BOTH
+    # arms, so the silent arm proves the check is not merely counting them.
+    survivors = f'/// Either "session/update" for ACP or "{ours}" for xAI.\n    r#"{{"method":"{ours}"}}"#;\n'
+    check(
+        not _drive_upstream({d.GROK_SESSION_STORAGE_URL: decl + survivors}, kind, _GROK_NAMES),
+        "an unchanged declaration must stay silent",
+    )
+    moved = decl.replace(ours, f"{ours}/v2") + survivors
+    got = _drive_upstream({d.GROK_SESSION_STORAGE_URL: moved}, kind, _GROK_NAMES)
+    check(
+        len(got) == 1 and f"`{ours}/v2`" in got[0],
+        f"a renamed declaration must fire once, naming the new value; got {got}",
+    )
+
+
 def main() -> int:
-    for t in (
+    tests = (
         test_try_fetch_classifies_permanent_vs_transient,
         test_source_parsers_find_nonempty_well_shaped_sets,
         test_upstream_parsers_extract_from_a_snippet,
@@ -1519,7 +1565,17 @@ def main() -> int:
         test_no_decoder_read_is_unaccounted_for,
         test_the_floor_can_never_be_weaker_than_what_we_register,
         test_every_believability_gate_can_name_the_document_it_doubts,
-    ):
+        test_grok_xai_method_compares_the_declaration_not_a_substring,
+    )
+    # This tuple IS the runner, so a test absent from it is inert and the suite
+    # still prints "all checks passed" — silently, forever.
+    unregistered = sorted(
+        n for n, o in globals().items() if n.startswith("test_") and o not in tests
+    )
+    if unregistered:
+        print(f"DRIFT SELFTEST FAILED:\n  - never run, absent from main(): {unregistered}")
+        return 1
+    for t in tests:
         t()
     if FAILS:
         print("DRIFT SELFTEST FAILED:")

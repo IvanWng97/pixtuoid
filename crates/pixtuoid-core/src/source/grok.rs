@@ -43,6 +43,11 @@ pub use native::{live_grok_session_ids, GrokSource};
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
 
+/// xAI's private JSON-RPC method namespace, mirroring upstream's
+/// `XAI_SESSION_UPDATE_METHOD`; `check_upstream_drift.py` reads this const
+/// rather than holding its own copy of the literal.
+const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+
 /// Decode one grok hook payload (already identified by
 /// `_pixtuoid_source == "grok"`), keyed on `sessionId`.
 ///
@@ -344,7 +349,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         )),
         // xAI private extension namespace — ACP reserves the `_` prefix for
         // implementation-specific methods, so none of this is ACP vocabulary.
-        "_x.ai/session/update" => match tag {
+        XAI_SESSION_UPDATE_METHOD => match tag {
             "subagent_spawned" => {
                 let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
@@ -480,7 +485,7 @@ fn spawn_is_blocking(args: Option<&Value>) -> bool {
 /// QUOTING this marker inside a JSON string.
 pub fn grok_session_ended(tail: &[u8]) -> bool {
     parsed_tail_lines(tail).any(|v| {
-        v.get("method").and_then(|m| m.as_str()) == Some("_x.ai/session/update")
+        v.get("method").and_then(|m| m.as_str()) == Some(XAI_SESSION_UPDATE_METHOD)
             && v.pointer("/params/update/sessionUpdate")
                 .and_then(|t| t.as_str())
                 == Some("hook_execution")
@@ -1355,8 +1360,7 @@ mod tests {
 
     /// Nothing on grok's TRANSCRIPT axis breadcrumbs — not a new method, not a
     /// new ACP tag, not a per-token chunk. A name we never read is noise on both
-    /// sides; the ones we DO read are watched by `check_upstream_drift.py`,
-    /// except `_x.ai/session/update`, which upstream states only in a `///`.
+    /// sides; the ones we DO read are watched by `check_upstream_drift.py`.
     #[test]
     fn no_transcript_line_breadcrumbs_however_new_its_method_or_tag() {
         for v in [

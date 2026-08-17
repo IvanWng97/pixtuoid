@@ -320,6 +320,12 @@ GROK_SESSION_STORAGE_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-shell/src/session/storage/mod.rs"
 )
+# Matches BOTH sides of this watch — upstream's declaration and our mirror of it.
+# The value must be read from the declaration, never scanned for as a substring:
+# an IDE symbol rename updates every ident reference but leaves the literal
+# standing in a `///` and a `#[cfg(test)]` fixture, so `"…" in text` is fail-open.
+GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
+GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 
 GROK_NOTIFICATION_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
@@ -469,9 +475,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
-    GROK_SESSION_STORAGE_URL: Anchor(
-        r"const XAI_SESSION_UPDATE_METHOD", "`XAI_SESSION_UPDATE_METHOD`"
-    ),
+    GROK_SESSION_STORAGE_URL: Anchor(GROK_XAI_METHOD_CONST, "`XAI_SESSION_UPDATE_METHOD`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
@@ -1147,6 +1151,18 @@ def read_hermes_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/hermes.rs", "HERMES_EVENTS")
 
 
+def read_grok_xai_method() -> str:
+    """The xAI private method namespace `decode_grok_line` gates on, read from
+    grok.rs so the watch compares upstream's declaration against the value that
+    actually ships rather than a second copy of the literal here."""
+    m = re.search(
+        GROK_XAI_METHOD_DECL, (REPO / "crates/pixtuoid-core/src/source/grok.rs").read_text()
+    )
+    if m is None:
+        raise RuntimeError("could not locate XAI_SESSION_UPDATE_METHOD in grok.rs")
+    return m.group(1)
+
+
 def read_grok_events() -> set[str]:
     return rust_const_str_array("crates/pixtuoid/src/install/grok.rs", "GROK_EVENTS")
 
@@ -1315,6 +1331,7 @@ class OurNames:
     openclaw: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
+    grok_xai_method: str | None = None
     kimi: set[str] | None = None
 
 
@@ -1337,6 +1354,11 @@ READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("openclaw", read_openclaw_events, "OPENCLAW_EVENTS in install/openclaw.rs"),
     ("hermes", read_hermes_events, "HERMES_EVENTS in install/hermes.rs"),
     ("grok", read_grok_events, "GROK_EVENTS in install/grok.rs"),
+    (
+        "grok_xai_method",
+        read_grok_xai_method,
+        "XAI_SESSION_UPDATE_METHOD in source/grok.rs",
+    ),
     ("kimi", read_kimi_events, "KIMI_EVENTS in install/kimi.rs"),
 )
 
@@ -1654,13 +1676,22 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"label degrade)."
                     )
         store = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
-        if store is not None and '"_x.ai/session/update"' not in store:
-            report.add_breaking(
-                "grok's xAI method namespace `_x.ai/session/update` is GONE from "
-                "XAI_SESSION_UPDATE_METHOD in session/storage/mod.rs — renamed; "
-                "decode_grok_line gates the whole xAI arm on it, so subagent "
-                "spawn/finish, model info and the session-end marker all stop."
-            )
+        if store is not None and ours.grok_xai_method is not None:
+            decl = re.search(GROK_XAI_METHOD_DECL, store)
+            if decl is None:
+                report.add_blind(
+                    "grok's `XAI_SESSION_UPDATE_METHOD` value",
+                    "grok session storage",
+                    "The xAI method watch was SKIPPED — the const is still named in "
+                    "session/storage/mod.rs but no longer declares a string literal.",
+                )
+            elif decl.group(1) != ours.grok_xai_method:
+                report.add_breaking(
+                    f"grok's xAI method namespace moved to `{decl.group(1)}` in "
+                    f"XAI_SESSION_UPDATE_METHOD — decode_grok_line gates the whole "
+                    f"xAI arm on it, so subagent spawn/finish, model info and the "
+                    f"session-end marker all stop."
+                )
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
             for variant in sorted(GROK_XAI_VARIANTS):
@@ -1691,9 +1722,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
     # The ACP method `session/update` and the two `sessionUpdate` tags
     # `decode_session_update` turns into events. v1 only — grok does not speak v2.
-    # xAI's OWN `_x.ai/session/update` is deliberately unwatched: its single
-    # upstream occurrence is inside a `///`, so a check would alarm on a comment
-    # reflow rather than a rename.
+    # xAI's OWN `_x.ai/session/update` is watched separately, off its declaration.
     up_acp: set[str] = set()
     acp_method_surface = False
     acp_method_declared = False
