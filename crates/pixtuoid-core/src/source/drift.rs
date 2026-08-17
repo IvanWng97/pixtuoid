@@ -4,18 +4,14 @@
 //! `source`, so the persistent warn-floor log (read by `pixtuoid doctor`)
 //! captures it without any decoder signature change.
 //!
-//! **The flood-safe axis rule (`unknown_event` has NO dedup — it warns per
-//! line).** A transcript decoder's tail may breadcrumb an unrecognized shape
-//! ONLY on a LOW-cardinality STRUCTURAL axis — a brand-new line SHAPE the source
-//! emits a bounded number of (codex's `RolloutItem` OUTER, copilot's `type`
-//! NAMESPACE, omp's entry `type`). It MUST stay SILENT on the HIGH-cardinality
-//! EVENT axis — a new value under a shape we already ignore dozens of per turn
-//! (codex's `EventMsg`/`ResponseItem` inners, copilot's `assistant.*_delta`,
-//! omp's `customType`) — because one warn per line there floods the warn-floor.
-//! Each decoder pins its axis in a `KNOWN_*` const, drift-watched by
-//! `check_upstream_drift.py` where the schema is fetchable. The axis lands in a
-//! different position in each source, so the principle is codified HERE and
-//! applied inline rather than abstracted.
+//! **Only a surface we READ may raise one, and never from a name list.** These
+//! warn per LINE (no dedup), so a decoder that breadcrumbed every name it did
+//! not recognise needed a hand-kept mirror of upstream's vocabulary just to stay
+//! quiet — and a harmless upstream ADDITION then alarmed every user. Breadcrumb
+//! the condition that actually costs events instead: a payload we decode having
+//! gone, or an unknown discriminator arriving WITH that payload (CC's
+//! `decode_cc_line`). A hook `hook_event_name` is the one safe name axis — we
+//! receive only hooks we registered, so an unknown one IS a rename of ours.
 //!
 //! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content, so they are made

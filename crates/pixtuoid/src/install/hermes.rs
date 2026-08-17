@@ -26,8 +26,8 @@ use crate::install::SENTINEL_KEY;
 
 /// Every event here decodes — `every_registered_hermes_event_decodes` enforces
 /// that direction, and only that one: an event the DECODER handles and this list
-/// omits is the shape that shipped `pre_approval_request` unregistered (#930),
-/// and it is `check_upstream_drift.py`'s job, not this test's. Wire values from a
+/// omits is the shape that shipped `pre_approval_request` unregistered (#930).
+/// Wire values from a
 /// real capture — session events carry the `on_` prefix, tool events don't.
 const HERMES_EVENTS: &[&str] = &[
     "on_session_start",

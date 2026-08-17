@@ -20,7 +20,7 @@ cross-cutting plumbing digests (burn tier, token meter, focus-jump) live in
 Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
 <!-- edges:start · generated from SHARP-EDGES.md by `just gen-guides` — edit the entry there, not this line -->
-- **Only a wire surface we actually READ may raise a drift alarm — don't add a `KNOWN_*` allowlist of names we ignore.** `drift::unknown_event` has no dedup, so such a list must mirror an upstream vocabulary forever …
+- **Only a wire surface we actually READ may raise a drift alarm — don't add a `KNOWN_*` allowlist of names we ignore.** `drift::unknown_event` has no dedup and fires per LINE, so such a list must mirror an upstream …
 - **There is NO core `render` module and no core render trait.** `blit_frame` is the only pre-scene-split render helper that stays. New render targets are thin …
 - **`walkable.rs` is coherence-bound to this crate — it did NOT move with the sim-geometry cluster.** `WalkableMask` is a type alias for `Grid<bool>` whose obstacle ops are an inherent …
 - **A daemon's runtime identity is the SOURCE's own wire fact, and for OpenClaw that is the resolved gateway PORT — not the profile, not the pid.** The profile is install-scope, never on the hook wire, and profile↔gateway is 1:N (verified …
@@ -79,10 +79,6 @@ question:
 - How does focus-jump resolve the agent's pid?
 - Why don't old idle sessions show on startup?
 <!-- lookup:end -->
-
-## Keeping the decode mapping current (upstream drift)
-
-Moved to [`UPSTREAM-DRIFT.md`](UPSTREAM-DRIFT.md) — read it before touching this area.
 
 ## When refactoring
 

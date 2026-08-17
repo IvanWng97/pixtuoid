@@ -1355,10 +1355,7 @@ mod tests {
     }
 
     /// Nothing on grok's TRANSCRIPT axis breadcrumbs — not a new method, not a
-    /// new ACP tag, not a per-token chunk. grok is open source and its three
-    /// depended surfaces are all fetched by `check_upstream_drift.py`, which
-    /// alarms when a name we DECODE vanishes; a name we never read is noise on
-    /// both sides.
+    /// new ACP tag, not a per-token chunk. None of them carries anything we read.
     #[test]
     fn no_transcript_line_breadcrumbs_however_new_its_method_or_tag() {
         for v in [

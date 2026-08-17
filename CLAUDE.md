@@ -44,9 +44,8 @@ explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 siblings that are **not** auto-loaded — you must open them. The four Rust
 guides (core, scene, binary, tui) index `SHARP-EDGES.md` (the edge + WHY +
 authority pointer per entry) and `WHERE-TO-LOOK.md` (the non-obvious seams
-behind "how does X work?"); core
-adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
-plain pointers. The `tests/` and Raycast guides are small enough to keep their
+behind "how does X work?"); the site guide
+adds `SINGLE-SOURCED.md` as a plain pointer. The `tests/` and Raycast guides are small enough to keep their
 sharp edges INLINE — nothing to open there. **Every index line
 is the sibling entry's own opening text, verbatim — grep any of it to land on
 the full entry — because the marked index blocks are GENERATED from the
@@ -84,8 +83,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 │                    Time is a PARAMETER — the engine never reads the clock on wasm.
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → Unix socket / Windows named pipe.
 scripts/             gen-media.py + media.json (the ONE driver for all committed art), the e2e
-                     tiers under lib/ (three OpenClaw, replay, live-sources — see Build & test),
-                     check_upstream_drift.py, risk-radar.py.
+                     tiers under lib/ (three OpenClaw, replay, live-sources — see Build & test).
 policy/              policy-as-code: Conftest/OPA structural contracts + yq-extracted
                      action/workflow behavior tests (`policy/ci-observability/`).
 site/                Astro landing page → GitHub Pages. Self-contained Node project, own CI.
@@ -260,7 +258,7 @@ and `procedural-lofi`.
   whatever length it earned — this repo's dense WHY is deliberate, and trimming a
   legitimate one is the worse error.
 
-  Evidence, not decoration: in a code comment, a measurement or before/after count belongs in the COMMIT MESSAGE — an inline number nobody re-measures is the first thing to rot. An issue number STAYS when it names the failure mode the comment exists to prevent (`#793` in `check_upstream_drift.py`), and is not provenance.
+  Evidence, not decoration: in a code comment, a measurement or before/after count belongs in the COMMIT MESSAGE — an inline number nobody re-measures is the first thing to rot. An issue number STAYS when it names the failure mode the comment exists to prevent, and is not provenance.
 
 - **No magic numbers — reuse an authoritative source, else ONE named `const` (single source of truth).** A numeric (or sentinel-string) literal whose value *carries domain meaning* (timeout, size cap, threshold, ratio/factor, pixel offset, protocol constant) must never be an anonymous inline literal. Handle it in this priority order:
   1. **Reuse an existing authority.** If the stdlib or a third-party crate already exposes the value or a type that carries it, USE that — don't re-hardcode what a dependency owns (it silently drifts when they bump it): `libc::FD_SETSIZE` not `1024`, a crate's provided default/`Duration` constant, an enum's `::default()`, `std::mem::size_of`, etc. Likewise if OUR code already defines the value (a `Theme` field, a layout/registry const, a `SourceDescriptor` row), read it from there — never copy it.
