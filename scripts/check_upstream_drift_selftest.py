@@ -26,7 +26,6 @@ import check_upstream_drift as d  # noqa: E402
 
 FAILS: list[str] = []
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
@@ -1514,9 +1513,7 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 
 def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
-    """The value must be read off the declaration, never scanned for: an IDE
-    symbol rename updates every ident reference and leaves the literal standing
-    in a `///` and a `#[cfg(test)]` fixture, so `"…" in text` never fires."""
+    """The value must be read off the declaration, never scanned for."""
     ours = d.read_grok_xai_method()
     kind = "xAI method namespace"
     decl = f'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "{ours}";\n'
@@ -1536,45 +1533,9 @@ def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
 
 
 def main() -> int:
-    tests = (
-        test_try_fetch_classifies_permanent_vs_transient,
-        test_source_parsers_find_nonempty_well_shaped_sets,
-        test_upstream_parsers_extract_from_a_snippet,
-        test_cc_doc_marker_detection_fires_both_directions,
-        test_const_array_parser_ignores_words_quoted_inside_comments,
-        test_parser_never_drops_a_real_event,
-        test_block_scrape_is_bounded_to_the_decoder,
-        test_every_const_array_reader_uses_the_shared_parser,
-        test_anchor_gate_fires_in_both_directions,
-        test_report_is_the_only_way_to_file_a_finding,
-        test_one_stale_reader_does_not_blind_the_sources_after_it,
-        test_every_reader_row_matches_a_field_on_our_names,
-        test_no_reader_is_called_outside_the_readers_table,
-        test_the_acp_method_check_separates_a_rename_from_a_restructure,
-        test_793_stale_pin_reads_as_probe_health_not_three_renames,
-        test_every_swept_url_declares_an_anchor,
-        test_report_separates_verified_change_from_probe_health,
-        test_enum_body_survives_struct_variants_and_indentation,
-        test_report_h1_is_the_issue_title_and_carries_the_disposition,
-        test_ts_comment_strip_survives_a_quote_detector_line,
-        test_rust_comment_strip_is_not_confused_by_lifetimes,
-        test_omp_env_sweeps_fire_and_stay_silent,
-        test_every_block_reader_strips_comments_before_counting_braces,
-        test_the_hermes_approval_gate_stays_observer_only,
-        test_a_partial_parse_files_no_verified_change,
-        test_no_decoder_read_is_unaccounted_for,
-        test_the_floor_can_never_be_weaker_than_what_we_register,
-        test_every_believability_gate_can_name_the_document_it_doubts,
-        test_grok_xai_method_compares_the_declaration_not_a_substring,
-    )
-    # This tuple IS the runner, so a test absent from it is inert and the suite
-    # still prints "all checks passed" — silently, forever.
-    unregistered = sorted(
-        n for n, o in globals().items() if n.startswith("test_") and o not in tests
-    )
-    if unregistered:
-        print(f"DRIFT SELFTEST FAILED:\n  - never run, absent from main(): {unregistered}")
-        return 1
+    # Derived, not hand-listed: a test missing from the runner is inert while
+    # the suite still prints "all checks passed".
+    tests = tuple(o for n, o in list(globals().items()) if n.startswith("test_"))
     for t in tests:
         t()
     if FAILS:
