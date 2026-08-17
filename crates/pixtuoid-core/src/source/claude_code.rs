@@ -365,7 +365,9 @@ pub(crate) fn admits_transcript(path: &Path) -> bool {
 /// session at once. An unnamed type WITHOUT that payload reads as sidecar, so a
 /// rename of the four payload-less activity types (`system`, `attachment`,
 /// `file-history-delta`, `queue-operation`) lands in the residual below rather
-/// than in this guard.
+/// than in this guard — on the REVIVE path (`jsonl/walk.rs`) as well as at first
+/// sight, so such a rename also delays an already-gated session's return until
+/// its next payload-carrying line.
 ///
 /// Accepted residual: an unvouched live session whose tail is momentarily all
 /// sidecar stays invisible until its next turn. Unvouched covers headless
@@ -518,9 +520,6 @@ mod tests {
         );
     }
 
-    /// The inverse rename: the NAME survives and the payload moves. Nothing
-    /// caught this before — `decode_cc_line` returned early on the absent
-    /// `message` without a word.
     /// `DECODED_TYPES` is a SECOND copy of what the decode arms match, and the
     /// arms cannot be enumerated at runtime — so shrinking the list would
     /// silently stop the lost-payload alarm for the dropped name.
@@ -546,6 +545,30 @@ mod tests {
         }
     }
 
+    /// The healthy path, which nothing covered: `assistant`/`user` DO carry
+    /// `message.role`+`content`, so only the arms being mutually exclusive keeps
+    /// them out of the drift log. Split into two `if`s and every line of the two
+    /// hottest types breadcrumbs — #935's flood, aimed at the types it protects.
+    #[test]
+    fn a_normal_decoded_line_is_drift_silent() {
+        let out = crate::test_capture::capture_logs(|| {
+            for ty in DECODED_TYPES {
+                let line = json!({
+                    "type": ty,
+                    "message": {"role": "assistant", "content": [], "model": "m"},
+                });
+                let _ = decode_cc_line("/p/s.jsonl", SOURCE_NAME, line);
+            }
+        });
+        assert!(
+            !out.contains(crate::source::drift::TARGET),
+            "a healthy decoded line reached the drift log:\n{out}"
+        );
+    }
+
+    /// The inverse rename: the NAME survives and the payload moves. Nothing
+    /// caught this before — `decode_cc_line` returned early on the absent
+    /// `message` without a word.
     #[test]
     fn a_decoded_type_that_lost_its_payload_alarms() {
         let out = crate::test_capture::capture_logs(|| {
@@ -609,7 +632,7 @@ mod tests {
                 "{ty} is a turn by NAME and must date the tail"
             );
         }
-        // F3: the predicate is the CONJUNCTION — a bare `message` envelope, or
+        // The predicate is the CONJUNCTION — a bare `message` envelope, or
         // half of one, must stay sidecar or a future CC sidecar type floods.
         for half in [
             r#","message":{"role":"assistant"}"#,

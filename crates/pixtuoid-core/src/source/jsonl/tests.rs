@@ -687,11 +687,76 @@ async fn a_metadata_append_does_not_revive_a_gated_transcript_but_a_turn_does() 
          a running pixtuoid meets, and the first-sight gate never sees it"
     );
     assert!(
+        !walk(Some(
+            "{\"type\":\"system-v2\",\"timestamp\":\"2026-08-02T06:01:11.000Z\"}\n"
+        ))
+        .await,
+        "an UNNAMED payload-less type reads as sidecar on the revive path too, so a \
+         rename of `system`/`attachment`/`file-history-delta`/`queue-operation` \
+         delays the return until the next payload-carrying line — the accepted \
+         residual documented on `cc_activity_recency`"
+    );
+    assert!(
         walk(Some(
             "{\"type\":\"assistant\",\"timestamp\":\"2026-08-02T06:05:26.613Z\"}\n"
         ))
         .await,
         "a real turn still revives it — the documented revive-on-append must survive"
+    );
+}
+
+/// The other half of the residual: an unnamed type that DOES carry the turn
+/// payload revives immediately, which is what stops a renamed turn type gating
+/// every live session at once. Its own file — a revival is once-per-transcript.
+#[tokio::test]
+async fn an_unnamed_type_carrying_the_turn_payload_revives_a_gated_transcript() {
+    use crate::source::claude_code::{cc_activity_recency, cc_session_ended, decode_cc_line};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("dead-then-renamed-turn.jsonl");
+    tokio::fs::write(&path, cc_metadata_touched_transcript())
+        .await
+        .unwrap();
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+
+    let walk = |body: Option<&'static str>| {
+        let path = path.clone();
+        let cursors = cursors.clone();
+        let seen = seen.clone();
+        async move {
+            if let Some(line) = body {
+                use std::io::Write;
+                let mut f = std::fs::OpenOptions::new()
+                    .append(true)
+                    .open(&path)
+                    .unwrap();
+                f.write_all(line.as_bytes()).unwrap();
+                f.sync_all().unwrap();
+            }
+            walk_once_with_recency(
+                &path,
+                Duration::from_secs(3600),
+                decode_cc_line,
+                cc_session_ended,
+                cc_activity_recency,
+                &cursors,
+                &seen,
+            )
+            .await
+            .iter()
+            .any(|(_, e)| matches!(e, AgentEvent::SessionStart { .. }))
+        }
+    };
+
+    assert!(!walk(None).await, "first sight of the dead file must gate");
+    assert!(
+        walk(Some(
+            "{\"type\":\"turn-v2\",\"timestamp\":\"2026-08-02T06:03:00.000Z\",\
+             \"message\":{\"role\":\"assistant\",\"content\":[]}}\n"
+        ))
+        .await,
+        "a renamed TURN type carries `message.role`+`content`, so it must revive"
     );
 }
 

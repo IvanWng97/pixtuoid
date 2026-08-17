@@ -297,6 +297,41 @@ KIMI_HOOKS_URL = (
 # liveness-registry struct. The ACP half of the transcript vocabulary lives in the
 # external agent-client-protocol crate and is deliberately NOT fetched here — a
 # versioned protocol, pinned in-repo by grok's own wire_tags guard test.
+# `RolloutItem` MOVED out of protocol.rs into the history crate. The old pin went
+# blind rather than wrong — but a blind flood guard is an unwatched one, and this
+# one was hiding an outer we did not know about (`security_risk_score`).
+CODEX_ROLLOUT_ITEM_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
+)
+
+# grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of the
+# v1 stable + v1 unstable tag sets — hence two fetches. v2 is a separate, partly
+# non-overlapping line grok does NOT speak, so fetching it would emit false
+# "adopt terminal_update" noise.
+ACP_V1_SCHEMA_URL = (
+    "https://raw.githubusercontent.com/agentclientprotocol/"
+    "agent-client-protocol/main/schema/v1/schema.json"
+)
+
+ACP_V1_SCHEMA_UNSTABLE_URL = (
+    "https://raw.githubusercontent.com/agentclientprotocol/"
+    "agent-client-protocol/main/schema/v1/schema.unstable.json"
+)
+
+# The rollout OUTER discriminators `decode_codex_line` matches on, plus the two
+# `extract_codex_cwd` / the burn tier read. A rename here is not a lost inner
+# type — the whole outer arm stops matching, so the transcript decodes to
+# nothing. Watched against the `RolloutItem` enum, which has moved crates once.
+CODEX_ROLLOUT_OUTERS = {"event_msg", "response_item", "session_meta", "turn_context"}
+
+# The two top-level `method` namespaces `decode_grok_line` matches. A rename
+# gates every ACP notification before its tag is ever read.
+GROK_METHODS = {"session/update", "_x.ai/session/update"}
+
+# The ACP v1 `sessionUpdate` tags `decode_session_update` DECODES — not the whole
+# vocabulary, only the two that produce events.
+ACP_DECODED_TAGS = {"tool_call", "tool_call_update"}
+
 GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-hooks/src/event.rs"
@@ -448,6 +483,7 @@ class Anchor(typing.NamedTuple):
 #      check vacuous (a rename would take the anchor too, so it could never fire).
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: each anchor is the declaration the checked names live inside.
+    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
@@ -485,11 +521,13 @@ ANCHORS: dict[str, Anchor] = {
 # selftest can assert this set equals the live `try_fetch` call sites — otherwise
 # the next unanchored sweep just uses that spelling to escape the gate.
 UNANCHORED_BY_DESIGN: dict[str, str] = {
+    ACP_V1_SCHEMA_URL: "parser-gated: upstream_acp_session_update_tags returns None",
+    ACP_V1_SCHEMA_UNSTABLE_URL: "parser-gated: same",
     CODEX_PROTOCOL_URL: "parser-gated: _enum_body / codex_turn_context_fields return None",
     CODEX_MODELS_URL: "parser-gated: _enum_body(ResponseItem) returns None",
     REASONIX_HOOK_URL: "parser-gated: upstream_reasonix_hooks returns None (gates the field sweep)",
     CODEWHALE_HOOK_URL: "parser-gated: upstream_codewhale_hooks -> _enum_body returns None",
-    COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates all three sweeps",
+    COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates both sweeps",
     OPENCLAW_PATHS_URL: "value comparison: both sides are read, no presence sweep",
 }
 
@@ -812,6 +850,39 @@ def parse_rust_const_str_array(src: str, const_name: str) -> set[str] | None:
     if not m:
         return None
     return set(re.findall(r'"(\w+)"', strip_rust_comments(m.group(1))))
+
+
+def upstream_acp_session_update_tags(text: str) -> set[str] | None:
+    """The ACP `SessionUpdate` discriminator tags from a v1 JSON schema. Returns
+    None if the schema won't parse or the union is absent → the caller files probe
+    health and SKIPS the check."""
+    try:
+        root = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    defs = root.get("$defs") or root.get("definitions") or {}
+    if not isinstance(defs, dict):
+        return None
+    su = defs.get("SessionUpdate")
+    members = su.get("oneOf") or su.get("anyOf") if isinstance(su, dict) else None
+    if not isinstance(members, list):
+        return None
+    tags: set[str] = set()
+    for member in members:
+        if not isinstance(member, dict):
+            continue
+        node = member
+        ref = member.get("$ref", "")
+        if ref:
+            node = defs.get(ref.rsplit("/", 1)[-1], {})
+        const = (
+            node.get("properties", {}).get("sessionUpdate", {}).get("const")
+            if isinstance(node, dict)
+            else None
+        )
+        if isinstance(const, str):
+            tags.add(const)
+    return tags or None
 
 
 def read_codex_events() -> set[str]:
@@ -1381,6 +1452,22 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"from upstream HookEventName — likely renamed; the "
                             f"decoder will silently drop it."
                         )
+        hist = fetch_anchored(CODEX_ROLLOUT_ITEM_URL, "Codex history", report)
+        up_outers = upstream_codex_enum_types(hist, "RolloutItem") if hist is not None else None
+        if hist is not None and up_outers is None:
+            report.add_blind(
+                "the Codex `RolloutItem` enum",
+                "codex-rs/history/src/lib.rs",
+                "The rollout OUTER watch was SKIPPED.",
+            )
+        elif up_outers is not None:
+            for outer in sorted(CODEX_ROLLOUT_OUTERS):
+                if outer not in up_outers:
+                    report.add_breaking(
+                        f"Codex rollout OUTER `{outer}` (matched in source/codex.rs) is "
+                        f"GONE from upstream `RolloutItem` — renamed; the whole outer arm "
+                        f"stops matching and the transcript decodes to nothing."
+                    )
         # ONE-DIRECTIONAL: codex emits many EventMsg/ResponseItem types we ignore,
         # so only a VANISHED depended type alarms.
         if text is not None and ours.codex_rollout is not None:
@@ -1579,6 +1666,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
+            # The xAI extension namespace is spelled in the notification module;
+            # `session/update` is ACP-standard and checked against the ACP schema.
+            for method in sorted(m for m in GROK_METHODS if m.startswith("_x.ai/")):
+                if method not in text:
+                    report.add_breaking(
+                        f"grok method namespace `{method}` is GONE from "
+                        f"extensions/notification.rs — renamed; decode_grok_line gates "
+                        f"every xAI notification before its tag is read (no subagent "
+                        f"link / no model info / no end marker)."
+                    )
             for variant in sorted(GROK_XAI_VARIANTS):
                 if not re.search(rf"(?m)^\s*{variant}\b", text):
                     report.add_breaking(
@@ -1605,6 +1702,36 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"negative vouch / focus) degrades to mtime gating."
                     )
 
+    # The ACP-standard half of grok's transcript: `session/update` + the two tags
+    # `decode_session_update` turns into events. v1 only — grok does not speak v2.
+    up_acp: set[str] = set()
+    acp_parsed = False
+    for url, label in (
+        (ACP_V1_SCHEMA_URL, "ACP v1 schema"),
+        (ACP_V1_SCHEMA_UNSTABLE_URL, "ACP v1 unstable schema"),
+    ):
+        acp_text = try_fetch(url, label, report)
+        if acp_text is None:
+            continue
+        tags = upstream_acp_session_update_tags(acp_text)
+        if tags is None:
+            report.add_blind(
+                "the ACP `SessionUpdate` oneOf union",
+                label,
+                "The ACP decoded-tag watch was SKIPPED.",
+            )
+        else:
+            up_acp |= tags
+            acp_parsed = True
+    if acp_parsed:
+        for tag in sorted(ACP_DECODED_TAGS):
+            if tag not in up_acp:
+                report.add_breaking(
+                    f"ACP v1 `sessionUpdate` tag `{tag}` (decoded in source/acp.rs) is "
+                    f"GONE from the ACP schema — renamed; every ACP-speaking source "
+                    f"loses that half of its activity decode."
+                )
+
     if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
         # The `SessionEvent` union is this document's ANCHOR: a parseable JSON is
@@ -1614,9 +1741,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             report.add_blind(
                 "the Copilot `SessionEvent` anyOf union",
                 COPILOT_SCHEMA_URL,
-                "EVERY Copilot check (event types, payload fields, the "
-                "namespace flood guard) was SKIPPED — an unproven schema "
-                "cannot tell a rename from a restructure.",
+                "EVERY Copilot check (event types, payload fields) was SKIPPED — "
+                "an unproven schema cannot tell a rename from a restructure.",
             )
         if text is not None and up_ns is not None:
             upstream = upstream_copilot_events(text)
