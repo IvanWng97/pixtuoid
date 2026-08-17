@@ -109,6 +109,21 @@ REASONIX_HOOK_URL = (
 )
 
 
+# Payload fields decode_rx_hook_payload reads — a renamed json tag silently
+# zeroes the decode (`event`/`cwd` are load-bearing: a payload lacking them is
+# rejected as malformed).
+REASONIX_PAYLOAD_FIELDS = {
+    "event",
+    "cwd",
+    # The PRIMARY AgentId key since #929 — 44/44 recorded payloads carry it. A
+    # rename here silently reverts reasonix to cwd-keying, merging two sessions in
+    # one repo back into one sprite: the exact bug #929 fixed, with no alarm.
+    "sessionId",
+    "toolName",
+    "toolArgs",
+    "subject",
+    "message",
+}
 
 CODEWHALE_HOOK_URL = (
     "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
@@ -120,6 +135,13 @@ CODEWHALE_EXECUTOR_URL = (
 )
 
 
+# CodeWhale ENV-MODE identity: the DEEPSEEK_* names our shim folds into the
+# cwd-keyed envelope, set by `HookContext::to_env_vars`. WORKSPACE is
+# load-bearing — it becomes the envelope `cwd` = the AgentId KEY, so a rename
+# drops EVERY session (no sprite). DEEPSEEK_SESSION_ID is deliberately NOT read
+# (proven inconsistent), and the raw subagent-JSON fields are left to the
+# decoder's own parentless-degrade because a fuzzy `json!` macro owns them.
+CODEWHALE_ENV_FIELDS = {"DEEPSEEK_WORKSPACE", "DEEPSEEK_TOOL_NAME", "DEEPSEEK_TOOL_ARGS"}
 
 # ONE-DIRECTIONAL: opencode emits far more EventV2 types than we map, so a new
 # upstream event is noise; only a type WE DEPEND ON vanishing alarms. Track the
@@ -135,6 +157,15 @@ OPENCODE_EVENT_URLS = (
 # don't alarm if the bare form isn't found as a `type:` literal.
 OPENCODE_TOLERATED = {"permission.asked"}
 
+# Payload FIELD names decode_oc_hook_payload reads, as `field:` property lines in
+# the schema Struct defs. A rename → the decoder reads None → wrong-register /
+# no-link / no-activity.
+OPENCODE_PAYLOAD_FIELDS = {
+    "info", "id", "parentID", "directory",
+    "part", "sessionID", "callID", "tool", "state", "status", "input",
+    # The `info.model` wrapper (the decoder reads `model.id`; `id` is above).
+    "model",
+}
 
 # Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest
 # published version, and a drift watch wants the latest shape, not a frozen one.
@@ -144,6 +175,19 @@ OPENCODE_TOLERATED = {"permission.asked"}
 # alarms.
 COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
 
+# Payload FIELD names decode_copilot_line / extract_copilot_cwd read, CURATED —
+# not scraped, which would drag in opaque tool-arg keys and fixture JSON. `data`
+# is the envelope every other field below lives under, so renaming that one key
+# nulls all of them while the nested names still resolve (the all-depth union
+# check would NOT alarm). The wire `parentId` is deliberately absent: sub-agents
+# link via the envelope `agentId`, so watching it would alarm on a non-dependency.
+COPILOT_PAYLOAD_FIELDS = {
+    "data",
+    "agentId", "sessionId", "context", "cwd",
+    "toolCallId", "toolName", "arguments", "agentDisplayName",
+    "permissionRequest", "result", "kind",
+    "model",
+}
 
 # Cursor is a closed binary, so — like CC — the docs are the only watchable
 # surface. ONE-DIRECTIONAL: only a depended event vanishing alarms. The
@@ -189,6 +233,7 @@ PAYLOAD_READS_NOT_WATCHED = {
     "openclaw_ours": {"_pid", "errored"},
 }
 
+OPENCLAW_PAYLOAD_FIELDS = {"runId", "sessionId", "success"}
 
 # The gateway PORT is pixtuoid's runtime identity for one gateway, read off
 # `gateway_start`'s event/ctx: a rename leaves every envelope stamped with the
@@ -217,12 +262,27 @@ HERMES_PLUGINS_URL = (
 HERMES_SHELL_HOOK_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/agent/shell_hooks.py"
 )
+# Field names decode_hermes_hook_payload reads, as dict-key literals in
+# _serialize_payload; a rename → the JSON omits it → the decoder reads None.
+HERMES_PAYLOAD_FIELDS = {
+    "session_id",
+    "cwd",
+    "tool_name",
+    "tool_input",
+    # Carries `description` (the Waiting reason — the whole point of #930) and
+    # `model` (the flame). Only the TOP-LEVEL key is watchable: `_serialize_payload`
+    # builds `extra` per event, so its members are not a fixed upstream set.
+    "extra",
+}
 # `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
 # a depended env var VANISHING means we resolve a config.yaml hermes no longer
 # reads — the #880 fail-silent class, whose only symptom is a missing sprite.
 HERMES_HOME_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_constants.py"
 )
+# The `.strip()` and the `%LOCALAPPDATA%\hermes` SHAPE are behaviour, not names,
+# so they are pinned by the hermes unit tests instead.
+HERMES_HOME_ENV_VARS = {"HERMES_HOME", "LOCALAPPDATA"}
 
 # Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
 # (each name appears verbatim in the summary table AND the payload examples), so —
@@ -255,6 +315,21 @@ GROK_ACTIVE_SESSIONS_URL = (
 
 
 
+# Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
+# fields are camelCase via struct-level rename_all, so the wire name never appears
+# literally and the `pub <ident>:` declarations are what to check; PAYLOAD fields
+# carry explicit `rename = "…"` attrs; two payload fields are un-renamed idents.
+GROK_ENVELOPE_IDENTS = {"hook_event_name", "session_id", "cwd", "workspace_root"}
+GROK_PAYLOAD_RENAMES = {
+    "toolName",
+    "toolUseId",
+    "toolInput",
+    "notificationType",
+    "subagentId",
+    "subagentType",
+    "modelId",
+}
+GROK_PAYLOAD_IDENTS = {"message", "description"}
 # Transcript vocabulary decode_grok_line reads from the xAI SessionUpdate enum:
 # variant IDENTS, since the snake_case tags derive via rename_all and the wire
 # string never appears literally.
@@ -265,6 +340,19 @@ GROK_XAI_VARIANTS = {
     "HookExecution",
     "TurnCompleted",
 }
+GROK_XAI_FIELDS = {
+    "subagent_id",
+    "child_session_id",
+    "model_id",
+    "reasoning_effort",
+    "event_name",
+    "subagent_type",
+    "description",
+}
+# The active_sessions.json registry struct grok_ids_from_registry parses (no
+# rename_all — field idents ARE the wire names). A rename silently degrades the
+# whole liveness ladder to mtime gating.
+GROK_ACTIVE_SESSION_FIELDS = {"session_id", "pid", "cwd", "opened_at"}
 
 # omp is TRANSCRIPT-ONLY, and its depended names are split across the upstream
 # files that define them. ONE-DIRECTIONAL like copilot: only a name WE DEPEND ON
@@ -272,6 +360,7 @@ GROK_XAI_VARIANTS = {
 OMP_SESSION_ENTRIES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
 )
+OMP_SESSION_ENTRY_FIELDS = {"cwd", "customType"}
 # The clean-teardown marker both the session-ended checker and the SessionEnd
 # decode key on.
 OMP_EXIT_DIAG_URL = (
@@ -282,6 +371,8 @@ OMP_EXIT_DIAG_URL = (
 OMP_AI_TYPES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
 )
+OMP_MESSAGE_LITERALS = {"assistant", "toolResult", "toolCall"}
+OMP_MESSAGE_FIELDS = {"toolCallId", "arguments", "model"}
 # The ask tool's NAME is STATE-bearing — decode_omp_line maps an assistant `ask`
 # block to Waiting — and the first question's text feeds the Waiting reason.
 # `arguments.i` (the intent fallback) is harness-wide, not defined in ask.ts, and
@@ -290,15 +381,48 @@ OMP_AI_TYPES_URL = (
 # depended env var VANISHING means we watch a sessions dir omp no longer writes
 # to — an empty office and no error, the #880 fail-silent class.
 OMP_DIRS_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/utils/src/dirs.ts"
+# The SHAPES (Node-join binding, the agent/ flatten, the charset) are behaviour
+# no name sweep can see — pinned by the omp axis-matrix unit tests.
+OMP_DIRS_ENV_VARS = {
+    "PI_CONFIG_DIR",
+    "OMP_PROFILE",
+    "PI_PROFILE",
+    "PI_CODING_AGENT_DIR",
+    "XDG_DATA_HOME",
+}
 # The `.env` OVERLAY that can move that same sessions dir. It is the ORDERING
 # that is load-bearing: those files reach `process.env` only AFTER dirs.ts froze
 # its resolver, so the post-load `refreshDirsFromEnv()` is what lets them move
 # the sessions dir at all — lose it and OUR overlay becomes the divergence,
 # honoring a file omp stopped reading. The value is the Rust half mirroring it.
 OMP_ENV_URL = "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/utils/src/env.ts"
+# Split by ROLE, because the two halves send a maintainer to different code and
+# a shared message would name the wrong requirement for one of them.
+# `parseEnvFile` itself is the ANCHOR, so its rename lands as a blind probe
+# rather than a rename line.
+#
+# The LOCATE-and-ORDER half: which dirs the files come from, and the rebuild
+# that lets them reach the sessions dir at all.
+OMP_ENV_LOCATORS = {
+    "refreshDirsFromEnv": "with_omp_dotenv",
+    "getAgentDir": "with_omp_dotenv",
+    "getConfigRootDir": "with_omp_dotenv",
+}
+# The line-PARSE half: what one `.env` line means once the file is found.
+OMP_ENV_PARSERS = {
+    "parseEnvLine": "parse_omp_env_line",
+    "isValidEnvName": "is_valid_env_name",
+    "isSafeEnvValue": "parse_omp_env_line",
+}
+# `.env` is the filename we look for under each of omp's dirs; `OMP_` is the
+# alias prefix that makes an `OMP_CODING_AGENT_DIR` reach the resolver as
+# `PI_CODING_AGENT_DIR` (its `PI_` twin is built in a template literal, so only
+# this half is quoted in the source and checkable as a literal).
+OMP_ENV_LITERALS = {".env", "OMP_"}
 OMP_ASK_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/tools/ask.ts"
 )
+OMP_ASK_FIELDS = {"questions", "question"}
 
 
 class Anchor(typing.NamedTuple):
@@ -1270,6 +1394,17 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "protocol.rs",
                     "The rollout event_msg watch was SKIPPED.",
                 )
+            else:
+                for t in sorted(event_msg_ours):
+                    if t not in up_ev:
+                        report.add_breaking(
+                            f"Codex rollout event_msg `{t}` (decoded in "
+                            f"source/codex.rs) is GONE from upstream `EventMsg` — "
+                            f"renamed; the transcript decoder drops it SILENTLY "
+                            f"(`_ => vec![]`, no drift breadcrumb)."
+                        )
+        # The burn-tier decode is fail-quiet by design (a rename just darkens the
+        # model badge/flame), so this watch is its only alarm.
         if text is not None:
             tc_fields = codex_turn_context_fields(text)
             if tc_fields is None:
@@ -1278,6 +1413,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "protocol.rs",
                     "The burn-tier model/effort watch was SKIPPED.",
                 )
+            else:
+                for f in ("model", "effort"):
+                    if f not in tc_fields:
+                        report.add_breaking(
+                            f"Codex turn_context field `{f}` is GONE from "
+                            f"TurnContextItem in protocol.rs — renamed; the "
+                            f"burn-tier decoder reads None (model badge/flame "
+                            f"silently dark for codex agents)."
+                        )
         if ours.codex_rollout is not None:
             _, response_item_ours = ours.codex_rollout
             models = try_fetch(CODEX_MODELS_URL, "Codex models", report)
@@ -1290,9 +1434,26 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         "The rollout response_item watch was SKIPPED.",
                     )
                 else:
+                    for t in sorted(response_item_ours):
+                        if t not in up_ri:
+                            report.add_breaking(
+                                f"Codex rollout response_item `{t}` (decoded in "
+                                f"source/codex.rs) is GONE from upstream "
+                                f"`ResponseItem` — renamed; the transcript decoder "
+                                f"drops it SILENTLY."
+                            )
                     # A rename here silently mislabels the tool / never fires the
                     # approval gate. None = graceful skip (see the helper).
                     fc_fields = codex_function_call_fields(models)
+                    if fc_fields is not None:
+                        for f in ("name", "arguments"):
+                            if f not in fc_fields:
+                                report.add_breaking(
+                                    f"Codex function_call field `{f}` is GONE from "
+                                    f"ResponseItem::FunctionCall in models.rs — renamed; "
+                                    f"the decoder reads None (mislabels the tool / never "
+                                    f"gates on approval)."
+                                )
 
     if ours.reasonix is not None:
         text = try_fetch(REASONIX_HOOK_URL, "Reasonix source", report)
@@ -1311,6 +1472,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"Reasonix hook `{ev}` (registered in REASONIX_EVENTS) is "
                             f"GONE from upstream hook.go — likely renamed; the decoder "
                             f"will silently drop it."
+                        )
+                for field in sorted(REASONIX_PAYLOAD_FIELDS):
+                    if f'json:"{field}' not in text:
+                        report.add_breaking(
+                            f"Reasonix payload field `{field}` (read by "
+                            f"decode_rx_hook_payload) has no json tag in upstream "
+                            f"hook.go — likely renamed; the decode will silently zero."
                         )
 
     if ours.codewhale is not None:
@@ -1334,6 +1502,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         # Its own fetch of a SEPARATE file, so a failure to read the executor
         # can't be mistaken for every env var vanishing.
         exec_text = fetch_anchored(CODEWHALE_EXECUTOR_URL, "CodeWhale executor", report)
+        if exec_text is not None:
+            for field in sorted(CODEWHALE_ENV_FIELDS):
+                if f'"{field}"' not in exec_text:
+                    report.add_breaking(
+                        f"CodeWhale env var `{field}` (folded by the shim's env-mode "
+                        f"into the {{cwd,tool,tool_args}} envelope) is GONE from "
+                        f"hooks/executor.rs `to_env_vars` — renamed; the shim reads "
+                        f"None, the envelope omits its field, and the cwd-keyed "
+                        f"decoder drops the event (empty cwd = no sprite / no activity)."
+                    )
 
     if ours.opencode is not None:
         parts = [
@@ -1351,6 +1529,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"opencode event `{ev}` (decoded in source/opencode.rs) is GONE "
                         f"from upstream — likely renamed; the plugin still forwards it but "
                         f"the decoder maps it to nothing (no sprite / no activity)."
+                    )
+            for field in sorted(OPENCODE_PAYLOAD_FIELDS):
+                if not re.search(rf"(?m)^\s*{re.escape(field)}:", text):
+                    report.add_breaking(
+                        f"opencode field `{field}` (read by source/opencode.rs) is GONE "
+                        f"from the schema Struct defs — likely renamed; the plugin still "
+                        f"forwards the event but the decoder reads None (wrong-register / "
+                        f"no-link / no-activity)."
                     )
 
     if ours.grok is not None:
@@ -1372,6 +1558,27 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"upstream event.rs — likely renamed; the registered key "
                             f"stops matching and that event silently never fires."
                         )
+            for ident in sorted(GROK_ENVELOPE_IDENTS):
+                if not re.search(rf"(?m)^\s*pub {ident}:", text):
+                    report.add_breaking(
+                        f"grok envelope field `{ident}` is GONE from HookEventEnvelope "
+                        f"in event.rs — renamed; its camelCase wire name shifts and "
+                        f"decode_grok_hook_payload reads None (no key / no cwd)."
+                    )
+            for rename in sorted(GROK_PAYLOAD_RENAMES):
+                if f'rename = "{rename}"' not in text:
+                    report.add_breaking(
+                        f"grok payload rename `{rename}` is GONE from event.rs — the "
+                        f"wire field decode_grok_hook_payload reads was renamed; the "
+                        f"decode silently zeroes (no tool label / no child key)."
+                    )
+            for ident in sorted(GROK_PAYLOAD_IDENTS):
+                if not re.search(rf"(?m)^\s*{ident}:", text):
+                    report.add_breaking(
+                        f"grok payload field `{ident}` is GONE from event.rs — renamed; "
+                        f"the decoder's fallback reads None (Waiting reason / child "
+                        f"label degrade)."
+                    )
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
             for variant in sorted(GROK_XAI_VARIANTS):
@@ -1382,7 +1589,23 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"shifts and decode_grok_line maps the line to nothing "
                         f"(no subagent link / no model info / no end marker)."
                     )
+            for ident in sorted(GROK_XAI_FIELDS):
+                if not re.search(rf"(?m)^\s*(pub )?{ident}:", text):
+                    report.add_breaking(
+                        f"grok xAI update field `{ident}` is GONE from "
+                        f"extensions/notification.rs — renamed; decode_grok_line reads "
+                        f"None (child un-keyed / model dropped / end marker missed)."
+                    )
         text = fetch_anchored(GROK_ACTIVE_SESSIONS_URL, "grok active-sessions source", report)
+        if text is not None:
+            for ident in sorted(GROK_ACTIVE_SESSION_FIELDS):
+                if not re.search(rf"(?m)^\s*(pub )?{ident}:", text):
+                    report.add_breaking(
+                        f"grok active_sessions field `{ident}` is GONE from "
+                        f"active_sessions.rs — renamed; grok_ids_from_registry stops "
+                        f"parsing and the WHOLE liveness ladder (probe / instant exit / "
+                        f"negative vouch / focus) degrades to mtime gating."
+                    )
 
     if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
@@ -1421,9 +1644,32 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     COPILOT_SCHEMA_URL,
                     "The Copilot payload-field watch was SKIPPED.",
                 )
+            else:
+                for field in sorted(COPILOT_PAYLOAD_FIELDS):
+                    if field not in fields_up:
+                        report.add_breaking(
+                            f"Copilot field `{field}` (read by decode_copilot_line / "
+                            f"extract_copilot_cwd) is GONE from the schema properties — "
+                            f"renamed; the decoder reads None (wrong-register / no-link / "
+                            f"no tool label / permission never gates)."
+                        )
 
     if ours.omp is not None:
         dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
+        if dirs is not None:
+            for var in sorted(OMP_DIRS_ENV_VARS):
+                # Word-boundary, NOT the quoted form the other checks use:
+                # dirs.ts reads most of these as `process.env.X` (unquoted), so
+                # requiring quotes false-alarms on two working vars. Safe — these
+                # are distinctive SCREAMING_SNAKE names with no prose collision.
+                if not re.search(rf"\b{re.escape(var)}\b", dirs):
+                    report.add_breaking(
+                        f"omp env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::omp::resolve_omp_sessions_dir) is GONE from "
+                        f"packages/utils/src/dirs.ts — omp now resolves its sessions dir some "
+                        f"other way, so the watcher polls a directory it never writes to "
+                        f"(an empty office, no error)."
+                    )
 
         env_ts = fetch_anchored(OMP_ENV_URL, "omp env", report)
         if env_ts is not None:
@@ -1431,6 +1677,36 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             # JSDoc, so a rename leaving a stale `{@link …}` must not read as
             # "still there".
             code = strip_ts_comments(env_ts)
+            for fn, mirror in sorted(OMP_ENV_LOCATORS.items()):
+                if fn not in code:
+                    report.add_breaking(
+                        f"omp dotenv locator `{fn}` is GONE from utils/env.ts — "
+                        f"upstream reshaped WHERE the `.env` files are read from "
+                        f"or WHEN the dir resolver is rebuilt, so `{mirror}` in "
+                        f"source/omp.rs is now the divergence: we would overlay a "
+                        f"file omp stopped reading and watch a directory it "
+                        f"abandoned. Re-read the load order and repin "
+                        f"OMP_ENV_LOCATORS."
+                    )
+            for fn, mirror in sorted(OMP_ENV_PARSERS.items()):
+                if fn not in code:
+                    report.add_breaking(
+                        f"omp dotenv parser `{fn}` is GONE from utils/env.ts — "
+                        f"upstream reshaped what one `.env` LINE means, so "
+                        f"`{mirror}` in source/omp.rs now reads a value omp does "
+                        f"not: a mis-parsed directory var resolves a path omp "
+                        f"never writes to. Re-read the line semantics and repin "
+                        f"OMP_ENV_PARSERS."
+                    )
+            for lit in sorted(OMP_ENV_LITERALS):
+                if f'"{lit}"' not in code:
+                    report.add_breaking(
+                        f"omp dotenv literal `{lit}` is GONE from utils/env.ts — "
+                        f"renamed; `with_omp_dotenv` in source/omp.rs reads the "
+                        f"wrong filename or drops the OMP_→PI_ alias, so a user "
+                        f"who configures omp through a file gets an EMPTY office, "
+                        f"silently. Repin OMP_ENV_LITERALS."
+                    )
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
             # Quote-anchored on purpose: the entry types are generic English words,
@@ -1443,9 +1719,52 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"still flows but the decoder maps it to nothing (no sprite "
                         f"/ no activity)."
                     )
+            for field in sorted(OMP_SESSION_ENTRY_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", text):
+                    report.add_breaking(
+                        f"omp field `{field}` (read by decode_omp_line) is GONE from "
+                        f"session-entries.ts property keys — renamed; the decoder "
+                        f"reads None (no cwd label / no session_exit end)."
+                    )
         diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", report)
+        if diag is not None and '"session_exit"' not in diag:
+            report.add_breaking(
+                "omp customType `session_exit` (the clean-teardown marker the "
+                "session-ended checker + SessionEnd decode key on) is GONE from "
+                "exit-diagnostics.ts — renamed; finished sessions resurrect at "
+                "first sight and never SessionEnd."
+            )
         ai = fetch_anchored(OMP_AI_TYPES_URL, "omp pi-ai types", report)
+        if ai is not None:
+            for name in sorted(OMP_MESSAGE_LITERALS):
+                if f'"{name}"' not in ai:
+                    report.add_breaking(
+                        f"omp message literal `{name}` (read by decode_omp_line) is "
+                        f"GONE from pi-ai types.ts — renamed; tool rounds decode to "
+                        f"nothing."
+                    )
+            for field in sorted(OMP_MESSAGE_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", ai):
+                    report.add_breaking(
+                        f"omp message field `{field}` (read by decode_omp_line) is "
+                        f"GONE from pi-ai types.ts property keys — renamed; tool "
+                        f"rounds lose their key/target."
+                    )
         ask = fetch_anchored(OMP_ASK_URL, "omp ask tool", report)
+        if ask is not None:
+            if '"ask"' not in ask:
+                report.add_breaking(
+                    "omp tool name `ask` (drives the ask→Waiting decode) is GONE "
+                    "from tools/ask.ts — renamed; a session parked on a user "
+                    "question renders active instead of waiting."
+                )
+            for field in sorted(OMP_ASK_FIELDS):
+                if not re.search(rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", ask):
+                    report.add_breaking(
+                        f"omp ask field `{field}` (feeds the Waiting reason) is GONE "
+                        f"from tools/ask.ts property keys — renamed; the Waiting "
+                        f"reason degrades to the intent/bare-name fallback."
+                    )
 
     if ours.cursor is not None:
         text = fetch_anchored(CURSOR_HOOKS_URL, "Cursor hooks doc", report)
@@ -1477,6 +1796,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
             )
             upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
+            for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
+                if not re.search(rf"\b{re.escape(field)}\b", text):
+                    report.add_breaking(
+                        f"OpenClaw field `{field}` (read by decode_openclaw_hook_payload) is "
+                        f"GONE from src/plugins/hook-types.ts — renamed; the decoder reads "
+                        f"None (wrong run-key / no Degraded gate / no presence)."
+                    )
             for ty in sorted(OPENCLAW_GATEWAY_PORT_TYPES):
                 if ty not in text:
                     report.add_breaking(
@@ -1504,6 +1830,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 "The upstream-port comparison had nothing to compare against "
                 "and was SKIPPED (did OUR const get renamed?).",
                 our_source=True,
+            )
+        elif m.group(1) != our_port:
+            report.add_breaking(
+                f"OpenClaw's DEFAULT_GATEWAY_PORT is now {m.group(1)} but "
+                f"openclaw_plugin.js still falls back to {our_port} — a gateway on the new "
+                f"default would be stamped with the stale port (a phantom second mascot "
+                f"until its TTL sweeps it)."
             )
 
     if ours.hermes is not None:
@@ -1561,6 +1894,25 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"ANSWER a real approval prompt. Unregister it in "
                             f"install/hermes.rs, or make the shim decline explicitly."
                         )
+            for field in sorted(HERMES_PAYLOAD_FIELDS):
+                if f'"{field}"' not in shell:
+                    report.add_breaking(
+                        f"Hermes payload field `{field}` (read by "
+                        f"decode_hermes_hook_payload) is GONE from agent/shell_hooks.py "
+                        f"_serialize_payload — renamed; the shell-hook JSON omits it and the "
+                        f"decoder reads None (no coalesce key / no tool label)."
+                    )
+        home = fetch_anchored(HERMES_HOME_URL, "Hermes home resolver", report)
+        if home is not None:
+            for var in sorted(HERMES_HOME_ENV_VARS):
+                if f'"{var}"' not in home:
+                    report.add_breaking(
+                        f"Hermes env var `{var}` (mirrored by "
+                        f"pixtuoid_core::source::hermes::resolve_hermes_home) is GONE from "
+                        f"hermes_constants.py _hermes_home_from_env — hermes now resolves its "
+                        f"home some other way, so we install shell hooks into a config.yaml it "
+                        f"never reads (installed, but no sprite)."
+                    )
 
     if ours.kimi is not None:
         text = fetch_anchored(KIMI_HOOKS_URL, "Kimi hooks doc", report)

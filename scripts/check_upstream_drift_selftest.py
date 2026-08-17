@@ -743,7 +743,7 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
             d.CODEWHALE_EXECUTOR_URL in served,
             "the executor fetch actually ran (the injected fault fired)",
         )
-        cw = lambda xs: [x for x in xs if "CodeWhale" in x]  # noqa: E731
+        cw = lambda xs: [x for x in xs if "DEEPSEEK" in x or "CodeWhale" in x]  # noqa: E731
         return cw(report.breaking), cw(report.blind), served
 
     br, bl, _ = drive(facade)
@@ -754,15 +754,9 @@ def test_793_stale_pin_reads_as_probe_health_not_three_renames() -> None:
         f"the probe-health line must not name env vars as renamed: {bl!r}",
     )
 
-    # The REAL-rename half now rides the surviving HOOK check: the anchor is
-    # intact, so an absent registered event is a verified change, not blindness.
-    real_rename = config_rs.replace("ToolCallBefore,", "ToolCallBeforeV2,")
-    served_cfg = config_rs
-    config_rs = real_rename
-    br, bl, _ = drive(executor)
-    config_rs = served_cfg
+    br, bl, _ = drive(executor.replace('        env.insert("DEEPSEEK_WORKSPACE".to_string(), ws);\n', ""))
     check(
-        len(br) == 1 and "tool_call_before" in br[0],
+        len(br) == 1 and "DEEPSEEK_WORKSPACE" in br[0],
         f"a REAL rename must still be breaking drift, got breaking={br} blind={bl}",
     )
     check(not bl, f"a readable document produces no probe-health noise, got {bl}")
@@ -1192,6 +1186,105 @@ def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     )
 
 
+def test_omp_env_sweeps_fire_and_stay_silent() -> None:
+    """`with_omp_dotenv` only tracks omp while `refreshDirsFromEnv` still runs
+    AFTER the `.env` files load. If that ordering goes, our overlay becomes the
+    divergence — we would honour a file omp ignores — so this sweep needs the
+    both-directions treatment, comment-masking included: `.env` and `OMP_` sit
+    in the JSDoc as well as the code.
+    """
+    live = _OMP_ENV_LIVE
+    roles = (("omp dotenv locator", d.OMP_ENV_LOCATORS), ("omp dotenv parser", d.OMP_ENV_PARSERS))
+    # Floors first: every loop below iterates one of these, so an emptied set
+    # would run zero bodies and pass VACUOUSLY.
+    for label, size, floor in (
+        ("OMP_ENV_LOCATORS", len(d.OMP_ENV_LOCATORS), 3),
+        ("OMP_ENV_PARSERS", len(d.OMP_ENV_PARSERS), 3),
+        ("OMP_ENV_LITERALS", len(d.OMP_ENV_LITERALS), 2),
+    ):
+        check(size >= floor, f"{label} covers the overlay's inputs, got {size}")
+
+    for kind in ("omp dotenv locator", "omp dotenv parser", "omp dotenv literal"):
+        got = _drive_omp({d.OMP_ENV_URL: live}, kind)
+        check(not got, f"{kind}: an unchanged upstream must stay silent, got {got}")
+
+    # Each role's message must name ITS OWN requirement, or it sends the
+    # maintainer to the wrong half of source/omp.rs.
+    for kind, table in roles:
+        other = "parser" if "locator" in kind else "locator"
+        for fn, mirror in sorted(table.items()):
+            got = _drive_omp({d.OMP_ENV_URL: live.replace(fn, "renamed")}, kind)
+            check(
+                len(got) == 1
+                and f"`{fn}`" in got[0]
+                and f"`{mirror}`" in got[0]
+                and other not in got[0],
+                f"a vanished {fn} must fire once as a {kind} naming {mirror}, got {got}",
+            )
+
+    for lit in sorted(d.OMP_ENV_LITERALS):
+        got = _drive_omp(
+            {d.OMP_ENV_URL: live.replace(f'"{lit}"', '"renamed"')}, "omp dotenv literal"
+        )
+        check(
+            len(got) == 1 and f"`{lit}`" in got[0],
+            f"a vanished literal {lit} must fire exactly once, got {got}",
+        )
+
+    # Renaming the ANCHOR is a BLIND probe, not a rename line — the louder
+    # signal, and the reason `parseEnvFile` is in neither role table.
+    gone = live.replace("export function parseEnvFile", "function gone")
+    got = _drive_omp({d.OMP_ENV_URL: gone}, "omp dotenv")
+    check(not got, f"an anchor miss must not masquerade as a rename, got {got}")
+
+    # The masking regression: the CODE occurrence goes, the comments keep it.
+    # `.env` survives in BOTH the leading JSDoc and the trailing `//` prose; the
+    # locator/parser names survive only in the trailing prose, which is the half
+    # a `"`-only comment stripper leaks (the detector line sits above it).
+    masked = live.replace('getConfigRootDir(), ".env"', 'getConfigRootDir(), ".renamed"')
+    masked = masked.replace('getAgentDir(), ".env"', 'getAgentDir(), ".renamed"')
+    check('".env"' in masked, "the JSDoc example must survive, or this proves nothing")
+    got = _drive_omp({d.OMP_ENV_URL: masked}, "omp dotenv literal")
+    check(
+        len(got) == 1 and "`.env`" in got[0],
+        f"a literal surviving only in JSDoc must still fire, got {got}",
+    )
+
+    for fn, kind in (("getAgentDir", "omp dotenv locator"), ("parseEnvLine", "omp dotenv parser")):
+        # Rename every CODE occurrence; the trailing prose keeps the name.
+        masked = "".join(
+            ln if ln.lstrip().startswith(("//", "*", "/*")) else ln.replace(fn, "renamed")
+            for ln in live.splitlines(keepends=True)
+        )
+        check(fn in masked, f"the prose mention of {fn} must survive, or this proves nothing")
+        got = _drive_omp({d.OMP_ENV_URL: masked}, kind)
+        check(
+            len(got) == 1 and f"`{fn}`" in got[0],
+            f"{fn} surviving only in a comment BELOW the quote detector must "
+            f"still fire, got {got}",
+        )
+
+    # The stays-silent half: the same names reached through a reshaped import
+    # and an aliased call are the SAME code, and a gate that reds on a reformat
+    # sends the maintainer to repin for nothing.
+    reshaped = live.replace(
+        'import { getAgentDir, getConfigRootDir, refreshDirsFromEnv } from "./dirs";',
+        'import {\n\tgetAgentDir,\n\tgetConfigRootDir,\n\trefreshDirsFromEnv as rebuild,\n} from "./dirs";',
+    ).replace("refreshDirsFromEnv();", "rebuild(); // refreshDirsFromEnv")
+    for kind, _ in roles:
+        got = _drive_omp({d.OMP_ENV_URL: reshaped}, kind)
+        check(not got, f"{kind}: a reshaped import is not a rename, got {got}")
+
+    # Every Rust symbol these messages name must be a REAL fn.
+    omp_rs = (d.REPO / "crates/pixtuoid-core/src/source/omp.rs").read_text()
+    named = set(d.OMP_ENV_LOCATORS.values()) | set(d.OMP_ENV_PARSERS.values())
+    for sym in sorted(named | {"parse_omp_env_file"}):
+        check(
+            f"fn {sym}(" in omp_rs,
+            f"drift messages name `{sym}` — it must exist in source/omp.rs",
+        )
+
+
 def test_a_partial_parse_files_no_verified_change() -> None:
     """The direction nobody tested. A reader returning 12 of 37 names used to file
     up to five ⛔ "registered ... is GONE" against WORKING decoders and only THEN
@@ -1367,6 +1460,7 @@ def main() -> int:
         test_report_h1_is_the_issue_title_and_carries_the_disposition,
         test_ts_comment_strip_survives_a_quote_detector_line,
         test_rust_comment_strip_is_not_confused_by_lifetimes,
+        test_omp_env_sweeps_fire_and_stay_silent,
         test_every_block_reader_strips_comments_before_counting_braces,
         test_the_hermes_approval_gate_stays_observer_only,
         test_a_partial_parse_files_no_verified_change,

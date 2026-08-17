@@ -310,7 +310,6 @@ fn grok_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
-/// The COMPLETE set of grok transcript `method` namespaces: the ACP standard
 /// Decode one `updates.jsonl` line. Envelope: `{"timestamp":<unix-secs>,
 /// "method":…,"params":{"sessionId":…,"update":{"sessionUpdate":"<tag>",…}}}`,
 /// where ACP notifications use camelCase fields and the xAI extension's fields
