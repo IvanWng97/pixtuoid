@@ -314,6 +314,14 @@ GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-hooks/src/event.rs"
 )
+# The module that WRITES the method into updates.jsonl (`serialize_entry("method",
+# XAI_SESSION_UPDATE_METHOD)`), so it owns the name we gate on — not the
+# notification module, which only mentions it in a `///`.
+GROK_SESSION_STORAGE_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-shell/src/session/storage/mod.rs"
+)
+
 GROK_NOTIFICATION_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
@@ -462,6 +470,9 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem", "`RolloutItem`"),
     CODEWHALE_EXECUTOR_URL: Anchor(r"fn to_env_vars", "`HookContext::to_env_vars`"),
     GROK_ACTIVE_SESSIONS_URL: Anchor(r"pub struct ActiveSession", "`ActiveSession`"),
+    GROK_SESSION_STORAGE_URL: Anchor(
+        r"const XAI_SESSION_UPDATE_METHOD", "`XAI_SESSION_UPDATE_METHOD`"
+    ),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_serialize_payload", "`_serialize_payload`"),
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
@@ -1653,6 +1664,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"the decoder's fallback reads None (Waiting reason / child "
                         f"label degrade)."
                     )
+        store = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
+        if store is not None and '"_x.ai/session/update"' not in store:
+            report.add_breaking(
+                "grok's xAI method namespace `_x.ai/session/update` is GONE from "
+                "XAI_SESSION_UPDATE_METHOD in session/storage/mod.rs — renamed; "
+                "decode_grok_line gates the whole xAI arm on it, so subagent "
+                "spawn/finish, model info and the session-end marker all stop."
+            )
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
             for variant in sorted(GROK_XAI_VARIANTS):

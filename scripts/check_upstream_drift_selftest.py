@@ -390,6 +390,9 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.GROK_HOOK_URL: "pub struct HookEventEnvelope {\n    pub cwd: String,\n}",
     d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    SubagentSpawned,\n}",
     d.GROK_ACTIVE_SESSIONS_URL: "pub struct ActiveSession {\n    pub pid: u32,\n}",
+    d.GROK_SESSION_STORAGE_URL: (
+        'pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";'
+    ),
     d.OMP_SESSION_ENTRIES_URL: "export type SessionEntry = MessageEntry | CustomEntry;",
     d.OMP_EXIT_DIAG_URL: 'export const SESSION_EXIT_CUSTOM_TYPE = "session_exit";',
     d.OMP_AI_TYPES_URL: "export type Message = UserMessage | AssistantMessage;",

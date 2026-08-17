@@ -4,11 +4,12 @@
 //! `source`, so the persistent warn-floor log (read by `pixtuoid doctor`)
 //! captures it without any decoder signature change.
 //!
-//! Four defenses, weakest last: a SEMANTIC signal beats a hardcoded name
+//! Four defenses: a SEMANTIC signal beats a hardcoded name
 //! (`make_tool_detail` keys dispatch on `subagent_type`); these breadcrumbs;
-//! the `every_registered_*_event_decodes` tests in `install/`; and
-//! `scripts/check_upstream_drift.py` where upstream is fetchable — CC's
-//! transcript and antigravity have no schema, so they stop at this file.
+//! the `every_registered_*_event_decodes` tests in `install/`, which assert our
+//! own belief and so cannot see a rename; and `scripts/check_upstream_drift.py`,
+//! which can, wherever upstream is fetchable — CC's transcript and antigravity
+//! have no schema, so they stop at this file.
 //!
 //! **Only a surface we READ may raise one, and never from a name list.** These
 //! warn per LINE (no dedup), so a decoder that breadcrumbed every name it did

@@ -75,8 +75,8 @@ teeth, those own the specifics.)
   (`driver.rs`) FAILS for a registered source left unwired, so `just preflight`
   catches the miss — don't make it wait that long.
 - Capture the real wire shape and set `verified_version` (`"unknown"` until a
-  byte-real capture anchors it). Drift-watch it (see the add-a-CLI list's
-  drift-watch note in `crates/pixtuoid-core/CLAUDE.md`).
+  byte-real capture anchors it). Drift-watch it — the row shape and what earns
+  one are in `docs/CONTRIBUTING.md` "Adding a new agent CLI".
 - `just gen-contract` only if you touched the `--json`/`SourceStatus`/`OutcomeRow`
   SHAPE (adding a row doesn't).
 - `just preflight` before the PR, then run the **two-lens-review** skill.
