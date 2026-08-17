@@ -106,10 +106,9 @@ mod tests {
         );
     }
 
-    /// Blank, per-token and brand-new tags alike decode to nothing IN SILENCE.
-    /// ACP's schema is fetchable, so a tag we decode vanishing is CI's job; a
-    /// tag we never read is nobody's, and it used to cost a per-token flood
-    /// risk that only a hand-maintained vocabulary held back.
+    /// Blank, per-token and brand-new tags alike decode to nothing IN SILENCE:
+    /// a tag we never read cannot cost us an event, and breadcrumbing one meant
+    /// hand-maintaining the whole v1 vocabulary to hold back a per-token flood.
     #[test]
     fn no_session_update_tag_breadcrumbs_however_new() {
         for update in [

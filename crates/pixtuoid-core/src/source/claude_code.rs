@@ -143,11 +143,15 @@ pub fn claude_config_dir() -> Option<PathBuf> {
         .map(|d| crate::platform::warn_if_relative_override("CLAUDE_CONFIG_DIR", d))
 }
 
-/// The CC transcript types whose `message` payload this module decodes. CC is a
-/// CLOSED binary with no fetchable transcript schema, so it gets no CI
-/// drift-watch and the runtime breadcrumb is the sole defense — but only these
-/// two names can break rendering, so only they may raise one.
-const DECODED_TYPES: &[&str] = &["assistant", "user"];
+const ASSISTANT: &str = "assistant";
+const USER: &str = "user";
+
+/// The CC transcript types whose `message` payload this module decodes. CC's
+/// TRANSCRIPT has no fetchable schema, so it gets no CI drift-watch (its hooks
+/// do) and the runtime breadcrumb is the sole defense — but only these two names
+/// can break rendering, so only they may raise one. Every decode arm below
+/// matches the same two consts, so this cannot drift from what we read.
+const DECODED_TYPES: &[&str] = &[ASSISTANT, USER];
 
 /// Does this line carry a turn's payload? `message.role` + `message.content` is
 /// what a renamed [`DECODED_TYPES`] member would still arrive with, so it
@@ -174,9 +178,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     let ty = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
     // Both directions of the one rename that can freeze a sprite: the payload
-    // moved out from under the name, or the name moved off the payload. Each
-    // arm is the condition that actually costs us events, so neither can fire
-    // on a line this module still decodes.
+    // moved out from under the name, or the name moved off the payload.
     let message = obj.get("message").and_then(|m| m.as_object());
     if DECODED_TYPES.contains(&ty) {
         if message.is_none() {
@@ -236,7 +238,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     };
     // Every assistant line carries the model that produced that turn.
     // `<synthetic>` is CC's marker for tool-generated/error turns, not a model.
-    if ty == "assistant" {
+    if ty == ASSISTANT {
         if let Some(model) = message
             .get("model")
             .and_then(|m| m.as_str())
@@ -267,7 +269,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     }
     let content = message.get("content");
     match (ty, content) {
-        ("assistant", Some(Value::Array(blocks))) => {
+        (ASSISTANT, Some(Value::Array(blocks))) => {
             for block in blocks {
                 let Some(bobj) = block.as_object() else {
                     continue;
@@ -291,7 +293,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 });
             }
         }
-        ("user", Some(Value::Array(blocks))) => {
+        (USER, Some(Value::Array(blocks))) => {
             for block in blocks {
                 let Some(bobj) = block.as_object() else {
                     continue;
@@ -319,8 +321,9 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     Ok(out)
 }
 
-/// The CC transcript types whose lines are AGENT TURN activity. Every OTHER
-/// type is a session-metadata SIDECAR line, which CC appends to a transcript for
+/// The CC transcript types whose lines are AGENT TURN activity. Types outside
+/// this list are session-metadata SIDECAR lines unless they carry the turn
+/// payload (see [`cc_activity_recency`]) — which CC appends to a transcript for
 /// reasons unrelated to the owning process being alive: a STARTING session
 /// writes a metadata run (`bridge-session`, `pr-link`, …) into an OTHER,
 /// long-dead session's transcript, bumping an mtime the first-sight gate trusted
@@ -341,8 +344,8 @@ const ACTIVITY_TYPES: &[&str] = &[
 /// The workflow/skills orchestrator writes a `journal.jsonl` sidecar under
 /// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
 /// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
-/// projects tree the CC watcher walks, whose every line would fire the
-/// undeduplicated unknown-`type` breadcrumb into the warn-floor.
+/// projects tree the CC watcher walks, so without this it is watched, tailed and
+/// first-sight-gated as if it were a session transcript.
 ///
 /// A denylist, not an allowlist: the real subagent transcripts (including the
 /// ones nested under `workflows/wf_*/`) stay admitted, because misfiltering one
@@ -359,7 +362,10 @@ pub(crate) fn admits_transcript(path: &Path) -> bool {
 ///
 /// An unnamed type still counts as a turn when it carries the turn payload:
 /// the day CC renames one, reading it as "not a turn" would gate every live
-/// session at once.
+/// session at once. An unnamed type WITHOUT that payload reads as sidecar, so a
+/// rename of the four payload-less activity types (`system`, `attachment`,
+/// `file-history-delta`, `queue-operation`) lands in the residual below rather
+/// than in this guard.
 ///
 /// Accepted residual: an unvouched live session whose tail is momentarily all
 /// sidecar stays invisible until its next turn. Unvouched covers headless
@@ -523,10 +529,49 @@ mod tests {
                 let _ = decode_cc_line("/p/s.jsonl", SOURCE_NAME, line);
             }
         });
+        assert!(
+            out.contains(crate::source::drift::TARGET) && out.contains("message"),
+            "a decoded type losing `message` must name the field it lost:\n{out}"
+        );
         for ty in DECODED_TYPES {
             assert!(
                 out.contains(ty),
                 "{ty} lost `message` and decoded to nothing, silently:\n{out}"
+            );
+        }
+    }
+
+    /// The tail classifier's two directions, which no other test could tell
+    /// apart from the old name-list one: a type we have never seen reads as a
+    /// TURN when it carries the payload, and as SIDECAR when it does not.
+    #[test]
+    fn an_unnamed_type_is_a_turn_only_when_it_carries_the_payload() {
+        let line = |ty: &str, body: &str| {
+            format!(r#"{{"type":"{ty}","timestamp":"2026-07-29T05:46:24.525Z"{body}}}"#)
+        };
+        let turn = r#","message":{"role":"assistant","content":[]}"#;
+
+        // A renamed turn type keeps its timestamp instead of blanking the tail.
+        match cc_activity_recency(line("assistant-v2", turn).as_bytes()) {
+            TailActivity::At(_) => {}
+            other => panic!("a payload-carrying unnamed type must date the tail, got {other:?}"),
+        }
+        // ...and an unnamed type WITHOUT the payload is metadata, so it cannot
+        // vouch for a dead session's mtime.
+        assert_eq!(
+            cc_activity_recency(line("history-suppression", "").as_bytes()),
+            TailActivity::SidecarOnly,
+            "a payload-less unnamed type must read as sidecar"
+        );
+        // Every named activity type still dates the tail without a payload —
+        // the four that carry none are the ones a rename would strand.
+        for ty in ACTIVITY_TYPES {
+            assert!(
+                matches!(
+                    cc_activity_recency(line(ty, "").as_bytes()),
+                    TailActivity::At(_)
+                ),
+                "{ty} is a turn by NAME and must date the tail"
             );
         }
     }
@@ -964,7 +1009,7 @@ mod tests {
     fn no_sidecar_line_breadcrumbs_whether_or_not_we_have_seen_its_type() {
         let path = "/x/.claude/projects/p/s.jsonl";
         // The last case is a real `attachment` line whose INNER
-        // attachment.type is brand-new: only the top-level `type` is guarded.
+        // attachment.type is brand-new: neither axis carries a turn payload.
         let quiet = crate::test_capture::capture_logs(|| {
             for v in [
                 json!({"type": "quantum-line", "foo": 1}),

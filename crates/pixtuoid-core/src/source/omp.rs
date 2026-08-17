@@ -598,7 +598,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
-        // Types that are not sprite-visible.
+        // Not sprite-visible.
         // (model_change stays undecoded even though the burn tier reads model:
         // its value is the provider-prefixed combined form, and every assistant
         // message re-stamps the bare `model` anyway — one turn's lag.)
