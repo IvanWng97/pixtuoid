@@ -149,8 +149,8 @@ const USER: &str = "user";
 /// The CC transcript types whose `message` payload this module decodes. CC's
 /// TRANSCRIPT has no fetchable schema, so it gets no CI drift-watch (its hooks
 /// do) and the runtime breadcrumb is the sole defense — but only these two names
-/// can break rendering, so only they may raise one. Every decode arm below
-/// matches the same two consts, so this cannot drift from what we read.
+/// can break rendering, so only they may raise one. Pinned to the decode arms
+/// by `the_decoded_set_is_exactly_what_the_arms_match`.
 const DECODED_TYPES: &[&str] = &[ASSISTANT, USER];
 
 /// Does this line carry a turn's payload? `message.role` + `message.content` is
@@ -521,6 +521,31 @@ mod tests {
     /// The inverse rename: the NAME survives and the payload moves. Nothing
     /// caught this before — `decode_cc_line` returned early on the absent
     /// `message` without a word.
+    /// `DECODED_TYPES` is a SECOND copy of what the decode arms match, and the
+    /// arms cannot be enumerated at runtime — so shrinking the list would
+    /// silently stop the lost-payload alarm for the dropped name.
+    #[test]
+    fn the_decoded_set_is_exactly_what_the_arms_match() {
+        assert_eq!(DECODED_TYPES, ["assistant", "user"]);
+        // Each name reaches a real arm — the block shape each arm actually matches.
+        let block = |ty: &str| match ty {
+            "user" => json!({"type": "tool_result", "tool_use_id": "t1"}),
+            _ => json!({"type": "tool_use", "id": "t1", "name": "Bash"}),
+        };
+        for ty in DECODED_TYPES {
+            let line = json!({
+                "type": ty,
+                "message": {"role": "assistant", "content": [block(ty)]},
+            });
+            assert!(
+                !decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
+                    .expect("a decoded type decodes")
+                    .is_empty(),
+                "{ty} is in DECODED_TYPES but reaches no decode arm"
+            );
+        }
+    }
+
     #[test]
     fn a_decoded_type_that_lost_its_payload_alarms() {
         let out = crate::test_capture::capture_logs(|| {
@@ -563,15 +588,37 @@ mod tests {
             TailActivity::SidecarOnly,
             "a payload-less unnamed type must read as sidecar"
         );
-        // Every named activity type still dates the tail without a payload —
-        // the four that carry none are the ones a rename would strand.
-        for ty in ACTIVITY_TYPES {
+        // Spelled out, NOT iterated from `ACTIVITY_TYPES`: a loop over the list
+        // the classifier reads can only prove list members are list members, so
+        // dropping one would shrink the assertion instead of failing it.
+        let by_name = [
+            "assistant",
+            "attachment",
+            "file-history-delta",
+            "queue-operation",
+            "system",
+            "user",
+        ];
+        assert_eq!(ACTIVITY_TYPES, by_name, "the turn-by-NAME set changed");
+        for ty in by_name {
             assert!(
                 matches!(
                     cc_activity_recency(line(ty, "").as_bytes()),
                     TailActivity::At(_)
                 ),
                 "{ty} is a turn by NAME and must date the tail"
+            );
+        }
+        // F3: the predicate is the CONJUNCTION — a bare `message` envelope, or
+        // half of one, must stay sidecar or a future CC sidecar type floods.
+        for half in [
+            r#","message":{"role":"assistant"}"#,
+            r#","message":{"content":[]}"#,
+        ] {
+            assert_eq!(
+                cc_activity_recency(line("some-new-type", half).as_bytes()),
+                TailActivity::SidecarOnly,
+                "half a message envelope must not read as a turn: {half}"
             );
         }
     }
