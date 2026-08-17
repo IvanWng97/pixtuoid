@@ -16,10 +16,10 @@
 //! quiet — and a harmless upstream ADDITION then alarmed every user. Breadcrumb
 //! the condition that actually costs events instead: a payload we decode having
 //! gone, or an unknown discriminator arriving WITH that payload (CC's
-//! `decode_cc_line`). An unrecognized `hook_event_name` VALUE is the one safe
-//! NAME axis, because the shim only ever receives hooks we registered — but note
-//! it cannot catch a RENAME: registration is name-keyed, so a renamed hook simply
-//! never fires and we hear silence. That direction is CI's (defense 4).
+//! `decode_cc_line`). An unrecognized `hook_event_name` VALUE is safe to name in
+//! the 8 `install/` sources, whose shim only receives hooks they registered. It
+//! catches a re-SPELLING, never a rename: registration is name-keyed, so a
+//! renamed hook never fires at all. That direction is CI's (defense 4).
 //!
 //! `source` is a static registry source name (safe). The free-form values
 //! (`name`/`field`/`tool`/`detail`) are untrusted wire content, so they are made

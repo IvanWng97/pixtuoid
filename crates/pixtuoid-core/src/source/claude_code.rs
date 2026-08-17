@@ -480,28 +480,6 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// A CC type we do not read may never reach `doctor`, however new it is —
-    /// the breadcrumb is per-LINE, so the alarm arrived in front of every user
-    /// the day CC shipped `history-suppression`.
-    #[test]
-    fn a_sidecar_type_we_never_decoded_is_silent_however_new() {
-        let out = crate::test_capture::capture_logs(|| {
-            for ty in ["history-suppression", "a-type-cc-has-not-invented-yet"] {
-                let line = json!({"type": ty, "sessionId": "s", "cause": "x"});
-                assert!(
-                    decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
-                        .expect("a sidecar decodes")
-                        .is_empty(),
-                    "{ty} carries nothing we read, so it must decode to no events"
-                );
-            }
-        });
-        assert!(
-            !out.contains(crate::source::drift::TARGET),
-            "a type we do not read reached the drift log:\n{out}"
-        );
-    }
-
     /// The half that still has to alarm: a RENAMED turn type. It is recognised
     /// by the payload we decode, not by absence from a list, so nothing has to
     /// track CC's vocabulary for this to fire.
@@ -531,33 +509,22 @@ mod tests {
             "user" => json!({"type": "tool_result", "tool_use_id": "t1"}),
             _ => json!({"type": "tool_use", "id": "t1", "name": "Bash"}),
         };
-        for ty in DECODED_TYPES {
-            let line = json!({
-                "type": ty,
-                "message": {"role": "assistant", "content": [block(ty)]},
-            });
-            assert!(
-                !decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
-                    .expect("a decoded type decodes")
-                    .is_empty(),
-                "{ty} is in DECODED_TYPES but reaches no decode arm"
-            );
-        }
-    }
-
-    /// The healthy path, which nothing covered: `assistant`/`user` DO carry
-    /// `message.role`+`content`, so only the arms being mutually exclusive keeps
-    /// them out of the drift log. Split into two `if`s and every line of the two
-    /// hottest types breadcrumbs — #935's flood, aimed at the types it protects.
-    #[test]
-    fn a_normal_decoded_line_is_drift_silent() {
+        // ...and the healthy path stays SILENT: these lines DO carry
+        // `message.role`+`content`, so only the arms being mutually exclusive
+        // keeps them out of the drift log. Split them and every line of the two
+        // hottest types breadcrumbs — #935's flood, aimed at what it protects.
         let out = crate::test_capture::capture_logs(|| {
             for ty in DECODED_TYPES {
                 let line = json!({
                     "type": ty,
-                    "message": {"role": "assistant", "content": [], "model": "m"},
+                    "message": {"role": "assistant", "content": [block(ty)]},
                 });
-                let _ = decode_cc_line("/p/s.jsonl", SOURCE_NAME, line);
+                assert!(
+                    !decode_cc_line("/p/s.jsonl", SOURCE_NAME, line)
+                        .expect("a decoded type decodes")
+                        .is_empty(),
+                    "{ty} is in DECODED_TYPES but reaches no decode arm"
+                );
             }
         });
         assert!(
@@ -1083,6 +1050,11 @@ mod tests {
         let quiet = crate::test_capture::capture_logs(|| {
             for v in [
                 json!({"type": "quantum-line", "foo": 1}),
+                // #935's instance: shipped by CC and read by nothing here.
+                json!({"type": "history-suppression", "cause": "x"}),
+                // TYPELESS but payload-carrying: the `!ty.is_empty()` guard, or
+                // the breadcrumb names nothing at all.
+                json!({"message": {"role": "assistant", "content": []}}),
                 json!({"type": "mode", "mode": "acceptEdits"}),
                 json!({"type": "last-prompt", "prompt": "hi"}),
                 json!({"type": "worktree-state"}),

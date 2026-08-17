@@ -318,19 +318,12 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
     "agent-client-protocol/main/schema/v1/schema.unstable.json"
 )
 
-# The rollout OUTER discriminators `decode_codex_line` matches on, plus the two
-# `extract_codex_cwd` / the burn tier read. A rename here is not a lost inner
-# type — the whole outer arm stops matching, so the transcript decodes to
-# nothing. Watched against the `RolloutItem` enum, which has moved crates once.
-CODEX_ROLLOUT_OUTERS = {"event_msg", "response_item", "session_meta", "turn_context"}
-
-# The two top-level `method` namespaces `decode_grok_line` matches. A rename
-# gates every ACP notification before its tag is ever read.
-GROK_METHODS = {"session/update", "_x.ai/session/update"}
-
-# The ACP v1 `sessionUpdate` tags `decode_session_update` DECODES — not the whole
-# vocabulary, only the two that produce events.
-ACP_DECODED_TAGS = {"tool_call", "tool_call_update"}
+# grok's xAI extension namespace, the ONE method name not derivable from the
+# decode block: its `match method` nests a second match whose bare arms
+# over-collect. The ACP-standard `session/update` is deliberately absent — no
+# document declares it, so claiming to watch it would be the false-coverage
+# class this file exists to avoid; the ACP TAGS underneath it are watched below.
+GROK_XAI_METHOD = "_x.ai/session/update"
 
 GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
@@ -895,6 +888,30 @@ def match_arm_inner_types(block: str, outer: str) -> set[str]:
     return {t.strip().strip('"') for arm in arms for t in arm.split("|")}
 
 
+def read_codex_rollout_outers() -> set[str]:
+    """The OUTER discriminators `decode_codex_line` matches — DERIVED from the
+    same block the inner reader parses, so it cannot drift from the arms and a
+    name nothing matches (`session_meta`) cannot sit in it unnoticed."""
+    src = (REPO / "crates/pixtuoid-core/src/source/codex.rs").read_text()
+    block = rust_block_after(strip_rust_comments(src), r"match \(outer, inner\)")
+    if block is None:
+        raise RuntimeError("could not locate the codex decode block; update the parser.")
+    return set(re.findall(r'\(\s*"(\w+)"\s*,', block))
+
+
+def read_acp_decoded_tags() -> set[str]:
+    """The `sessionUpdate` tags `decode_session_update` turns into events —
+    DERIVED. Line-anchored because the block nests a `match status` whose arms
+    are `Some("…")`-wrapped and must not be collected."""
+    src = (REPO / "crates/pixtuoid-core/src/source/acp.rs").read_text()
+    block = rust_block_after(
+        strip_rust_comments(src), r'match str_field\("sessionUpdate"\)'
+    )
+    if block is None:
+        raise RuntimeError("could not locate the ACP sessionUpdate match; update the parser.")
+    return set(re.findall(r'(?m)^\s*"([^"]+)"\s*(?:\|\s*"[^"]+"\s*)*=>', block))
+
+
 def read_codex_rollout_types() -> tuple[set[str], set[str]]:
     """The (event_msg, response_item) inner `type` strings the codex TRANSCRIPT
     decoder matches on. These are registered NOWHERE and the decoder's
@@ -1314,6 +1331,8 @@ class OurNames:
 
     codex: set[str] | None = None
     codex_rollout: tuple[set[str], set[str]] | None = None
+    codex_rollout_outers: set[str] | None = None
+    acp_decoded_tags: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
     reasonix: set[str] | None = None
@@ -1335,6 +1354,8 @@ class OurNames:
 READERS: tuple[tuple[str, typing.Callable[[], typing.Any], str], ...] = (
     ("codex", read_codex_events, "CODEX_EVENTS in install/codex.rs"),
     ("codex_rollout", read_codex_rollout_types, "the decode arms in source/codex.rs"),
+    ("codex_rollout_outers", read_codex_rollout_outers, "the outer arms in source/codex.rs"),
+    ("acp_decoded_tags", read_acp_decoded_tags, "the sessionUpdate arms in source/acp.rs"),
     ("cc", read_cc_events, "EVENTS in install/claude.rs"),
     ("dispatch_names", read_dispatch_names, "the dispatch tool names in source/decoder.rs"),
     ("reasonix", read_reasonix_events, "REASONIX_EVENTS in install/reasonix.rs"),
@@ -1392,8 +1413,8 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
         report.add_blind(
             f"the {source} name set upstream actually offers",
             PARSE_SOURCES[source],
-            f"the reader returned {len(upstream)} names (floor {floor}), so BOTH "
-            f"drift directions were SKIPPED for {source}.",
+            f"the reader returned {len(upstream)} names (floor {floor}), so the "
+            f"vanish check was SKIPPED for {source}.",
         )
         return False
     return True
@@ -1461,7 +1482,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 "The rollout OUTER watch was SKIPPED.",
             )
         elif up_outers is not None:
-            for outer in sorted(CODEX_ROLLOUT_OUTERS):
+            for outer in sorted(ours.codex_rollout_outers or ()):
                 if outer not in up_outers:
                     report.add_breaking(
                         f"Codex rollout OUTER `{outer}` (matched in source/codex.rs) is "
@@ -1668,7 +1689,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         if text is not None:
             # The xAI extension namespace is spelled in the notification module;
             # `session/update` is ACP-standard and checked against the ACP schema.
-            for method in sorted(m for m in GROK_METHODS if m.startswith("_x.ai/")):
+            for method in [GROK_XAI_METHOD]:
                 if method not in text:
                     report.add_breaking(
                         f"grok method namespace `{method}` is GONE from "
@@ -1724,7 +1745,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             up_acp |= tags
             acp_parsed = True
     if acp_parsed:
-        for tag in sorted(ACP_DECODED_TAGS):
+        for tag in sorted(ours.acp_decoded_tags or ()):
             if tag not in up_acp:
                 report.add_breaking(
                     f"ACP v1 `sessionUpdate` tag `{tag}` (decoded in source/acp.rs) is "
@@ -1902,8 +1923,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"cursor.com/docs/hooks — likely renamed; the CLI still fires it but "
                         f"the decoder maps it to nothing (no sprite / no activity)."
                     )
-            # The other direction. The docs name hooks inline, so the set is the
-            # camelCase vocabulary rather than a quoted literal list.
 
     if ours.openclaw is not None:
         text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook-types", report)
@@ -1916,10 +1935,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"the plugin registers a hook OpenClaw never fires, so the lobster "
                         f"mascot silently stops reacting (no presence)."
                     )
-            union = re.search(
-                r'export type PluginHookName\s*=\s*((?:\s*\|\s*"[a-z_]+")+)', text
-            )
-            upstream = set(re.findall(r'"([a-z_]+)"', union.group(1))) if union else set()
             for field in sorted(OPENCLAW_PAYLOAD_FIELDS):
                 if not re.search(rf"\b{re.escape(field)}\b", text):
                     report.add_breaking(
