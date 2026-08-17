@@ -171,7 +171,6 @@ CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
 # `gateway_start`'s event/ctx: a rename leaves every envelope stamped with the
 # registration-time FALLBACK, so two live gateways collapse onto one mascot. The
 # type names are watched instead of the common word `port`.
-OPENCLAW_GATEWAY_PORT_TYPES = {"PluginHookGatewayStartEvent", "PluginHookGatewayContext"}
 
 # The plugin cannot IMPORT upstream's `DEFAULT_GATEWAY_PORT` (it lives in
 # OpenClaw's state dir, outside any `node_modules/openclaw`), so the literal is
@@ -230,7 +229,6 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
 # The value must be read from the declaration, never scanned for as a substring:
 # a rename of the VALUE at the declaration leaves the old literal standing in a
 # `///` and a `#[cfg(test)]` fixture, so `"…" in text` never fires.
-GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
 
 
 
@@ -303,6 +301,15 @@ class Anchor(typing.NamedTuple):
 #      without a parser, and a docs PAGE can only ever be this.
 #   3. Never one of the checked names itself — that is circular and makes the
 #      check vacuous (a rename would take the anchor too, so it could never fire).
+# The three JSON Schemas are parsed STRUCTURALLY (`$defs`/`definitions` walked by
+# `upstream_acp_session_update_tags` / `upstream_copilot_*`), so a text anchor
+# would add nothing a failed parse does not already say. Every OTHER swept
+# document is prose and must declare one — `every_swept_url_declares_an_anchor`
+# is what stops a new sweep quietly skipping the #793 gate.
+UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
+    {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
+)
+
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: each anchor is the declaration the checked names live inside.
     # `_hermes_home_from_env` is the whole resolution we mirror (it reads
@@ -325,11 +332,6 @@ ANCHORS: dict[str, Anchor] = {
 # Documents where a PARSER is the identity proof instead. Written down so the
 # selftest can assert this set equals the live `try_fetch` call sites — otherwise
 # the next unanchored sweep just uses that spelling to escape the gate.
-UNANCHORED_BY_DESIGN: dict[str, str] = {
-    ACP_V1_SCHEMA_URL: "parser-gated: upstream_acp_session_update_tags returns None",
-    ACP_V1_SCHEMA_UNSTABLE_URL: "parser-gated: same",
-    COPILOT_SCHEMA_URL: "parser-gated: the SessionEvent anyOf union gates both sweeps",
-}
 
 
 @dataclasses.dataclass
@@ -521,103 +523,10 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
 
 
 
-def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
-    """Remove `//` and `/* */` comments, PRESERVING string literals.
-
-    A scanner rather than a pair of `re.sub`s, because both regex approaches drop
-    a REAL depended name and so fail SILENTLY OPEN — the watcher stops checking
-    a name and nothing says so:
-
-    - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
-      every later entry on that line with it;
-    - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
-      leaves its tail behind and re-admits words from inside it.
-
-    The two languages disagree on exactly two axes, both passed in rather than
-    sniffed, because guessing either one fails SILENTLY OPEN too:
-
-    - `nested`: Rust NESTS block comments, TypeScript ends at the first `*/`.
-      Nesting a TS file would swallow the real code after that `*/`.
-    - `quotes`: which characters open a string. TS needs all three — its own
-      dotenv quote-detector spells `'"'`, a lone double quote inside a
-      single-quoted string, and tracking `"` alone desynchronises the scanner
-      from there to end of file (pinned by
-      `test_ts_comment_strip_survives_a_quote_detector_line`). Rust must NOT
-      track `'`, where an apostrophe is far more often a lifetime (`&'a str`)
-      than a string, and `'` + the next `'` would swallow the code between two
-      lifetimes (pinned by `test_rust_comment_strip_is_not_confused_by_lifetimes`).
-    """
-    out: list[str] = []
-    i, n, depth = 0, len(body), 0
-    while i < n:
-        pair = body[i : i + 2]
-        if depth:
-            if nested and pair == "/*":
-                depth += 1
-                i += 2
-            elif pair == "*/":
-                depth -= 1
-                i += 2
-            else:
-                i += 1
-            continue
-        if pair == "/*":
-            depth = 1
-            i += 2
-            continue
-        if pair == "//":
-            nl = body.find("\n", i)
-            i = n if nl < 0 else nl
-            continue
-        quote = body[i]
-        if quote in quotes:
-            j = i + 1
-            while j < n:
-                if body[j] == "\\":
-                    j += 2
-                    continue
-                if body[j] == quote:
-                    j += 1
-                    break
-                j += 1
-            out.append(body[i:j])
-            i = j
-            continue
-        out.append(body[i])
-        i += 1
-    return "".join(out)
 
 
-def rust_block_after(src: str, anchor_re: str) -> str | None:
-    """The `{ … }` block following the first `anchor_re` match, `None` if absent.
-
-    Bounding the scrape keeps out text the decoder does not depend on — a
-    `#[cfg(test)] mod tests` constructing the same shape leaks a phantom, and a
-    phantom makes the watcher alarm on a name upstream never had. Run the source
-    through `strip_rust_comments` first so a brace inside a comment or string
-    cannot move the bounds.
-    """
-    m = re.search(anchor_re, src)
-    if not m:
-        return None
-    start = src.find("{", m.end())
-    if start < 0:
-        return None
-    depth = 0
-    for i in range(start, len(src)):
-        if src[i] == "{":
-            depth += 1
-        elif src[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return src[start : i + 1]
-    return None
 
 
-def strip_rust_comments(body: str) -> str:
-    """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
-    the only string opener — an apostrophe here is usually a lifetime."""
-    return _strip_c_style_comments(body, nested=True, quotes='"')
 
 
 
@@ -677,57 +586,8 @@ def _snake_case(camel: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", camel).lower()
 
 
-def _enum_body(text: str, enum_name: str) -> str | None:
-    """The brace-balanced body of `enum <enum_name> { … }`.
-
-    THE enum-body reader for every Rust surface we watch — do not go back to a
-    regex, because both spellings guess where the body ENDS and break on a
-    harmless upstream refactor:
-
-    * `(.*?)\\}` stops at the FIRST `}`, so one struct variant truncates the enum
-      and every variant after it reads as GONE — a phantom rename per variant.
-    * `(.*?)\\n\\}` demands a column-0 closing brace, so an INDENTED enum runs on
-      to the next top-level one and a variant scrape admits the following `impl`
-      block's CamelCase idents.
-
-    Comments are stripped FIRST because they are scanned for braces otherwise: a
-    `// see Foo { bar }` line inside the enum would unbalance the count.
-    `strip_rust_comments` preserves string literals, so `rename = "…"` attrs that
-    callers read out of the returned body survive.
-    """
-    text = strip_rust_comments(text)
-    # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
-    # `HookEvent` must not bind to `enum HookEventName {`.
-    m = re.search(rf"enum\s+{enum_name}\s*\{{", text)
-    if not m:
-        return None
-    start = m.end() - 1
-    depth = 0
-    for i in range(start, len(text)):
-        if text[i] == "{":
-            depth += 1
-        elif text[i] == "}":
-            depth -= 1
-            if depth == 0:
-                return text[start + 1 : i]
-    return None
 
 
-def _strip_nested(s: str) -> str:
-    """Iteratively strip innermost `(…)`/`{…}` so only top-level variant idents
-    survive — else a CamelCase field/param TYPE reads as a variant.
-
-    PRECONDITION: comments are already gone (every caller passes an `_enum_body`
-    result). Do NOT re-strip them here with a naive `//[^\\n]*`: that eats to
-    end-of-line from a `//` inside a STRING LITERAL, so one `rename = "http://…"`
-    attr would silently delete every variant after it on that line.
-    """
-    prev = None
-    while prev != s:
-        prev = s
-        s = re.sub(r"\([^()]*\)", "", s)
-        s = re.sub(r"\{[^{}]*\}", "", s)
-    return s
 
 
 
@@ -744,14 +604,6 @@ def codex_function_call_fields(text: str) -> set[str] | None:
     return set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
-def codex_turn_context_fields(text: str) -> set[str] | None:
-    """The field idents of the `TurnContextItem` struct — the burn-tier feature
-    reads `model` + `effort` off every `turn_context` rollout line. Same
-    graceful-skip contract as `codex_function_call_fields`."""
-    m = re.search(r"pub struct TurnContextItem\s*\{([^}]*)\}", text)
-    if not m:
-        return None
-    return set(re.findall(r"\bpub ([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
 def upstream_cc_hook_events(text: str) -> set[str] | None:
@@ -765,9 +617,6 @@ def upstream_cc_hook_events(text: str) -> set[str] | None:
 
 
 
-def upstream_reasonix_hooks(text: str) -> set[str] | None:
-    found = set(re.findall(r'\w+\s+Event\s*=\s*"(\w+)"', text))
-    return found or None
 
 
 
@@ -872,19 +721,6 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
     return names or None
 
 
-def upstream_codewhale_hooks(text: str) -> set[str] | None:
-    """The CodeWhale TUI shell-command hook wire names.
-
-    NOT the app-server `codewhale-hooks` sink enum in `crates/hooks` — a different
-    mechanism sharing no configuration. serde `rename_all = "snake_case"`, so each
-    CamelCase variant converts to the name we register.
-    """
-    body = _enum_body(text, "HookEvent")
-    if body is None:
-        return None
-    variants = re.findall(r"^\s*([A-Z][A-Za-z0-9]+)\s*,", body, re.M)
-    snake = {_snake_case(v) for v in variants}
-    return snake or None
 
 
 def cc_doc_marker_findings(hooks_doc: str) -> list[str]:

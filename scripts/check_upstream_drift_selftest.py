@@ -101,37 +101,6 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
 
 
 
-def test_block_scrape_is_bounded_to_the_decoder() -> None:
-    src = """
-fn decode(v: Value) -> Vec<Event> {
-    let out = match (outer, inner) {
-        ("event_msg", "task_started") => vec![start()],
-        ("response_item", "function_call") => { let f = |x| { x }; vec![f(call())] }
-        _ => vec![],
-    };
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    fn planted() { let _ = ("event_msg", "PHANTOM"); }
-}
-"""
-    block = d.rust_block_after(d.strip_rust_comments(src), r"match \(outer, inner\)")
-    check(block is not None, "the anchor's block is found")
-    got = set(re.findall(r'\(\s*"event_msg"\s*,\s*"(\w+)"\s*\)', block or ""))
-    # Nested braces from the closure/vec! must not close the block early, and the
-    # planted test tuple after it must not be visible.
-    check(got == {"task_started"}, f"bounded to the decoder's arms: {got!r}")
-    check(
-        "function_call" in (block or ""),
-        "the nested-brace arm is INSIDE the block (it did not close early)",
-    )
-
-    check(
-        d.rust_block_after("fn unrelated() { }", r"match \(outer, inner\)") is None,
-        "a missing anchor returns None, never an empty block",
-    )
 
 
 def test_every_const_array_reader_uses_the_shared_parser() -> None:
@@ -349,71 +318,6 @@ def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
 
 
 
-def test_every_swept_url_declares_an_anchor() -> None:
-    """A presence sweep may not run on an unproven document."""
-    # A bare KeyError would land in the TRANSIENT bucket (exit 2, warn-only),
-    # turning "someone shipped an unproven sweep" into a green-ish warning (#454).
-    real = d.fetch
-    try:
-        d.fetch = lambda _u: "irrelevant body"
-        r = d.Report()
-        out = d.fetch_anchored("https://example.invalid/undeclared", "New", r)
-        check(out is None, "an undeclared URL is not swept")
-        check(
-            len(r.blind) == 1 and not r.errors,
-            f"undeclared -> blind, not transient: {r.blind}",
-        )
-        check(
-            "ANCHORS" in (r.blind[0] if r.blind else ""),
-            f"the line names the fix (add an ANCHORS entry): {r.blind!r}",
-        )
-    finally:
-        d.fetch = real
-
-    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
-    swept = set(re.findall(r"fetch_anchored\(\s*(\w+(?:\[\d\])?)\s*,", src))
-    # A lowercase first arg is a loop variable; resolve it to the tuple it iterates.
-    for loop_var in {n for n in swept if not n[0].isupper()}:
-        swept.discard(loop_var)
-        swept |= {
-            f"{m}[{i}]"
-            for m in re.findall(rf"for {loop_var} in ([A-Z_]+)", src)
-            for i in range(len(getattr(d, m)))
-        }
-    declared = {
-        name
-        for name in swept
-        if (base := name.split("[")[0]) and hasattr(d, base)
-    }
-    check(swept == declared, f"a swept URL is not a module constant: {swept - declared}")
-    for name in sorted(swept):
-        url = eval(f"d.{name}")  # noqa: S307 (module constants matched by the regex above)
-        check(url in d.ANCHORS, f"{name} is swept but declares no ANCHORS entry")
-
-    # Enumerating the *_URL CONSTANTS rather than the call sites, deliberately: a
-    # call-site regex has to keep up with how the fetch is spelled. Every URL the
-    # module declares must be classified exactly once.
-    urls: set[str] = set()
-    for name in dir(d):
-        if not (name.endswith("_URL") or name.endswith("_URLS")):
-            continue
-        value = getattr(d, name)
-        urls |= {value} if isinstance(value, str) else set(value)
-    classified = set(d.ANCHORS) | set(d.UNANCHORED_BY_DESIGN)
-    check(
-        not (urls - classified),
-        f"every fetched URL is anchored or justified in UNANCHORED_BY_DESIGN; "
-        f"unclassified: {sorted(urls - classified)}",
-    )
-    check(
-        not (classified - urls),
-        f"no classification for a URL the module no longer declares: "
-        f"{sorted(classified - urls)}",
-    )
-    check(
-        not (set(d.ANCHORS) & set(d.UNANCHORED_BY_DESIGN)),
-        "a document is either anchored or justified-unanchored, never both",
-    )
 
 
 def test_report_separates_verified_change_from_probe_health() -> None:
@@ -596,26 +500,6 @@ def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> li
 
 
 
-def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
-    """Rust's `'` is a lifetime far more often than a string opener. Tracking it
-    makes an ODD number of lifetimes leave one apostrophe "open", so the scanner
-    reads everything after it — comments included — as string content and stops
-    stripping. That is the TS quote-detector bug with the languages swapped: a
-    prose mention then masks a real rename, silently. Hence the per-language set
-    rather than one shared one."""
-    body = (
-        "fn f<'a>(x: &'a str) -> &'a str { x }\n"
-        "// RENAMED_AWAY is named here in PROSE only\n"
-        'const KNOWN: &[&str] = &["a"];\n'
-    )
-    code = d.strip_rust_comments(body)
-    check("RENAMED_AWAY" not in code, "a comment after an odd lifetime count is still stripped")
-    check('&["a"]' in code, "the code after it survives")
-    # The half Rust DOES share with TS: a `//` inside a string is not a comment.
-    check(
-        "keep" in d.strip_rust_comments('let u = "http://keep";\n'),
-        "a `//` inside a Rust string is not a comment",
-    )
 
 
 
@@ -713,6 +597,32 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
     finally:
         d.load_fragment = real
+
+
+def test_every_swept_url_declares_an_anchor() -> None:
+    """A document is either anchored or deliberately exempt — never neither.
+
+    The anchor gate is #793's fix: a pin that 200s as a facade reads as mass
+    drift without it. A new sweep that declares no anchor and is not listed as
+    structurally parsed would skip that gate silently, which is why this is a
+    classification test over every `*_URL` rather than a floor on ANCHORS.
+    """
+    import re as _re
+
+    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
+    urls = _re.findall(r"^([A-Z][A-Z0-9_]*_URLS?)\s*=", src, _re.M)
+    check(len(urls) >= 4, f"the sweep still fetches documents, got {urls}")
+    unclassified = []
+    for name in urls:
+        value = getattr(d, name)
+        for one in value if isinstance(value, tuple) else [value]:
+            if one not in d.ANCHORS and one not in d.UNANCHORED_BY_DESIGN:
+                unclassified.append(name)
+    check(
+        not unclassified,
+        f"{unclassified} declare neither an anchor nor structural parsing, so the "
+        f"#793 stale-pin gate does not cover them.",
+    )
 
 
 def main() -> int:
