@@ -1096,7 +1096,9 @@ def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> li
 
     `ours` is explicit because each source's block is gated on its own field: a
     driver that supplied one source's names silently skipped every OTHER block,
-    so the stub was never fetched and the drive passed by testing nothing."""
+    so the stub was never REQUESTED. The guard below checks exactly that much — a
+    document fetched but never swept reads identically, so a silent arm still
+    needs a paired mutant arm to prove the sweep ran."""
 
     served: list[str] = []
 
@@ -1530,11 +1532,30 @@ def test_grok_xai_method_compares_the_declaration_not_a_substring() -> None:
         len(got) == 1 and f"`{ours}/v2`" in got[0],
         f"a renamed declaration must fire once, naming the new value; got {got}",
     )
+    # `re.search` takes the FIRST match, so a commented-out declaration ABOVE the
+    # real one masks the rename unless comments are stripped first.
+    masked = f"// pub const XAI_SESSION_UPDATE_METHOD: &str = \"{ours}\";\n" + moved
+    got = _drive_upstream({d.GROK_SESSION_STORAGE_URL: masked}, kind, _GROK_NAMES)
+    check(
+        len(got) == 1 and f"`{ours}/v2`" in got[0],
+        f"a commented-out declaration must not mask the rename; got {got}",
+    )
 
 
 def main() -> int:
     # Derived, not hand-listed: a test missing from the runner is inert while
-    # the suite still prints "all checks passed".
+    # the suite still prints "all checks passed". Derivation cannot see the OTHER
+    # half — a second `def` of the same name replaces the binding — so that is an
+    # AST scan, and it runs HERE rather than as a test because a test detecting
+    # duplicate names is itself shadowable by a duplicate.
+    defined = [
+        n.name
+        for n in ast.parse(pathlib.Path(__file__).read_text()).body
+        if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")
+    ]
+    if dupes := sorted({n for n in defined if defined.count(n) > 1}):
+        print(f"DRIFT SELFTEST FAILED:\n  - test name defined twice, shadowing: {dupes}")
+        return 1
     tests = tuple(o for n, o in list(globals().items()) if n.startswith("test_"))
     for t in tests:
         t()

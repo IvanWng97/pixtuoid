@@ -322,8 +322,8 @@ GROK_SESSION_STORAGE_URL = (
 )
 # Matches BOTH sides of this watch — upstream's declaration and our mirror of it.
 # The value must be read from the declaration, never scanned for as a substring:
-# an IDE symbol rename updates every ident reference but leaves the literal
-# standing in a `///` and a `#[cfg(test)]` fixture, so `"…" in text` is fail-open.
+# a rename of the VALUE at the declaration leaves the old literal standing in a
+# `///` and a `#[cfg(test)]` fixture, so `"…" in text` never fires.
 GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
 GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 
@@ -1677,7 +1677,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
         store = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
         if store is not None and ours.grok_xai_method is not None:
-            decl = re.search(GROK_XAI_METHOD_DECL, store)
+            decl = re.search(GROK_XAI_METHOD_DECL, strip_rust_comments(store))
             if decl is None:
                 report.add_blind(
                     "grok's `XAI_SESSION_UPDATE_METHOD` value",
