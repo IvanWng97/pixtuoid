@@ -44,9 +44,8 @@ explains why, one line of it indexed in that crate's nested `CLAUDE.md`.
 siblings that are **not** auto-loaded — you must open them. The four Rust
 guides (core, scene, binary, tui) index `SHARP-EDGES.md` (the edge + WHY +
 authority pointer per entry) and `WHERE-TO-LOOK.md` (the non-obvious seams
-behind "how does X work?"); core
-adds `UPSTREAM-DRIFT.md` and site `SINGLE-SOURCED.md` as
-plain pointers. The `tests/` and Raycast guides are small enough to keep their
+behind "how does X work?"); the site guide
+adds `SINGLE-SOURCED.md` as a plain pointer. The `tests/` and Raycast guides are small enough to keep their
 sharp edges INLINE — nothing to open there. **Every index line
 is the sibling entry's own opening text, verbatim — grep any of it to land on
 the full entry — because the marked index blocks are GENERATED from the

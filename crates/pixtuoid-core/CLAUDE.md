@@ -80,10 +80,6 @@ question:
 - Why don't old idle sessions show on startup?
 <!-- lookup:end -->
 
-## Keeping the decode mapping current (upstream drift)
-
-Moved to [`UPSTREAM-DRIFT.md`](UPSTREAM-DRIFT.md) — read it before touching this area.
-
 ## When refactoring
 
 The channel type, `Source` trait, `AgentEvent` enum, and reducer signature are workspace-wide contracts — see the root [`CLAUDE.md`](../../CLAUDE.md) "When refactoring" for the full list of test files to update and the add-a-CLI checklist.
