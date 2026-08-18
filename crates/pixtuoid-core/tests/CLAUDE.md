@@ -1,157 +1,99 @@
 # pixtuoid-core/tests — agent guide
 
-Integration tests for the headless lib, organized **by capability/layer** (the
-suite's real axis), with the per-CLI dimension living where the actual variation
-is — the source fixtures. 9 test binaries (each top-level `tests/*.rs` or
-`tests/<area>/main.rs` is one binary):
+Integration tests organized **by capability/layer**; the per-CLI dimension
+lives where the actual variation is — the source fixtures. 9 test binaries
+(each top-level `tests/*.rs` or `tests/<area>/main.rs` is one binary):
 
 ```
 tests/
-├── sources/main.rs           the source/decode layer (1 binary)
-│   ├── captures.rs          THE walk (`every_capture()`) + every provenance RULE.
-│   │                         `conformance.rs` imports its tree helpers, so dropping
-│   │                         `mod captures;` fails to COMPILE rather than quietly
-│   │                         running 13 fewer tests — that coupling is the floor.
-│   │                         ONE enumeration, no mirror: separate walks with three
-│   │                         populations is why "the fix landed on half the
-│   │                         population" recurred across four review rounds, and a
-│   │                         Python twin of the walk was a second copy of the same
-│   │                         hazard. The rules are Rust so they ride `just test` on
-│   │                         all three platforms; `fixture-age.py` keeps only the
-│   │                         advisory age report
-│   ├── decode/mod.rs         cross-CLI decoder unit tests
-│   │   └── fixtures/{hooks,jsonl}/   decode's OWN data (NOT a capture — hand-built
-│   │                         decoder inputs, so `capture_dirs()` skips `decode/`)
-│   ├── conformance.rs        per-source SessionStart→tool snapshot harness (insta) — a
-│   │                         `harness::Drive` shell (one drive per transport); ALSO pins that a
-│   │                         first-sight SEED keyed by the registry row coalesces with each
-│   │                         transcript's own decoder keying
-│   ├── manager.rs            SourceManager spawn/health
-│   ├── claude/mod.rs         CC subagent lifecycle
-│   │   └── fixtures/hook-payloads.jsonl   CC's OWN data (single-owner; NOT scanned)
-│   ├── codex/mod.rs          codex subagent lifecycle
-│   │   └── fixtures/hook-payloads.jsonl   codex's OWN data (single-owner; NOT scanned)
-│   ├── codewhale/mod.rs      codewhale subagent lifecycle (spawn/complete → child sprite)
-│   │   └── fixtures/hook-payloads.jsonl   codewhale's OWN data (single-owner; NOT scanned)
-│   ├── cursor/mod.rs         cursor's DELEGATING capture: a child is an independent session,
-│   │   └── fixtures/…        so it is two sprites and cannot live under the one-AgentId rule
-│   ├── grok/mod.rs           grok's DELEGATING capture, both transports of ONE run — same
-│   │   └── fixtures/…        two-sprite reason; only a `background: false` spawn mints Task
-│   ├── delegation/mod.rs     the NAME-KEYED family (a tool literally called `task`): opencode,
-│   │   └── fixtures/<cli>/   copilot, omp. Grouped by CAPABILITY — one rule, one table
-│   ├── snapshots/            insta snaps  (sources__conformance__<source>__<scenario>)
-│   └── fixtures/<source>/    ══ conformance scenarios ONLY — dir name MUST be a registered source ══
-│       └── <scenario>/provenance.json   recorded | composed | unknown — REQUIRED, see fixtures/README.md
-├── reducer/main.rs           state-machine behavior (1 binary; shared scaffolding lives in main.rs — builders `start`/`delegating_pair` + the apply-DSL `act_start`/`act_end`/`waiting`/`proof_of_life`/`sess_end`)
-│   ├── lifecycle.rs          SessionStart/End arms: registration/capacity, resurrect-in-place, hook synthesis of unknown ids, duplicate-start backfill, `Identity`
-│   ├── activity.rs           per-slot FSM: Active/Idle debounce, Waiting set/resolve gates, active_ms + tool_call_count
-│   ├── tasks.rs              active_tasks suppression, hook-wins dedup, drains, b1 cascade grace + waiting-clobber pins
-│   ├── liveness.rs           stale sweeps/timeouts, proof-of-life + vouch exemptions, cascade↓ / liveness↑ / readiness, cycle reap
-│   ├── display.rs            labels: cwd-basename derivation, ghost ordinals, source prefixes, rename
-│   ├── child_ledger.rs       SessionEnd tombstones + child-end ledger: gating, revival relink, parent adoption, cycle filter
-│   └── snapshot.rs           full-scene serialization golden (#279): deterministic fixed-time script → insta YAML of the whole SceneState (locks tree shape + reducer output end-to-end)
-├── e2e.rs                    end-to-end driver wiring (own binary)
-├── watcher/main.rs           JsonlWatcher behavior (1 binary; the poll-seam harness — `fast_watch`,
-│   │                         `cc_watcher`, `vouch_snapshot`, `write_lines`, `backdate` + the cc line builders — lives in main.rs)
-│   ├── tailing.rs            cursor mechanics: append-tail emit, partial trailing line, truncation reset, non-UTF-8 skip
-│   ├── first_sight.rs        the first-sight gate: stale/recent/ended/oversized seeds, probe bypass, cwd + id/label derivers, subagent parent links
-│   ├── liveness.rs           proof-of-life emission, negative vouch, instant exit (pid death), probe-failure no-ops
-│   ├── unclaim.rs            child-end un-claim: turn-N+1 re-register + in-flight multi-turn revival
-│   ├── sources.rs            Source::run glue — ALL SIX transcript sources bind+spawn (codex / antigravity /
-│   │                         claude-code / copilot / omp / grok). Keep it all six: grok was the one missing
-│   │                         and its `run -> Ok(())` mutant outlived the whole workspace suite (#828)
-│   │                         + the ONE fixture→Reducer fold: a committed rollout driven through the real
-│   │                         reducer, asserting the ActivityState progression (conformance snapshots stop
-│   │                         at decoded events and never construct a Reducer, so no other test observes one)
-│   └── attach.rs             the mid-attach scenario suite (attach shows exactly the live set)
-├── transport/main.rs         #[cfg(unix)] mod socket;  #[cfg(windows)] mod pipe;
-├── render/main.rs            mod {blit, format}  +  render/fixtures/ (sprites)
-├── socket_path_parity.rs     FLAT — publish-excluded (see below)
-├── supported_sources_manifest.rs   FLAT — publish-excluded
-└── proof_fixture_disjointness.rs   FLAT — publish-excluded (see below)
+├── sources/main.rs      the source/decode layer (1 binary)
+│   ├── captures.rs      THE walk (`every_capture()`) + every provenance RULE, in Rust
+│   │                    so the rules ride `just test` on all three platforms. ONE
+│   │                    enumeration, no mirror (three populations = a fix landing on
+│   │                    half of one, four rounds running). `conformance.rs` imports its
+│   │                    tree helpers, so dropping `mod captures;` fails to COMPILE.
+│   ├── decode/          cross-CLI decoder unit tests; its fixtures/{hooks,jsonl}/ are
+│   │                    hand-built decoder inputs, NOT captures (`capture_dirs()` skips it)
+│   ├── conformance.rs   per-source SessionStart→tool snapshot harness (insta), a
+│   │                    `harness::Drive` shell; also pins first-sight seed ↔ decoder keying
+│   ├── manager.rs       SourceManager spawn/health
+│   ├── claude/ codex/ codewhale/   per-CLI subagent lifecycle, each with its OWN
+│   │                    single-owner fixtures/hook-payloads.jsonl (NOT scanned)
+│   ├── cursor/ grok/    DELEGATING captures — a child is an independent session (two
+│   │                    sprites), so these can't live under the one-AgentId rule
+│   ├── delegation/      the NAME-KEYED family (a tool literally called `task`):
+│   │                    opencode, copilot, omp — one rule, one table
+│   ├── snapshots/       insta snaps (sources__conformance__<source>__<scenario>)
+│   └── fixtures/<source>/<scenario>/  conformance scenarios ONLY — dir name MUST be a
+│                        registered source; provenance.json REQUIRED (fixtures/README.md)
+├── reducer/main.rs      state-machine behavior; shared builders + apply-DSL in main.rs
+│                        (lifecycle · activity · tasks · liveness · display ·
+│                        child_ledger · snapshot.rs, the full-scene insta golden #279)
+├── e2e.rs               end-to-end driver wiring
+├── watcher/main.rs      JsonlWatcher behavior; the poll-seam harness in main.rs
+│                        (tailing · first_sight · liveness · unclaim · attach ·
+│                        sources.rs — ALL SIX transcript sources bind+spawn, keep all
+│                        six (#828), + the ONE fixture→Reducer fold: the only test that
+│                        drives committed wire through a real Reducer)
+├── transport/main.rs    #[cfg(unix)] socket / #[cfg(windows)] pipe
+├── render/main.rs       blit + format (+ sprite fixtures)
+└── socket_path_parity.rs · supported_sources_manifest.rs · proof_fixture_disjointness.rs
+                         FLAT + publish-excluded (sharp edge below)
 ```
 
-## Governing principle
-
-- **Code groups by capability/layer**, not by CLI. Only the subagent-lifecycle
-  tests are single-CLI (`sources/{claude,codex,codewhale,cursor,grok}`); decode/conformance are cross-CLI.
-- **Data scopes to the binary that reads it, sub-grouped by CLI.** A fixture read
-  by one test module lives *with that module* at `sources/<module>/fixtures/`;
-  fixtures the conformance harness iterates live in `sources/fixtures/<source>/`.
-  Two single-owner trees have a second, CROSS-CRATE reader:
-  `pixtuoid/tests/wire_to_pixels.rs` roots at `sources/` rather than
-  `sources/fixtures/` because it needs the two-sprite captures (cursor's and the
-  delegation family's) that the conformance one-AgentId rule cannot host.
+Data scopes to the binary that reads it — a module-owned fixture lives with
+its module. One cross-crate reader: `pixtuoid/tests/wire_to_pixels.rs` roots
+at `sources/` (not `sources/fixtures/`) because it needs the two-sprite
+captures the one-AgentId rule cannot host.
 
 ## The one pipeline
 
-Everything that feeds real wire bytes through the production path rides
-`pixtuoid_core::harness::Drive` (core's dev-only `harness` feature): this
-suite's `conformance.rs`, `sources/grok/mod.rs`, `sources/cursor/mod.rs` and
-`sources/delegation/mod.rs` (the last two hardcoded their decoders until #929 —
-a registry row rewired to a different `line_decoder` left all five tests green),
-`pixtuoid/tests/wire_to_pixels.rs`, and the two
-on-demand tools (`examples/decoder_fuzz.rs`,
-`pixtuoid-scene/examples/corpus_check.rs`). `benches/decode_reduce.rs` rides it
-too but SYNTHESIZES its lines — a bench-shaped fixture under `sources/fixtures/`
-would be mis-scanned (see the sharp edge below). A shell supplies bytes and asserts
-or reports; it does NOT re-roll decode → reduce, and in particular it does not
-re-derive the first-sight seed's `AgentId` (that comes from the source's
-registry row — see the core guide).
+Real wire bytes ride `pixtuoid_core::harness::Drive` (dev-only `harness`
+feature): `conformance.rs`, `sources/{grok,cursor,delegation}` (hardcoded
+decoders until #929), `pixtuoid/tests/wire_to_pixels.rs`, and the on-demand
+tools (`decoder_fuzz`, `corpus_check`). A shell supplies bytes and asserts;
+it does NOT re-roll decode→reduce and never re-derives the first-sight seed's
+`AgentId` (that comes from the source's registry row — core guide).
+`benches/decode_reduce.rs` SYNTHESIZES its lines — a bench-shaped fixture
+under `sources/fixtures/` would be mis-scanned.
 
 ## Adding a new agent CLI — the test steps
 
-1. **Always:** add `tests/sources/fixtures/<registered-source>/<scenario>/` — at
-   minimum a `SessionStart` conformance scenario, RECORDED off the CLI (`just
-   capture-fixture <source> <scenario> <cmd…>`), plus the `provenance.json` the
-   recorder writes and `every_capture_declares_a_valid_origin_with_its_required_fields` requires. A
-   hook-only source's first recorded scenario also drops its
-   `NO_WIRE_EVIDENCE_YET` entry. `conformance.rs` auto-discovers the dir;
-   `supported_sources_manifest` forces the manifest row; `cargo insta review`
-   to accept the new snapshot. The dir name MUST equal the registered source
-   name (`registered_source_names()`: `claude-code`, not `claude`). A
-   transcript-bearing source's fixture is additionally driven WITH the
-   first-sight seed, so a registry row wired to the wrong `id_from_path` fails
-   there rather than shipping as two sprites for one session.
-2. **Always:** add a case row + a `#[test] fn` to
-   `pixtuoid/tests/wire_to_pixels.rs` (`wire_matrix_covers_every_registered_source`
-   forces it), and settle `TOOL_ID_KEY_UNPROVEN` in `captures.rs` — a capture
-   carries a tool id under the row's `tool_id_key`, or the source is named there
-   with the reason it cannot. Step 12 of `CONTRIBUTING.md`'s checklist lists the
-   third roster literal, which lives outside this tree.
-3. **Only if the CLI has unique behavior** (subagent hooks, custom lifecycle): add
-   `tests/sources/<cli>.rs` (or `<cli>/mod.rs` if it needs private fixtures) and
-   register `mod <cli>;` in `tests/sources/main.rs`. Plain CLIs (antigravity,
-   reasonix) need none — `decode/mod.rs` + `conformance.rs` cover them.
+1. **Always:** `tests/sources/fixtures/<registered-source>/<scenario>/` — at
+   minimum a RECORDED SessionStart scenario (`just capture-fixture`) with the
+   `provenance.json` the recorder writes; a hook-only source's first recorded
+   scenario also drops its `NO_WIRE_EVIDENCE_YET` entry. `conformance.rs`
+   auto-discovers the dir; `supported_sources_manifest` forces the manifest
+   row; `cargo insta review` accepts the snapshot. Dir name = registered
+   source name (`claude-code`, not `claude`); transcript-bearing fixtures are
+   driven WITH the first-sight seed, so a wrong `id_from_path` fails here
+   instead of shipping two sprites for one session.
+2. **Always:** a case row + `#[test] fn` in `pixtuoid/tests/wire_to_pixels.rs`
+   (`wire_matrix_covers_every_registered_source` forces it), and settle
+   `TOOL_ID_KEY_UNPROVEN` in `captures.rs`. The third roster literal is
+   CONTRIBUTING.md checklist step 12, outside this tree.
+3. **Only for unique behavior** (subagent hooks, custom lifecycle): a
+   `tests/sources/<cli>/` module registered in `sources/main.rs`. Plain CLIs
+   (antigravity, reasonix) need none.
 
 ## Known sharp edges
 
-- **Three tests stay FLAT and MUST NOT be moved into a grouped binary**:
-  `socket_path_parity.rs` (`#[path]`-includes the hook shim's `paths.rs`),
-  `supported_sources_manifest.rs` (reads `../../site/src/sources.json`), and
-  `proof_fixture_disjointness.rs` (reads `../../site/src/components/Statusline.astro`
-  — the proof-session fixture's disjointness pin against the statusline ticker's
-  `FALLBACK` corpus). All three are in `Cargo.toml`'s `exclude` so the published
-  `.crate` tarball builds without their sibling `site/`/`pixtuoid-hook` files; a
-  submodule of a grouped binary can't be individually excluded (the parent's
-  `mod` would fail to compile on the extracted crate).
-- **A multi-file binary is `tests/<area>/main.rs`, NOT `tests/<area>.rs`.** A
-  top-level `area.rs` is a *crate root* — its `mod foo;` resolves to `tests/foo.rs`
-  (a sibling), not `tests/area/foo.rs`. The `<area>/main.rs` dir form makes `mod`
-  resolve inside `<area>/`. (nextest still runs every `#[test]` in its own process,
-  so fewer binaries = faster linking, same parallelism.)
-- **`conformance.rs` (the harness) asserts every dir under `sources/fixtures/` is a
-  registered source** (`descriptor_for(dirname).is_some()`) and that each scenario
-  dir holds exactly one transcript/hook file → one AgentId. So single-owner,
-  multi-payload fixtures (decode's hooks/jsonl, codex's lifecycle file) CANNOT live
-  there — they'd be mis-scanned and panic. They co-locate with their module instead.
-- **insta snapshot names = `<binary>__<module>__<explicit-name>`** → `sources__conformance__<source>__<scenario>.snap`. The decoded-event bodies hash an `AgentId` from the fixture's path *relative to `fixtures_root()`* — so moving the fixtures tree is snapshot-safe as long as the per-source suffix is preserved.
-
-## Windows parity twins
-
-`transport/pipe.rs` (in `transport/main.rs`) and the hook shim's
-`tests/shim_pipe.rs` are `#[cfg(windows)]` twins of `transport/socket.rs`
-and `tests/shim.rs` respectively — they run only on the `windows-test` CI
-job (full nextest suite). Each branch executes only on its
-target OS, and the windows job is part of the parity invariant: a behavior
-pinned on one platform's transport must stay pinned on the other's twin.
+- **The three FLAT tests stay flat and publish-excluded.** Each reads a
+  sibling outside this crate (`site/src/sources.json`, `Statusline.astro`,
+  the shim's `paths.rs`), so all three sit in `Cargo.toml`'s `exclude` and
+  the published tarball builds without them; a grouped binary's submodule
+  can't be individually excluded (the parent `mod` fails on the extracted crate).
+- **A multi-file binary is `tests/<area>/main.rs`, NOT `tests/<area>.rs`** — a
+  top-level `area.rs` is a crate root whose `mod foo;` resolves to a SIBLING
+  `tests/foo.rs`. (nextest runs each `#[test]` in its own process either way.)
+- **`conformance.rs` asserts every dir under `sources/fixtures/` is a
+  registered source with exactly one transcript/hook file → one AgentId** —
+  single-owner multi-payload fixtures would be mis-scanned and panic; they
+  co-locate with their module instead.
+- **insta names = `<binary>__<module>__<explicit-name>`**; decoded bodies hash
+  an `AgentId` from the fixture path relative to `fixtures_root()`, so moving
+  the tree is snapshot-safe iff the per-source suffix is preserved.
+- **Windows parity twins:** `transport/pipe.rs` and the shim's
+  `tests/shim_pipe.rs` are `#[cfg(windows)]` twins of the socket tests, run
+  only on the `windows-test` job — a behavior pinned on one platform's
+  transport stays pinned on the other's twin.
