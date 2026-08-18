@@ -207,8 +207,12 @@ mod tests {
             let Some((head, _)) = line.split_once("=>") else {
                 continue;
             };
+            // ANY `"` in the head, not just a leading or `(`-prefixed one: the
+            // shape that escaped was a guard, `g if g == "wire_name" =>`, which
+            // dispatches on a name the surface never carries while `armed` stays
+            // equal to the export because the token is not SCREAMING_SNAKE.
             assert!(
-                !head.trim_start().starts_with('"') && !head.contains("(\""),
+                !head.contains('"'),
                 "{file}: arm `{}` in {export}'s dispatch reads a bare wire literal — \
                  name it as a const so the drift surface can carry it",
                 head.trim(),
@@ -348,10 +352,19 @@ mod tests {
         );
         for (name, src) in &hits {
             if let Some((_, test)) = PINNED_ELSEWHERE.iter().find(|(n, _)| n == name) {
+                let body = src
+                    .split_once(&format!("fn {test}"))
+                    .map(|(_, rest)| rest)
+                    .unwrap_or("");
                 assert!(
-                    src.contains(&format!("fn {test}")),
+                    !body.is_empty(),
                     "{name} claims to be pinned by {test}, which its module no longer \
                      declares — the exemption is now an unbacked claim of coverage",
+                );
+                assert!(
+                    body.split("\n    fn ").next().unwrap_or("").contains(name),
+                    "{test} exists but never names {name}, so the exemption claims a \
+                     coverage the test does not provide — have it read the const",
                 );
             }
         }

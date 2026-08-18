@@ -14,6 +14,7 @@ import json
 import pathlib
 import re
 import sys
+import traceback
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -979,7 +980,13 @@ def main() -> int:
         return 1
     tests = tuple(o for n, o in list(globals().items()) if n.startswith("test_"))
     for t in tests:
-        t()
+        # A raise past a recorded `check()` would otherwise replace the whole
+        # FAILS list — including the line that already explains the failure —
+        # with a traceback from the code that ran on after it.
+        try:
+            t()
+        except Exception:  # noqa: BLE001 - a raising test is a failing test
+            FAILS.append(f"{t.__name__} raised:\n{traceback.format_exc()}")
     if FAILS:
         print("DRIFT SELFTEST FAILED:")
         for f in FAILS:
