@@ -389,4 +389,206 @@ mod tests {
              or, the other direction, a row here outlived the const it named"
         );
     }
+
+    /// Every wire literal a decoder equality-compares is carried by the drift
+    /// surface or exempted below with its adjudicated reason (#943's gate:
+    /// five such literals were deleted from the watch and found one at a time
+    /// by review — this makes the sixth a test failure instead).
+    ///
+    /// Fragment membership is global across sets, so a cross-source spelling
+    /// collision passes; a literal moved behind a non-exported const escapes
+    /// the scan. Both were adjudicated as accepted looseness on #943. Stale
+    /// exemptions fail the OTHER direction.
+    #[test]
+    fn every_equality_compared_wire_literal_is_accounted_for() {
+        // (file stem, literal, why no upstream watch is owed)
+        const EXEMPT: &[(&str, &str, &str)] = &[
+            (
+                "antigravity",
+                "PLANNER_RESPONSE",
+                "unverified reverse-engineered name (see decoder comment); the \
+                 decoder breadcrumbs unknown vocabulary",
+            ),
+            ("antigravity", "ask_permission", "same as PLANNER_RESPONSE"),
+            ("antigravity", "ask_question", "same as PLANNER_RESPONSE"),
+            (
+                "admit",
+                "jsonl",
+                "file-extension guard; resolver/path axis (#880)",
+            ),
+            (
+                "cc_probe",
+                "json",
+                "file-extension guard; resolver/path axis (#880)",
+            ),
+            (
+                "cc_probe",
+                "projects",
+                "dirname guard; resolver/path axis (#880)",
+            ),
+            (
+                "claude_code",
+                "<synthetic>",
+                "CC's placeholder model value; a rename degrades to a cosmetic \
+                 flame label until the next real model string arrives",
+            ),
+            (
+                "claude_code",
+                "tool_use",
+                "Messages-API block type; no CC doc declares it apart from \
+                 `tool_use_id`, and the hook transport carries the same activity \
+                 — headless-only degradation, corpus-census detectable",
+            ),
+            ("claude_code", "tool_result", "same as tool_use"),
+            (
+                "antigravity",
+                "USER_INPUT",
+                "no watchable upstream doc; the decoder breadcrumbs unknown \
+                 vocabulary (the runtime detector)",
+            ),
+            ("antigravity", "CONVERSATION_HISTORY", "same as USER_INPUT"),
+            (
+                "claude_code",
+                "attachment",
+                "undocumented transcript surface; its marker KINDS are \
+                 appearance-watched via CC_LIFECYCLE_SURFACE_MARKERS",
+            ),
+            (
+                "copilot",
+                "task",
+                "name-only BY DESIGN — semantic subagent_type detection is \
+                 spoofable by model-authored args (see copilot_tool_detail)",
+            ),
+            (
+                "cursor",
+                "Task",
+                "legacy fallback; detection is semantic (subagent_type) and the \
+                 live name is watched as decoder.dispatch_names",
+            ),
+            (
+                "grok",
+                "spawn_subagent",
+                "semantic subagent_type fallback exists on the same arm",
+            ),
+            (
+                "omp",
+                "default",
+                "resolver/path axis, deliberately unwatched (#880)",
+            ),
+            (
+                "omp",
+                "sessions",
+                "resolver/path axis, deliberately unwatched (#880)",
+            ),
+            (
+                "omp",
+                "task",
+                "children register via PATH NESTING regardless (module doc); the \
+                 name only styles the parent's pose",
+            ),
+            (
+                "opencode",
+                "tool",
+                "part-type inside the watched `message.part.updated`; a rename is \
+                 #940-class field-value drift, accepted residual",
+            ),
+        ];
+
+        let mut carried: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for rel in ["../pixtuoid-core", "../pixtuoid"] {
+            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("..")
+                .join(rel.trim_start_matches("../"))
+                .join("drift-surface.json");
+            let frag: Value = serde_json::from_str(
+                &std::fs::read_to_string(&path).expect("committed fragment is readable"),
+            )
+            .expect("fragment parses");
+            fn walk(v: &Value, out: &mut std::collections::BTreeSet<String>) {
+                match v {
+                    Value::String(s) => {
+                        out.insert(s.clone());
+                    }
+                    Value::Array(a) => a.iter().for_each(|x| walk(x, out)),
+                    Value::Object(o) => o.values().for_each(|x| walk(x, out)),
+                    _ => {}
+                }
+            }
+            walk(&frag, &mut carried);
+        }
+        let sources: std::collections::BTreeSet<&str> =
+            crate::source::registry::registered_source_names().collect();
+
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("the source dir is readable") {
+                let path = entry.expect("a readable entry").path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let mut paths = Vec::new();
+        rs_files(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/source"),
+            &mut paths,
+        );
+
+        let mut found: std::collections::BTreeSet<(String, String)> =
+            std::collections::BTreeSet::new();
+        let mut unaccounted: Vec<String> = Vec::new();
+        for path in paths {
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .expect("a utf-8 stem")
+                .to_owned();
+            // mod/native/tests are the runtime+resolver axis, deliberately
+            // unwatched (#880); drift/registry are the breadcrumb infra itself.
+            if ["mod", "native", "tests", "drift", "registry"].contains(&stem.as_str()) {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("the module is readable");
+            let prod = src
+                .split("#[cfg(test)]\nmod tests")
+                .next()
+                .expect("split never yields zero parts");
+            for line in prod.lines() {
+                // Comments first: a doc example quoting `== "x"` is not a read.
+                let code = line.split("//").next().unwrap_or("");
+                for pat in ["== Some(\"", "== \"", "!= Some(\"", "!= \""] {
+                    for (i, _) in code.match_indices(pat) {
+                        let rest = &code[i + pat.len()..];
+                        let Some(end) = rest.find('\"') else { continue };
+                        let lit = &rest[..end];
+                        found.insert((stem.clone(), lit.to_owned()));
+                        let ok = carried.contains(lit)
+                            || sources.contains(lit)
+                            || lit.starts_with('.')
+                            || lit.ends_with(".jsonl")
+                            || EXEMPT.iter().any(|(f, l, _)| *f == stem && *l == lit);
+                        if !ok {
+                            unaccounted.push(format!("{stem}.rs: == \"{lit}\""));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            unaccounted.is_empty(),
+            "a decoder equality-compares wire literals the drift surface never \
+             carries — export them (a `DECODED_*` const + a fragment row), \
+             breadcrumb the miss, or exempt them here with the adjudicated \
+             reason:\n  {}",
+            unaccounted.join("\n  "),
+        );
+        for (file, lit, _) in EXEMPT {
+            assert!(
+                found.contains(&((*file).to_owned(), (*lit).to_owned())),
+                "the exemption for {file}.rs == \"{lit}\" outlived the \
+                 comparison it excused — delete the row",
+            );
+        }
+    }
 }

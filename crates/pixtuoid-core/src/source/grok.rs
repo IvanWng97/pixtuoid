@@ -50,6 +50,7 @@ const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
 const XAI_SUBAGENT_SPAWNED: &str = "subagent_spawned";
 const XAI_SUBAGENT_FINISHED: &str = "subagent_finished";
 const XAI_MODEL_CHANGED: &str = "model_changed";
+const XAI_MODEL_AUTO_SWITCHED: &str = "model_auto_switched";
 const XAI_TURN_COMPLETED: &str = "turn_completed";
 const XAI_HOOK_EXECUTION: &str = "hook_execution";
 
@@ -63,6 +64,7 @@ pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
     XAI_SUBAGENT_SPAWNED,
     XAI_SUBAGENT_FINISHED,
     XAI_MODEL_CHANGED,
+    XAI_MODEL_AUTO_SWITCHED,
     XAI_TURN_COMPLETED,
     XAI_HOOK_EXECUTION,
 ];
@@ -425,6 +427,24 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                     agent_id,
                     model,
                     effort,
+                }])
+            }
+            // Fires INSTEAD of `model_changed` when the persisted model is no
+            // longer available — without this arm the flame shows the dead
+            // model for the whole session (#933's sibling class, found by the
+            // family sweep).
+            XAI_MODEL_AUTO_SWITCHED => {
+                let model = str_field("new_model_id")
+                    .filter(|s| !s.is_empty())
+                    .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
+                let Some(model) = model else {
+                    crate::source::drift::missing_field(SOURCE_NAME, tag, "new_model_id");
+                    return Ok(vec![]);
+                };
+                Ok(vec![AgentEvent::ModelInfo {
+                    agent_id,
+                    model: Some(model),
+                    effort: None,
                 }])
             }
             // The transcript twin of the `stop` hook: a tool-less turn's only
@@ -1237,7 +1257,8 @@ mod tests {
                 evs = decode_line(xai_line(json!({
                     "sessionUpdate": tag,
                     "child_session_id": "c", "subagent_id": "s",
-                    "model_id": "m", "event_name": "session_end", "runs": [],
+                    "model_id": "m", "new_model_id": "m2",
+                    "event_name": "session_end", "runs": [],
                 })))
                 .len();
             });

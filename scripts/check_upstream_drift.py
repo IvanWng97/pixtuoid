@@ -545,6 +545,14 @@ CODEX_KNOWN_OMITTED: dict[str, str] = {
 }
 
 
+# grok xAI variants we know about and deliberately do not decode.
+GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
+    "hook_annotation": "TUI scrollback text; carries no state we render",
+    "subagent_progress": "rate-limited elapsed-time ticks on a child that "
+    "`subagent_spawned` already registered",
+}
+
+
 def sibling_families(decoded: set[str]) -> set[str]:
     """The trailing word of each name we decode — `function_call` → `call`.
 
@@ -1172,6 +1180,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             )
 
     if acp_parsed:
+        # The appearing direction, scoped to the one family we decode: a new
+        # `tool_call_*` tag (a confirmation, a retry) decodes to nothing and
+        # its calls render wrong for every ACP-speaking source.
+        for tag in sorted(up_acp - set(ours.acp_decoded_tags or ())):
+            if tag.startswith("tool_call"):
+                report.add_review(
+                    f"ACP grew `{tag}`, a `tool_call` sibling decode_session_update "
+                    f"does not handle — every ACP-speaking source decodes it to "
+                    f"nothing."
+                )
         for tag in sorted(ours.acp_decoded_tags or ()):
             if tag not in up_acp:
                 report.add_breaking(
@@ -1517,6 +1535,31 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     # grok's xAI extension is TRANSCRIPT vocabulary whose arm ends
     # `_ => Ok(vec![])` — the method gates the whole block and each tag decodes
     # to nothing once renamed, with no breadcrumb either way.
+    # The PREFIX twin, for vocabularies whose family leads the name. The OTHER
+    # vocabularies are out deliberately: copilot's `session.*` is a product-wide
+    # event bus (52 same-namespace additions today — a ledger would mirror it);
+    # omp's entry types are single words with no family signal, and every
+    # renderable state also rides the message stream we decode; codex `EventMsg`
+    # suffixes are generic lifecycle words; CC and antigravity breadcrumb their
+    # unknown vocabulary (the runtime detector); opencode's plugin forwards
+    # exactly what the decoder reads, pinned by test — an upstream addition
+    # never arrives.
+    if ours.grok_xai_tags is not None:
+        text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
+        if text is not None:
+            upstream = upstream_codex_enum_types(text, "SessionUpdate")
+            if upstream is not None:
+                families = {n.split("_", 1)[0] for n in ours.grok_xai_tags if "_" in n}
+                gap = upstream - ours.grok_xai_tags - set(GROK_XAI_KNOWN_OMITTED)
+                for name in sorted(gap):
+                    if name.split("_", 1)[0] in families:
+                        report.add_review(
+                            f"grok's xAI `SessionUpdate` has `{name}`, a sibling of a "
+                            f"family we already decode, and source/grok.rs decodes it "
+                            f"to nothing. Decode it, or add it to "
+                            f"GROK_XAI_KNOWN_OMITTED with the reason."
+                        )
+
     if ours.codex_escalation is not None:
         # A BOOLEAN check with no breadcrumb possible: a renamed field or value
         # makes `is_escalated` silently false, and false is a legitimate answer,

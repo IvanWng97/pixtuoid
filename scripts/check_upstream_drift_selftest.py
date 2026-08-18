@@ -558,6 +558,46 @@ def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
         d.CODEX_KNOWN_OMITTED.update(saved)
 
 
+def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None:
+    """The grok/acp twin of the codex suffix sweep, same four directions."""
+    real = d.fetch
+    saved = dict(d.GROK_XAI_KNOWN_OMITTED)
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        tags = sorted(ours.grok_xai_tags or ())
+        check(bool(tags), "the fragment supplies the xai tag set")
+
+        def drive(extra: list[str]) -> d.Report:
+            pas = lambda n: "".join(p.title() for p in n.split("_"))
+            doc = ("pub enum SessionUpdate {\n"
+                   + "".join(f"    {pas(n)},\n" for n in tags + extra) + "}\n")
+
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.GROK_NOTIFICATION_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        check(not drive([]).review, "decoding everything upstream has stays silent")
+        fam = tags[0].split("_", 1)[0]
+        sib = f"{fam}_pxd_new"
+        loud = drive([sib])
+        check(any(sib in x for x in loud.review), f"a `{fam}_*` sibling must flag; got {loud.review}")
+        check(not drive(["pxd_stranger"]).review, "a family-less addition stays silent")
+        d.GROK_XAI_KNOWN_OMITTED[sib] = "test"
+        check(not drive([sib]).review, "a ledgered sibling goes quiet")
+    finally:
+        d.fetch = real
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED.update(saved)
+
+
 def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     """The stripper's docstring named this test before the test existed.
 

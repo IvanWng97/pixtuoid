@@ -852,9 +852,14 @@ const KIMI: SourceDescriptor = SourceDescriptor {
             // SessionStart is the registration carrier, not UserPromptSubmit, so
             // a swept session does not walk back in.
             resurrects_on_prompt: false,
-            // Kimi's "agent swarm" subagents are NOT modeled (their payload
-            // shape is uncaptured), so a Delegating parent goes hook-silent
-            // through the delegation. `true` can only over-retain a dead slot.
+            // CONSUMED, not decorative: kimi's dispatch input always carries
+            // `subagent_type` — 0.36.1's `AgentToolInputSchema` (installed
+            // bundle, tools/builtin/collaboration/agent.ts) injects `"coder"`
+            // when the model omits it, resume calls excepted — so
+            // `make_tool_detail` mints Task semantically. The CHILD's own hook
+            // payloads stay unmodeled, so the Delegating parent goes
+            // hook-silent through the delegation; `true` can only over-retain
+            // a dead slot.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
