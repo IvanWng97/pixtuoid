@@ -542,14 +542,7 @@ def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
         for group, rows in d.load_fragment(rel).items()
         for key in rows
     }
-    # `opencode.hook_events` is read by a RUST test (the plugin/decoder binding
-    # in install/opencode.rs), not from here — the only key with a consumer this
-    # side cannot see.
-    unconsumed = sorted(
-        f"{rel.split('/')[1]} {g}.{k}"
-        for rel, g, k in emitted - consumed
-        if k != "opencode.hook_events"
-    )
+    unconsumed = sorted(f"{rel.split('/')[1]} {g}.{k}" for rel, g, k in emitted - consumed)
     check(not unconsumed, f"emitted but read by nobody: {unconsumed}")
 
 
@@ -637,6 +630,87 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
     ):
         got = fn('{"definitions": {"Unrelated": {}}}')
         check(not got, f"copilot {name}: an unrecognised schema must not parse to a set, got {got}")
+
+
+def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
+    """The gate #941 asks for: every source's check, both directions, offline.
+
+    Each document is BUILT from the set we actually register, so adding an event
+    cannot make the test stale — and it is built in the UPSTREAM spelling, which
+    is the trap that hid codewhale's arm during review (upstream declares
+    `MessageSubmit`, we register `message_submit`).
+    """
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        check(not rep0.blind, f"the fragments load: {rep0.blind}")
+
+        def pascal(name: str) -> str:
+            return "".join(p.title() for p in name.split("_"))
+
+        # source -> (url, how upstream spells the set, doc template)
+        cases = [
+            ("reasonix", d.REASONIX_HOOK_URL, lambda n: n,
+             lambda ns: "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"),
+            ("codewhale", d.CODEWHALE_HOOK_URL, pascal,
+             lambda ns: "pub enum HookEvent {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
+            ("codex", d.CODEX_PROTOCOL_URL, lambda n: n,
+             lambda ns: "pub enum HookEventName {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
+            ("hermes", d.HERMES_PLUGINS_URL, lambda n: n,
+             lambda ns: "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"),
+            ("openclaw", d.OPENCLAW_HOOK_TYPES_URL, lambda n: n,
+             lambda ns: "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)),
+            ("cursor", d.CURSOR_HOOKS_URL, lambda n: n,
+             lambda ns: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)),
+            ("kimi", d.KIMI_HOOKS_URL, lambda n: n,
+             lambda ns: "hook_event_name\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)),
+            ("cc", d.CC_HOOKS_URL, lambda n: n,
+             lambda ns: "# Hooks reference\n\n| Event | When it fires |\n|---|---|\n"
+                        + "".join(f"| `{n}` | x |\n" for n in ns)),
+        ]
+        check(len(cases) >= 8, "every source with a name-set check needs a row")
+
+        for source, url, spell, render in cases:
+            names = sorted(getattr(ours, source))
+            check(bool(names), f"{source}: the fragment supplies a set")
+            full = render([spell(n) for n in names])
+
+            def drive(body: str) -> list[str]:
+                d.fetch = lambda u, _b=body, _u=url: _b if u == _u else real(u)
+                rep = d.Report()
+                d.run_checks(d.read_our_names(rep), report=rep)
+                return [x for x in rep.breaking if source.split("-")[0] in x.lower()]
+
+            # The believability gate refuses a parse smaller than what we handle,
+            # so the vanish arm must ADD a name as it drops one — otherwise the
+            # check is skipped as probe health and this test proves nothing.
+            victim = names[0]
+            # Filler derived from a SURVIVING name so it always matches that parser's
+            # own character class — codex wants PascalCase, cursor rejects
+            # underscores, and a filler the parser drops would shrink the set
+            # below the believability floor and skip the check entirely.
+            keep = [spell(n) for n in names[1:]]
+            # …and in that name's own CASE STYLE: hermes' parser takes only
+            # `[a-z_]`, so a `Pxd` suffix would be dropped just like a
+            # wrong-class one.
+            # …in that name's own case style AND without digits: hermes' parser
+            # takes only `[a-z_]` and cursor's headings only `[A-Za-z]`, so a
+            # mis-shaped filler is dropped exactly like a wrong-class one — and a
+            # dropped filler shrinks the set below the floor, skipping the check.
+            lower = keep[0].islower()
+            extra = [keep[0] + ("_pxd" if lower else "Pxd"),
+                     keep[0] + ("_pxdb" if lower else "Pxdb")]
+            gone = render(keep + extra)
+
+            check(not drive(full), f"{source}: an intact document must stay silent")
+            fired = drive(gone)
+            check(
+                any(victim in x for x in fired),
+                f"{source}: a vanished `{victim}` must fire; got {fired}",
+            )
+    finally:
+        d.fetch = real
 
 
 def main() -> int:

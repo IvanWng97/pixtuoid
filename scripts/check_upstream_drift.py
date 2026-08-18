@@ -5,8 +5,19 @@ pixtuoid decodes agent-CLI wire formats (hook event names, the subagent-dispatch
 tool name, transcript type tags) whose names change upstream WITHOUT notice — the
 `Task` -> `Agent` rename shipped undocumented and silently disabled subagent
 suppression. This verifies that every name we depend on still exists at its
-canonical upstream source, reading what we depend on from our OWN source (no
-snapshot file to rot).
+canonical upstream source.
+
+What we depend on is read from `drift-surface.json` — one per crate, GENERATED
+by a test in the crate that owns those (private) names. This file never parses
+our Rust: a scraped `match` arm goes stale silently, so a rename would narrow
+the watch with nothing to show for it.
+
+WHICH sources get a row is decided by TRANSPORT, not by how nice the upstream
+document is. A HOOK-REGISTERED CLI needs one: registration is name-keyed, so a
+rename leaves our entry inert, the CLI fires nothing, and the decoder is never
+reached — silence, not a signal, and no runtime breadcrumb can cover it. A
+TRANSCRIPT-bearing CLI does not: the renamed type still lands in the transcript
+and `source/drift.rs`'s breadcrumbs meet it. That file holds the full ladder.
 
 Findings carry a DISPOSITION (see `Report`), because "upstream changed" and "our
 probe missed" need different work and only one of them is a statement about
