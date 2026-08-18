@@ -870,9 +870,9 @@ def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
     The two languages disagree on exactly two axes, both passed in rather than
     sniffed, because guessing either one fails SILENTLY OPEN too:
 
-    - `nested`: Rust NESTS block comments, TypeScript ends at the first `*/`.
-      Nesting a TS file would swallow the real code after that `*/`.
-    - `quotes`: which characters open a string. TS needs all three — its own
+    - `nested`: Rust NESTS block comments; a non-nesting language would need
+      False, and nesting one that does not swallows the code after its first
+      `*/`. Passed in rather than sniffed: guessing fails SILENTLY OPEN.
       dotenv quote-detector spells `'"'`, a lone double quote inside a
       single-quoted string, and tracking `"` alone desynchronises the scanner
       from there to end of file (pinned by
@@ -954,15 +954,6 @@ def strip_rust_comments(body: str) -> str:
     return _strip_c_style_comments(body, nested=True, quotes='"')
 
 
-def strip_ts_comments(body: str) -> str:
-    """[`_strip_c_style_comments`] for TypeScript: non-nesting block comments,
-    and all three string openers.
-
-    Used so a PRESENCE sweep reads CODE only: `env.ts` names `parseEnvLine` and
-    its siblings in its OWN JSDoc, so a rename that leaves a stale `{@link …}`
-    behind would otherwise stay silent.
-    """
-    return _strip_c_style_comments(body, nested=False, quotes="\"'`")
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
