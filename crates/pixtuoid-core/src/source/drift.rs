@@ -40,7 +40,8 @@
 //!
 //! Two shapes are watched only where a row was written for them, never
 //! systematically: payload FIELD names a decoder reads (#940 — copilot's ride
-//! `copilot.payload_fields`; the rest are neither watched nor breadcrumbed)
+//! `copilot.payload_fields`, codex's escalation pair `codex.escalation`; the
+//! rest are neither watched nor breadcrumbed)
 //! and single wire VALUES it compares for equality (#943 —
 //! `every_equality_compared_wire_literal_is_accounted_for` is the census;
 //! what it does not carry is an exemption with a written reason).

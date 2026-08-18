@@ -1027,7 +1027,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 "export const Event = {\n"
                 + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns))
                 + "}\n"
-                + "".join(f'export type S{i} = "{st}";\n'
+                + "".join(f'const S{i} = Schema.Literal("{st}");\n'
                           for i, st in enumerate(full["opencode_part_statuses"])))),
             ("opencode_part_statuses", str, lambda ns: dict.fromkeys(
                 d.OPENCODE_EVENT_URLS,
@@ -1035,7 +1035,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n'
                           for i, n in enumerate(full["opencode"]))
                 + "}\n"
-                + "".join(f'export type S{i} = "{st}";\n' for i, st in enumerate(ns)))),
+                + "".join(f'const S{i} = Schema.Literal("{st}");\n' for i, st in enumerate(ns)))),
             # A VALUE row: upstream declares the const ONCE, so the document
             # carries one declaration and a vanish is a different value in it.
             ("grok_xai_method", str, lambda ns: {

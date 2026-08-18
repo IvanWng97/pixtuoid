@@ -81,13 +81,6 @@ const MESSAGE_PART_UPDATED: &str = "message.part.updated";
 const PERMISSION_ASKED: &str = "permission.asked";
 const PERMISSION_V2_ASKED: &str = "permission.v2.asked";
 
-/// The hook event types this decoder turns into events — this module's row in
-/// the drift surface. Pinned to the arms above by
-/// `the_decoded_event_set_is_exactly_what_the_arms_match`.
-///
-/// Test-gated because the surface emitter is its only reader: the ARMS are what
-/// production dispatches on, and a second copy of the vocabulary must not be
-/// something the shipped crate can read and drift against.
 const STATUS_RUNNING: &str = "running";
 const STATUS_COMPLETED: &str = "completed";
 const STATUS_ERROR: &str = "error";
@@ -98,6 +91,13 @@ const STATUS_ERROR: &str = "error";
 #[cfg(test)]
 pub(crate) const DECODED_PART_STATUSES: &[&str] = &[STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR];
 
+/// The hook event types this decoder turns into events — this module's row in
+/// the drift surface. Pinned to the arms above by
+/// `the_decoded_event_set_is_exactly_what_the_arms_match`.
+///
+/// Test-gated because the surface emitter is its only reader: the ARMS are what
+/// production dispatches on, and a second copy of the vocabulary must not be
+/// something the shipped crate can read and drift against.
 #[cfg(test)]
 pub(crate) const DECODED_EVENTS: &[&str] = &[
     SESSION_CREATED,
@@ -442,11 +442,6 @@ mod tests {
 
     #[test]
     fn running_tool_part_is_activity_start_keyed_on_callid() {
-        // The exported set IS the arms: start + the two end statuses, nothing more.
-        assert_eq!(
-            DECODED_PART_STATUSES,
-            [STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR]
-        );
         let events = decode_all(json!({
             "type": "message.part.updated",
             "properties": {

@@ -1019,8 +1019,7 @@ mod tests {
 
     /// Every field the decoder reads by a LITERAL key is declared here — reads
     /// through a variable (the `bucket()` totals: `input`, `cache_write`,
-    /// `output`) are outside the scan, and the alphanumeric retain drops
-    /// underscore-spelled keys with them. A literal read added without a
+    /// `output`) are outside the scan entirely. A literal read added without a
     /// declaration fails this test; a helper-routed one does not.
     #[test]
     fn the_field_set_is_exactly_what_the_decoder_reads() {
@@ -1043,7 +1042,7 @@ mod tests {
             }
         }
         // `type` is watched as DECODED_KINDS; a `/` marks a JSON pointer; the
-        // alphanumeric clause drops underscore keys — the helper-read totals.
+        // alphanumeric clause drops the scanner's own non-key artifacts.
         read.retain(|f| {
             *f != "type" && !f.contains('/') && f.chars().all(|c| c.is_ascii_alphanumeric())
         });

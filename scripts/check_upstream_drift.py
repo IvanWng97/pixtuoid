@@ -548,9 +548,9 @@ CODEX_KNOWN_OMITTED: dict[str, str] = {
 # grok xAI variants we know about and deliberately do not decode.
 GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "hook_annotation": "TUI scrollback text; carries no state we render",
-    "subagent_progress": "cumulative per-child totals (tokens, tool calls); "
+    "subagent_progress": "cumulative per-child totals (turns, tool calls); "
     "summing a running total into the delta-accumulating reducer double-counts "
-    "(codex.rs's token_count comment is the precedent)",
+    "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
 }
 
 
@@ -840,7 +840,7 @@ def read_our_names(report: Report) -> OurNames:
                 f"what WE depend on, reading {rel} ({e})",
                 f"the drift surface emitted by {rel.rsplit('/', 1)[0]}",
                 "That fragment is missing or unparseable, so every check it feeds "
-                "was SKIPPED. Regenerate with `UPDATE_DRIFT_SURFACE=1 just test`.",
+                "was SKIPPED. Regenerate with `just gen-drift-surface`.",
                 our_source=True,
             )
     for field, rel, group, key in SURFACE_ROWS:
@@ -1321,7 +1321,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             report.add_review(finding)
 
 
-    # HOOK-REGISTERED sources — clause 1 of `source/drift.rs`'s header.
+    # HOOK-REGISTERED sources — the inert-registration clause of
+    # `source/drift.rs`'s header.
     if ours.reasonix is not None:
         text = fetch_anchored(REASONIX_HOOK_URL, "Reasonix hook source", report)
         if text is not None:
@@ -1690,7 +1691,9 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             # dispatch ends `_ => Ok(vec![])`, so a renamed `running` silently
             # stops every opencode tool activity.
             for st in sorted(ours.opencode_part_statuses or ()):
-                if f'"{st}"' not in joined:
+                # `Schema.Literal(...)` is the DECLARATION; a bare `"error"` also
+                # matches two unrelated `Omit<…, "error">` sites, masking a rename.
+                if f'Schema.Literal("{st}")' not in joined:
                     report.add_breaking(
                         f"opencode part status `{st}` (decoded in source/opencode.rs) "
                         f"is GONE from the schema — renamed; tool activity decodes to "

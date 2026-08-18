@@ -285,6 +285,7 @@ mod tests {
             ),
             ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
+            ("opencode.rs", "match status {", "DECODED_PART_STATUSES"),
         ];
         for (file, dispatch, export) in rows {
             assert_arms_match_export(file, dispatch, export);
@@ -315,10 +316,6 @@ mod tests {
             ),
             ("DECODED_EXIT_MARKER", "session_exit_ends_root_not_as_child"),
             ("DECODED_ESCALATION", "escalated_function_call_is_waiting"),
-            (
-                "DECODED_PART_STATUSES",
-                "running_tool_part_is_activity_start_keyed_on_callid",
-            ),
             (
                 "DECODED_MESSAGE_VOCAB",
                 "the_exported_message_vocabulary_is_exactly_what_the_arms_match",
