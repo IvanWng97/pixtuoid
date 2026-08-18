@@ -35,6 +35,39 @@ import typing
 import urllib.error
 import urllib.request
 
+REASONIX_HOOK_URL = (
+    "https://raw.githubusercontent.com/esengine/DeepSeek-Reasonix/main-v2/"
+    "internal/hook/hook.go"
+)
+
+CODEWHALE_HOOK_URL = (
+    "https://raw.githubusercontent.com/Hmbown/CodeWhale/main/"
+    "crates/tui/src/hooks/config.rs"
+)
+
+CODEX_PROTOCOL_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/"
+    "codex-rs/protocol/src/protocol.rs"
+)
+
+HERMES_PLUGINS_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
+)
+
+OPENCLAW_HOOK_TYPES_URL = (
+    "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
+)
+
+# `permission.asked` is decoded DEFENSIVELY (a V1/alias spelling); only
+# `permission.v2.asked` is a guaranteed standalone upstream EventV2 definition,
+# so don't alarm if the bare form isn't found as a `type:` literal.
+OPENCODE_TOLERATED = {"permission.asked"}
+
+OPENCODE_EVENT_URLS = (
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/session.ts",
+    "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/permission.ts",
+)
+
 # URLError alone is not enough: the READ phase inside fetch() raises raw
 # socket.timeout / ConnectionResetError (OSError, NOT URLError) and
 # http.client.IncompleteRead (HTTPException) — left uncaught they exit 1 and the
@@ -109,7 +142,7 @@ COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/sessio
 # common-word event `stop` is intrinsically low-confidence (the page contains the
 # word regardless), so its disappearance can be masked; the distinctive
 # `sessionStart`/`sessionEnd`/`preToolUse`/`postToolUse` carry the check.
-CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
+CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks.md"
 
 # Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
 # (each name appears verbatim in the summary table AND the payload examples), so —
@@ -214,8 +247,15 @@ ANCHORS: dict[str, Anchor] = {
     # Owns the agentDir + XDG resolution; the profile / config-dir-name helpers
     # are its collaborators in the same file.
     # identity-grade: co-located, not owning. A union head or page title.
-    CURSOR_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
+    CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
     KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
+    REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
+    CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
+    CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
+    HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
+    OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
+    OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
+    OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
 }
@@ -482,6 +522,18 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
 
 
 
+def upstream_cursor_hook_events(text: str) -> set[str] | None:
+    """The per-hook SECTION HEADINGS of cursor's hooks page.
+
+    Word-boundary counting over the page is fail-open here: the names appear
+    5-17 times each in prose and code samples, so a rename would have to erase
+    every occurrence for the check to fire. A heading is the page's own
+    declaration of "this hook exists" and vanishes with the hook.
+    """
+    heads = re.findall(r"(?m)^#{2,4} ([a-z][A-Za-z]+)\s*$", text)
+    return set(heads) or None
+
+
 def upstream_cc_hook_events(text: str) -> set[str] | None:
     """The canonical event list is the "| Event | When it fires |" summary table —
     parse only its rows, since other tables repeat names with different columns."""
@@ -630,6 +682,12 @@ class OurNames:
     acp_decoded_tags: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
+    codex: set[str] | None = None
+    codewhale: set[str] | None = None
+    hermes: set[str] | None = None
+    openclaw: set[str] | None = None
+    opencode: set[str] | None = None
+    reasonix: set[str] | None = None
     copilot: set[str] | None = None
     copilot_fields: set[str] | None = None
     cursor: set[str] | None = None
@@ -646,6 +704,11 @@ class OurNames:
 # a maintainer knows which pin to re-check.
 PARSE_SOURCES: dict[str, str] = {
     "cc": "the hook-event summary table in hooks.md",
+    "cursor": "the per-hook section headings on cursor.com/docs/hooks.md",
+    "codex": "the HookEventName enum in codex-rs/protocol/src/protocol.rs",
+    "codewhale": "the HookEvent enum in crates/tui/src/hooks/config.rs",
+    "hermes": "VALID_HOOKS in hermes_cli/plugins.py",
+    "reasonix": "the Event consts in internal/hook/hook.go",
 }
 
 
@@ -685,6 +748,12 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("cc", CORE_BIN_FRAGMENT, "registered", "claude-code"),
     ("cursor", CORE_BIN_FRAGMENT, "registered", "cursor"),
     ("kimi", CORE_BIN_FRAGMENT, "registered", "kimi"),
+    ("codex", CORE_BIN_FRAGMENT, "registered", "codex"),
+    ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
+    ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
+    ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
+    ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
+    ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
     ("copilot_fields", CORE_LIB_FRAGMENT, "decoded", "copilot.payload_fields"),
@@ -738,6 +807,184 @@ def read_our_names(report: Report) -> OurNames:
             continue
         setattr(ours, field, set(got))
     return ours
+
+
+def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
+    """Remove `//` and `/* */` comments, PRESERVING string literals.
+
+    A scanner rather than a pair of `re.sub`s, because both regex approaches drop
+    a REAL depended name and so fail SILENTLY OPEN — the watcher stops checking
+    a name and nothing says so:
+
+    - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
+      every later entry on that line with it;
+    - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
+      leaves its tail behind and re-admits words from inside it.
+
+    The two languages disagree on exactly two axes, both passed in rather than
+    sniffed, because guessing either one fails SILENTLY OPEN too:
+
+    - `nested`: Rust NESTS block comments, TypeScript ends at the first `*/`.
+      Nesting a TS file would swallow the real code after that `*/`.
+    - `quotes`: which characters open a string. TS needs all three — its own
+      dotenv quote-detector spells `'"'`, a lone double quote inside a
+      single-quoted string, and tracking `"` alone desynchronises the scanner
+      from there to end of file (pinned by
+      `test_ts_comment_strip_survives_a_quote_detector_line`). Rust must NOT
+      track `'`, where an apostrophe is far more often a lifetime (`&'a str`)
+      than a string, and `'` + the next `'` would swallow the code between two
+      lifetimes (pinned by `test_rust_comment_strip_is_not_confused_by_lifetimes`).
+    """
+    out: list[str] = []
+    i, n, depth = 0, len(body), 0
+    while i < n:
+        pair = body[i : i + 2]
+        if depth:
+            if nested and pair == "/*":
+                depth += 1
+                i += 2
+            elif pair == "*/":
+                depth -= 1
+                i += 2
+            else:
+                i += 1
+            continue
+        if pair == "/*":
+            depth = 1
+            i += 2
+            continue
+        if pair == "//":
+            nl = body.find("\n", i)
+            i = n if nl < 0 else nl
+            continue
+        quote = body[i]
+        if quote in quotes:
+            j = i + 1
+            while j < n:
+                if body[j] == "\\":
+                    j += 2
+                    continue
+                if body[j] == quote:
+                    j += 1
+                    break
+                j += 1
+            out.append(body[i:j])
+            i = j
+            continue
+        out.append(body[i])
+        i += 1
+    return "".join(out)
+
+
+def strip_rust_comments(body: str) -> str:
+    """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
+    the only string opener — an apostrophe here is usually a lifetime."""
+    return _strip_c_style_comments(body, nested=True, quotes='"')
+
+
+def strip_ts_comments(body: str) -> str:
+    """[`_strip_c_style_comments`] for TypeScript: non-nesting block comments,
+    and all three string openers.
+
+    Used so a PRESENCE sweep reads CODE only: `env.ts` names `parseEnvLine` and
+    its siblings in its OWN JSDoc, so a rename that leaves a stale `{@link …}`
+    behind would otherwise stay silent.
+    """
+    return _strip_c_style_comments(body, nested=False, quotes="\"'`")
+
+
+def _enum_body(text: str, enum_name: str) -> str | None:
+    """The brace-balanced body of `enum <enum_name> { … }`.
+
+    THE enum-body reader for every Rust surface we watch — do not go back to a
+    regex, because both spellings guess where the body ENDS and break on a
+    harmless upstream refactor:
+
+    * `(.*?)\\}` stops at the FIRST `}`, so one struct variant truncates the enum
+      and every variant after it reads as GONE — a phantom rename per variant.
+    * `(.*?)\\n\\}` demands a column-0 closing brace, so an INDENTED enum runs on
+      to the next top-level one and a variant scrape admits the following `impl`
+      block's CamelCase idents.
+
+    Comments are stripped FIRST because they are scanned for braces otherwise: a
+    `// see Foo { bar }` line inside the enum would unbalance the count.
+    `strip_rust_comments` preserves string literals, so `rename = "…"` attrs that
+    callers read out of the returned body survive.
+    """
+    text = strip_rust_comments(text)
+    # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
+    # `HookEvent` must not bind to `enum HookEventName {`.
+    m = re.search(rf"enum\s+{enum_name}\s*\{{", text)
+    if not m:
+        return None
+    start = m.end() - 1
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start + 1 : i]
+    return None
+
+
+def _snake_case(camel: str) -> str:
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", camel).lower()
+
+
+def upstream_codewhale_hooks(text: str) -> set[str] | None:
+    """The CodeWhale TUI shell-command hook wire names.
+
+    NOT the app-server `codewhale-hooks` sink enum in `crates/hooks` — a different
+    mechanism sharing no configuration. serde `rename_all = "snake_case"`, so each
+    CamelCase variant converts to the name we register.
+    """
+    body = _enum_body(text, "HookEvent")
+    if body is None:
+        return None
+    variants = re.findall(r"^\s*([A-Z][A-Za-z0-9]+)\s*,", body, re.M)
+    snake = {_snake_case(v) for v in variants}
+    return snake or None
+
+
+def upstream_codex_hooks(text: str) -> set[str] | None:
+    body = _enum_body(text, "HookEventName")
+    if body is None:
+        return None
+    return set(re.findall(r"\b([A-Z][A-Za-z]+)\b", body)) or None
+
+
+def upstream_reasonix_hooks(text: str) -> set[str] | None:
+    found = set(re.findall(r'\w+\s+Event\s*=\s*"(\w+)"', text))
+    return found or None
+
+
+def python_set_literal(src: str, decl: str) -> set[str]:
+    """The string members of a `NAME: Set[str] = { … }` block.
+
+    Comments are stripped BEFORE the brace scan, for the reason `_enum_body` and
+    `rust_block_after` both state: a brace inside a comment moves the bounds. The
+    first cut scanned raw source, and upstream interleaves prose here — one of its
+    comments quotes `{"action": "continue"}`, and a stray `}` truncated the set
+    SILENTLY while the size floor still passed.
+    """
+    i = src.find(decl)
+    if i < 0:
+        return set()
+    code = "\n".join(line.split("#", 1)[0] for line in src[i:].splitlines())
+    j = code.find("{")
+    if j < 0:
+        return set()
+    depth = 0
+    for k in range(j, len(code)):
+        if code[k] == "{":
+            depth += 1
+        elif code[k] == "}":
+            depth -= 1
+            if depth == 0:
+                return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code[j + 1 : k]))
+    return set()
 
 
 def run_checks(ours: OurNames, *, report: Report) -> None:
@@ -855,14 +1102,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     if ours.cursor is not None:
         text = fetch_anchored(CURSOR_HOOKS_URL, "Cursor hooks doc", report)
         if text is not None:
-            for ev in sorted(ours.cursor):
-                # Word-boundary, not quote-anchored: the docs render the names
-                # inline / in tables, never as quoted literals.
-                if not re.search(rf"\b{re.escape(ev)}\b", text):
+            upstream = upstream_cursor_hook_events(text)
+            if upstream and parse_is_believable("cursor", upstream, ours, report):
+                for ev in sorted(ours.cursor - upstream):
                     report.add_breaking(
-                        f"Cursor hook `{ev}` (decoded in source/cursor.rs) is GONE from "
-                        f"cursor.com/docs/hooks — likely renamed; the CLI still fires it but "
-                        f"the decoder maps it to nothing (no sprite / no activity)."
+                        f"Cursor hook `{ev}` (decoded in source/cursor.rs) no longer has a "
+                        f"section on cursor.com/docs/hooks — likely renamed; the CLI still "
+                        f"fires it but the decoder maps it to nothing (no sprite)."
                     )
 
 
@@ -919,6 +1165,91 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
         for finding in cc_doc_marker_findings(hooks_doc):
             report.add_review(finding)
+
+
+    # HOOK-REGISTERED sources. These need an upstream watch in a way a
+    # transcript-bearing source does not: registration is NAME-KEYED, so an
+    # upstream rename leaves our entry inert, the CLI fires nothing, the decoder
+    # is never reached, and NO breadcrumb is emitted. Silence, not a signal —
+    # #938's wrong premise #1, and the reason "closed CLIs are covered at
+    # runtime" is false for exactly these.
+    if ours.reasonix is not None:
+        text = fetch_anchored(REASONIX_HOOK_URL, "Reasonix hook source", report)
+        if text is not None:
+            upstream = upstream_reasonix_hooks(text)
+            if upstream and parse_is_believable("reasonix", upstream, ours, report):
+                for ev in sorted(ours.reasonix - upstream):
+                    report.add_breaking(
+                        f"Reasonix hook `{ev}` (registered in REASONIX_EVENTS) is GONE "
+                        f"from upstream hook.go — likely renamed; we register a hook it "
+                        f"never fires, so the decoder is never reached (no sprite)."
+                    )
+
+    if ours.codewhale is not None:
+        text = fetch_anchored(CODEWHALE_HOOK_URL, "CodeWhale hook source", report)
+        if text is not None:
+            upstream = upstream_codewhale_hooks(text)
+            if upstream and parse_is_believable("codewhale", upstream, ours, report):
+                for ev in sorted(ours.codewhale - upstream):
+                    report.add_breaking(
+                        f"CodeWhale hook `{ev}` (registered in CODEWHALE_EVENTS) is GONE "
+                        f"from upstream HookEvent — likely renamed; we register a hook it "
+                        f"never fires, so the decoder is never reached (no sprite)."
+                    )
+
+    if ours.codex is not None:
+        text = fetch_anchored(CODEX_PROTOCOL_URL, "Codex protocol source", report)
+        if text is not None:
+            upstream = upstream_codex_hooks(text)
+            if upstream and parse_is_believable("codex", upstream, ours, report):
+                for ev in sorted(ours.codex - upstream):
+                    report.add_breaking(
+                        f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE from "
+                        f"upstream HookEventName — likely renamed; we register a hook it "
+                        f"never fires, so the decoder is never reached (no sprite)."
+                    )
+
+    if ours.hermes is not None:
+        text = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
+        if text is not None:
+            valid = python_set_literal(text, "VALID_HOOKS: Set[str] = {")
+            if valid and parse_is_believable("hermes", valid, ours, report):
+                for ev in sorted(ours.hermes - valid):
+                    report.add_breaking(
+                        f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
+                        f"VALID_HOOKS in hermes_cli/plugins.py — likely renamed; the shell "
+                        f"hook we install into config.yaml fires nothing (no sprite)."
+                    )
+
+    if ours.openclaw is not None:
+        text = fetch_anchored(OPENCLAW_HOOK_TYPES_URL, "OpenClaw hook types", report)
+        if text is not None:
+            for ev in sorted(ours.openclaw):
+                if f'"{ev}"' not in text:
+                    report.add_breaking(
+                        f"OpenClaw hook `{ev}` (registered in OPENCLAW_EVENTS / the TS "
+                        f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
+                        f"the plugin registers a hook OpenClaw never fires (no presence)."
+                    )
+
+    if ours.opencode is not None:
+        # The inventory is SPLIT across two modules — `permission.v2.asked` is
+        # declared in permission.ts, not session.ts — so the union is the
+        # document, and a single fetch failure must not read as a vanish.
+        docs = [
+            t
+            for u in OPENCODE_EVENT_URLS
+            if (t := fetch_anchored(u, "opencode event inventory", report)) is not None
+        ]
+        if len(docs) == len(OPENCODE_EVENT_URLS):
+            joined = "\n".join(docs)
+            for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
+                if f'"{ev}"' not in joined:
+                    report.add_breaking(
+                        f"opencode event `{ev}` (forwarded by our plugin, decoded in "
+                        f"source/opencode.rs) is GONE from upstream — likely renamed; "
+                        f"the plugin subscribes to an event it never fires (no sprite)."
+                    )
 
 
 def main() -> int:

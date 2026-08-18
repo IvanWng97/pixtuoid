@@ -6,7 +6,7 @@ use toml::value::Table;
 use crate::install::target::MergeOutcome;
 use crate::install::SENTINEL_KEY;
 
-const CODEX_EVENTS: &[&str] = &[
+pub(crate) const CODEX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",

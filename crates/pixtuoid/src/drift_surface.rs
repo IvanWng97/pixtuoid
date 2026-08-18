@@ -23,8 +23,21 @@ fn surface() -> Value {
     // file has to be byte-stable or the gate flaps.
     let mut registered: BTreeMap<&str, Value> = BTreeMap::new();
     registered.insert("claude-code", json!(crate::install::claude::EVENTS));
+    registered.insert("codewhale", {
+        // The only registration set carrying a second column (whether the event
+        // is shell-serviceable); the drift watch compares NAMES.
+        let names: Vec<&str> = crate::install::codewhale::CODEWHALE_EVENTS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        json!(names)
+    });
+    registered.insert("codex", json!(crate::install::codex::CODEX_EVENTS));
     registered.insert("cursor", json!(crate::install::cursor::CURSOR_EVENTS));
+    registered.insert("hermes", json!(crate::install::hermes::HERMES_EVENTS));
     registered.insert("kimi", json!(crate::install::kimi::KIMI_EVENTS));
+    registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
+    registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("registered", json!(registered));

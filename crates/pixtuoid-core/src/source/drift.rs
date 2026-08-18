@@ -20,9 +20,13 @@
 //! 4. The `every_registered_*_event_decodes` tests assert our own belief, so they
 //!    can never see a rename — they bind registration to decoding, nothing more.
 //!
-//! Scraping a vendor's SOURCE TREE was tried for 23 documents and deleted: no
-//! promise attaches to their file layout, and three of that watch's four alarms
-//! were a moved file, a stale pin, or our own comment read as an event name.
+//! That order is about LYING. It says nothing about being SILENT, and a defense
+//! that never speaks never lies: for a HOOK-REGISTERED source, registration is
+//! name-keyed, so an upstream rename leaves our entry inert, the CLI fires
+//! nothing and #2 is never reached at all. Those sources need #3 even where the
+//! only thing declaring the names is a source tree — which is why the watch
+//! keeps that shape for them and not for transcript-bearing CLIs.
+//!
 //! An alarm must state a fact about US ("this decoder met X and dropped it"),
 //! never a guess about THEM ("upstream renamed X").
 //!

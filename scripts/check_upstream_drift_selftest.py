@@ -106,10 +106,17 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
 # One snippet per anchored document; a new ANCHORS entry with no sample here
 # fails the gate test below.
 ANCHOR_SAMPLES: dict[str, str] = {
-    d.CURSOR_HOOKS_URL: '"hook_event_name": "beforeShellExecution"',
+    d.CURSOR_HOOKS_URL: "\n### Hook events\n\n#### preToolUse\n",
     d.KIMI_HOOKS_URL: '"hook_event_name": "PreToolUse"',
     d.CC_TOOLS_URL: "\n# Tools reference\n",
     d.CC_HOOKS_URL: "\n# Hooks reference\n",
+    d.REASONIX_HOOK_URL: 'const (\n    SessionStart Event = "SessionStart"\n)\n',
+    d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
+    d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
+    d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
+    d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
+    d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
+    d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
 }
 
 # A document that satisfies NO anchor — the "upstream reorganized this file"
