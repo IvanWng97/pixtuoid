@@ -14,6 +14,11 @@ use std::path::PathBuf;
 
 use serde_json::{json, Value};
 
+use crate::source::codex::{
+    EM_RESUME, EM_SEARCH, EM_TOKENS, EM_TURN_END, EM_TURN_START, EVENT_MSG, RESPONSE_ITEM,
+    RI_RESUME, RI_SEARCH, RI_TOOL_START, TURN_CONTEXT,
+};
+
 /// Where the committed fragment lives, relative to the workspace root.
 const FRAGMENT: &str = "crates/pixtuoid-core/drift-surface.json";
 
@@ -27,6 +32,22 @@ fn surface() -> Value {
     decoded.insert(
         "acp.session_update_tags",
         json!(crate::source::acp::DECODED_TAGS),
+    );
+    decoded.insert(
+        "codex.event_msg",
+        json!([EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()),
+    );
+    decoded.insert(
+        "codex.response_item",
+        json!([RI_TOOL_START, RI_RESUME, RI_SEARCH].concat()),
+    );
+    decoded.insert(
+        "codex.rollout_outers",
+        json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
+    );
+    decoded.insert(
+        "omp.entry_types",
+        json!(crate::source::omp::DECODED_ENTRY_TYPES),
     );
     decoded.insert(
         "copilot.kinds",

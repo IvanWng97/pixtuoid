@@ -467,6 +467,12 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
+/// The session-entry `type` values this decoder maps — this module's row in the
+/// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so
+/// this watch is the ONLY signal an entry type rename gives us.
+#[cfg(test)]
+pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM];
+
 const SESSION: &str = "session";
 const MESSAGE: &str = "message";
 const CUSTOM: &str = "custom";

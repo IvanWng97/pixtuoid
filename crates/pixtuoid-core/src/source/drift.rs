@@ -21,11 +21,12 @@
 //!    can never see a rename — they bind registration to decoding, nothing more.
 //!
 //! That order is about LYING. It says nothing about being SILENT, and a defense
-//! that never speaks never lies: for a HOOK-REGISTERED source, registration is
-//! name-keyed, so an upstream rename leaves our entry inert, the CLI fires
-//! nothing and #2 is never reached at all. Those sources need #3 even where the
-//! only thing declaring the names is a source tree — which is why the watch
-//! keeps that shape for them and not for transcript-bearing CLIs.
+//! that never speaks never lies. #2 is silent in two ways: a HOOK-REGISTERED
+//! source renames to an inert entry, so the CLI fires nothing and the decoder is
+//! never reached; and a decoder whose catch-all is a bare `_ => vec![]` says
+//! nothing even when the line does arrive (`omp`, `codex`). Both need #3, source
+//! tree included — being watchable is not the same as being watched well, but a
+//! silent defense is not a defense.
 //!
 //! An alarm must state a fact about US ("this decoder met X and dropped it"),
 //! never a guess about THEM ("upstream renamed X").

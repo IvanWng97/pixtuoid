@@ -12,12 +12,14 @@ by a test in the crate that owns those (private) names. This file never parses
 our Rust: a scraped `match` arm goes stale silently, so a rename would narrow
 the watch with nothing to show for it.
 
-WHICH sources get a row is decided by TRANSPORT, not by how nice the upstream
-document is. A HOOK-REGISTERED CLI needs one: registration is name-keyed, so a
+WHICH sources get a row is decided by TRANSPORT and by whether the decoder can
+speak. A HOOK-REGISTERED CLI always needs one: registration is name-keyed, so a
 rename leaves our entry inert, the CLI fires nothing, and the decoder is never
-reached — silence, not a signal, and no runtime breadcrumb can cover it. A
-TRANSCRIPT-bearing CLI does not: the renamed type still lands in the transcript
-and `source/drift.rs`'s breadcrumbs meet it. That file holds the full ladder.
+reached — silence, and no runtime breadcrumb can cover it. A TRANSCRIPT-bearing
+CLI needs one ONLY IF its decoder stays silent on an unrecognised line: `omp`
+and `codex` both end `_ => vec![]`, so their transcript vocabularies are watched
+here; the sources whose decoders breadcrumb are not. `source/drift.rs` holds the
+full ladder.
 
 Findings carry a DISPOSITION (see `Report`), because "upstream changed" and "our
 probe missed" need different work and only one of them is a statement about
@@ -63,6 +65,19 @@ CODEX_PROTOCOL_URL = (
 
 HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
+)
+
+CODEX_MODELS_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/"
+    "codex-rs/protocol/src/models.rs"
+)
+
+OMP_SESSION_ENTRIES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
+)
+
+CODEX_ROLLOUT_ITEM_URL = (
+    "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
 )
 
 GROK_HOOK_URL = (
@@ -269,6 +284,9 @@ ANCHORS: dict[str, Anchor] = {
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
+    CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
+    OMP_SESSION_ENTRIES_URL: Anchor(r"SessionEntry|entries", "the session-entry types"),
+    CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -703,6 +721,10 @@ class OurNames:
     codewhale: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
+    omp: set[str] | None = None
+    codex_event_msg: set[str] | None = None
+    codex_response_item: set[str] | None = None
+    codex_outers: set[str] | None = None
     openclaw: set[str] | None = None
     opencode: set[str] | None = None
     reasonix: set[str] | None = None
@@ -771,6 +793,10 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
     ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
+    ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
+    ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
+    ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
+    ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
@@ -977,6 +1003,37 @@ def _enum_body(text: str, enum_name: str) -> str | None:
 
 def _snake_case(camel: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", camel).lower()
+
+
+def _strip_nested(s: str) -> str:
+    """Iteratively strip innermost `(…)`/`{…}` so only top-level variant idents
+    survive — else a CamelCase field/param TYPE reads as a variant.
+
+    PRECONDITION: comments are already gone (every caller passes an `_enum_body`
+    result). Do NOT re-strip them here with a naive `//[^\\n]*`: that eats to
+    end-of-line from a `//` inside a STRING LITERAL, so one `rename = "http://…"`
+    attr would silently delete every variant after it on that line.
+    """
+    prev = None
+    while prev != s:
+        prev = s
+        s = re.sub(r"\([^()]*\)", "", s)
+        s = re.sub(r"\{[^{}]*\}", "", s)
+    return s
+
+
+def upstream_codex_enum_types(text: str, enum_name: str) -> set[str] | None:
+    """Serialized `type` tags of a codex `#[serde(tag="type", rename_all="snake_case")]`
+    enum. Over-includes (a renamed variant keeps its snake_case form too), which is
+    HARMLESS given a one-directional check. Returns None if the enum can't be
+    located → the caller files probe health rather than claiming a rename."""
+    body = _enum_body(text, enum_name)
+    if body is None:
+        return None
+    # rename/alias literals must be read BEFORE `_strip_nested` eats the attr parens.
+    names = set(re.findall(r'(?:rename|alias)\s*=\s*"([^"]+)"', body))
+    names.update(_snake_case(v) for v in re.findall(r"\b([A-Z][A-Za-z0-9]*)\b", _strip_nested(body)))
+    return names or None
 
 
 def upstream_grok_hooks(text: str) -> set[str] | None:
@@ -1327,6 +1384,47 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"VALID_HOOKS in hermes_cli/plugins.py — likely renamed; the shell "
                         f"hook we install into config.yaml fires nothing (no sprite)."
                     )
+
+    # TRANSCRIPT sources whose decoder does NOT breadcrumb an unknown type —
+    # `decode_omp_line` and `decode_codex_line` both end `_ => vec![]`, so the
+    # "a breadcrumb meets it" half of the transport rule is false for them and
+    # the watch is the only signal. omp's types are generic English words, so
+    # the match is QUOTE-anchored: a bare word test stays green on prose.
+    if ours.omp is not None:
+        text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
+        if text is not None:
+            for name in sorted(ours.omp):
+                if f'"{name}"' not in text:
+                    report.add_breaking(
+                        f"omp entry type `{name}` (decoded in source/omp.rs) is GONE from "
+                        f"session-entries.ts — likely renamed; the transcript still flows "
+                        f"but the decoder maps it to nothing (no sprite / no activity)."
+                    )
+
+    for field, url, enum, label in (
+        ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem", "rollout OUTER"),
+        ("codex_event_msg", CODEX_PROTOCOL_URL, "EventMsg", "rollout event_msg"),
+        ("codex_response_item", CODEX_MODELS_URL, "ResponseItem", "rollout response_item"),
+    ):
+        mine = getattr(ours, field)
+        if mine is None:
+            continue
+        text = fetch_anchored(url, f"Codex `{enum}`", report)
+        if text is None:
+            continue
+        upstream = upstream_codex_enum_types(text, enum)
+        if upstream is None:
+            report.add_blind(
+                f"the Codex `{enum}` enum",
+                url.rsplit("/", 2)[-1],
+                f"The {label} watch was SKIPPED.",
+            )
+            continue
+        for name in sorted(mine - upstream):
+            report.add_breaking(
+                f"Codex {label} `{name}` (decoded in source/codex.rs) is GONE from "
+                f"upstream `{enum}` — renamed; the transcript decodes to nothing."
+            )
 
     if ours.grok is not None:
         text = fetch_anchored(GROK_HOOK_URL, "grok hook source", report)
