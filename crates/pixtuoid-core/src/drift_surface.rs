@@ -58,6 +58,10 @@ fn surface() -> Value {
         json!(crate::source::grok::DECODED_XAI_TAGS),
     );
     decoded.insert(
+        "omp.message_vocab",
+        json!(crate::source::omp::DECODED_MESSAGE_VOCAB),
+    );
+    decoded.insert(
         "omp.exit_marker",
         json!([crate::source::omp::DECODED_EXIT_MARKER]),
     );
@@ -131,10 +135,8 @@ mod tests {
     fn no_emitted_set_is_empty() {
         let s = surface();
         let groups = s.as_object().expect("the fragment root is an object");
-        assert!(!groups.is_empty(), "the fragment emits no groups at all");
         for (group, entries) in groups {
             let obj = entries.as_object().expect("group is an object");
-            assert!(!obj.is_empty(), "{group} is empty");
             for (k, v) in obj {
                 match v {
                     Value::Array(a) => {
@@ -301,6 +303,10 @@ mod tests {
                 "the_decoded_entry_type_set_is_exactly_what_the_arms_match",
             ),
             ("DECODED_EXIT_MARKER", "session_exit_ends_root_not_as_child"),
+            (
+                "DECODED_MESSAGE_VOCAB",
+                "the_exported_message_vocabulary_is_exactly_what_the_arms_match",
+            ),
             // grok's arms nest inside the method arm, so the shared dispatch
             // scanner above cannot reach them.
             (

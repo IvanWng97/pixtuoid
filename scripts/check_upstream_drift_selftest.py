@@ -103,6 +103,8 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
+    d.OMP_AI_TYPES_URL: 'export type Block = { type: "toolCall" };\n',
+    d.OMP_ASK_URL: 'export class AskTool { name = "ask"; }\n',
     d.CODEX_ROLLOUT_ITEM_URL: "pub enum RolloutItem {\n    SessionMeta,\n}\n",
     d.CODEX_MODELS_URL: "pub enum ResponseItem {\n    FunctionCall,\n}\n",
     d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
@@ -865,6 +867,15 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("grok_xai_tags", pascal, lambda ns: {
                 d.GROK_NOTIFICATION_URL:
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
+            # Split across two documents like the real vocabulary: `ask` is only
+            # in ask.ts, so a case serving one file could not fire for it.
+            ("omp_message_vocab", str, lambda ns: {
+                d.OMP_AI_TYPES_URL:
+                    "export type Block = {\n"
+                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask") + "};\n",
+                d.OMP_ASK_URL:
+                    "export class AskTool {\n"
+                    + "".join(f'  name = "{n}";\n' for n in ns if n == "ask") + "}\n"}),
             ("omp_exit_marker", str, lambda ns: {
                 d.OMP_EXIT_DIAG_URL: "".join(
                     f'const SESSION_EXIT_CUSTOM_TYPE = "{n}";\n' for n in ns)}),

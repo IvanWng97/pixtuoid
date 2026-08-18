@@ -504,11 +504,17 @@ you:
     - **transcript-bearing** → needs one only if its decoder is silent on an
       unrecognised line. Check YOUR catch-all: `_ => vec![]` with no
       `drift::unknown_event` means nothing will ever tell you.
+    - **a breadcrumb that DEGRADES rather than saves** → still needs one. It
+      fires while the feature quietly stops working, which nobody sees until
+      they read a log.
 
-    A row is four edits, and only the last two fail loudly: the `DECODED_*`
-    const, the `insert` in that crate's `src/drift_surface.rs`, `just
-    gen-drift-surface` (commit the regenerated `crates/*/drift-surface.json`),
-    then the `SURFACE_ROWS` row plus its case in the selftest's `cases` list.
+    A row is four edits. Which const you start from depends on the clause — a
+    `DECODED_*` in `pixtuoid-core` for what you decode, a `*_EVENTS` in
+    `pixtuoid`'s `install/` for what you register — then the `insert` in that
+    crate's `src/drift_surface.rs`, `just gen-drift-surface` (commit the
+    regenerated `crates/*/drift-surface.json`), and the `SURFACE_ROWS` row plus
+    its case in the selftest's `cases` list. Only the last two fail loudly on
+    their own; a missing `insert` is caught by that crate's census.
 12. **Three edits no failure message spells out**, all of them roster literals a
     new source is simply absent from:
     - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`

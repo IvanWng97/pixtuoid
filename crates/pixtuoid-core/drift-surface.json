@@ -84,6 +84,12 @@
     "omp.exit_marker": [
       "session_exit"
     ],
+    "omp.message_vocab": [
+      "assistant",
+      "toolResult",
+      "toolCall",
+      "ask"
+    ],
     "opencode.hook_events": [
       "session.created",
       "session.deleted",

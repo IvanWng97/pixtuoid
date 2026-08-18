@@ -486,6 +486,21 @@ pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 const SESSION_EXIT: &str = "session_exit";
 
+const ROLE_ASSISTANT: &str = "assistant";
+const ROLE_TOOL_RESULT: &str = "toolResult";
+const BLOCK_TOOL_CALL: &str = "toolCall";
+const TOOL_ASK: &str = "ask";
+
+/// The message-level wire vocabulary this decoder keys on — the two roles it
+/// reads, the block type carrying tool calls, and the `ask` tool whose Start
+/// binds the reducer's Waiting gate. Exported because each is an equality guard
+/// falling through to a silent path: a rename decodes the turn to nothing, or
+/// strands a Wait forever. Pinned by
+/// `the_exported_message_vocabulary_is_exactly_what_the_arms_match`.
+#[cfg(test)]
+pub(crate) const DECODED_MESSAGE_VOCAB: &[&str] =
+    &[ROLE_ASSISTANT, ROLE_TOOL_RESULT, BLOCK_TOOL_CALL, TOOL_ASK];
+
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -519,7 +534,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 return Ok(vec![]);
             };
             match msg.get("role").and_then(|r| r.as_str()) {
-                Some("assistant") => {
+                Some(ROLE_ASSISTANT) => {
                     let mut out = Vec::new();
                     // The BARE `model` field, never the provider-prefixed
                     // `model_change` form, so TOP_MODELS prefix matching sees
@@ -563,20 +578,20 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     let mut asks = Vec::new();
                     for b in blocks
                         .iter()
-                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
+                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some(BLOCK_TOOL_CALL))
                     {
                         // `id` is a REQUIRED pairing key on a block we decode,
                         // so its absence is upstream drift, not a line we
                         // ignore — breadcrumb before dropping.
                         let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
-                            crate::source::drift::missing_field(source, "toolCall", "id");
+                            crate::source::drift::missing_field(source, BLOCK_TOOL_CALL, "id");
                             continue;
                         };
                         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| {
-                            crate::source::drift::missing_field(source, "toolCall", "name");
+                            crate::source::drift::missing_field(source, BLOCK_TOOL_CALL, "name");
                             ""
                         });
-                        let is_ask = name == "ask";
+                        let is_ask = name == TOOL_ASK;
                         let dst = if is_ask { &mut asks } else { &mut out };
                         dst.push(AgentEvent::ActivityStart {
                             agent_id: acting,
@@ -593,7 +608,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     out.extend(asks);
                     out
                 }
-                Some("toolResult") => {
+                Some(ROLE_TOOL_RESULT) => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
                         // An unkeyable End can never close its Start (leaks
                         // Active forever) — breadcrumb, then drop.
@@ -815,6 +830,41 @@ mod tests {
             }
             other => panic!("expected one parented SessionStart, got {other:?}"),
         }
+    }
+
+    /// Every exported message-level name reaches a real arm.
+    ///
+    /// Each is an equality guard whose miss is SILENT — a renamed role decodes
+    /// the turn to nothing, a renamed block type finds no tool calls, a renamed
+    /// `ask` strands the Waiting gate — so the export is the only thing the
+    /// drift watch can compare upstream.
+    #[test]
+    fn the_exported_message_vocabulary_is_exactly_what_the_arms_match() {
+        let turn = |role: &str, block: &str, tool: &str| {
+            decode_omp_line(
+                ROOT,
+                SOURCE_NAME,
+                json!({"type": "message", "id": "m1", "parentId": null, "timestamp": "t",
+                       "message": {"role": role, "timestamp": 1,
+                                   "content": [{"type": block, "id": "t1", "name": tool}]}}),
+            )
+            .map_or(0, |e| e.len())
+        };
+        let good = turn(ROLE_ASSISTANT, BLOCK_TOOL_CALL, TOOL_ASK);
+        assert!(good > 0, "the exported vocabulary decodes a turn");
+        for (role, block, tool, what) in [
+            ("pxd", BLOCK_TOOL_CALL, TOOL_ASK, "role"),
+            (ROLE_ASSISTANT, "pxd", TOOL_ASK, "block type"),
+        ] {
+            assert!(
+                turn(role, block, tool) < good,
+                "a renamed {what} must decode to less, not the same",
+            );
+        }
+        assert!(
+            DECODED_MESSAGE_VOCAB.contains(&ROLE_TOOL_RESULT),
+            "the toolResult role is exported",
+        );
     }
 
     #[test]

@@ -1041,8 +1041,8 @@ mod tests {
                 }
             }
         }
-        // The discriminator is watched as DECODED_KINDS; test fixtures and JSON
-        // pointers are not payload reads.
+        // `type` is watched as DECODED_KINDS, and a `/` marks a JSON pointer
+        // rather than a payload key.
         read.retain(|f| {
             *f != "type" && !f.contains('/') && f.chars().all(|c| c.is_ascii_alphanumeric())
         });

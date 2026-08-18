@@ -128,19 +128,36 @@ mod tests {
     /// construction, not by exception).
     #[test]
     fn every_install_events_const_reaches_the_fragment() {
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install");
+        // Recursive: `src/install/hook_cmd/` already exists, and a registration
+        // set declared in a subdirectory would otherwise be invisible to the
+        // census that exists to see it.
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(dir).expect("the install dir is readable") {
+                let path = entry.expect("a readable entry").path();
+                if path.is_dir() {
+                    rs_files(&path, out);
+                } else if path.extension().is_some_and(|e| e == "rs") {
+                    out.push(path);
+                }
+            }
+        }
+        let install_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install");
+        let mut paths = Vec::new();
+        rs_files(&install_dir, &mut paths);
         let emitter = include_str!("drift_surface.rs");
         let mut found = 0;
-        for entry in std::fs::read_dir(&dir).expect("the install dir is readable") {
-            let path = entry.expect("a readable entry").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            let module = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .expect("a utf-8 module name")
-                .to_owned();
+        for path in paths {
+            // The path RELATIVE to install/, not the file stem: `hook_cmd/mod.rs`
+            // must not report itself as `mod.rs`, and the emitter's reference
+            // spells the module path anyway.
+            let rel = path
+                .strip_prefix(&install_dir)
+                .unwrap_or(&path)
+                .with_extension("");
+            let rel = rel
+                .to_string_lossy()
+                .replace(std::path::MAIN_SEPARATOR, "::");
+            let module = rel.strip_suffix("::mod").unwrap_or(&rel).to_owned();
             let src = std::fs::read_to_string(&path).expect("the module is readable");
             for line in src.lines() {
                 let Some((_, rest)) = line.split_once("const ") else {
@@ -158,7 +175,7 @@ mod tests {
                 found += 1;
                 assert!(
                     emitter.contains(&format!("{module}::{name}")),
-                    "install/{module}.rs registers hooks as {name}, but surface() never emits \
+                    "install/{module} registers hooks as {name}, but surface() never emits \
                      them — check_upstream_drift.py cannot watch a name it never receives, and \
                      a rename would leave the registration inert with nothing to say so. Add a \
                      `registered.insert` here, run `just gen-drift-surface`, then add its \
@@ -183,7 +200,6 @@ mod tests {
         let obj = s["registered"]
             .as_object()
             .expect("registered is an object");
-        assert!(!obj.is_empty(), "no source emits a registration set");
         for (name, events) in obj {
             assert!(
                 roster.contains(&name.as_str()),

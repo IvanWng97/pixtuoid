@@ -90,6 +90,18 @@ OMP_EXIT_DIAG_URL = (
     "packages/coding-agent/src/session/exit-diagnostics.ts"
 )
 
+# omp's message-level vocabulary is SPLIT across two upstream files: the roles
+# and block type live in the shared LLM types, the `ask` tool in its own module.
+# Each is an equality guard whose miss decodes the turn to nothing.
+OMP_AI_TYPES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
+)
+
+OMP_ASK_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/tools/ask.ts"
+)
+
 OMP_SESSION_ENTRIES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
 )
@@ -292,6 +304,8 @@ ANCHORS: dict[str, Anchor] = {
     # identity-grade: co-located, not owning — a section head, a page title, or a
     # union whose MEMBERS declare the checked literals. The names could move out
     # while this still matches.
+    OMP_AI_TYPES_URL: Anchor(r"toolCall", "the message block types"),
+    OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
@@ -678,6 +692,7 @@ class OurNames:
     grok_xai_tags: set[str] | None = None
     omp: set[str] | None = None
     omp_exit_marker: set[str] | None = None
+    omp_message_vocab: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
@@ -748,6 +763,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("grok_xai_tags", CORE_LIB_FRAGMENT, "decoded", "grok.xai_tags"),
     ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
     ("omp_exit_marker", CORE_LIB_FRAGMENT, "decoded", "omp.exit_marker"),
+    ("omp_message_vocab", CORE_LIB_FRAGMENT, "decoded", "omp.message_vocab"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
@@ -1356,6 +1372,24 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
     # omp's entry types are generic English words, so the match is QUOTE-anchored:
     # a bare word test stays green on prose.
+    if ours.omp_message_vocab is not None:
+        # The union IS the document: `ask` is declared only in ask.ts, the rest
+        # only in types.ts, so a single fetch failure must not read as a vanish.
+        docs = [
+            t
+            for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)
+            if (t := fetch_anchored(u, "omp message vocabulary", report)) is not None
+        ]
+        if len(docs) == 2:
+            joined = "\n".join(docs)
+            for name in sorted(ours.omp_message_vocab):
+                if f'"{name}"' not in joined:
+                    report.add_breaking(
+                        f"omp message name `{name}` (decoded in source/omp.rs) is GONE "
+                        f"from upstream — renamed; the turn decodes to nothing, or an "
+                        f"`ask` round strands its Waiting gate forever."
+                    )
+
     if ours.omp_exit_marker is not None:
         diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", report)
         if diag is not None:
