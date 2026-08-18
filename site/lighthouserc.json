@@ -10,7 +10,6 @@
         "http://localhost:4321/architecture/?theme=day",
         "http://localhost:4321/config/?theme=day",
         "http://localhost:4321/contributing/?theme=day",
-        "http://localhost:4321/knowledge-base/?theme=day",
         "http://localhost:4321/parallel-delivery/?theme=day"
       ]
     },

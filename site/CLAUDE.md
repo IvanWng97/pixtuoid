@@ -20,12 +20,12 @@ FAILS the build, and all six sit in the `site.yml` / `pages.yml` path filters:
   runs ahead of the released version mid-cycle). Both workflows checkout with
   `fetch-depth: 0`. `pages.yml` deploys on push to `main`, not on tag push, so
   a fresh tag shows after the next `main` commit or a `workflow_dispatch`.
-- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, KNOWLEDGE-ENGINEERING,
-  PARALLEL-DELIVERY}.md` → rendered routes via glob loaders in
-  `src/content.config.ts`. **Adding or renaming a rendered doc is a
-  multi-point edit**: glob pattern, `src/pages/*.astro`, the `DOCS` entry in
-  `consts.ts`, a `Nav.astro` link, and both path filters. (Route slugs may
-  outlive file renames — `/knowledge-base` did.)
+- `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, PARALLEL-DELIVERY}.md`
+  → rendered routes via glob loaders in `src/content.config.ts`. **Adding,
+  renaming, or REMOVING a rendered doc is a multi-point edit**: glob
+  pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (Nav and
+  `assert-docs-rendered` derive from it), both workflow path filters,
+  `lighthouserc.json`, and the smoke viewport table.
 
 **Mermaid renders at build AND during `astro check`** (why CI installs
 Chromium, BEFORE `npm run check`). A version-mismatched Chromium/Playwright

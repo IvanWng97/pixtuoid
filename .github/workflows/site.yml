@@ -5,7 +5,7 @@ on:
   # be a redundant 2nd Astro build. README drift is gated by ci-lint.yml's
   # `readme` job instead, so README.md is deliberately absent from the paths.
   pull_request:
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/KNOWLEDGE-ENGINEERING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/site.yml', '.github/workflows/pages.yml']
 
 permissions:
   contents: read
