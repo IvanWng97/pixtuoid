@@ -154,6 +154,49 @@ fn render_plugin(hook_path: &str) -> Result<String> {
 mod tests {
     use super::*;
 
+    /// The plugin forwards EXACTLY what the decoder reads. These are two lists in
+    /// two languages — a TS `FORWARD` set here, `match event` arms in
+    /// `pixtuoid-core` — and no compiler can see across that gap, so they are
+    /// bound through the emitted drift surface instead. Forward one the decoder
+    /// ignores and we spawn a shim per event for nothing; miss one it reads and
+    /// that signal never arrives.
+    #[test]
+    fn the_plugin_forwards_exactly_what_the_decoder_reads() {
+        let mut forwarded: Vec<String> = PLUGIN_TEMPLATE
+            .split_once("const FORWARD = new Set<string>([")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(body, _)| {
+                body.split('"')
+                    .skip(1)
+                    .step_by(2)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .expect("the plugin declares a FORWARD set");
+        // Handled outside FORWARD because it is deduped on status change.
+        assert!(PLUGIN_TEMPLATE.contains(r#"t === "message.part.updated""#));
+        forwarded.push("message.part.updated".to_string());
+        forwarded.sort();
+
+        let surface: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../pixtuoid-core/drift-surface.json"),
+            )
+            .expect("the core drift surface is committed"),
+        )
+        .expect("the drift surface parses");
+        let mut decoded: Vec<String> = surface["decoded"]["opencode.hook_events"]
+            .as_array()
+            .expect("opencode.hook_events is a set")
+            .iter()
+            .map(|v| v.as_str().expect("a name").to_string())
+            .collect();
+        decoded.sort();
+
+        assert_eq!(forwarded, decoded);
+    }
+
     /// Nothing re-installs on a pixtuoid upgrade, so an old plugin runs forever.
     /// A config-shaped target names its missing EVENTS; this is the code-artifact
     /// equivalent, and without it doctor reported an outdated `FORWARD` set green.

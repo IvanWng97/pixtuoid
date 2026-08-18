@@ -52,6 +52,9 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
   pre-existing implementation; weight by divergence risk.
 - Drift: docs naming a moved file/fn/flag/count — sweep `rg --hidden`
   (bare `rg` skips `.github/`/`.claude/`).
+- Wire-format/upstream: a decoder or drift-watch row vs the REAL upstream
+  shape; whether a source OWES a row is `source/drift.rs`'s header — read it
+  before filing "no row" (an audit sweeps EVERY source, not just changed ones).
 - Declared-not-wired: every NEW field/flag/check/gate traces to a live
   consumer that reads it.
 - Manifest-bridge: `site/src/*.json` / generated schemas vs their Rust

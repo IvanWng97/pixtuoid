@@ -1,0 +1,111 @@
+{
+  "decoded": {
+    "acp.session_update_tags": [
+      "tool_call",
+      "tool_call_update"
+    ],
+    "acp.terminal_statuses": [
+      "completed",
+      "failed"
+    ],
+    "codex.escalation": [
+      "require_escalated",
+      "sandbox_permissions"
+    ],
+    "codex.event_msg": [
+      "task_started",
+      "turn_started",
+      "exec_command_end",
+      "patch_apply_end",
+      "web_search_begin",
+      "web_search_end",
+      "task_complete",
+      "turn_complete",
+      "turn_aborted",
+      "token_count"
+    ],
+    "codex.response_item": [
+      "function_call",
+      "custom_tool_call",
+      "function_call_output",
+      "custom_tool_call_output",
+      "web_search_call",
+      "tool_search_call",
+      "tool_search_output"
+    ],
+    "codex.rollout_outers": [
+      "event_msg",
+      "response_item",
+      "turn_context"
+    ],
+    "copilot.kinds": [
+      "session.start",
+      "tool.execution_start",
+      "tool.execution_complete",
+      "permission.requested",
+      "permission.completed",
+      "subagent.started",
+      "subagent.completed",
+      "subagent.failed",
+      "session.task_complete",
+      "session.shutdown"
+    ],
+    "copilot.payload_fields": [
+      "agentDisplayName",
+      "agentId",
+      "arguments",
+      "context",
+      "cwd",
+      "data",
+      "kind",
+      "model",
+      "permissionRequest",
+      "result",
+      "sessionId",
+      "tokenCount",
+      "tokenDetails",
+      "toolCallId",
+      "toolName"
+    ],
+    "decoder.dispatch_names": [
+      "Agent"
+    ],
+    "grok.xai_method": [
+      "_x.ai/session/update"
+    ],
+    "grok.xai_tags": [
+      "subagent_spawned",
+      "subagent_finished",
+      "model_changed",
+      "model_auto_switched",
+      "turn_completed",
+      "hook_execution"
+    ],
+    "omp.entry_types": [
+      "session",
+      "message",
+      "custom"
+    ],
+    "omp.exit_marker": [
+      "session_exit"
+    ],
+    "omp.message_vocab": [
+      "assistant",
+      "toolResult",
+      "toolCall",
+      "ask"
+    ],
+    "opencode.hook_events": [
+      "session.created",
+      "session.deleted",
+      "message.part.updated",
+      "permission.asked",
+      "permission.v2.asked"
+    ],
+    "opencode.part_statuses": [
+      "running",
+      "completed",
+      "error"
+    ]
+  }
+}

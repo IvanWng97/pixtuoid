@@ -1284,6 +1284,17 @@ gen-guides-check:
     python3 scripts/gen-guides.py --selftest
     python3 scripts/gen-guides.py --check
 
+# Regenerate the committed drift-surface fragments — what each crate declares it
+# READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
+# these instead of parsing our Rust, so a rename must be re-emitted or the watch
+# narrows. The gate is the crates' own tests, which fail on a stale file; this is
+# just the writer.
+[group('meta')]
+[doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
+gen-drift-surface:
+    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core --lib drift_surface
+    UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid --lib drift_surface
+
 # Self-test the upstream-drift watcher — its ONLY test. A regex-parser regression
 # is a silent monitor death (the script returns empty / raises, the weekly job
 # alarms on junk or watches nothing); this pins the parsers + the fetch

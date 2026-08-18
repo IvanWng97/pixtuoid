@@ -2,7 +2,7 @@
 
 Indexed one line each in [`CLAUDE.md`](CLAUDE.md). These look like bugs and are deliberate design — read the entry before "fixing" one: the edge, the WHY, one authority pointer (pinning test / in-code comment / issue). Adjudication history lives in the cited issue/PR, not here.
 
-- **Only a wire surface we actually READ may raise a drift alarm — don't add a `KNOWN_*` allowlist of names we ignore.** `drift::unknown_event` has no dedup, so such a list must mirror an upstream vocabulary forever or a harmless upstream addition alarms every user (#935). Fetchable upstream → a `check_upstream_drift.py` VANISH row; unfetchable → detect by SHAPE, the payload a renamed type still carries (`an_unnamed_type_is_a_turn_only_when_it_carries_the_payload`).
+- **Only a wire surface we actually READ may raise a drift alarm — don't add a `KNOWN_*` allowlist of names we ignore.** `drift::unknown_event` has no dedup, so such a list must mirror an upstream vocabulary forever or a harmless upstream addition alarms every user (#935). Detect by SHAPE where the payload allows (`an_unnamed_type_is_a_turn_only_when_it_carries_the_payload`); WHICH sources also owe an upstream watch, and why a breadcrumb cannot cover some of them, is decided in `source/drift.rs`'s header — not here, because that answer changes with the decoders.
 
 - **`walkable.rs` is coherence-bound to this crate — it did NOT move with the sim-geometry cluster.** `WalkableMask` aliases `Grid<bool>` with inherent obstacle ops; the orphan rule pins an inherent impl to the crate owning the type. Wrapper struct and extension trait were adjudicated against — see the comment on the impl.
 

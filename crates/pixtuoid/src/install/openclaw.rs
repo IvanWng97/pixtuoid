@@ -28,14 +28,14 @@ const CONFIG_FILES: [&str; 2] = ["openclaw.json", "clawdbot.json"];
 #[cfg(test)]
 const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
-const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
+pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 
 /// The OpenClaw gateway hook events pixtuoid depends on — the SINGLE source of
 /// truth, pinned to the plugin's `HOOKS` array and `decode_openclaw_hook_payload`'s
-/// arms by the consistency test below, and parsed out of this source text by
-/// `check_upstream_drift.py` (which is why a const with no prod caller is
-/// test-gated rather than deleted). A rename upstream makes that hook silently
-/// stop firing, since the plugin registers by name.
+/// arms by the consistency test below, and emitted into the drift surface by
+/// `drift_surface.rs` (which is why a const with no prod caller is test-gated
+/// rather than deleted). A rename upstream makes that hook silently stop firing,
+/// since the plugin registers by name.
 #[cfg(test)]
 pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
     "gateway_start",

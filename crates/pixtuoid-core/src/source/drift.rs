@@ -4,12 +4,50 @@
 //! `source`, so the persistent warn-floor log (read by `pixtuoid doctor`)
 //! captures it without any decoder signature change.
 //!
-//! Four defenses: a SEMANTIC signal beats a hardcoded name
-//! (`make_tool_detail` keys dispatch on `subagent_type`); these breadcrumbs;
-//! the `every_registered_*_event_decodes` tests in `install/`, which assert our
-//! own belief and so cannot see a rename; and `scripts/check_upstream_drift.py`,
-//! which can, wherever upstream is fetchable — CC's transcript and antigravity
-//! have no schema, so they stop at this file.
+//! **Alarm only on what the vendor PROMISED; defend everything else by not
+//! depending on it.** The defenses, ordered by whether they can lie to you:
+//!
+//! 1. **Don't key on the name.** `make_tool_detail` dispatches on `subagent_type`
+//!    being present, `decode_cc_line` on the payload a renamed type still
+//!    carries. Cannot lie, and drift stops mattering rather than being detected.
+//! 2. **These breadcrumbs, and the recorded fixtures.** Cannot lie either: both
+//!    meet the real wire. A breadcrumb is something a decoder actually met and
+//!    could not handle, on the machine running that CLI, the moment it happened
+//!    — `doctor` counts them per source and the TUI footer surfaces it.
+//! 3. **`check_upstream_drift.py`, against whatever DECLARES those names** — a
+//!    JSON schema, a consumer hooks page, or the declaration in the vendor's own
+//!    source. It can lie (a file moves, a doc is restyled), which is why a stale
+//!    pin reads as probe health rather than drift.
+//! 4. The `every_registered_*_event_decodes` tests assert our own belief, so they
+//!    can never see a rename — they bind registration to decoding, nothing more.
+//!
+//! That order is about LYING. It says nothing about being SILENT, and a defense
+//! that never speaks never lies. #2 is silent in three ways, each needing #3,
+//! source tree included:
+//!
+//! * **Inert registration.** A HOOK-REGISTERED source renames to an entry the
+//!   CLI never matches, so it fires nothing and the decoder is never reached.
+//! * **A silent catch-all.** A decoder ending in a bare `_ => vec![]` says
+//!   nothing even when the line does arrive. Grep the decoders for that shape;
+//!   do not keep a list here.
+//! * **Silent DEGRADATION.** A breadcrumb that fires while the feature quietly
+//!   stops working is not coverage: `make_tool_detail`'s name fallback
+//!   breadcrumbs a renamed dispatch tool, and subagent suppression is off until
+//!   someone reads the log. `Task` -> `Agent` is why this watch exists at all.
+//!
+//! Being watchable is not the same as being watched well, but a silent defense
+//! is not a defense.
+//!
+//! Two shapes are watched only where a row was written for them, never
+//! systematically: payload FIELD names a decoder reads (#940 — copilot's ride
+//! `copilot.payload_fields`, codex's escalation pair `codex.escalation`; the
+//! rest are neither watched nor breadcrumbed)
+//! and single wire VALUES it compares for equality (#943 —
+//! `every_equality_compared_wire_literal_is_accounted_for` is the census;
+//! what it does not carry is an exemption with a written reason).
+//!
+//! An alarm must state a fact about US ("this decoder met X and dropped it"),
+//! never a guess about THEM ("upstream renamed X").
 //!
 //! **Only a surface we READ may raise one, and never from a name list.** These
 //! warn per LINE (no dedup), so a decoder that breadcrumbed every name it did

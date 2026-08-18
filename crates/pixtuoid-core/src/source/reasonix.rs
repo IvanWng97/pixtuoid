@@ -69,7 +69,13 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .get("sessionId")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
-        .unwrap_or(cwd);
+        .unwrap_or_else(|| {
+            // The fallback is for OLD builds that carried no id, and an upstream
+            // RENAME is indistinguishable from one — but its blast radius is
+            // every session merging onto cwd, so it must not be silent.
+            crate::source::drift::missing_field(SOURCE_NAME, event, "sessionId");
+            cwd
+        });
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);
 
     let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key, Some(cwd.into()));
@@ -206,6 +212,34 @@ mod tests {
 
     fn decode(v: Value) -> AgentEvent {
         decode_all(v).pop().expect("at least one event")
+    }
+
+    /// An absent `sessionId` is breadcrumbed, not merged in silence.
+    ///
+    /// The cwd fallback stays for old builds, but an upstream RENAME looks
+    /// identical to one and collapses every session in a workspace onto a
+    /// single sprite — so the drop has to say so.
+    #[test]
+    fn a_missing_session_id_breadcrumbs_before_falling_back_to_cwd() {
+        let payload = json!({"event": "SessionStart", "cwd": "/repo"});
+        let mut evs = 0;
+        let logs = crate::test_capture::capture_logs(|| {
+            evs = decode_rx_hook_payload(&payload).expect("decodes").len();
+        });
+        assert!(evs > 0, "the fallback still decodes the event");
+        assert!(
+            logs.contains(crate::source::drift::TARGET),
+            "an absent sessionId must breadcrumb; got {logs:?}"
+        );
+
+        let with_id = json!({"event": "SessionStart", "cwd": "/repo", "sessionId": "s1"});
+        let quiet = crate::test_capture::capture_logs(|| {
+            decode_rx_hook_payload(&with_id).expect("decodes");
+        });
+        assert!(
+            !quiet.contains(crate::source::drift::TARGET),
+            "a present sessionId must stay quiet; got {quiet:?}"
+        );
     }
 
     #[test]

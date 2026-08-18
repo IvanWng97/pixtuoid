@@ -43,10 +43,36 @@ pub use native::{live_grok_session_ids, GrokSource};
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
 
-/// xAI's private JSON-RPC method namespace, mirroring upstream's
-/// `XAI_SESSION_UPDATE_METHOD`; `check_upstream_drift.py` reads this const
-/// rather than holding its own copy of the literal.
+/// xAI's private JSON-RPC method namespace, named once so the decode arm and
+/// the session-end scan cannot drift apart.
 const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+
+const XAI_SUBAGENT_SPAWNED: &str = "subagent_spawned";
+const XAI_SUBAGENT_FINISHED: &str = "subagent_finished";
+const XAI_MODEL_CHANGED: &str = "model_changed";
+const XAI_MODEL_AUTO_SWITCHED: &str = "model_auto_switched";
+const XAI_TURN_COMPLETED: &str = "turn_completed";
+const XAI_HOOK_EXECUTION: &str = "hook_execution";
+
+/// The xAI extension tags this decoder turns into events. Exported for the
+/// drift surface: the arm below ends `_ => Ok(vec![])`, so a renamed tag decodes
+/// to nothing with no breadcrumb to say so, and the upstream watch is the only
+/// signal. Pinned to the arms by
+/// `the_exported_xai_tag_set_is_exactly_what_the_arms_match`.
+#[cfg(test)]
+pub(crate) const DECODED_XAI_TAGS: &[&str] = &[
+    XAI_SUBAGENT_SPAWNED,
+    XAI_SUBAGENT_FINISHED,
+    XAI_MODEL_CHANGED,
+    XAI_MODEL_AUTO_SWITCHED,
+    XAI_TURN_COMPLETED,
+    XAI_HOOK_EXECUTION,
+];
+
+/// The method namespace itself, exported for the same reason: it gates the whole
+/// xAI block, so its rename silences every tag at once.
+#[cfg(test)]
+pub(crate) const DECODED_XAI_METHOD: &str = XAI_SESSION_UPDATE_METHOD;
 
 /// Decode one grok hook payload (already identified by
 /// `_pixtuoid_source == "grok"`), keyed on `sessionId`.
@@ -350,7 +376,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
         // xAI private extension namespace — ACP reserves the `_` prefix for
         // implementation-specific methods, so none of this is ACP vocabulary.
         XAI_SESSION_UPDATE_METHOD => match tag {
-            "subagent_spawned" => {
+            XAI_SUBAGENT_SPAWNED => {
                 let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
@@ -377,7 +403,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 }
                 Ok(evs)
             }
-            "subagent_finished" => {
+            XAI_SUBAGENT_FINISHED => {
                 let Some(child_key) = transcript_child_key(update) else {
                     crate::source::drift::missing_field(SOURCE_NAME, tag, "child_session_id");
                     return Ok(vec![]);
@@ -387,7 +413,7 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                     as_child: true,
                 }])
             }
-            "model_changed" => {
+            XAI_MODEL_CHANGED => {
                 let model = str_field("model_id")
                     .filter(|s| !s.is_empty())
                     .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
@@ -403,13 +429,30 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                     effort,
                 }])
             }
+            // Fires INSTEAD of `model_changed` when the persisted model is no
+            // longer available — undecoded, the flame shows the dead model
+            // until the next `_meta.modelId`-bearing update corrects it.
+            XAI_MODEL_AUTO_SWITCHED => {
+                let model = str_field("new_model_id")
+                    .filter(|s| !s.is_empty())
+                    .map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS));
+                let Some(model) = model else {
+                    crate::source::drift::missing_field(SOURCE_NAME, tag, "new_model_id");
+                    return Ok(vec![]);
+                };
+                Ok(vec![AgentEvent::ModelInfo {
+                    agent_id,
+                    model: Some(model),
+                    effort: None,
+                }])
+            }
             // The transcript twin of the `stop` hook: a tool-less turn's only
             // end signal for transcript-only setups.
-            "turn_completed" => Ok(vec![AgentEvent::ActivityEnd {
+            XAI_TURN_COMPLETED => Ok(vec![AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: None,
             }]),
-            "hook_execution" => {
+            XAI_HOOK_EXECUTION => {
                 if str_field("event_name") == Some("session_end") {
                     Ok(vec![AgentEvent::SessionEnd {
                         agent_id,
@@ -1196,6 +1239,56 @@ mod tests {
         assert!(
             matches!(&background[..], [AgentEvent::ActivityStart { detail: Some(d), .. }] if !d.is_task()),
             "default (background) spawn must NOT be Task — b1 would evict the live child"
+        );
+    }
+
+    /// The exported tag set is exactly what the arms match.
+    ///
+    /// Two copies otherwise: a tag added to an arm but not the export leaves it
+    /// unwatched, and one dropped from an arm but not the export watches a name
+    /// we no longer read. The bare-word probe is a control — an unread tag must
+    /// reach neither arm.
+    #[test]
+    fn the_exported_xai_tag_set_is_exactly_what_the_arms_match() {
+        let reaches = |tag: &str| {
+            let mut evs = 0;
+            let logs = crate::test_capture::capture_logs(|| {
+                evs = decode_line(xai_line(json!({
+                    "sessionUpdate": tag,
+                    "child_session_id": "c", "subagent_id": "s",
+                    "model_id": "m", "new_model_id": "m2",
+                    "event_name": "session_end", "runs": [],
+                })))
+                .len();
+            });
+            evs > 0 || logs.contains(crate::source::drift::TARGET)
+        };
+        for tag in DECODED_XAI_TAGS {
+            assert!(reaches(tag), "{tag} must reach a real arm");
+        }
+        assert!(
+            !reaches("checkpoint_saved"),
+            "an unread tag reaches neither"
+        );
+        assert_eq!(DECODED_XAI_METHOD, XAI_SESSION_UPDATE_METHOD);
+
+        // The auto-switch arm reads `new_model_id`, not `model_changed`'s
+        // `model_id` — a payload carrying only the WRONG field must not emit.
+        let only = |field: &str| {
+            decode_line(xai_line(
+                json!({"sessionUpdate": XAI_MODEL_AUTO_SWITCHED, field: "m2"}),
+            ))
+        };
+        assert!(
+            matches!(
+                only("new_model_id").as_slice(),
+                [AgentEvent::ModelInfo { model: Some(_), .. }]
+            ),
+            "new_model_id alone must emit ModelInfo"
+        );
+        assert!(
+            only("model_id").is_empty(),
+            "model_id alone must NOT satisfy the auto-switch arm"
         );
     }
 

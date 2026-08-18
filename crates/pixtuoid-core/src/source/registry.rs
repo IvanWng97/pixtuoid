@@ -499,6 +499,13 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             tool_id_key: ToolIdKey::ToolUse,
             custom: None,
         }),
+        // Both false is VERIFIED, not unexamined: the transcript carries no end
+        // marker (`status` is per-step and always DONE), and a swept session
+        // cannot walk back in — JSONL lines for an unknown id are no-ops, and
+        // the hook spec above never fires because there is no install target.
+        // So the long stale sweep is the only correct reaper here; flipping
+        // `resurrects_on_prompt` to earn the 5-min one would strand a live
+        // idle session permanently.
         caps: SourceCaps {
             has_exit_signal: false,
             resurrects_on_prompt: false,
@@ -845,9 +852,14 @@ const KIMI: SourceDescriptor = SourceDescriptor {
             // SessionStart is the registration carrier, not UserPromptSubmit, so
             // a swept session does not walk back in.
             resurrects_on_prompt: false,
-            // Kimi's "agent swarm" subagents are NOT modeled (their payload
-            // shape is uncaptured), so a Delegating parent goes hook-silent
-            // through the delegation. `true` can only over-retain a dead slot.
+            // CONSUMED, not decorative — for the `Agent` tool: 0.36.1's
+            // `AgentToolInputSchema` (installed bundle) injects
+            // `subagent_type: "coder"` when the model omits it, so
+            // `make_tool_detail` mints Task semantically. `AgentSwarm` has NO
+            // such injection (its subagent_type is optional with a prose-only
+            // default), so an omitting swarm call mints Generic and this flag
+            // is not consumed on that path. The child's own hook payloads stay
+            // unmodeled either way; `true` can only over-retain a dead slot.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,

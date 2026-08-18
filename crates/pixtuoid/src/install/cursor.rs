@@ -23,7 +23,7 @@ use crate::install::SENTINEL_KEY;
 /// are deliberately absent (they don't fire in the CLI). `postToolUseFailure` FIRES
 /// instead of `postToolUse` on a failed tool, so it is registered too — else a
 /// failed tool's ActivityStart never closes under `-p` (where `stop` doesn't fire).
-const CURSOR_EVENTS: &[&str] = &[
+pub(crate) const CURSOR_EVENTS: &[&str] = &[
     "sessionStart",
     "preToolUse",
     "postToolUse",

@@ -493,6 +493,17 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
+const DISPATCH_TOOL: &str = "Agent";
+
+/// The subagent-dispatch tool NAME we still recognise — this module's row in the
+/// drift surface. It is a fallback, not the detector: dispatch is found
+/// semantically by `subagent_type` presence, so a rename degrades to a
+/// breadcrumb rather than a miss.
+///
+/// Test-gated: the surface emitter is the only reader.
+#[cfg(test)]
+pub(crate) const DECODED_DISPATCH_NAMES: &[&str] = &[DISPATCH_TOOL];
+
 pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Value>) -> ToolDetail {
     // Detect the subagent-dispatch tool SEMANTICALLY, by the PRESENCE of a
     // `subagent_type` input field. The dispatch tool was renamed `Task` →
@@ -508,7 +519,7 @@ pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Val
     // vouched-Delegating subtree shield would then sweep-EXEMPT every FINISHED
     // fleet subagent until the workflow ends: worse desk starvation than the gap
     // it would "fix". Fleet lifecycle rides the SubagentStart/Stop hooks instead.
-    let known_name = tool_name == "Agent";
+    let known_name = tool_name == DISPATCH_TOOL;
     if has_subagent_type || known_name {
         if has_subagent_type && !known_name {
             super::drift::unknown_dispatch(source, tool_name);
@@ -765,6 +776,31 @@ mod tests {
         );
     }
     use serde_json::json;
+
+    /// The exported name IS the one the fallback matches, and it is only a
+    /// FALLBACK: `subagent_type` presence detects the dispatch on its own, so a
+    /// tool outside the set still becomes a Task when it carries the field.
+    #[test]
+    fn the_dispatch_name_set_is_exactly_what_the_fallback_matches() {
+        for name in DECODED_DISPATCH_NAMES {
+            assert!(matches!(
+                make_tool_detail("claude-code", name, None),
+                ToolDetail::Task
+            ));
+        }
+        assert!(!matches!(
+            make_tool_detail("claude-code", "Bash", None),
+            ToolDetail::Task
+        ));
+        assert!(matches!(
+            make_tool_detail(
+                "claude-code",
+                "Renamed",
+                Some(&json!({"subagent_type": null}))
+            ),
+            ToolDetail::Task
+        ));
+    }
 
     #[test]
     fn task_prefixed_tools_without_subagent_type_are_not_the_dispatch() {

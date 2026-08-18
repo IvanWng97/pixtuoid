@@ -73,6 +73,9 @@ pub use state::{
 pub use walkable::{OccupancyOverlay, WalkableMask};
 
 #[cfg(test)]
+mod drift_surface;
+
+#[cfg(test)]
 pub(crate) mod test_capture;
 
 /// Test-only mutex serializing tests that mutate process-global environment

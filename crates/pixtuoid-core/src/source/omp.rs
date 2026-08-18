@@ -467,6 +467,40 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
+/// The session-entry `type` values this decoder maps — this module's row in the
+/// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so
+/// this watch is the ONLY signal an entry type rename gives us.
+#[cfg(test)]
+pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM];
+
+const SESSION: &str = "session";
+const MESSAGE: &str = "message";
+const CUSTOM: &str = "custom";
+
+/// The `customType` marking a clean teardown — the ONLY structural end omp
+/// writes. Exported for the drift surface because the guard below falls through
+/// to `_ => vec![]`: rename it upstream and no omp session ever ends cleanly,
+/// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
+#[cfg(test)]
+pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
+
+const SESSION_EXIT: &str = "session_exit";
+
+const ROLE_ASSISTANT: &str = "assistant";
+const ROLE_TOOL_RESULT: &str = "toolResult";
+const BLOCK_TOOL_CALL: &str = "toolCall";
+const TOOL_ASK: &str = "ask";
+
+/// The message-level wire vocabulary this decoder keys on — the two roles it
+/// reads, the block type carrying tool calls, and the `ask` tool whose Start
+/// binds the reducer's Waiting gate. Exported because each is an equality guard
+/// falling through to a silent path: a rename decodes the turn to nothing, or
+/// strands a Wait forever. Pinned by
+/// `the_exported_message_vocabulary_is_exactly_what_the_arms_match`.
+#[cfg(test)]
+pub(crate) const DECODED_MESSAGE_VOCAB: &[&str] =
+    &[ROLE_ASSISTANT, ROLE_TOOL_RESULT, BLOCK_TOOL_CALL, TOOL_ASK];
+
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -481,7 +515,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
     let out = match kind {
         // session_id must be the SAME id-deriver key the watcher's first-sight
         // registration uses, so the two SessionStarts agree.
-        "session" => {
+        SESSION => {
             let cwd = obj.get("cwd").and_then(|c| c.as_str()).unwrap_or_else(|| {
                 crate::source::drift::missing_field(source, "session", "cwd");
                 ""
@@ -495,12 +529,12 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 parent_id,
             }]
         }
-        "message" => {
+        MESSAGE => {
             let Some(msg) = obj.get("message") else {
                 return Ok(vec![]);
             };
             match msg.get("role").and_then(|r| r.as_str()) {
-                Some("assistant") => {
+                Some(ROLE_ASSISTANT) => {
                     let mut out = Vec::new();
                     // The BARE `model` field, never the provider-prefixed
                     // `model_change` form, so TOP_MODELS prefix matching sees
@@ -544,20 +578,20 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     let mut asks = Vec::new();
                     for b in blocks
                         .iter()
-                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some("toolCall"))
+                        .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some(BLOCK_TOOL_CALL))
                     {
                         // `id` is a REQUIRED pairing key on a block we decode,
                         // so its absence is upstream drift, not a line we
                         // ignore — breadcrumb before dropping.
                         let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
-                            crate::source::drift::missing_field(source, "toolCall", "id");
+                            crate::source::drift::missing_field(source, BLOCK_TOOL_CALL, "id");
                             continue;
                         };
                         let name = b.get("name").and_then(|n| n.as_str()).unwrap_or_else(|| {
-                            crate::source::drift::missing_field(source, "toolCall", "name");
+                            crate::source::drift::missing_field(source, BLOCK_TOOL_CALL, "name");
                             ""
                         });
-                        let is_ask = name == "ask";
+                        let is_ask = name == TOOL_ASK;
                         let dst = if is_ask { &mut asks } else { &mut out };
                         dst.push(AgentEvent::ActivityStart {
                             agent_id: acting,
@@ -574,7 +608,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     out.extend(asks);
                     out
                 }
-                Some("toolResult") => {
+                Some(ROLE_TOOL_RESULT) => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
                         // An unkeyable End can never close its Start (leaks
                         // Active forever) — breadcrumb, then drop.
@@ -592,7 +626,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
         }
         // Clean teardown marker: reason/kind ignored — every kind
         // ("normal"|"signal"|"fatal"|"process_exit") IS an end.
-        "custom" if obj.get("customType").and_then(|c| c.as_str()) == Some("session_exit") => {
+        CUSTOM if obj.get("customType").and_then(|c| c.as_str()) == Some(SESSION_EXIT) => {
             vec![AgentEvent::SessionEnd {
                 agent_id: acting,
                 as_child: omp_parent_key_from_path(path).is_some(),
@@ -642,6 +676,35 @@ mod tests {
     const ROOT_KEY: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001";
     const CHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha.jsonl";
     const GRANDCHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha/GoodWolf.jsonl";
+
+    /// Each entry type reaches a real arm. The arms dispatch on these same
+    /// consts, so a value cannot drift; what this proves is that none of them
+    /// has stopped being handled. `custom` is GUARDED on
+    /// `customType == "session_exit"`, so its payload has to clear the guard —
+    /// a bare `custom` falls through to the catch-all like any unread type.
+    #[test]
+    fn the_decoded_entry_type_set_is_exactly_what_the_arms_match() {
+        let drive = |ty: &str| {
+            let line = match ty {
+                CUSTOM => json!({"type": ty, "id": "x", "parentId": null,
+                                 "timestamp": "t", "customType": "session_exit"}),
+                MESSAGE => json!({"type": ty, "id": "x", "parentId": null, "timestamp": "t",
+                                  "message": {"role": "assistant", "timestamp": 1,
+                                              "model": "anthropic/claude-opus-4-5"}}),
+                _ => json!({"type": ty, "version": 3, "id": "x", "timestamp": "t",
+                            "cwd": "/home/u/proj"}),
+            };
+            let mut evs = 0;
+            let logs = crate::test_capture::capture_logs(|| {
+                evs = decode_omp_line(ROOT, SOURCE_NAME, line).map_or(0, |e| e.len());
+            });
+            evs > 0 || logs.contains(crate::source::drift::TARGET)
+        };
+        for ty in DECODED_ENTRY_TYPES {
+            assert!(drive(ty), "{ty} must reach a real arm");
+        }
+        assert!(!drive("checkpoint"), "an unread entry type reaches neither");
+    }
 
     #[test]
     fn a_root_stem_needs_both_the_date_shape_and_the_uuid_separator() {
@@ -769,8 +832,66 @@ mod tests {
         }
     }
 
+    /// Every exported message-level name reaches a real arm.
+    ///
+    /// Each is an equality guard whose miss is SILENT — a renamed role decodes
+    /// the turn to nothing, a renamed block type finds no tool calls, a renamed
+    /// `ask` strands the Waiting gate — so the export is the only thing the
+    /// drift watch can compare upstream.
+    #[test]
+    fn the_exported_message_vocabulary_is_exactly_what_the_arms_match() {
+        let turn = |role: &str, block: &str, tool: &str| {
+            decode_omp_line(
+                ROOT,
+                SOURCE_NAME,
+                json!({"type": "message", "id": "m1", "parentId": null, "timestamp": "t",
+                       "message": {"role": role, "timestamp": 1,
+                                   "content": [{"type": block, "id": "t1", "name": tool}]}}),
+            )
+            .map_or(0, |e| e.len())
+        };
+        let good = turn(ROLE_ASSISTANT, BLOCK_TOOL_CALL, TOOL_ASK);
+        assert!(good > 0, "the exported vocabulary decodes a turn");
+        for (role, block, tool, what) in [
+            ("pxd", BLOCK_TOOL_CALL, TOOL_ASK, "role"),
+            (ROLE_ASSISTANT, "pxd", TOOL_ASK, "block type"),
+        ] {
+            assert!(
+                turn(role, block, tool) < good,
+                "a renamed {what} must decode to less, not the same",
+            );
+        }
+        assert!(
+            DECODED_MESSAGE_VOCAB.contains(&ROLE_TOOL_RESULT),
+            "the toolResult role is exported",
+        );
+
+        // The ask arm's OWN probe: an ask-named call must gate Waiting, and a
+        // renamed ask must not — start-only, never the gate.
+        let waits = |tool: &str| {
+            decode_omp_line(
+                ROOT,
+                SOURCE_NAME,
+                json!({"type": "message", "id": "m2", "parentId": null, "timestamp": "t",
+                       "message": {"role": ROLE_ASSISTANT, "timestamp": 1,
+                                   "content": [{"type": BLOCK_TOOL_CALL, "id": "t2",
+                                                "name": tool}]}}),
+            )
+            .is_ok_and(|evs| evs.iter().any(|e| matches!(e, AgentEvent::Waiting { .. })))
+        };
+        assert!(waits(TOOL_ASK), "an ask call must gate Waiting");
+        assert!(
+            !waits("pxd_renamed_ask"),
+            "a renamed ask must not gate Waiting"
+        );
+    }
+
     #[test]
     fn session_exit_ends_root_not_as_child() {
+        assert_eq!(
+            DECODED_EXIT_MARKER, "session_exit",
+            "the exported marker IS the arm's"
+        );
         let line = r#"{"type":"custom","id":"a1b2c3d4","parentId":"e5f6a7b8","timestamp":"2026-07-09T08:10:00.000Z","customType":"session_exit","data":{"reason":"exit command","kind":"normal","recordedAt":"2026-07-09T08:10:00.000Z"}}"#;
         match &decode(line)[..] {
             [AgentEvent::SessionEnd { agent_id, as_child }] => {

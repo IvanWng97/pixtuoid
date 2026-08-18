@@ -6,6 +6,9 @@ pub(crate) mod audio;
 pub mod cli;
 pub mod config;
 pub mod doctor;
+
+#[cfg(test)]
+mod drift_surface;
 pub mod floating;
 pub(crate) mod focus;
 pub(crate) mod graphics;

@@ -58,6 +58,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 
 - Don't chain `cargo clippy && cargo test` (two build caches) — `just preflight` or one at a time. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
+- Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
 - Look-changing PR → `just gen`, commit `docs/images/` + `site/public/demos/`; a scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
 - Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.

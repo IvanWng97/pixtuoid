@@ -252,8 +252,8 @@ guards; steps 1–3, 11 and 12 are on you.
    to an upstream file/version. **Audit its HOME RESOLVER per axis in the
    same pass** — PROBE the installed artifact rather than trusting docs; an
    unmirrored axis is fail-silent: the watcher polls a directory the CLI
-   never writes and the office stays empty (#880). Add a
-   `check_upstream_drift.py` row where the resolver is fetchable source.
+   never writes and the office stays empty (#880). Resolver axes are
+   deliberately NOT drift-watched — re-run the probe matrix when the CLI majors.
 2. **Write the source module** — `crates/pixtuoid-core/src/source/<name>.rs`:
    `SOURCE_NAME`, a `LineDecoder` fn (one JSONL line → `Vec<AgentEvent>`), a
    label deriver, unit tests per event mapping. Format knowledge lives HERE.
@@ -286,7 +286,11 @@ guards; steps 1–3, 11 and 12 are on you.
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
 11. **Docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md` entry,
-    and a `check_upstream_drift.py` check if the upstream is open source.
+    and a `check_upstream_drift.py` row where one is owed — which surfaces owe
+    one is `source/drift.rs`'s header, read it there. A row is four steps: the
+    const, the `insert` in that crate's `src/drift_surface.rs`,
+    `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
+    row plus its selftest case (the case census fails without it).
 12. **Three roster literals no failure message spells out**: the row-by-row
     byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
     `tests/sources/captures.rs`; a case row + `#[test]` in

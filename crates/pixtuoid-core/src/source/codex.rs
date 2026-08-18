@@ -118,6 +118,34 @@ pub(crate) fn extract_codex_cwd(v: &Value) -> Option<PathBuf> {
     v.get("payload")?.get("cwd")?.as_str().map(PathBuf::from)
 }
 
+pub(crate) const EVENT_MSG: &str = "event_msg";
+pub(crate) const RESPONSE_ITEM: &str = "response_item";
+pub(crate) const TURN_CONTEXT: &str = "turn_context";
+
+const SANDBOX_PERMISSIONS_FIELD: &str = "sandbox_permissions";
+const REQUIRE_ESCALATED: &str = "require_escalated";
+
+/// The escalation pair this decoder keys on. Exported because the check is a
+/// BOOLEAN: a rename makes it silently `false`, and `false` is a legitimate
+/// answer, so no breadcrumb can exist here — the upstream watch is the only
+/// signal. Pinned by `escalated_permission_is_detected_by_the_exported_pair`.
+#[cfg(test)]
+pub(crate) const DECODED_ESCALATION: &[&str] = &[REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD];
+
+/// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
+/// (the arms below guard on `contains`) and the export source, so there is one
+/// declaration per name and no second copy to drift.
+pub(crate) const EM_TURN_START: &[&str] = &["task_started", "turn_started"];
+pub(crate) const EM_RESUME: &[&str] = &["exec_command_end", "patch_apply_end"];
+pub(crate) const EM_SEARCH: &[&str] = &["web_search_begin", "web_search_end"];
+pub(crate) const EM_TURN_END: &[&str] = &["task_complete", "turn_complete", "turn_aborted"];
+pub(crate) const EM_TOKENS: &[&str] = &["token_count"];
+
+pub(crate) const RI_TOOL_START: &[&str] = &["function_call", "custom_tool_call"];
+pub(crate) const RI_RESUME: &[&str] = &["function_call_output", "custom_tool_call_output"];
+pub(crate) const RI_SEARCH: &[&str] =
+    &["web_search_call", "tool_search_call", "tool_search_output"];
+
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
 pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
@@ -146,10 +174,10 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // `task_started` is what codex serializes today; `turn_started` is
         // upstream's own serde alias, accepted so a future serializer flip to
         // the alias form still drives Active/Idle.
-        ("event_msg", "task_started") | ("event_msg", "turn_started") => vec![start()],
+        (EVENT_MSG, i) if EM_TURN_START.contains(&i) => vec![start()],
         // `custom_tool_call` is the SAME item under codex's custom-tool API and is
         // what a modern session serializes — `a_custom_tool_call_is_a_tool_call`.
-        ("response_item", "function_call" | "custom_tool_call") => {
+        (RESPONSE_ITEM, i) if RI_TOOL_START.contains(&i) => {
             if function_call_needs_approval(payload) {
                 vec![AgentEvent::Waiting {
                     agent_id,
@@ -162,31 +190,22 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // Resume signals: a command/patch finished running after (auto-)approval.
         // Each is an ActivityStart so the reducer clears any Waiting set by the
         // permission gate.
-        ("response_item", "function_call_output")
-        | ("response_item", "custom_tool_call_output")
-        | ("event_msg", "exec_command_end")
-        | ("event_msg", "patch_apply_end") => {
-            vec![start()]
-        }
+        (RESPONSE_ITEM, i) if RI_RESUME.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_RESUME.contains(&i) => vec![start()],
         // Web/tool search are turn-INTERNAL work pulses that keep the agent
         // Active; only task_complete / turn_aborted end the turn. Both the
         // EventMsg and the raw-Responses-item forms appear in real rollouts.
         // Searching is never permission-prompted — no Waiting branch.
-        ("response_item", "web_search_call")
-        | ("event_msg", "web_search_begin")
-        | ("event_msg", "web_search_end")
-        | ("response_item", "tool_search_call")
-        | ("response_item", "tool_search_output") => vec![start()],
-        ("event_msg", "task_complete")
-        | ("event_msg", "turn_complete")
-        | ("event_msg", "turn_aborted") => vec![end()],
+        (RESPONSE_ITEM, i) if RI_SEARCH.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_SEARCH.contains(&i) => vec![start()],
+        (EVENT_MSG, i) if EM_TURN_END.contains(&i) => vec![end()],
         // `last_token_usage` is that turn's reading; the cumulative twin
         // `total_token_usage` must NOT be read — the reducer accumulates
         // deltas, so summing a running total would double-count. codex's
         // `input_tokens` INCLUDES the cached share (verified), so fresh input
         // = input − cached, saturating because upstream reporting quirks must
         // not wrap; `reasoning_output_tokens` is additive alongside `output`.
-        ("event_msg", "token_count") => {
+        (EVENT_MSG, i) if EM_TOKENS.contains(&i) => {
             let last = payload
                 .and_then(|p| p.get("info"))
                 .and_then(|i| i.get("last_token_usage"))
@@ -211,7 +230,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
         // turns only, the effort — both RAW verbatim, last-seen-wins, so a
         // mid-session switch tracks. Absent effort ≠ downgrade: the reducer
         // only refreshes on Some.
-        ("turn_context", _) => {
+        (TURN_CONTEXT, _) => {
             let model = payload
                 .and_then(|p| p.get("model"))
                 .and_then(|m| m.as_str())
@@ -264,7 +283,7 @@ fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
             return false;
         }
     };
-    args.get("sandbox_permissions").and_then(|s| s.as_str()) == Some("require_escalated")
+    args.get(SANDBOX_PERMISSIONS_FIELD).and_then(|s| s.as_str()) == Some(REQUIRE_ESCALATED)
 }
 
 fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> AgentEvent {
@@ -296,6 +315,49 @@ pub fn codex_home() -> PathBuf {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Every name in a behaviour group reaches a real arm, and one outside them
+    /// reaches none. The groups ARE the matcher — the arms guard on
+    /// `contains` — so this is not pinning a second copy; it is proving no group
+    /// member has quietly stopped being handled.
+    #[test]
+    fn the_decoded_rollout_sets_are_exactly_what_the_arms_match() {
+        let drive = |outer: &str, inner: &str| {
+            let v = json!({
+                "type": outer,
+                "payload": {"type": inner, "turn_id": "t1", "cwd": "/r",
+                            "name": "bash", "call_id": "c1", "arguments": "{}",
+                            "model": "gpt-5.6-sol", "effort": "xhigh",
+                            "info": {"last_token_usage": {"input_tokens": 1}}},
+            });
+            decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v)
+                .is_ok_and(|e| !e.is_empty())
+        };
+        for inner in [EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat() {
+            assert!(
+                drive(EVENT_MSG, inner),
+                "event_msg/{inner} must reach an arm"
+            );
+        }
+        for inner in [RI_TOOL_START, RI_RESUME, RI_SEARCH].concat() {
+            assert!(
+                drive(RESPONSE_ITEM, inner),
+                "response_item/{inner} must reach an arm",
+            );
+        }
+        assert!(
+            drive(TURN_CONTEXT, "anything"),
+            "turn_context matches on `_`"
+        );
+        assert!(
+            !drive(EVENT_MSG, "turn_paused"),
+            "an unread inner reaches none"
+        );
+        assert!(
+            !drive("session_meta", "task_started"),
+            "an unread outer reaches none"
+        );
+    }
 
     #[test]
     fn turn_context_surfaces_model_and_effort_verbatim() {
@@ -469,8 +531,16 @@ mod tests {
 
     #[test]
     fn escalated_function_call_is_waiting() {
-        let args =
-            r#"{"cmd":"date","sandbox_permissions":"require_escalated","justification":"allow?"}"#;
+        // Built FROM the exported pair, so the drift row and the arm cannot
+        // drift apart: the check is a boolean with no breadcrumb to lean on.
+        assert_eq!(
+            DECODED_ESCALATION,
+            [REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD]
+        );
+        let args = format!(
+            r#"{{"cmd":"date","{SANDBOX_PERMISSIONS_FIELD}":"{REQUIRE_ESCALATED}","justification":"allow?"}}"#
+        );
+        let args = args.as_str();
         let out = ev(
             json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":args}}),
         );
