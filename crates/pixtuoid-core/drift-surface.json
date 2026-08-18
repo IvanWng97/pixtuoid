@@ -4,6 +4,10 @@
       "tool_call",
       "tool_call_update"
     ],
+    "acp.terminal_statuses": [
+      "completed",
+      "failed"
+    ],
     "codex.event_msg": [
       "task_started",
       "turn_started",
@@ -61,6 +65,16 @@
     ],
     "decoder.dispatch_names": [
       "Agent"
+    ],
+    "grok.xai_method": [
+      "_x.ai/session/update"
+    ],
+    "grok.xai_tags": [
+      "subagent_spawned",
+      "subagent_finished",
+      "model_changed",
+      "turn_completed",
+      "hook_execution"
     ],
     "omp.entry_types": [
       "session",

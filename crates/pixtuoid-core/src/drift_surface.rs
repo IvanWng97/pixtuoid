@@ -34,6 +34,10 @@ fn surface() -> Value {
         json!(crate::source::acp::DECODED_TAGS),
     );
     decoded.insert(
+        "acp.terminal_statuses",
+        json!(crate::source::acp::DECODED_TERMINAL_STATUSES),
+    );
+    decoded.insert(
         "codex.event_msg",
         json!([EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()),
     );
@@ -44,6 +48,14 @@ fn surface() -> Value {
     decoded.insert(
         "codex.rollout_outers",
         json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
+    );
+    decoded.insert(
+        "grok.xai_method",
+        json!([crate::source::grok::DECODED_XAI_METHOD]),
+    );
+    decoded.insert(
+        "grok.xai_tags",
+        json!(crate::source::grok::DECODED_XAI_TAGS),
     );
     decoded.insert(
         "omp.entry_types",
@@ -104,7 +116,7 @@ mod tests {
         assert_eq!(
             got.trim_end(),
             want,
-            "{FRAGMENT} is stale — regenerate with `{UPDATE_ENV}=1 cargo test -p pixtuoid-core`",
+            "{FRAGMENT} is stale — regenerate with `just gen-drift-surface`",
         );
     }
 
@@ -114,7 +126,9 @@ mod tests {
     #[test]
     fn no_emitted_set_is_empty() {
         let s = surface();
-        for (group, entries) in [("decoded", &s["decoded"])] {
+        let groups = s.as_object().expect("the fragment root is an object");
+        assert!(!groups.is_empty(), "the fragment emits no groups at all");
+        for (group, entries) in groups {
             let obj = entries.as_object().expect("group is an object");
             assert!(!obj.is_empty(), "{group} is empty");
             for (k, v) in obj {
@@ -161,9 +175,7 @@ mod tests {
     /// The fragment binds a RENAME — change a const's value and the committed
     /// file goes stale. It cannot bind an ADDITION: an arm written as a bare
     /// literal decodes a name the surface never mentions, and every other gate
-    /// stays green. The deleted scraper covered that by capturing arm POSITION;
-    /// this replaces it and is stricter — a bare literal is rejected outright
-    /// rather than silently absorbed.
+    /// stays green — so a bare literal is rejected outright.
     ///
     /// Reading our own source here is not what this crate stopped doing: that
     /// was a FOREIGN program regex-parsing us, where a miss narrowed the watch
@@ -181,6 +193,21 @@ mod tests {
             .unwrap_or_else(|| panic!("{file}: no `{dispatch}` dispatch"))
             .1;
         let body = &after[..after.find("\n}\n").unwrap_or(after.len())];
+        // The bare-literal ban runs at EVERY depth, not just the level the export
+        // is collected from: a nested `match` (acp's on `status`) would otherwise
+        // hide wire values behind an indent the collector skips. Naming them is
+        // what puts them in front of a reviewer and lets them be exported.
+        for line in body.lines() {
+            let Some((head, _)) = line.split_once("=>") else {
+                continue;
+            };
+            assert!(
+                !head.trim_start().starts_with('"') && !head.contains("(\""),
+                "{file}: arm `{}` in {export}'s dispatch reads a bare wire literal — \
+                 name it as a const so the drift surface can carry it",
+                head.trim(),
+            );
+        }
         let mut armed: Vec<&str> = Vec::new();
         for line in body.lines() {
             if !line.contains("=>")
@@ -246,39 +273,82 @@ mod tests {
             assert_arms_match_export(file, dispatch, export);
         }
 
-        // The floor this replaces was `rows.len() >= 3` over a 3-element literal,
-        // so it could not fail in any revision that compiled.
-        const PINNED_ELSEWHERE: &[&str] = &[
-            // claude_code.rs::the_decoded_set_is_exactly_what_the_arms_match
-            "DECODED_TYPES",
-            // copilot.rs::the_field_set_is_exactly_what_the_decoder_reads
-            "DECODED_FIELDS",
-            // decoder.rs::the_dispatch_name_set_is_exactly_what_the_fallback_matches
-            "DECODED_DISPATCH_NAMES",
-            // omp.rs::the_decoded_entry_type_set_is_exactly_what_the_arms_match
-            "DECODED_ENTRY_TYPES",
+        // Each entry is the const and the test that pins it, so a renamed test
+        // cannot leave a row still claiming coverage.
+        const PINNED_ELSEWHERE: &[(&str, &str)] = &[
+            (
+                "DECODED_TERMINAL_STATUSES",
+                "tool_call_starts_and_terminal_update_ends_keyed_by_tool_call_id",
+            ),
+            (
+                "DECODED_TYPES",
+                "the_decoded_set_is_exactly_what_the_arms_match",
+            ),
+            (
+                "DECODED_FIELDS",
+                "the_field_set_is_exactly_what_the_decoder_reads",
+            ),
+            (
+                "DECODED_DISPATCH_NAMES",
+                "the_dispatch_name_set_is_exactly_what_the_fallback_matches",
+            ),
+            (
+                "DECODED_ENTRY_TYPES",
+                "the_decoded_entry_type_set_is_exactly_what_the_arms_match",
+            ),
+            // grok's arms nest inside the method arm, so the shared dispatch
+            // scanner above cannot reach them.
+            (
+                "DECODED_XAI_TAGS",
+                "the_exported_xai_tag_set_is_exactly_what_the_arms_match",
+            ),
+            (
+                "DECODED_XAI_METHOD",
+                "the_exported_xai_tag_set_is_exactly_what_the_arms_match",
+            ),
         ];
-        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/source");
-        let mut found: Vec<String> = Vec::new();
-        for entry in std::fs::read_dir(&dir).expect("the source dir is readable") {
-            let path = entry.expect("a readable entry").path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            let src = std::fs::read_to_string(&path).expect("the module is readable");
-            for line in src.lines() {
-                let Some((_, rest)) = line.split_once("const DECODED_") else {
+        // Recursive: `src/source/` has nine module directories, and a const in
+        // one would otherwise be invisible to the census that exists to see it.
+        fn collect(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+            for entry in std::fs::read_dir(dir).expect("the source dir is readable") {
+                let path = entry.expect("a readable entry").path();
+                if path.is_dir() {
+                    collect(&path, out);
                     continue;
-                };
-                if let Some((name, _)) = rest.split_once(':') {
-                    found.push(format!("DECODED_{name}"));
+                }
+                if path.extension().is_none_or(|e| e != "rs") {
+                    continue;
+                }
+                let src = std::fs::read_to_string(&path).expect("the module is readable");
+                for line in src.lines() {
+                    let Some((_, rest)) = line.split_once("const DECODED_") else {
+                        continue;
+                    };
+                    if let Some((name, _)) = rest.split_once(':') {
+                        out.push((format!("DECODED_{name}"), src.clone()));
+                    }
                 }
             }
         }
+        let mut hits: Vec<(String, String)> = Vec::new();
+        collect(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/source"),
+            &mut hits,
+        );
+        for (name, src) in &hits {
+            if let Some((_, test)) = PINNED_ELSEWHERE.iter().find(|(n, _)| n == name) {
+                assert!(
+                    src.contains(&format!("fn {test}")),
+                    "{name} claims to be pinned by {test}, which its module no longer \
+                     declares — the exemption is now an unbacked claim of coverage",
+                );
+            }
+        }
+        let mut found: Vec<String> = hits.into_iter().map(|(n, _)| n).collect();
         let mut covered: Vec<String> = rows
             .iter()
             .map(|(_, _, export)| (*export).to_owned())
-            .chain(PINNED_ELSEWHERE.iter().map(|e| (*e).to_owned()))
+            .chain(PINNED_ELSEWHERE.iter().map(|(e, _)| (*e).to_owned()))
             .collect();
         found.sort_unstable();
         found.dedup();
@@ -286,7 +356,8 @@ mod tests {
         covered.dedup();
         assert_eq!(
             found, covered,
-            "every DECODED_* export needs a row above or a named pin in PINNED_ELSEWHERE"
+            "a DECODED_* export needs a row above or a named pin in PINNED_ELSEWHERE — \
+             or, the other direction, a row here outlived the const it named"
         );
     }
 }

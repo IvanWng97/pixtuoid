@@ -75,7 +75,62 @@ mod tests {
         assert_eq!(
             got.trim_end(),
             want,
-            "{FRAGMENT} is stale — regenerate with `{UPDATE_ENV}=1 cargo test -p pixtuoid`",
+            "{FRAGMENT} is stale — regenerate with `just gen-drift-surface`",
+        );
+    }
+
+    /// Every `*_EVENTS` registration set in `install/` reaches the fragment.
+    ///
+    /// The other direction — emitted ⊆ roster — is below. This is the one the
+    /// rule needs: a hook-registered CLI whose names the watcher never sees has
+    /// no upstream watch at all, and every gate stays green because both sides
+    /// omit it symmetrically. Derived from the consts themselves, so there is no
+    /// exemption list to drift (opencode registers through its TS plugin's
+    /// FORWARD set and declares no `*_EVENTS` const, so it is absent by
+    /// construction, not by exception).
+    #[test]
+    fn every_install_events_const_reaches_the_fragment() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install");
+        let emitter = include_str!("drift_surface.rs");
+        let mut found = 0;
+        for entry in std::fs::read_dir(&dir).expect("the install dir is readable") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let module = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .expect("a utf-8 module name")
+                .to_owned();
+            let src = std::fs::read_to_string(&path).expect("the module is readable");
+            for line in src.lines() {
+                let Some((_, rest)) = line.split_once("const ") else {
+                    continue;
+                };
+                let Some((name, _)) = rest.split_once(':') else {
+                    continue;
+                };
+                let name = name.trim();
+                if !name.ends_with("EVENTS")
+                    || !name.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+                {
+                    continue;
+                }
+                found += 1;
+                assert!(
+                    emitter.contains(&format!("{module}::{name}")),
+                    "install/{module}.rs registers hooks as {name}, but surface() never emits \
+                     them — check_upstream_drift.py cannot watch a name it never receives, and \
+                     a rename would leave the registration inert with nothing to say so. Add a \
+                     `registered.insert` here, run `just gen-drift-surface`, then add its \
+                     SURFACE_ROWS row in scripts/check_upstream_drift.py.",
+                );
+            }
+        }
+        assert!(
+            found > 0,
+            "the *_EVENTS declaration shape moved — this census reads nothing"
         );
     }
 
@@ -105,12 +160,10 @@ mod tests {
         }
     }
 
-    /// Byte-stability across feature unification. The workspace enables
-    /// serde_json's `preserve_order` (`pixtuoid` asks for it), and feature
-    /// unification hands it to every crate — so an object built by `json!({…})`
-    /// is sorted under `cargo test -p` and insertion-ordered under
-    /// `cargo nextest run --workspace`. That difference reached the committed
-    /// file once and made the gate above pass one way and fail the other.
+    /// Byte-stability across feature unification — the WHY is on
+    /// `pixtuoid_core`'s twin of this test, which this deliberately duplicates
+    /// rather than share: a 15-line walker is under the extract-a-helper bar,
+    /// and each crate's fragment has to be gated where it is emitted.
     #[test]
     fn every_emitted_object_has_sorted_keys() {
         fn walk(v: &Value, path: &str) {

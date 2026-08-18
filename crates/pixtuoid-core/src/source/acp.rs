@@ -17,6 +17,17 @@ use crate::AgentId;
 const TOOL_CALL: &str = "tool_call";
 const TOOL_CALL_UPDATE: &str = "tool_call_update";
 
+const STATUS_COMPLETED: &str = "completed";
+const STATUS_FAILED: &str = "failed";
+
+/// The `ToolCallStatus` values that END a tool call. Exported for the drift
+/// surface because the arm reading them falls through to `_ => vec![]`: rename
+/// either upstream and every ACP tool call stays Active forever, with no
+/// breadcrumb. Pinned to the arms by
+/// `the_terminal_status_set_is_exactly_what_ends_a_call`.
+#[cfg(test)]
+pub(crate) const DECODED_TERMINAL_STATUSES: &[&str] = &[STATUS_COMPLETED, STATUS_FAILED];
+
 /// The `sessionUpdate` tags this decoder turns into events — this module's row
 /// in the drift surface. Pinned to the arms below by
 /// `the_decoded_tag_set_is_exactly_what_the_arms_match`.
@@ -52,7 +63,7 @@ pub(crate) fn decode_session_update(
             )),
         }],
         TOOL_CALL_UPDATE => match str_field("status") {
-            Some("completed") | Some("failed") => vec![AgentEvent::ActivityEnd {
+            Some(STATUS_COMPLETED) | Some(STATUS_FAILED) => vec![AgentEvent::ActivityEnd {
                 agent_id,
                 tool_use_id: tool_call_id(),
             }],
@@ -95,7 +106,7 @@ mod tests {
             }
             other => panic!("expected one ActivityStart, got {other:?}"),
         }
-        for status in ["completed", "failed"] {
+        for status in DECODED_TERMINAL_STATUSES {
             match decode(
                 json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": status}),
             )
@@ -108,7 +119,13 @@ mod tests {
                 other => panic!("expected one ActivityEnd for {status}, got {other:?}"),
             }
         }
+        // The negative half binds the export's WIDTH: an added member would have
+        // to break one of these, so the drift row cannot quietly grow.
         for status in ["in_progress", "pending"] {
+            assert!(
+                !DECODED_TERMINAL_STATUSES.contains(&status),
+                "{status} must not be in the exported terminal set"
+            );
             assert!(
                 decode(json!({"sessionUpdate": "tool_call_update", "toolCallId": "c1", "status": status})).is_empty(),
                 "{status} must not end the activity"

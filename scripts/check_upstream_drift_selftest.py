@@ -100,10 +100,13 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
+    d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.CODEX_ROLLOUT_ITEM_URL: "pub enum RolloutItem {\n    SessionMeta,\n}\n",
     d.CODEX_MODELS_URL: "pub enum ResponseItem {\n    FunctionCall,\n}\n",
     d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
+    d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    HookExecution,\n}\n",
+    d.GROK_SESSION_STORAGE_URL: 'const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";\n',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
     d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
@@ -341,6 +344,128 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         d.run_checks = real_run
 
 
+def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None:
+    """The one APPEARANCE watch among the name checks, so the vanish census cannot
+    cover it: exit 0 on a blocking approval hook ANSWERS the prompt (invariant #5).
+    """
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        unsafe = sorted(d.HERMES_BLOCKING_UNSAFE & (ours.hermes or set()))
+        check(bool(unsafe), f"we register something the watch calls unsafe: {unsafe}")
+
+        def drive(members: list[str]) -> d.Report:
+            body = "_BLOCKING_EVENTS = frozenset({%s})\n" % ", ".join(
+                f'"{m}"' for m in members
+            )
+
+            def stub(u: str, _b: str = body) -> str:
+                if u == d.HERMES_SHELL_HOOK_URL:
+                    return _b
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        quiet = drive(["pre_tool_call"])
+        check(not quiet.breaking, f"an observer-only set stays silent: {quiet.breaking}")
+        loud = drive(["pre_tool_call", unsafe[0]])
+        check(any(unsafe[0] in x for x in loud.breaking),
+              f"`{unsafe[0]}` turning blocking must fire; got {loud.breaking}")
+        # The anchor is the declaration itself, so a moved set is probe health.
+        d.fetch = lambda _u: "BLOCK_EXIT_CODE = 2\n"
+        gone = d.Report()
+        d.run_checks(d.read_our_names(gone), report=gone)
+        check(not gone.breaking, f"a moved declaration is not drift: {gone.breaking}")
+    finally:
+        d.fetch = real
+
+
+def test_enum_body_survives_struct_variants_and_indentation() -> None:
+    """`(.*?)\\}` stopped at the first `}` (a struct variant truncated the enum);
+    `(.*?)\\n\\}` additionally demanded a column-0 closing brace, so an indented
+    enum read as "moved upstream" (#793).
+    """
+    struct_variant = (
+        "pub enum HookEvent {\n"
+        "    SessionStart,\n"
+        "    ToolCallBefore { name: String, args: Value },\n"
+        "    SessionEnd,\n"
+        "}\n"
+    )
+    got = d.upstream_codewhale_hooks(struct_variant)
+    check(
+        got is not None and "session_end" in got,
+        f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
+    )
+
+    # The OVER-capture direction: `upstream_codex_hooks` scrapes every CamelCase
+    # word, so a spill into the following `impl` becomes phantom variants — and a
+    # phantom is worse than a miss, because it makes a real rename look present.
+    indented = (
+        "mod outer {\n"
+        "    pub enum HookEventName {\n"
+        "        PreToolUse,\n"
+        "    }\n"
+        "\n"
+        "    impl HookEventName {\n"
+        "        fn f(&self) -> PhantomVariant { PhantomVariant }\n"
+        "    }\n"
+        "}\n"
+    )
+    got = d.upstream_codex_hooks(indented)
+    check(got is not None and "PreToolUse" in got, f"the real variant is found: {got}")
+    check(
+        got is not None and "PhantomVariant" not in got,
+        f"the body STOPS at the enum's own brace — no spill into the impl: {got}",
+    )
+
+    commented = (
+        "pub enum HookEvent {\n"
+        "    /// Fires like `Foo { bar }` does.\n"
+        "    SessionStart,\n"
+        "    SessionEnd,\n"
+        "}\n"
+    )
+    got = d.upstream_codewhale_hooks(commented)
+    check(
+        got is not None and {"session_start", "session_end"} <= got,
+        f"a brace in a comment does not truncate the body: {got}",
+    )
+
+    # An empty set would report every registered event as GONE.
+    check(d.upstream_codewhale_hooks("struct Other {}") is None, "absent enum -> None")
+    check(d.upstream_codex_hooks("struct Other {}") is None, "absent enum -> None")
+    check(
+        d.upstream_codewhale_hooks("pub enum HookEventName {\n    PreToolUse,\n}") is None,
+        "`HookEvent` must not match `enum HookEventName`",
+    )
+
+
+def test_every_block_reader_strips_comments_before_counting_braces() -> None:
+    """The rule two of the three readers state in their own docstrings, and the
+    third re-broke: a brace inside a comment moves the bounds. The dangerous
+    outcome is not the empty parse (loud) but the TRUNCATED one — the size floor
+    still passes and the tail of the set silently leaves the sweep."""
+    clean = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n    "b_two",\n}\n'
+    want = {"a_one", "b_two"}
+    check(d.python_set_literal(clean, "VALID_HOOKS: Set[str] = {") == want, "clean baseline")
+    for label, comment in (
+        ("unmatched open", '    # returns {"action": "continue"\n'),
+        ("stray close", "    # anything else } lets the turn finish\n"),
+        ("both", '    # {"a": 1} and a trailing }\n'),
+    ):
+        poisoned = 'VALID_HOOKS: Set[str] = {\n    "a_one",\n' + comment + '    "b_two",\n}\n'
+        got = d.python_set_literal(poisoned, "VALID_HOOKS: Set[str] = {")
+        check(
+            got == want,
+            f"a comment with an {label} brace must not move the bounds: got {sorted(got)}",
+        )
+
+
 def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     """The stripper's docstring named this test before the test existed.
 
@@ -408,14 +533,6 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     )
 
 
-# A minimal `env.ts` satisfying every omp-env sweep, shaped like the real file in
-# the two ways the sweep can be fooled: `.env`/`OMP_` appear in JSDoc as well as
-# code, and the quote detector (a lone `"` inside a single-quoted string) sits
-# ABOVE a comment that names checked symbols. Tracking only `"` desynchronises
-# there and leaks every later comment back into the "code" — which is why the
-# masking cases below live AFTER the detector, not before it.
-
-
 def test_the_floor_is_what_we_already_handle() -> None:
     """A parse returning fewer names than we already decode is broken or degraded,
     and must file probe health rather than five ⛔ against working decoders —
@@ -479,7 +596,7 @@ def test_every_swept_url_declares_an_anchor() -> None:
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
     urls = _re.findall(r"^([A-Z][A-Z0-9_]*_URLS?)\s*=", src, _re.M)
-    check(len(urls) >= 4, f"the sweep still fetches documents, got {urls}")
+    check(bool(urls), "the *_URL declaration shape moved — this census reads nothing")
     unclassified = []
     for name in urls:
         value = getattr(d, name)
@@ -558,6 +675,29 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         d.load_fragment = real
 
 
+def test_codex_enum_reader_drops_field_types_and_keeps_renames() -> None:
+    """`_strip_nested` is what stops a struct field's CamelCase TYPE reading as a
+    variant. A phantom is invisible to the vanish census — the check is
+    one-directional — so it needs a reader-level case: a phantom makes a REAL
+    rename look present, which is the masked half of the same failure.
+    """
+    body = (
+        "pub enum EventMsg {\n"
+        "    TaskStarted { detail: PhantomType, n: usize },\n"
+        "    ExecCommandEnd(PhantomTuple),\n"
+        "    #[serde(rename = \"renamed_wire_name\")]\n"
+        "    TokenCount,\n"
+        "}\n"
+    )
+    got = d.upstream_codex_enum_types(body, "EventMsg")
+    check(got is not None, "the enum parses")
+    got = got or set()
+    check("task_started" in got and "exec_command_end" in got, f"variants convert: {sorted(got)}")
+    check("renamed_wire_name" in got, f"a rename attr is read verbatim: {sorted(got)}")
+    check("phantom_type" not in got and "phantom_tuple" not in got,
+          f"a field TYPE is not a variant: {sorted(got)}")
+
+
 def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
     """Each parser, against a hand-made document of the shape it reads.
 
@@ -631,19 +771,30 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
         def tagged_enum(enum: str, names: list[str]) -> str:
-            # The `rename` attrs ARE the wire names, so this never rests on our
-            # snake_case surviving a round trip through upstream's idents.
+            # Shaped like the REAL codex enums, in the two dimensions the parsers
+            # defend: a STRUCT variant (so `_enum_body` must brace-balance rather
+            # than stop at the first `}`) and PascalCase idents whose snake_case
+            # tags derive — the path that delivers 7/7 of `ResponseItem` and 3/3
+            # of `RolloutItem` upstream, where a `rename` attr delivers almost
+            # none. A unit-variant-only fixture leaves both untested.
             rows = "".join(
-                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n' for i, n in enumerate(names)
+                f"    {pascal(n)} {{ pxd: PxdType }},\n" if i == 0 else f"    {pascal(n)},\n"
+                for i, n in enumerate(names)
             )
             return f"pub enum {enum} {{\n{rows}}}\n"
 
-        def acp_schema(tags: list[str]) -> str:
+        def acp_schema(tags: list[str], statuses: list[str] | None = None) -> str:
             # `x-method` present + the method literal are the ACP arm's own anchor.
             return json.dumps({
                 "x-method": "session/update",
-                "$defs": {"SessionUpdate": {"oneOf": [
-                    {"properties": {"sessionUpdate": {"const": t}}} for t in tags]}},
+                "$defs": {
+                    "SessionUpdate": {"oneOf": [
+                        {"properties": {"sessionUpdate": {"const": t}}} for t in tags]},
+                    "ToolCallStatus": {"oneOf": [
+                        {"const": c} for c in (
+                            statuses if statuses is not None else full["acp_terminal_statuses"]
+                        )]},
+                },
             })
 
         def copilot_schema(events: list[str], fields: list[str]) -> str:
@@ -677,8 +828,22 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("hermes", str, lambda ns: {
                 d.HERMES_PLUGINS_URL:
                     "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
+            # Upstream GENERATES the enum from a `hook_events!` table: the
+            # plain-enum regex matches the macro DEFINITION and reads `$variant`
+            # placeholders as zero names, so the real document is only parsed by
+            # the `rust_block_after` fall-through. A plain-enum fixture would
+            # test the branch upstream does not use.
             ("grok", str, lambda ns: {
-                d.GROK_HOOK_URL: bare_enum("HookEventName", ns)}),
+                d.GROK_HOOK_URL:
+                    "macro_rules! hook_events {\n"
+                    "    ($($variant:ident { $($rest:tt)* }),* $(,)?) => {\n"
+                    "        pub enum HookEventName {\n"
+                    "            $($variant,)*\n"
+                    "        }\n"
+                    "    };\n"
+                    "}\n\n"
+                    "hook_events! {\n"
+                    + "".join(f'    {n} {{ alias: "x" }},\n' for n in ns) + "}\n"}),
             ("openclaw", str, lambda ns: {
                 d.OPENCLAW_HOOK_TYPES_URL:
                     "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
@@ -686,6 +851,12 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.OPENCODE_EVENT_URLS,
                 "export const Event = {\n"
                 + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns)) + "}\n")),
+            ("grok_xai_method", str, lambda ns: {
+                d.GROK_SESSION_STORAGE_URL: "".join(
+                    f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{n}";\n' for n in ns)}),
+            ("grok_xai_tags", pascal, lambda ns: {
+                d.GROK_NOTIFICATION_URL:
+                    "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
             ("omp", str, lambda ns: {
                 d.OMP_SESSION_ENTRIES_URL:
                     "export type SessionEntry =\n"
@@ -703,6 +874,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.CC_TOOLS_URL: "# Tools reference\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
             ("acp_decoded_tags", str, lambda ns: dict.fromkeys(
                 (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL), acp_schema(ns))),
+            ("acp_terminal_statuses", str, lambda ns: dict.fromkeys(
+                (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL),
+                acp_schema(full["acp_decoded_tags"], ns))),
             ("copilot", str, lambda ns: {
                 d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {
@@ -710,8 +884,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         ]
         covered = {c[0] for c in cases}
         rows = {f for f, *_ in d.SURFACE_ROWS}
-        # The `>= 8` floor this replaced sat BELOW the row count, so seven arms —
-        # both restored in round 2 among them — were uncovered while it passed.
         check(covered == rows, f"every surface row needs a case; differ: {covered ^ rows}")
 
         def drive(docs: dict[str, str]) -> d.Report:

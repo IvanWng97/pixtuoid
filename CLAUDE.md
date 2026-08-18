@@ -115,6 +115,10 @@ iterating, scope to one crate (seconds vs a full-workspace run).
 roster?** Run `just gen-contract` — it regenerates BOTH committed schemas and
 the Raycast types; skip it and the Raycast `gen:contract` diff + `tsc` go red.
 
+**Renamed a decoded or registered wire name?** Run `just gen-drift-surface` and
+commit both `crates/*/drift-surface.json` — that emitted pair is what the
+upstream drift watch reads, and a stale one narrows the watch silently.
+
 **Test tiers:** unit tests beside the code · integration tests in
 `crates/<crate>/tests/` · the headless render harness driving the real
 `TuiRenderer` through ratatui `TestBackend`. The 9-binary layout and the

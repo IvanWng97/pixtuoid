@@ -401,8 +401,9 @@ you:
    Where does it write transcripts, what does a line look like, does it have
    hooks, what identifies a session? Pin every fact to an upstream file/version
    in your comments — wire formats change without notice (`Task` → `Agent` did),
-   and a guessed format decodes nothing (the anchor grade and the three
-   dispositions are in `scripts/check_upstream_drift.py`'s module docstring).
+   and a guessed format decodes nothing (anchor grades are the `ANCHORS` table's
+   own comment in `scripts/check_upstream_drift.py`; the three dispositions are
+   `Report`'s docstring there).
 
    **Audit its HOME RESOLVER in the same pass, per axis** — home order,
    config-dir API, env-override semantics (verbatim vs `~`-expanded; is
@@ -501,9 +502,13 @@ you:
 
     - **hook-registered** → ALWAYS needs a row.
     - **transcript-bearing** → needs one only if its decoder is silent on an
-      unrecognised line. Check the catch-all: `_ => vec![]` with no
-      `drift::unknown_event` means nothing will ever tell you (omp and codex are
-      both this).
+      unrecognised line. Check YOUR catch-all: `_ => vec![]` with no
+      `drift::unknown_event` means nothing will ever tell you.
+
+    A row is four edits, and only the last two fail loudly: the `DECODED_*`
+    const, the `insert` in that crate's `src/drift_surface.rs`, `just
+    gen-drift-surface` (commit the regenerated `crates/*/drift-surface.json`),
+    then the `SURFACE_ROWS` row plus its case in the selftest's `cases` list.
 12. **Three edits no failure message spells out**, all of them roster literals a
     new source is simply absent from:
     - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`

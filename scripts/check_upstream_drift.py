@@ -12,14 +12,9 @@ by a test in the crate that owns those (private) names. This file never parses
 our Rust: a scraped `match` arm goes stale silently, so a rename would narrow
 the watch with nothing to show for it.
 
-WHICH sources get a row is decided by TRANSPORT and by whether the decoder can
-speak. A HOOK-REGISTERED CLI always needs one: registration is name-keyed, so a
-rename leaves our entry inert, the CLI fires nothing, and the decoder is never
-reached — silence, and no runtime breadcrumb can cover it. A TRANSCRIPT-bearing
-CLI needs one ONLY IF its decoder stays silent on an unrecognised line: `omp`
-and `codex` both end `_ => vec![]`, so their transcript vocabularies are watched
-here; the sources whose decoders breadcrumb are not. `source/drift.rs` holds the
-full ladder.
+WHICH surfaces get a row is decided by transport and by whether the decoder can
+speak. `crates/pixtuoid-core/src/source/drift.rs`'s header is the ONLY statement
+of that rule — a row here with no clause there is a bug in one of the two.
 
 Findings carry a DISPOSITION (see `Report`), because "upstream changed" and "our
 probe missed" need different work and only one of them is a statement about
@@ -63,6 +58,19 @@ CODEX_PROTOCOL_URL = (
     "codex-rs/protocol/src/protocol.rs"
 )
 
+# We install a SHELL hook, so the only thing that can make our always-exit-0
+# shim ANSWER an approval is `_BLOCKING_EVENTS` — the set gating
+# `returncode == BLOCK_EXIT_CODE`. An APPEARANCE watch, the opposite direction
+# from every name check here: today the set holds only `pre_tool_call`, where
+# exit 0 means "proceed" and the shim is a correct no-op.
+HERMES_SHELL_HOOK_URL = (
+    "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/agent/shell_hooks.py"
+)
+
+# Registered events whose blocking would make exit 0 a DECISION, not a no-op.
+# `install/hermes.rs` states the observer-only premise; this is what checks it.
+HERMES_BLOCKING_UNSAFE = {"pre_approval_request"}
+
 HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
 )
@@ -85,6 +93,21 @@ CODEX_ROLLOUT_ITEM_URL = (
 GROK_HOOK_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-hooks/src/event.rs"
+)
+
+# The module that WRITES the method into updates.jsonl, so it OWNS the name we
+# gate on — not the notification module, which only mentions it in a `///`.
+GROK_SESSION_STORAGE_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-shell/src/session/storage/mod.rs"
+)
+
+# The xAI `SessionUpdate` variants. Upstream declares PascalCase idents whose
+# snake_case wire tags derive via `rename_all`, so the tag never appears
+# literally and the check converts before searching.
+GROK_NOTIFICATION_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
 )
 
 OPENCLAW_HOOK_TYPES_URL = (
@@ -225,6 +248,13 @@ UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
     {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
 )
 
+# Matches BOTH sides — upstream's declaration and the value we emit. The value
+# must be read from the DECLARATION, never scanned for as a substring: a rename
+# leaves the old literal standing in a `///` and a `#[cfg(test)]` fixture, so
+# `"…" in text` never fires.
+GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
+GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
+
 ANCHORS: dict[str, Anchor] = {
     # owner-grade: the anchor IS the declaration the checked names live inside,
     # so it cannot hold while the names have moved out from under it.
@@ -233,7 +263,12 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
+    GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
+    GROK_SESSION_STORAGE_URL: Anchor(
+        GROK_XAI_METHOD_CONST, "`XAI_SESSION_UPDATE_METHOD`"
+    ),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
+    HERMES_SHELL_HOOK_URL: Anchor(r"_BLOCKING_EVENTS\s*=", "`_BLOCKING_EVENTS`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -469,6 +504,24 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     return tags or None
 
 
+def upstream_acp_tool_call_statuses(text: str) -> set[str] | None:
+    """The `ToolCallStatus` values a v1 schema declares, as `oneOf` consts."""
+    try:
+        root = json.loads(text)
+    except json.JSONDecodeError:
+        return None
+    defs = root.get("$defs") or root.get("definitions") or {}
+    members = defs.get("ToolCallStatus", {}).get("oneOf") if isinstance(defs, dict) else None
+    if not isinstance(members, list):
+        return None
+    out = {
+        m["const"]
+        for m in members
+        if isinstance(m, dict) and isinstance(m.get("const"), str)
+    }
+    return out or None
+
+
 def upstream_cursor_hook_events(text: str) -> set[str] | None:
     """The per-hook SECTION HEADINGS of cursor's hooks page.
 
@@ -596,12 +649,15 @@ class OurNames:
     stale parser darkens exactly what it fed and nothing else."""
 
     acp_decoded_tags: set[str] | None = None
+    acp_terminal_statuses: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
     codex: set[str] | None = None
     codewhale: set[str] | None = None
     hermes: set[str] | None = None
     grok: set[str] | None = None
+    grok_xai_method: set[str] | None = None
+    grok_xai_tags: set[str] | None = None
     omp: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
@@ -615,14 +671,8 @@ class OurNames:
     kimi: set[str] | None = None
 
 
-# A parse smaller than this is not believed, so BOTH drift directions are SKIPPED
-# for that source and the run files probe health instead. Each number is a
-# MEASUREMENT of the upstream document taken when the row was written; an absent
-# source claims only the derived minimum (what we already handle). #929's false
-# "fix the decoder" against `pre_approval_request` came from a partial document
-# that cleared a bare non-emptiness check.
-# The document each floor is measured against — named in the probe-health line so
-# a maintainer knows which pin to re-check.
+# The document each source's believability gate doubts — named in the probe-health
+# line so a maintainer knows which pin to re-check.
 PARSE_SOURCES: dict[str, str] = {
     "cc": "the hook-event summary table in hooks.md",
     "cursor": "the per-hook section headings on cursor.com/docs/hooks.md",
@@ -674,6 +724,8 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
     ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
+    ("grok_xai_method", CORE_LIB_FRAGMENT, "decoded", "grok.xai_method"),
+    ("grok_xai_tags", CORE_LIB_FRAGMENT, "decoded", "grok.xai_tags"),
     ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
@@ -682,6 +734,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
+    ("acp_terminal_statuses", CORE_LIB_FRAGMENT, "decoded", "acp.terminal_statuses"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
     ("copilot_fields", CORE_LIB_FRAGMENT, "decoded", "copilot.payload_fields"),
     ("dispatch_names", CORE_LIB_FRAGMENT, "decoded", "decoder.dispatch_names"),
@@ -987,6 +1040,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     # `decode_session_update` turns into events. v1 only — grok does not speak v2.
     # xAI's OWN `_x.ai/session/update` is watched separately, off its declaration.
     up_acp: set[str] = set()
+    up_acp_status: set[str] = set()
     acp_method_surface = False
     acp_method_declared = False
     acp_parsed = False
@@ -1006,6 +1060,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             )
         else:
             up_acp |= tags
+            up_acp_status |= upstream_acp_tool_call_statuses(acp_text) or set()
             acp_parsed = True
             # `"x-method"` is the surface that OWNS the method names, and it is a
             # generator-emitted vendor extension — a codegen change can move it
@@ -1028,6 +1083,23 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             "ACP-standard activity event is silently lost (`_ => Ok(vec![])`, no "
             "breadcrumb)."
         )
+    if acp_parsed and ours.acp_terminal_statuses is not None:
+        if up_acp_status:
+            for st in sorted(ours.acp_terminal_statuses):
+                if st not in up_acp_status:
+                    report.add_breaking(
+                        f"ACP `ToolCallStatus` value `{st}` (read by "
+                        f"decode_session_update) is GONE from the ACP schema — "
+                        f"renamed; the tool_call_update arm falls through to "
+                        f"`_ => vec![]` and every ACP tool call stays Active forever."
+                    )
+        else:
+            report.add_blind(
+                "the ACP `ToolCallStatus` union",
+                "the ACP v1 schemas",
+                "The terminal-status watch was SKIPPED.",
+            )
+
     if acp_parsed:
         for tag in sorted(ours.acp_decoded_tags or ()):
             if tag not in up_acp:
@@ -1239,11 +1311,29 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"hook we install into config.yaml fires nothing (no sprite)."
                     )
 
-    # TRANSCRIPT sources whose decoder does NOT breadcrumb an unknown type —
-    # `decode_omp_line` and `decode_codex_line` both end `_ => vec![]`, so the
-    # "a breadcrumb meets it" half of the transport rule is false for them and
-    # the watch is the only signal. omp's types are generic English words, so
-    # the match is QUOTE-anchored: a bare word test stays green on prose.
+    if ours.hermes is not None:
+        shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
+        if shell is not None:
+            blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)
+            if blocking is None:
+                report.add_blind(
+                    "whether a hermes shell hook can stall an approval",
+                    "_BLOCKING_EVENTS in agent/shell_hooks.py",
+                    "The blocking-event set moved or was renamed, so the premise behind "
+                    "an always-exit-0 shim on a PERMISSION hook is unchecked.",
+                )
+            else:
+                for ev in sorted(HERMES_BLOCKING_UNSAFE & ours.hermes):
+                    if f'"{ev}"' in blocking.group(1):
+                        report.add_breaking(
+                            f"Hermes `{ev}` is now in `_BLOCKING_EVENTS` — a shell hook's "
+                            f"exit code can stall it, so the shim's silent exit 0 would "
+                            f"ANSWER a real approval prompt. Unregister it in "
+                            f"install/hermes.rs, or make the shim decline explicitly."
+                        )
+
+    # omp's entry types are generic English words, so the match is QUOTE-anchored:
+    # a bare word test stays green on prose.
     if ours.omp is not None:
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
@@ -1296,6 +1386,42 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"grok hook `{ev}` (registered in GROK_EVENTS) is GONE from "
                         f"upstream event.rs — likely renamed; we register a hook it never "
                         f"fires, so the decoder is never reached (no sprite)."
+                    )
+
+    # grok's xAI extension is TRANSCRIPT vocabulary whose arm ends
+    # `_ => Ok(vec![])` — the method gates the whole block and each tag decodes
+    # to nothing once renamed, with no breadcrumb either way.
+    if ours.grok_xai_method is not None:
+        text = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
+        if text is not None:
+            decl = re.search(GROK_XAI_METHOD_DECL, strip_rust_comments(text))
+            if decl is None:
+                report.add_blind(
+                    "grok's `XAI_SESSION_UPDATE_METHOD` declaration",
+                    "storage/mod.rs",
+                    "The xAI method watch was SKIPPED.",
+                )
+            else:
+                for method in sorted(ours.grok_xai_method):
+                    if method != decl.group(1):
+                        report.add_breaking(
+                            f"grok's xAI method is now `{decl.group(1)}`, not `{method}` "
+                            f"(source/grok.rs) — decode_grok_line gates the WHOLE xAI "
+                            f"block on it, so every subagent link, model change and end "
+                            f"marker is silently lost."
+                        )
+
+    if ours.grok_xai_tags is not None:
+        text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
+        if text is not None:
+            for tag in sorted(ours.grok_xai_tags):
+                variant = "".join(p.title() for p in tag.split("_"))
+                if not re.search(rf"(?m)^\s*{variant}\b", text):
+                    report.add_breaking(
+                        f"grok xAI update variant `{variant}` (tag `{tag}`, decoded in "
+                        f"source/grok.rs) is GONE from extensions/notification.rs — its "
+                        f"snake_case tag shifts and the line decodes to nothing "
+                        f"(no subagent link / no model info / no end marker)."
                     )
 
     if ours.openclaw is not None:

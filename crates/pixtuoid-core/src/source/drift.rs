@@ -22,12 +22,26 @@
 //!    can never see a rename — they bind registration to decoding, nothing more.
 //!
 //! That order is about LYING. It says nothing about being SILENT, and a defense
-//! that never speaks never lies. #2 is silent in two ways: a HOOK-REGISTERED
-//! source renames to an inert entry, so the CLI fires nothing and the decoder is
-//! never reached; and a decoder whose catch-all is a bare `_ => vec![]` says
-//! nothing even when the line does arrive (`omp`, `codex`). Both need #3, source
-//! tree included — being watchable is not the same as being watched well, but a
-//! silent defense is not a defense.
+//! that never speaks never lies. #2 is silent in three ways, each needing #3,
+//! source tree included:
+//!
+//! * **Inert registration.** A HOOK-REGISTERED source renames to an entry the
+//!   CLI never matches, so it fires nothing and the decoder is never reached.
+//! * **A silent catch-all.** A decoder ending in a bare `_ => vec![]` says
+//!   nothing even when the line does arrive. Grep the decoders for that shape;
+//!   do not keep a list here.
+//! * **Silent DEGRADATION.** A breadcrumb that fires while the feature quietly
+//!   stops working is not coverage: `make_tool_detail`'s name fallback
+//!   breadcrumbs a renamed dispatch tool, and subagent suppression is off until
+//!   someone reads the log. `Task` -> `Agent` is why this watch exists at all.
+//!
+//! Being watchable is not the same as being watched well, but a silent defense
+//! is not a defense.
+//!
+//! What this ladder does NOT reach: payload FIELD names. A field the decoder
+//! reads and upstream renames is silent unless the read is breadcrumbed, and
+//! most are not — #940 tracks making "watched or breadcrumbed" a ratchet over
+//! all 13 sources.
 //!
 //! An alarm must state a fact about US ("this decoder met X and dropped it"),
 //! never a guess about THEM ("upstream renamed X").

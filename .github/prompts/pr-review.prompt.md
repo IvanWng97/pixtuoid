@@ -127,12 +127,14 @@ given change/tree, say so, don't skip it.
   sweep with `rg --hidden` or `grep -rn`, else the class recurs: #448's
   post-merge stale-`line_decoder` MEDIUM and #449's beautify-SKILL recurrence
   were both hidden-dir misses); wire-format / upstream (a decoder or drift-watch
-  rule vs the real upstream shape; a new source with no drift-watch row;
-  install-path resolvers are an upstream surface too, not just decoders — and an
-  AUDIT sweeps EVERY registered source, not just a changed one: each source's
-  decoder vs its live upstream wire shape + a PRESENT, ALIVE `check_upstream_drift`
-  row, since the watch itself fail-open behind its own self-test false-greened two
-  sources through the wrong decoders for weeks, #454);
+  rule vs the real upstream shape; a source that OWES a drift-watch row and has
+  none — owing one is decided by transport and decoder silence, and
+  `crates/pixtuoid-core/src/source/drift.rs`'s header is the only statement of
+  that rule, so read it before filing "no row" as a finding. An AUDIT sweeps
+  EVERY registered source, not just a changed one: each source's decoder vs its
+  live upstream wire shape, and where the rule says a row is owed, a PRESENT,
+  ALIVE one — the watch itself fail-open behind its own self-test false-greened
+  two sources through the wrong decoders for weeks, #454);
   version-lockstep (Cargo.toml versions, MSRV, the "N sites must stay in sync"
   invariants; version ADJUDICATION — the contract half semver-checks can't see
   (CONTRIBUTING.md "Releasing": patch=fix/polish, minor=feature OR breaking):
