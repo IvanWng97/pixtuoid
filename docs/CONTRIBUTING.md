@@ -286,13 +286,11 @@ guards; steps 1–3, 11 and 12 are on you.
     theme file + `badge_color` in the manifest row; the coverage, legibility
     and site-bridge tests fail until it exists.
 11. **Docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md` entry,
-    and a `check_upstream_drift.py` row per the transport rule (the WHY is
-    `source/drift.rs`'s header): hook-registered → ALWAYS; transcript-bearing →
-    only if your catch-all is silent (`_ => vec![]`, no `drift::unknown_event`);
-    a breadcrumb that DEGRADES rather than saves → still owed. A row is four
-    edits — the const, the `insert` in that crate's `src/drift_surface.rs`,
-    `just gen-drift-surface` (commit both fragments), the `SURFACE_ROWS` row
-    plus its selftest case.
+    and a `check_upstream_drift.py` row where one is owed — which surfaces owe
+    one is `source/drift.rs`'s header, read it there. A row is four steps: the
+    const, the `insert` in that crate's `src/drift_surface.rs`,
+    `just gen-drift-surface` (commit both fragments), and the `SURFACE_ROWS`
+    row plus its selftest case (the case census fails without it).
 12. **Three roster literals no failure message spells out**: the row-by-row
     byte pin in `corpus_check.rs`; `TOOL_ID_KEY_UNPROVEN` in
     `tests/sources/captures.rs`; a case row + `#[test]` in

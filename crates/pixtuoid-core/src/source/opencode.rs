@@ -88,6 +88,16 @@ const PERMISSION_V2_ASKED: &str = "permission.v2.asked";
 /// Test-gated because the surface emitter is its only reader: the ARMS are what
 /// production dispatches on, and a second copy of the vocabulary must not be
 /// something the shipped crate can read and drift against.
+const STATUS_RUNNING: &str = "running";
+const STATUS_COMPLETED: &str = "completed";
+const STATUS_ERROR: &str = "error";
+
+/// The part-state statuses that drive activity. Exported because the dispatch
+/// below ends `_ => Ok(vec![])`: rename `running` upstream and every opencode
+/// tool activity silently stops. Pinned by the tool-part decode tests.
+#[cfg(test)]
+pub(crate) const DECODED_PART_STATUSES: &[&str] = &[STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR];
+
 #[cfg(test)]
 pub(crate) const DECODED_EVENTS: &[&str] = &[
     SESSION_CREATED,
@@ -187,7 +197,7 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
     let agent_id = AgentId::from_parts(SOURCE_NAME, session_id);
     let identity = oc_identity(agent_id, session_id);
     match status {
-        "running" => {
+        STATUS_RUNNING => {
             let tool = part
                 .get("tool")
                 .and_then(|t| t.as_str())
@@ -209,7 +219,7 @@ fn decode_tool_part(props: &serde_json::Map<String, Value>) -> Result<Vec<AgentE
                 },
             ])
         }
-        "completed" | "error" => Ok(vec![
+        STATUS_COMPLETED | STATUS_ERROR => Ok(vec![
             identity,
             AgentEvent::ActivityEnd {
                 agent_id,
@@ -432,6 +442,11 @@ mod tests {
 
     #[test]
     fn running_tool_part_is_activity_start_keyed_on_callid() {
+        // The exported set IS the arms: start + the two end statuses, nothing more.
+        assert_eq!(
+            DECODED_PART_STATUSES,
+            [STATUS_RUNNING, STATUS_COMPLETED, STATUS_ERROR]
+        );
         let events = decode_all(json!({
             "type": "message.part.updated",
             "properties": {

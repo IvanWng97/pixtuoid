@@ -1017,10 +1017,11 @@ mod tests {
         }
     }
 
-    /// The exported field set IS what the decoder reads. A field it starts
-    /// reading without being declared here is a dependency the drift watch never
-    /// looks at — `tokenCount` / `tokenDetails` were exactly that until this test
-    /// existed.
+    /// Every field the decoder reads by a LITERAL key is declared here — reads
+    /// through a variable (the `bucket()` totals: `input`, `cache_write`,
+    /// `output`) are outside the scan, and the alphanumeric retain drops
+    /// underscore-spelled keys with them. A literal read added without a
+    /// declaration fails this test; a helper-routed one does not.
     #[test]
     fn the_field_set_is_exactly_what_the_decoder_reads() {
         let src = include_str!("copilot.rs");
@@ -1041,8 +1042,8 @@ mod tests {
                 }
             }
         }
-        // `type` is watched as DECODED_KINDS, and a `/` marks a JSON pointer
-        // rather than a payload key.
+        // `type` is watched as DECODED_KINDS; a `/` marks a JSON pointer; the
+        // alphanumeric clause drops underscore keys — the helper-read totals.
         read.retain(|f| {
             *f != "type" && !f.contains('/') && f.chars().all(|c| c.is_ascii_alphanumeric())
         });

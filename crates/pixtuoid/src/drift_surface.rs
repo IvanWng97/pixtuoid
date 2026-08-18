@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 /// Where the committed fragment lives, relative to the workspace root.
 const FRAGMENT: &str = "crates/pixtuoid/drift-surface.json";
 
-/// Set when regenerating: `UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid`.
+/// Set when regenerating: `just gen-drift-surface`.
 const UPDATE_ENV: &str = "UPDATE_DRIFT_SURFACE";
 
 fn surface() -> Value {
@@ -40,12 +40,13 @@ fn surface() -> Value {
     registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
     registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
-    // A VALUE, not a name set: the gateway port IS the daemon's runtime identity
+    // SHIPPED, not decoded or registered: the value rides the plugin we install,
+    // and the gateway port IS the daemon's runtime identity
     // (`pixtuoid-core/SHARP-EDGES.md`), so a silent upstream bump collapses two
     // live gateways onto one mascot. Read out of the shipped template rather than
     // copied, so the watch compares what actually installs.
-    let mut values: BTreeMap<&str, Value> = BTreeMap::new();
-    values.insert(
+    let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
+    shipped.insert(
         "openclaw.default_gateway_port",
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
@@ -53,7 +54,7 @@ fn surface() -> Value {
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("registered", json!(registered));
-    root.insert("values", json!(values));
+    root.insert("shipped", json!(shipped));
     json!(root)
 }
 
@@ -81,7 +82,7 @@ mod tests {
     use super::*;
 
     /// The committed fragment IS what we register. Regenerate with
-    /// `UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid`.
+    /// `just gen-drift-surface`.
     ///
     /// A TEST rather than a CI-only job so it runs on every platform in
     /// `just test` — a stale fragment narrows the watch, which is exactly the
@@ -144,7 +145,14 @@ mod tests {
         let install_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/install");
         let mut paths = Vec::new();
         rs_files(&install_dir, &mut paths);
-        let emitter = include_str!("drift_surface.rs");
+        let full = include_str!("drift_surface.rs");
+        // Scope to surface()'s body: a mention in a comment elsewhere must not
+        // satisfy the census.
+        let start = full.find("fn surface()").expect("surface() exists");
+        let end = full[start..]
+            .find("\n}\n")
+            .map_or(full.len(), |i| start + i);
+        let emitter = &full[start..end];
         let mut found = 0;
         for path in paths {
             // The path RELATIVE to install/, not the file stem: `hook_cmd/mod.rs`
@@ -200,6 +208,19 @@ mod tests {
         let obj = s["registered"]
             .as_object()
             .expect("registered is an object");
+        for (g, entries) in s.as_object().expect("root is an object") {
+            let o = entries.as_object().expect("group is an object");
+            assert!(!o.is_empty(), "{g} is an empty group");
+            for (k, v) in o {
+                let ok = match v {
+                    Value::Array(a) => {
+                        !a.is_empty() && a.iter().all(|x| x.as_str().is_some_and(|s| !s.is_empty()))
+                    }
+                    _ => false,
+                };
+                assert!(ok, "{g}.{k} must be a non-empty array of non-empty names");
+            }
+        }
         for (name, events) in obj {
             assert!(
                 roster.contains(&name.as_str()),

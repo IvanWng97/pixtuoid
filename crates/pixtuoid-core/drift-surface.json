@@ -101,6 +101,11 @@
       "message.part.updated",
       "permission.asked",
       "permission.v2.asked"
+    ],
+    "opencode.part_statuses": [
+      "running",
+      "completed",
+      "error"
     ]
   }
 }

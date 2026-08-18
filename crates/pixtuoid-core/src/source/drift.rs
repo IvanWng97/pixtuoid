@@ -38,9 +38,12 @@
 //! Being watchable is not the same as being watched well, but a silent defense
 //! is not a defense.
 //!
-//! What this ladder does NOT reach, in two shapes nothing enumerates: payload
-//! FIELD names a decoder reads (#940) and single wire VALUES it compares for
-//! equality (#943). Both are silent unless breadcrumbed, and most are not.
+//! Two shapes are watched only where a row was written for them, never
+//! systematically: payload FIELD names a decoder reads (#940 — copilot's ride
+//! `copilot.payload_fields`; the rest are neither watched nor breadcrumbed)
+//! and single wire VALUES it compares for equality (#943 —
+//! `every_equality_compared_wire_literal_is_accounted_for` is the census;
+//! what it does not carry is an exemption with a written reason).
 //!
 //! An alarm must state a fact about US ("this decoder met X and dropped it"),
 //! never a guess about THEM ("upstream renamed X").

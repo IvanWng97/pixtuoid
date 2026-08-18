@@ -122,10 +122,6 @@ pub(crate) const EVENT_MSG: &str = "event_msg";
 pub(crate) const RESPONSE_ITEM: &str = "response_item";
 pub(crate) const TURN_CONTEXT: &str = "turn_context";
 
-/// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
-/// (the arms below guard on `contains`) and the export source, so there is one
-/// declaration per name and no second copy to drift. Adding a name to a group
-/// changes what decodes AND what the drift surface claims, in one edit.
 const SANDBOX_PERMISSIONS_FIELD: &str = "sandbox_permissions";
 const REQUIRE_ESCALATED: &str = "require_escalated";
 
@@ -136,6 +132,9 @@ const REQUIRE_ESCALATED: &str = "require_escalated";
 #[cfg(test)]
 pub(crate) const DECODED_ESCALATION: &[&str] = &[REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD];
 
+/// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
+/// (the arms below guard on `contains`) and the export source, so there is one
+/// declaration per name and no second copy to drift.
 pub(crate) const EM_TURN_START: &[&str] = &["task_started", "turn_started"];
 pub(crate) const EM_RESUME: &[&str] = &["exec_command_end", "patch_apply_end"];
 pub(crate) const EM_SEARCH: &[&str] = &["web_search_begin", "web_search_end"];

@@ -430,9 +430,8 @@ pub fn decode_grok_line(path: &str, source: &str, v: Value) -> Result<Vec<AgentE
                 }])
             }
             // Fires INSTEAD of `model_changed` when the persisted model is no
-            // longer available — without this arm the flame shows the dead
-            // model for the whole session (#933's sibling class, found by the
-            // family sweep).
+            // longer available — undecoded, the flame shows the dead model
+            // until the next `_meta.modelId`-bearing update corrects it.
             XAI_MODEL_AUTO_SWITCHED => {
                 let model = str_field("new_model_id")
                     .filter(|s| !s.is_empty())
@@ -1272,6 +1271,25 @@ mod tests {
             "an unread tag reaches neither"
         );
         assert_eq!(DECODED_XAI_METHOD, XAI_SESSION_UPDATE_METHOD);
+
+        // The auto-switch arm reads `new_model_id`, not `model_changed`'s
+        // `model_id` — a payload carrying only the WRONG field must not emit.
+        let only = |field: &str| {
+            decode_line(xai_line(
+                json!({"sessionUpdate": XAI_MODEL_AUTO_SWITCHED, field: "m2"}),
+            ))
+        };
+        assert!(
+            matches!(
+                only("new_model_id").as_slice(),
+                [AgentEvent::ModelInfo { model: Some(_), .. }]
+            ),
+            "new_model_id alone must emit ModelInfo"
+        );
+        assert!(
+            only("model_id").is_empty(),
+            "model_id alone must NOT satisfy the auto-switch arm"
+        );
     }
 
     #[test]

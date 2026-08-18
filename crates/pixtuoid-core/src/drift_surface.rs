@@ -1,7 +1,7 @@
 //! This crate's half of the **drift surface** — the names our decoders read,
 //! emitted as data for `check_upstream_drift.py`.
 //!
-//! The watcher is a separate program that cannot call us, and for years it
+//! The watcher is a separate program that cannot call us, and until #942 it
 //! REGEX-PARSED this crate's source instead. That fails SILENTLY: rename a
 //! const and the parser returns a smaller set, so the watch narrows with
 //! nothing to show for it. Emitting makes it a test failure HERE.
@@ -22,7 +22,7 @@ use crate::source::codex::{
 /// Where the committed fragment lives, relative to the workspace root.
 const FRAGMENT: &str = "crates/pixtuoid-core/drift-surface.json";
 
-/// Set when regenerating: `UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core`.
+/// Set when regenerating: `just gen-drift-surface`.
 const UPDATE_ENV: &str = "UPDATE_DRIFT_SURFACE";
 
 fn surface() -> Value {
@@ -86,6 +86,10 @@ fn surface() -> Value {
         json!(super::source::decoder::DECODED_DISPATCH_NAMES),
     );
     decoded.insert(
+        "opencode.part_statuses",
+        json!(crate::source::opencode::DECODED_PART_STATUSES),
+    );
+    decoded.insert(
         "opencode.hook_events",
         json!(crate::source::opencode::DECODED_EVENTS),
     );
@@ -109,7 +113,7 @@ mod tests {
     use super::*;
 
     /// The committed fragment IS what the decoders read. Regenerate with
-    /// `UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core`.
+    /// `just gen-drift-surface`.
     ///
     /// This is the gate, and it is a TEST rather than a CI-only job so it runs
     /// on every platform in `just test` — a stale fragment is a narrowed watch,
@@ -150,7 +154,11 @@ mod tests {
                             "{group}.{k} carries a blank name",
                         );
                     }
-                    Value::String(x) => assert!(!x.is_empty(), "{group}.{k} is blank"),
+                    Value::String(_) => panic!(
+                        "{group}.{k} is a bare string — the Python reader does \
+                         set(value), so it reads as a set of CHARACTERS; wrap it \
+                         in a 1-element array"
+                    ),
                     other => panic!("{group}.{k} is neither a set nor a value: {other}"),
                 }
             }
@@ -237,11 +245,6 @@ mod tests {
                 .split('|')
                 .map(str::trim)
             {
-                assert!(
-                    !tok.starts_with('"'),
-                    "{file}: arm {tok} dispatches on a bare literal — name it and put it in \
-                     {export}, or the decoder reads a name the drift surface omits",
-                );
                 if tok != "_"
                     && !tok.is_empty()
                     && tok
@@ -313,6 +316,10 @@ mod tests {
             ("DECODED_EXIT_MARKER", "session_exit_ends_root_not_as_child"),
             ("DECODED_ESCALATION", "escalated_function_call_is_waiting"),
             (
+                "DECODED_PART_STATUSES",
+                "running_tool_part_is_activity_start_keyed_on_callid",
+            ),
+            (
                 "DECODED_MESSAGE_VOCAB",
                 "the_exported_message_vocabulary_is_exactly_what_the_arms_match",
             ),
@@ -358,7 +365,7 @@ mod tests {
         for (name, src) in &hits {
             if let Some((_, test)) = PINNED_ELSEWHERE.iter().find(|(n, _)| n == name) {
                 let body = src
-                    .split_once(&format!("fn {test}"))
+                    .split_once(&format!("fn {test}("))
                     .map(|(_, rest)| rest)
                     .unwrap_or("");
                 assert!(
@@ -391,14 +398,15 @@ mod tests {
     }
 
     /// Every wire literal a decoder equality-compares is carried by the drift
-    /// surface or exempted below with its adjudicated reason (#943's gate:
-    /// five such literals were deleted from the watch and found one at a time
-    /// by review — this makes the sixth a test failure instead).
+    /// surface or exempted below with its adjudicated reason (#943's gate).
     ///
-    /// Fragment membership is global across sets, so a cross-source spelling
-    /// collision passes; a literal moved behind a non-exported const escapes
-    /// the scan. Both were adjudicated as accepted looseness on #943. Stale
-    /// exemptions fail the OTHER direction.
+    /// Three accepted loosenesses, adjudicated on #943: fragment membership is
+    /// global across sets, so a cross-source spelling collision passes; a
+    /// literal behind a non-exported const escapes the scan; and the scan is
+    /// `==`/`!=`-shaped only — a MATCH ARM pattern, a `.starts_with` prefix
+    /// gate, or a `matches!` is outside its population. Export such
+    /// vocabularies instead (opencode's part statuses are the precedent).
+    /// Stale exemptions fail the OTHER direction.
     #[test]
     fn every_equality_compared_wire_literal_is_accounted_for() {
         // (file stem, literal, why no upstream watch is owed)
@@ -406,11 +414,16 @@ mod tests {
             (
                 "antigravity",
                 "PLANNER_RESPONSE",
-                "unverified reverse-engineered name (see decoder comment); the \
-                 decoder breadcrumbs unknown vocabulary",
+                "capture-verified step type; a rename lands in the \
+                 non-PLANNER_RESPONSE + tool_calls breadcrumb (antigravity.rs)",
             ),
-            ("antigravity", "ask_permission", "same as PLANNER_RESPONSE"),
-            ("antigravity", "ask_question", "same as PLANNER_RESPONSE"),
+            (
+                "antigravity",
+                "ask_permission",
+                "unverified reverse-engineered tool name (antigravity.rs comment); \
+                 no watchable upstream, silent on rename — accepted",
+            ),
+            ("antigravity", "ask_question", "same as ask_permission"),
             (
                 "admit",
                 "jsonl",
@@ -456,14 +469,15 @@ mod tests {
             (
                 "copilot",
                 "task",
-                "name-only BY DESIGN — semantic subagent_type detection is \
-                 spoofable by model-authored args (see copilot_tool_detail)",
+                "name-only BY DESIGN (subagent_type is spoofable, see \
+                 copilot_tool_detail) — and unwatchable: the schema types \
+                 toolName as a free string and never declares tool-name values",
             ),
             (
                 "cursor",
                 "Task",
-                "legacy fallback; detection is semantic (subagent_type) and the \
-                 live name is watched as decoder.dispatch_names",
+                "detection is semantic (subagent_type, capture-verified), so a \
+                 rename degrades to a Generic tool, never a missed delegation",
             ),
             (
                 "grok",
@@ -490,7 +504,7 @@ mod tests {
                 "opencode",
                 "tool",
                 "part-type inside the watched `message.part.updated`; a rename is \
-                 #940-class field-value drift, accepted residual",
+                 #943-class value drift, accepted residual",
             ),
         ];
 
@@ -551,7 +565,7 @@ mod tests {
             }
             let src = std::fs::read_to_string(&path).expect("the module is readable");
             let prod = src
-                .split("#[cfg(test)]\nmod tests")
+                .split("#[cfg(test)]\nmod ")
                 .next()
                 .expect("split never yields zero parts");
             for line in prod.lines() {

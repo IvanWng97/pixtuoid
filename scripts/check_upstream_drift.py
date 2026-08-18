@@ -12,9 +12,10 @@ by a test in the crate that owns those (private) names. This file never parses
 our Rust: a scraped `match` arm goes stale silently, so a rename would narrow
 the watch with nothing to show for it.
 
-WHICH surfaces get a row is decided by transport and by whether the decoder can
-speak. `crates/pixtuoid-core/src/source/drift.rs`'s header is the ONLY statement
-of that rule — a row here with no clause there is a bug in one of the two.
+WHICH surfaces owe a VANISH row is decided by transport and by whether the
+decoder can speak — `crates/pixtuoid-core/src/source/drift.rs`'s header is the
+only statement of that rule. The appearance watches (adopt-a-surface markers,
+safety premises, the sibling sweeps) are declared at their own sweep sites.
 
 Findings carry a DISPOSITION (see `Report`), because "upstream changed" and "our
 probe missed" need different work and only one of them is a statement about
@@ -276,10 +277,9 @@ UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
     {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
 )
 
-# Matches BOTH sides — upstream's declaration and the value we emit. The value
-# must be read from the DECLARATION, never scanned for as a substring: a rename
-# leaves the old literal standing in a `///` and a `#[cfg(test)]` fixture, so
-# `"…" in text` never fires.
+# The value must be read from upstream's DECLARATION, never scanned for as a
+# substring: a rename leaves the old literal standing in a `///` and a
+# `#[cfg(test)]` fixture, so `"…" in text` never fires.
 GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?str"
 GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 
@@ -548,8 +548,9 @@ CODEX_KNOWN_OMITTED: dict[str, str] = {
 # grok xAI variants we know about and deliberately do not decode.
 GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "hook_annotation": "TUI scrollback text; carries no state we render",
-    "subagent_progress": "rate-limited elapsed-time ticks on a child that "
-    "`subagent_spawned` already registered",
+    "subagent_progress": "cumulative per-child totals (tokens, tool calls); "
+    "summing a running total into the delta-accumulating reducer double-counts "
+    "(codex.rs's token_count comment is the precedent)",
 }
 
 
@@ -729,6 +730,7 @@ class OurNames:
     openclaw: set[str] | None = None
     openclaw_gateway_port: set[str] | None = None
     opencode: set[str] | None = None
+    opencode_part_statuses: set[str] | None = None
     reasonix: set[str] | None = None
     copilot: set[str] | None = None
     copilot_fields: set[str] | None = None
@@ -799,9 +801,10 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
     ("codex_escalation", CORE_LIB_FRAGMENT, "decoded", "codex.escalation"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
-    ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "values", "openclaw.default_gateway_port"),
+    ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "shipped", "openclaw.default_gateway_port"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
+    ("opencode_part_statuses", CORE_LIB_FRAGMENT, "decoded", "opencode.part_statuses"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
     ("acp_terminal_statuses", CORE_LIB_FRAGMENT, "decoded", "acp.terminal_statuses"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
@@ -1318,12 +1321,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             report.add_review(finding)
 
 
-    # HOOK-REGISTERED sources. These need an upstream watch in a way a
-    # transcript-bearing source does not: registration is NAME-KEYED, so an
-    # upstream rename leaves our entry inert, the CLI fires nothing, the decoder
-    # is never reached, and NO breadcrumb is emitted. Silence, not a signal —
-    # #938's wrong premise #1, and the reason "closed CLIs are covered at
-    # runtime" is false for exactly these.
+    # HOOK-REGISTERED sources — clause 1 of `source/drift.rs`'s header.
     if ours.reasonix is not None:
         text = fetch_anchored(REASONIX_HOOK_URL, "Reasonix hook source", report)
         if text is not None:
@@ -1573,7 +1571,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         if len(docs) == 2:
             joined = "\n".join(docs)
             for name in sorted(ours.codex_escalation):
-                if name not in joined:
+                if not re.search(rf"\b{re.escape(name)}\b", joined):
                     report.add_breaking(
                         f"Codex escalation name `{name}` (read by source/codex.rs) is "
                         f"GONE from upstream — renamed; the approval gate never fires, "
@@ -1687,6 +1685,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"opencode event `{ev}` (forwarded by our plugin, decoded in "
                         f"source/opencode.rs) is GONE from upstream — likely renamed; "
                         f"the plugin subscribes to an event it never fires (no sprite)."
+                    )
+            # The part-state statuses ride the same two schema documents. The
+            # dispatch ends `_ => Ok(vec![])`, so a renamed `running` silently
+            # stops every opencode tool activity.
+            for st in sorted(ours.opencode_part_statuses or ()):
+                if f'"{st}"' not in joined:
+                    report.add_breaking(
+                        f"opencode part status `{st}` (decoded in source/opencode.rs) "
+                        f"is GONE from the schema — renamed; tool activity decodes to "
+                        f"nothing (sprites never go Active, or never come back)."
                     )
 
 

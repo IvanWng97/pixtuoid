@@ -592,6 +592,36 @@ def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None
         check(not drive(["pxd_stranger"]).review, "a family-less addition stays silent")
         d.GROK_XAI_KNOWN_OMITTED[sib] = "test"
         check(not drive([sib]).review, "a ledgered sibling goes quiet")
+        # The ACP twin: a new `tool_call_*` tag must flag, a stranger must not.
+        acp_tags = sorted(ours.acp_decoded_tags or ())
+        statuses = sorted(ours.acp_terminal_statuses or ())
+
+        def acp(extra: list[str]) -> d.Report:
+            doc = json.dumps({
+                "x-method": "session/update",
+                "$defs": {
+                    "SessionUpdate": {"oneOf": [
+                        {"properties": {"sessionUpdate": {"const": t}}}
+                        for t in acp_tags + extra]},
+                    "ToolCallStatus": {"oneOf": [{"const": c} for c in statuses]},
+                },
+            })
+
+            def stub(u: str, _d: str = doc) -> str:
+                if u in (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL):
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        check(not acp([]).review, "the intact ACP schema stays silent")
+        loud = acp(["tool_call_confirmation"])
+        check(any("tool_call_confirmation" in x for x in loud.review),
+              f"a new tool_call_* tag must flag; got {loud.review}")
+        check(not acp(["pxd_stranger"]).review, "a non-tool_call addition stays silent")
     finally:
         d.fetch = real
         d.GROK_XAI_KNOWN_OMITTED.clear()
@@ -995,7 +1025,17 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("opencode", str, lambda ns: dict.fromkeys(
                 d.OPENCODE_EVENT_URLS,
                 "export const Event = {\n"
-                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns)) + "}\n")),
+                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns))
+                + "}\n"
+                + "".join(f'export type S{i} = "{st}";\n'
+                          for i, st in enumerate(full["opencode_part_statuses"])))),
+            ("opencode_part_statuses", str, lambda ns: dict.fromkeys(
+                d.OPENCODE_EVENT_URLS,
+                "export const Event = {\n"
+                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n'
+                          for i, n in enumerate(full["opencode"]))
+                + "}\n"
+                + "".join(f'export type S{i} = "{st}";\n' for i, st in enumerate(ns)))),
             # A VALUE row: upstream declares the const ONCE, so the document
             # carries one declaration and a vanish is a different value in it.
             ("grok_xai_method", str, lambda ns: {
@@ -1050,7 +1090,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             # to the network. `else real(u)` made `just lint` issue 208 live
             # requests per run — and `lint` joins its jobs with `wait`, so a
             # blackholing network would hang preflight and pre-push at
-            # 30s/request (justfile:1327).
+            # 30s/request (`just lint`'s parallel job join).
             def stub(u: str, _d: dict[str, str] = docs) -> str:
                 if u in _d:
                     return _d[u]

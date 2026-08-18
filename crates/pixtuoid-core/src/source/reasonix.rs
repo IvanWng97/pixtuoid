@@ -73,7 +73,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
             // The fallback is for OLD builds that carried no id, and an upstream
             // RENAME is indistinguishable from one — but its blast radius is
             // every session merging onto cwd, so it must not be silent.
-            crate::source::drift::missing_field(SOURCE_NAME, "hook", "sessionId");
+            crate::source::drift::missing_field(SOURCE_NAME, event, "sessionId");
             cwd
         });
     let agent_id = AgentId::from_parts(SOURCE_NAME, key);

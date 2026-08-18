@@ -865,6 +865,25 @@ mod tests {
             DECODED_MESSAGE_VOCAB.contains(&ROLE_TOOL_RESULT),
             "the toolResult role is exported",
         );
+
+        // The ask arm's OWN probe: an ask-named call must gate Waiting, and a
+        // renamed ask must not — start-only, never the gate.
+        let waits = |tool: &str| {
+            decode_omp_line(
+                ROOT,
+                SOURCE_NAME,
+                json!({"type": "message", "id": "m2", "parentId": null, "timestamp": "t",
+                       "message": {"role": ROLE_ASSISTANT, "timestamp": 1,
+                                   "content": [{"type": BLOCK_TOOL_CALL, "id": "t2",
+                                                "name": tool}]}}),
+            )
+            .is_ok_and(|evs| evs.iter().any(|e| matches!(e, AgentEvent::Waiting { .. })))
+        };
+        assert!(waits(TOOL_ASK), "an ask call must gate Waiting");
+        assert!(
+            !waits("pxd_renamed_ask"),
+            "a renamed ask must not gate Waiting"
+        );
     }
 
     #[test]
