@@ -90,7 +90,7 @@ Hence:
    its brief from `pr-review.prompt.md`, `<...>` slots FILLED with this change's
    specific claims (a lazily-filled slot turns both reviewers generic). Give each
    the worktree path + `git -C <path> diff <base>..HEAD`. Then add an escalation
-   lens for EVERY trigger the prompt's "When two lenses aren't enough" section
+   lens for EVERY trigger the prompt's "Escalation triggers" section
    matches on this change — that trigger→lens list is canonical THERE; don't
    restate it here (a copy would be the two-copies-drift class the header names —
    a new trigger added to the prompt must reach reviews without a manual mirror).
