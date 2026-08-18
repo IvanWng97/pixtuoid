@@ -29,7 +29,7 @@ use crate::install::SENTINEL_KEY;
 /// omits is the shape that shipped `pre_approval_request` unregistered (#930),
 /// and it is `check_upstream_drift.py`'s job, not this test's. Wire values from a
 /// real capture — session events carry the `on_` prefix, tool events don't.
-pub(crate) const HERMES_EVENTS: &[&str] = &[
+const HERMES_EVENTS: &[&str] = &[
     "on_session_start",
     "pre_tool_call",
     // The approval gate. Observer-only upstream, so registering it cannot affect

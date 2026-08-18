@@ -471,16 +471,6 @@ const SESSION: &str = "session";
 const MESSAGE: &str = "message";
 const CUSTOM: &str = "custom";
 
-/// The session-entry `type` values this decoder maps — this module's row in the
-/// drift surface. Pinned to the arms by
-/// `the_decoded_entry_type_set_is_exactly_what_the_arms_match`.
-///
-/// Test-gated because the surface emitter is its only reader: the ARMS are what
-/// production dispatches on, and a second copy of the vocabulary must not be
-/// something the shipped crate can read and drift against.
-#[cfg(test)]
-pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM];
-
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -657,9 +647,9 @@ mod tests {
     const CHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha.jsonl";
     const GRANDCHILD: &str = "/home/u/.omp/agent/sessions/-dev-proj/2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001/Alpha/GoodWolf.jsonl";
 
-    /// The exported set IS the arms. The arms dispatch on the SAME consts, so a
-    /// value cannot drift; this catches a member dropped from the set, or kept
-    /// after its arm went away. `custom` is GUARDED on
+    /// Each entry type reaches a real arm. The arms dispatch on these same
+    /// consts, so a value cannot drift; what this proves is that none of them
+    /// has stopped being handled. `custom` is GUARDED on
     /// `customType == "session_exit"`, so its payload has to clear the guard —
     /// a bare `custom` falls through to the catch-all like any unread type.
     #[test]
@@ -680,7 +670,7 @@ mod tests {
             });
             evs > 0 || logs.contains(crate::source::drift::TARGET)
         };
-        for ty in DECODED_ENTRY_TYPES {
+        for ty in [SESSION, MESSAGE, CUSTOM] {
             assert!(drive(ty), "{ty} must reach a real arm");
         }
         assert!(!drive("checkpoint"), "an unread entry type reaches neither");

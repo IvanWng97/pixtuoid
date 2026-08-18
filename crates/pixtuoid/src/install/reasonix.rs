@@ -30,7 +30,7 @@ use crate::install::SENTINEL_KEY;
 /// hooks registered under PostToolUse / Stop with the event re-labeled, and ours
 /// are native-format — registering both spellings would double-fire every failed
 /// tool/turn for the same decoded ActivityEnd.
-pub(crate) const REASONIX_EVENTS: &[&str] = &[
+const REASONIX_EVENTS: &[&str] = &[
     "SessionStart",
     "PreToolUse",
     "PostToolUse",

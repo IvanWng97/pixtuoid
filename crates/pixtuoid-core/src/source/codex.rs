@@ -122,11 +122,6 @@ const EVENT_MSG: &str = "event_msg";
 const RESPONSE_ITEM: &str = "response_item";
 const TURN_CONTEXT: &str = "turn_context";
 
-/// The rollout OUTER discriminators this decoder dispatches on — this module's
-/// row in the drift surface. Test-gated: the surface emitter is the only reader.
-#[cfg(test)]
-pub(crate) const DECODED_OUTERS: &[&str] = &[EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT];
-
 /// The rollout inners, grouped BY BEHAVIOUR — each group is both the matcher
 /// (the arms below guard on `contains`) and the export source, so there is one
 /// declaration per name and no second copy to drift. Adding a name to a group
@@ -140,18 +135,6 @@ const EM_TOKENS: &[&str] = &["token_count"];
 const RI_TOOL_START: &[&str] = &["function_call", "custom_tool_call"];
 const RI_RESUME: &[&str] = &["function_call_output", "custom_tool_call_output"];
 const RI_SEARCH: &[&str] = &["web_search_call", "tool_search_call", "tool_search_output"];
-
-/// Derived from the SAME group consts the arms guard on — never a hand-kept
-/// mirror. Test-gated: the surface emitter is the only reader.
-#[cfg(test)]
-pub(crate) fn decoded_event_msg() -> Vec<&'static str> {
-    [EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat()
-}
-
-#[cfg(test)]
-pub(crate) fn decoded_response_item() -> Vec<&'static str> {
-    [RI_TOOL_START, RI_RESUME, RI_SEARCH].concat()
-}
 
 /// Decode one transcript line. `tool_use_id` is always `None` so these events
 /// are never suppressed by the hook-wins dedup (which keys on `tool_use_id`).
@@ -323,10 +306,10 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    /// Every exported rollout name reaches a real arm, and a name outside the
-    /// sets reaches none. The OUTERS dispatch on consts so their value cannot
-    /// drift; the inners are a second copy, which is exactly why each is driven
-    /// here rather than merely listed.
+    /// Every name in a behaviour group reaches a real arm, and one outside them
+    /// reaches none. The groups ARE the matcher — the arms guard on
+    /// `contains` — so this is not pinning a second copy; it is proving no group
+    /// member has quietly stopped being handled.
     #[test]
     fn the_decoded_rollout_sets_are_exactly_what_the_arms_match() {
         let drive = |outer: &str, inner: &str| {
@@ -340,13 +323,13 @@ mod tests {
             decode_codex_line("/p/rollout-2026-07-10-abc.jsonl", "codex", v)
                 .is_ok_and(|e| !e.is_empty())
         };
-        for inner in decoded_event_msg() {
+        for inner in [EM_TURN_START, EM_RESUME, EM_SEARCH, EM_TURN_END, EM_TOKENS].concat() {
             assert!(
                 drive(EVENT_MSG, inner),
                 "event_msg/{inner} must reach an arm"
             );
         }
-        for inner in decoded_response_item() {
+        for inner in [RI_TOOL_START, RI_RESUME, RI_SEARCH].concat() {
             assert!(
                 drive(RESPONSE_ITEM, inner),
                 "response_item/{inner} must reach an arm",
@@ -356,7 +339,6 @@ mod tests {
             drive(TURN_CONTEXT, "anything"),
             "turn_context matches on `_`"
         );
-        assert_eq!(DECODED_OUTERS, [EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]);
         assert!(
             !drive(EVENT_MSG, "turn_paused"),
             "an unread inner reaches none"

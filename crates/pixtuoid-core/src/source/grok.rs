@@ -43,10 +43,9 @@ pub use native::{live_grok_session_ids, GrokSource};
 /// The Grok Build source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "grok";
 
-/// xAI's private JSON-RPC method namespace, mirroring upstream's
-/// `XAI_SESSION_UPDATE_METHOD`; `check_upstream_drift.py` reads this const
-/// rather than holding its own copy of the literal.
-pub(crate) const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
+/// xAI's private JSON-RPC method namespace, named once so the decode arm and
+/// the session-end scan cannot drift apart.
+const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";
 
 /// Decode one grok hook payload (already identified by
 /// `_pixtuoid_source == "grok"`), keyed on `sessionId`.

@@ -37,7 +37,7 @@ const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 /// test-gated rather than deleted). A rename upstream makes that hook silently
 /// stop firing, since the plugin registers by name.
 #[cfg(test)]
-pub(crate) const OPENCLAW_EVENTS: &[&str] = &[
+const OPENCLAW_EVENTS: &[&str] = &[
     "gateway_start",
     "gateway_stop",
     "session_start",

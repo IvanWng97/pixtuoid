@@ -455,13 +455,6 @@ _OMP_ENV_LIVE = (
 )
 
 
-_OMP_NAMES = d.OurNames(omp={"session"})
-_GROK_NAMES = d.OurNames(
-    grok=set(),
-    grok_xai_method=d.load_fragment(d.CORE_LIB_FRAGMENT)["values"]["grok.xai_session_update_method"],
-)
-
-
 def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> list[str]:
     """Run the checks over stubbed upstream files, returning only the lines the
     `kind` sweep emits — a sibling sweep's noise must not read as this one.
@@ -562,41 +555,6 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 
 
-def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
-    """A gap in the emitted surface costs exactly what it feeds.
-
-    The 16 hand-written readers had per-reader `try` for this; the fragments give
-    per-KEY isolation instead, and it has to be the same promise or a single
-    missing row silently darkens the whole watch."""
-    real = d.load_fragment
-    try:
-        full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
-
-        # A row that is present everywhere else goes missing.
-        holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
-        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["copilot.kinds"]
-        d.load_fragment = lambda rel: holed[rel]
-        rep = d.Report()
-        ours = d.read_our_names(rep)
-        check(ours.copilot is None, f"the holed field is dark, got {ours.copilot!r}")
-        for other in ("cc", "codex", "omp", "opencode", "grok"):
-            got = getattr(ours, other)
-            check(got, f"{other} must survive a sibling's gap, got {got!r}")
-        named = [b for b in rep.blind if "copilot" in b]
-        check(len(named) == 1, f"exactly one probe-health line names copilot: {rep.blind}")
-        check(
-            any("our_source" in str(b) or "SKIPPED" in b for b in named),
-            f"the line must read as OUR problem, not upstream's: {named}",
-        )
-
-        # A fragment that does not load at all darkens only what IT feeds.
-        d.load_fragment = lambda rel: (_ for _ in ()).throw(OSError("gone")) if rel == d.CORE_BIN_FRAGMENT else full[rel]
-        rep2 = d.Report()
-        ours2 = d.read_our_names(rep2)
-        check(ours2.cc is None, "a registration field is dark when its fragment is gone")
-        check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
-    finally:
-        d.load_fragment = real
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
@@ -623,6 +581,78 @@ def test_every_swept_url_declares_an_anchor() -> None:
         f"{unclassified} declare neither an anchor nor structural parsing, so the "
         f"#793 stale-pin gate does not cover them.",
     )
+
+
+def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
+    """`SURFACE_ROWS` maps an `OurNames` field to a key in a fragment the RUST
+    side writes. Nothing in either language binds the two, so a key renamed in
+    `src/drift_surface.rs` would surface only as a probe-health line in the
+    weekly run — loud enough to notice, late enough to have already skipped a
+    sweep. This is the binding, and it runs in `just lint`.
+
+    The reverse direction matters too: a key emitted that nothing consumes is
+    exactly the "maintaining what we don't use" this file exists to delete.
+    """
+    consumed = set()
+    for field, rel, group, key in d.SURFACE_ROWS:
+        frag = d.load_fragment(rel)
+        check(group in frag, f"{rel} has no `{group}` group for {field}")
+        check(key in frag[group], f"{rel} {group} has no `{key}` for {field}")
+        check(frag[group].get(key), f"{rel} {group}.{key} is empty")
+        consumed.add((rel, group, key))
+
+    emitted = {
+        (rel, group, key)
+        for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)
+        for group, rows in d.load_fragment(rel).items()
+        for key in rows
+    }
+    # `opencode.hook_events` is read by a RUST test (the plugin/decoder binding
+    # in install/opencode.rs), not from here — the only key with a consumer this
+    # side cannot see.
+    unconsumed = sorted(
+        f"{rel.split('/')[1]} {g}.{k}"
+        for rel, g, k in emitted - consumed
+        if k != "opencode.hook_events"
+    )
+    check(not unconsumed, f"emitted but read by nobody: {unconsumed}")
+
+
+def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
+    """A gap in the emitted surface costs exactly what it feeds.
+
+    The 16 hand-written readers this replaced had per-reader `try` for it; the
+    fragments give per-KEY isolation instead, and it has to be the same promise
+    or one missing row silently darkens the whole watch.
+    """
+    real = d.load_fragment
+    try:
+        full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
+
+        holed = {rel: json.loads(json.dumps(f)) for rel, f in full.items()}
+        del holed[d.CORE_LIB_FRAGMENT]["decoded"]["copilot.kinds"]
+        d.load_fragment = lambda rel: holed[rel]
+        rep = d.Report()
+        ours = d.read_our_names(rep)
+        check(ours.copilot is None, f"the holed field is dark, got {ours.copilot!r}")
+        for other in ("cc", "cursor", "kimi", "acp_decoded_tags", "dispatch_names"):
+            check(getattr(ours, other), f"{other} must survive a sibling's gap")
+        named = [b for b in rep.blind if "copilot" in b]
+        check(len(named) == 1, f"exactly one probe-health line names copilot: {rep.blind}")
+
+        # A fragment that does not load at all darkens only what IT feeds.
+        def half(rel):
+            if rel == d.CORE_BIN_FRAGMENT:
+                raise OSError("gone")
+            return full[rel]
+
+        d.load_fragment = half
+        rep2 = d.Report()
+        ours2 = d.read_our_names(rep2)
+        check(ours2.cc is None, "a registration field is dark when its fragment is gone")
+        check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
+    finally:
+        d.load_fragment = real
 
 
 def main() -> int:

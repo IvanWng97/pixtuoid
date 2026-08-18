@@ -751,21 +751,11 @@ class OurNames:
     `None` means that reader failed; every consumer guards on `is not None`, so a
     stale parser darkens exactly what it fed and nothing else."""
 
-    codex: set[str] | None = None
-    codex_rollout: tuple[set[str], set[str], set[str]] | None = None
     acp_decoded_tags: set[str] | None = None
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
-    reasonix: set[str] | None = None
-    codewhale: set[str] | None = None
-    opencode: set[str] | None = None
     copilot: set[str] | None = None
-    omp: set[str] | None = None
     cursor: set[str] | None = None
-    openclaw: set[str] | None = None
-    hermes: set[str] | None = None
-    grok: set[str] | None = None
-    grok_xai_method: str | None = None
     kimi: set[str] | None = None
 
 
@@ -821,19 +811,11 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
 # (`src/drift_surface.rs` in each), so a rename is a test failure THERE rather
 # than a parser here quietly returning a smaller set.
 SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
-    ("codex", CORE_BIN_FRAGMENT, "registered", "codex"),
     ("cc", CORE_BIN_FRAGMENT, "registered", "claude-code"),
-    ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
-    ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
     ("cursor", CORE_BIN_FRAGMENT, "registered", "cursor"),
-    ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
-    ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
-    ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
     ("kimi", CORE_BIN_FRAGMENT, "registered", "kimi"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
-    ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
-    ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
     ("dispatch_names", CORE_LIB_FRAGMENT, "decoded", "decoder.dispatch_names"),
 )
 
@@ -883,31 +865,6 @@ def read_our_names(report: Report) -> OurNames:
             )
             continue
         setattr(ours, field, set(got))
-    # The one non-set field: codex compares three sets that ride one parse.
-    lib = frags.get(CORE_LIB_FRAGMENT)
-    if lib is not None:
-        d = lib.get("decoded", {})
-        triple = (d.get("codex.event_msg"), d.get("codex.response_item"), d.get("codex.rollout_outers"))
-        if all(triple):
-            ours.codex_rollout = tuple(set(x) for x in triple)  # type: ignore[assignment]
-        else:
-            report.add_blind(
-                "what WE depend on for `codex_rollout`, reading the codex rows",
-                "the emitted drift surface",
-                "A codex rollout row is absent or empty, so the rollout checks "
-                "were SKIPPED. Every OTHER source still ran.",
-                our_source=True,
-            )
-        method = lib.get("values", {}).get("grok.xai_session_update_method")
-        if method:
-            ours.grok_xai_method = method  # type: ignore[assignment]
-        else:
-            report.add_blind(
-                "what WE depend on for `grok_xai_method`",
-                "the emitted drift surface",
-                "The xAI method value is absent, so that watch was SKIPPED.",
-                our_source=True,
-            )
     return ours
 
 

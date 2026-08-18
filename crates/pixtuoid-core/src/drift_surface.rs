@@ -35,18 +35,6 @@ fn surface() -> Value {
         json!(crate::source::acp::DECODED_TAGS),
     );
     decoded.insert(
-        "codex.rollout_outers",
-        json!(crate::source::codex::DECODED_OUTERS),
-    );
-    decoded.insert(
-        "codex.event_msg",
-        json!(crate::source::codex::decoded_event_msg()),
-    );
-    decoded.insert(
-        "codex.response_item",
-        json!(crate::source::codex::decoded_response_item()),
-    );
-    decoded.insert(
         "copilot.kinds",
         json!(crate::source::copilot::DECODED_KINDS),
     );
@@ -55,25 +43,14 @@ fn surface() -> Value {
         json!(super::source::decoder::DECODED_DISPATCH_NAMES),
     );
     decoded.insert(
-        "omp.entry_types",
-        json!(crate::source::omp::DECODED_ENTRY_TYPES),
-    );
-    decoded.insert(
         "opencode.hook_events",
         json!(crate::source::opencode::DECODED_EVENTS),
-    );
-
-    let mut values: BTreeMap<&str, Value> = BTreeMap::new();
-    values.insert(
-        "grok.xai_session_update_method",
-        json!(crate::source::grok::XAI_SESSION_UPDATE_METHOD),
     );
 
     // Through a BTreeMap, never a `json!` object literal — see
     // `every_emitted_object_has_sorted_keys` for why that distinction is a gate.
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("decoded", json!(decoded));
-    root.insert("values", json!(values));
     json!(root)
 }
 
@@ -118,7 +95,7 @@ mod tests {
     #[test]
     fn no_emitted_set_is_empty() {
         let s = surface();
-        for (group, entries) in [("decoded", &s["decoded"]), ("values", &s["values"])] {
+        for (group, entries) in [("decoded", &s["decoded"])] {
             let obj = entries.as_object().expect("group is an object");
             assert!(!obj.is_empty(), "{group} is empty");
             for (k, v) in obj {
