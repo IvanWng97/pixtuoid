@@ -1,23 +1,12 @@
 # pixtuoid-scene — render+simulation engine crate guide
 
-The **backend-agnostic render + simulation engine CRATE**: the office world
-itself — the layer between `pixtuoid-core` (the headless lib) and the `pixtuoid`
-binary's painters. The workspace DAG is `pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}`.
-`pixtuoid-scene` owns layout geometry, pose/motion/pathfinding (the per-agent
-motion-timing authority + A\* router), the half-block-agnostic **pixel pass**
-(`render_to_rgb_buffer` — the SHARED world render), the color-theme MODEL, pets,
-chitchat, the frame cache, and the embedded sprite pack. It is **terminal- AND
-window-free BY CRATE BOUNDARY** — `ratatui`/`crossterm`/`winit`/`softbuffer` are
-NOT in `pixtuoid-scene/Cargo.toml`, so "no terminal/window dependency" is now a
-COMPILER-enforced fact (not merely a lint), and `just arch` covers this crate too.
-THREE thin painters layer on top — `tui` (ratatui half-block) and `floating`
-(winit/softbuffer) **in the `pixtuoid` binary**, plus `pixtuoid-web` (the wasm
-`<canvas>` painter, built with `default-features = false`) — and **none depends
-on another**. This is where the headless `SceneState` becomes a pixel buffer;
-the painters add the flush. Parent guides: workspace [`../../CLAUDE.md`](../../CLAUDE.md);
-headless lib [`../pixtuoid-core/CLAUDE.md`](../pixtuoid-core/CLAUDE.md); the binary
-[`../pixtuoid/CLAUDE.md`](../pixtuoid/CLAUDE.md); the terminal painter
-[`../pixtuoid/src/tui/CLAUDE.md`](../pixtuoid/src/tui/CLAUDE.md).
+The **backend-agnostic render + simulation engine**: layout geometry,
+pose/motion/pathfinding, the pixel pass (`render_to_rgb_buffer` — the shared
+world render), the color-theme MODEL, pets, chitchat, frame cache, embedded
+sprite pack. Terminal- AND window-free by crate boundary (workspace invariant
+#1); the three painters (`tui`, `floating`, `pixtuoid-web`) sit on top and
+none depends on another. Cross-cutting rules: workspace
+[`CLAUDE.md`](../../CLAUDE.md).
 
 ## Screen-space compass (THE convention — read before reasoning about N/S)
 
@@ -32,16 +21,11 @@ real-world headings. Pin this and stop re-deriving it:
   (`GroundAlign::End`): a sprite's front/base row.
 - East = +x (right), West = −x (left).
 
-`ApproachSides` states this once (`decor.rs`: *north = −y*); a piece's
-approach set is canonical (facing-South) then rotated by live `Facing`.
-Worked example — the **home desk**'s CANONICAL set (`DESK_APPROACH =
-{n:true, s:false, e:true, w:true}`) opens AWAY from the monitor. Half a pod is
-back-turned, so that set is rotated per desk: a viewer-facing desk is
-approached N/E/W, a back-turned one S/E/W. `layout.desk_facing(i)` is the
-authority — never assume the canonical set is the live one. (We keep north=up even though a real sunny-window office in the
-northern hemisphere would face its windows SOUTH — the compass is
-screen-space, and flipping it would invert the entire z-sort/"south row"
-vocabulary across 400+ sites for zero behavior change.)
+A piece's approach set is canonical (facing-South) then rotated by live
+`Facing` — `layout.desk_facing(i)` is the authority; never assume the
+canonical set is the live one. (The compass stays screen-space even where
+real-world geography disagrees — flipping it would invert the z-sort/"south
+row" vocabulary across 400+ sites for zero behavior change.)
 
 ## Layout
 
@@ -51,22 +35,12 @@ render-seam digest (`render_floor`/`FloorSession`) lives in
 
 ## The corpus census (`examples/corpus_check.rs`)
 
-The one place the render layer answers "would the UI actually SHOW this?" for
-real, uncurated bytes: `cargo run --release -p pixtuoid-scene --example
-corpus_check -- <source> [root] [--json]` (an omitted root resolves via
-`resolved_source_root`, so `just corpus-all` walks them all without a second
-copy of the roster or of any per-CLI path) walks the `.jsonl` under a live
-transcript tree that the source's registry `path_filter` admits (the same set
-the watcher would), drives each file through `pixtuoid_core::harness::Drive` (the
-shared decode→reduce pipeline, first-sight seed included), then asks
-`FloorSession::observe` whether its `SimFrame.characters` is non-empty — the
-documented headless seam, so a non-empty set IS "a sprite would be painted", no
-pixel buffer or terminal involved. It REPORTS (corpus content is unbounded and
-partly historical, so a non-registering file is not automatically a bug); the
-hard failures are a decode `Err` or a PANIC on bytes the source itself wrote.
-The provenance column — file mtime minus the newest turn the SESSION wrote — is
-the ghost-session class made countable, and it lives in this shell rather than
-the registry because it feeds a report, not a contract.
+`just corpus-all` (or `--example corpus_check -- <source>`) drives every local
+transcript through the real decode→reduce pipeline and asks
+`FloorSession::observe` for a non-empty `SimFrame.characters` — the headless
+"a sprite would be painted" seam. It REPORTS rather than gates (corpora are
+partly historical); the hard failures are a decode `Err` or a PANIC on bytes
+the source itself wrote. Detail: the example's own `//!` header.
 
 ## Known sharp edges (don't be surprised by these)
 
@@ -106,9 +80,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
 ## Where to look
 
-Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
-pays for the entry it needs instead of all of them. Grep it for the
-question:
+Grep [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md) for the question:
 
 <!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - Where does a furniture's footprint / visual size / approach side / dwell come from?
@@ -127,14 +99,8 @@ question:
 
 ## When refactoring
 
-The render path is exercised by the headless harness (the binary's
-`tui/tui_renderer/harness`, ~100 headless integration tests) plus dense `motion/tests.rs` +
-`pose/tests.rs` unit suites in THIS crate with a real A\* router and overlay
-churn. Changes to `derive_with_routing`, `MotionState`, or the pixel passes
-should add or update a frame-by-frame continuity guard — the
-flash/teleport/replay regressions in [`SHARP-EDGES.md`](SHARP-EDGES.md) all came
-back as failing tests first. The crate must stay terminal- and window-free (invariant #1, now
-COMPILER-enforced by the crate boundary + `just arch`): if you reach for
-`ratatui`/`crossterm`/`winit`/`softbuffer`, you CAN'T add it to
-`pixtuoid-scene/Cargo.toml` — the code belongs in the binary's painter (`tui/`
-or `floating/`), not here.
+Changes to `derive_with_routing`, `MotionState`, or the pixel passes add or
+update a frame-by-frame continuity guard (`motion/tests.rs`, `pose/tests.rs`,
+the binary's `tui_renderer/harness`) — the flash/teleport/replay regressions
+all came back as failing tests first. Terminal/window code belongs in the
+binary's painters, not here (invariant #1).

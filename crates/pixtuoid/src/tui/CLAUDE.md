@@ -1,26 +1,12 @@
 # pixtuoid/tui — terminal renderer agent guide
 
 The **terminal painter**: ratatui `App` + `TuiRenderer` (its inherent `render`
-flush). Owns the half-block flush, the widgets (footer/wall-display/theme-picker
-UI/tooltip/help/dashboard/Sources panel), mouse hit-testing, the version popup,
-the crossterm event loop + terminal lifecycle, and the per-session UI models
-(dashboard, Sources/connection). This is where the `pixtuoid-scene` engine's pixel
-buffer becomes terminal cells.
-
-**The render + simulation ENGINE is its OWN crate
-[`pixtuoid-scene`](../../../pixtuoid-scene/CLAUDE.md)** (the DAG is
-`pixtuoid-core ← pixtuoid-scene ← pixtuoid`) — layout, pose/motion/pathfinding,
-the pixel pass (`render_to_rgb_buffer`), the color theme MODEL, pets, chitchat,
-frame_cache, embedded_pack. `tui` and `floating` are sibling thin painters over
-the `pixtuoid-scene` crate; neither depends on the other. When a painter entry
-below references engine internals (`pixtuoid_scene::pixel_painter`,
-`pixtuoid_scene::theme`, `pixtuoid_scene::motion`, …) follow the link to the
-[scene guide](../../../pixtuoid-scene/CLAUDE.md) for the deep "why."
-
-Parent guides: binary [`../../CLAUDE.md`](../../CLAUDE.md); workspace
-[`../../../../CLAUDE.md`](../../../../CLAUDE.md); headless lib
-[`../../../pixtuoid-core/CLAUDE.md`](../../../pixtuoid-core/CLAUDE.md); the engine
-[`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md).
+flush). Owns the half-block flush, the widgets, mouse hit-testing, the version
+popup, the crossterm event loop + terminal lifecycle, and the per-session UI
+models. The engine's deep "why" lives in the
+[scene guide](../../../pixtuoid-scene/CLAUDE.md); `tui` and `floating` are
+sibling painters — neither depends on the other. Cross-cutting rules:
+workspace [`CLAUDE.md`](../../../../CLAUDE.md).
 
 ## Layout
 
@@ -42,9 +28,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
 ## Where to look
 
-Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
-pays for the entry it needs instead of all of them. Grep it for the
-question:
+Grep [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md) for the question:
 
 <!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - How is the office rendered (pixel pass → terminal)?
@@ -57,12 +41,7 @@ question:
 
 ## When refactoring
 
-The terminal render path is exercised by the headless harness
-(`tui_renderer/harness`, ~100 tests — 99 as of #435) driving the real `TuiRenderer` through a
-ratatui `TestBackend` — output-first (`buf()` pixels + `frame_buffer` cells).
-Changes to `draw_scene`, the widgets, or the dispatch precedence should add or
-update a harness test. The engine-side authority (`derive_with_routing`,
-`MotionState`, the pixel passes) lives in the `pixtuoid-scene` crate — see
-[`../../../pixtuoid-scene/CLAUDE.md`](../../../pixtuoid-scene/CLAUDE.md)'s "When
-refactoring." Don't reach back into `floating/` from here: `tui` and `floating`
-are sibling painters that share the `pixtuoid-scene` crate, not each other.
+Changes to `draw_scene`, the widgets, or the dispatch precedence add or update
+a harness test (`tui_renderer/harness` drives the real `TuiRenderer` through a
+ratatui `TestBackend`, output-first). Don't reach back into `floating/` from
+here.

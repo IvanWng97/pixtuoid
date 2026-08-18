@@ -1,13 +1,9 @@
 # pixtuoid-core — agent guide
 
-The **headless library**: no terminal dependencies (`ratatui`/`crossterm`/`stdout`
-are forbidden here — see workspace invariant #1). Owns the source/decoder seam,
-the reducer/state machine, sprite parsing, and the shared grid/walkability
-vocabulary. The sim geometry (layout, pose derivation, walk physics) lives in
-`pixtuoid-scene` — the engine owns its geometry; only the coherence-bound
-`walkable.rs` stays here (see [`SHARP-EDGES.md`](SHARP-EDGES.md)). The scene engine (`pixtuoid-scene`)
-and the binary (`pixtuoid`) sit on top of this. See the workspace
-[`CLAUDE.md`](../../CLAUDE.md) for cross-cutting rules.
+The **headless library**: the source/decoder seam, the reducer/state machine,
+sprite parsing, grid/walkability. No terminal deps (workspace invariant #1).
+Sim geometry lives in `pixtuoid-scene`; only the coherence-bound `walkable.rs`
+stays here. Cross-cutting rules: workspace [`CLAUDE.md`](../../CLAUDE.md).
 
 ## Layout
 
@@ -62,9 +58,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
 ## Where to look
 
-Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
-pays for the entry it needs instead of all of them. Grep it for the
-question:
+Grep [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md) for the question:
 
 <!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - How does the per-agent state machine work?

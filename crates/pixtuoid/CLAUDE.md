@@ -1,18 +1,12 @@
 # pixtuoid (binary) — agent guide
 
 The **TUI binary**: `ratatui` + `crossterm` + `winit` + `tokio` + `clap`. Wires
-sources → reducer → renderer, owns the CLI subcommands, hook installation, config
-persistence, and multi-floor orchestration. The backend-agnostic render +
-simulation **engine** (layout, pose/motion/pathfinding, the pixel pass, the theme
-model, pets, chitchat) is its OWN dependency crate `pixtuoid-scene` (it used to be
-an in-binary module) — see [`../pixtuoid-scene/CLAUDE.md`](../pixtuoid-scene/CLAUDE.md);
-the DAG is `pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}`. This
-binary's two thin painters **over the `pixtuoid-scene` crate** are the terminal
-renderer `src/tui/` ([`src/tui/CLAUDE.md`](src/tui/CLAUDE.md)) and the
-`floating/` desktop window (neither depends on the other); the wasm `<canvas>`
-painter is the SIBLING crate `pixtuoid-web`. Cross-cutting rules: workspace
-[`CLAUDE.md`](../../CLAUDE.md); headless-lib detail:
-[`../pixtuoid-core/CLAUDE.md`](../pixtuoid-core/CLAUDE.md).
+sources → reducer → renderer; owns the CLI subcommands, hook installation,
+config persistence, and multi-floor orchestration. Its two thin painters over
+the `pixtuoid-scene` engine ([`../pixtuoid-scene/CLAUDE.md`](../pixtuoid-scene/CLAUDE.md))
+are `src/tui/` ([`src/tui/CLAUDE.md`](src/tui/CLAUDE.md)) and `floating/` —
+neither depends on the other. Cross-cutting rules: workspace
+[`CLAUDE.md`](../../CLAUDE.md).
 
 ## Layout
 
@@ -44,9 +38,7 @@ Full entries in [`SHARP-EDGES.md`](SHARP-EDGES.md) — grep it for the phrase.
 
 ## Where to look
 
-Answers live in [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md), so a session
-pays for the entry it needs instead of all of them. Grep it for the
-question:
+Grep [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md) for the question:
 
 <!-- lookup:start · generated from WHERE-TO-LOOK.md by `just gen-guides` — edit the entry there, not this list -->
 - How do hooks get installed?
