@@ -192,7 +192,7 @@ configured before the tag is pushed, or that target's publish step fails. See
 ## The arc loop
 
 Non-trivial work runs as an **arc**: design → build → gate → wrap. The root
-[`CLAUDE.md`](../CLAUDE.md) carries the nine-step summary every agent session
+[`CLAUDE.md`](../CLAUDE.md) carries the one-line summary every agent session
 loads; this is the per-step detail.
 
 1. **Pick** — an issue (GitHub is the tracker; `gh issue list`) or backlog item.
@@ -221,10 +221,11 @@ loads; this is the per-step detail.
 6. **Build** — TDD (see Conventions): failing test → minimal impl → commit.
 7. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
-   lenses on the diff) + green CI + the online review bot's `Findings: 0` at
-   HEAD, checked atomically. (If the bot errors or posts no findings comment at
-   HEAD — it can fail on a very large diff — the gate is unsatisfiable as
-   written; the `two-lens-review` skill's step 6 owns the fallback.)
+   lenses on the diff) + green CI + every online-bot finding dispositioned,
+   judged under the `two-lens-review` skill's **convergence contract**: churn
+   budget before review, a two-fix-round hard cap, only a confirmed HIGH
+   blocks, and a bot `Findings: 0` is evidence, not the gate. (Bot errored or
+   absent at HEAD → the skill's step 6 owns the fallback.)
    See [Pull requests](#pull-requests) and [the running
    order](#the-running-order). **A human merges.**
 9. **Wrap** — retro; record durable lessons.

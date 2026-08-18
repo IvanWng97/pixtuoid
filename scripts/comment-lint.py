@@ -591,8 +591,8 @@ def gate_fails(gate: bool, docs: list, moved: list, over_prose: bool) -> bool:
     than the CI job sharing its recipe.
 
     `docs` (the doc-run length) does not block either, and that is a correction,
-    not an oversight: CLAUDE.md's three comment tests are all SEMANTIC and it says
-    outright "none demands brevity … a comment stays at whatever length it earned",
+    not an oversight: CLAUDE.md's comment rules are all SEMANTIC and it says
+    outright "none demands brevity … a comment that passes them stays at whatever length it earned",
     so a length cap contradicts the rule it was built to serve. Measured, the tree
     holds 50 `//!` and 47 `///` runs over the cap, and every per-CLI source module
     — a recurring change type with its own committed skill — carries a 17-51 line
