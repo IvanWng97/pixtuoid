@@ -91,6 +91,19 @@ pub(crate) fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// A fixture's JSONL payload as its non-empty lines — THE line reader for every
+/// source test. One definition so a semantics change (a BOM skip, a `\r` trim
+/// for Windows checkouts) cannot reach one source's tests and miss its siblings;
+/// four diverging copies is how #936 happened.
+pub(crate) fn fixture_lines(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 pub(crate) fn sources_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
 }

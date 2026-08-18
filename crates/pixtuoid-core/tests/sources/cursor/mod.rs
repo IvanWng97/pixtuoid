@@ -13,14 +13,10 @@ use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::AgentEvent;
 
 fn lines() -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/sources/cursor/fixtures/hook-payloads.jsonl");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+    super::captures::fixture_lines(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/sources/cursor/fixtures/hook-payloads.jsonl"),
+    )
 }
 
 /// The RAW envelopes, for the one assertion that is about the WIRE rather than

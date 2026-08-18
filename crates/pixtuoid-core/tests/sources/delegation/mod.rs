@@ -10,16 +10,12 @@ use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 
 fn lines(cli: &str, name: &str) -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/sources/delegation/fixtures")
-        .join(cli)
-        .join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+    super::captures::fixture_lines(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/sources/delegation/fixtures")
+            .join(cli)
+            .join(name),
+    )
 }
 
 fn opencode_events() -> Vec<AgentEvent> {

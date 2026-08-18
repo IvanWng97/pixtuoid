@@ -20,17 +20,16 @@ const PARENT: &str = "01000000-0000-7000-8000-000000000001";
 const CHILD: &str = "01000000-0000-7000-8000-000000000002";
 
 fn captured_hook_events() -> Vec<AgentEvent> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/sources/codex/fixtures/hook-payloads.jsonl");
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .flat_map(|l| {
-            let v: serde_json::Value = serde_json::from_str(l).expect("valid hook json");
-            decode_hook_payload(v).expect("captured Codex hook payload must decode")
-        })
-        .collect()
+    super::captures::fixture_lines(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/sources/codex/fixtures/hook-payloads.jsonl"),
+    )
+    .iter()
+    .flat_map(|l| {
+        let v: serde_json::Value = serde_json::from_str(l).expect("valid hook json");
+        decode_hook_payload(v).expect("captured Codex hook payload must decode")
+    })
+    .collect()
 }
 
 #[test]
