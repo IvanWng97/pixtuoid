@@ -40,7 +40,7 @@ const HOOK_TIMEOUT_SECS: u64 = 2;
 
 /// Registration keys (PascalCase; the wire `hookEventName` values are snake_case).
 /// Every entry must decode — `every_registered_grok_event_decodes` pins it.
-const GROK_EVENTS: &[&str] = &[
+pub(crate) const GROK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",

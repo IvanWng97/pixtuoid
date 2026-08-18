@@ -65,6 +65,11 @@ HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
 )
 
+GROK_HOOK_URL = (
+    "https://raw.githubusercontent.com/xai-org/grok-build/main/"
+    "crates/codegen/xai-grok-hooks/src/event.rs"
+)
+
 OPENCLAW_HOOK_TYPES_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/plugins/hook-types.ts"
 )
@@ -264,6 +269,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
+    GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
@@ -696,6 +702,7 @@ class OurNames:
     codex: set[str] | None = None
     codewhale: set[str] | None = None
     hermes: set[str] | None = None
+    grok: set[str] | None = None
     openclaw: set[str] | None = None
     opencode: set[str] | None = None
     reasonix: set[str] | None = None
@@ -719,6 +726,7 @@ PARSE_SOURCES: dict[str, str] = {
     "codex": "the HookEventName enum in codex-rs/protocol/src/protocol.rs",
     "codewhale": "the HookEvent enum in crates/tui/src/hooks/config.rs",
     "hermes": "VALID_HOOKS in hermes_cli/plugins.py",
+    "grok": "the HookEventName enum in xai-grok-hooks/src/event.rs",
     "reasonix": "the Event consts in internal/hook/hook.go",
 }
 
@@ -762,6 +770,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codex", CORE_BIN_FRAGMENT, "registered", "codex"),
     ("codewhale", CORE_BIN_FRAGMENT, "registered", "codewhale"),
     ("hermes", CORE_BIN_FRAGMENT, "registered", "hermes"),
+    ("grok", CORE_BIN_FRAGMENT, "registered", "grok"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
@@ -887,6 +896,32 @@ def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
     return "".join(out)
 
 
+def rust_block_after(src: str, anchor_re: str) -> str | None:
+    """The `{ … }` block following the first `anchor_re` match, `None` if absent.
+
+    Bounding the scrape keeps out text the decoder does not depend on — a
+    `#[cfg(test)] mod tests` constructing the same shape leaks a phantom, and a
+    phantom makes the watcher alarm on a name upstream never had. Run the source
+    through `strip_rust_comments` first so a brace inside a comment or string
+    cannot move the bounds.
+    """
+    m = re.search(anchor_re, src)
+    if not m:
+        return None
+    start = src.find("{", m.end())
+    if start < 0:
+        return None
+    depth = 0
+    for i in range(start, len(src)):
+        if src[i] == "{":
+            depth += 1
+        elif src[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return src[start : i + 1]
+    return None
+
+
 def strip_rust_comments(body: str) -> str:
     """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
     the only string opener — an apostrophe here is usually a lifetime."""
@@ -942,6 +977,32 @@ def _enum_body(text: str, enum_name: str) -> str | None:
 
 def _snake_case(camel: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", camel).lower()
+
+
+def upstream_grok_hooks(text: str) -> set[str] | None:
+    """The HookEventName enum variants (bare Rust idents — registration keys
+    accept the PascalCase spelling, so these ARE the names we register).
+
+    TWO declaration shapes, tried in order, because upstream now GENERATES the
+    enum from a `hook_events! { … }` macro table. The plain-enum regex still
+    matches the macro DEFINITION's body, but that body holds `$variant`
+    placeholders and reads empty — hence the fall-THROUGH: an empty plain-enum
+    parse is not an answer, it is the signal to read the table.
+    """
+    m = re.search(r"pub enum HookEventName \{(.*?)\n\}", text, re.S)
+    if m:
+        found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
+        if found:
+            return found
+    # Comments first: `rust_block_after` measures braces, and a doc comment on a
+    # row would otherwise read as a variant.
+    block = rust_block_after(strip_rust_comments(text), r"(?m)^\s*hook_events!\s*")
+    if block is None:
+        return None
+    # Row headers only — the row BODY is `key: value` lines whose aliases/traits
+    # carry CamelCase tokens we must not admit.
+    found = set(re.findall(r"(?m)^\s*([A-Z]\w+)\s*\{", block))
+    return found or None
 
 
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
@@ -1114,7 +1175,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(CURSOR_HOOKS_URL, "Cursor hooks doc", report)
         if text is not None:
             upstream = upstream_cursor_hook_events(text)
-            if upstream and parse_is_believable("cursor", upstream, ours, report):
+            if upstream is None:
+                report.add_blind(
+                    "the cursor hook sections upstream publishes",
+                    PARSE_SOURCES["cursor"],
+                    "The page parsed to no hook sections, so the cursor vanish "
+                    "check was SKIPPED.",
+                )
+            elif parse_is_believable("cursor", upstream, ours, report):
                 for ev in sorted(ours.cursor - upstream):
                     report.add_breaking(
                         f"Cursor hook `{ev}` (decoded in source/cursor.rs) no longer has a "
@@ -1188,7 +1256,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(REASONIX_HOOK_URL, "Reasonix hook source", report)
         if text is not None:
             upstream = upstream_reasonix_hooks(text)
-            if upstream and parse_is_believable("reasonix", upstream, ours, report):
+            if upstream is None:
+                report.add_blind(
+                    f"the reasonix hook names upstream declares",
+                    PARSE_SOURCES["reasonix"],
+                    "The parser found no declaration, so the reasonix vanish check "
+                    "was SKIPPED.",
+                )
+            elif parse_is_believable("reasonix", upstream, ours, report):
                 for ev in sorted(ours.reasonix - upstream):
                     report.add_breaking(
                         f"Reasonix hook `{ev}` (registered in REASONIX_EVENTS) is GONE "
@@ -1200,7 +1275,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(CODEWHALE_HOOK_URL, "CodeWhale hook source", report)
         if text is not None:
             upstream = upstream_codewhale_hooks(text)
-            if upstream and parse_is_believable("codewhale", upstream, ours, report):
+            if upstream is None:
+                report.add_blind(
+                    f"the codewhale hook names upstream declares",
+                    PARSE_SOURCES["codewhale"],
+                    "The parser found no declaration, so the codewhale vanish check "
+                    "was SKIPPED.",
+                )
+            elif parse_is_believable("codewhale", upstream, ours, report):
                 for ev in sorted(ours.codewhale - upstream):
                     report.add_breaking(
                         f"CodeWhale hook `{ev}` (registered in CODEWHALE_EVENTS) is GONE "
@@ -1212,7 +1294,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(CODEX_PROTOCOL_URL, "Codex protocol source", report)
         if text is not None:
             upstream = upstream_codex_hooks(text)
-            if upstream and parse_is_believable("codex", upstream, ours, report):
+            if upstream is None:
+                report.add_blind(
+                    f"the codex hook names upstream declares",
+                    PARSE_SOURCES["codex"],
+                    "The parser found no declaration, so the codex vanish check "
+                    "was SKIPPED.",
+                )
+            elif parse_is_believable("codex", upstream, ours, report):
                 for ev in sorted(ours.codex - upstream):
                     report.add_breaking(
                         f"Codex hook `{ev}` (registered in CODEX_EVENTS) is GONE from "
@@ -1224,12 +1313,37 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if text is not None:
             valid = python_set_literal(text, "VALID_HOOKS: Set[str] = {")
-            if valid and parse_is_believable("hermes", valid, ours, report):
+            if valid is None:
+                report.add_blind(
+                    f"the hermes hook names upstream declares",
+                    PARSE_SOURCES["hermes"],
+                    "The parser found no declaration, so the hermes vanish check "
+                    "was SKIPPED.",
+                )
+            elif parse_is_believable("hermes", valid, ours, report):
                 for ev in sorted(ours.hermes - valid):
                     report.add_breaking(
                         f"Hermes hook `{ev}` (registered in HERMES_EVENTS) is GONE from "
                         f"VALID_HOOKS in hermes_cli/plugins.py — likely renamed; the shell "
                         f"hook we install into config.yaml fires nothing (no sprite)."
+                    )
+
+    if ours.grok is not None:
+        text = fetch_anchored(GROK_HOOK_URL, "grok hook source", report)
+        if text is not None:
+            upstream = upstream_grok_hooks(text)
+            if upstream is None:
+                report.add_blind(
+                    "the grok hook names upstream declares",
+                    PARSE_SOURCES["grok"],
+                    "The parser found no declaration, so the grok vanish check was SKIPPED.",
+                )
+            elif parse_is_believable("grok", upstream, ours, report):
+                for ev in sorted(ours.grok - upstream):
+                    report.add_breaking(
+                        f"grok hook `{ev}` (registered in GROK_EVENTS) is GONE from "
+                        f"upstream event.rs — likely renamed; we register a hook it never "
+                        f"fires, so the decoder is never reached (no sprite)."
                     )
 
     if ours.openclaw is not None:

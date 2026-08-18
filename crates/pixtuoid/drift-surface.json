@@ -38,6 +38,22 @@
       "stop",
       "sessionEnd"
     ],
+    "grok": [
+      "SessionStart",
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PermissionDenied",
+      "Notification",
+      "Stop",
+      "StopFailure",
+      "StopCancelled",
+      "SubagentStart",
+      "SubagentStop",
+      "SubagentEnd",
+      "SessionEnd"
+    ],
     "hermes": [
       "on_session_start",
       "pre_tool_call",

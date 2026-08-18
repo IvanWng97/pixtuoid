@@ -114,6 +114,7 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.CODEWHALE_HOOK_URL: "pub enum HookEvent {\n    SessionStart,\n}\n",
     d.CODEX_PROTOCOL_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
+    d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
     d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
     d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
@@ -659,6 +660,8 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
              lambda ns: "pub enum HookEventName {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
             ("hermes", d.HERMES_PLUGINS_URL, lambda n: n,
              lambda ns: "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"),
+            ("grok", d.GROK_HOOK_URL, lambda n: n,
+             lambda ns: "pub enum HookEventName {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
             ("openclaw", d.OPENCLAW_HOOK_TYPES_URL, lambda n: n,
              lambda ns: "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)),
             ("cursor", d.CURSOR_HOOKS_URL, lambda n: n,
@@ -677,7 +680,17 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             full = render([spell(n) for n in names])
 
             def drive(body: str) -> list[str]:
-                d.fetch = lambda u, _b=body, _u=url: _b if u == _u else real(u)
+                # OFFLINE: every non-target URL raises rather than going to the
+                # network. `else real(u)` made `just lint` issue 208 live
+                # requests per run — and `lint` joins its jobs with `wait`, so a
+                # blackholing network would hang preflight and pre-push at
+                # 30s/request (justfile:1327).
+                def stub(u: str, _b: str = body, _u: str = url) -> str:
+                    if u == _u:
+                        return _b
+                    raise urllib.error.URLError("offline: not this case's document")
+
+                d.fetch = stub
                 rep = d.Report()
                 d.run_checks(d.read_our_names(rep), report=rep)
                 return [x for x in rep.breaking if source.split("-")[0] in x.lower()]
