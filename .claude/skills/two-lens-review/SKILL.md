@@ -1,12 +1,12 @@
 ---
 name: two-lens-review
-version: 1.1.0
-description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
+version: 1.2.0
+description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the convergence contract (churn budget, two-fix-round cap, HIGH-only blocking), the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
 metadata:
   scope: "pixtuoid repo only"
 ---
 
-# two-lens-review (v1.1) — the review gate + the whole-codebase audit
+# two-lens-review (v1.2) — the review gate + the whole-codebase audit
 
 ONE protocol, two SCOPES over the SAME factors:
 
@@ -47,6 +47,53 @@ size). The quality lever is never the lens NAME — it's the change-specific
 checklist filled into the `<...>` slots, and the FACTOR COVERAGE (no family
 silently dropped).
 
+## Convergence contract (diff scope)
+
+From the measured review history (derivation in this section's introducing
+commit): under ~1500 lines of churn, PRs converge in 0–1 fix rounds; above
+it, rounds 2+ are dominated by defects the PREVIOUS round's fixes introduced
+and by reversals of already-settled calls — the loop generates its own work.
+Hence:
+
+- **Churn budget** — a diff whose ADDED + MODIFIED lines exceed ~1500 does
+  not enter review; split it first (stacked PRs). Pure deletions are exempt
+  from the count — a removed line ships no behavior for a lens to verify —
+  but only when the census rule below is satisfied. A change that both adds
+  and deletes at scale is two PRs.
+- **Two fix rounds, hard cap.** Round 1: full review, all lenses, folded into
+  ONE commit. Round 2: verify the dispositions + review ONLY the delta since
+  round 1's head — no full re-sweep (full re-sweeps are where settled calls
+  get re-litigated). If round 2 confirms a HIGH in round 1's fixes, STOP:
+  revert the fold and re-land smaller, or re-scope the PR. There is no round
+  3 of patching patches.
+- **Round 2's fold is the last commit that may change behavior, and it is
+  verified, not re-reviewed.** Every round-2 fix must be one of three shapes:
+  a revert, a deletion, or a change that ships a test FAILING without it.
+  Anything else is not a fix — revert the fold and re-land smaller. (Rounds
+  2+ are dominated by fix-introduced defects; this keeps the one unreviewed
+  commit from carrying one.)
+- **Blocking bar** — only a HIGH (correctness / security / invariant)
+  CONFIRMED BY THE ORCHESTRATOR against the code — never by the finder's own
+  severity label — blocks merge. A MEDIUM this change INTRODUCED is fixed in
+  the fold or forces a re-scope; taste findings are optional by default —
+  drop them; a pre-existing find is SURFACED to the owner in one line. Nothing
+  spawns another round, and agents never file issues.
+- **No new gates in a fix round.** A fix may not introduce a new bespoke
+  checker/lint/census — gate-shaped fixes routinely arrive fail-open and feed
+  the next round. Prefer making the failure IMPOSSIBLE (derive from the one
+  source of truth) over DETECTED (police two copies); a genuinely wanted new
+  check becomes its own small PR through the design gate. A check
+  asserts facts in its own layer — a Rust fact is checked from Rust, never a
+  Python regex over `.rs` files.
+- **Deletion-shaped PRs enumerate first.** Before deleting N members of a
+  class, the population census (full list + criterion) lands in the FIRST
+  commit or the PR body, before review starts — reviewers check the census
+  once instead of restoring survivors one per round (#943).
+- **The bot's `Findings: 0` is evidence, not the gate** — it can be vacuous
+  (an errored run wearing a clean badge). The gate: every finding (local
+  lenses + both bots) dispositioned, and zero OPEN confirmed HIGH at the
+  final head.
+
 ## Diff scope — how to run (orchestration)
 
 1. **Isolate**: the reviewed branch in a worktree (never the shared checkout —
@@ -55,7 +102,7 @@ silently dropped).
    its brief from `pr-review.prompt.md`, `<...>` slots FILLED with this change's
    specific claims (a lazily-filled slot turns both reviewers generic). Give each
    the worktree path + `git -C <path> diff <base>..HEAD`. Then add an escalation
-   lens for EVERY trigger the prompt's "When two lenses aren't enough" section
+   lens for EVERY trigger the prompt's "Escalation triggers" section
    matches on this change — that trigger→lens list is canonical THERE; don't
    restate it here (a copy would be the two-copies-drift class the header names —
    a new trigger added to the prompt must reach reviews without a manual mirror).
@@ -75,7 +122,9 @@ silently dropped).
 6. **After a fix round**, re-run the gates and watch the NEW head's CI; before
    merging, read the online bot review's LATEST COMMENT verdict (`Findings: N`)
    + `mergeStateStatus` — the review JOB passes even when it posts findings, so
-   the check table alone can't gate (#448). If the bot ERRORED or left no
+   the check table alone can't gate (#448). Judge the verdict against the
+   convergence contract above: dispositioned findings + zero open confirmed
+   HIGH, within the two-fix-round cap. If the bot ERRORED or left no
    findings comment at HEAD (it can fail on a very large diff — `error_max_turns`
    with no comment — or on a spent quota, which the workflow now states itself in
    an `<!-- absent-<marker>:<sha> -->` comment; do NOT read that as a review),
@@ -107,15 +156,17 @@ orchestration" section of `pr-review.prompt.md`. In brief:
 Scale to the ask: "any bugs?" → a few finders, single-vote verify; "thoroughly
 audit / be comprehensive" → larger finder pool, multi-vote adversarial verify,
 synthesis. Do the involved/cross-crate refactors it surfaces IN-ARC (design-debt
-lens); defer only genuinely big/refactor work to issues.
+lens); anything bigger is SURFACED in the ranked report for the owner to pick.
 
 ## Disposition sweep (both scopes)
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
-**FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate
-`SHARP-EDGES.md` entry, or the guide's inline section where no sibling exists — that keeps the next agent's context accurate) · **ISSUE-FILED**
-(no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
-state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
+FIXED · REFUTED-with-trace (cite or ADD the relevant per-crate
+`SHARP-EDGES.md` entry — that keeps the next agent's context accurate) ·
+RE-SCOPED · SURFACED — the four states are defined ONCE in
+`pr-review.prompt.md`'s orchestrator notes; fill from there, never a
+paraphrase here. Agents never file issues. "Acknowledged, no action" is NOT
+a state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
 thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
 head — a finding that lands after the local lenses ran is the #283/#383 drop
 class; and check WHICH commit a bot re-flag was raised against before
@@ -134,4 +185,6 @@ re-litigating (#316's were stale).
 | "The verdict row shows N lenses ran" | Count REAL returns, not dispatches — a stubbed lens under a clean aggregate hid a real AA failure (#455). |
 | "The bot says it's still broken" | Check WHICH commit it reviewed — #316's re-flags were raised against an old commit; five were already fixed (REFUTED-STALE). |
 | "The finder found it, report it" (audit) | Findings self-certify nothing — a separate skeptic must try to REFUTE each survivor first. |
+| "One more fix round will converge" | Measured: rounds ≥2 mostly find defects the fixes introduced + re-litigate settled calls. Two fix rounds is the cap — revert or re-scope. |
+| "This fix needs its own new checker" | Gate-shaped fixes arrive fail-open and feed the next round. Derive from the source of truth, or file the checker as its own PR. |
 | "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); check the sharp edge before proposing a merge. |

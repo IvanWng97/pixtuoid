@@ -5,275 +5,109 @@ built with [Astro](https://astro.build). Deploys to GitHub Pages at
 **https://pixtuoid.dev/** (the old project page
 https://ivanwng97.github.io/pixtuoid/ redirects there).
 
-Self-contained: this is a Node project that lives in `site/` and is independent
-of the Rust workspace. Its CI (`.github/workflows/site.yml`) runs the same checks
-as `npm run verify`; deploys run via `.github/workflows/pages.yml`.
+Self-contained: a Node project living in `site/`, independent of the Rust
+workspace. CI (`.github/workflows/site.yml`) runs the same checks as
+`npm run verify`; deploys run via `.github/workflows/pages.yml`. Agent notes,
+build-input coupling, and CSP details: [`CLAUDE.md`](CLAUDE.md). Generated
+content and its sources: [`SINGLE-SOURCED.md`](SINGLE-SOURCED.md).
 
 ## Develop
 
 ```sh
 npm install        # or: just site-setup   (from the repo root)
 npm run dev        # http://localhost:4321/   ·  just site-dev
+just site-dev-bg   # background daemon (agent-friendly) · just site-dev-stop
 ```
 
-**Agent-driven (non-TTY) dev server** — foreground `astro dev` exits on stdin
-EOF, so it dies between an agent's shell commands. Astro 7's background mode
-fixes this (dev-server only; `astro preview` has none of it):
-
-```sh
-just site-dev-bg       # astro dev --background, then polls /_astro/status until ready
-just site-dev-stop     # astro dev stop (frees port 4321; no-op if not running)
-npx astro dev status   # from site/: is the daemon up? · logs: npx astro dev logs --follow
-```
-
-Readiness/liveness is the dev-only `/_astro/status` endpoint (`{"ok":true}`,
-served at the root and under the base path). In a non-TTY context astro
-auto-switches to JSON log lines — no logger config needed. Stop the daemon
-before `just site-e2e`: dev and preview share port 4321, and the e2e webServer
-fails loud on a squatted port by design.
+The background daemon polls the dev-only `/_astro/status` endpoint until
+ready; stop it before `just site-e2e` (dev and preview share port 4321).
 
 ## Quality gates
 
 ```sh
 npm run verify     # format:check → lint → check → knip → test:unit → build → check:docs → audit
-# individually:
-# `audit` runs LAST on purpose: it resolves advisories live, so someone else's
-# publish would otherwise short-circuit every check below it (#847/#849).
-# `pages.yml` deliberately keeps it FIRST instead — that one ships.
-npm run audit      # fail on any known dependency vulnerability
-npm run format     # prettier --write .
-npm run lint       # eslint .
-npm run check       # astro check (types + templates)
-npm run knip       # unused files / exports / dependencies
-npm run build      # astro build → dist/
-npm run e2e        # Playwright smoke suite (tests/e2e/) vs the PRODUCTION build
-npm run lighthouse # three-run accessibility, SEO, and performance budgets
+npm run e2e        # Playwright smoke suite vs the PRODUCTION build
+npm run lighthouse # three-run a11y / SEO / performance budgets (in-repo runner)
 ```
 
-From the repo root the same gate is `just site-check` (and `just site-fmt`);
-`just site-e2e` builds then runs the Playwright suite — the runtime-contract
-tier (window seams, scrollspy keys, dimmer, reduced-motion) that the static
-gates can't see. CI runs it in `site.yml` after the build step.
-
-The site requires npm 12 (`packageManager` pins CI to 12.0.1 and
-`engine-strict=true` rejects older local clients), because Node 26's bundled npm
-does not include the complete install-script policy toolchain. Dependency install
-scripts are fail-closed via `.npmrc`; `allowScripts` contains the reviewed
-version-pinned approval and an explicit `fsevents` denial. Use npm's
-`install-scripts` command to review changes.
-
-> **Cross-boundary build inputs.** The site reads six files from _outside_ `site/`
-> at build time: the workspace `Cargo.toml` (displayed version, via `vite.define` in
-> `astro.config.mjs`), `docs/CONFIGURATION.md` (rendered as `/config`),
-> `docs/ARCHITECTURE.md` (rendered as `/architecture` — its Mermaid diagram becomes an
-> inline SVG at build via rehype-mermaid, which is why CI installs Chromium),
-> `docs/CONTRIBUTING.md` (rendered as `/contributing`), `docs/KNOWLEDGE-ENGINEERING.md` (rendered as
-> `/knowledge-base` — the route slug kept from its `KNOWLEDGE-BASE.md` days, no link
-> rot), and `docs/PARALLEL-DELIVERY.md` (rendered as `/parallel-delivery`).
-> Renaming/moving any of them — or breaking the diagram's Mermaid syntax — fails
-> `astro build`; all six are in the `site.yml` / `pages.yml` path filters so a
-> change re-runs CI + redeploys. The root `README.md`'s Features table and install
-> commands are sourced from `src/features.json` / `src/install.json` (see below);
-> drift is gated by the `readme` job in `.github/workflows/ci-lint.yml`, called
-> by `.github/workflows/ci.yml`, on every PR (`just gen-readme-check`), not by
-> `site.yml`.
-
-> **Generated README sections.** `src/features.json` (feature inventory — also
-> drives the Showcase roster), `src/sources.json` (supported tools — also drives the
-> tool × OS matrix AND the hero's badge row, filtered to `status: "supported"` —
-> a bridge e2e pins the two rendered counts together), and `src/install.json`
-> (install methods — also drives the Install tabs) are single sources shared
-> with the **root README**:
-> `scripts/gen-readme.mjs` regenerates the Features table, the supported-tools
-> glimpse, and the install block between their markers. The install block shows
-> only methods flagged `"readme": true` (Homebrew, npm); the rest (Cargo, GitHub
-> Releases) stay site-only. Edit the JSON → run `just gen-readme`; CI's `readme`
-> job runs `just gen-readme-check` and fails on drift.
-
-> **Generated pixel icons.** `src/assets/pix-icons/` (the sprite-icon PNGs
-> `<PixIcon>` renders, replacing the old standalone Features section's emoji
-> glyphs) is
-> GENERATED by `scripts/gen-pix-icons.py` from the embedded sprite pack's own
-> palette (`crates/pixtuoid-scene/sprites/default/pack.toml`) — an icon may
-> only use pack-defined colors, so it can never drift off the office's own
-> palette. Never hand-edit the PNGs; regenerate via `just gen-icons` (folded
-> into `just gen`). `PixIcon.astro` fails the build on an unknown icon name;
-> `config/pix-icons.test.mjs` bridges `features.json`'s `pix` names to the
-> generated PNGs. Drift is gated by `just gen-check`
-> (`scripts/gen-pix-icons.py --check`, decode-compared like `gen-media.py`'s
-> check rather than raw-byte compared — a Pillow re-encode can change
-> compressed bytes across versions without changing a pixel).
+From the repo root: `just site-check`, `just site-fmt`, `just site-e2e`.
+`audit` runs LAST in `verify` on purpose (it resolves advisories live —
+someone else's publish would short-circuit every check below it); `pages.yml`
+keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
+`engine-strict`); dependency install scripts are fail-closed via `.npmrc` +
+`allowScripts` — review changes with `npm install-scripts ls`.
 
 ## Design
 
-- **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · Monaspace Neon
-  (UI/code) · Lora (body); ASCII dividers, blinking cursor, CRT scanlines.
-- **Palette** — warm "Coworking" (cream lifted from the office carpet + Claude
-  coral). Day = cream, night = after-hours. Until the visitor picks a theme the
-  site follows their wall clock like the app does (19:00–07:00 → night; the
-  clock only ever turns night ON — a dark-preference system keeps night at noon
-  via the `prefers-color-scheme` fallback). `dracula` is a hidden easter-egg
-  theme (type it, or `?theme=dracula`).
-- **The building (OPEN FLOOR)** — the page is one continuous camera hold on the
-  REAL office: `OfficeBackdrop.astro` runs the `pixtuoid-web` wasm engine as a
-  fixed full-viewport canvas (poster-first; reduced-motion / no-JS / any
-  failure stays on the still), and scrolling is the light switch — a `#dimmer`
-  sheet darkens toward statements and releases to 0 in full-viewport
-  "office gaps" (the hero caps its dim lower via `data-lit-max` so the live
-  office reads above the fold). Each section is a floor (6F penthouse → 1F front desk);
-  `Statusline.astro`, `ElevatorShaft.astro`, and the `#office-pause` switch
-  (see FX) are the three pieces of fixed chrome. The statusline carries the
-  floor readout + scrollspy, the build-time merged-PR feed with a canned-reel
-  fallback, `lights %` / clock / `● LIVE` · `❚❚ PAUSED`, and a right-end
-  install chip — star count, a jump-to-Install link, hire receipt. The shaft
-  is a slim pixel rail whose car rides the same six floors along the right
-  edge (click-to-ride, a lit current-floor LED, an arrival-pulse ding —
-  visual only, no audio — six dots on mobile, and its own `keys 1–6` hint) —
-  both it and the statusline read the ONE floor-spy band so their readouts
-  can't disagree. The app's literal keys also work on the
-  page — digits `1–6` ride between floors, **document-global** from any
-  scroll depth (guards: typing surfaces, the boot splash, a held modifier,
-  and a focused `[data-keys-scope]` region — e.g. the 5F channel dial's
-  own tune keys — claims the digits locally instead); `t` retints the
-  decorative palette (Esc restores) and keeps the
-  stricter **focus-gated** posture (WCAG 2.1.4: fires only from a neutral
-  focus context — page body / a jumped-to section / the statusline, never a
-  focused control — the shared `window.__pixKeys.shortcutContext()` gate).
-  Making digits document-global is a deliberate WCAG 2.1.4 posture
-  change — they used to share `t`'s focus gate, which silently killed them
-  after any content click — so the whole vocabulary ships a persisted
-  off-switch instead: the keyboard-shortcuts toggle in the statusline floor
-  popover (`localStorage('pix-keys')`, `window.__pixKeys.enabled()` /
-  `setEnabled()`), and the statusline hint reads `keys 1–6`. The favicon
-  dims with the night theme; 404 is the office at 3 a.m. (`--empty` render).
-- **Cross-component seams** (what a new section must wire): sections declare
-  `data-lit` (dimmer target; `data-lit="fade"` also rises with the darkness)
-  and `data-floor`/`data-floor-label` (scrollspy + wayfinding) — a new floor
-  is a `FLOORS` row in `consts.ts` (the `{id, fl, label}` shape, e.g.
-  `{id: 'lobby', fl: '6F', label: 'penthouse — welcome'}` — the ONE source the
-  statusline lift, `ElevatorShaft.astro`'s LED/car, AND each section's
-  `data-floor="6F"` string / `data-floor-label` / id / eyebrow derive from),
-  then `data-lit` on the section. The backdrop publishes
-  `window.__pixLights` (per-frame dim value; the statusline polls it), `pix:onair`
-  - the `.backdrop.is-live` class (discrete live flip; event for changes, class
-    for late-attach seeding), and `pix:paused` (the office pause switch — see FX)
-    — every >5s auto-motion listens, so ONE control governs page motion. The 1F
-    Install tabs are the surviving install-copy control (the statusline chip is
-    a plain jump link to Install, not a copy control, and the closer's own copy
-    row was cut as redundant right after Install): `Install.astro` writes the
-    clipboard then fires `pix:install-copy {source:'install'}` directly;
-    `OfficeBackdrop`'s listener walks a coworker into the live office
-    (engine-capped at `VisitorHires::MAX_LIVE`, 3 concurrent) and answers
-    with `pix:hired {name: 'cc·yours'}`, which the statusline chip listens
-    for to flash its hire receipt. `__GH_STARS__` is a build-time
-    `vite.define` (the star count baked in at build; null on an
-    offline/unauthenticated build) — every consumer must omit its ★ segment
-    on null, never render a literal `★null`. The boot handshake: `Base.astro`
-    publishes `window.__pixRevealed` (+ the
-    `pix:revealed` event) when the terminal boot splash lifts — that RELEASES the
-    office's floor-roll reveal; `OfficeBackdrop` publishes `window.__pixEngineReady`
-    when the engine resolves (live / failed / unsupported), which the splash's
-    Level-2 gate polls so it lifts STRAIGHT into the reveal instead of a bg gap.
-    `window.__pixNight()` and `window.__pixTheme` / `window.__pixKeys`
-    (defined parse-first in `Base.astro`'s head) are the ONE day/night boundary /
-    theme-constants source / key-shortcut helpers — never re-derive 19:00–07:00,
-    the theme BG map, or the typing guard inline.
-- **FX** (all `prefers-reduced-motion`-safe) — CRT power-on, hero pixel-dust,
-  and the dimmer itself. (The old pointer glow + 3D tilt were removed
-  deliberately: perspective transforms smear pixel art.) The live office has
-  a pixel-style pause switch (`#office-pause`, bottom-right above the
-  statusline — WCAG 2.2.2): pause freezes the office frame in place AND, via the
-  `pix:paused` event, stops every other >5s auto-motion (the statusline feed
-  ticker, the hero dust) — the statusline reads `❚❚ PAUSED`; resume picks the
-  timeline up where it stopped. Hidden only under reduced motion (nothing
-  auto-animates); on a no-wasm / fetch-failure poster it stays visible, since the
-  ticker / dust / clips still run and it governs them wasm-independently (#456).
-- **Docs shell** — `layouts/Docs.astro` gives /config, /architecture,
-  /contributing, /knowledge-base, and /parallel-delivery a shared sidebar + build-time mini-TOC + pager,
-  driven by the one `DOCS` manifest in `consts.ts` (the Nav dropdown reads the
-  same source). The sidebar is an elevator panel (`.hw-panel` + `.led-dot`) —
-  a DOCS wing plus a building bank of every other floor, both off the same
-  `FLOORS` manifest the lift/shaft use. Each doc route mounts the Statusline's
-  **doc variant** (`~ pixtuoid docs · /<route>` in place of the index-only
-  organs; the build-time PR-feed fetch is skipped). Top-level blockquotes in
-  the rendered markdown promote to terminal-window callouts via
-  `config/rehype-callouts.mjs`.
+- **Layout/type** — "Cozy Terminal": Jersey 10 (pixel display) · Monaspace
+  Neon (UI/code) · Lora (body); ASCII dividers, blinking cursor, CRT
+  scanlines.
+- **Palette** — warm "Coworking" (cream + Claude coral). Day = cream, night =
+  after-hours; until the visitor picks, the site follows their wall clock
+  (19:00–07:00 → night; `prefers-color-scheme` keeps night at noon for
+  dark-preference systems). `dracula` is a hidden easter egg (type it, or
+  `?theme=dracula`).
+- **The building (OPEN FLOOR)** — one continuous camera hold on the REAL
+  office: `OfficeBackdrop.astro` runs the `pixtuoid-web` wasm engine as a
+  fixed full-viewport canvas (poster-first; reduced-motion / no-JS / failure
+  stays on the still). Scrolling is the light switch — the `#dimmer` sheet
+  darkens toward statements and releases in office gaps. Each section is a
+  floor (6F → 1F); fixed chrome is `Statusline.astro` (floor readout +
+  scrollspy + PR feed + install chip), `ElevatorShaft.astro` (click-to-ride
+  rail), and the `#office-pause` switch. Digits `1–6` ride between floors
+  document-global (typing surfaces, modifiers, the boot splash, and focused
+  `[data-keys-scope]` regions claim them locally); `t` retints, focus-gated
+  (WCAG 2.1.4); the statusline popover carries the persisted keys
+  off-switch. 404 is the office at 3 a.m.
+- **Cross-component seams** (what a new section wires): `data-lit` (dimmer)
+  and a `FLOORS` row in `consts.ts` (statusline, shaft, section ids all
+  derive from it). The backdrop publishes `window.__pixLights`, `pix:onair` /
+  `.is-live`, and `pix:paused` (every >5s auto-motion listens — one control
+  governs page motion). `Install.astro` fires `pix:install-copy` → the
+  backdrop walks a coworker in (capped) → `pix:hired` flashes the statusline
+  receipt. `Base.astro`'s head defines `window.__pixNight()` / `__pixTheme` /
+  `__pixKeys` — never re-derive the night window, theme BG map, or typing
+  guard inline. Boot handshake: `pix:revealed` (splash lifts) releases the
+  office's floor-roll; `__pixEngineReady` lets the splash lift straight into
+  it.
+- **FX** — CRT power-on, hero pixel-dust, the dimmer; all
+  `prefers-reduced-motion`-safe. Pause freezes the office frame AND stops all
+  ambient motion via `pix:paused`; it stays visible on a no-wasm poster
+  (ticker/dust/clips still run).
+- **Docs shell** — `layouts/Docs.astro` gives the doc routes a shared
+  elevator-panel sidebar + mini-TOC + pager off the one `DOCS` manifest;
+  blockquotes promote to terminal-window callouts.
 
 ## Demo art
 
-`site/public/demos/*` (office screenshots, demo clips, per-theme shots) is
-**generated**, never hand-placed. Regenerate from the pixtuoid binary:
-
-```sh
-just gen-media              # from the repo root (or: just gen for README + all images)
-```
-
-`scripts/gen-media.py` (driven by `scripts/media.json`) reads `src/themes.json` and
-`src/weather.json` (via `@`-refs in the manifest), keeping their variant-set channels
-in lock-step with their manifests. It also renders the four animated clips via the
-snapshot example's `--gif`/`--navigate-at`/`--agents`/`--pets`/`--meeting`
-flags (the multi-floor clip uses `--agents 22 --navigate-at 3:1 --navigate-at 7:0`
-to drive the real TuiRenderer across floors; the pets clip uses `--pets cat`; the
-meetings clip uses `--meeting 3` to stage three agents converging on one meeting
-room, with an auto-computed warmup pre-roll so the clip opens just before the
-first agent rises — no screen recording). Each `.gif` is re-encoded through
-`encode_clip` into `.mp4` + `.webm` + a poster frame (a clip job's optional
-`poster` field picks the poster's second, e.g. mid-meeting for `meetings`) so
-`ChannelStage` can emit a `<video>` with both sources.
-
-(Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer would
-resize/blur it.)
+`public/demos/*` is **generated**, never hand-placed — `just gen-media` from
+the repo root (`scripts/gen-media.py` + `scripts/media.json`, rendering
+through the real TuiRenderer; clips re-encode to `.mp4` + `.webm` + poster).
+Pixel art lives in `public/` on purpose — Astro's `src/assets/` optimizer
+would resize/blur it.
 
 ## Showcase (Studio Wall)
 
-The landing page's interactive demo section is a single, manifest-driven
-component (`Showcase` → `ChannelStage`; the channel dial is inline mono text —
-`MonitorWall.astro` is the kept-but-unmounted fallback, see `knip.jsonc`).
-Channel order, labels, and content type are all defined in
-**`src/showcase.json`** — the **fifth single-source manifest** alongside
-`src/themes.json`, `src/weather.json`, `src/features.json`, and
-`src/install.json`.
+Manifest-driven (`Showcase` → `ChannelStage`), defined in
+**`src/showcase.json`** alongside `src/themes.json`, `src/weather.json`,
+`src/features.json`, `src/install.json`. Channel kinds: **`clip`** (mp4 +
+webm + poster from `just gen-media`), **`variant-set`** (screenshot grid via
+`variantsRef`/`variants`), **`soon`** (placeholder). `astro.config.mjs`
+enforces the invariants at build time (one default live channel, unique ids,
+assets present, features↔showcase bijection).
 
-Channel kinds:
+**Adding a demo channel**: one `showcase.json` entry + `just gen-media`
+assets (a `clip` channel also adds its render + `encode_clip` block in
+`scripts/gen-media.py`). No component edits.
 
-- **`clip`** — mp4 + webm + poster rendered by `just gen-media`. Requires `asset`,
-  `w`, `h`, and the three files in `public/demos/` (`<asset>.mp4`, `.webm`,
-  `-poster.png`).
-- **`variant-set`** — static screenshot grid (themes / weather / day-night).
-  References `variantsRef` (a sibling manifest) or an inline `variants` array.
-- **`soon`** (`"status": "soon"`) — placeholder monitor, no assets needed.
+**Adding a theme**: one row in `src/themes.json` + `just gen-media`. Chips,
+counts, retint, and renders all pick it up automatically.
 
-`astro.config.mjs` enforces the invariants at build time: exactly one `default`
-live channel, no duplicate ids, and all live clip assets present on disk.
+## Custom domain & deploy
 
-**Adding a demo channel:** add one entry to `showcase.json` + run `just gen-media`
-for the assets. No component edits. For a `clip` channel, also add a render call
-and an `encode_clip` block in `scripts/gen-media.py`; `variant-set` channels only
-need the manifest entry and whatever static screenshots the manifest references.
-
-## Add a theme
-
-When pixtuoid ships a new in-app theme, the site is a **one-line** update:
-
-1. Add `{ "id": "...", "name": "...", "accent": "#...", "accent2": "#..." }`
-   to [`src/themes.json`](src/themes.json).
-2. Run `just gen-media` to render its screenshot.
-
-The switcher chips, the live "N built-in themes" count, the page retint, and the
-render script all pick it up automatically — no component edits.
-
-## Custom domain
-
-The site lives on **pixtuoid.dev** (`base: '/'`, `site: 'https://pixtuoid.dev'`
-in `astro.config.mjs`). The domain itself is configured in the repo's
-**Settings → Pages** — Actions deploys need no `public/CNAME` file (that's a
-branch-deploy mechanism) — with DNS A/AAAA records on the apex pointing at
-GitHub Pages and `www` CNAME'd to `ivanwng97.github.io`. `robots.txt` and its
-sitemap URL (`src/pages/robots.txt.ts`) derive from the config automatically,
-and now serve at the origin root where crawlers actually read them. GitHub
-redirects the old `ivanwng97.github.io/pixtuoid/` project-page URLs here.
-
-## First deploy (one-time)
-
-In the repo's **Settings → Pages**, set **Source: GitHub Actions**. After that,
-every push to `main` that touches `site/**` redeploys automatically.
+The site lives on **pixtuoid.dev** (`base: '/'`, `site` in
+`astro.config.mjs`); the domain is configured in **Settings → Pages** (Actions
+deploys need no `CNAME` file), apex A/AAAA at GitHub Pages, `www` CNAME'd to
+`ivanwng97.github.io`. `robots.txt` + sitemap derive from the config. First
+deploy: set **Source: GitHub Actions**; after that every push to `main`
+touching `site/**` redeploys.

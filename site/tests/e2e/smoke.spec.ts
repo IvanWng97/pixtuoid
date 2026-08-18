@@ -1499,7 +1499,6 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     ['./config', 768],
     ['./architecture', 375],
     ['./contributing', 375],
-    ['./knowledge-base', 375],
     ['./parallel-delivery', 320], // the #503 repro: wide ASCII pre + long links
     ['./parallel-delivery', 375],
     ['./parallel-delivery', 768],

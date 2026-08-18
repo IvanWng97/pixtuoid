@@ -165,7 +165,7 @@ jobs:
 
   # Absence renders as a pass: publish skips, nothing comments, and `ci-gate`
   # being the only required check leaves the PR merely UNSTABLE. The merge gate
-  # is "Findings: 0 at HEAD", so an absent verdict has to say it is absent. Two
+  # reads the bot verdict at HEAD as evidence, so an absent one must say so. Two
   # shapes, and the quieter one is greener: analyze FAILS, or it DECLINES
   # (`reviewable=false` exits 0, so that arm has no red job at all).
   # `!cancelled()` is load-bearing: without a status function an implicit
