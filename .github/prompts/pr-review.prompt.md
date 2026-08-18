@@ -136,8 +136,10 @@ Dispatch lenses in parallel, in the worktree, in the background. Verify every
 MEDIUM+ finding's premise (read the SHARP-EDGES entry) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
 reaches exactly one terminal state in the PR thread — FIXED /
-REFUTED-with-trace (cite or ADD the sharp edge) / ISSUE-FILED; "acknowledged"
-is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
+REFUTED-with-trace (cite or ADD the sharp edge) / RE-SCOPED (in-scope but
+bigger than the PR ⇒ the PR splits) / SURFACED (pre-existing, outside the
+blast radius ⇒ one line for the owner, who decides); agents never file
+issues; "acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
 re-flag was raised against before re-litigating. Gate on the bot's latest
 COMMENT verdict + `mergeStateStatus`, never the check table; an
 `<!-- absent-… -->` notice is an unreviewed head. Round caps, blocking bar,

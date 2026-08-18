@@ -64,8 +64,10 @@ Hence:
   revert the fold and re-land smaller, or re-scope the PR. There is no round
   3 of patching patches.
 - **Blocking bar** — only a CONFIRMED HIGH (correctness / security /
-  invariant) blocks merge. MEDIUM and taste findings ride the same fold
-  commit if trivial, else ISSUE-FILED — they never spawn another round.
+  invariant) blocks merge. A MEDIUM on touched code is fixed in the fold or
+  forces a re-scope; taste findings are optional by default — drop them; a
+  pre-existing find outside the blast radius is SURFACED to the owner in one
+  line. Nothing spawns another round, and agents never file issues.
 - **No new gates in a fix round.** A fix may not introduce a new bespoke
   checker/lint/census — gate-shaped fixes routinely arrive fail-open and feed
   the next round. Prefer making the failure IMPOSSIBLE (derive from the one
@@ -144,15 +146,19 @@ orchestration" section of `pr-review.prompt.md`. In brief:
 Scale to the ask: "any bugs?" → a few finders, single-vote verify; "thoroughly
 audit / be comprehensive" → larger finder pool, multi-vote adversarial verify,
 synthesis. Do the involved/cross-crate refactors it surfaces IN-ARC (design-debt
-lens); defer only genuinely big/refactor work to issues.
+lens); anything bigger is SURFACED in the ranked report for the owner to pick.
 
 ## Disposition sweep (both scopes)
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
 **FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate
-`SHARP-EDGES.md` entry, or the guide's inline section where no sibling exists — that keeps the next agent's context accurate) · **ISSUE-FILED**
-(no-deferral rule: only big/refactor defers). "Acknowledged, no action" is NOT a
-state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
+`SHARP-EDGES.md` entry, or the guide's inline section where no sibling exists — that keeps the next agent's context accurate) · **RE-SCOPED**
+(real, in this change's blast radius, bigger than the PR — the PR is
+wrong-sized: split/redesign so the finding is IN scope; needing to defer
+proved the fix wasn't the right shape) · **SURFACED** (real, pre-existing,
+OUTSIDE the blast radius — one line to the owner in the PR thread / the
+ranked report; the owner decides). Agents never file issues. "Acknowledged,
+no action" is NOT a state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
 thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
 head — a finding that lands after the local lenses ran is the #283/#383 drop
 class; and check WHICH commit a bot re-flag was raised against before

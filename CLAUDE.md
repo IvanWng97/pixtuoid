@@ -90,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding cites (or adds) a sharp edge** — the entry is edge + WHY + authority pointer; `gen-guides` fails past a size ceiling, so split grown entries. **A deferred finding gets a GitHub issue first.**
+- **A refuted review finding cites (or adds) a sharp edge** — the entry is edge + WHY + authority pointer; `gen-guides` fails past a size ceiling, so split grown entries. **A real finding is fixed in-scope or forces a re-scope; only a pre-existing find OUTSIDE the change's blast radius is instead SURFACED to the owner in one line. Agents never file issues.**
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
 ## Architecture invariants (load-bearing)
@@ -120,7 +120,7 @@ drives sprite design — numbers in `crates/pixtuoid/SHARP-EDGES.md`.
 - No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No READMEs/CHANGELOGs/docs generated in PRs unless asked. No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks; budgeted files stay under their `gen-guides` caps (one-in-one-out). No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
 - No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against sharp edges first.
 
