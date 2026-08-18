@@ -1350,6 +1350,31 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
 
     if ours.hermes is not None:
+        # SHELL_UNSUPPORTED_HOOKS is the OTHER appearance direction on the
+        # plugins document: a hook we register being reclassified as unservable
+        # by a shell hook means the command we write into config.yaml fires
+        # nothing — same silence as a rename, from the opposite edit.
+        plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
+        if plugins is not None:
+            unsupported = python_set_literal(
+                plugins, "SHELL_UNSUPPORTED_HOOKS: Set[str] = {"
+            )
+            if unsupported is None:
+                report.add_blind(
+                    "hermes's SHELL_UNSUPPORTED_HOOKS set",
+                    PARSE_SOURCES["hermes"],
+                    "The shell-serviceability check was SKIPPED, so a hook we "
+                    "install could already be one a shell hook cannot serve.",
+                )
+            else:
+                for ev in sorted(ours.hermes & unsupported):
+                    report.add_breaking(
+                        f"Hermes `{ev}` (registered in HERMES_EVENTS) is now in "
+                        f"SHELL_UNSUPPORTED_HOOKS — a shell hook cannot serve it, so "
+                        f"the command we install into config.yaml fires nothing "
+                        f"(no sprite / no activity)."
+                    )
+
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
             blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)

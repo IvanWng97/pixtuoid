@@ -380,6 +380,37 @@ def test_the_hermes_blocking_watch_fires_on_an_appearance_not_a_vanish() -> None
         loud = drive(["pre_tool_call", unsafe[0]])
         check(any(unsafe[0] in x for x in loud.breaking),
               f"`{unsafe[0]}` turning blocking must fire; got {loud.breaking}")
+
+        # The OTHER appearance direction on the plugins document: a hook we
+        # register being reclassified as unservable by a shell hook.
+        registered = sorted(ours.hermes or ())
+        check(bool(registered), "the fragment supplies hermes' registration set")
+
+        def plugins(unservable: list[str]) -> d.Report:
+            body = (
+                "VALID_HOOKS: Set[str] = {\n"
+                + "".join(f'    "{h}",\n' for h in registered)
+                + "}\n"
+                + "SHELL_UNSUPPORTED_HOOKS: Set[str] = {\n"
+                + "".join(f'    "{h}",\n' for h in unservable)
+                + "}\n"
+            )
+
+            def stub(u: str, _b: str = body) -> str:
+                if u == d.HERMES_PLUGINS_URL:
+                    return _b
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        ok = plugins(["transform_api_error_classification"])
+        check(not ok.breaking, f"a hook we do not register stays silent: {ok.breaking}")
+        bad = plugins([registered[0]])
+        check(any(registered[0] in x for x in bad.breaking),
+              f"`{registered[0]}` turning unservable must fire; got {bad.breaking}")
         # The anchor is the declaration itself, so a moved set is probe health.
         d.fetch = lambda _u: "BLOCK_EXIT_CODE = 2\n"
         gone = d.Report()
