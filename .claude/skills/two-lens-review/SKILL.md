@@ -74,9 +74,9 @@ Hence:
   commit from carrying one.)
 - **Blocking bar** — only a HIGH (correctness / security / invariant)
   CONFIRMED BY THE ORCHESTRATOR against the code — never by the finder's own
-  severity label — blocks merge. A MEDIUM on touched code is fixed in the
-  fold or forces a re-scope; taste findings are optional by default — drop
-  them; a pre-existing find is SURFACED to the owner in one line. Nothing
+  severity label — blocks merge. A MEDIUM this change INTRODUCED is fixed in
+  the fold or forces a re-scope; taste findings are optional by default —
+  drop them; a pre-existing find is SURFACED to the owner in one line. Nothing
   spawns another round, and agents never file issues.
 - **No new gates in a fix round.** A fix may not introduce a new bespoke
   checker/lint/census — gate-shaped fixes routinely arrive fail-open and feed

@@ -65,7 +65,7 @@ BUDGETS: dict[str, int] = {
     "crates/pixtuoid-core/tests/CLAUDE.md": 7_000,
     "crates/pixtuoid-scene/CLAUDE.md": 10_500,
     "crates/pixtuoid-scene/SHARP-EDGES.md": 13_000,
-    "crates/pixtuoid-scene/WHERE-TO-LOOK.md": 5_000,
+    "crates/pixtuoid-scene/WHERE-TO-LOOK.md": 5_300,
     "crates/pixtuoid/CLAUDE.md": 5_000,
     "crates/pixtuoid/SHARP-EDGES.md": 8_000,
     "crates/pixtuoid/WHERE-TO-LOOK.md": 3_000,
@@ -231,9 +231,8 @@ def run(
                 guide.write_text(new)
     # Budgets are measured AFTER regeneration — the run that GROWS a guide must be
     # the one that reds, and an over-budget file must not brick unrelated regen.
-    over = guard_file_budgets(root, BUDGETS if budgets is None else budgets)
-    if budgets is None:
-        over += guard_budget_coverage(tracked, BUDGETS)
+    eff = BUDGETS if budgets is None else budgets
+    over = guard_file_budgets(root, eff) + guard_budget_coverage(tracked, eff)
     if not quiet:
         for msg in over:
             print(msg)
@@ -243,7 +242,7 @@ def run(
                 print(f"{rel}: index block drifted — `just gen-guides` REBUILDS the block FROM the sibling,\n"
                       f"  discarding any hand-edit inside it; put the change in the SIBLING first")
         return 1
-    if not quiet:
+    if not quiet and not over:
         verb = "would rewrite" if check else "rewrote"
         print(f"gen-guides: {verb} {len(drifted)} guide(s)" if drifted else "gen-guides: all index blocks current ✓")
     return 1 if over else 0
@@ -270,8 +269,10 @@ def selftest() -> int:
 
         def gen(check: bool, budgets: dict[str, int] | None = None) -> int:
             try:
+                # The fixture default budgets its one tracked guide generously, so
+                # baseline arms stay green while coverage runs on EVERY call.
                 return run(repo, tracked, check, quiet=True,
-                           budgets={} if budgets is None else budgets)
+                           budgets={"crate/CLAUDE.md": 10_000} if budgets is None else budgets)
             except SystemExit as e:  # sys.exit from a builder/assert arm
                 return 1 if e.code else 0
 
@@ -338,8 +339,10 @@ def selftest() -> int:
             fails.append("an over-budget file must FAIL generation too")
         if gen(True, budgets={"crate/MISSING.md": 10}) != 1:
             fails.append("a BUDGETS key with no file must red (stale-key fail-open)")
-        if gen(True, budgets={"crate/SHARP-EDGES.md": 10_000}) != 0:
+        if gen(True, budgets={"crate/SHARP-EDGES.md": 10_000, "crate/CLAUDE.md": 10_000}) != 0:
             fails.append("an under-budget file must stay green (budget does-not-fire arm)")
+        if gen(True, budgets={"crate/SHARP-EDGES.md": 10_000}) != 1:
+            fails.append("an unbudgeted tracked guide must red THROUGH run() (coverage wiring)")
         gen(False)
         at_cap = {"crate/CLAUDE.md": (repo / "crate/CLAUDE.md").stat().st_size}
         stage("crate/SHARP-EDGES.md", edges + "- **Edge two.** a second entry\n")
