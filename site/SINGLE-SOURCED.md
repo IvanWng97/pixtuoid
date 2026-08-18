@@ -71,7 +71,9 @@ Notes no gate carries:
   down and FOLDS ancestor `opacity` into the ink. Corollary: de-emphasis
   comes from SIZE, never sub-AA ink or an opacity multiplier. Office-ground
   hues need theme-aware tokens (`--office-ink*`, `--led-ink`) measured
-  against the real composite.
+  against the real composite. `--led-glow` stays theme-independent lime on
+  purpose: a shadow the glyph paints is decoration, not the ground WCAG
+  grades against (measured worst case 5.28:1) — don't theme it.
 - **♩ audio**: muted-by-default, gesture-gated (`AudioContext` only on first
   click); synthesis prewarms OFF-thread in `public/audio-worker.js` at idle,
   click-time chunked warmup is the fallback; buffers COPIED out of wasm

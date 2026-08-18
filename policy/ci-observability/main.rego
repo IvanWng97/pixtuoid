@@ -790,8 +790,8 @@ deny contains msg if {
 	msg := sprintf("%s must run `%s` in exactly one job — the fork-head guard is keyed to that job's condition", [claude_tag_workflow_path, claude_action])
 }
 
-# The merge gate reads "Findings: 0 at HEAD", so a run that produces no verdict
-# must SAY so — otherwise a spent quota is indistinguishable from a clean review
+# The merge gate reads the bot verdict at HEAD as evidence, so a run that
+# produces no verdict must SAY so — otherwise a spent quota is indistinguishable from a clean review
 # (publish skips, nothing comments, the PR just reads UNSTABLE). #819
 deny contains msg if {
 	_ := documents[claude_reusable_workflow_path]

@@ -1,6 +1,6 @@
 ---
 name: two-lens-review
-version: 1.1.0
+version: 1.2.0
 description: "Run pixtuoid's review protocol at either scope — the mandatory pre-merge DIFF gate (2+ differentiated-lens agents on the diff) or a whole-codebase AUDIT (subsystem × factor fan-out over the whole tree). Both draw ONE shared factor taxonomy + verify contract + disposition; they differ only in population and orchestration. Use before merging ANY PR, on 'review this PR/branch' / 'is this ready to merge' (diff scope), or on 'whole-codebase review' / pre-release / periodic audit (whole-codebase scope). Encodes the convergence contract (churn budget, two-fix-round cap, HIGH-only blocking), the five hard requirements, the escalation triggers, the adversarial finder→verify fan-out, and the disposition sweep the repo learned the hard way."
 metadata:
   scope: "pixtuoid repo only"
@@ -55,30 +55,40 @@ it, rounds 2+ are dominated by defects the PREVIOUS round's fixes introduced
 and by reversals of already-settled calls — the loop generates its own work.
 Hence:
 
-- **Churn budget** — a diff over ~1500 changed lines does not enter review;
-  split it first (stacked PRs).
+- **Churn budget** — a diff whose ADDED + MODIFIED lines exceed ~1500 does
+  not enter review; split it first (stacked PRs). Pure deletions are exempt
+  from the count — a removed line ships no behavior for a lens to verify —
+  but only when the census rule below is satisfied. A change that both adds
+  and deletes at scale is two PRs.
 - **Two fix rounds, hard cap.** Round 1: full review, all lenses, folded into
   ONE commit. Round 2: verify the dispositions + review ONLY the delta since
   round 1's head — no full re-sweep (full re-sweeps are where settled calls
   get re-litigated). If round 2 confirms a HIGH in round 1's fixes, STOP:
   revert the fold and re-land smaller, or re-scope the PR. There is no round
   3 of patching patches.
-- **Blocking bar** — only a CONFIRMED HIGH (correctness / security /
-  invariant) blocks merge. A MEDIUM on touched code is fixed in the fold or
-  forces a re-scope; taste findings are optional by default — drop them; a
-  pre-existing find outside the blast radius is SURFACED to the owner in one
-  line. Nothing spawns another round, and agents never file issues.
+- **Round 2's fold is the last commit that may change behavior, and it is
+  verified, not re-reviewed.** Every round-2 fix must be one of three shapes:
+  a revert, a deletion, or a change that ships a test FAILING without it.
+  Anything else is not a fix — revert the fold and re-land smaller. (Rounds
+  2+ are dominated by fix-introduced defects; this keeps the one unreviewed
+  commit from carrying one.)
+- **Blocking bar** — only a HIGH (correctness / security / invariant)
+  CONFIRMED BY THE ORCHESTRATOR against the code — never by the finder's own
+  severity label — blocks merge. A MEDIUM on touched code is fixed in the
+  fold or forces a re-scope; taste findings are optional by default — drop
+  them; a pre-existing find is SURFACED to the owner in one line. Nothing
+  spawns another round, and agents never file issues.
 - **No new gates in a fix round.** A fix may not introduce a new bespoke
   checker/lint/census — gate-shaped fixes routinely arrive fail-open and feed
   the next round. Prefer making the failure IMPOSSIBLE (derive from the one
   source of truth) over DETECTED (police two copies); a genuinely wanted new
-  check becomes an issue + its own small PR through the design gate. A check
+  check becomes its own small PR through the design gate. A check
   asserts facts in its own layer — a Rust fact is checked from Rust, never a
   Python regex over `.rs` files.
 - **Deletion-shaped PRs enumerate first.** Before deleting N members of a
-  class, the FIRST commit is the population census (full list + criterion) —
-  reviewers check the census once instead of restoring survivors one per
-  round (#943).
+  class, the population census (full list + criterion) lands in the FIRST
+  commit or the PR body, before review starts — reviewers check the census
+  once instead of restoring survivors one per round (#943).
 - **The bot's `Findings: 0` is evidence, not the gate** — it can be vacuous
   (an errored run wearing a clean badge). The gate: every finding (local
   lenses + both bots) dispositioned, and zero OPEN confirmed HIGH at the
@@ -151,14 +161,12 @@ lens); anything bigger is SURFACED in the ranked report for the owner to pick.
 ## Disposition sweep (both scopes)
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
-**FIXED** · **REFUTED-with-trace** (cite or ADD the relevant per-crate
-`SHARP-EDGES.md` entry, or the guide's inline section where no sibling exists — that keeps the next agent's context accurate) · **RE-SCOPED**
-(real, in this change's blast radius, bigger than the PR — the PR is
-wrong-sized: split/redesign so the finding is IN scope; needing to defer
-proved the fix wasn't the right shape) · **SURFACED** (real, pre-existing,
-OUTSIDE the blast radius — one line to the owner in the PR thread / the
-ranked report; the owner decides). Agents never file issues. "Acknowledged,
-no action" is NOT a state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
+FIXED · REFUTED-with-trace (cite or ADD the relevant per-crate
+`SHARP-EDGES.md` entry — that keeps the next agent's context accurate) ·
+RE-SCOPED · SURFACED — the four states are defined ONCE in
+`pr-review.prompt.md`'s orchestrator notes; fill from there, never a
+paraphrase here. Agents never file issues. "Acknowledged, no action" is NOT
+a state — #40's ignored finding became a 0.4.1 blocker (#46). Diff scope: in the PR
 thread. Whole-codebase scope: in the ranked report. Sweep at the FINAL merge
 head — a finding that lands after the local lenses ran is the #283/#383 drop
 class; and check WHICH commit a bot re-flag was raised against before

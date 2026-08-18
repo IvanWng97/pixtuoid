@@ -90,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding cites (or adds) a sharp edge** — the entry is edge + WHY + authority pointer; `gen-guides` fails past a size ceiling, so split grown entries. **A real finding is fixed in-scope or forces a re-scope; only a pre-existing find OUTSIDE the change's blast radius is instead SURFACED to the owner in one line. Agents never file issues.**
+- **A refuted review finding cites (or adds) a sharp edge** — the entry is edge + WHY + authority pointer; `gen-guides` fails past a size ceiling, so split grown entries. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
 ## Architecture invariants (load-bearing)

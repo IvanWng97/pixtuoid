@@ -12,8 +12,9 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 
 ## Cross-boundary build inputs (the coupling that bites)
 
-`astro build` reads **six files from OUTSIDE `site/`**; a rename/move of any
-FAILS the build, and all six sit in the `site.yml` / `pages.yml` path filters:
+`astro build` reads **these files from OUTSIDE `site/`** (workspace
+`Cargo.toml` + the `docs/` pages below); a rename/move of any FAILS the
+build, and every one sits in the `site.yml` / `pages.yml` path filters:
 
 - workspace `Cargo.toml` → displayed-version FALLBACK only; the primary source
   is the latest release tag (`config/released-version.mjs`, unit-tested — main
@@ -23,9 +24,11 @@ FAILS the build, and all six sit in the `site.yml` / `pages.yml` path filters:
 - `docs/{CONFIGURATION, ARCHITECTURE, CONTRIBUTING, PARALLEL-DELIVERY}.md`
   → rendered routes via glob loaders in `src/content.config.ts`. **Adding,
   renaming, or REMOVING a rendered doc is a multi-point edit**: glob
-  pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (Nav and
-  `assert-docs-rendered` derive from it), both workflow path filters,
-  `lighthouserc.json`, and the smoke viewport table.
+  pattern, `src/pages/*.astro`, the `DOCS` entry in `consts.ts` (`Nav.astro`
+  and `Docs.astro`'s sidebar/pager derive from it; `assert-docs-rendered` is
+  generic by design — it globs every rendered `article.prose` — and needs no
+  edit), both workflow path filters, `lighthouserc.json`, and the smoke
+  viewport table.
 
 **Mermaid renders at build AND during `astro check`** (why CI installs
 Chromium, BEFORE `npm run check`). A version-mismatched Chromium/Playwright
@@ -37,8 +40,9 @@ forever — hence `pages.yml` pins `package-manager: npm` (#680) and
 build-cmd): every doc `<article>` has a body and `/architecture` keeps its
 `<svg>` — a collapsed render reddens, never deploys.
 
-**Docs shell**: the five doc routes mount the Statusline doc variant (no PR
-feed fetch); `Docs.astro`'s sidebar reads the one `FLOORS` manifest.
+**Docs shell**: the doc routes (the `DOCS` manifest in `consts.ts` is the
+roster) mount the Statusline doc variant (no PR feed fetch); `Docs.astro`'s
+sidebar reads the one `FLOORS` manifest.
 Blockquotes promote to terminal callouts (`config/rehype-callouts.mjs`,
 unit-tested, registered AFTER `rehypeRepoLinks`). **SHARP EDGE — the callout
 window is a `--screen` panel inside `.prose`, so every `.prose <tag>` colour

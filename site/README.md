@@ -74,7 +74,7 @@ keeps it FIRST — that one ships. npm 12 is required (`packageManager` +
   `prefers-reduced-motion`-safe. Pause freezes the office frame AND stops all
   ambient motion via `pix:paused`; it stays visible on a no-wasm poster
   (ticker/dust/clips still run).
-- **Docs shell** — `layouts/Docs.astro` gives the five doc routes a shared
+- **Docs shell** — `layouts/Docs.astro` gives the doc routes a shared
   elevator-panel sidebar + mini-TOC + pager off the one `DOCS` manifest;
   blockquotes promote to terminal-window callouts.
 

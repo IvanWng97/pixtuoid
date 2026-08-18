@@ -13,8 +13,14 @@ distributed guessing.
   your types) plus its codegen and pinning gates; nothing forks until it is
   reviewed. Spec lint + breaking-diff gates (Spectral, `oasdiff`,
   `buf breaking`) make "can't drift" mechanical; runtime conformance checks
-  (Dredd / Schemathesis) close the gap spec-only gates miss — most APIs drift
-  from their own spec in production.
+  (Dredd / Schemathesis) close the gap spec-only gates miss — a spec-only
+  gate proves the spec is compatible, not that the running code matches it.
+  Pick the contract language by consumer polyglotism, not preference:
+  Protobuf/gRPC or Smithy for a multi-language fleet, OpenAPI for REST
+  tooling, GraphQL for schema-shaped frontends — tRPC cannot reach native
+  Kotlin/Swift consumers. Schema-compatibility mode dictates deploy order:
+  `BACKWARD` ⇒ consumers first; `FORWARD` ⇒ producer first; `FULL` ⇒ any
+  order.
 - **Phase 1 — fan out by area.** Each worker builds against the frozen
   contract in its own git worktree. Typed SDKs generated from the one spec
   turn a producer break into a consumer **compile error**; generated mocks
@@ -46,9 +52,3 @@ rules live in its own `CLAUDE.md`.
 - Concurrent agents on one checkout race on `HEAD` — one worktree per agent.
 - Agents over-claim "green": run the failing gate yourself, and never read an
   exit code through a pipe.
-
-Pick the contract language by consumer polyglotism, not preference:
-Protobuf/gRPC or Smithy for a multi-language fleet, OpenAPI for REST tooling,
-GraphQL for schema-shaped frontends — tRPC cannot reach native Kotlin/Swift
-consumers. Schema-compatibility mode dictates deploy order: `BACKWARD` ⇒
-consumers first; `FORWARD` ⇒ producer first; `FULL` ⇒ any order.

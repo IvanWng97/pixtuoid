@@ -79,12 +79,26 @@ BUDGETS: dict[str, int] = {
 
 
 def guard_file_budgets(root: pathlib.Path, budgets: dict[str, int]) -> list[str]:
-    return [
-        f"{rel}: {p.stat().st_size} bytes > budget {cap} — cut it, or raise its "
-        f"budget consciously in the same PR (one-in-one-out)"
-        for rel, cap in sorted(budgets.items())
-        if (p := root / rel).exists() and p.stat().st_size > cap
-    ]
+    out = []
+    for rel, cap in sorted(budgets.items()):
+        p = root / rel
+        if not p.exists():
+            out.append(f"{rel}: budgeted file is MISSING — a renamed/deleted file "
+                       f"silently loses its cap; fix or remove the BUDGETS row")
+        elif (size := p.stat().st_size) > cap:
+            hint = (" (its index block is GENERATED: cut a SHARP-EDGES/WHERE-TO-LOOK "
+                    "entry or the hand-written prose, never the block)"
+                    if rel.endswith("CLAUDE.md") else "")
+            out.append(f"{rel}: {size} bytes > budget {cap} — cut it{hint}, or raise "
+                       f"its budget consciously in the same PR (one-in-one-out)")
+    return out
+
+
+def guard_budget_coverage(tracked: list[str], budgets: dict[str, int]) -> list[str]:
+    """A new tracked guide must arrive with a cap — an allowlist the author must
+    remember is the fail-open half of a byte budget."""
+    return [f"{rel}: tracked guide has no BUDGETS entry — add one"
+            for rel in tracked if rel not in budgets]
 
 
 def clip(text: str, budget: int) -> str:
@@ -205,11 +219,6 @@ def run(
     quiet: bool = False,
     budgets: dict[str, int] | None = None,
 ) -> int:
-    over = guard_file_budgets(root, BUDGETS if budgets is None else budgets)
-    if over:
-        for msg in over:
-            print(msg)
-        return 1
     drifted = []
     for rel in tracked:
         guide = root / rel
@@ -220,15 +229,24 @@ def run(
             drifted.append(rel)
             if not check:
                 guide.write_text(new)
+    # Budgets are measured AFTER regeneration — the run that GROWS a guide must be
+    # the one that reds, and an over-budget file must not brick unrelated regen.
+    over = guard_file_budgets(root, BUDGETS if budgets is None else budgets)
+    if budgets is None:
+        over += guard_budget_coverage(tracked, BUDGETS)
+    if not quiet:
+        for msg in over:
+            print(msg)
     if check and drifted:
-        for rel in drifted:
-            print(f"{rel}: index block drifted — `just gen-guides` REBUILDS the block FROM the sibling,\n"
-                  f"  discarding any hand-edit inside it; put the change in the SIBLING first")
+        if not quiet:
+            for rel in drifted:
+                print(f"{rel}: index block drifted — `just gen-guides` REBUILDS the block FROM the sibling,\n"
+                      f"  discarding any hand-edit inside it; put the change in the SIBLING first")
         return 1
     if not quiet:
         verb = "would rewrite" if check else "rewrote"
         print(f"gen-guides: {verb} {len(drifted)} guide(s)" if drifted else "gen-guides: all index blocks current ✓")
-    return 0
+    return 1 if over else 0
 
 
 def selftest() -> int:
@@ -312,14 +330,27 @@ def selftest() -> int:
         if gen(False) != 0:
             fails.append("a just-under-ceiling entry must still generate (the does-not-fire arm)")
         stage("crate/SHARP-EDGES.md", edges)
+        gen(False)  # re-sync BEFORE the budget arms — drifted-index red would confound them
         tiny = {"crate/SHARP-EDGES.md": 10}
         if gen(True, budgets=tiny) != 1:
             fails.append("an over-budget file must red --check (guard_file_budgets)")
         if gen(False, budgets=tiny) != 1:
             fails.append("an over-budget file must FAIL generation too")
-        gen(False)  # re-sync the index after the MAX_ENTRY restore, as every arm does
+        if gen(True, budgets={"crate/MISSING.md": 10}) != 1:
+            fails.append("a BUDGETS key with no file must red (stale-key fail-open)")
         if gen(True, budgets={"crate/SHARP-EDGES.md": 10_000}) != 0:
             fails.append("an under-budget file must stay green (budget does-not-fire arm)")
+        gen(False)
+        at_cap = {"crate/CLAUDE.md": (repo / "crate/CLAUDE.md").stat().st_size}
+        stage("crate/SHARP-EDGES.md", edges + "- **Edge two.** a second entry\n")
+        if gen(False, budgets=at_cap) != 1:
+            fails.append("generation that pushes a guide over budget must FAIL, not pass (growth arm)")
+        stage("crate/SHARP-EDGES.md", edges)
+        gen(False)
+        if not guard_budget_coverage(["crate/CLAUDE.md"], {}):
+            fails.append("an unbudgeted tracked guide must be reported (coverage fires)")
+        if guard_budget_coverage(["crate/CLAUDE.md"], {"crate/CLAUDE.md": 1}):
+            fails.append("a budgeted tracked guide must pass (coverage does-not-fire arm)")
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 

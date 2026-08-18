@@ -2,7 +2,7 @@
 
 Thanks for your interest! PRs are welcome — especially **new themes**, sprite and
 decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
-(the ten agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
+(the agent CLIs plus the OpenClaw gateway already wired up are listed in the README).
 
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
 nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
@@ -49,7 +49,8 @@ does not mean a green PR:
 - **check-windows** — msvc cross-lint on every PR.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   plain `cargo test` can't see.
-- **hygiene** — the `just lint` recipes, including `just ci-observability`
+- **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
+  so a skipped local preflight can't land a lint break), including `just ci-observability`
   (the yq + Conftest/OPA policy tests under `policy/ci-observability/` pinning
   cross-file workflow semantics actionlint can't express) and
   `just fixture-pii` (gitleaks over the committed capture tree). The
@@ -211,13 +212,9 @@ here.
   `claude-security-review` workflows plus your local two-lens pass.
 - AI-authored PRs get the `needs-human-verify` label and a human visual check.
 - **Every reviewer/bot finding reaches exactly one terminal state in the PR
-  thread**: **FIXED** · **REFUTED-with-trace** (cite or add the sharp edge) ·
-  **RE-SCOPED** (real and inside this change's blast radius, but bigger than
-  the PR — then the PR is wrong-sized: split or redesign it so the finding IS
-  in scope; a correctly-scoped fix leaves nothing to defer) · **SURFACED**
-  (real, pre-existing, outside this change's blast radius — one line to the
-  owner in the PR thread; the owner decides). Agents never file issues
-  autonomously, and "acknowledged, no action" is not a state.
+  thread** — FIXED · REFUTED-with-trace · RE-SCOPED · SURFACED, defined ONCE
+  in [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md). Agents
+  never file issues, and "acknowledged, no action" is not a state.
 
 ### Recurring pitfalls (this codebase's review history, distilled)
 
@@ -248,7 +245,7 @@ gh run rerun --failed                        # rerun only failed CI jobs
 
 The registration steps (4–7, 9) are test-forced — skipping one fails
 `just test`. Step 8 is forced only for hook-only sources; step 10 by the theme
-guards; steps 1–3 and 11 are on you.
+guards; steps 1–3, 11 and 12 are on you.
 
 1. **Verify the wire format against the CLI's actual source/releases first** —
    transcript location, line shape, hooks, session identity; pin every fact

@@ -92,6 +92,7 @@ Grep [`WHERE-TO-LOOK.md`](WHERE-TO-LOOK.md) for the question:
 - How does the theme system work?
 - How does weather / sky-light work?
 - How does the meeting room come alive?
+- How does walk-pace physics work?
 - What is the elastic wander timeline?
 - How does the gateway mascot (the OpenClaw lobster) work?
 - How does the lofi soundtrack get composed (and how do I add an instrument / a stem)?

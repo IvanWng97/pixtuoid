@@ -4,7 +4,8 @@ Canonical for both scopes of `two-lens-review` (diff gate / whole-codebase
 audit). The skill owns *when* to invoke and the convergence contract (round
 caps, blocking bar, churn budget).
 
-**Size budget: ≤160 lines; one-in-one-out.** A line lives here only if it
+**Size budget: the `BUDGETS` byte cap in `scripts/gen-guides.py` (enforced by
+`just lint`); one-in-one-out.** A line lives here only if it
 changes reviewer BEHAVIOR: a repo-specific trap whose obvious reading is
 wrong, a rule about what NOT to flag, or a verification act beyond reading
 the diff. Generic defect hunting (logic, races, error handling, unwrap,
@@ -135,11 +136,14 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 Dispatch lenses in parallel, in the worktree, in the background. Verify every
 MEDIUM+ finding's premise (read the SHARP-EDGES entry) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
-reaches exactly one terminal state in the PR thread — FIXED /
-REFUTED-with-trace (cite or ADD the sharp edge) / RE-SCOPED (in-scope but
-bigger than the PR ⇒ the PR splits) / SURFACED (pre-existing, outside the
-blast radius ⇒ one line for the owner, who decides); agents never file
-issues; "acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
+reaches exactly one terminal state in the PR thread (this list is CANONICAL —
+other docs point here): FIXED · REFUTED-with-trace (cite or ADD the sharp
+edge) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
+change, and bigger than the PR: the PR is wrong-sized, split or redesign it
+until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
+to the owner, who decides, whether or not this change touched its file; a
+pre-existing defect never grows the PR). Agents never file issues;
+"acknowledged" is not a state. Sweep at the FINAL merge head; check WHICH commit a bot
 re-flag was raised against before re-litigating. Gate on the bot's latest
 COMMENT verdict + `mergeStateStatus`, never the check table; an
 `<!-- absent-… -->` notice is an unreviewed head. Round caps, blocking bar,
