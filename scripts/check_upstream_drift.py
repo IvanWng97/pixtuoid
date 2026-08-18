@@ -536,6 +536,27 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     return tags or None
 
 
+# Codex variants we know about and deliberately do not decode. Each would START
+# an activity with no upstream event to END it, so decoding one strands the
+# session Active until the stale sweep — worse than not decoding it.
+CODEX_KNOWN_OMITTED: dict[str, str] = {
+    "local_shell_call": "no `local_shell_call_output` sibling exists to end it",
+    "image_generation_call": "no `image_generation_call_output` sibling exists to end it",
+}
+
+
+def sibling_families(decoded: set[str]) -> set[str]:
+    """The trailing word of each name we decode — `function_call` → `call`.
+
+    A vocabulary MISS matters when the new name is a sibling of one we already
+    handle (`custom_tool_call` beside `function_call`, #933's origin), not when
+    upstream merely grows. Only usable where the suffix is a real family: codex's
+    `EventMsg` suffixes are generic lifecycle words (`begin`/`end`/`started`)
+    shared across unrelated subsystems, so it is excluded on purpose.
+    """
+    return {n.rsplit("_", 1)[-1] for n in decoded if "_" in n}
+
+
 def upstream_acp_tool_call_statuses(text: str) -> set[str] | None:
     """The `ToolCallStatus` values a v1 schema declares, as `oneOf` consts."""
     try:
@@ -696,6 +717,7 @@ class OurNames:
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
+    codex_escalation: set[str] | None = None
     openclaw: set[str] | None = None
     openclaw_gateway_port: set[str] | None = None
     opencode: set[str] | None = None
@@ -767,6 +789,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
+    ("codex_escalation", CORE_LIB_FRAGMENT, "decoded", "codex.escalation"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
     ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "values", "openclaw.default_gateway_port"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
@@ -1036,6 +1059,16 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
     return found or None
 
 
+def sole_match(pattern: str, text: str) -> re.Match[str] | None:
+    """The ONE match, or None when there are none OR several.
+
+    A first-match read is silently wrong the day upstream grows a second
+    declaration above the real one — a `#[cfg(test)]` twin, a `macro_rules!`
+    body, a raw string. Ambiguity is probe health, never an answer."""
+    found = list(re.finditer(pattern, text))
+    return found[0] if len(found) == 1 else None
+
+
 def python_set_literal(src: str, decl: str) -> set[str] | None:
     """The string members of a `NAME: Set[str] = { … }` block.
 
@@ -1045,9 +1078,9 @@ def python_set_literal(src: str, decl: str) -> set[str] | None:
     comments quotes `{"action": "continue"}`, and a stray `}` truncated the set
     SILENTLY while the size floor still passed.
     """
-    i = src.find(decl)
-    if i < 0:
+    if src.count(decl) != 1:
         return None
+    i = src.find(decl)
     code = "\n".join(line.split("#", 1)[0] for line in src[i:].splitlines())
     j = code.find("{")
     if j < 0:
@@ -1377,7 +1410,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
         shell = fetch_anchored(HERMES_SHELL_HOOK_URL, "Hermes shell_hooks", report)
         if shell is not None:
-            blocking = re.search(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)
+            blocking = sole_match(r"_BLOCKING_EVENTS\s*=\s*frozenset\(\{([^}]*)\}", shell)
             if blocking is None:
                 report.add_blind(
                     "whether a hermes shell hook can stall an approval",
@@ -1484,10 +1517,56 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     # grok's xAI extension is TRANSCRIPT vocabulary whose arm ends
     # `_ => Ok(vec![])` — the method gates the whole block and each tag decodes
     # to nothing once renamed, with no breadcrumb either way.
+    if ours.codex_escalation is not None:
+        # A BOOLEAN check with no breadcrumb possible: a renamed field or value
+        # makes `is_escalated` silently false, and false is a legitimate answer,
+        # so codex sessions would sit Active through every approval prompt. The
+        # pair is split across two upstream files, so the union is the document.
+        docs = [
+            t
+            for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)
+            if (t := fetch_anchored(u, "Codex escalation names", report)) is not None
+        ]
+        if len(docs) == 2:
+            joined = "\n".join(docs)
+            for name in sorted(ours.codex_escalation):
+                if name not in joined:
+                    report.add_breaking(
+                        f"Codex escalation name `{name}` (read by source/codex.rs) is "
+                        f"GONE from upstream — renamed; the approval gate never fires, "
+                        f"so a codex session sits Active through every prompt."
+                    )
+
+    # The APPEARING direction (#933): a sibling of something we decode, that we
+    # do not. One-directional the other way is what let `custom_tool_call` decode
+    # to nothing for four tool calls a turn.
+    for field, url, enum in (
+        ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
+        ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
+    ):
+        mine = getattr(ours, field)
+        if mine is None:
+            continue
+        text = fetch_anchored(url, f"Codex `{enum}`", report)
+        if text is None:
+            continue
+        upstream = upstream_codex_enum_types(text, enum)
+        if upstream is None:
+            continue
+        families = sibling_families(mine)
+        for name in sorted(upstream - mine - set(CODEX_KNOWN_OMITTED)):
+            if name.rsplit("_", 1)[-1] in families:
+                report.add_review(
+                    f"upstream `{enum}` has `{name}`, a sibling of the "
+                    f"`{'`/`'.join(sorted(n for n in mine if n.rsplit('_', 1)[-1] == name.rsplit('_', 1)[-1])[:2])}` "
+                    f"we already decode, and source/codex.rs decodes it to nothing. "
+                    f"Decode it, or add it to CODEX_KNOWN_OMITTED with the reason."
+                )
+
     if ours.grok_xai_method is not None:
         text = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
         if text is not None:
-            decl = re.search(GROK_XAI_METHOD_DECL, strip_rust_comments(text))
+            decl = sole_match(GROK_XAI_METHOD_DECL, strip_rust_comments(text))
             if decl is None:
                 report.add_blind(
                     "grok's `XAI_SESSION_UPDATE_METHOD` declaration",
@@ -1531,7 +1610,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     if ours.openclaw_gateway_port is not None:
         text = fetch_anchored(OPENCLAW_PATHS_URL, "OpenClaw config/paths", report)
         if text is not None:
-            m = re.search(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
+            m = sole_match(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
             if m is None:
                 report.add_blind(
                     "OpenClaw's `DEFAULT_GATEWAY_PORT` value",

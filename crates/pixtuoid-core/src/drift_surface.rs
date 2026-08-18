@@ -46,6 +46,10 @@ fn surface() -> Value {
         json!([RI_TOOL_START, RI_RESUME, RI_SEARCH].concat()),
     );
     decoded.insert(
+        "codex.escalation",
+        json!(crate::source::codex::DECODED_ESCALATION),
+    );
+    decoded.insert(
         "codex.rollout_outers",
         json!([EVENT_MSG, RESPONSE_ITEM, TURN_CONTEXT]),
     );
@@ -307,6 +311,7 @@ mod tests {
                 "the_decoded_entry_type_set_is_exactly_what_the_arms_match",
             ),
             ("DECODED_EXIT_MARKER", "session_exit_ends_root_not_as_child"),
+            ("DECODED_ESCALATION", "escalated_function_call_is_waiting"),
             (
                 "DECODED_MESSAGE_VOCAB",
                 "the_exported_message_vocabulary_is_exactly_what_the_arms_match",

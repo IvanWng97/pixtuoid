@@ -499,6 +499,13 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             tool_id_key: ToolIdKey::ToolUse,
             custom: None,
         }),
+        // Both false is VERIFIED, not unexamined: the transcript carries no end
+        // marker (`status` is per-step and always DONE), and a swept session
+        // cannot walk back in — JSONL lines for an unknown id are no-ops, and
+        // the hook spec above never fires because there is no install target.
+        // So the long stale sweep is the only correct reaper here; flipping
+        // `resurrects_on_prompt` to earn the 5-min one would strand a live
+        // idle session permanently.
         caps: SourceCaps {
             has_exit_signal: false,
             resurrects_on_prompt: false,

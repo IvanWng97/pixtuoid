@@ -126,6 +126,16 @@ pub(crate) const TURN_CONTEXT: &str = "turn_context";
 /// (the arms below guard on `contains`) and the export source, so there is one
 /// declaration per name and no second copy to drift. Adding a name to a group
 /// changes what decodes AND what the drift surface claims, in one edit.
+const SANDBOX_PERMISSIONS_FIELD: &str = "sandbox_permissions";
+const REQUIRE_ESCALATED: &str = "require_escalated";
+
+/// The escalation pair this decoder keys on. Exported because the check is a
+/// BOOLEAN: a rename makes it silently `false`, and `false` is a legitimate
+/// answer, so no breadcrumb can exist here — the upstream watch is the only
+/// signal. Pinned by `escalated_permission_is_detected_by_the_exported_pair`.
+#[cfg(test)]
+pub(crate) const DECODED_ESCALATION: &[&str] = &[REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD];
+
 pub(crate) const EM_TURN_START: &[&str] = &["task_started", "turn_started"];
 pub(crate) const EM_RESUME: &[&str] = &["exec_command_end", "patch_apply_end"];
 pub(crate) const EM_SEARCH: &[&str] = &["web_search_begin", "web_search_end"];
@@ -274,7 +284,7 @@ fn function_call_needs_approval(payload: Option<&Map<String, Value>>) -> bool {
             return false;
         }
     };
-    args.get("sandbox_permissions").and_then(|s| s.as_str()) == Some("require_escalated")
+    args.get(SANDBOX_PERMISSIONS_FIELD).and_then(|s| s.as_str()) == Some(REQUIRE_ESCALATED)
 }
 
 fn codex_tool_start(agent_id: AgentId, payload: Option<&Map<String, Value>>) -> AgentEvent {
@@ -522,8 +532,16 @@ mod tests {
 
     #[test]
     fn escalated_function_call_is_waiting() {
-        let args =
-            r#"{"cmd":"date","sandbox_permissions":"require_escalated","justification":"allow?"}"#;
+        // Built FROM the exported pair, so the drift row and the arm cannot
+        // drift apart: the check is a boolean with no breadcrumb to lean on.
+        assert_eq!(
+            DECODED_ESCALATION,
+            [REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD]
+        );
+        let args = format!(
+            r#"{{"cmd":"date","{SANDBOX_PERMISSIONS_FIELD}":"{REQUIRE_ESCALATED}","justification":"allow?"}}"#
+        );
+        let args = args.as_str();
         let out = ev(
             json!({"type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":args}}),
         );

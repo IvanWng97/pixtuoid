@@ -502,6 +502,62 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
         )
 
 
+def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
+    """#933's direction: upstream GAINING a name we do not decode.
+
+    Scoped to siblings of what we already handle, because "upstream grew" alone
+    is not a signal — codex's `EventMsg` adds names constantly. `custom_tool_call`
+    beside `function_call` is the shape that cost four tool calls a turn.
+    """
+    real = d.fetch
+    saved = dict(d.CODEX_KNOWN_OMITTED)
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        decoded = sorted(ours.codex_response_item or ())
+        check(bool(decoded), "the fragment supplies the response_item set")
+
+        def drive(extra: list[str]) -> d.Report:
+            rows = "".join(
+                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n'
+                for i, n in enumerate(decoded + extra)
+            )
+            body = f"pub enum ResponseItem {{\n{rows}}}\n"
+
+            def stub(u: str, _b: str = body) -> str:
+                if u == d.CODEX_MODELS_URL:
+                    return _b
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        d.CODEX_KNOWN_OMITTED.clear()
+        quiet = drive([])
+        check(not quiet.review, f"decoding everything upstream has stays silent: {quiet.review}")
+
+        family = decoded[0].rsplit("_", 1)[-1]
+        sibling = f"pxd_new_{family}"
+        loud = drive([sibling])
+        check(any(sibling in x for x in loud.review),
+              f"a new `_{family}` sibling must be reported; got {loud.review}")
+
+        stranger = drive(["pxd_unrelated_thing"])
+        check(not any("pxd_unrelated" in x for x in stranger.review),
+              f"an unrelated addition must NOT be reported; got {stranger.review}")
+
+        d.CODEX_KNOWN_OMITTED[sibling] = "test"
+        ledgered = drive([sibling])
+        check(not any(sibling in x for x in ledgered.review),
+              f"a ledgered sibling goes quiet; got {ledgered.review}")
+    finally:
+        d.fetch = real
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED.update(saved)
+
+
 def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     """The stripper's docstring named this test before the test existed.
 
@@ -859,6 +915,14 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + tagged_enum("EventMsg", ns)}),
             ("codex_response_item", str, lambda ns: {
                 d.CODEX_MODELS_URL: tagged_enum("ResponseItem", ns)}),
+            # The check reads the UNION of codex's two documents, so a name has to
+            # leave both to count as gone. Each document keeps its own anchor.
+            ("codex_escalation", str, lambda ns: {
+                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", full["codex"])
+                + "".join(f'const {n.upper()}: &str = "{n}";\n' for n in ns),
+                d.CODEX_MODELS_URL: tagged_enum(
+                    "ResponseItem", full["codex_response_item"]
+                )}),
             ("codex_outers", str, lambda ns: {
                 d.CODEX_ROLLOUT_ITEM_URL: tagged_enum("RolloutItem", ns)}),
             ("hermes", str, lambda ns: {
@@ -884,8 +948,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             # absent one, so the generic filler drives it by declaring the fillers
             # instead of ours.
             ("openclaw_gateway_port", str, lambda ns: {
-                d.OPENCLAW_PATHS_URL:
-                    "".join(f"export const DEFAULT_GATEWAY_PORT = {n};\n" for n in ns)}),
+                d.OPENCLAW_PATHS_URL: f"export const DEFAULT_GATEWAY_PORT = {ns[0]};\n"}),
             ("openclaw", str, lambda ns: {
                 d.OPENCLAW_HOOK_TYPES_URL:
                     "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
@@ -893,9 +956,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 d.OPENCODE_EVENT_URLS,
                 "export const Event = {\n"
                 + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns)) + "}\n")),
+            # A VALUE row: upstream declares the const ONCE, so the document
+            # carries one declaration and a vanish is a different value in it.
             ("grok_xai_method", str, lambda ns: {
-                d.GROK_SESSION_STORAGE_URL: "".join(
-                    f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{n}";\n' for n in ns)}),
+                d.GROK_SESSION_STORAGE_URL:
+                    f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{ns[0]}";\n'}),
             ("grok_xai_tags", pascal, lambda ns: {
                 d.GROK_NOTIFICATION_URL:
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
@@ -1001,15 +1066,37 @@ def main() -> int:
     # half — a second `def` of the same name replaces the binding — so that is an
     # AST scan, and it runs HERE rather than as a test because a test detecting
     # duplicate names is itself shadowable by a duplicate.
-    defined = [
-        n.name
-        for n in ast.parse(pathlib.Path(__file__).read_text()).body
-        if isinstance(n, ast.FunctionDef) and n.name.startswith("test_")
-    ]
-    if dupes := sorted({n for n in defined if defined.count(n) > 1}):
-        print(f"DRIFT SELFTEST FAILED:\n  - test name defined twice, shadowing: {dupes}")
+    # `ast.walk`, not `.body`: a top-level-only scan misses an `async def`, a
+    # nested `def`, and a rebind — each of which shadows a real test while the
+    # suite prints "all checks passed".
+    tree = ast.parse(pathlib.Path(__file__).read_text())
+    defined: dict[str, list[int]] = {}
+    for n in ast.walk(tree):
+        name = getattr(n, "name", None) if isinstance(
+            n, (ast.FunctionDef, ast.AsyncFunctionDef)
+        ) else None
+        if name is None and isinstance(n, ast.Assign):
+            name = next(
+                (t.id for t in n.targets if isinstance(t, ast.Name)),
+                None,
+            )
+        if name and name.startswith("test_"):
+            defined.setdefault(name, []).append(n.lineno)
+    if dupes := sorted(k for k, v in defined.items() if len(v) > 1):
+        print(f"DRIFT SELFTEST FAILED:\n  - test name bound twice, shadowing: {dupes}")
         return 1
     tests = tuple(o for n, o in list(globals().items()) if n.startswith("test_"))
+    # The binding a name RESOLVES to must be the one the AST saw: a
+    # `globals()[...]` rebind leaves the AST untouched, so only this catches it.
+    for t in tests:
+        lines = defined.get(t.__name__)
+        if lines is None or t.__code__.co_firstlineno not in lines:
+            print(
+                f"DRIFT SELFTEST FAILED:\n  - {t.__name__} resolves to a function "
+                f"defined at line {t.__code__.co_firstlineno}, which this file does "
+                f"not declare (rebound at runtime?)"
+            )
+            return 1
     for t in tests:
         # A raise past a recorded `check()` would otherwise replace the whole
         # FAILS list — including the line that already explains the failure —

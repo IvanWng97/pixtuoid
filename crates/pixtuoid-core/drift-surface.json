@@ -8,6 +8,10 @@
       "completed",
       "failed"
     ],
+    "codex.escalation": [
+      "require_escalated",
+      "sandbox_permissions"
+    ],
     "codex.event_msg": [
       "task_started",
       "turn_started",
