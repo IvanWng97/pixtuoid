@@ -161,12 +161,6 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 # alarms.
 COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
 
-# Payload FIELD names decode_copilot_line / extract_copilot_cwd read, CURATED —
-# not scraped, which would drag in opaque tool-arg keys and fixture JSON. `data`
-# is the envelope every other field below lives under, so renaming that one key
-# nulls all of them while the nested names still resolve (the all-depth union
-# check would NOT alarm). The wire `parentId` is deliberately absent: sub-agents
-# link via the envelope `agentId`, so watching it would alarm on a non-dependency.
 
 # Cursor is a closed binary, so — like CC — the docs are the only watchable
 # surface. ONE-DIRECTIONAL: only a depended event vanishing alarms. The
@@ -267,34 +261,27 @@ UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
 )
 
 ANCHORS: dict[str, Anchor] = {
-    # owner-grade: each anchor is the declaration the checked names live inside.
-    # `_hermes_home_from_env` is the whole resolution we mirror (it reads
-    # HERMES_HOME and delegates to the platform default), so it owns both names.
-    # NOT `SessionNotification` (the obvious pick): it sits earlier in the file and
-    # does not own the variants, so moving the enum out would leave it satisfied
-    # while every variant read as renamed.
-    # The const IDENT owns the checked VALUE `"session_exit"`; a value rename
-    # keeps the identifier, so the anchor holds and the check still fires.
-    # Owns the agentDir + XDG resolution; the profile / config-dir-name helpers
-    # are its collaborators in the same file.
-    # identity-grade: co-located, not owning. A union head or page title.
-    CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
-    KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
-    REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
+    # owner-grade: the anchor IS the declaration the checked names live inside,
+    # so it cannot hold while the names have moved out from under it.
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
-    CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
-    HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
-    OMP_SESSION_ENTRIES_URL: Anchor(r"SessionEntry|entries", "the session-entry types"),
+    CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
+    HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
-    CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
+    # identity-grade: co-located, not owning — a section head or page title. The
+    # names could move out while this still matches, so these documents lean on
+    # the believability floor instead.
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
+    CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
+    CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
+    KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
+    OMP_SESSION_ENTRIES_URL: Anchor(r"SessionEntry|entries", "the session-entry types"),
+    REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
 }
-
 
 
 @dataclasses.dataclass
@@ -484,20 +471,6 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     return text
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     """The ACP `SessionUpdate` discriminator tags from a v1 JSON schema. Returns
     None if the schema won't parse or the union is absent → the caller files probe
@@ -531,32 +504,6 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     return tags or None
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def upstream_cursor_hook_events(text: str) -> set[str] | None:
     """The per-hook SECTION HEADINGS of cursor's hooks page.
 
@@ -576,35 +523,6 @@ def upstream_cc_hook_events(text: str) -> set[str] | None:
     if not m:
         return None
     return set(re.findall(r"^\|\s*`(\w+)`\s*\|", m.group(1), re.M)) or None
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def _copilot_type_const(sch: object) -> str | None:
@@ -682,8 +600,6 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
     walk(root)
     return names or None
-
-
 
 
 def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
@@ -952,8 +868,6 @@ def strip_rust_comments(body: str) -> str:
     """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
     the only string opener — an apostrophe here is usually a lifetime."""
     return _strip_c_style_comments(body, nested=True, quotes='"')
-
-
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
@@ -1239,8 +1153,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
 
 
-
-
     if ours.kimi is not None:
         text = fetch_anchored(KIMI_HOOKS_URL, "Kimi hooks doc", report)
         if text is not None:
@@ -1306,7 +1218,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             upstream = upstream_reasonix_hooks(text)
             if upstream is None:
                 report.add_blind(
-                    f"the reasonix hook names upstream declares",
+                    "the reasonix hook names upstream declares",
                     PARSE_SOURCES["reasonix"],
                     "The parser found no declaration, so the reasonix vanish check "
                     "was SKIPPED.",
@@ -1325,7 +1237,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             upstream = upstream_codewhale_hooks(text)
             if upstream is None:
                 report.add_blind(
-                    f"the codewhale hook names upstream declares",
+                    "the codewhale hook names upstream declares",
                     PARSE_SOURCES["codewhale"],
                     "The parser found no declaration, so the codewhale vanish check "
                     "was SKIPPED.",
@@ -1344,7 +1256,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             upstream = upstream_codex_hooks(text)
             if upstream is None:
                 report.add_blind(
-                    f"the codex hook names upstream declares",
+                    "the codex hook names upstream declares",
                     PARSE_SOURCES["codex"],
                     "The parser found no declaration, so the codex vanish check "
                     "was SKIPPED.",
@@ -1363,7 +1275,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             valid = python_set_literal(text, "VALID_HOOKS: Set[str] = {")
             if valid is None:
                 report.add_blind(
-                    f"the hermes hook names upstream declares",
+                    "the hermes hook names upstream declares",
                     PARSE_SOURCES["hermes"],
                     "The parser found no declaration, so the hermes vanish check "
                     "was SKIPPED.",

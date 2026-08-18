@@ -26,8 +26,6 @@ import check_upstream_drift as d  # noqa: E402
 FAILS: list[str] = []
 
 
-
-
 def check(cond: bool, msg: str) -> None:
     if not cond:
         FAILS.append(msg)
@@ -78,10 +76,6 @@ def test_try_fetch_classifies_permanent_vs_transient() -> None:
         d.fetch = real
 
 
-
-
-
-
 def test_cc_doc_marker_detection_fires_both_directions() -> None:
     quiet = "\n".join(d.CC_DEPENDED_DOC_MARKERS)
     got = d.cc_doc_marker_findings(quiet)
@@ -93,14 +87,6 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
 
     got = d.cc_doc_marker_findings(quiet + "\nultra_effort_exit\n")
     check(len(got) == 1 and "ultra_effort_exit" in got[0], f"appearance fires: {got!r}")
-
-
-
-
-
-
-
-
 
 
 # One snippet per anchored document; a new ANCHORS entry with no sample here
@@ -257,16 +243,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
     )
 
 
-
-
-
-
-
-
-
-
-
-
 def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
     """The `x-method` surface is this check's anchor, because `schema.json` is
     GENERATED and the key is a generator-emitted vendor extension: absent means the
@@ -302,10 +278,6 @@ def test_the_acp_method_check_separates_a_rename_from_a_restructure() -> None:
     check(not br, f"a RESTRUCTURE must claim no rename, got {br}")
     check(len(bl) == 1, f"a RESTRUCTURE is one probe-health line, got {bl}")
     d.fetch = real
-
-
-
-
 
 
 def test_report_separates_verified_change_from_probe_health() -> None:
@@ -369,8 +341,6 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         d.run_checks = real_run
 
 
-
-
 def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     """The H1 is a CROSS-FILE contract: upstream-drift.yml titles the GitHub issue
     with `head -1 | sed 's/^# //'` rather than keeping its own copy of these strings.
@@ -413,7 +383,6 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     )
 
 
-
 # A minimal `env.ts` satisfying every omp-env sweep, shaped like the real file in
 # the two ways the sweep can be fooled: `.env`/`OMP_` appear in JSDoc as well as
 # code, and the quote detector (a lone `"` inside a single-quoted string) sits
@@ -422,28 +391,9 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
 # masking cases below live AFTER the detector, not before it.
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_the_floor_is_what_we_already_handle() -> None:
     """A parse returning fewer names than we already decode is broken or degraded,
     and must file probe health rather than five ⛔ against working decoders —
-    #929's false ⛔ on `pre_approval_request` came from exactly a partial
     document. Proven by running the sweep, not by reading the comparison."""
     rep = d.Report()
     ours = d.OurNames(cc={f"ev{i}" for i in range(9)})
@@ -490,10 +440,6 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
         any(f"SKIPPED for {caller}" in f for f in rep.blind),
         f"and must name {caller} in the probe-health line: {rep.blind}",
     )
-
-
-
-
 
 
 def test_every_swept_url_declares_an_anchor() -> None:

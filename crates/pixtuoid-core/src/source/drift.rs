@@ -14,9 +14,10 @@
 //!    meet the real wire. A breadcrumb is something a decoder actually met and
 //!    could not handle, on the machine running that CLI, the moment it happened
 //!    — `doctor` counts them per source and the TUI footer surfaces it.
-//! 3. **`check_upstream_drift.py`, against a PUBLISHED contract only** — a JSON
-//!    schema, or a hooks page written for consumers. It can lie (a vendor may
-//!    restyle a doc), but they owe consumers stability, so it is worth the noise.
+//! 3. **`check_upstream_drift.py`, against whatever DECLARES those names** — a
+//!    JSON schema, a consumer hooks page, or the declaration in the vendor's own
+//!    source. It can lie (a file moves, a doc is restyled), which is why a stale
+//!    pin reads as probe health rather than drift.
 //! 4. The `every_registered_*_event_decodes` tests assert our own belief, so they
 //!    can never see a rename — they bind registration to decoding, nothing more.
 //!

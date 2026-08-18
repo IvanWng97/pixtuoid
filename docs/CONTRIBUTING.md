@@ -495,17 +495,15 @@ you:
     (`pixtuoid-scene/tests/site_badge_colors.rs`) all fail until it exists.
 11. **Other docs in the same PR**: the nested `crates/pixtuoid-core/CLAUDE.md`
     entry, and a `scripts/check_upstream_drift.py` check unless the decoder
-    itself will speak. HOOK-REGISTERED always needs one: registration is
-    name-keyed, so an upstream rename leaves our entry inert, the CLI fires
-    nothing, the decoder is never reached and no breadcrumb is emitted —
-    silence, not a signal. Watch whatever declares those names, source tree
-    included; a stale pin now reads as probe health, not drift (the anchor gate).
+    itself will speak. Two clauses, and the WHY for both lives in
+    `crates/pixtuoid-core/src/source/drift.rs`'s header — read it there, don't
+    restate it:
 
-    TRANSCRIPT-bearing needs one only if its decoder is SILENT on an
-    unrecognised line. Check the catch-all: a `_ => vec![]` with no
-    `drift::unknown_event` means nothing will ever tell you (omp and codex are
-    both this, and are watched here). Where the decoder does breadcrumb, the
-    real wire is the better signal and no row is needed.
+    - **hook-registered** → ALWAYS needs a row.
+    - **transcript-bearing** → needs one only if its decoder is silent on an
+      unrecognised line. Check the catch-all: `_ => vec![]` with no
+      `drift::unknown_event` means nothing will ever tell you (omp and codex are
+      both this).
 12. **Three edits no failure message spells out**, all of them roster literals a
     new source is simply absent from:
     - the 13-row byte pin in `the_whole_roster_is_pinned_row_by_row`
