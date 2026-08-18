@@ -81,6 +81,9 @@
       "message",
       "custom"
     ],
+    "omp.exit_marker": [
+      "session_exit"
+    ],
     "opencode.hook_events": [
       "session.created",
       "session.deleted",

@@ -58,6 +58,10 @@ fn surface() -> Value {
         json!(crate::source::grok::DECODED_XAI_TAGS),
     );
     decoded.insert(
+        "omp.exit_marker",
+        json!([crate::source::omp::DECODED_EXIT_MARKER]),
+    );
+    decoded.insert(
         "omp.entry_types",
         json!(crate::source::omp::DECODED_ENTRY_TYPES),
     );
@@ -296,6 +300,7 @@ mod tests {
                 "DECODED_ENTRY_TYPES",
                 "the_decoded_entry_type_set_is_exactly_what_the_arms_match",
             ),
+            ("DECODED_EXIT_MARKER", "session_exit_ends_root_not_as_child"),
             // grok's arms nest inside the method arm, so the shared dispatch
             // scanner above cannot reach them.
             (

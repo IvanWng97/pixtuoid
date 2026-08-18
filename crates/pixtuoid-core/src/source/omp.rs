@@ -477,6 +477,15 @@ const SESSION: &str = "session";
 const MESSAGE: &str = "message";
 const CUSTOM: &str = "custom";
 
+/// The `customType` marking a clean teardown — the ONLY structural end omp
+/// writes. Exported for the drift surface because the guard below falls through
+/// to `_ => vec![]`: rename it upstream and no omp session ever ends cleanly,
+/// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
+#[cfg(test)]
+pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
+
+const SESSION_EXIT: &str = "session_exit";
+
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -602,7 +611,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
         }
         // Clean teardown marker: reason/kind ignored — every kind
         // ("normal"|"signal"|"fatal"|"process_exit") IS an end.
-        CUSTOM if obj.get("customType").and_then(|c| c.as_str()) == Some("session_exit") => {
+        CUSTOM if obj.get("customType").and_then(|c| c.as_str()) == Some(SESSION_EXIT) => {
             vec![AgentEvent::SessionEnd {
                 agent_id: acting,
                 as_child: omp_parent_key_from_path(path).is_some(),
@@ -810,6 +819,10 @@ mod tests {
 
     #[test]
     fn session_exit_ends_root_not_as_child() {
+        assert_eq!(
+            DECODED_EXIT_MARKER, "session_exit",
+            "the exported marker IS the arm's"
+        );
         let line = r#"{"type":"custom","id":"a1b2c3d4","parentId":"e5f6a7b8","timestamp":"2026-07-09T08:10:00.000Z","customType":"session_exit","data":{"reason":"exit command","kind":"normal","recordedAt":"2026-07-09T08:10:00.000Z"}}"#;
         match &decode(line)[..] {
             [AgentEvent::SessionEnd { agent_id, as_child }] => {

@@ -82,6 +82,14 @@ CODEX_MODELS_URL = (
     "codex-rs/protocol/src/models.rs"
 )
 
+# omp's clean-teardown marker VALUE. The decoder's guard falls through to
+# `_ => vec![]`, so a rename means no omp session ever ends cleanly — every one
+# lingers to a stale sweep, with nothing said.
+OMP_EXIT_DIAG_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/session/exit-diagnostics.ts"
+)
+
 OMP_SESSION_ENTRIES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
 )
@@ -108,6 +116,14 @@ GROK_SESSION_STORAGE_URL = (
 GROK_NOTIFICATION_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
+)
+
+# OpenClaw's own `DEFAULT_GATEWAY_PORT`. A VALUE watch, not a name sweep: the
+# resolved port is the daemon's runtime IDENTITY, so an upstream bump our plugin
+# does not follow stamps a gateway with a stale port and two live gateways
+# collapse onto one mascot.
+OPENCLAW_PATHS_URL = (
+    "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
 )
 
 OPENCLAW_HOOK_TYPES_URL = (
@@ -270,11 +286,13 @@ ANCHORS: dict[str, Anchor] = {
     HERMES_PLUGINS_URL: Anchor(r"VALID_HOOKS", "`VALID_HOOKS`"),
     HERMES_SHELL_HOOK_URL: Anchor(r"_BLOCKING_EVENTS\s*=", "`_BLOCKING_EVENTS`"),
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
+    OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     # identity-grade: co-located, not owning — a section head, a page title, or a
     # union whose MEMBERS declare the checked literals. The names could move out
     # while this still matches.
+    OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
@@ -659,10 +677,12 @@ class OurNames:
     grok_xai_method: set[str] | None = None
     grok_xai_tags: set[str] | None = None
     omp: set[str] | None = None
+    omp_exit_marker: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
     openclaw: set[str] | None = None
+    openclaw_gateway_port: set[str] | None = None
     opencode: set[str] | None = None
     reasonix: set[str] | None = None
     copilot: set[str] | None = None
@@ -727,10 +747,12 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("grok_xai_method", CORE_LIB_FRAGMENT, "decoded", "grok.xai_method"),
     ("grok_xai_tags", CORE_LIB_FRAGMENT, "decoded", "grok.xai_tags"),
     ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
+    ("omp_exit_marker", CORE_LIB_FRAGMENT, "decoded", "omp.exit_marker"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
     ("openclaw", CORE_BIN_FRAGMENT, "registered", "openclaw"),
+    ("openclaw_gateway_port", CORE_BIN_FRAGMENT, "values", "openclaw.default_gateway_port"),
     ("reasonix", CORE_BIN_FRAGMENT, "registered", "reasonix"),
     ("opencode", CORE_LIB_FRAGMENT, "decoded", "opencode.hook_events"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
@@ -1334,6 +1356,18 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
     # omp's entry types are generic English words, so the match is QUOTE-anchored:
     # a bare word test stays green on prose.
+    if ours.omp_exit_marker is not None:
+        diag = fetch_anchored(OMP_EXIT_DIAG_URL, "omp exit-diagnostics", report)
+        if diag is not None:
+            for marker in sorted(ours.omp_exit_marker):
+                if f'"{marker}"' not in diag:
+                    report.add_breaking(
+                        f"omp's clean-teardown marker `{marker}` (decoded in "
+                        f"source/omp.rs) is GONE from exit-diagnostics.ts — renamed; "
+                        f"no omp session ever ends cleanly again, each lingering to a "
+                        f"stale sweep with no breadcrumb."
+                    )
+
     if ours.omp is not None:
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
@@ -1434,6 +1468,26 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"plugin) is GONE from src/plugins/hook-types.ts — likely renamed; "
                         f"the plugin registers a hook OpenClaw never fires (no presence)."
                     )
+
+    if ours.openclaw_gateway_port is not None:
+        text = fetch_anchored(OPENCLAW_PATHS_URL, "OpenClaw config/paths", report)
+        if text is not None:
+            m = re.search(r"DEFAULT_GATEWAY_PORT\s*=\s*(\d+)", text)
+            if m is None:
+                report.add_blind(
+                    "OpenClaw's `DEFAULT_GATEWAY_PORT` value",
+                    "src/config/paths.ts",
+                    "The plugin's fallback-port comparison was SKIPPED.",
+                )
+            else:
+                for ours_port in sorted(ours.openclaw_gateway_port):
+                    if m.group(1) != ours_port:
+                        report.add_breaking(
+                            f"OpenClaw's DEFAULT_GATEWAY_PORT is now {m.group(1)} but "
+                            f"openclaw_plugin.js still falls back to {ours_port} — a gateway "
+                            f"on the new default is stamped with the stale port, so two live "
+                            f"gateways collapse onto one mascot until a TTL sweeps it."
+                        )
 
     if ours.opencode is not None:
         # The inventory is SPLIT across two modules — `permission.v2.asked` is

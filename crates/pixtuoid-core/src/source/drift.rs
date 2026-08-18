@@ -38,10 +38,9 @@
 //! Being watchable is not the same as being watched well, but a silent defense
 //! is not a defense.
 //!
-//! What this ladder does NOT reach: payload FIELD names. A field the decoder
-//! reads and upstream renames is silent unless the read is breadcrumbed, and
-//! most are not — #940 tracks making "watched or breadcrumbed" a ratchet over
-//! all 13 sources.
+//! What this ladder does NOT reach, in two shapes nothing enumerates: payload
+//! FIELD names a decoder reads (#940) and single wire VALUES it compares for
+//! equality (#943). Both are silent unless breadcrumbed, and most are not.
 //!
 //! An alarm must state a fact about US ("this decoder met X and dropped it"),
 //! never a guess about THEM ("upstream renamed X").

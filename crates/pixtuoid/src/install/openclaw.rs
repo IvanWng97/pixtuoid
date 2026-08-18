@@ -28,7 +28,7 @@ const CONFIG_FILES: [&str; 2] = ["openclaw.json", "clawdbot.json"];
 #[cfg(test)]
 const SENTINEL: &str = "@pixtuoid-openclaw-plugin";
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
-const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
+pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("openclaw_plugin.js");
 
 /// The OpenClaw gateway hook events pixtuoid depends on — the SINGLE source of
 /// truth, pinned to the plugin's `HOOKS` array and `decode_openclaw_hook_payload`'s

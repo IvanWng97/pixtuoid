@@ -40,9 +40,34 @@ fn surface() -> Value {
     registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
     registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
+    // A VALUE, not a name set: the gateway port IS the daemon's runtime identity
+    // (`pixtuoid-core/SHARP-EDGES.md`), so a silent upstream bump collapses two
+    // live gateways onto one mascot. Read out of the shipped template rather than
+    // copied, so the watch compares what actually installs.
+    let mut values: BTreeMap<&str, Value> = BTreeMap::new();
+    values.insert(
+        "openclaw.default_gateway_port",
+        json!([openclaw_default_gateway_port()
+            .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
+    );
+
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("registered", json!(registered));
+    root.insert("values", json!(values));
     json!(root)
+}
+
+/// The fallback port the bundled OpenClaw plugin ships with, read out of the
+/// template itself so the drift watch never compares against a second copy.
+fn openclaw_default_gateway_port() -> Option<&'static str> {
+    let after = crate::install::openclaw::PLUGIN_TEMPLATE
+        .split_once("const DEFAULT_GATEWAY_PORT")?
+        .1
+        .split_once('=')?
+        .1;
+    let digits = after.trim_start();
+    let end = digits.find(|c: char| !c.is_ascii_digit())?;
+    (end > 0).then(|| &digits[..end])
 }
 
 fn fragment_path() -> PathBuf {
@@ -77,6 +102,19 @@ mod tests {
             want,
             "{FRAGMENT} is stale — regenerate with `just gen-drift-surface`",
         );
+    }
+
+    /// The port reader finds the shipped literal, and refuses a shape it cannot
+    /// read rather than emitting a plausible wrong answer.
+    #[test]
+    fn the_gateway_port_is_read_from_the_template_not_copied() {
+        let got = openclaw_default_gateway_port().expect("the template declares it");
+        assert!(
+            crate::install::openclaw::PLUGIN_TEMPLATE
+                .contains(&format!("const DEFAULT_GATEWAY_PORT = {got};")),
+            "the emitted port {got} is not the literal the template ships",
+        );
+        assert!(got.chars().all(|c| c.is_ascii_digit()) && !got.is_empty());
     }
 
     /// Every `*_EVENTS` registration set in `install/` reaches the fragment.

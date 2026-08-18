@@ -90,5 +90,10 @@
       "Notification",
       "SessionEnd"
     ]
+  },
+  "values": {
+    "openclaw.default_gateway_port": [
+      "18789"
+    ]
   }
 }

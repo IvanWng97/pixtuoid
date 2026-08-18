@@ -102,12 +102,14 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.HERMES_PLUGINS_URL: 'VALID_HOOKS: Set[str] = {\n    "on_session_start",\n}\n',
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
+    d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
     d.CODEX_ROLLOUT_ITEM_URL: "pub enum RolloutItem {\n    SessionMeta,\n}\n",
     d.CODEX_MODELS_URL: "pub enum ResponseItem {\n    FunctionCall,\n}\n",
     d.GROK_HOOK_URL: "pub enum HookEventName {\n    SessionStart,\n}\n",
     d.GROK_NOTIFICATION_URL: "pub enum SessionUpdate {\n    HookExecution,\n}\n",
     d.GROK_SESSION_STORAGE_URL: 'const XAI_SESSION_UPDATE_METHOD: &str = "_x.ai/session/update";\n',
     d.OPENCLAW_HOOK_TYPES_URL: 'export type PluginHookName =\n  | "agent_end"\n',
+    d.OPENCLAW_PATHS_URL: "export const DEFAULT_GATEWAY_PORT = 18789;\n",
     d.OPENCODE_EVENT_URLS[0]: 'export const Event = {\n  Created: "session.created",\n}\n',
     d.OPENCODE_EVENT_URLS[1]: 'export const Event = {\n  Asked: "permission.v2.asked",\n}\n',
 }
@@ -844,6 +846,12 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "}\n\n"
                     "hook_events! {\n"
                     + "".join(f'    {n} {{ alias: "x" }},\n' for n in ns) + "}\n"}),
+            # A VALUE row: the vanish arm is a DIFFERENT port upstream, not an
+            # absent one, so the generic filler drives it by declaring the fillers
+            # instead of ours.
+            ("openclaw_gateway_port", str, lambda ns: {
+                d.OPENCLAW_PATHS_URL:
+                    "".join(f"export const DEFAULT_GATEWAY_PORT = {n};\n" for n in ns)}),
             ("openclaw", str, lambda ns: {
                 d.OPENCLAW_HOOK_TYPES_URL:
                     "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
@@ -857,6 +865,9 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("grok_xai_tags", pascal, lambda ns: {
                 d.GROK_NOTIFICATION_URL:
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
+            ("omp_exit_marker", str, lambda ns: {
+                d.OMP_EXIT_DIAG_URL: "".join(
+                    f'const SESSION_EXIT_CUSTOM_TYPE = "{n}";\n' for n in ns)}),
             ("omp", str, lambda ns: {
                 d.OMP_SESSION_ENTRIES_URL:
                     "export type SessionEntry =\n"
@@ -919,7 +930,15 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             # and its lone all-lowercase `stop` made an `islower()` test pick the
             # snake_case suffix, silently skipping the whole cursor arm.
             stem = spell(names[-1])
-            sfx = ("_pxd", "_pxdb") if "_" in stem else ("Pxd", "Pxdb")
+            if stem.isdigit():
+                # A numeric VALUE row: a `Pxd` suffix still leaves our digits at
+                # the front, where the reader's `(\d+)` finds them and the arm
+                # reads as unchanged. Extra digits are what make it a real vanish.
+                sfx = ("0", "00")
+            elif "_" in stem:
+                sfx = ("_pxd", "_pxdb")
+            else:
+                sfx = ("Pxd", "Pxdb")
             kept = [spell(n) for n in names if n not in victims]
 
             intact = drive(build([spell(n) for n in names]))
