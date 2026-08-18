@@ -46,6 +46,46 @@ GIST_BUDGET = 96
 # changelog — split it into its component edges or move the argument to its issue.
 MAX_ENTRY_CHARS = 2000
 
+# Whole-file byte budgets for the always-injected / reviewer-loaded docs — the
+# deletion-side forcing function (2026-08 context diet): growth past the cap fails
+# `--check` AND generation, so a grown file must cut, or raise its budget
+# consciously in the same PR (one-in-one-out).
+BUDGETS: dict[str, int] = {
+    "CLAUDE.md": 14_000,
+    "docs/CONTRIBUTING.md": 19_000,
+    "docs/ARCHITECTURE.md": 7_500,
+    "docs/PARALLEL-DELIVERY.md": 4_000,
+    ".github/prompts/pr-review.prompt.md": 11_000,
+    ".github/prompts/impl-plan.prompt.md": 8_000,
+    ".github/prompts/pr_review_rules.md": 8_000,
+    ".claude/skills/two-lens-review/SKILL.md": 14_000,
+    "crates/pixtuoid-core/CLAUDE.md": 11_000,
+    "crates/pixtuoid-core/SHARP-EDGES.md": 16_000,
+    "crates/pixtuoid-core/WHERE-TO-LOOK.md": 4_000,
+    "crates/pixtuoid-core/tests/CLAUDE.md": 7_000,
+    "crates/pixtuoid-scene/CLAUDE.md": 13_500,
+    "crates/pixtuoid-scene/SHARP-EDGES.md": 13_000,
+    "crates/pixtuoid-scene/WHERE-TO-LOOK.md": 5_000,
+    "crates/pixtuoid/CLAUDE.md": 6_000,
+    "crates/pixtuoid/SHARP-EDGES.md": 8_000,
+    "crates/pixtuoid/WHERE-TO-LOOK.md": 3_000,
+    "crates/pixtuoid/src/tui/CLAUDE.md": 5_000,
+    "crates/pixtuoid/src/tui/SHARP-EDGES.md": 4_000,
+    "crates/pixtuoid/src/tui/WHERE-TO-LOOK.md": 3_500,
+    "site/CLAUDE.md": 7_500,
+    "site/SINGLE-SOURCED.md": 8_500,
+    "integrations/raycast/CLAUDE.md": 8_500,
+}
+
+
+def guard_file_budgets(root: pathlib.Path, budgets: dict[str, int]) -> list[str]:
+    return [
+        f"{rel}: {p.stat().st_size} bytes > budget {cap} — cut it, or raise its "
+        f"budget consciously in the same PR (one-in-one-out)"
+        for rel, cap in sorted(budgets.items())
+        if (p := root / rel).exists() and p.stat().st_size > cap
+    ]
+
 
 def clip(text: str, budget: int) -> str:
     """Word-boundary prefix of `text`, retreating past unbalanced markdown so the
@@ -158,7 +198,18 @@ def tracked_guides(root: pathlib.Path) -> list[str]:
     ).stdout.splitlines()
 
 
-def run(root: pathlib.Path, tracked: list[str], check: bool, quiet: bool = False) -> int:
+def run(
+    root: pathlib.Path,
+    tracked: list[str],
+    check: bool,
+    quiet: bool = False,
+    budgets: dict[str, int] | None = None,
+) -> int:
+    over = guard_file_budgets(root, BUDGETS if budgets is None else budgets)
+    if over:
+        for msg in over:
+            print(msg)
+        return 1
     drifted = []
     for rel in tracked:
         guide = root / rel
@@ -199,9 +250,10 @@ def selftest() -> int:
         def stage(rel: str, body: str) -> None:
             (repo / rel).write_text(body)
 
-        def gen(check: bool) -> int:
+        def gen(check: bool, budgets: dict[str, int] | None = None) -> int:
             try:
-                return run(repo, tracked, check, quiet=True)
+                return run(repo, tracked, check, quiet=True,
+                           budgets={} if budgets is None else budgets)
             except SystemExit as e:  # sys.exit from a builder/assert arm
                 return 1 if e.code else 0
 
@@ -260,6 +312,14 @@ def selftest() -> int:
         if gen(False) != 0:
             fails.append("a just-under-ceiling entry must still generate (the does-not-fire arm)")
         stage("crate/SHARP-EDGES.md", edges)
+        tiny = {"crate/SHARP-EDGES.md": 10}
+        if gen(True, budgets=tiny) != 1:
+            fails.append("an over-budget file must red --check (guard_file_budgets)")
+        if gen(False, budgets=tiny) != 1:
+            fails.append("an over-budget file must FAIL generation too")
+        gen(False)  # re-sync the index after the MAX_ENTRY restore, as every arm does
+        if gen(True, budgets={"crate/SHARP-EDGES.md": 10_000}) != 0:
+            fails.append("an under-budget file must stay green (budget does-not-fire arm)")
         if gen(False) != 0 or gen(True) != 0:
             fails.append("fixture must return to green after the controls")
 
