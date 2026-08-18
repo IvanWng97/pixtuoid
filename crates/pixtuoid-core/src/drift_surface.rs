@@ -1,19 +1,13 @@
-//! This crate's half of the **drift surface** — the names our decoders actually
-//! read, emitted as data for `check_upstream_drift.py`.
+//! This crate's half of the **drift surface** — the names our decoders read,
+//! emitted as data for `check_upstream_drift.py`.
 //!
-//! It exists because the watcher is a separate program that cannot call us, and
-//! the alternative it used for years was to REGEX-PARSE this crate's source. A
-//! scraped `match` arm goes stale silently: rename a const and the parser
-//! quietly returns a smaller set, so the watch narrows without anything failing.
-//! Emitting instead makes that a test failure here, in the crate that owns the
-//! names.
+//! The watcher is a separate program that cannot call us, and for years it
+//! REGEX-PARSED this crate's source instead. That fails SILENTLY: rename a
+//! const and the parser returns a smaller set, so the watch narrows with
+//! nothing to show for it. Emitting makes it a test failure HERE.
 //!
-//! The names stay `pub(crate)` and `#[cfg(test)]`: nothing about this is a
-//! published API, and the shipped crate must not be able to read a second copy
-//! of a vocabulary it dispatches on.
-//!
-//! `crates/pixtuoid` emits the other half — its `install/` registration sets are
-//! private to that crate for the same reason.
+//! `crates/pixtuoid` emits the other half — the `*_EVENTS` sharp edge in its
+//! `SHARP-EDGES.md`, not an organisational split.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -37,6 +31,10 @@ fn surface() -> Value {
     decoded.insert(
         "copilot.kinds",
         json!(crate::source::copilot::DECODED_KINDS),
+    );
+    decoded.insert(
+        "copilot.payload_fields",
+        json!(crate::source::copilot::DECODED_FIELDS),
     );
     decoded.insert(
         "decoder.dispatch_names",
@@ -134,5 +132,97 @@ mod tests {
             }
         }
         walk(&surface(), "<root>");
+    }
+
+    /// Every dispatch arm in `file` names a CONST, and those consts are exactly
+    /// the ones `export` declares.
+    ///
+    /// The fragment binds a RENAME — change a const's value and the committed
+    /// file goes stale. It cannot bind an ADDITION: an arm written as a bare
+    /// literal decodes a name the surface never mentions, and every other gate
+    /// stays green. The deleted scraper covered that by capturing arm POSITION;
+    /// this replaces it and is stricter — a bare literal is rejected outright
+    /// rather than silently absorbed.
+    ///
+    /// Reading our own source here is not what this crate stopped doing: that
+    /// was a FOREIGN program regex-parsing us, where a miss narrowed the watch
+    /// in silence. A miss here fails this crate's own test.
+    fn assert_arms_match_export(file: &str, dispatch: &str, export: &str) {
+        let src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("src/source")
+                .join(file),
+        )
+        .expect("the module is readable");
+
+        let after = src
+            .split_once(dispatch)
+            .unwrap_or_else(|| panic!("{file}: no `{dispatch}` dispatch"))
+            .1;
+        let body = &after[..after.find("\n}\n").unwrap_or(after.len())];
+        let mut armed: Vec<&str> = Vec::new();
+        for line in body.lines() {
+            if !line.contains("=>")
+                || !line.starts_with("        ")
+                || line.starts_with("         ")
+            {
+                continue;
+            }
+            for tok in line
+                .split("=>")
+                .next()
+                .unwrap_or("")
+                .split('|')
+                .map(str::trim)
+            {
+                assert!(
+                    !tok.starts_with('"'),
+                    "{file}: arm {tok} dispatches on a bare literal — name it and put it in \
+                     {export}, or the decoder reads a name the drift surface omits",
+                );
+                if tok != "_"
+                    && !tok.is_empty()
+                    && tok
+                        .chars()
+                        .all(|c| c.is_ascii_uppercase() || c == '_' || c.is_ascii_digit())
+                {
+                    armed.push(tok);
+                }
+            }
+        }
+
+        let decl = src
+            .split_once(&format!("{export}: &[&str] = &["))
+            .unwrap_or_else(|| panic!("{file}: no {export} declaration"))
+            .1;
+        let mut declared: Vec<&str> = decl[..decl.find("];").unwrap_or(0)]
+            .split(',')
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .collect();
+
+        armed.sort_unstable();
+        armed.dedup();
+        declared.sort_unstable();
+        assert_eq!(armed, declared, "{file}: dispatch arms vs {export}");
+    }
+
+    /// One row per decoder that exports a set. A decoder added here without a row
+    /// is the gap this closes, so the count is floored.
+    #[test]
+    fn every_exported_set_is_exactly_its_dispatch_arms() {
+        let rows = [
+            (
+                "acp.rs",
+                "match str_field(\"sessionUpdate\").unwrap_or(\"\") {",
+                "DECODED_TAGS",
+            ),
+            ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
+            ("opencode.rs", "match event {", "DECODED_EVENTS"),
+        ];
+        assert!(rows.len() >= 3, "every set-exporting decoder needs a row");
+        for (file, dispatch, export) in rows {
+            assert_arms_match_export(file, dispatch, export);
+        }
     }
 }

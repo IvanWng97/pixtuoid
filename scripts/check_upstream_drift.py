@@ -89,40 +89,6 @@ CC_LIFECYCLE_SURFACE_MARKERS = {
 }
 
 
-# Registered hermes events for which upstream treating them as BLOCKING would let
-# our silent exit 0 ANSWER a decision rather than merely observe one. Only the
-# approval gate qualifies today; `pre_tool_call` is blocking upstream and that is
-# fine — a tool gate is not a permission answer.
-
-
-
-
-# Payload fields decode_rx_hook_payload reads — a renamed json tag silently
-# zeroes the decode (`event`/`cwd` are load-bearing: a payload lacking them is
-# rejected as malformed).
-
-
-
-# CodeWhale ENV-MODE identity: the DEEPSEEK_* names our shim folds into the
-# cwd-keyed envelope, set by `HookContext::to_env_vars`. WORKSPACE is
-# load-bearing — it becomes the envelope `cwd` = the AgentId KEY, so a rename
-# drops EVERY session (no sprite). DEEPSEEK_SESSION_ID is deliberately NOT read
-# (proven inconsistent), and the raw subagent-JSON fields are left to the
-# decoder's own parentless-degrade because a fuzzy `json!` macro owns them.
-
-# ONE-DIRECTIONAL: opencode emits far more EventV2 types than we map, so a new
-# upstream event is noise; only a type WE DEPEND ON vanishing alarms. Track the
-# `dev` branch (the active default) and `packages/schema/` (the old
-# `packages/core` path is a re-export shim that 200s but greps empty).
-
-# `permission.asked` is decoded DEFENSIVELY (a V1/alias spelling); only
-# `permission.v2.asked` is a guaranteed standalone upstream EventV2 definition, so
-# don't alarm if the bare form isn't found as a `type:` literal.
-
-# Payload FIELD names decode_oc_hook_payload reads, as `field:` property lines in
-# the schema Struct defs. A rename → the decoder reads None → wrong-register /
-# no-link / no-activity.
-
 # Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest
 # published version, and a drift watch wants the latest shape, not a frozen one.
 # The schema ships inside the platform packages (`@github/copilot` itself is now a
@@ -137,13 +103,6 @@ COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/sessio
 # nulls all of them while the nested names still resolve (the all-depth union
 # check would NOT alarm). The wire `parentId` is deliberately absent: sub-agents
 # link via the envelope `agentId`, so watching it would alarm on a non-dependency.
-COPILOT_PAYLOAD_FIELDS = {
-    "data",
-    "agentId", "sessionId", "context", "cwd",
-    "toolCallId", "toolName", "arguments", "agentDisplayName",
-    "permissionRequest", "result", "kind",
-    "model",
-}
 
 # Cursor is a closed binary, so — like CC — the docs are the only watchable
 # surface. ONE-DIRECTIONAL: only a depended event vanishing alarms. The
@@ -151,46 +110,6 @@ COPILOT_PAYLOAD_FIELDS = {
 # word regardless), so its disappearance can be masked; the distinctive
 # `sessionStart`/`sessionEnd`/`preToolUse`/`postToolUse` carry the check.
 CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks"
-
-# The canonical OpenClaw hook-name union, as quoted string literals.
-# ONE-DIRECTIONAL: a hook WE REGISTER vanishing means the plugin registers
-# something OpenClaw never fires, so the mascot silently goes dark.
-
-# Payload FIELD names decode_openclaw_hook_payload reads: `runId` (the in-flight run
-# key), `sessionId` (fallback key + label), `success` (agent_end → Degraded gate).
-# `success` is a common word, so a rename of it could be masked by an unrelated
-# occurrence; the distinctive `runId`/`sessionId` carry the check.
-# Reads that are deliberately NOT watched, per source. The pattern the event
-# sweeps already use: a `.get()` that is neither watched nor ledgered fails
-# `no_decoder_read_is_unaccounted_for`, so adding one forces the decision instead
-# of silently losing coverage — which is how `sessionId` and `extra` came to be
-# missing from the two sets above.
-
-
-# The gateway PORT is pixtuoid's runtime identity for one gateway, read off
-# `gateway_start`'s event/ctx: a rename leaves every envelope stamped with the
-# registration-time FALLBACK, so two live gateways collapse onto one mascot. The
-# type names are watched instead of the common word `port`.
-
-# The plugin cannot IMPORT upstream's `DEFAULT_GATEWAY_PORT` (it lives in
-# OpenClaw's state dir, outside any `node_modules/openclaw`), so the literal is
-# copied into `openclaw_plugin.js` — a copied constant is a latent drift bug
-# unless something watches it. This is that watch.
-
-# BOTH directions ride `VALID_HOOKS`, the declaration that OWNS the vocabulary,
-# with `SHELL_UNSUPPORTED_HOOKS` naming which of those a SHELL hook cannot serve.
-# The vanish half used to read `_DEFAULT_PAYLOADS` one file over — the `hermes
-# hooks test` FIXTURE set, which does not list every hook — and filed a verified
-# ⛔ against `pre_approval_request`, an event this repo holds a capture of.
-# The shell-hook PAYLOAD is assembled by `_serialize_payload()` in a DIFFERENT
-# file from the event list — two orthogonal checks, two files.
-# Field names decode_hermes_hook_payload reads, as dict-key literals in
-# _serialize_payload; a rename → the JSON omits it → the decoder reads None.
-# `hermes::resolve_hermes_home` MIRRORS `_hermes_home_from_env`. ONE-DIRECTIONAL:
-# a depended env var VANISHING means we resolve a config.yaml hermes no longer
-# reads — the #880 fail-silent class, whose only symptom is a missing sprite.
-# The `.strip()` and the `%LOCALAPPDATA%\hermes` SHAPE are behaviour, not names,
-# so they are pinned by the hermes unit tests instead.
 
 # Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
 # (each name appears verbatim in the summary table AND the payload examples), so —
@@ -201,9 +120,6 @@ KIMI_HOOKS_URL = (
     "https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/"
     "docs/en/customization/hooks.md"
 )
-
-# `RolloutItem` lives in the history crate, NOT protocol.rs — a stale pin here goes
-# blind rather than wrong, which reads as green.
 
 # grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of the
 # v1 stable + v1 unstable tag sets — hence two fetches. v2 is a separate, partly
@@ -218,30 +134,6 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
     "https://raw.githubusercontent.com/agentclientprotocol/"
     "agent-client-protocol/main/schema/v1/schema.unstable.json"
 )
-
-# Three depended surfaces in three files: the hook event enum + payload serde,
-# the transcript xAI-extension vocabulary, and the active_sessions.json
-# liveness-registry struct.
-# The module that WRITES the method into updates.jsonl (`serialize_entry("method",
-# XAI_SESSION_UPDATE_METHOD)`), so it owns the name we gate on — not the
-# notification module, which only mentions it in a `///`.
-# Matches BOTH sides of this watch — upstream's declaration and our mirror of it.
-# The value must be read from the declaration, never scanned for as a substring:
-# a rename of the VALUE at the declaration leaves the old literal standing in a
-# `///` and a `#[cfg(test)]` fixture, so `"…" in text` never fires.
-
-
-
-# Hook fields decode_grok_hook_payload reads, split by serde origin: ENVELOPE
-# fields are camelCase via struct-level rename_all, so the wire name never appears
-# literally and the `pub <ident>:` declarations are what to check; PAYLOAD fields
-# carry explicit `rename = "…"` attrs; two payload fields are un-renamed idents.
-# Transcript vocabulary decode_grok_line reads from the xAI SessionUpdate enum:
-# variant IDENTS, since the snake_case tags derive via rename_all and the wire
-# string never appears literally.
-# The active_sessions.json registry struct grok_ids_from_registry parses (no
-# rename_all — field idents ARE the wire names). A rename silently degrades the
-# whole liveness ladder to mtime gating.
 
 # omp is TRANSCRIPT-ONLY, and its depended names are split across the upstream
 # files that define them. ONE-DIRECTIONAL like copilot: only a name WE DEPEND ON
@@ -328,10 +220,6 @@ ANCHORS: dict[str, Anchor] = {
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
 }
 
-
-# Documents where a PARSER is the identity proof instead. Written down so the
-# selftest can assert this set equals the live `try_fetch` call sites — otherwise
-# the next unanchored sweep just uses that spelling to escape the gate.
 
 
 @dataclasses.dataclass
@@ -582,8 +470,6 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
 
 
 
-def _snake_case(camel: str) -> str:
-    return re.sub(r"(?<!^)(?=[A-Z])", "_", camel).lower()
 
 
 
@@ -592,16 +478,6 @@ def _snake_case(camel: str) -> str:
 
 
 
-def codex_function_call_fields(text: str) -> set[str] | None:
-    """The field idents of the INLINE `ResponseItem::FunctionCall { … }` variant.
-
-    Returns None if it isn't an inline struct — a GRACEFUL SKIP, not an alarm: a
-    tuple-variant refactor serializes the SAME JSON, so the decoder still works
-    and only this bonus check goes quiet."""
-    m = re.search(r"FunctionCall\s*\{([^}]*)\}", text)
-    if not m:
-        return None
-    return set(re.findall(r"\b([a-z_][a-z0-9_]*)\s*:", m.group(1)))
 
 
 
@@ -755,14 +631,9 @@ class OurNames:
     cc: set[str] | None = None
     dispatch_names: set[str] | None = None
     copilot: set[str] | None = None
+    copilot_fields: set[str] | None = None
     cursor: set[str] | None = None
     kimi: set[str] | None = None
-
-
-# (OurNames field, reader, the surface it reads — the wording of its probe-health
-# line). A table because each row needs its OWN `try`; rows hold function OBJECTS
-# captured at import, so a test injecting a stale reader must replace the ROW, not
-# the module attribute.
 
 
 # A parse smaller than this is not believed, so BOTH drift directions are SKIPPED
@@ -816,6 +687,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("kimi", CORE_BIN_FRAGMENT, "registered", "kimi"),
     ("acp_decoded_tags", CORE_LIB_FRAGMENT, "decoded", "acp.session_update_tags"),
     ("copilot", CORE_LIB_FRAGMENT, "decoded", "copilot.kinds"),
+    ("copilot_fields", CORE_LIB_FRAGMENT, "decoded", "copilot.payload_fields"),
     ("dispatch_names", CORE_LIB_FRAGMENT, "decoded", "decoder.dispatch_names"),
 )
 
@@ -879,12 +751,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     costs exactly what it fed. No `read_*` may be called from here: an inline read
     unwinds to that catch-all and is filed TRANSIENT — a warning on a green run —
     which is strictly worse than the probe-health line `read_our_names` files."""
-    # protocol.rs holds BOTH the HookEventName enum and the EventMsg enum.
-
-
-
-
-
     # The ACP method `session/update` and the two `sessionUpdate` tags
     # `decode_session_update` turns into events. v1 only — grok does not speak v2.
     # xAI's OWN `_x.ai/session/update` is watched separately, off its declaration.
@@ -976,7 +842,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     "The Copilot payload-field watch was SKIPPED.",
                 )
             else:
-                for field in sorted(COPILOT_PAYLOAD_FIELDS):
+                for field in sorted(ours.copilot_fields or ()):
                     if field not in fields_up:
                         report.add_breaking(
                             f"Copilot field `{field}` (read by decode_copilot_line / "

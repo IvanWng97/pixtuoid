@@ -14,7 +14,6 @@ import json
 import pathlib
 import re
 import sys
-import typing
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -27,7 +26,6 @@ import check_upstream_drift as d  # noqa: E402
 FAILS: list[str] = []
 
 
-READER_NAME_SUFFIXES = {"", "_events", "_types", "_entry_types"}
 
 
 def check(cond: bool, msg: str) -> None:
@@ -103,19 +101,6 @@ def test_cc_doc_marker_detection_fires_both_directions() -> None:
 
 
 
-def test_every_const_array_reader_uses_the_shared_parser() -> None:
-    """No reader may hand-roll the scrape the shared parser exists to own."""
-    src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
-    offenders = [
-        ln.strip()
-        for ln in src.splitlines()
-        if 'findall(r\'"(\\w+)"\'' in ln and "strip_rust_comments" not in ln
-    ]
-    check(
-        not offenders,
-        "every `\"(\\\\w+)\"` scrape must route through strip_rust_comments; "
-        f"unrouted: {offenders!r}",
-    )
 
 
 # One snippet per anchored document; a new ANCHORS entry with no sample here
@@ -263,14 +248,6 @@ def test_report_is_the_only_way_to_file_a_finding() -> None:
 
 
 
-def _raiser(name: str) -> typing.Callable[[], object]:
-    """A reader that always fails, keeping `__name__` so the report can name it."""
-
-    def broken() -> object:
-        raise RuntimeError("parser stale")
-
-    broken.__name__ = name
-    return broken
 
 
 
@@ -432,57 +409,8 @@ def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
 # ABOVE a comment that names checked symbols. Tracking only `"` desynchronises
 # there and leaks every later comment back into the "code" — which is why the
 # masking cases below live AFTER the detector, not before it.
-_OMP_ENV_LIVE = (
-    '/** Reads ".env" from each dir and aliases "OMP_" keys — JSDoc, not code. */\n'
-    'import { getAgentDir, getConfigRootDir, refreshDirsFromEnv } from "./dirs";\n'
-    "export function isValidEnvName(name: string): boolean { return true; }\n"
-    "export function isSafeEnvValue(value: string): boolean { return true; }\n"
-    "function parseEnvLine(line: string) {\n"
-    "\tif (quote === '\"' || quote === \"'\" || quote === \"`\") return undefined;\n"
-    "\treturn undefined;\n"
-    "}\n"
-    "export function parseEnvFile(filePath: string): Record<string, string> {\n"
-    "\tconst result = {};\n"
-    "\tfor (const line of content.split()) parseEnvLine(line);\n"
-    '\tif (k.startsWith("OMP_")) result[`PI_${k.slice(4)}`] = result[k];\n'
-    "\treturn result;\n"
-    "}\n"
-    "// Eagerly parse each dir's \".env\", then rebuild: getAgentDir() already\n"
-    "// located one, and parseEnvLine gives it Bun's semantics. Prose, not code.\n"
-    'parseEnvFile(path.join(getConfigRootDir(), ".env"));\n'
-    'parseEnvFile(path.join(getAgentDir(), ".env"));\n'
-    "refreshDirsFromEnv();\n"
-)
 
 
-def _drive_upstream(bodies: dict[str, str], kind: str, ours: "d.OurNames") -> list[str]:
-    """Run the checks over stubbed upstream files, returning only the lines the
-    `kind` sweep emits — a sibling sweep's noise must not read as this one.
-
-    `ours` is explicit because each source's block is gated on its own field: a
-    driver that supplied one source's names silently skipped every OTHER block,
-    so the stub was never REQUESTED. The guard below checks exactly that much — a
-    document fetched but never swept reads identically, so a silent arm still
-    needs a paired mutant arm to prove the sweep ran."""
-
-    served: list[str] = []
-
-    def stub(url: str) -> str:
-        served.append(url)
-        if url in bodies:
-            return bodies[url]
-        raise urllib.error.URLError("not stubbed")  # -> transient, filtered below
-
-    real = d.fetch
-    d.fetch = stub
-    try:
-        report = d.Report()
-        d.run_checks(ours, report=report)
-    finally:
-        d.fetch = real
-    unread = sorted(set(bodies) - set(served))
-    check(not unread, f"_drive_upstream never fetched {unread} — the drive was vacuous")
-    return [x for x in report.breaking if kind in x]
 
 
 
@@ -653,6 +581,55 @@ def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
         check(bool(ours2.copilot), "a DECODE field survives the other fragment going missing")
     finally:
         d.load_fragment = real
+
+
+def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
+    """Each parser, against a hand-made document of the shape it reads.
+
+    They fail SAFE (an empty parse becomes probe health, not a ⛔), but the
+    selftest's own premise is that a regex-parser regression is a silent monitor
+    death — and these four are what the whole remaining watch stands on. The
+    coverage that used to be here went with the source-scraping parsers it also
+    covered; this is the half that had to come back.
+    """
+    cc = d.upstream_cc_hook_events(
+        "# Hooks reference\n\n"
+        "| Event | When it fires |\n|---|---|\n"
+        "| `PreToolUse` | before a tool |\n"
+        "| `PermissionRequest` | on a gate |\n"
+    )
+    check(cc is not None and {"PreToolUse", "PermissionRequest"} <= cc, f"cc table: {cc}")
+    check(
+        d.upstream_cc_hook_events("# Hooks reference\n\nprose with no table\n") in (None, set()),
+        "a table-less page must not read as a full parse",
+    )
+
+    schema = (
+        '{"definitions": {"SessionEvent": {"anyOf": ['
+        '{"$ref": "#/definitions/Start"}, {"$ref": "#/definitions/Stop"}]},'
+        '"Start": {"properties": {"type": {"const": "session.start"},'
+        '"sessionId": {"type": "string"}}},'
+        '"Stop": {"properties": {"type": {"const": "tool.execution_complete"},'
+        '"toolCallId": {"type": "string"}}}}}'
+    )
+    evs = d.upstream_copilot_events(schema)
+    check(evs is not None and {"session.start", "tool.execution_complete"} <= evs, f"kinds: {evs}")
+    ns = d.upstream_copilot_namespaces(schema)
+    check(ns is not None and {"session", "tool"} <= ns, f"namespaces: {ns}")
+    fields = d.upstream_copilot_field_names(schema)
+    check(fields is not None and {"sessionId", "toolCallId"} <= fields, f"fields: {fields}")
+
+    # An unrecognised document must not parse to a NON-EMPTY set: that is what
+    # would report every name we depend on as GONE. Empty and None are both safe
+    # here — the believability gate turns either into probe health — so this
+    # asserts falsiness, not which of the two.
+    for name, fn in (
+        ("events", d.upstream_copilot_events),
+        ("namespaces", d.upstream_copilot_namespaces),
+        ("fields", d.upstream_copilot_field_names),
+    ):
+        got = fn('{"definitions": {"Unrelated": {}}}')
+        check(not got, f"copilot {name}: an unrecognised schema must not parse to a set, got {got}")
 
 
 def main() -> int:

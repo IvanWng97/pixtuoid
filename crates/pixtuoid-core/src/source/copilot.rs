@@ -114,6 +114,36 @@ pub(crate) const DECODED_KINDS: &[&str] = &[
     SESSION_SHUTDOWN,
 ];
 
+/// The payload fields `decode_copilot_line` / `extract_copilot_cwd` read — this
+/// module's second row in the drift surface, alongside the `kind` set.
+///
+/// `type` is excluded: it is the discriminator, watched as `DECODED_KINDS`.
+/// Pinned to the decoder's ACTUAL reads by
+/// `the_field_set_is_exactly_what_the_decoder_reads`, because a field the
+/// decoder starts reading without being added here is a dependency nothing
+/// watches — which is how `tokenCount` and `tokenDetails` came to be read and
+/// unwatched.
+///
+/// Test-gated: the surface emitter is the only reader.
+#[cfg(test)]
+pub(crate) const DECODED_FIELDS: &[&str] = &[
+    "agentDisplayName",
+    "agentId",
+    "arguments",
+    "context",
+    "cwd",
+    "data",
+    "kind",
+    "model",
+    "permissionRequest",
+    "result",
+    "sessionId",
+    "tokenCount",
+    "tokenDetails",
+    "toolCallId",
+    "toolName",
+];
+
 /// Decode one `events.jsonl` line into zero or more `AgentEvent`s. Unknown,
 /// ephemeral, or malformed shapes return `vec![]` and never panic — real files
 /// carry embedded-newline / U+2028 corruption (upstream copilot-cli #2649/#2012).
@@ -985,5 +1015,41 @@ mod tests {
             Some(v) => std::env::set_var("COPILOT_HOME", v),
             None => std::env::remove_var("COPILOT_HOME"),
         }
+    }
+
+    /// The exported field set IS what the decoder reads. A field it starts
+    /// reading without being declared here is a dependency the drift watch never
+    /// looks at — `tokenCount` / `tokenDetails` were exactly that until this test
+    /// existed.
+    #[test]
+    fn the_field_set_is_exactly_what_the_decoder_reads() {
+        let src = include_str!("copilot.rs");
+        let mut read: Vec<&str> = Vec::new();
+        for m in src.match_indices("str_at(") {
+            let rest = &src[m.0..];
+            if let Some(q) = rest.find('"') {
+                if let Some(end) = rest[q + 1..].find('"') {
+                    read.push(&rest[q + 1..q + 1 + end]);
+                }
+            }
+        }
+        for pat in ["\t.get(\"", ".get(\""] {
+            for m in src.match_indices(pat) {
+                let rest = &src[m.0 + pat.len()..];
+                if let Some(end) = rest.find('"') {
+                    read.push(&rest[..end]);
+                }
+            }
+        }
+        // The discriminator is watched as DECODED_KINDS; test fixtures and JSON
+        // pointers are not payload reads.
+        read.retain(|f| {
+            *f != "type" && !f.contains('/') && f.chars().all(|c| c.is_ascii_alphanumeric())
+        });
+        read.sort_unstable();
+        read.dedup();
+        let mut declared = DECODED_FIELDS.to_vec();
+        declared.sort_unstable();
+        assert_eq!(read, declared, "decoder reads vs DECODED_FIELDS");
     }
 }

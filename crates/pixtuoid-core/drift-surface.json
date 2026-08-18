@@ -16,6 +16,23 @@
       "session.task_complete",
       "session.shutdown"
     ],
+    "copilot.payload_fields": [
+      "agentDisplayName",
+      "agentId",
+      "arguments",
+      "context",
+      "cwd",
+      "data",
+      "kind",
+      "model",
+      "permissionRequest",
+      "result",
+      "sessionId",
+      "tokenCount",
+      "tokenDetails",
+      "toolCallId",
+      "toolName"
+    ],
     "decoder.dispatch_names": [
       "Agent"
     ],
