@@ -228,8 +228,9 @@ mod tests {
         assert_eq!(armed, declared, "{file}: dispatch arms vs {export}");
     }
 
-    /// One row per decoder that exports a set. A decoder added here without a row
-    /// is the gap this closes, so the count is floored.
+    /// One row per decoder whose export is a match dispatch. Every OTHER
+    /// `DECODED_*` export names the test that pins it instead — a new one gets
+    /// neither by default, and the census below is what refuses it.
     #[test]
     fn every_exported_set_is_exactly_its_dispatch_arms() {
         let rows = [
@@ -241,9 +242,51 @@ mod tests {
             ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
         ];
-        assert!(rows.len() >= 3, "every set-exporting decoder needs a row");
         for (file, dispatch, export) in rows {
             assert_arms_match_export(file, dispatch, export);
         }
+
+        // The floor this replaces was `rows.len() >= 3` over a 3-element literal,
+        // so it could not fail in any revision that compiled.
+        const PINNED_ELSEWHERE: &[&str] = &[
+            // claude_code.rs::the_decoded_set_is_exactly_what_the_arms_match
+            "DECODED_TYPES",
+            // copilot.rs::the_field_set_is_exactly_what_the_decoder_reads
+            "DECODED_FIELDS",
+            // decoder.rs::the_dispatch_name_set_is_exactly_what_the_fallback_matches
+            "DECODED_DISPATCH_NAMES",
+            // omp.rs::the_decoded_entry_type_set_is_exactly_what_the_arms_match
+            "DECODED_ENTRY_TYPES",
+        ];
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/source");
+        let mut found: Vec<String> = Vec::new();
+        for entry in std::fs::read_dir(&dir).expect("the source dir is readable") {
+            let path = entry.expect("a readable entry").path();
+            if path.extension().is_none_or(|e| e != "rs") {
+                continue;
+            }
+            let src = std::fs::read_to_string(&path).expect("the module is readable");
+            for line in src.lines() {
+                let Some((_, rest)) = line.split_once("const DECODED_") else {
+                    continue;
+                };
+                if let Some((name, _)) = rest.split_once(':') {
+                    found.push(format!("DECODED_{name}"));
+                }
+            }
+        }
+        let mut covered: Vec<String> = rows
+            .iter()
+            .map(|(_, _, export)| (*export).to_owned())
+            .chain(PINNED_ELSEWHERE.iter().map(|e| (*e).to_owned()))
+            .collect();
+        found.sort_unstable();
+        found.dedup();
+        covered.sort_unstable();
+        covered.dedup();
+        assert_eq!(
+            found, covered,
+            "every DECODED_* export needs a row above or a named pin in PINNED_ELSEWHERE"
+        );
     }
 }

@@ -67,6 +67,8 @@ HERMES_PLUGINS_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/hermes_cli/plugins.py"
 )
 
+# The ROLLOUT `response_item` types live in this sibling of protocol.rs, not in
+# protocol.rs itself.
 CODEX_MODELS_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/models.rs"
@@ -122,8 +124,6 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 CORE_LIB_FRAGMENT = "crates/pixtuoid-core/drift-surface.json"
 CORE_BIN_FRAGMENT = "crates/pixtuoid/drift-surface.json"
 
-# The ROLLOUT `response_item` types live in the sibling models.rs
-# (`crate::models::ResponseItem`), NOT protocol.rs.
 CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
 CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 
@@ -193,41 +193,6 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
     "agent-client-protocol/main/schema/v1/schema.unstable.json"
 )
 
-# omp is TRANSCRIPT-ONLY, and its depended names are split across the upstream
-# files that define them. ONE-DIRECTIONAL like copilot: only a name WE DEPEND ON
-# vanishing is breaking (the transcript still flows but decodes to nothing).
-# The clean-teardown marker both the session-ended checker and the SessionEnd
-# decode key on.
-# Message-level names (roles + tool-call block shape) live in the pi-ai LLM types:
-# quoted TS literals for the roles/block type, property keys for the fields.
-# The ask tool's NAME is STATE-bearing — decode_omp_line maps an assistant `ask`
-# block to Waiting — and the first question's text feeds the Waiting reason.
-# `arguments.i` (the intent fallback) is harness-wide, not defined in ask.ts, and
-# its loss only degrades the label, so it is deliberately unwatched.
-# `omp::resolve_omp_sessions_dir` MIRRORS `DirResolver`. ONE-DIRECTIONAL: a
-# depended env var VANISHING means we watch a sessions dir omp no longer writes
-# to — an empty office and no error, the #880 fail-silent class.
-# The SHAPES (Node-join binding, the agent/ flatten, the charset) are behaviour
-# no name sweep can see — pinned by the omp axis-matrix unit tests.
-# The `.env` OVERLAY that can move that same sessions dir. It is the ORDERING
-# that is load-bearing: those files reach `process.env` only AFTER dirs.ts froze
-# its resolver, so the post-load `refreshDirsFromEnv()` is what lets them move
-# the sessions dir at all — lose it and OUR overlay becomes the divergence,
-# honoring a file omp stopped reading. The value is the Rust half mirroring it.
-# Split by ROLE, because the two halves send a maintainer to different code and
-# a shared message would name the wrong requirement for one of them.
-# `parseEnvFile` itself is the ANCHOR, so its rename lands as a blind probe
-# rather than a rename line.
-#
-# The LOCATE-and-ORDER half: which dirs the files come from, and the rebuild
-# that lets them reach the sessions dir at all.
-# The line-PARSE half: what one `.env` line means once the file is found.
-# `.env` is the filename we look for under each of omp's dirs; `OMP_` is the
-# alias prefix that makes an `OMP_CODING_AGENT_DIR` reach the resolver as
-# `PI_CODING_AGENT_DIR` (its `PI_` twin is built in a template literal, so only
-# this half is quoted in the source and checkable as a literal).
-
-
 class Anchor(typing.NamedTuple):
     """The declaration that OWNS the names we check a fetched document for."""
 
@@ -272,14 +237,14 @@ ANCHORS: dict[str, Anchor] = {
     OPENCLAW_HOOK_TYPES_URL: Anchor(r"export type PluginHookName\s*=", "`PluginHookName`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
-    # identity-grade: co-located, not owning — a section head or page title. The
-    # names could move out while this still matches, so these documents lean on
-    # the believability floor instead.
+    # identity-grade: co-located, not owning — a section head, a page title, or a
+    # union whose MEMBERS declare the checked literals. The names could move out
+    # while this still matches.
+    OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
     KIMI_HOOKS_URL: Anchor(r"hook_event_name", "the hook-event payload docs"),
-    OMP_SESSION_ENTRIES_URL: Anchor(r"SessionEntry|entries", "the session-entry types"),
     REASONIX_HOOK_URL: Anchor(r"Event\s*=\s*\"", "the Event consts"),
 }
 
@@ -771,8 +736,8 @@ def read_our_names(report: Report) -> OurNames:
     return ours
 
 
-def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
-    """Remove `//` and `/* */` comments, PRESERVING string literals.
+def strip_rust_comments(body: str) -> str:
+    """Remove Rust `//` and `/* */` comments, PRESERVING string literals.
 
     A scanner rather than a pair of `re.sub`s, because both regex approaches drop
     a REAL depended name and so fail SILENTLY OPEN — the watcher stops checking
@@ -783,26 +748,17 @@ def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
     - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
       leaves its tail behind and re-admits words from inside it.
 
-    The two languages disagree on exactly two axes, both passed in rather than
-    sniffed, because guessing either one fails SILENTLY OPEN too:
-
-    - `nested`: Rust NESTS block comments; a non-nesting language would need
-      False, and nesting one that does not swallows the code after its first
-      `*/`. Passed in rather than sniffed: guessing fails SILENTLY OPEN.
-      dotenv quote-detector spells `'"'`, a lone double quote inside a
-      single-quoted string, and tracking `"` alone desynchronises the scanner
-      from there to end of file (pinned by
-      `test_ts_comment_strip_survives_a_quote_detector_line`). Rust must NOT
-      track `'`, where an apostrophe is far more often a lifetime (`&'a str`)
-      than a string, and `'` + the next `'` would swallow the code between two
-      lifetimes (pinned by `test_rust_comment_strip_is_not_confused_by_lifetimes`).
+    `"` is the only string opener tracked: an apostrophe here is far more often a
+    lifetime (`&'a str`), and an ODD count of them would swallow the FOLLOWING
+    comment into a fake literal, re-admitting every word inside it (pinned by
+    `test_rust_comment_strip_is_not_confused_by_lifetimes`).
     """
     out: list[str] = []
     i, n, depth = 0, len(body), 0
     while i < n:
         pair = body[i : i + 2]
         if depth:
-            if nested and pair == "/*":
+            if pair == "/*":
                 depth += 1
                 i += 2
             elif pair == "*/":
@@ -819,14 +775,13 @@ def _strip_c_style_comments(body: str, *, nested: bool, quotes: str) -> str:
             nl = body.find("\n", i)
             i = n if nl < 0 else nl
             continue
-        quote = body[i]
-        if quote in quotes:
+        if body[i] == '"':
             j = i + 1
             while j < n:
                 if body[j] == "\\":
                     j += 2
                     continue
-                if body[j] == quote:
+                if body[j] == '"':
                     j += 1
                     break
                 j += 1
@@ -864,10 +819,6 @@ def rust_block_after(src: str, anchor_re: str) -> str | None:
     return None
 
 
-def strip_rust_comments(body: str) -> str:
-    """[`_strip_c_style_comments`] for Rust: NESTING block comments, and `"` is
-    the only string opener — an apostrophe here is usually a lifetime."""
-    return _strip_c_style_comments(body, nested=True, quotes='"')
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
@@ -994,7 +945,7 @@ def upstream_reasonix_hooks(text: str) -> set[str] | None:
     return found or None
 
 
-def python_set_literal(src: str, decl: str) -> set[str]:
+def python_set_literal(src: str, decl: str) -> set[str] | None:
     """The string members of a `NAME: Set[str] = { … }` block.
 
     Comments are stripped BEFORE the brace scan, for the reason `_enum_body` and
@@ -1005,11 +956,11 @@ def python_set_literal(src: str, decl: str) -> set[str]:
     """
     i = src.find(decl)
     if i < 0:
-        return set()
+        return None
     code = "\n".join(line.split("#", 1)[0] for line in src[i:].splitlines())
     j = code.find("{")
     if j < 0:
-        return set()
+        return None
     depth = 0
     for k in range(j, len(code)):
         if code[k] == "{":
@@ -1017,8 +968,8 @@ def python_set_literal(src: str, decl: str) -> set[str]:
         elif code[k] == "}":
             depth -= 1
             if depth == 0:
-                return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code[j + 1 : k]))
-    return set()
+                return set(re.findall(r'"([a-z_][a-z0-9_]*)"', code[j + 1 : k])) or None
+    return None
 
 
 def run_checks(ours: OurNames, *, report: Report) -> None:

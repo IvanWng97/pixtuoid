@@ -676,7 +676,7 @@ mod tests {
             });
             evs > 0 || logs.contains(crate::source::drift::TARGET)
         };
-        for ty in [SESSION, MESSAGE, CUSTOM] {
+        for ty in DECODED_ENTRY_TYPES {
             assert!(drive(ty), "{ty} must reach a real arm");
         }
         assert!(!drive("checkpoint"), "an unread entry type reaches neither");

@@ -341,6 +341,31 @@ def test_report_separates_verified_change_from_probe_health() -> None:
         d.run_checks = real_run
 
 
+def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
+    """The stripper's docstring named this test before the test existed.
+
+    Tracking `'` as a string opener swallows the comment AFTER an odd number of
+    lifetimes into a fake literal, re-admitting every word inside it. An EVEN
+    count cannot show this — the fake span closes before the comment — so a
+    two-lifetime fixture passes under both implementations and proves nothing.
+    """
+    odd = "fn f<'a>(x: &'a str) -> &'static u8 { /* PxGhost */ }"
+    check("PxGhost" not in d.strip_rust_comments(odd),
+          f"lifetimes must not open a string: {d.strip_rust_comments(odd)}")
+
+    # `//` inside a string literal: a blind `//[^\n]*` eats the rest of the line.
+    in_string = 'const U: &str = "https://x/y"; const K: &str = "PxKeep";'
+    check(d.strip_rust_comments(in_string) == in_string,
+          f"a `//` inside a string is not a comment: {d.strip_rust_comments(in_string)}")
+
+    # NESTED block comments: `/\\*.*?\\*/` stops at the first `*/` and re-admits
+    # `PxGhost` from inside the comment.
+    nested = 'A, /* outer /* inner */ PxGhost */ B,'
+    stripped = d.strip_rust_comments(nested)
+    check("PxGhost" not in stripped, f"a nested comment leaks: {stripped}")
+    check("A," in stripped and "B," in stripped, f"code around it survives: {stripped}")
+
+
 def test_report_h1_is_the_issue_title_and_carries_the_disposition() -> None:
     """The H1 is a CROSS-FILE contract: upstream-drift.yml titles the GitHub issue
     with `head -1 | sed 's/^# //'` rather than keeping its own copy of these strings.
@@ -419,7 +444,7 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
     the day a parse actually degrades, which is the day the report matters."""
     src = (pathlib.Path(__file__).resolve().parent / "check_upstream_drift.py").read_text()
     callers = set(re.findall(r'parse_is_believable\(\s*"(\w+)"', src))
-    check(callers, "the gate still has callers")
+    check(bool(callers), "the gate still has callers")
     missing = sorted(callers - set(d.PARSE_SOURCES))
     check(
         not missing,
@@ -583,9 +608,9 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
 
 
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
-    """The gate #941 asks for: every source's check, both directions, offline.
+    """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
-    Each document is BUILT from the set we actually register, so adding an event
+    Each document is BUILT from the set we actually depend on, so adding an event
     cannot make the test stale — and it is built in the UPSTREAM spelling, which
     is the trap that hid codewhale's arm during review (upstream declares
     `MessageSubmit`, we register `message_submit`).
@@ -595,82 +620,143 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         rep0 = d.Report()
         ours = d.read_our_names(rep0)
         check(not rep0.blind, f"the fragments load: {rep0.blind}")
+        full: dict[str, list[str]] = {
+            f: sorted(getattr(ours, f) or ()) for f, *_ in d.SURFACE_ROWS
+        }
 
         def pascal(name: str) -> str:
             return "".join(p.title() for p in name.split("_"))
 
-        # source -> (url, how upstream spells the set, doc template)
-        cases = [
-            ("reasonix", d.REASONIX_HOOK_URL, lambda n: n,
-             lambda ns: "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"),
-            ("codewhale", d.CODEWHALE_HOOK_URL, pascal,
-             lambda ns: "pub enum HookEvent {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
-            ("codex", d.CODEX_PROTOCOL_URL, lambda n: n,
-             lambda ns: "pub enum HookEventName {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
-            ("hermes", d.HERMES_PLUGINS_URL, lambda n: n,
-             lambda ns: "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"),
-            ("grok", d.GROK_HOOK_URL, lambda n: n,
-             lambda ns: "pub enum HookEventName {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"),
-            ("openclaw", d.OPENCLAW_HOOK_TYPES_URL, lambda n: n,
-             lambda ns: "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)),
-            ("cursor", d.CURSOR_HOOKS_URL, lambda n: n,
-             lambda ns: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)),
-            ("kimi", d.KIMI_HOOKS_URL, lambda n: n,
-             lambda ns: "hook_event_name\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)),
-            ("cc", d.CC_HOOKS_URL, lambda n: n,
-             lambda ns: "# Hooks reference\n\n| Event | When it fires |\n|---|---|\n"
-                        + "".join(f"| `{n}` | x |\n" for n in ns)),
-        ]
-        check(len(cases) >= 8, "every source with a name-set check needs a row")
+        def bare_enum(enum: str, names: list[str]) -> str:
+            return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
-        for source, url, spell, render in cases:
-            names = sorted(getattr(ours, source))
-            check(bool(names), f"{source}: the fragment supplies a set")
-            full = render([spell(n) for n in names])
-
-            def drive(body: str) -> list[str]:
-                # OFFLINE: every non-target URL raises rather than going to the
-                # network. `else real(u)` made `just lint` issue 208 live
-                # requests per run — and `lint` joins its jobs with `wait`, so a
-                # blackholing network would hang preflight and pre-push at
-                # 30s/request (justfile:1327).
-                def stub(u: str, _b: str = body, _u: str = url) -> str:
-                    if u == _u:
-                        return _b
-                    raise urllib.error.URLError("offline: not this case's document")
-
-                d.fetch = stub
-                rep = d.Report()
-                d.run_checks(d.read_our_names(rep), report=rep)
-                return [x for x in rep.breaking if source.split("-")[0] in x.lower()]
-
-            # The believability gate refuses a parse smaller than what we handle,
-            # so the vanish arm must ADD a name as it drops one — otherwise the
-            # check is skipped as probe health and this test proves nothing.
-            victim = names[0]
-            # Filler derived from a SURVIVING name so it always matches that parser's
-            # own character class — codex wants PascalCase, cursor rejects
-            # underscores, and a filler the parser drops would shrink the set
-            # below the believability floor and skip the check entirely.
-            keep = [spell(n) for n in names[1:]]
-            # …and in that name's own CASE STYLE: hermes' parser takes only
-            # `[a-z_]`, so a `Pxd` suffix would be dropped just like a
-            # wrong-class one.
-            # …in that name's own case style AND without digits: hermes' parser
-            # takes only `[a-z_]` and cursor's headings only `[A-Za-z]`, so a
-            # mis-shaped filler is dropped exactly like a wrong-class one — and a
-            # dropped filler shrinks the set below the floor, skipping the check.
-            lower = keep[0].islower()
-            extra = [keep[0] + ("_pxd" if lower else "Pxd"),
-                     keep[0] + ("_pxdb" if lower else "Pxdb")]
-            gone = render(keep + extra)
-
-            check(not drive(full), f"{source}: an intact document must stay silent")
-            fired = drive(gone)
-            check(
-                any(victim in x for x in fired),
-                f"{source}: a vanished `{victim}` must fire; got {fired}",
+        def tagged_enum(enum: str, names: list[str]) -> str:
+            # The `rename` attrs ARE the wire names, so this never rests on our
+            # snake_case surviving a round trip through upstream's idents.
+            rows = "".join(
+                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n' for i, n in enumerate(names)
             )
+            return f"pub enum {enum} {{\n{rows}}}\n"
+
+        def acp_schema(tags: list[str]) -> str:
+            # `x-method` present + the method literal are the ACP arm's own anchor.
+            return json.dumps({
+                "x-method": "session/update",
+                "$defs": {"SessionUpdate": {"oneOf": [
+                    {"properties": {"sessionUpdate": {"const": t}}} for t in tags]}},
+            })
+
+        def copilot_schema(events: list[str], fields: list[str]) -> str:
+            defs: dict = {f"E{i}": {"properties": {"type": {"const": e}}}
+                          for i, e in enumerate(events)}
+            defs["SessionEvent"] = {"anyOf": [
+                {"$ref": f"#/definitions/E{i}"} for i in range(len(events))]}
+            defs["Payload"] = {"properties": dict.fromkeys(fields, {})}
+            return json.dumps({"definitions": defs})
+
+        # field -> (upstream spelling, {url: document} built from the given names).
+        # Two fields sharing one URL (codex/codex_event_msg, copilot/copilot_fields)
+        # each render the OTHER's set in full, so a case proves its own arm rather
+        # than riding its neighbour's blind.
+        cases = [
+            ("reasonix", str, lambda ns: {
+                d.REASONIX_HOOK_URL:
+                    "const (\n" + "".join(f'    {n} Event = "{n}"\n' for n in ns) + ")\n"}),
+            ("codewhale", pascal, lambda ns: {
+                d.CODEWHALE_HOOK_URL: bare_enum("HookEvent", ns)}),
+            ("codex", str, lambda ns: {
+                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", ns)
+                + tagged_enum("EventMsg", full["codex_event_msg"])}),
+            ("codex_event_msg", str, lambda ns: {
+                d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", full["codex"])
+                + tagged_enum("EventMsg", ns)}),
+            ("codex_response_item", str, lambda ns: {
+                d.CODEX_MODELS_URL: tagged_enum("ResponseItem", ns)}),
+            ("codex_outers", str, lambda ns: {
+                d.CODEX_ROLLOUT_ITEM_URL: tagged_enum("RolloutItem", ns)}),
+            ("hermes", str, lambda ns: {
+                d.HERMES_PLUGINS_URL:
+                    "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
+            ("grok", str, lambda ns: {
+                d.GROK_HOOK_URL: bare_enum("HookEventName", ns)}),
+            ("openclaw", str, lambda ns: {
+                d.OPENCLAW_HOOK_TYPES_URL:
+                    "export type PluginHookName =\n" + "".join(f'  | "{n}"\n' for n in ns)}),
+            ("opencode", str, lambda ns: dict.fromkeys(
+                d.OPENCODE_EVENT_URLS,
+                "export const Event = {\n"
+                + "".join(f'  Pxe{i}: {{ type: "{n}" }},\n' for i, n in enumerate(ns)) + "}\n")),
+            ("omp", str, lambda ns: {
+                d.OMP_SESSION_ENTRIES_URL:
+                    "export type SessionEntry =\n"
+                    + "".join(f"\t| Pxe{i}Entry\n" for i in range(len(ns)))
+                    + "".join(f'export interface Pxe{i}Entry {{ type: "{n}" }}\n'
+                              for i, n in enumerate(ns))}),
+            ("cursor", str, lambda ns: {
+                d.CURSOR_HOOKS_URL: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)}),
+            ("kimi", str, lambda ns: {
+                d.KIMI_HOOKS_URL: "hook_event_name\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
+            ("cc", str, lambda ns: {
+                d.CC_HOOKS_URL: "# Hooks reference\n\n| Event | When it fires |\n|---|---|\n"
+                + "".join(f"| `{n}` | x |\n" for n in ns)}),
+            ("dispatch_names", str, lambda ns: {
+                d.CC_TOOLS_URL: "# Tools reference\n\n" + "".join(f"| `{n}` | x |\n" for n in ns)}),
+            ("acp_decoded_tags", str, lambda ns: dict.fromkeys(
+                (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL), acp_schema(ns))),
+            ("copilot", str, lambda ns: {
+                d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
+            ("copilot_fields", str, lambda ns: {
+                d.COPILOT_SCHEMA_URL: copilot_schema(full["copilot"], ns)}),
+        ]
+        covered = {c[0] for c in cases}
+        rows = {f for f, *_ in d.SURFACE_ROWS}
+        # The `>= 8` floor this replaced sat BELOW the row count, so seven arms —
+        # both restored in round 2 among them — were uncovered while it passed.
+        check(covered == rows, f"every surface row needs a case; differ: {covered ^ rows}")
+
+        def drive(docs: dict[str, str]) -> d.Report:
+            # OFFLINE: every URL this case does not serve raises rather than going
+            # to the network. `else real(u)` made `just lint` issue 208 live
+            # requests per run — and `lint` joins its jobs with `wait`, so a
+            # blackholing network would hang preflight and pre-push at
+            # 30s/request (justfile:1327).
+            def stub(u: str, _d: dict[str, str] = docs) -> str:
+                if u in _d:
+                    return _d[u]
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        for field, spell, build in cases:
+            names = full[field]
+            check(bool(names), f"{field}: the fragment supplies a set")
+            # The tolerated alias can never fire, so it must not be the victim.
+            pool = [n for n in names
+                    if field != "opencode" or n not in d.OPENCODE_TOLERATED]
+            # `dispatch_names` is an ANY-of check — one surviving documented name
+            # clears it — so its vanish arm has to take them all.
+            victims = pool if field == "dispatch_names" else pool[:1]
+            # The believability floor refuses a parse smaller than what we handle,
+            # so the vanish arm ADDS names as it drops one — shaped like the name
+            # it extends, since a filler this parser's character class rejects
+            # shrinks the set below the floor and SKIPS the check, proving nothing.
+            # `_` and not case is the axis: cursor's headings take `[a-z][A-Za-z]+`
+            # and its lone all-lowercase `stop` made an `islower()` test pick the
+            # snake_case suffix, silently skipping the whole cursor arm.
+            stem = spell(names[-1])
+            sfx = ("_pxd", "_pxdb") if "_" in stem else ("Pxd", "Pxdb")
+            kept = [spell(n) for n in names if n not in victims]
+
+            intact = drive(build([spell(n) for n in names]))
+            check(not intact.breaking,
+                  f"{field}: an intact document must stay silent; got {intact.breaking}")
+            rep = drive(build(kept + [stem + s for s in sfx]))
+            check(any(victims[0] in x for x in rep.breaking),
+                  f"{field}: a vanished `{victims[0]}` must fire; got {rep.breaking} "
+                  f"(skipped as probe health? {rep.blind})")
     finally:
         d.fetch = real
 
