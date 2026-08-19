@@ -7,15 +7,13 @@
 //! declines to "fix": the flat render, and the `Task` id that never pairs.
 
 use std::collections::BTreeSet;
-use std::path::Path;
 
 use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::AgentEvent;
 
 fn lines() -> Vec<String> {
     super::captures::fixture_lines(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/cursor/fixtures/hook-payloads.jsonl"),
+        &super::captures::sources_root().join("cursor/fixtures/hook-payloads.jsonl"),
     )
 }
 

@@ -140,8 +140,7 @@ fn hook_parent_id() -> AgentId {
 /// bare shim with no env, so the decoder's claude-code default applies.
 fn captured_hook_events() -> Vec<AgentEvent> {
     super::captures::fixture_lines(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/claude/fixtures/hook-payloads.jsonl"),
+        &super::captures::sources_root().join("claude/fixtures/hook-payloads.jsonl"),
     )
     .iter()
     .flat_map(|l| {

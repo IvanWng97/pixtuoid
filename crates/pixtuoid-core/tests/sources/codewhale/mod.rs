@@ -4,7 +4,6 @@
 //! CodeWhale's documented observer-hook wire (Hmbown/CodeWhale
 //! `crates/tui/src/hooks/config.rs` `HookEvent` + `docs/CONFIGURATION.md`).
 
-use std::path::Path;
 use std::time::SystemTime;
 
 use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -18,8 +17,7 @@ const CHILD: &str = "agent_12345678";
 
 fn hook_events() -> Vec<AgentEvent> {
     super::captures::fixture_lines(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/codewhale/fixtures/hook-payloads.jsonl"),
+        &super::captures::sources_root().join("codewhale/fixtures/hook-payloads.jsonl"),
     )
     .iter()
     .flat_map(|l| {

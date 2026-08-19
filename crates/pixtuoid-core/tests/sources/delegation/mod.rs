@@ -4,15 +4,13 @@
 //! model-authored argument on an ordinary tool cannot spoof a delegation, seed
 //! `active_tasks`, and cascade a real child out on drain.
 
-use std::path::Path;
-
 use pixtuoid_core::harness::Drive;
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 
 fn lines(cli: &str, name: &str) -> Vec<String> {
     super::captures::fixture_lines(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/delegation/fixtures")
+        &super::captures::sources_root()
+            .join("delegation/fixtures")
             .join(cli)
             .join(name),
     )

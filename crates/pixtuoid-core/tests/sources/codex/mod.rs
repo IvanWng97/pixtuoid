@@ -7,7 +7,7 @@
 //! 0.135, gpt-5.5) and sanitized: synthetic UUIDs, generic cwd, the huge
 //! `last_assistant_message` truncated.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::SystemTime;
 
 use pixtuoid_core::source::decoder::decode_hook_payload;
@@ -21,8 +21,7 @@ const CHILD: &str = "01000000-0000-7000-8000-000000000002";
 
 fn captured_hook_events() -> Vec<AgentEvent> {
     super::captures::fixture_lines(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("tests/sources/codex/fixtures/hook-payloads.jsonl"),
+        &super::captures::sources_root().join("codex/fixtures/hook-payloads.jsonl"),
     )
     .iter()
     .flat_map(|l| {
