@@ -473,12 +473,28 @@ pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
 /// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so
 /// this watch is the ONLY signal an entry type rename gives us.
 #[cfg(test)]
-pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[SESSION, MESSAGE, CUSTOM, THINKING_LEVEL_CHANGE];
+pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
+    SESSION,
+    MESSAGE,
+    CUSTOM,
+    THINKING_LEVEL_CHANGE,
+    TITLE,
+    TITLE_CHANGE,
+];
+
+/// The title payload key read by both first-sight and live carriers. It happens
+/// to match the `title` entry type today; keep the authorities separate so one
+/// upstream rename cannot silently rewrite both surfaces.
+#[cfg(test)]
+pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 
 const SESSION: &str = "session";
 const MESSAGE: &str = "message";
 const CUSTOM: &str = "custom";
 const THINKING_LEVEL_CHANGE: &str = "thinking_level_change";
+const TITLE: &str = "title";
+const TITLE_CHANGE: &str = "title_change";
+const TITLE_FIELD: &str = "title";
 
 /// The `customType` marking a clean teardown — the ONLY structural end omp
 /// writes. Exported for the drift surface because the guard below falls through
@@ -504,6 +520,55 @@ const TOOL_ASK: &str = "ask";
 pub(crate) const DECODED_MESSAGE_VOCAB: &[&str] =
     &[ROLE_ASSISTANT, ROLE_TOOL_RESULT, BLOCK_TOOL_CALL, TOOL_ASK];
 
+/// `prefix·<text>` at the label cap — the ONE place omp assembles a
+/// content-derived label, shared by the subagent-stem deriver and the session
+/// title, so neither can bypass the bound that keeps an untrusted string out of
+/// the painter and the headless summary. The prefix is read from the registry,
+/// never hardcoded (invariant #3).
+fn omp_label(source: &str, text: &str) -> String {
+    let prefix = crate::source::decoder::label_prefix_for(source);
+    format!("{prefix}·{}", ellipsize(text, MAX_DECODED_FIELD_CHARS))
+}
+
+/// omp label: a NESTED transcript is a subagent, and its file STEM is the
+/// human-authored `tasks[].name` the parent dispatched it under (`Alpha`,
+/// `OmpWireFormat`) — which the default deriver throws away. omp subagents run
+/// IN-PROCESS, so a child's `session` header repeats the parent's `cwd`
+/// verbatim: `prefix·<cwd-basename>` renders a whole delegation fan-out as N
+/// identical labels, separated only by the disambiguation suffix. A ROOT keeps
+/// the shared cwd derivation as its FLOOR — superseded by the session title,
+/// which reaches first sight through [`omp_head_title`] and the live stream
+/// through the decoder's `title_change` arm.
+// Rides `derive_prefixed_label`'s gate: the watcher wiring is `native`, and the
+// registry conformance test is the only other caller.
+#[cfg(any(feature = "native", test))]
+pub(crate) fn omp_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
+    if omp_parent_key_from_path(path).is_some() {
+        if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+            return omp_label(source, stem);
+        }
+    }
+    crate::source::decoder::derive_prefixed_label(source, cwd)
+}
+
+/// The session title off ONE head line, for the first-sight label. omp writes
+/// the title into a fixed-width line-1 slot precisely so it is readable without
+/// the transcript — which is what makes it the right carrier here: when the
+/// backlog is skipped (an oversized root, a revival's tail-only read) the
+/// decoder's `title` arm never runs, and the label would fall back to the cwd
+/// basename every concurrent session in a repo shares.
+///
+/// EMPTY is not a title: omp writes the slot at birth and fills it later, and
+/// leaves SUBAGENT titles empty forever — `None` keeps the stem/cwd deriver.
+// Same gate as `omp_derive_label`: the only non-test caller is the `native`
+// watcher wiring.
+#[cfg(any(feature = "native", test))]
+pub(crate) fn omp_head_title(v: &Value) -> Option<String> {
+    let obj = v.as_object()?;
+    matches!(obj.get("type").and_then(|t| t.as_str()), Some(TITLE)).then_some(())?;
+    let title = obj.get(TITLE_FIELD).and_then(|t| t.as_str())?;
+    (!title.is_empty()).then(|| omp_label(SOURCE_NAME, title))
+}
 /// Decode one omp session JSONL line into zero or more `AgentEvent`s.
 /// Unknown entry types / roles and malformed shapes return `vec![]` — the
 /// upstream loader is itself lenient (`parseJsonlLenient`).
@@ -646,6 +711,19 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             }],
             _ => vec![],
         },
+        // The only human-readable name a ROOT transcript has — its stem is a
+        // timestamp+uuid and its cwd basename is shared with every concurrent
+        // session in the repo. The EMPTY guard is load-bearing: omp writes the
+        // slot at birth and fills it later, and leaves SUBAGENT titles empty
+        // forever, so an unguarded Rename would blank a root's label and wipe
+        // every subagent's dispatch-name label.
+        TITLE | TITLE_CHANGE => match obj.get(TITLE_FIELD).and_then(|t| t.as_str()) {
+            Some(title) if !title.is_empty() => vec![AgentEvent::Rename {
+                agent_id: acting,
+                label: omp_label(source, title),
+            }],
+            _ => vec![],
+        },
         // Not sprite-visible.
         // (model_change stays undecoded even though the burn tier reads model:
         // its value is the provider-prefixed combined form, and every assistant
@@ -693,9 +771,8 @@ mod tests {
 
     /// Each entry type reaches a real arm. The arms dispatch on these same
     /// consts, so a value cannot drift; what this proves is that none of them
-    /// has stopped being handled. The guarded `custom` and
-    /// `thinking_level_change` arms get the payload each needs to emit; a bare
-    /// guarded type falls through like any unread type.
+    /// has stopped being handled. Guarded arms get the payload each needs to
+    /// emit; a bare guarded type falls through like any unread type.
     #[test]
     fn the_decoded_entry_type_set_is_exactly_what_the_arms_match() {
         let drive = |ty: &str| {
@@ -707,6 +784,8 @@ mod tests {
                                               "model": "anthropic/claude-opus-4-5"}}),
                 THINKING_LEVEL_CHANGE => json!({"type": ty, "id": "x", "parentId": null,
                                                 "timestamp": "t", "thinkingLevel": "high"}),
+                TITLE | TITLE_CHANGE => json!({"type": ty, "id": "x", "parentId": null,
+                                               "timestamp": "t", "title": "Named session"}),
                 _ => json!({"type": ty, "version": 3, "id": "x", "timestamp": "t",
                             "cwd": "/home/u/proj"}),
             };
@@ -803,6 +882,156 @@ mod tests {
         );
         assert_eq!(omp_id_from_path(Path::new(&p)), ROOT_KEY);
         assert_eq!(omp_parent_key_from_path(Path::new(&p)), None);
+    }
+
+    /// omp subagents run IN-PROCESS and inherit the parent's `cwd`, so the
+    /// default cwd-basename deriver renders a fan-out as N identical labels.
+    #[test]
+    fn subagent_labels_come_from_the_task_name_not_the_shared_cwd() {
+        let cwd = Path::new("/home/u/proj");
+        let child = format!("/home/u/.omp/agent/sessions/-dev-proj/{ROOT_KEY}/OmpWireFormat.jsonl");
+        assert_eq!(
+            omp_derive_label(Path::new(&child), SOURCE_NAME, cwd),
+            "om·OmpWireFormat",
+            "a subagent is named by the task it was dispatched under"
+        );
+        // Siblings sharing that cwd must NOT collapse onto one label.
+        let sibling =
+            format!("/home/u/.omp/agent/sessions/-dev-proj/{ROOT_KEY}/OmpConfigDirs.jsonl");
+        assert_ne!(
+            omp_derive_label(Path::new(&sibling), SOURCE_NAME, cwd),
+            omp_derive_label(Path::new(&child), SOURCE_NAME, cwd)
+        );
+        // A ROOT's own stem is a timestamp+uuid, so the cwd stays the better name.
+        assert_eq!(
+            omp_derive_label(Path::new(ROOT), SOURCE_NAME, cwd),
+            "om·proj"
+        );
+        // The stem is MODEL-authored, so it rides the same cap as every other
+        // content-derived label.
+        let long = "N".repeat(MAX_DECODED_FIELD_CHARS * 4);
+        let capped = omp_derive_label(
+            Path::new(&format!(
+                "/home/u/.omp/agent/sessions/-dev-proj/{ROOT_KEY}/{long}.jsonl"
+            )),
+            SOURCE_NAME,
+            cwd,
+        );
+        assert_eq!(
+            capped.chars().count(),
+            "om·".chars().count() + MAX_DECODED_FIELD_CHARS + 1
+        );
+        assert!(capped.ends_with('…'));
+    }
+
+    /// Byte-real (omp 17.2.9): the line-1 slot and the appended rename carry
+    /// the same `title` field, and concurrent sessions in ONE repo are the case
+    /// that makes this matter — they all share a cwd basename.
+    #[test]
+    fn a_non_empty_session_title_renames_the_slot_and_an_empty_one_never_does() {
+        let slot = r#"{"type":"title","v":1,"title":"Raise PR for working branch","source":"auto","updatedAt":"t","pad":"   "}"#;
+        match &decode(slot)[..] {
+            [AgentEvent::Rename { agent_id, label }] => {
+                assert_eq!(*agent_id, root());
+                assert_eq!(label, "om·Raise PR for working branch");
+            }
+            other => panic!("expected one Rename, got {other:?}"),
+        }
+        let changed = r#"{"type":"title_change","id":"x","parentId":"p","timestamp":"t","title":"Implement auto-refresh","source":"auto","previousTitle":"Auto-detect changes","trigger":"auto"}"#;
+        match &decode(changed)[..] {
+            [AgentEvent::Rename { label, .. }] => assert_eq!(label, "om·Implement auto-refresh"),
+            other => panic!("expected one Rename, got {other:?}"),
+        }
+        // The slot exists from birth and omp leaves SUBAGENT titles empty
+        // forever — renaming to a blank would wipe the deriver's label.
+        for blank in [
+            r#"{"type":"title","v":1,"title":"","source":null,"updatedAt":"t","pad":"   "}"#,
+            r#"{"type":"title","v":1,"source":"auto","updatedAt":"t","pad":"   "}"#,
+            r#"{"type":"title_change","id":"x","parentId":null,"timestamp":"t","title":null}"#,
+        ] {
+            assert!(decode(blank).is_empty(), "expected no events for {blank}");
+        }
+        // Auto-generated from model output, so it rides the label cap.
+        let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 3);
+        let line =
+            format!(r#"{{"type":"title_change","id":"x","timestamp":"t","title":"{long}"}}"#);
+        match &decode(&line)[..] {
+            [AgentEvent::Rename { label, .. }] => {
+                assert_eq!(
+                    label.chars().count(),
+                    "om·".chars().count() + MAX_DECODED_FIELD_CHARS + 1
+                );
+                assert!(label.ends_with('…'));
+            }
+            other => panic!("expected one Rename, got {other:?}"),
+        }
+    }
+
+    /// The first-sight carrier of the same title. Most root transcripts are
+    /// already past `MAX_PENDING_BYTES` when first seen, and that path decodes
+    /// NOTHING — so without this the decoder's `title` arm never runs for the
+    /// common case and the root keeps the shared cwd basename.
+    #[test]
+    fn head_title_names_a_root_at_first_sight_but_never_on_an_empty_slot() {
+        let head = |s: &str| omp_head_title(&serde_json::from_str(s).unwrap());
+        assert_eq!(
+            head(r#"{"type":"title","v":1,"title":"Raise PR for working branch","pad":"   "}"#),
+            Some("om·Raise PR for working branch".to_string())
+        );
+        // Empty/missing slot, and the OTHER entry types that carry a `title`
+        // key: only the line-1 slot is the head carrier, and a subagent's slot
+        // stays empty forever — either would clobber a better label.
+        for none in [
+            r#"{"type":"title","v":1,"title":"","pad":"   "}"#,
+            r#"{"type":"title","v":1,"pad":"   "}"#,
+            r#"{"type":"title_change","id":"x","title":"Implement auto-refresh"}"#,
+            r#"{"type":"session","version":3,"cwd":"/home/u/proj"}"#,
+            r#"["not an object"]"#,
+        ] {
+            assert_eq!(head(none), None, "expected no head title for {none}");
+        }
+        // Model-authored, so it rides the same cap as every decoded field.
+        let long = "T".repeat(MAX_DECODED_FIELD_CHARS * 3);
+        let capped = head(&format!(r#"{{"type":"title","v":1,"title":"{long}"}}"#)).unwrap();
+        assert_eq!(
+            capped.chars().count(),
+            "om·".chars().count() + MAX_DECODED_FIELD_CHARS + 1
+        );
+        assert!(capped.ends_with('…'));
+    }
+
+    #[test]
+    fn the_exported_title_field_set_is_exactly_what_both_readers_use() {
+        fn title_entry(kind: &str, field: &str) -> Value {
+            let mut obj = serde_json::Map::new();
+            obj.insert("type".to_string(), Value::String(kind.to_string()));
+            obj.insert(
+                field.to_string(),
+                Value::String("Name this session".to_string()),
+            );
+            Value::Object(obj)
+        }
+
+        assert_eq!(DECODED_TITLE_FIELDS.len(), 1);
+        let field = DECODED_TITLE_FIELDS[0];
+        assert_eq!(
+            omp_head_title(&title_entry(TITLE, field)).as_deref(),
+            Some("om·Name this session")
+        );
+        assert!(matches!(
+            decode_omp_line(ROOT, SOURCE_NAME, title_entry(TITLE_CHANGE, field))
+                .expect("title entry decodes")
+                .as_slice(),
+            [AgentEvent::Rename { label, .. }] if label == "om·Name this session"
+        ));
+
+        let renamed = "renamedTitle";
+        assert!(omp_head_title(&title_entry(TITLE, renamed)).is_none());
+        assert!(
+            decode_omp_line(ROOT, SOURCE_NAME, title_entry(TITLE_CHANGE, renamed))
+                .expect("unknown title field is ignored")
+                .is_empty()
+        );
     }
 
     #[test]
@@ -1232,8 +1461,10 @@ mod tests {
     #[test]
     fn non_lifecycle_entries_and_malformed_lines_are_ignored_not_panicked() {
         for line in [
-            r#"{"type":"title","v":1,"title":"Fix flaky test","source":"auto","updatedAt":"t","pad":"   "}"#,
-            r#"{"type":"title_change","id":"x","parentId":null,"timestamp":"t","title":"New","source":"user"}"#,
+            // Titles decode to a Rename only when NON-empty; the birth-state
+            // empty slot is the non-lifecycle case (owned in full by
+            // `a_non_empty_session_title_renames_the_slot_and_an_empty_one_never_does`).
+            r#"{"type":"title","v":1,"title":"","source":null,"updatedAt":"t","pad":"   "}"#,
             r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"anthropic/claude-opus-4-5"}"#,
             r#"{"type":"compaction","id":"x","parentId":null,"timestamp":"t","summary":"…","firstKeptEntryId":"y","tokensBefore":1}"#,
             r#"{"type":"session_init","id":"x","parentId":null,"timestamp":"t","systemPrompt":"…","task":"…","tools":[]}"#,
@@ -1256,7 +1487,7 @@ mod tests {
     fn no_entry_type_breadcrumbs_however_new() {
         for line in [
             r#"{"type":"quantum_entry","id":"x","parentId":null,"timestamp":"t"}"#,
-            r#"{"type":"title","v":1,"title":"t","source":"auto","updatedAt":"t","pad":"   "}"#,
+            r#"{"type":"title","v":1,"title":"","source":null,"updatedAt":"t","pad":"   "}"#,
             r#"{"type":"model_change","id":"x","parentId":null,"timestamp":"t","model":"m"}"#,
             r#"{"type":"compaction","id":"x","parentId":null,"timestamp":"t","summary":"…"}"#,
             r#"{"type":"custom","id":"x","parentId":null,"timestamp":"t","customType":"memory_write","data":{}}"#,

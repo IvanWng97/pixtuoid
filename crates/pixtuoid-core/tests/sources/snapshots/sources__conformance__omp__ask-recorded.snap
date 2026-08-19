@@ -2,6 +2,9 @@
 source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
+- Rename:
+    agent_id: 4349876156057149153
+    label: om·Rename NOTE.txt after asking
 - SessionStart:
     agent_id: 4349876156057149153
     source: omp
@@ -12,6 +15,9 @@ expression: events
     agent_id: 4349876156057149153
     model: ~
     effort: high
+- Rename:
+    agent_id: 4349876156057149153
+    label: om·Rename NOTE.txt after asking
 - ModelInfo:
     agent_id: 4349876156057149153
     model: deepseek-v4-flash

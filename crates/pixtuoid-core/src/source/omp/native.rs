@@ -2,7 +2,10 @@ use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 
-use super::{decode_omp_line, omp_id_from_path, omp_sessions_dir, SOURCE_NAME};
+use super::{
+    decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path, omp_sessions_dir,
+    SOURCE_NAME,
+};
 use crate::source::decoder::parsed_tail_lines;
 use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
 use crate::source::{Source, TaggedSender};
@@ -46,7 +49,9 @@ impl Source for OmpSource {
             SOURCE_NAME.to_string(),
             decode_omp_line,
             omp_session_ended,
-        );
+        )
+        .with_label_deriver(omp_derive_label)
+        .with_head_label(omp_head_title);
         if let Some(root) = omp_probe_root(&self.sessions_root) {
             watcher = watcher
                 .with_liveness_probe(std::sync::Arc::new(move || live_omp_session_ids(&root)));

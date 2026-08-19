@@ -85,7 +85,9 @@
       "session",
       "message",
       "custom",
-      "thinking_level_change"
+      "thinking_level_change",
+      "title",
+      "title_change"
     ],
     "omp.exit_marker": [
       "session_exit"
@@ -95,6 +97,9 @@
       "toolResult",
       "toolCall",
       "ask"
+    ],
+    "omp.title_fields": [
+      "title"
     ],
     "opencode.hook_events": [
       "session.created",

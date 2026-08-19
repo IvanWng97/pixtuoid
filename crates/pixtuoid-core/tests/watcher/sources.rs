@@ -493,6 +493,82 @@ async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
 }
 
 #[tokio::test]
+async fn omp_oversized_first_sight_uses_the_head_title_through_source_wiring() {
+    use pixtuoid_core::source::omp::OmpSource;
+
+    // Keeps the tool start outside the bounded pending-task tail while forcing
+    // the production oversized-skip branch; the no-Activity assertion below
+    // fails if this ever stops being oversized.
+    const BACKLOG_PADDING_BYTES: usize = 2 * 1024 * 1024;
+    const ROOT_STEM: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000001";
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let sessions_root = dir.path().to_path_buf();
+    let cwd_dir = sessions_root.join("-dev-proj");
+    tokio::fs::create_dir_all(&cwd_dir).await.unwrap();
+    let transcript = cwd_dir.join(format!("{ROOT_STEM}.jsonl"));
+
+    let title = serde_json::json!({
+        "type": "title", "v": 1, "title": "Oversized root title",
+        "source": "auto", "updatedAt": "t", "pad": ""
+    });
+    let header = serde_json::json!({
+        "type": "session", "version": 3, "id": "0197f0aa-0000-7000-8000-000000000001",
+        "timestamp": "2026-07-09T08:00:00.000Z", "cwd": "/dev/proj"
+    });
+    let tool = serde_json::json!({
+        "type": "message", "id": "m", "parentId": null, "timestamp": "t",
+        "message": {
+            "role": "assistant", "timestamp": 1,
+            "content": [{
+                "type": "toolCall", "id": "tool-before-padding",
+                "name": "bash", "arguments": {"command": "true"}
+            }]
+        }
+    });
+    let padding = serde_json::json!({
+        "type": "ignored", "padding": "x".repeat(BACKLOG_PADDING_BYTES)
+    });
+    tokio::fs::write(
+        &transcript,
+        format!("{title}\n{header}\n{tool}\n{padding}\n"),
+    )
+    .await
+    .unwrap();
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
+    let handle = tokio::spawn(async move { Box::new(OmpSource { sessions_root }).run(tx).await });
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    let mut rename_seen_at = None;
+    let mut rename_labels = Vec::new();
+    let mut saw_activity = false;
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::Rename { label, .. }))) => {
+                if rename_seen_at.is_none() {
+                    rename_seen_at = Some(tokio::time::Instant::now());
+                }
+                rename_labels.push(label);
+            }
+            Ok(Some((_, AgentEvent::ActivityStart { .. }))) => saw_activity = true,
+            Ok(Some(_)) | Ok(None) | Err(_) => {}
+        }
+        if rename_seen_at.is_some_and(|at| at.elapsed() >= Duration::from_millis(500)) {
+            break;
+        }
+    }
+    handle.abort();
+
+    assert_eq!(rename_labels, vec!["om·Oversized root title"]);
+    assert!(
+        !saw_activity,
+        "the buried tool must not replay; otherwise this never tested the oversized path"
+    );
+}
+
+#[tokio::test]
 async fn codex_permission_flow_fixture_drives_the_reducer_through_waiting() {
     use pixtuoid_core::state::ActivityState;
     use pixtuoid_core::{Reducer, SceneState};
