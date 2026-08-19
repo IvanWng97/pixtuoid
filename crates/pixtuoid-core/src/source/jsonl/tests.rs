@@ -397,6 +397,7 @@ async fn walk_once_with_recency(
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -435,6 +436,7 @@ async fn first_sight_cwd_falls_back_to_the_path_deriver_when_content_has_none() 
             id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
             path_filter: accept_all_paths,
             cwd_derive: derived_cwd,
+            head_label: None,
         };
         let cursors = Arc::new(Mutex::new(HashMap::new()));
         let seen = Arc::new(Mutex::new(HashMap::new()));
@@ -486,6 +488,7 @@ async fn walk_once_live(
         id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -789,6 +792,7 @@ async fn walk_jsonl_honors_the_path_filter() {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: skip_full,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -839,6 +843,156 @@ async fn gated_file_registers_on_oversized_first_append() {
         cursors.lock().await.get(&path).copied(),
         Some(full.len() as u64),
         "cursor must advance to EOF"
+    );
+}
+
+/// A stand-in for omp's line-1 title slot: names the session from the head.
+fn t_head_label(v: &serde_json::Value) -> Option<String> {
+    let t = v.get("title")?.as_str()?;
+    (!t.is_empty()).then(|| format!("t·{t}"))
+}
+
+/// Both head fields come back from ONE pass, and a source with no head label
+/// still gets its cwd. (The scan's STOP point — the cost half of this seam — is
+/// pinned by `walk::stop_tests`, where the predicate is directly observable.)
+#[test]
+fn a_head_read_yields_cwd_and_the_optional_title_in_one_pass() {
+    let plain = "{\"type\":\"session\",\"cwd\":\"/repo/head\"}\n{\"type\":\"assistant\"}\n";
+    let (cwd, label) =
+        super::walk::extract_head_fields(plain.as_bytes(), cwd_extractor_for("test"), None);
+    assert_eq!(cwd.as_deref(), Some(Path::new("/repo/head")));
+    assert_eq!(label, None, "a source with no head label must name nothing");
+
+    let titled = "{\"type\":\"title\",\"title\":\"Ship it\"}\n{\"type\":\"session\",\"cwd\":\"/repo/head\"}\n";
+    let (cwd, label) = super::walk::extract_head_fields(
+        titled.as_bytes(),
+        cwd_extractor_for("test"),
+        Some(t_head_label),
+    );
+    assert_eq!(cwd.as_deref(), Some(Path::new("/repo/head")));
+    assert_eq!(label.as_deref(), Some("t·Ship it"));
+
+    // The title slot exists but is EMPTY (omp's subagents, forever): the head
+    // read must fall through to the cwd-basename deriver, not name it "".
+    let empty =
+        "{\"type\":\"title\",\"title\":\"\"}\n{\"type\":\"session\",\"cwd\":\"/repo/head\"}\n";
+    let (_, label) = super::walk::extract_head_fields(
+        empty.as_bytes(),
+        cwd_extractor_for("test"),
+        Some(t_head_label),
+    );
+    assert_eq!(label, None, "an empty slot must not become an empty name");
+}
+
+async fn walk_once_with_head_label(
+    path: &Path,
+    cursors: &Arc<Mutex<HashMap<PathBuf, u64>>>,
+    seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
+) -> Vec<(Transport, AgentEvent)> {
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(64);
+    let source: Arc<str> = Arc::from("test");
+    let decoders = SourceDecoders {
+        decode_line: t_decode,
+        derive_label: t_label,
+        check_ended: t_ended,
+        activity_recency: super::no_activity_recency,
+        id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
+        path_filter: accept_all_paths,
+        cwd_derive: no_cwd_from_path,
+        head_label: Some(t_head_label),
+    };
+    let live = Arc::new(Mutex::new(HashSet::new()));
+    let ctx = WatchCtx {
+        source: &source,
+        cursors,
+        seen,
+        tx: &tx,
+        window: Duration::from_secs(3600),
+        live: &live,
+    };
+    walk_jsonl(path, decoders, &ctx).await;
+    drop(tx);
+    let mut events = Vec::new();
+    while let Ok(ev) = rx.try_recv() {
+        events.push(ev);
+    }
+    events
+}
+
+fn first_rename(events: &[(Transport, AgentEvent)]) -> Option<&str> {
+    events.iter().find_map(|(_, e)| match e {
+        AgentEvent::Rename { label, .. } => Some(label.as_str()),
+        _ => None,
+    })
+}
+
+/// The oversized path skips the whole backlog, so the decoder never reaches a
+/// head-borne title — the bounded head read is its ONLY carrier. Without it a
+/// big transcript registers under the cwd basename every concurrent session in
+/// one repo shares.
+#[tokio::test]
+async fn oversized_first_sight_names_the_slot_from_the_head_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big.jsonl");
+    let mut full = String::from("{\"type\":\"title\",\"title\":\"Ship the parser\"}\n");
+    full.push_str("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");
+    full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+    tokio::fs::write(&path, &full).await.unwrap();
+    assert!(
+        full.len() as u64 > super::walk::MAX_PENDING_BYTES,
+        "the span must exceed MAX_PENDING_BYTES to take the oversized path"
+    );
+
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let events = walk_once_with_head_label(&path, &cursors, &seen).await;
+    assert_eq!(
+        first_rename(&events),
+        Some("t·Ship the parser"),
+        "the head label must win over the cwd deriver, got {events:?}"
+    );
+}
+
+/// The head label is an OVERRIDE, not a requirement: a head with none leaves
+/// the cwd-basename deriver in charge.
+#[tokio::test]
+async fn oversized_first_sight_falls_back_to_the_deriver_without_a_head_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("big-untitled.jsonl");
+    let mut full = String::from("{\"type\":\"title\",\"title\":\"\"}\n");
+    full.push_str("{\"type\":\"assistant\",\"cwd\":\"/repo/head\"}\n");
+    full.push_str(&"{\"type\":\"assistant\"}\n".repeat(60_000));
+    tokio::fs::write(&path, &full).await.unwrap();
+
+    let cursors = Arc::new(Mutex::new(HashMap::new()));
+    let seen = Arc::new(Mutex::new(HashMap::new()));
+    let events = walk_once_with_head_label(&path, &cursors, &seen).await;
+    assert_eq!(
+        first_rename(&events),
+        Some(t_label(&path, "test", Path::new("/repo/head")).as_str()),
+        "an empty title must leave the deriver's label, got {events:?}"
+    );
+}
+
+/// A GATED file revived by an append reads only the tail, which is likewise
+/// past a head-borne title — the same head read has to carry it.
+#[tokio::test]
+async fn revived_gated_file_still_names_the_slot_from_the_head_label() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("revived.jsonl");
+    let initial = "{\"type\":\"title\",\"title\":\"Ship the parser\"}\n";
+    let (cursors, seen) = gated_fixture(&path, initial).await;
+
+    // The append carries NO cwd, so first-sight falls back to the head read.
+    let mut full = String::from(initial);
+    full.push_str("{\"type\":\"assistant\"}\n");
+    tokio::fs::write(&path, &full).await.unwrap();
+
+    let events = walk_once_with_head_label(&path, &cursors, &seen).await;
+    assert_eq!(
+        first_rename(&events),
+        Some("t·Ship the parser"),
+        "a revival must recover the head title, got {events:?}"
     );
 }
 
@@ -1013,6 +1167,7 @@ async fn session_exit_drains_pending_bytes_so_a_straggler_walk_cannot_resurrect(
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -1089,6 +1244,7 @@ async fn session_exit_purges_live_so_a_probe_failure_pass_cannot_revouch() {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -1144,6 +1300,7 @@ fn t_decoders() -> SourceDecoders {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     }
 }
 
@@ -1342,6 +1499,7 @@ async fn decoded_terminator_release_is_not_revouched_into_a_full_replay() {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -1587,6 +1745,7 @@ async fn known_oversized_tail_emits_session_end_if_the_skipped_span_ended() {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let live = Arc::new(Mutex::new(HashSet::new()));
     let ctx = WatchCtx {
@@ -1853,6 +2012,7 @@ async fn scan_pass_re_vouches_a_transiently_gated_live_file() {
         id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -1963,6 +2123,7 @@ async fn revouch_does_not_replay_a_probe_vouched_ended_transcript() {
         id_derive: super::folded::FoldedDeriver::new(crate::source::claude_code::cc_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,
@@ -3012,6 +3173,7 @@ async fn revouch_pass_prunes_deleted_files_from_cursors() {
         id_derive: super::folded::FoldedDeriver::new(default_id_from_path),
         path_filter: accept_all_paths,
         cwd_derive: no_cwd_from_path,
+        head_label: None,
     };
     let ctx = WatchCtx {
         source: &source,

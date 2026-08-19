@@ -2,6 +2,9 @@
 source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
+- Rename:
+    agent_id: 4349876156057149153
+    label: om·Rename NOTE.txt after asking
 - SessionStart:
     agent_id: 4349876156057149153
     source: omp
@@ -12,6 +15,9 @@ expression: events
     agent_id: 4349876156057149153
     model: ~
     effort: high
+- Rename:
+    agent_id: 4349876156057149153
+    label: om·Rename NOTE.txt after asking
 - ModelInfo:
     agent_id: 4349876156057149153
     model: deepseek-v4-flash
@@ -24,7 +30,7 @@ expression: events
     tool_use_id: call_00_hiuykNHdR1ojkFiZXHfb4236
     detail:
       Generic:
-        display: ask
+        display: "ask: Choosing new filename for NOTE.txt"
 - Waiting:
     agent_id: 4349876156057149153
     reason: What should NOTE.txt be renamed to?

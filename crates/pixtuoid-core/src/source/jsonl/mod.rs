@@ -37,7 +37,7 @@ pub use crate::source::decoder::{IdDeriver, PathFilter, TailActivity};
 
 /// Derives an agent's display label from its transcript `(path, source, cwd)`.
 /// The default is the source-prefixed cwd basename (`cx·dotfiles`); **CC**
-/// overrides it with `cc_derive_label`.
+/// overrides it with `cc_derive_label` and **omp** with `omp_derive_label`.
 pub type LabelDeriver = fn(&Path, &str, &Path) -> String;
 
 fn default_prefixed_label(_path: &Path, source: &str, cwd: &Path) -> String {
@@ -69,6 +69,14 @@ fn no_cwd_from_path(_p: &Path) -> Option<PathBuf> {
     None
 }
 
+/// Pulls a display label out of ONE decoded head line, for a source that names
+/// its session in the transcript HEAD rather than only in the tail stream.
+/// `None` on a source's decoder row means it has no such name — which is
+/// load-bearing, not merely absent: it lets the head scan stop at the first
+/// `cwd` instead of reading on for a label that can never arrive. **omp** is
+/// the one override; see its `omp_head_title`.
+pub type HeadLabel = fn(&serde_json::Value) -> Option<String>;
+
 #[derive(Clone, Copy)]
 struct SourceDecoders {
     decode_line: LineDecoder,
@@ -78,6 +86,7 @@ struct SourceDecoders {
     id_derive: folded::FoldedDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
+    head_label: Option<HeadLabel>,
 }
 
 /// The `IdDeriver` behind its only legal caller.
@@ -163,6 +172,7 @@ pub struct JsonlWatcher {
     id_derive: folded::FoldedDeriver,
     path_filter: PathFilter,
     cwd_derive: CwdDeriver,
+    head_label: Option<HeadLabel>,
     liveness_probe: Option<LivenessProbe>,
     poll_interval: Duration,
     negative_vouch_min_span: Duration,
@@ -208,6 +218,7 @@ impl JsonlWatcher {
             check_session_ended,
             activity_recency: no_activity_recency,
             cwd_derive: no_cwd_from_path,
+            head_label: None,
             liveness_probe: None,
             poll_interval: DEFAULT_POLL_INTERVAL,
             negative_vouch_min_span: NEGATIVE_VOUCH_MIN_SPAN,
@@ -257,7 +268,9 @@ impl JsonlWatcher {
     }
 
     /// Override the display-label derivation (default: the source-prefixed cwd
-    /// basename via [`LabelDeriver`]). Only **CC** needs this.
+    /// basename via [`LabelDeriver`]). Needed by the sources whose transcript
+    /// PATH names the agent better than its cwd does — **CC** (subagents) and
+    /// **omp** (subagents, named by the task they were dispatched under).
     pub fn with_label_deriver(mut self, derive_label: LabelDeriver) -> Self {
         self.derive_label = derive_label;
         self
@@ -267,6 +280,13 @@ impl JsonlWatcher {
     /// head-scan yields none (default: never). See [`CwdDeriver`].
     pub fn with_cwd_deriver(mut self, cwd_derive: CwdDeriver) -> Self {
         self.cwd_derive = cwd_derive;
+        self
+    }
+
+    /// Name the session from ONE decoded head line, ahead of the cwd-basename
+    /// deriver (default: never). See [`HeadLabel`].
+    pub fn with_head_label(mut self, head_label: HeadLabel) -> Self {
+        self.head_label = Some(head_label);
         self
     }
 
@@ -417,6 +437,7 @@ impl JsonlWatcher {
             id_derive: self.id_derive,
             path_filter: self.path_filter,
             cwd_derive: self.cwd_derive,
+            head_label: self.head_label,
         };
 
         // The initial seed rides the same `scan_root` → `walk_jsonl` path every

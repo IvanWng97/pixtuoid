@@ -74,6 +74,10 @@ fn surface() -> Value {
         json!(crate::source::omp::DECODED_ENTRY_TYPES),
     );
     decoded.insert(
+        "omp.title_fields",
+        json!(crate::source::omp::DECODED_TITLE_FIELDS),
+    );
+    decoded.insert(
         "copilot.kinds",
         json!(crate::source::copilot::DECODED_KINDS),
     );
@@ -319,6 +323,10 @@ mod tests {
             (
                 "DECODED_MESSAGE_VOCAB",
                 "the_exported_message_vocabulary_is_exactly_what_the_arms_match",
+            ),
+            (
+                "DECODED_TITLE_FIELDS",
+                "the_exported_title_field_set_is_exactly_what_both_readers_use",
             ),
             // grok's arms nest inside the method arm, so the shared dispatch
             // scanner above cannot reach them.

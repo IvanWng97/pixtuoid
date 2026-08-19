@@ -12,7 +12,7 @@
 //!
 //! 1. **Registration comes from the WATCHER, not the decoder.** A JSONL event
 //!    for an unknown id is a documented no-op, so a transcript driven with no
-//!    seed registers nothing however well it decodes. [`Drive::seeded`] stands
+//!    seed registers nothing however well it decodes. [`crate::harness::Drive::seeded`] stands
 //!    in for `emit_first_sight`, keyed by the SAME registry row the watcher
 //!    reads, so the seed can't drift from production.
 //! 2. **Transport is load-bearing** (the reducer's hook-wins dedup keys on it),

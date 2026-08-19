@@ -107,6 +107,11 @@ OMP_SESSION_ENTRIES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
 )
 
+# The two declarations whose `title` key the decoder actually reads. A third
+# same-named field exists on `SessionHeader`; scanning the whole document lets
+# that unrelated survivor mask both carrier renames.
+OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
+
 CODEX_ROLLOUT_ITEM_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
 )
@@ -723,6 +728,7 @@ class OurNames:
     omp: set[str] | None = None
     omp_exit_marker: set[str] | None = None
     omp_message_vocab: set[str] | None = None
+    omp_title_fields: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
@@ -796,6 +802,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("omp", CORE_LIB_FRAGMENT, "decoded", "omp.entry_types"),
     ("omp_exit_marker", CORE_LIB_FRAGMENT, "decoded", "omp.exit_marker"),
     ("omp_message_vocab", CORE_LIB_FRAGMENT, "decoded", "omp.message_vocab"),
+    ("omp_title_fields", CORE_LIB_FRAGMENT, "decoded", "omp.title_fields"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
@@ -943,7 +950,45 @@ def rust_block_after(src: str, anchor_re: str) -> str | None:
                 return src[start : i + 1]
     return None
 
+def typescript_interface_body(text: str, name: str) -> str | None:
+    """The body of one top-level exported TS interface, else `None`.
 
+    Conservative on purpose: a declaration move, duplicate, or restyle is probe
+    health, never evidence that a wire field was renamed.
+    """
+    pattern = rf"(?ms)^export\s+interface\s+{re.escape(name)}\b[^{{\n]*\{{(.*?)(?=^\}})"
+    matches = list(re.finditer(pattern, text))
+    return matches[0].group(1) if len(matches) == 1 else None
+
+
+def check_omp_title_fields(text: str, fields: set[str], report: Report) -> None:
+    bodies = {
+        name: typescript_interface_body(text, name) for name in OMP_TITLE_FIELD_CARRIERS
+    }
+    missing_carriers = [name for name, body in bodies.items() if body is None]
+    if missing_carriers:
+        report.add_blind(
+            "omp title-field carriers " + ", ".join(f"`{name}`" for name in missing_carriers),
+            "session-entries.ts",
+            "The omp title-field checks were SKIPPED.",
+        )
+        return
+
+    for field in sorted(fields):
+        property_re = (
+            rf"(?m)^\s*(?:readonly\s+)?(?P<quote>[\"']?){re.escape(field)}"
+            rf"(?P=quote)\??\s*:"
+        )
+        missing_owners = [
+            name for name, body in bodies.items() if re.search(property_re, body or "") is None
+        ]
+        if missing_owners:
+            report.add_breaking(
+                f"omp title field `{field}` (read by source/omp.rs) is GONE from "
+                + ", ".join(f"`{name}`" for name in missing_owners)
+                + " in session-entries.ts — renamed; first sight or live updates lose "
+                "the only human-readable root label and fall back to cwd."
+            )
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
@@ -1477,16 +1522,19 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"stale sweep with no breadcrumb."
                     )
 
-    if ours.omp is not None:
+    if ours.omp is not None or ours.omp_title_fields is not None:
         text = fetch_anchored(OMP_SESSION_ENTRIES_URL, "omp session-entries", report)
         if text is not None:
-            for name in sorted(ours.omp):
-                if f'"{name}"' not in text:
-                    report.add_breaking(
-                        f"omp entry type `{name}` (decoded in source/omp.rs) is GONE from "
-                        f"session-entries.ts — likely renamed; the transcript still flows "
-                        f"but the decoder maps it to nothing (no sprite / no activity)."
-                    )
+            if ours.omp is not None:
+                for name in sorted(ours.omp):
+                    if f'"{name}"' not in text:
+                        report.add_breaking(
+                            f"omp entry type `{name}` (decoded in source/omp.rs) is GONE from "
+                            f"session-entries.ts — likely renamed; the transcript still flows "
+                            f"but the decoder maps it to nothing (no sprite / no activity)."
+                        )
+            if ours.omp_title_fields is not None:
+                check_omp_title_fields(text, ours.omp_title_fields, report)
 
     for field, url, enum, label in (
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem", "rollout OUTER"),

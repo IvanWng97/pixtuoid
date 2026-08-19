@@ -909,6 +909,93 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
         check(not got, f"copilot {name}: an unrecognised schema must not parse to a set, got {got}")
 
 
+def test_omp_title_field_watch_requires_both_carriers() -> None:
+    """A same-named SessionHeader field must not mask either carrier's rename."""
+    def document(
+        slot_field: str = "title",
+        change_field: str = "title",
+        *,
+        include_slot: bool = True,
+        include_change: bool = True,
+    ) -> str:
+        slot = (
+            "export interface SessionTitleSlotEntry {\n"
+            "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
+            f"  {slot_field}: string;\n"
+            "}\n"
+            if include_slot
+            else ""
+        )
+        change = (
+            "export interface TitleChangeEntry {\n"
+            "  type: typeof TITLE_CHANGE_ENTRY_TYPE;\n"
+            f"  {change_field}: string;\n"
+            "}\n"
+            if include_change
+            else ""
+        )
+        return (
+            "export type SessionEntry = TitleChangeEntry;\n"
+            "export interface SessionHeader {\n"
+            "  title?: string;\n"
+            "}\n"
+            + slot
+            + change
+        )
+
+    def drive(text: str) -> tuple[list[str], list[str]]:
+        report = d.Report()
+        d.check_omp_title_fields(text, {"title"}, report)
+        return report.breaking, report.blind
+
+    intact_breaking, intact_blind = drive(document())
+    check(not intact_breaking and not intact_blind, "both intact title carriers stay silent")
+
+    quoted_breaking, quoted_blind = drive(document('readonly "title"?', "'title'"))
+    check(
+        not quoted_breaking and not quoted_blind,
+        "quoted/readonly/optional spellings preserve the same property key",
+    )
+
+    for slot_field, change_field, missing_owner in [
+        ("currentTitle", "title", "SessionTitleSlotEntry"),
+        ("title", "nextTitle", "TitleChangeEntry"),
+    ]:
+        breaking, blind = drive(document(slot_field, change_field))
+        check(
+            len(breaking) == 1 and missing_owner in breaking[0] and not blind,
+            f"a field missing from {missing_owner} must be breaking: "
+            f"breaking={breaking}, blind={blind}",
+        )
+
+    for include_slot, include_change, missing_owner in [
+        (False, True, "SessionTitleSlotEntry"),
+        (True, False, "TitleChangeEntry"),
+    ]:
+        breaking, blind = drive(
+            document(include_slot=include_slot, include_change=include_change)
+        )
+        check(
+            not breaking and len(blind) == 1 and missing_owner in blind[0],
+            f"a missing {missing_owner} declaration must be probe health: "
+            f"breaking={breaking}, blind={blind}",
+        )
+
+    duplicate = document() + (
+        "export interface SessionTitleSlotEntry {\n"
+        "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
+        "  title: string;\n"
+        "}\n"
+    )
+    duplicate_breaking, duplicate_blind = drive(duplicate)
+    check(
+        not duplicate_breaking
+        and len(duplicate_blind) == 1
+        and "SessionTitleSlotEntry" in duplicate_blind[0],
+        "a merged/duplicate carrier declaration is probe health, never drift",
+    )
+
+
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
@@ -966,6 +1053,24 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 {"$ref": f"#/definitions/E{i}"} for i in range(len(events))]}
             defs["Payload"] = {"properties": dict.fromkeys(fields, {})}
             return json.dumps({"definitions": defs})
+
+        def omp_session_entries(entry_types: list[str], title_fields: list[str]) -> str:
+            return (
+                "export type SessionEntry =\n"
+                + "".join(f"\t| Pxe{i}Entry\n" for i in range(len(entry_types)))
+                + "".join(
+                    f'export interface Pxe{i}Entry {{ type: "{name}" }}\n'
+                    for i, name in enumerate(entry_types)
+                )
+                + "export interface SessionTitleSlotEntry {\n"
+                + "  type: typeof SESSION_TITLE_SLOT_ENTRY_TYPE;\n"
+                + "".join(f"  {name}: string;\n" for name in title_fields)
+                + "}\n"
+                + "export interface TitleChangeEntry {\n"
+                + "  type: typeof TITLE_CHANGE_ENTRY_TYPE;\n"
+                + "".join(f"  {name}: string;\n" for name in title_fields)
+                + "}\n"
+            )
 
         # field -> (upstream spelling, {url: document} built from the given names).
         # Two fields sharing one URL (codex/codex_event_msg, copilot/copilot_fields)
@@ -1058,10 +1163,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     f'const SESSION_EXIT_CUSTOM_TYPE = "{n}";\n' for n in ns)}),
             ("omp", str, lambda ns: {
                 d.OMP_SESSION_ENTRIES_URL:
-                    "export type SessionEntry =\n"
-                    + "".join(f"\t| Pxe{i}Entry\n" for i in range(len(ns)))
-                    + "".join(f'export interface Pxe{i}Entry {{ type: "{n}" }}\n'
-                              for i, n in enumerate(ns))}),
+                    omp_session_entries(ns, full["omp_title_fields"])}),
+            ("omp_title_fields", str, lambda ns: {
+                d.OMP_SESSION_ENTRIES_URL:
+                    omp_session_entries(full["omp"], ns)}),
             ("cursor", str, lambda ns: {
                 d.CURSOR_HOOKS_URL: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)}),
             ("kimi", str, lambda ns: {

@@ -14,7 +14,9 @@ use crate::AgentId;
 
 use super::health::FailureLatch;
 use super::liveness::{probe_admits, revouch_gated_files};
-use super::{ActivityRecency, SessionEndChecker, SourceDecoders, TailActivity, WatchCtx};
+use super::{
+    ActivityRecency, HeadLabel, SessionEndChecker, SourceDecoders, TailActivity, WatchCtx,
+};
 
 /// Oversized-span skip threshold: a pending span past this is never replayed.
 pub(super) const MAX_PENDING_BYTES: u64 = 1 << 20;
@@ -290,8 +292,16 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             Some(super::TailActivity::SidecarOnly)
         );
         if !registered && !metadata_only {
-            let head_cwd = read_head_cwd(path, MAX_PENDING_BYTES, cwd_extractor_for(source)).await;
-            emit_first_sight(path, source, decoders, seen, tx, head_cwd).await;
+            // The backlog is skipped wholesale, so the decoder never reaches a
+            // head-borne title — this bounded read is its ONLY carrier, and a
+            // root transcript is usually already past MAX_PENDING_BYTES.
+            let (head_cwd, head_label) = match read_head(path, MAX_PENDING_BYTES).await {
+                Some(head) => {
+                    extract_head_fields(&head, cwd_extractor_for(source), decoders.head_label)
+                }
+                None => (None, None),
+            };
+            emit_first_sight(path, source, decoders, seen, tx, head_cwd, head_label).await;
         }
         // #222: the skipped span may bury an IN-FLIGHT Task dispatch — tail-scan
         // for unmatched Task starts and re-emit exactly those (see
@@ -342,17 +352,32 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // A GATED file revived by an append only reads the tail — and Codex
     // rollouts carry cwd ONLY on the head session_meta line, so the revive
     // would register with an empty cwd (→ the unknown-cwd short reap). Fall
-    // back to a bounded head read.
+    // back to a bounded head read. The same read carries the head label: a
+    // revival's tail is likewise past a head-borne title, so without this the
+    // revived slot would drop back to the cwd basename.
     let extract = cwd_extractor_for(source);
     let mut first_sight_cwd = extract_cwd(new_bytes, extract);
+    let mut head_label = None;
     if first_sight_cwd.is_none() && seen.lock().await.get(path) != Some(&true) {
-        first_sight_cwd = read_head_cwd(path, MAX_PENDING_BYTES, extract).await;
+        if let Some(head) = read_head(path, MAX_PENDING_BYTES).await {
+            (first_sight_cwd, head_label) =
+                extract_head_fields(&head, extract, decoders.head_label);
+        }
     }
     if !matches!(
         (decoders.activity_recency)(new_bytes),
         super::TailActivity::SidecarOnly
     ) {
-        emit_first_sight(path, source, decoders, seen, tx, first_sight_cwd).await;
+        emit_first_sight(
+            path,
+            source,
+            decoders,
+            seen,
+            tx,
+            first_sight_cwd,
+            head_label,
+        )
+        .await;
     }
 
     let path_agent_id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
@@ -433,6 +458,7 @@ async fn emit_first_sight(
     seen: &Arc<Mutex<HashMap<PathBuf, bool>>>,
     tx: &TaggedSender,
     cwd: Option<PathBuf>,
+    head_label: Option<String>,
 ) {
     // `Some(false)` — a claim RELEASED by the child-end un-claim (#246) —
     // registers like an absent entry: a released path's next append IS the
@@ -467,7 +493,9 @@ async fn emit_first_sight(
         ))
         .await;
 
-    let label = (decoders.derive_label)(path, source, &cwd);
+    // A head-read name beats the cwd deriver: it is the session's OWN title,
+    // while the cwd basename is shared by every concurrent session in a repo.
+    let label = head_label.unwrap_or_else(|| (decoders.derive_label)(path, source, &cwd));
     let _ = tx
         .send((
             Transport::Jsonl,
@@ -479,16 +507,17 @@ async fn emit_first_sight(
         .await;
 }
 
-/// Read at most `limit` bytes from the START of a file and extract `cwd` from
-/// the first complete JSONL line (CC writes `cwd` there), so registration never
-/// reads a whole multi-MB transcript.
-async fn read_head_cwd(path: &Path, limit: u64, extract: CwdExtractor) -> Option<PathBuf> {
+/// Read at most `limit` bytes from the START of a file, so registration never
+/// reads a whole multi-MB transcript. Returned raw because first-sight pulls
+/// TWO fields out of the same bytes (`cwd`, and the head label for a source
+/// that names its session there) — one read, not one per field.
+async fn read_head(path: &Path, limit: u64) -> Option<Vec<u8>> {
     let file_len = tokio::fs::metadata(path).await.ok()?.len();
     let mut file = tokio::fs::File::open(path).await.ok()?;
     let mut head = vec![0u8; limit.min(file_len) as usize];
     let n = file.read(&mut head).await.ok()?;
     head.truncate(n);
-    extract_cwd(&head, extract)
+    Some(head)
 }
 
 /// Read at most `bytes` from the END of a file (clamped to file size). `None`
@@ -610,6 +639,18 @@ pub(super) fn detect_parent_id(path: &Path, source: &str) -> Option<AgentId> {
 /// transcript lets a foreign-shaped line label a session with a foreign,
 /// identity-bearing cwd.
 pub(super) fn extract_cwd(bytes: &[u8], extract: CwdExtractor) -> Option<PathBuf> {
+    let mut found = None;
+    scan_jsonl(bytes, |v| {
+        found = extract(v);
+        found.is_some()
+    });
+    found
+}
+
+/// Walk a byte span's JSONL lines, handing each parsed line to `visit` until it
+/// returns `true`. Malformed/non-UTF-8 lines are skipped — a transcript head can
+/// straddle a partial write.
+fn scan_jsonl(bytes: &[u8], mut visit: impl FnMut(&serde_json::Value) -> bool) {
     for line in bytes.split(|b| *b == b'\n') {
         if line.is_empty() {
             continue;
@@ -620,9 +661,63 @@ pub(super) fn extract_cwd(bytes: &[u8], extract: CwdExtractor) -> Option<PathBuf
         let Ok(v) = serde_json::from_str::<serde_json::Value>(s) else {
             continue;
         };
-        if let Some(cwd) = extract(&v) {
-            return Some(cwd);
+        if visit(&v) {
+            return;
         }
     }
-    None
+}
+
+/// Whether a head scan can stop: everything it is ABLE to find, it has found.
+///
+/// `wants_label` is the whole reason `head_label` is an `Option`. A source with
+/// no head name can never satisfy a label term, so folding one in unconditionally
+/// turns its first-line stop into a full up-to-`MAX_PENDING_BYTES` parse — on a
+/// path every transcript source rides.
+fn head_scan_complete(cwd: Option<&Path>, label: Option<&str>, wants_label: bool) -> bool {
+    cwd.is_some() && (!wants_label || label.is_some())
+}
+
+/// The first-sight fields a HEAD read yields, pulled in ONE parse pass: scanning
+/// a 1 MiB head once per field is a real cost. For a TITLED omp root — the only
+/// source with a head label — the two land on adjacent lines (`title`, then
+/// `session`) and the scan stops there. A title-less head (every subagent, and
+/// legacy files with no slot) has no label to find, so it scans to the byte cap:
+/// bounded, once per first sight, and off the reducer thread.
+pub(super) fn extract_head_fields(
+    bytes: &[u8],
+    extract: CwdExtractor,
+    head_label: Option<HeadLabel>,
+) -> (Option<PathBuf>, Option<String>) {
+    let (mut cwd, mut label) = (None, None);
+    scan_jsonl(bytes, |v| {
+        if cwd.is_none() {
+            cwd = extract(v);
+        }
+        if let (Some(f), None) = (head_label, &label) {
+            label = f(v);
+        }
+        head_scan_complete(cwd.as_deref(), label.as_deref(), head_label.is_some())
+    });
+    (cwd, label)
+}
+
+#[cfg(test)]
+mod stop_tests {
+    use super::*;
+
+    /// The truth table the scan's cost depends on. The `wants_label = false`
+    /// row is load-bearing: it is the difference between stopping on the first
+    /// `cwd` line and parsing the entire head.
+    #[test]
+    fn head_scan_stops_on_cwd_alone_when_the_source_has_no_head_label() {
+        let cwd = Path::new("/repo");
+
+        assert!(head_scan_complete(Some(cwd), None, false));
+        assert!(head_scan_complete(Some(cwd), Some("t"), false));
+        assert!(!head_scan_complete(None, Some("t"), false));
+
+        assert!(!head_scan_complete(Some(cwd), None, true));
+        assert!(head_scan_complete(Some(cwd), Some("t"), true));
+        assert!(!head_scan_complete(None, None, true));
+    }
 }
