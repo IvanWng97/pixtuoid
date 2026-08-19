@@ -66,7 +66,7 @@ pub const DRAINED_TASK_TOMBSTONE_TTL: Duration = Duration::from_secs(90);
 /// staleness sweeps (#220). The probe is ground truth that the OWNING PROCESS
 /// is alive, while every `STALE_*` window only models event silence — so a
 /// vouched slot must not be swept on silence alone. Sized 2.5× the watcher's
-/// 60s poll cadence: two missed polls plus slack.
+/// poll cadence (`DEFAULT_POLL_INTERVAL`): two missed polls plus slack.
 #[doc(hidden)]
 pub const PROOF_OF_LIFE_TTL: Duration = Duration::from_secs(150);
 

@@ -667,14 +667,12 @@ command = "echo hi"
 
     #[test]
     fn codewhale_events_pins_the_exact_registered_set() {
-        // Deleting a registered event ships GREEN — cargo-mutants does not mutate
-        // slice initializers and nothing else asserts the SET. The bool is pinned
-        // too: it is `env_mode`, and flipping one silently changes the installed
-        // command string (whether `--event <name>` is baked in).
-        use std::collections::BTreeSet;
-        assert_eq!(
-            CODEWHALE_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
-            BTreeSet::from([
+        // The pinned bool is `env_mode`: flipping one silently changes whether
+        // `--event <name>` is baked into the installed command.
+        crate::install::assert_event_roster(
+            "CODEWHALE_EVENTS",
+            CODEWHALE_EVENTS,
+            &[
                 ("session_start", true),
                 ("message_submit", true),
                 ("tool_call_before", true),
@@ -682,9 +680,7 @@ command = "echo hi"
                 ("session_end", true),
                 ("subagent_spawn", false),
                 ("subagent_complete", false),
-            ]),
-            "CODEWHALE_EVENTS membership changed — a registered event that vanishes is \
-             a shipping bug no other test can see."
+            ],
         );
     }
 }

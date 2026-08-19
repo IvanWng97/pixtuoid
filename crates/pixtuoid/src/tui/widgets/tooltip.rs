@@ -18,8 +18,8 @@ use pixtuoid_scene::pose;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
-/// `tooltip_bg` fill + drop shadow), and the 1-cell uniform padding stands in for
-/// the old border, keeping the `+2` width/height math unchanged.
+/// `tooltip_bg` fill + drop shadow); the 1-cell uniform padding is what every
+/// caller's `+2` width/height math accounts for.
 pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
     Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
 }
@@ -390,10 +390,10 @@ pub(crate) fn paint_mascot_tooltip(
     paint_simple_tooltip(f, &text, mx, my, scene_rect, theme);
 }
 
-/// The mascot tooltip's text. The verb keys on the RUN state, not the session
-/// count (a single-user gateway holds one persistent session even at rest), and
-/// `degraded` — gateway up but its model backend failing every run — outranks
-/// busy/idle. Plain text (no emoji) to keep the caller's width math exact.
+/// The mascot tooltip's text. The verb keys on `busy` — see
+/// [`pixtuoid_scene::pixel_painter::MascotFrame::busy`] for why the run state,
+/// not the session count — and `degraded` outranks busy/idle. Plain text (no
+/// emoji) to keep the caller's width math exact.
 fn mascot_tooltip_text(
     name: &str,
     instance: Option<&str>,

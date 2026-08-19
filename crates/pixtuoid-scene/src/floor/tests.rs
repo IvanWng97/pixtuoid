@@ -997,14 +997,8 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
     );
 }
 
-// The scale-invariance property this file used to assert at the frame seam
-// lives in `render_scale.rs` now, beside `floor_capacity_is_invariant_under_
-// render_scale` and its negative control. It moved because the version here
-// could not fail: it drove `render_floor` at scale 2 and asserted only
-// desk-count equality plus buffer width, both of which hold while the frame
-// itself is garbled — the classic pass honoured the scale at a handful of
-// centred blits and nowhere else. `FrameInputs` no longer carries a scale, so
-// there is no half-kept promise left to certify.
+// The frame-seam scale-invariance property lives in `render_scale.rs` — the
+// version here asserted only desk counts, which hold on a garbled frame.
 
 #[test]
 fn the_foreground_layer_is_lit_by_the_clock() {

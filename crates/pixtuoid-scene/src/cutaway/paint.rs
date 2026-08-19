@@ -827,13 +827,8 @@ fn paint_character(
     let agent = frame.agents.get(c.agent_idx)?;
     let at = cutaway_anchor(c);
 
-    // The SAME recolored sprite the classic painter blits — per-agent hair,
-    // skin and cwd-keyed outfit, through the same cache. This profile used to
-    // blit the pack's raw frame, so every agent rendered in the placeholder
-    // palette and the office read as one person copied twelve times, which is
-    // the opposite of what it exists to show. It also hand-rolled the facing
-    // flip as `mirror_vertical` — rows, not columns — so a west-facing
-    // character would have rendered UPSIDE DOWN.
+    // The classic painter's own recolor + facing-flip path, through the same
+    // cache: a raw pack blit clones one placeholder-palette person twelve times.
     let glow_tint = crate::pixel_painter::character_glow_tint(c.glow, agent, theme);
     let (art, _burn) = crate::pixel_painter::seat::character_frame(
         c.anim_name,
