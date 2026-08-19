@@ -30,7 +30,7 @@ pub const HOOK_SESSION_END_TOMBSTONE_TTL: Duration = Duration::from_secs(5);
 
 /// How long a child-ledger entry's `ended_at` keeps gating a PARENTED
 /// re-registration of that child after it ended (#244). Sized past the
-/// watcher's 60s poll backstop, the worst case for a late transcript
+/// watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), the worst case for a late transcript
 /// first-sight; child ids are per-spawn unique, so a parented Start inside
 /// the window is never a legitimate new child, only the dead one's late echo.
 /// Parentless Starts are deliberately NOT gated — a Codex resurrect-on-prompt
@@ -42,7 +42,7 @@ pub const CHILD_END_LEDGER_TTL: Duration = Duration::from_secs(90);
 /// `parent_id` memory the #246 parentless-revival re-link reads.
 ///
 /// Deliberately LONGER than [`CHILD_END_LEDGER_TTL`]: the GATE is bounded by
-/// the watcher's 60s poll backstop, while the MEMORY must span a TURN gap,
+/// the watcher's poll backstop (`DEFAULT_POLL_INTERVAL`), while the MEMORY must span a TURN gap,
 /// which is unbounded. Sharing one clock meant a child idle >90s came back an
 /// ORPHAN, the exact phantom #246 exists to eliminate. Aligned with
 /// `jsonl::unclaim::CHILD_END_UNCLAIM_TTL`, the sibling half of this flow —
@@ -56,7 +56,8 @@ pub const CHILD_END_RELINK_TTL: Duration = Duration::from_secs(300);
 /// replay of its Start cannot re-fire `enter_delegating`. After the drain the
 /// transcript's batched Start+End pair replays into an EMPTY set, so the
 /// first-insert gate reads it as a fresh dispatch and would clobber a Waiting
-/// the parent raised in the gap. Sized past the 60s `scan_root` poll backstop;
+/// the parent raised in the gap. Sized past the `scan_root` poll backstop
+/// (`DEFAULT_POLL_INTERVAL`);
 /// a `tool_use_id` is never legitimately re-dispatched, so generosity costs
 /// only the tombstone's map entry.
 #[doc(hidden)]

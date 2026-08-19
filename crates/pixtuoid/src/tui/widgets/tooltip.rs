@@ -18,8 +18,8 @@ use pixtuoid_scene::pose;
 
 /// Borderless tooltip frame shared by every hover/click tooltip: just the padded
 /// text. The caller must paint `super::paint_card_backing` UNDER it (the `Clear` +
-/// `tooltip_bg` fill + drop shadow); the 1-cell uniform padding is what every
-/// caller's `+2` width/height math accounts for.
+/// `tooltip_bg` fill + drop shadow); the 1-cell uniform padding is what the
+/// callers' `+2` size math accounts for.
 pub(super) fn framed_tooltip<'a>(lines: Vec<Line<'a>>) -> Paragraph<'a> {
     Paragraph::new(lines).block(Block::default().padding(Padding::uniform(1)))
 }

@@ -998,7 +998,7 @@ fn audio_observer_keeps_cue_edges_warm_so_delivery_resume_fires_no_volley() {
 }
 
 // The frame-seam scale-invariance property lives in `render_scale.rs` — the
-// version here asserted only desk counts, which hold on a garbled frame.
+// version here asserted only desk count + buffer width, which hold on a garbled frame.
 
 #[test]
 fn the_foreground_layer_is_lit_by_the_clock() {
