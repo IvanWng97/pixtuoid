@@ -166,11 +166,12 @@ pub fn walk_profile(path_len_octile: u32, intent: WalkIntent, agent_id: AgentId)
 /// (progress scaled by this, so integer math carries three fractional digits).
 pub const PROGRESS_SCALE: u16 = 1000;
 
-/// Render progress as `t_x1000 = round(1000 · s(elapsed_ms) / L)`.
+/// Render progress as `t_x1000 = round(SCALE · s(elapsed_ms) / L)`,
+/// `SCALE` being [`PROGRESS_SCALE`].
 ///
 /// - `elapsed_ms < duration_ms`: physics kinematics (accel/cruise/decel).
-/// - `elapsed_ms >= duration_ms`: saturates at 1000 (also covers pause window).
-/// - Zero-length profile: always returns 1000.
+/// - `elapsed_ms >= duration_ms`: saturates at the scale (also covers pause window).
+/// - Zero-length profile: always returns the scale.
 pub fn walk_progress(p: &WalkProfile, elapsed_ms: u64) -> u16 {
     if p.path_len_octile == 0 || elapsed_ms >= p.duration_ms {
         return PROGRESS_SCALE;
@@ -597,8 +598,9 @@ mod prop {
         pixtuoid_core::AgentId::from_parts("prop", &seed.to_string())
     }
 
-    /// Sweep one profile's whole timeline: progress is bounded to [0, 1000],
-    /// non-decreasing, exactly 1000 at/after duration_ms, and never panics.
+    /// Sweep one profile's whole timeline: progress is bounded to
+    /// [0, `PROGRESS_SCALE`], non-decreasing, exactly the scale at/after
+    /// duration_ms, and never panics.
     fn assert_progress_invariants(p: &WalkProfile) -> Result<(), TestCaseError> {
         let mut prev = walk_progress(p, 0);
         prop_assert!(prev <= PROGRESS_SCALE, "p(0)={} out of range", prev);

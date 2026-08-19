@@ -289,8 +289,8 @@ pub const TEST_DEFAULT_DESKS: usize = CLASSIC_OFFICE_DESKS;
 /// The desk-grid vertical gap unit (px) — the lounge-waypoint bound in the layout
 /// tests reads it; the pod grid itself prices its own spacing.
 pub const DESK_GAP_Y: u16 = 14;
-/// Floor (px) for the layout's `top_margin` — the north wall band never
-/// shrinks below this (`top_margin = max(30% of buffer height, this)`).
+/// Floor (px) for the layout's `top_margin` — `compute::top_margin`'s
+/// percent-of-buffer derivation never shrinks the north wall band below this.
 pub const MIN_TOP_MARGIN: u16 = 20;
 const MIN_DUAL_MEETING_H: u16 = 80;
 

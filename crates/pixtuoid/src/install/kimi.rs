@@ -516,14 +516,14 @@ command = "terminal-notifier -message done"
     }
 
     // MEMBERSHIP pin — the completeness half `every_registered_kimi_event_decodes`
-    // can't see (it only proves registered ⊆ decodable, so silently DROPPING an
-    // event ships green; cargo-mutants doesn't mutate `&[&str]` initializers).
+    // can't see; the two `*Failure` variants are serviced ONLY by the custom
+    // Extend decoder, so update this pin deliberately.
     #[test]
     fn kimi_events_pins_the_exact_registered_set() {
-        use std::collections::BTreeSet;
-        assert_eq!(
-            KIMI_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
-            BTreeSet::from([
+        crate::install::assert_event_roster(
+            "KIMI_EVENTS",
+            KIMI_EVENTS,
+            &[
                 "SessionStart",
                 "PreToolUse",
                 "PostToolUse",
@@ -532,9 +532,7 @@ command = "terminal-notifier -message done"
                 "Stop",
                 "StopFailure",
                 "SessionEnd",
-            ]),
-            "KIMI_EVENTS membership changed — the two `*Failure` variants are the \
-             ones ONLY the custom Extend decoder services; update this pin deliberately."
+            ],
         );
     }
 }

@@ -482,5 +482,26 @@ pub(crate) fn uninstall_target(t: &Target, config: Option<PathBuf>) -> Result<Un
     })
 }
 
+/// Assert a `*_EVENTS` roster is exactly `expected`, naming it in the failure.
+///
+/// Deleting a registered event ships GREEN — cargo-mutants does not mutate
+/// slice initializers and nothing else asserts the SET, which is how both of
+/// #929's headline registration fixes could be silently removed. Update a pin
+/// deliberately when its roster changes.
+#[cfg(test)]
+pub(crate) fn assert_event_roster<T: Ord + std::fmt::Debug + Copy>(
+    name: &str,
+    actual: &[T],
+    expected: &[T],
+) {
+    use std::collections::BTreeSet;
+    assert_eq!(
+        actual.iter().copied().collect::<BTreeSet<_>>(),
+        expected.iter().copied().collect::<BTreeSet<_>>(),
+        "{name} membership changed — a registered event that vanishes is a \
+         shipping bug no other test can see."
+    );
+}
+
 #[cfg(test)]
 mod tests;

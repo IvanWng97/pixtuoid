@@ -465,14 +465,10 @@ mod tests {
 
     #[test]
     fn grok_events_pins_the_exact_registered_set() {
-        // Deleting a registered event ships GREEN — cargo-mutants does not mutate
-        // `&[&str]` initializers and nothing else asserts the SET, which is how
-        // both of #929's headline registration fixes could be silently removed.
-        // Update this pin deliberately when the roster changes.
-        use std::collections::BTreeSet;
-        assert_eq!(
-            GROK_EVENTS.iter().copied().collect::<BTreeSet<_>>(),
-            BTreeSet::from([
+        crate::install::assert_event_roster(
+            "GROK_EVENTS",
+            GROK_EVENTS,
+            &[
                 "SessionStart",
                 "UserPromptSubmit",
                 "PreToolUse",
@@ -487,9 +483,7 @@ mod tests {
                 "SubagentStop",
                 "SubagentEnd",
                 "SessionEnd",
-            ]),
-            "GROK_EVENTS membership changed — a registered event that vanishes is a \
-             shipping bug no other test can see."
+            ],
         );
     }
 }

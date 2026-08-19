@@ -290,8 +290,7 @@ fn lofi_post(buf: &[f32], drive: f32) -> Vec<f32> {
     let warped = crate::audio::dsp::warp_resample(buf, &[(0.7, 0.0025), (8.0, 0.0006)]);
     let t = drive.tanh();
     let sat: Vec<f32> = warped.iter().map(|&x| (x * drive).tanh() / t).collect();
-    // widened from 80-120: tape 15ips head-bump ≈ 60Hz, and the bass lane's
-    // fundamentals sat under the old floor (LOFI-BIBLE §4)
+    // tape 15ips head-bump ≈ 60Hz — low enough to catch the bass fundamentals (LOFI-BIBLE §4)
     let bump = bandpass(&sat, 60.0, 120.0);
     let bumped: Vec<f32> = sat.iter().zip(&bump).map(|(&x, &b)| x + 0.35 * b).collect();
     lowpass(&bumped, 6500.0)
