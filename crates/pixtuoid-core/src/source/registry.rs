@@ -817,9 +817,11 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // AND the child persists its own parent-linked transcript.
             delegations_are_hook_silent: false,
         },
-        // No shim to stamp a pid, and no click-time transcript probe wired in
-        // the binary (the fd probe binds pid_of for LIVENESS only).
-        focus: FocusChannel::Unsupported,
+        // omp holds a for-lifetime append fd on its session file, so the SAME
+        // `live_omp_session_ids` snapshot that vouches for liveness also names
+        // the owning pid — click-time resolution re-runs it via
+        // `omp_pid_for_session`. There is no shim to stamp a pid.
+        focus: FocusChannel::TranscriptProbe,
     },
 };
 

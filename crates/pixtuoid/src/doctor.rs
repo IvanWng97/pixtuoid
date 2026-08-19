@@ -645,6 +645,11 @@ struct DoctorReport {
     /// `None` = probe disabled (non-standard projects root).
     cc_registry: Option<(std::path::PathBuf, bool)>,
     codex_sessions: (std::path::PathBuf, bool),
+    /// The other two `TranscriptProbe` roots. Each is source-specific — omp's is
+    /// the resolved sessions dir, grok's a registry FILE — so each needs its own
+    /// hand-written row, pinned by `every_focusable_source_appears_in_the_focus_category`.
+    omp_sessions: (std::path::PathBuf, bool),
+    grok_registry: (std::path::PathBuf, bool),
     home_split: Option<String>,
     /// Whether the report may carry ANSI color — see [`report_color`].
     color: bool,
@@ -821,6 +826,12 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     });
     let codex_sessions = pixtuoid_core::source::codex::CodexSource::default_paths().sessions_root;
     let codex_exists = codex_sessions.is_dir();
+    // Resolved exactly as the probe does, so the report cannot claim a root
+    // the probe would not use. grok's is a registry FILE, not a directory.
+    let omp_sessions = pixtuoid_core::source::omp::omp_sessions_dir();
+    let omp_exists = omp_sessions.is_dir();
+    let grok_registry = pixtuoid_core::source::grok::grok_home().join("active_sessions.json");
+    let grok_exists = grok_registry.is_file();
 
     // Read as BYTES, lossy ONLY here: the advisory renders these for a human,
     // it never opens them, so this is the one boundary where losing an
@@ -854,6 +865,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         backend_healthy,
         cc_registry,
         codex_sessions: (codex_sessions, codex_exists),
+        omp_sessions: (omp_sessions, omp_exists),
+        grok_registry: (grok_registry, grok_exists),
         home_split,
         color,
         truecolor_probe_ran: probe_ok,
@@ -1162,6 +1175,38 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             r.codex_sessions.0.display()
         ));
     }
+    let om_prefix = prefix_of(pixtuoid_core::source::omp::SOURCE_NAME);
+    if r.omp_sessions.1 {
+        details.push(format!(
+            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe {} {}",
+            ink.ok("\u{2713}"),
+            r.omp_sessions.0.display()
+        ));
+    } else {
+        problem = true;
+        details.push(format!(
+            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe {} {} (focus no-ops until omp \
+             writes it)",
+            ink.bad("\u{2717} missing"),
+            r.omp_sessions.0.display()
+        ));
+    }
+    let gk_prefix = prefix_of(pixtuoid_core::source::grok::SOURCE_NAME);
+    if r.grok_registry.1 {
+        details.push(format!(
+            "{DETAIL_INDENT}{gk_prefix}\u{b7}grok — session registry {} {}",
+            ink.ok("\u{2713}"),
+            r.grok_registry.0.display()
+        ));
+    } else {
+        problem = true;
+        details.push(format!(
+            "{DETAIL_INDENT}{gk_prefix}\u{b7}grok — session registry {} {} (focus no-ops until grok \
+             writes it)",
+            ink.bad("\u{2717} missing"),
+            r.grok_registry.0.display()
+        ));
+    }
     use registry::FocusChannel;
     let mut shim_stamp = Vec::new();
     let mut plugin_stamp = Vec::new();
@@ -1414,6 +1459,34 @@ mod tests {
         );
     }
 
+    /// Every focusable (non-daemon) registered source must appear SOMEWHERE in
+    /// the category. A `TranscriptProbe` row is HAND-WRITTEN — the registry loop
+    /// below it skips that channel — so without this a newly probe-backed source
+    /// silently VANISHES from the report, which is exactly what omp did the
+    /// moment it left `Unsupported`.
+    #[test]
+    fn every_focusable_source_appears_in_the_focus_category() {
+        let mut r = summary_report(vec![]);
+        r.cc_registry = Some(("/home/u/x".into(), true));
+        r.codex_sessions = ("/home/u/x".into(), true);
+        r.omp_sessions = ("/home/u/x".into(), true);
+        r.grok_registry = ("/home/u/x".into(), true);
+        let s = focus_category(&r, &Ink { on: false }).details.join("\n");
+        for src in registry::registered_source_names() {
+            let Some(d) = registry::descriptor_for(src) else {
+                continue;
+            };
+            if d.is_daemon() {
+                continue;
+            }
+            let tag = format!("{}\u{b7}{}", d.label_prefix, src);
+            assert!(
+                s.contains(&tag),
+                "{tag} is missing from the focus category:\n{s}"
+            );
+        }
+    }
+
     #[test]
     fn run_renders_the_category_report() {
         // A dev shell exporting CLICOLOR_FORCE would force escapes even under
@@ -1490,6 +1563,8 @@ mod tests {
             backend_healthy: true,
             cc_registry: Some(("/tmp/reg".into(), true)),
             codex_sessions: ("/tmp/cx".into(), true),
+            omp_sessions: ("/tmp/om".into(), true),
+            grok_registry: ("/tmp/gk/active_sessions.json".into(), true),
             home_split: None,
             color: false,
             truecolor_probe_ran: false,

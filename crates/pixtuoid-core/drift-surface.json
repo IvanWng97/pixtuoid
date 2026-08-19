@@ -84,7 +84,8 @@
     "omp.entry_types": [
       "session",
       "message",
-      "custom"
+      "custom",
+      "thinking_level_change"
     ],
     "omp.exit_marker": [
       "session_exit"

@@ -331,6 +331,19 @@ pub fn grok_pid_for_session(grok_root: &std::path::Path, session_id: &str) -> Op
         .copied()
 }
 
+/// omp twin, keyed by the `omp_id_from_path` stem CHAIN (the slot's
+/// `session_id`, so a nested subagent resolves its OWN pid — which is the
+/// parent's, since omp subagents run in-process and inherit the fd).
+/// `sessions_root` is `omp_sessions_dir()`; the probe applies its own
+/// first-party-layout gate, so a replay root resolves nothing.
+#[cfg(feature = "native")]
+pub fn omp_pid_for_session(sessions_root: &std::path::Path, session_id: &str) -> Option<i32> {
+    omp::live_omp_session_ids_for_focus(sessions_root)?
+        .pid_of
+        .get(session_id)
+        .copied()
+}
+
 /// Shared ACP (Agent Client Protocol) wire-vocabulary decode — reused by any
 /// source whose transcript speaks ACP (grok today).
 pub(crate) mod acp;
@@ -481,5 +494,21 @@ mod focus_pid_tests {
             "hit: the session's own live registry pid"
         );
         assert_eq!(grok_pid_for_session(root.path(), "unknown-sess"), None);
+    }
+
+    /// Like the Codex twin this is miss-only: a HIT needs an fd held by a
+    /// process the probe recognizes (`bun`/`omp`), which a test binary is not,
+    /// so this is a WIRING smoke test — both roots miss for different reasons
+    /// and it cannot tell them apart. The layout gate itself has teeth in
+    /// `omp::native`'s `probe_root_requires_first_party_layout`.
+    #[test]
+    fn omp_pid_for_session_gates_on_the_first_party_layout() {
+        let root = tempfile::tempdir().unwrap();
+        // An arbitrary replay root: rejected before the probe even runs.
+        assert_eq!(omp_pid_for_session(root.path(), "any-session"), None);
+        // First-party shape: passes the gate, so the probe itself runs.
+        let sessions = root.path().join(".omp").join("agent").join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        assert_eq!(omp_pid_for_session(&sessions, "any-session"), None);
     }
 }

@@ -61,11 +61,12 @@ impl Source for OmpSource {
 /// pid per id.
 ///
 /// omp keeps a for-lifetime append fd on its session file, so an open
-/// transcript fd IS the first-party liveness signal. omp runs under Bun, so the
-/// kernel-truncated process name is `bun`, not `omp` — probe both (a future
-/// compiled binary would report `omp`). The fd MODE is not checked, so a
-/// long-lived bun tool reading an OLD transcript vouches for it: an accepted
-/// intermittent resurrection, reaped again once the fd closes.
+/// transcript fd IS the first-party liveness signal. BOTH process names are
+/// probed: a packaged omp (Homebrew ships a Bun-compiled single binary, which
+/// reports `omp`) and a `bun run` checkout, whose kernel-truncated name is
+/// `bun`. The fd MODE is not checked, so a long-lived bun tool reading an OLD
+/// transcript vouches for it: an accepted intermittent resurrection, reaped
+/// again once the fd closes.
 fn live_omp_session_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
     ProbeSnapshot::from_open_fds(
         sessions_root,
@@ -73,6 +74,15 @@ fn live_omp_session_ids(sessions_root: &Path) -> Option<ProbeSnapshot> {
         omp_recognize,
         omp_id_from_path,
     )
+}
+
+/// The FOCUS-jump entry point: the same snapshot the liveness probe takes,
+/// behind the same first-party-layout gate, so a `--sessions-root` replay can
+/// never resolve a pid for a transcript it merely replayed. Re-probed at CLICK
+/// time rather than cached, which is what makes the pid recycle-safe: a dead
+/// omp holds no fd, so its id simply drops out of the snapshot.
+pub(crate) fn live_omp_session_ids_for_focus(sessions_root: &Path) -> Option<ProbeSnapshot> {
+    live_omp_session_ids(&omp_probe_root(sessions_root)?)
 }
 
 /// The per-source RECOGNIZER: a held-open `.jsonl` under the root vouches. The
