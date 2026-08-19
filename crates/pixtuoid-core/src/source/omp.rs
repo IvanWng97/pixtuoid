@@ -740,7 +740,13 @@ fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if tool == "task" {
         return ToolDetail::Task;
     }
-    const KEYS: &[&str] = &["command", "path", "pattern", "query"];
+    // `i` is omp's universal per-call INTENT ("Reading the burn tier"), which
+    // its tool schemas mandate — so it sits LAST, below every concrete target:
+    // a path beats a paraphrase of that path. It earns its place on the tools
+    // that have no keyed target at all (`edit`, `todo`, `job`, `hub`, …),
+    // which otherwise render as a bare verb. `omp_ask_reason` already leans on
+    // the same field for the Waiting prompt.
+    const KEYS: &[&str] = &["command", "path", "pattern", "query", "i"];
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
 
@@ -1203,6 +1209,50 @@ mod tests {
             }
             other => panic!("expected one ActivityStart, got {other:?}"),
         }
+    }
+
+    /// Byte-real: omp mandates a per-call `i` intent, and its `edit`/`todo`
+    /// tools carry NO path-like argument, so they would render as a bare verb
+    /// without `i` as the last-resort target.
+    #[test]
+    fn intent_is_the_last_resort_target_and_never_outranks_a_concrete_one() {
+        let display_of = |args: &str| {
+            let line = format!(
+                r#"{{"type":"message","id":"m1","parentId":null,"timestamp":"t","message":{{"role":"assistant","content":[{{"type":"toolCall","id":"t1","name":"edit","arguments":{args}}}],"timestamp":1}}}}"#
+            );
+            match &decode(&line)[..] {
+                [AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { display }),
+                    ..
+                }] => display.clone(),
+                other => panic!("expected one ActivityStart, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            display_of(r#"{"i":"Adding the palette color","input":"…"}"#),
+            "edit: Adding the palette color",
+            "a keyless tool falls back to its intent"
+        );
+        assert_eq!(
+            display_of(r#"{"path":"src/burn.rs","i":"Adding the palette color"}"#),
+            "edit: src/burn.rs",
+            "a CONCRETE target outranks the paraphrase"
+        );
+        assert_eq!(
+            display_of(r#"{"input":"…"}"#),
+            "edit",
+            "no target and no intent stays a bare verb"
+        );
+        // The intent rides the same target cap as every other key, so a
+        // model that writes an essay can't blow out the sprite's detail line.
+        let long = "T".repeat(200);
+        let capped = display_of(&format!(r#"{{"i":"{long}"}}"#));
+        let target = capped.strip_prefix("edit: ").expect("has a target suffix");
+        assert_eq!(
+            target.chars().count(),
+            crate::source::decoder::MAX_TOOL_TARGET_CHARS + 1
+        );
+        assert!(target.ends_with('…'));
     }
 
     #[test]

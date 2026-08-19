@@ -30,7 +30,7 @@ expression: events
     tool_use_id: call_00_hiuykNHdR1ojkFiZXHfb4236
     detail:
       Generic:
-        display: ask
+        display: "ask: Choosing new filename for NOTE.txt"
 - Waiting:
     agent_id: 4349876156057149153
     reason: What should NOTE.txt be renamed to?
