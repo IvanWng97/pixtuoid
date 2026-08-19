@@ -9,8 +9,6 @@
 //! parent's `subagent_start` names the child and the CHILD's own `subagent_stop`
 //! ends it.
 
-use std::path::Path;
-
 use pixtuoid_core::harness::{Drive, Driven};
 use pixtuoid_core::source::{AgentEvent, ToolDetail};
 use pixtuoid_core::AgentId;
@@ -19,15 +17,11 @@ const PARENT: &str = "01a006a5-e63d-7543-b1af-da3127a85c3b";
 const CHILD: &str = "01a006a6-0659-7690-a9cc-20da7c827b72";
 
 fn lines(name: &str) -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/sources/grok/fixtures")
-        .join(name);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .filter(|l| !l.trim().is_empty())
-        .map(str::to_string)
-        .collect()
+    super::captures::fixture_lines(
+        &super::captures::sources_root()
+            .join("grok/fixtures")
+            .join(name),
+    )
 }
 
 fn hooks() -> Driven {

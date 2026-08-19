@@ -22,7 +22,7 @@ use pixtuoid_core::source::{registry, AgentEvent};
 // copies whose `read_dir` SWALLOWED errors where the other panics — an
 // unreadable capture dir made `wire_files()` empty, so the redaction rule
 // passed vacuously for it.
-use super::captures::{fixtures_root, sorted_dirs, transcripts_in};
+use super::captures::{fixture_lines, fixtures_root, sorted_dirs, transcripts_in};
 
 /// Hook-only-ness comes from the registry row, never a harness-side list — a
 /// second list could mark a JSONL source hook-only and pass the harness without
@@ -36,15 +36,6 @@ fn is_hook_only(source: &str) -> bool {
 /// apply (no agent slots).
 fn is_daemon(source: &str) -> bool {
     registry::descriptor_for(source).is_some_and(|d| d.is_daemon())
-}
-
-fn read_lines(path: &Path) -> Vec<String> {
-    std::fs::read_to_string(path)
-        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
-        .lines()
-        .map(str::to_string)
-        .filter(|l| !l.trim().is_empty())
-        .collect()
 }
 
 struct Decoded {
@@ -111,7 +102,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
                  SourceDescriptor row in source/registry.rs"
             )
         });
-        let driven = drive.lines(read_lines(transcript));
+        let driven = drive.lines(fixture_lines(transcript));
         driven.assert_clean(&format!("transcript {}", transcript.display()));
         driven
     });
@@ -120,7 +111,7 @@ fn decode_fixture(source: &str, dir: &Path) -> Decoded {
     // `{{TRANSCRIPT_PATH}}` lets a path-keyed hook (CC) line up with its
     // transcript; Codex carries it too, to prove it's ignored.
     let hook_lines: Vec<String> = if hooks_path.exists() {
-        read_lines(&hooks_path)
+        fixture_lines(&hooks_path)
             .into_iter()
             .map(|l| l.replace("{{TRANSCRIPT_PATH}}", &logical))
             .collect()
@@ -163,7 +154,7 @@ fn a_seeded_drive_coalesces_with_each_transcripts_own_decoder() {
             let driven = Drive::transcript_at(&source, &transcript)
                 .unwrap_or_else(|| panic!("{source}: no transcript decoder"))
                 .seeded()
-                .lines(read_lines(&transcript));
+                .lines(fixture_lines(&transcript));
             driven.assert_clean(&format!("seeded transcript {}", transcript.display()));
 
             let ids: BTreeSet<_> = driven.events.iter().map(AgentEvent::agent_id).collect();

@@ -91,6 +91,18 @@ pub(crate) fn transcripts_in(dir: &Path) -> Vec<PathBuf> {
     out
 }
 
+/// A fixture's JSONL payload as its non-empty lines — this binary's one line
+/// reader. One definition so a semantics change (a BOM skip, say) cannot reach
+/// one source's tests and miss its siblings (#936's diverging-copies class).
+pub(crate) fn fixture_lines(path: &Path) -> Vec<String> {
+    std::fs::read_to_string(path)
+        .unwrap_or_else(|e| panic!("read {}: {e}", path.display()))
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
 pub(crate) fn sources_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
 }
@@ -836,12 +848,8 @@ fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
         let mut stamps: BTreeSet<String> = BTreeSet::new();
         let mut dates: BTreeSet<String> = BTreeSet::new();
         if let Some(hooks) = c.hook_payloads() {
-            for line in std::fs::read_to_string(&hooks)
-                .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-            {
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            for line in fixture_lines(&hooks) {
+                let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
                     continue;
                 };
                 if let Some(src) = v.get("_pixtuoid_source").and_then(|s| s.as_str()) {
@@ -1039,12 +1047,8 @@ fn each_sources_tool_id_key_is_the_one_its_captures_carry() {
         let Some(want) = d.hook().map(|h| h.tool_id_key.wire_name()) else {
             continue;
         };
-        for line in std::fs::read_to_string(&hooks)
-            .unwrap_or_else(|e| panic!("read {}: {e}", hooks.display()))
-            .lines()
-            .filter(|l| !l.trim().is_empty())
-        {
-            let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+        for line in fixture_lines(&hooks) {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
                 continue;
             };
             for wrong in KEYS.iter().filter(|k| **k != want) {
