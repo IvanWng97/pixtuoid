@@ -505,7 +505,8 @@ fn probe_version(argv: &'static [&'static str]) -> Option<String> {
 /// `setup --yes` order then installed hooks into CLIs `setup --yes` alone had
 /// just declined to touch. Gating on presence removes the observer effect by
 /// construction: a CLI that has already written its own state cannot be
-/// perturbed into existence by one more `--version`.
+/// perturbed into existence by one more `--version`. Pinned by
+/// `run_never_spawns_a_version_probe_for_a_cli_it_has_no_evidence_of`.
 fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
     connected || cli_detected.unwrap_or(false)
 }

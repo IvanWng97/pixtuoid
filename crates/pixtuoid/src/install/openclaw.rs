@@ -276,7 +276,10 @@ fn contains_include(v: &Value) -> bool {
 /// writer emits strict JSON. Our read→merge→write round-trip re-serializes through
 /// `serde_json`, which cannot represent any of that: parsing it would mean silently
 /// DELETING the user's comments on their next `connect`. So a non-strict document
-/// is refused with the owner-CLI path instead of being rewritten.
+/// is refused with the owner-CLI path instead of being rewritten. Upstream's own
+/// `openclaw config patch` re-serializes strict and loses them too — measured, so
+/// don't re-propose it as the fix without re-measuring. Pinned by
+/// `merge_refuses_a_json5_document_instead_of_dropping_its_comments`.
 fn parse_for_merge(content: &str) -> Result<Value> {
     if content.trim().is_empty() {
         return Ok(json!({}));

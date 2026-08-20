@@ -139,6 +139,9 @@ pub(crate) fn verify_target(
     // code-artifact target. Where the artifact IS the target's own config file it
     // has no `extra_artifacts` to ride this loop, so the check belongs in that
     // target's `verify_schema` instead — opencode's plugin is the one such shape.
+    // Pinned by
+    // `verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_target`,
+    // which sweeps every target rather than naming them.
     if let Some(make) = t.extra_artifacts {
         match make(std::path::Path::new("pixtuoid-hook")) {
             Ok(arts) => {

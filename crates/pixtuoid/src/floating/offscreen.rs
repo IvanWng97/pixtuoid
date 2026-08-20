@@ -187,7 +187,8 @@ pub(crate) fn boot_capacities_for_window(size: PhysicalSize<u32>) -> [usize; MAX
 /// `store`, NOT the TUI's monotone `fetch_max`: the floating window's pixel size is
 /// exact and authoritative on every redraw, so a shrink genuinely LOWERS capacity and
 /// the reducer must stop admitting agents onto desks that no longer exist. Don't
-/// "harmonize" the two — the direction is deliberate.
+/// "harmonize" the two — the direction is deliberate, and pinned by
+/// `a_shrink_lowers_the_published_capacity_it_is_store_not_fetch_max`.
 ///
 /// The resize DETECTION rides along with the publish because `floor_capacity` runs a
 /// full layout compute per floor, so this must not run per frame. Both live here rather

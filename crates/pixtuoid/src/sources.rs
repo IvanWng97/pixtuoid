@@ -85,8 +85,8 @@ impl ChangeOutcome {
 ///
 /// Treat this wire as PUBLISHED: installed Raycast store copies parse it
 /// independently of the binary's version, so a further shape change needs a
-/// version handshake, never another flag-day edit — see the sharp edge in
-/// `crates/pixtuoid/CLAUDE.md`.
+/// version handshake, never another flag-day edit. The token spelling is pinned
+/// by `change_outcome_wire_tokens_are_stable`.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 // `deny_unknown_fields` ⇒ `additionalProperties: false` (rationale on `SourceStatus`).
 #[cfg_attr(test, derive(schemars::JsonSchema), schemars(deny_unknown_fields))]
@@ -160,6 +160,7 @@ pub enum ConnectOutcome {
 /// Result of a disconnect whose FLAG was persisted false. `Err` from
 /// `disconnect` is reserved for the persist-failure abort; a failed hook removal
 /// folds in here so the gate still closes (connect rolls back, disconnect does not).
+/// Pinned by `map_disconnect_outcome_surfaces_a_folded_hook_removal_failure`.
 #[derive(Debug)]
 pub enum DisconnectOutcome {
     FlagOnly,
