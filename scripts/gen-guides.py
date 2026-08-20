@@ -106,13 +106,8 @@ DECLARED_FN = re.compile(r"\bfn\s+([a-z0-9_]+)")
 
 
 def guard_pinned_by_claims(root: pathlib.Path) -> list[str]:
-    """A `Pinned by `x`` comment must name a function that exists.
-
-    This is the anti-orphan half of moving rationale onto declarations: prose
-    outlives the code it describes, a named mechanism cannot. `drift_surface.rs`
-    already asserts exactly this for the `DECODED_*` exemptions; the rule is not
-    specific to those consts, so it runs tree-wide.
-    """
+    """A ``Pinned by `x``` comment must name a function that exists — prose outlives
+    the code it describes; a named mechanism cannot. Generalizes `drift_surface.rs`."""
     sources = [p for p in root.rglob("*.rs") if "target" not in p.parts]
     declared: set[str] = set()
     claims: list[tuple[str, str]] = []
@@ -348,18 +343,16 @@ def selftest() -> int:
             fails.append("a hard-wrapped sibling entry must FAIL generation (assert_verbatim)")
         stage("crate/SHARP-EDGES.md", edges)
 
-        # Both directions for the pinned-by guard, plus the wrap case: a claim
-        # split across two `///` lines is the shape that a line-at-a-time matcher
-        # silently passes, so the fixture spells it that way. The resync is load
-        # bearing — the arm above leaves the guide drifted from its sibling on
-        # purpose, and this arm's control is `--check` returning 0.
         gen(False)
         stage("crate/src.rs", "/// Pinned by `a_test_that_exists`.\nfn a_test_that_exists() {}\n")
         if gen(True) != 0:
-            fails.append("a pinned-by claim naming a declared fn must stay green")
+            fails.append("a pinned-by claim naming a declared fn must stay green — if "
+                         "this red, the resync above stopped clearing the prior arm's "
+                         "deliberate drift and the control is measuring that instead")
         stage("crate/src.rs", "/// Pinned by\n/// `no_such_test`.\nfn unrelated() {}\n")
         if gen(True) != 1:
-            fails.append("a wrapped pinned-by claim naming nothing must red --check")
+            fails.append("a pinned-by claim WRAPPED across two `///` lines must still "
+                         "red --check — a line-at-a-time matcher passes it silently")
         (repo / "crate/src.rs").unlink()
 
         stage("crate/SHARP-EDGES.md", "# e\n\n- **Huge.** " + "x " * MAX_ENTRY_CHARS + "\n")
