@@ -78,6 +78,9 @@ pub(crate) fn state_color(kind: StateKind, theme: &Theme) -> Color {
 }
 
 /// The drop shadow's single uniform darkening factor (0 = black, 1 = unchanged).
+///
+/// Uniform is a standing OWNER PREFERENCE, not an unfinished gradient — don't
+/// "restore" a penumbra. Pinned by `borderless_panel_casts_a_flat_offset_shadow`.
 const SHADOW_FACTOR: f32 = 0.42;
 /// How far the shadow silhouette is offset down-and-right of the card, in cells — what
 /// makes it read as a cast box-shadow (the card floats above it) rather than an outline.

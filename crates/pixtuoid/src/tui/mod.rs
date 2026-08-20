@@ -276,7 +276,8 @@ fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
 }
 
 /// Windows delivers Press AND Release per keystroke, so without this guard every key
-/// double-fires there — `p` would pause then instantly unpause. Inert on Unix.
+/// double-fires there — `p` would pause then instantly unpause. Inert on Unix, which
+/// is why a local green run is no evidence. Pinned by `only_press_events_dispatch`.
 fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
 }
@@ -803,6 +804,10 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     false
 }
 
+/// The event loop, running as the `block_on` ROOT future rather than on a tokio
+/// worker — so `tokio::task::block_in_place` here is inert, not a yield point, and
+/// it does not panic either (that is `current_thread`-only). Pinned by
+/// `block_in_place_is_inert_on_the_block_on_thread`.
 pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
@@ -1000,9 +1005,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                                 m.row,
                                 now,
                             ) {
-                                // Empty on purpose: the click was consumed. An agent
-                                // wins over the coffee Easter egg and the pet, matching
-                                // the hover ladder in renderer.rs.
+                                // Empty on purpose: the click was consumed. The
+                                // coffee-before-pet order below is the half no
+                                // mechanism holds — keep it in step with the
+                                // hover arms in `renderer::draw_scene`.
                             } else if renderer.cached_layout().is_some_and(|layout| {
                                 renderer::hit_test_coffee_machine(layout, m.column, m.row)
                             }) {
