@@ -161,8 +161,8 @@ lens); anything bigger is SURFACED in the ranked report for the owner to pick.
 ## Disposition sweep (both scopes)
 
 Drive every reviewer/finder/bot finding to **exactly one terminal state**:
-FIXED · REFUTED-with-trace (cite or ADD the relevant per-crate
-`SHARP-EDGES.md` entry — that keeps the next agent's context accurate) ·
+FIXED · REFUTED-with-trace (cite the MECHANISM that refutes it — a test, a
+compile-time constraint, a CI gate; ADD one where none exists, never prose) ·
 RE-SCOPED · SURFACED — the four states are defined ONCE in
 `pr-review.prompt.md`'s orchestrator notes; fill from there, never a
 paraphrase here. Agents never file issues. "Acknowledged, no action" is NOT
