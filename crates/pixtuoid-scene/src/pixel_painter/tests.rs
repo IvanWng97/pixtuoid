@@ -1308,6 +1308,23 @@ fn door_frame_closed_when_no_agents() {
 }
 
 #[test]
+fn wall_clock_epoch_ms_survives_an_f32_cast_only_after_an_integer_reduction() {
+    // The freeze is invisible at a test-scale `now`; it needs the real ~1.7e12
+    // magnitude, so this fixture counts from the epoch like production does.
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let a_second_later = now + std::time::Duration::from_secs(1);
+
+    // An f32 ULP up here is ~131 s, so a whole second vanishes in the cast.
+    assert_eq!(epoch_ms(now) as f32, epoch_ms(a_second_later) as f32);
+
+    const CYCLE_MS: u64 = 4500;
+    assert_ne!(
+        (epoch_ms(now) % CYCLE_MS) as f32,
+        (epoch_ms(a_second_later) % CYCLE_MS) as f32
+    );
+}
+
+#[test]
 fn door_frame_just_spawned_is_half_open() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     // 50 ms into the 200 ms opening ramp — first half = frame 1.
