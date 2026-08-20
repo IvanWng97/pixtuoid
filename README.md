@@ -163,11 +163,11 @@ Inspired by [`pixel-agents`](https://github.com/pablodelucca/pixel-agents) (VS C
 ## Star History
 
 <p align="center">
-  <a href="https://www.star-history.com/?repos=IvanWng97%2Fpixtuoid&type=date&legend=top-left">
+  <a href="https://star-history.dera.page/#IvanWng97/pixtuoid&type=date&legend=top-left">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date" />
-      <img alt="star history chart for IvanWng97/pixtuoid" src="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date" width="640" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=IvanWng97/pixtuoid&type=Date&theme=dark" />
+      <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=IvanWng97/pixtuoid&type=Date" />
+      <img alt="star history chart for IvanWng97/pixtuoid" src="https://star-history.dera.page/svg?repos=IvanWng97/pixtuoid&type=Date" width="640" />
     </picture>
   </a>
 </p>
