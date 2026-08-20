@@ -128,7 +128,7 @@ const REQUIRE_ESCALATED: &str = "require_escalated";
 /// The escalation pair this decoder keys on. Exported because the check is a
 /// BOOLEAN: a rename makes it silently `false`, and `false` is a legitimate
 /// answer, so no breadcrumb can exist here — the upstream watch is the only
-/// signal. Pinned by `escalated_permission_is_detected_by_the_exported_pair`.
+/// signal. Pinned by `escalated_function_call_is_waiting`.
 #[cfg(test)]
 pub(crate) const DECODED_ESCALATION: &[&str] = &[REQUIRE_ESCALATED, SANDBOX_PERMISSIONS_FIELD];
 

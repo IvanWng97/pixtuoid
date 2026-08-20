@@ -101,6 +101,35 @@ def guard_budget_coverage(tracked: list[str], budgets: dict[str, int]) -> list[s
             for rel in tracked if rel not in budgets]
 
 
+RS_COMMENT_WRAP = re.compile(r"\n\s*//[/!]?")
+PINNED_BY = re.compile(r"[Pp]inned by\s+\[?`([a-z0-9_]{4,})`")
+DECLARED_FN = re.compile(r"\bfn\s+([a-z0-9_]+)")
+
+
+def guard_pinned_by_claims(root: pathlib.Path) -> list[str]:
+    """A `Pinned by `x`` comment must name a function that exists.
+
+    This is the anti-orphan half of moving rationale onto declarations: prose
+    outlives the code it describes, a named mechanism cannot. `drift_surface.rs`
+    already asserts exactly this for the `DECODED_*` exemptions; the rule is not
+    specific to those consts, so it runs tree-wide.
+    """
+    sources = [p for p in root.rglob("*.rs") if "target" not in p.parts]
+    declared: set[str] = set()
+    claims: list[tuple[str, str]] = []
+    for path in sources:
+        try:
+            src = path.read_text(errors="ignore")
+        except OSError:
+            continue
+        declared.update(DECLARED_FN.findall(src))
+        joined = RS_COMMENT_WRAP.sub(" ", src)
+        claims += [(str(path.relative_to(root)), n) for n in PINNED_BY.findall(joined)]
+    return [f"{rel}: claims to be pinned by `{name}`, which no module declares — "
+            f"an unbacked claim of coverage; name the real mechanism or drop it"
+            for rel, name in claims if name not in declared]
+
+
 def clip(text: str, budget: int) -> str:
     """Word-boundary prefix of `text`, retreating past unbalanced markdown so the
     clip stays verbatim-greppable AND renders clean; ` …` marks the elision."""
@@ -232,7 +261,8 @@ def run(
     # Budgets are measured AFTER regeneration — the run that GROWS a guide must be
     # the one that reds, and an over-budget file must not brick unrelated regen.
     eff = BUDGETS if budgets is None else budgets
-    over = guard_file_budgets(root, eff) + guard_budget_coverage(tracked, eff)
+    over = (guard_file_budgets(root, eff) + guard_budget_coverage(tracked, eff)
+            + guard_pinned_by_claims(root))
     if not quiet:
         for msg in over:
             print(msg)
@@ -318,6 +348,20 @@ def selftest() -> int:
         if gen(False) != 1:
             fails.append("a hard-wrapped sibling entry must FAIL generation (assert_verbatim)")
         stage("crate/SHARP-EDGES.md", edges)
+
+        # Both directions for the pinned-by guard, plus the wrap case: a claim
+        # split across two `///` lines is the shape that a line-at-a-time matcher
+        # silently passes, so the fixture spells it that way. The resync is load
+        # bearing — the arm above leaves the guide drifted from its sibling on
+        # purpose, and this arm's control is `--check` returning 0.
+        gen(False)
+        stage("crate/src.rs", "/// Pinned by `a_test_that_exists`.\nfn a_test_that_exists() {}\n")
+        if gen(True) != 0:
+            fails.append("a pinned-by claim naming a declared fn must stay green")
+        stage("crate/src.rs", "/// Pinned by\n/// `no_such_test`.\nfn unrelated() {}\n")
+        if gen(True) != 1:
+            fails.append("a wrapped pinned-by claim naming nothing must red --check")
+        (repo / "crate/src.rs").unlink()
 
         stage("crate/SHARP-EDGES.md", "# e\n\n- **Huge.** " + "x " * MAX_ENTRY_CHARS + "\n")
         if gen(False) != 1:
