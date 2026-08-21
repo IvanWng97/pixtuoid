@@ -49,12 +49,9 @@ impl ProbeSnapshot {
 
     /// Build a snapshot from the regular files that live `comm_names`-named
     /// processes hold open under `root` — the skeleton the open-FD liveness
-    /// sources share.
-    ///
-    /// `None` ONLY when the proc-table enumeration itself fails — the watcher
-    /// then changes nothing (#223). An ABSENT / un-canonicalizable `root` is NOT
-    /// a failure (the source may simply never have run) → `Some(empty)`, a
-    /// healthy "nothing alive" observation.
+    /// sources share, under `LivenessProbe`'s explicit-failure contract: only a
+    /// failed proc-table enumeration is `None`, the state that changes nothing
+    /// (#223); an un-canonicalizable `root` (the source never ran) is `Some(empty)`.
     pub(crate) fn from_open_fds(
         root: &Path,
         comm_names: &[&str],
@@ -83,9 +80,8 @@ impl ProbeSnapshot {
         pids_by_name: impl Fn(&str) -> Option<Vec<i32>>,
         open_vnode_paths: impl Fn(i32) -> Vec<PathBuf>,
     ) -> Option<Self> {
-        // Canonicalize once per call: kernel-reported fd paths are fully
-        // resolved (/tmp → /private/tmp on macOS), so the under-root compare
-        // must run against the canonical root or every match misses.
+        // Kernel-reported fd paths are fully resolved (/tmp → /private/tmp on
+        // macOS), so an under-root compare against a raw root misses everything.
         let Ok(canonical) = root.canonicalize() else {
             debug!(
                 "fd probe: root {} not canonicalizable; nothing alive there",
@@ -121,9 +117,8 @@ impl ProbeSnapshot {
                 continue;
             }
             if recognize(&path) {
-                // The fold lives at the seam (`walk::id_path`), NOT inside each
-                // source's deriver — so the probe id-space matches the walk
-                // seam's and a new fd-probe source can't forget it.
+                // Folded at the seam (`walk::id_path`), NOT in each source's
+                // deriver — one id-space no new fd-probe source can forget.
                 let id = (id_derive)(&super::walk::id_path(&path));
                 debug!(
                     "fd probe: pid {pid} holds {} open (id {id})",
@@ -139,14 +134,11 @@ impl ProbeSnapshot {
 /// Optional first-party liveness probe: the session ids — in the source's
 /// `IdDeriver` id-space — of agent processes known to be ALIVE right now.
 /// ADDITIVE-ONLY for admission: membership bypasses the first-sight
-/// recency/ended gate.
-///
-/// Failure is EXPLICIT: `None` means the probe itself FAILED and callers must
-/// change NOTHING; `Some` with an empty snapshot means it ran fine and nothing
-/// is alive. Only that distinction lets a previously-vouched id MISSING from two
-/// healthy snapshots count as a high-confidence exit (the negative vouch, #223).
-/// `Arc<dyn Fn>` rather than a fn pointer because the real probe captures its
-/// registry dir.
+/// recency/ended gate. Failure is EXPLICIT: `None` means the probe itself FAILED
+/// and callers must change NOTHING; `Some` with an empty snapshot means it ran
+/// fine and nothing is alive — the distinction `ProbeLadder`'s negative vouch
+/// (#223) rests on. `Arc<dyn Fn>` rather than a fn pointer because the real
+/// probe captures its registry dir.
 pub type LivenessProbe = Arc<dyn Fn() -> Option<ProbeSnapshot> + Send + Sync>;
 
 /// Negative vouch (#223): a previously-vouched id must be MISSING from two
@@ -214,8 +206,10 @@ pub(super) struct ProbeLadder {
     /// id → when a healthy snapshot FIRST came back without it. `Instant`
     /// (monotonic): a wall-clock jump must not fake a 60s span.
     miss_since: HashMap<String, std::time::Instant>,
-    /// pid → the session ids a healthy snapshot bound to it. An id is bound
-    /// under at most ONE pid (`fold`'s migration maintains this).
+    /// pid → the session ids a healthy snapshot bound to it, ADDITIVE per
+    /// snapshot: an id leaves via `pid_died` or a confirmed exit, never by
+    /// snapshot omission — the vouch ladder owns "gone" semantics. Bound under
+    /// at most ONE pid (`fold`'s migration maintains this).
     pid_bindings: HashMap<i32, HashSet<String>>,
 }
 
@@ -256,10 +250,6 @@ impl ProbeLadder {
                         "negative vouch confirmed for {id}: probe stopped vouching; \
                          emitting SessionEnd"
                     );
-                    // Drop the pid binding too: a codex-style process owns many
-                    // rollouts, so it may outlive this session — its eventual OS
-                    // exit must not re-emit a SessionEnd for an already-confirmed
-                    // id.
                     self.forget(&id);
                     self.unbind(&id);
                     exits.push(id);
@@ -275,25 +265,18 @@ impl ProbeLadder {
         self.prev_vouched = snap.pid_of.keys().cloned().collect();
         self.prev_vouched.extend(self.miss_since.keys().cloned());
 
-        // Bindings are ADDITIVE per snapshot (ids leave via `pid_died` or the
-        // confirm-unbind above, never by snapshot omission — the vouch ladder
-        // owns "gone" semantics) — EXCEPT an observed rebind: an id seen under a
-        // NEW pid (a codex `resume` of the same rollout in another process while
-        // the old one lives) migrates between sets, because the negative vouch
-        // can't clean that stale binding and the old pid's later death would
-        // otherwise instant-exit a live session.
         let mut newly_watched = Vec::new();
         for (id, pid) in &snap.pid_of {
-            // find-then-compare (not `any(p != pid && contains)`): an id is
-            // bound under at most ONE pid, so the first holder is the only
-            // holder and the single `!=` leaves no conjunction whose halves a
-            // mutation could silently swap.
+            // find-then-compare (not `any(p != pid && contains)`): the first
+            // holder is the only holder, so there is no conjunction to mutate.
             let bound_elsewhere = self
                 .pid_bindings
                 .iter()
                 .find(|(_, ids)| ids.contains(id))
                 .is_some_and(|(p, _)| p != pid);
             if bound_elsewhere {
+                // A rebind (a codex `resume` of one rollout in a second process)
+                // MIGRATES the id — the old pid's death would else instant-exit it.
                 self.unbind(id);
             }
             let newly_seen = !self.pid_bindings.contains_key(pid);
@@ -337,7 +320,10 @@ impl ProbeLadder {
     }
 
     /// Remove one session id from every pid's binding set, dropping pids whose
-    /// set empties. The bindings inverse of `forget`.
+    /// set empties. The bindings inverse of `forget` — a confirmed exit needs
+    /// both, because a codex-style process owns many rollouts and may outlive
+    /// this session, so its eventual OS exit must not re-emit a SessionEnd for
+    /// an already-confirmed id.
     fn unbind(&mut self, id: &str) {
         self.pid_bindings.retain(|_, ids| {
             ids.remove(id);
@@ -347,23 +333,16 @@ impl ProbeLadder {
 }
 
 /// ONE exit path for every watcher-synthesized session end, shared by the
-/// negative-vouch confirmation and the instant-exit arm so the two can't fork.
-/// The un-claim is what lets a LATER append re-register through
-/// `emit_first_sight`.
-///
-/// The drain-FIRST ordering is load-bearing: the instant exit can beat a
-/// pre-death write's notify event by orders of magnitude, and un-claiming with
-/// bytes still pending would let that stale chunk re-enter `walk_jsonl` as a
-/// first-sight and resurrect the dead session as a ghost, with every fast rung
-/// already disarmed for it.
+/// negative-vouch and instant-exit arms so the two can't fork. Drain FIRST,
+/// then un-claim (which lets a LATER append re-register via `emit_first_sight`):
+/// an instant exit can beat a pre-death write's notify, and un-claiming with
+/// bytes pending re-enters that chunk as a first-sight — a ghost, every rung disarmed.
 pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
     let claimed: Vec<PathBuf> = {
         let seen = ctx.seen.lock().await;
         seen.keys()
-            // Folded via `walk::id_path` like every other derivation seam: a
-            // raw key derives into a different id-space, the filter matches
-            // nothing, and the `seen` entry never releases — so a later append
-            // can never re-register the session.
+            // Folded via `walk::id_path` like every other derivation seam — a
+            // raw key matches nothing and the `seen` entry never releases.
             .filter(|p| decoders.id_derive.id_for(p) == id)
             .cloned()
             .collect()
@@ -391,11 +370,8 @@ pub(super) async fn emit_session_exit(id: &str, decoders: SourceDecoders, ctx: &
             seen.remove(path);
         }
     }
-    // Purge the admission set too: `live` is otherwise only rewritten by a
-    // HEALTHY probe refresh, so after an instant exit a probe-FAILURE pass would
-    // keep vouching the id this watcher just declared dead, and the re-vouch
-    // sweep would re-admit its parked file (cursor reset to 0 → full replay → a
-    // phantom SessionStart).
+    // Purge `live` too: only a HEALTHY refresh rewrites it, so a probe FAILURE
+    // would keep vouching this id and replay it into a phantom SessionStart.
     ctx.live.lock().await.remove(id);
 }
 
@@ -414,11 +390,8 @@ pub(super) async fn refresh_probe_snapshot(
     let Some(probe) = probe else {
         return false;
     };
-    // The probe is blocking std::fs/libproc that would occupy a tokio worker for
-    // the walk's duration if run inline, stalling the render loop and every
-    // source task sharing the runtime. `spawn_blocking` (not `block_in_place`)
-    // because this crate's tokio has no `rt-multi-thread` and the watcher's own
-    // tests run on a current-thread runtime, where `block_in_place` panics.
+    // `spawn_blocking`, not `block_in_place`: the probe is blocking std::fs and
+    // libproc, and this crate's tokio is current-thread, where the latter panics.
     let probe = Arc::clone(probe);
     let snap = match tokio::task::spawn_blocking(move || probe()).await {
         Ok(Some(snap)) => snap,
@@ -448,19 +421,14 @@ pub(super) async fn refresh_probe_snapshot(
     true
 }
 
-/// The probe is consulted only in `walk_jsonl`'s !known first-sight branch, so
-/// a TRANSIENT probe miss (registry file mid-rewrite, a read race) would gate a
-/// live session PERMANENTLY — every later pass exits at `cursor == file_len` and
-/// never asks again. On each SCAN pass, re-ask about every file that is
-/// known-but-never-registered and reset a vouched one's cursor to 0.
-///
-/// Cannot loop: a re-vouched file that registers claims `seen` and drops out of
-/// the candidate set; an ENDED one is refused here, and a terminator decoded
-/// mid-replay RELEASES the claim rather than removing it, so neither re-enters.
+/// Re-ask the probe, on each SCAN pass, about every known-but-never-registered
+/// file, resetting a vouched one's cursor to 0: the probe is consulted only in
+/// `walk_jsonl`'s !known first-sight branch, so a TRANSIENT miss (registry file
+/// mid-rewrite, a read race) would gate a live session PERMANENTLY — every later
+/// pass exits at `cursor == file_len` and never asks again.
 pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx<'_>) {
-    // Empty snapshot = no probe wired, or nothing live: skip the sweep so a
-    // probe-less source pays one lock check per pass, not a metadata read per
-    // gated file.
+    // Empty = no probe wired, or nothing live: a probe-less source then pays one
+    // lock check per pass, not a metadata read per gated file.
     if ctx.live.lock().await.is_empty() {
         return;
     }
@@ -469,22 +437,17 @@ pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx
         cursors.iter().map(|(p, c)| (p.clone(), *c)).collect()
     };
     for (path, cursor) in candidates {
-        // ANY entry skips — including a RELEASED claim: the probe legitimately
-        // vouches a multi-turn child's still-open rollout, but replaying it
-        // would re-register the just-ended child with a burst of stale activity.
-        // A released path revives only on NEW bytes.
+        // ANY entry skips: registered ones leave the candidate set (so this cannot
+        // loop), and replaying a RELEASED, still-vouched child bursts stale activity.
         if ctx.seen.lock().await.contains_key(&path) {
             continue;
         }
-        // Only a file parked exactly at EOF is stuck — one with a pending
-        // append revives through the normal walk on this same pass.
+        // Only a file parked exactly at EOF is stuck; a pending append revives it.
         let meta = match tokio::fs::metadata(&path).await {
             Ok(m) => m,
             Err(e) => {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    // Deleted transcript: prune, or a lost notify Remove event
-                    // leaves the entry a permanent candidate — one failed stat
-                    // per pass, forever, on a file that can never revive.
+                    // Prune, or a lost notify Remove leaves a forever-candidate.
                     ctx.cursors.lock().await.remove(&path);
                 }
                 continue;
@@ -496,10 +459,8 @@ pub(super) async fn revouch_gated_files(decoders: SourceDecoders, ctx: &WatchCtx
         if !probe_admits(&path, decoders, ctx).await {
             continue;
         }
-        // Last, so the bounded tail read costs only the handful of vouched
-        // candidates. Resetting an ENDED transcript's cursor would undo the
-        // first-sight gate's terminator decision and replay the whole dead
-        // session once per scan pass, for as long as the vouch lasts.
+        // Last, so the bounded tail read costs only the vouched candidates. An
+        // ENDED one is refused here — resetting undoes the terminator gate.
         if check_session_ended(&path, decoders.check_ended).await {
             continue;
         }

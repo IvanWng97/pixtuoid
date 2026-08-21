@@ -1,12 +1,8 @@
 //! THE enumeration of committed captures, and the rules every capture obeys.
-//!
-//! There used to be several walks of this tree with different populations, so
-//! each rule landed on whichever subset its author picked — the "fix landed on
-//! half the population" class that recurred across four review rounds.
-//!
-//! So: ONE walk, and `the_walk_sees_every_provenance_on_disk` fails if a capture
-//! falls outside it. A rule written against `every_capture()` cannot cover a
-//! subset by accident, because there is no second walk to choose.
+//! Several walks of this tree with different populations used to exist, so each
+//! rule landed on whichever subset its author picked — the "fix landed on half
+//! the population" class that recurred across four review rounds. So: ONE walk,
+//! and `the_walk_sees_every_provenance_on_disk` fails if a capture falls outside.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -66,10 +62,10 @@ impl Capture {
     }
 }
 
+/// LOUD, not swallowing: an unreadable capture dir used to make `wire_files()`
+/// return empty, so `a_recorded_capture_that_was_edited_says_so` saw no
+/// sentinels and passed vacuously for that capture.
 fn push_transcripts(dir: &Path, out: &mut Vec<PathBuf>) {
-    // LOUD, not swallowing: an unreadable capture dir used to make `wire_files()`
-    // return empty, so `a_recorded_capture_that_was_edited_says_so` saw no
-    // sentinels and passed vacuously for that capture.
     for e in read_dir_or_panic(dir) {
         let p = e.path();
         if p.is_dir() {
@@ -132,12 +128,10 @@ fn source_of(dir: &Path) -> Option<String> {
 }
 
 /// Every dir the LAYOUT says is a capture — before asking whether it declares
-/// anything. This is the half that makes `provenance.json` mandatory: a walk
-/// that enumerated the FILES could not see a capture that declares nothing, so
-/// deleting a provenance made the suite greener.
-///
-/// A `<module>/fixtures/` tree declares EITHER at its root OR once per sub-dir;
-/// both shapes are in the tree today (`codex/fixtures` vs `delegation/fixtures/*`).
+/// anything, which is what makes `provenance.json` mandatory: a walk over the
+/// FILES could not see a capture that declares nothing, so deleting a provenance
+/// made the suite greener. A `<module>/fixtures/` tree declares EITHER at its
+/// root OR once per sub-dir (`codex/fixtures` vs `delegation/fixtures/*`).
 fn capture_dirs() -> Vec<PathBuf> {
     let mut out = Vec::new();
     for source_dir in sorted_dirs(&fixtures_root()) {
@@ -149,24 +143,21 @@ fn capture_dirs() -> Vec<PathBuf> {
             .and_then(|s| s.to_str())
             .unwrap_or_default();
         let fixtures = module.join("fixtures");
-        // `decode/` holds hand-built decoder INPUTS, not captures — they are
-        // composed on purpose and have no wire to be provenance about. `fixtures/`
-        // itself is the conformance subtree, already covered above.
+        // `decode/` holds hand-built decoder INPUTS, not captures — composed on
+        // purpose; `fixtures/` is the conformance subtree, already covered above.
         if name == "decode" || name == "fixtures" || !fixtures.is_dir() {
             continue;
         }
         if fixtures.join("provenance.json").is_file() {
             out.push(fixtures);
         } else {
-            // No root declaration, so every sub-tree must carry one — and there
-            // must BE sub-trees. Without this, deleting a root provenance from a
-            // tree that has no sub-dirs makes the whole capture vanish from the
-            // population instead of failing.
             let subs = sorted_dirs(&fixtures);
             assert!(
                 !subs.is_empty(),
                 "{}: a capture tree must declare its origin — add provenance.json \
-                 here, or one per sub-tree",
+                 here, or one per sub-tree. With no root declaration every sub-tree \
+                 must carry one, and there must BE sub-trees, or deleting the root \
+                 provenance vanishes the whole capture from the population",
                 fixtures.display()
             );
             out.extend(subs);
@@ -244,20 +235,16 @@ fn the_walk_sees_every_provenance_on_disk() {
     }
     let mut on_disk = 0;
     count(&sources_root(), &mut on_disk);
-    // The two sides are derived DIFFERENTLY on purpose: `capture_dirs()` from the
-    // LAYOUT, this counter from the FILES. Counting the same predicate twice was
-    // a tautology that a deleted provenance decremented on both sides.
+    // Derived DIFFERENTLY on purpose: `capture_dirs()` from the LAYOUT, the
+    // counter above from the FILES — one predicate counted twice is a tautology.
     let walked = every_capture().len();
     assert_eq!(
         walked, on_disk,
         "the layout names {walked} captures but {on_disk} provenance.json files exist — \
          a file outside every layout shape is one no rule applies to"
     );
-    // Provenance counting alone cannot see an orphan that declares NOTHING: a
-    // `.jsonl` dropped straight into `fixtures/<source>/`, or a whole unregistered
-    // `fixtures/<name>/` dir, contributes no provenance to either side and the
-    // suite stays green over bytes no rule reads. So account for the WIRE files
-    // too — every one on disk must belong to a capture the walk returned.
+    // Provenance counting cannot see an orphan that declares NOTHING, so account
+    // for the WIRE files too: each must belong to a capture the walk returned.
     let mut wire_on_disk: BTreeSet<PathBuf> = BTreeSet::new();
     fn wire(dir: &Path, out: &mut BTreeSet<PathBuf>) {
         for e in read_dir_or_panic(dir) {
@@ -289,18 +276,13 @@ fn the_walk_sees_every_provenance_on_disk() {
         .collect();
     assert!(
         orphans.is_empty(),
-        "wire bytes no capture claims, so nothing decodes or scans them:\n  {}",
+        "wire bytes no capture claims — a `.jsonl` dropped straight into \
+         `fixtures/<source>/`, or a whole unregistered `fixtures/<name>/` dir, \
+         declares no provenance and so nothing decodes or scans it:\n  {}",
         orphans.join("\n  ")
     );
-    // DERIVED, not hand-picked. Three siblings of this floor were three
-    // hand-picked constants for one idea (20 vs 37, 40 vs 42, 140 vs 146) — two of
-    // them one routine fixture cleanup away from firing and blaming the walk. What
-    // the floor actually means is "the walk found the tree": every registered
-    // source has at least one capture, so a walk that found the tree sees at least
-    // as many captures as there are sources.
-    // The PREMISE, not its count consequence: "at least as many captures as
-    // sources" leaves most of the corpus free to vanish before it fires, and it is the
-    // per-source statement that makes every rule below non-vacuous.
+    // The PREMISE, not a hand-picked count floor: three sibling floors for this
+    // one idea were each a fixture cleanup away from firing and blaming the walk.
     let covered: BTreeSet<String> = every_capture().into_iter().map(|c| c.source).collect();
     let bare: Vec<&str> = registry::registered_source_names()
         .filter(|n| !covered.contains(*n))
@@ -308,7 +290,8 @@ fn the_walk_sees_every_provenance_on_disk() {
     assert!(
         bare.is_empty(),
         "registered sources with no capture at all: {bare:?} — every rule below is \
-         silent for them"
+         silent for them, which is what makes the per-source statement, not a count \
+         of captures, the thing that keeps those rules non-vacuous"
     );
 }
 
@@ -327,11 +310,7 @@ fn every_captures_layout_names_a_registered_source() {
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// The rules. Each is an assertion over `every_capture()`, so none can cover a
-// subset by accident — the shape that produced "the fix landed on half the
-// population" in four separate review rounds.
-// ─────────────────────────────────────────────────────────────────────────────
+// ── The rules: each an assertion over `every_capture()`, never a subset. ─────
 
 /// `unknown` scenarios that stay unknown, with the reason. It only SHRINKS.
 const UNVERIFIED_PROVENANCE: &[&str] = &[
@@ -429,20 +408,15 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
     }
 }
 
-/// A `recorded` fixture whose bytes were EDITED must say so. Nothing in the
-/// bytes separates a capture from a composition — which is the whole reason
-/// provenance exists — so a redaction sentinel with a silent `note` is the one
-/// state the mechanism cannot tolerate. Sentinels, not a `/Users/dev` grep: the
-/// sweep that keyed on that alone missed kimi's, whose redaction is the owner
-/// column inside a captured `ls -la`.
+/// A `recorded` fixture whose bytes were EDITED must say so: nothing in them
+/// separates a capture from a composition — the whole reason provenance exists —
+/// so a redaction sentinel with a silent `note` is the one state the mechanism
+/// cannot tolerate. Sentinels, not a `/Users/dev` grep: the sweep that keyed on
+/// that alone missed kimi's, whose redaction is a captured `ls -la`'s owner column.
 #[test]
 fn a_recorded_capture_that_was_edited_says_so() {
-    // The path placeholders are READ from the scanner's own allowlist rather than
-    // copied: one hand-copy here knew only `/Users/dev`, so a capture redacted the
-    // Linux way (`/home/dev`) was edited-but-silent to this gate and clean to
-    // `just fixture-pii`. Only the PLACEHOLDER line — the sibling line names
-    // infrastructure accounts a real UNEDITED capture can carry, and reading both
-    // made an honest note look like a silent one.
+    // Placeholders READ from the scanner's own allowlist, never copied: a hand-copy
+    // knew only `/Users/dev`, so a `/home/dev` redaction was edited-but-silent here.
     let allow = std::fs::read_to_string(
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
     )
@@ -451,7 +425,12 @@ fn a_recorded_capture_that_was_edited_says_so() {
         .split("(?:dev|")
         .nth(1)
         .and_then(|s| s.split(')').next())
-        .expect("the placeholder alternation moved — re-derive this from the rule");
+        .expect(
+            "the placeholder alternation moved — re-derive this from the rule. Only \
+             the PLACEHOLDER line: the sibling line names infrastructure accounts a \
+             real UNEDITED capture can carry, and reading both made an honest note \
+             look like a silent one",
+        );
     let mut sentinels: Vec<String> = Vec::new();
     for root in ["/Users/", "/home/"] {
         for who in std::iter::once("dev").chain(names.split('|')) {
@@ -459,9 +438,8 @@ fn a_recorded_capture_that_was_edited_says_so() {
         }
     }
     sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
-    // A path sentinel must end at a real boundary: bare `contains` read any longer
-    // account name that merely STARTS with a placeholder as that placeholder, so an
-    // un-redacted person's path excused itself.
+    // A path sentinel must end at a real boundary: bare `contains` let a longer
+    // account name that merely STARTS with a placeholder excuse itself.
     let hit = |body: &str, s: &str| {
         body.match_indices(s).any(|(at, _)| {
             !s.starts_with('/')
@@ -475,13 +453,8 @@ fn a_recorded_capture_that_was_edited_says_so() {
     let mut silent = Vec::new();
     for c in every_capture().iter().filter(|c| c.is_recorded()) {
         let note = c.field("note").unwrap_or_default().to_ascii_lowercase();
-        // "verbatim" USED to satisfy this, which let a note assert the OPPOSITE
-        // of what the bytes show. A bare `contains` re-opens that hole one word
-        // over — "unredacted", "nothing redacted".
-        // "sanitiz" as well as "redact": the oldest single-owner captures declare
-        // their edit with that stem instead, which tells a reader
-        // exactly what this gate exists to tell them. A one-word vocabulary would
-        // have had them edit an honest note to satisfy the checker.
+        // "verbatim" USED to satisfy this, and a bare `contains` re-opens that hole
+        // one word over ("unredacted"). "sanitiz" too — the oldest captures use it.
         let declares = ["redact", "sanitiz"].iter().any(|stem| {
             note.match_indices(stem).any(|(at, _)| {
                 let before = note[..at].trim_end();
@@ -527,9 +500,8 @@ fn banner_version(line: &str) -> Option<&str> {
         while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
             i += 1;
         }
-        // `contains('.')` on the RAW run and empty parts filtered AFTER, exactly
-        // as `doctor::parse_version` does. Trimming trailing dots first made the
-        // two disagree on `"2. "` — doctor reads 2.0.0, the mirror read nothing.
+        // RAW run for `contains('.')`, empty parts filtered AFTER — exactly as
+        // `doctor::parse_version`; trimming trailing dots first disagreed on `"2. "`.
         let run = &line[start..i];
         if !run.contains('.') {
             continue;
@@ -554,13 +526,11 @@ fn banner_version(line: &str) -> Option<&str> {
         .map(|(.., run)| *run)
 }
 
-/// Cases the mirror must agree with `doctor::parse_version` on: the first two are
-/// from that fn's own doc, the rest are real `--version` banners this tree holds
-/// captures of. What is PINNED mechanically is the const — the grep below fails
-/// if `doctor.rs`'s `IMPLAUSIBLE_MAJOR` moves. The ALGORITHM cannot be pinned
-/// from here (`parse_version` is `pub(crate)` in the binary crate), so it is
-/// mirrored statement for statement instead, including the two orderings a
-/// rewrite gets wrong — see the loop.
+/// Cases the mirror must agree with `doctor::parse_version` on: the first two
+/// from that fn's own doc, the rest real `--version` banners this tree holds
+/// captures of. Only the const is PINNED mechanically (the grep below fails if
+/// `doctor.rs`'s `IMPLAUSIBLE_MAJOR` moves); the ALGORITHM cannot be — it is
+/// `pub(crate)` in the binary crate — so it is mirrored statement for statement.
 #[test]
 fn banner_version_matches_doctors_documented_cases() {
     let cases = [
@@ -588,11 +558,8 @@ fn banner_version_matches_doctors_documented_cases() {
         body.contains(&format!("IMPLAUSIBLE_MAJOR: u64 = {IMPLAUSIBLE_MAJOR};")),
         "doctor.rs's IMPLAUSIBLE_MAJOR drifted from this mirror"
     );
-    // The Python mirror cannot be EXECUTED from here — a cross-runtime spawn is
-    // what reddened the Windows jobs — but its case table can be pinned to this
-    // one by reading it. Pin the PAIR, not the banner: the drift this exists for
-    // was a disagreeing EXPECTATION (`"2. "` → `2` there, `2.` here), and a
-    // banner-only check passes with both halves of that drift restored.
+    // The Python mirror can't be EXECUTED here (a cross-runtime spawn reddened the
+    // Windows jobs); pin the PAIR — a banner-only check misses a drifted EXPECTATION.
     let py = std::fs::read_to_string(root.join("scripts/fixture-age.py")).expect("fixture-age.py");
     for (banner, want) in cases {
         let want_py = want.map_or_else(|| "None".to_string(), |v| format!("{v:?}"));
@@ -643,9 +610,8 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             continue;
         };
         let Some(versions) = by_source.get(&source) else {
-            // A source with captures but NO version among them cannot anchor
-            // anything, and skipping it is how `verified_version: "0.0.0-A-LIE"`
-            // passed for copilot: three recorded scenarios, all `unknown`.
+            // Skipping a version-less source is how `verified_version:
+            // "0.0.0-A-LIE"` passed for copilot: three scenarios, all `unknown`.
             assert_eq!(
                 d.verified_version, "unknown",
                 "{source}: every recorded capture here says `version: unknown`, so nothing \
@@ -656,28 +622,20 @@ fn a_recorded_capture_anchors_its_sources_verified_version() {
             );
             continue;
         };
-        // The HIGHEST version, not `any` and not the newest DATE. `any` let
-        // hermes' 0.20.0 anchor forever beside its 0.20.1 — the stale pin this
-        // test exists to prevent. But ordering by date says a contributor who
-        // records a fresh scenario on a machine whose CLI has NOT been updated
-        // must move `verified_version` DOWN, discarding a sighting this tree
-        // still holds and re-arming doctor's "newer than verified" for everyone
-        // on the higher one. "The version whose wire we have SEEN" is a max.
+        // The HIGHEST version: `any` let hermes' 0.20.0 anchor beside its 0.20.1,
+        // and the newest DATE would move the pin DOWN on a stale machine.
         let dated: Vec<&(String, String)> = versions
             .iter()
             .filter(|(when, _)| is_iso_date(when))
             .collect();
-        // Every version-bearing capture carries an ISO `captured`; a source that
-        // loses that should fail here, loudly, rather than quietly weaken the rule.
         assert!(
             !dated.is_empty(),
             "{source}: has recorded versions but none with an ISO `captured`, so nothing \
-             dates the sightings"
+             dates the sightings — every version-bearing capture carries one, and a \
+             source that loses it must fail loudly rather than weaken the rule"
         );
-        // Version first, then the ISO `captured` date — the date is the tie-break,
-        // not the ordering. Without it two captures of the SAME version resolve by
-        // capture-dir iteration order, and a pre-release beside its release
-        // (`1.2.3-rc.1` vs `1.2.3`, which parse alike) picks whichever came last.
+        // Version first, `captured` only as TIE-BREAK: without it two captures of one
+        // version resolve by dir iteration order (`1.2.3-rc.1` vs `1.2.3` parse alike).
         let highest = &dated
             .iter()
             .max_by(|a, b| {
@@ -708,9 +666,7 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
         .map(|c| c.source.as_str())
         .collect();
     // Keyed off `sources_root()`, not `fixtures_root()`: the `?` on the narrower
-    // prefix silently dropped every single-owner capture INSIDE a rule whose
-    // signature says "every capture" — a subset created by a path operation is
-    // harder to see than the separate walks this file replaced.
+    // prefix silently dropped every single-owner capture from this rule.
     let unknown: BTreeSet<String> = captures
         .iter()
         .filter(|c| c.origin() == "unknown")
@@ -732,8 +688,7 @@ fn the_pinned_provenance_rosters_hold_both_ways() {
          fixture as recorded|composed"
     );
     // BOTH directions: the one-way check let two members survive after their
-    // `unknown` scenarios were recorded away, so the list claimed a reassurance
-    // about sources that no longer had anything to reassure about.
+    // `unknown` scenarios were recorded away.
     let unknown_sources: BTreeSet<&str> = UNVERIFIED_PROVENANCE
         .iter()
         .filter_map(|s| {
@@ -815,21 +770,19 @@ fn the_readme_states_the_schema_the_gates_enforce() {
     }
 }
 
-/// A `recorded` provenance must be FALSIFIABLE by its own bytes. One that is not
+/// A `recorded` provenance must be FALSIFIABLE by its own bytes; one that is not
 /// is a claim, not a record — a wholly false one (`cli: codex`, `version:
 /// 0.0.0-A-LIE`) passed every gate in this tree until an equivalent of this ran.
-///
-/// Three axes the committed bytes can answer, plus the field shapes. `cli` is
-/// `a_recorded_captures_cli_is_its_trees_binary`; this is everything else.
+/// Three axes the committed bytes can answer, plus the field shapes: `cli` is
+/// `a_recorded_captures_cli_is_its_trees_binary`, this is everything else.
 #[test]
 fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
     let mut bad: Vec<String> = Vec::new();
     for c in every_capture().iter().filter(|c| c.is_recorded()) {
         let at = c.provenance_path.display();
 
-        // A `version` holding the INVOCATION rather than a version reports a
-        // drift of nothing for as long as it sits there — the live instance was
-        // `"grok --permission-mode default"`.
+        // A `version` holding the INVOCATION reports a drift of nothing for as long
+        // as it sits there — the live instance was `"grok --permission-mode default"`.
         let version = c.field("version").unwrap_or_default();
         if !version.is_empty()
             && version != "unknown"
@@ -860,9 +813,8 @@ fn a_recorded_captures_claims_are_falsified_by_its_own_bytes() {
                 }
             }
         }
-        // codex and omp name their transcripts by capture instant, which is the
-        // only date evidence a transcript-only fixture has — and most of this
-        // tree's captures ship no hook payloads at all.
+        // codex and omp name transcripts by capture instant — the only date evidence
+        // a transcript-only fixture has, and most captures ship no hook payloads.
         for f in c.wire_files() {
             if let Some(d) = date_prefix(&f.file_name().unwrap_or_default().to_string_lossy()) {
                 dates.insert(d);
@@ -931,8 +883,7 @@ fn utc_date(ms: i64) -> String {
     let mut days = ms.div_euclid(86_400_000);
     let (mut y, mut m) = (1970i64, 1i64);
     // A pre-epoch stamp is not a real `_shim_ts_ms`, but a corrupt one must still
-    // render a well-formed date: the forward walk alone fell straight through and
-    // emitted a malformed one into a diagnostic whose whole job is to be read.
+    // render a well-formed date — the forward walk alone emitted a malformed one.
     while days < 0 {
         y -= 1;
         days += if (y % 4 == 0 && y % 100 != 0) || y % 400 == 0 {
@@ -1011,25 +962,19 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
 }
 
 /// Reading the wrong `tool_id_key` is SILENT — every kimi tool call decoded to
-/// `None` for the whole source's life. The compiler forces a CHOICE and nothing
-/// forced the right one: a NEW source's conformance snapshot is generated from
-/// whatever key its author copied. The captures answer it — whatever key a real
-/// payload carries its tool id under IS that source's key.
-///
-/// Exempt only by NAME, never by a property the test infers: `custom` claiming
-/// every payload makes the key inert, but that is the row author's intent rather
-/// than something the row states.
+/// `None` for the source's whole life, because a NEW source's conformance
+/// snapshot is generated from whatever key its author copied. Whatever key a real
+/// payload carries its tool id under IS that source's key; exemption is by NAME
+/// only, never by an inferred property (`custom` claiming all is intent, not state).
 const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
-    // `// inert: custom claims all` in their registry row — the shared arms that
-    // read `tool_id_key` never run, so no capture can exercise it.
+    // `inert: custom claims all` in their registry row — the shared arms never run.
     "codewhale",
     "grok",
     "hermes",
     "opencode",
     "reasonix",
-    // LIVE (`custom: None`) and simply unexercised: a real hook spec with no
-    // install target, so nothing can send us one. The only entry here a capture
-    // would remove.
+    // LIVE (`custom: None`), just unexercised: a hook spec with no install target,
+    // so nothing can send us one — the only entry here a capture would remove.
     "antigravity",
 ];
 

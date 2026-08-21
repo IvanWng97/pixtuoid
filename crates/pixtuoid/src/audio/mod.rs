@@ -1,8 +1,6 @@
-//! Ambient office audio — the only owner of any audio-device dependency, over
-//! the pure synthesis in `pixtuoid_scene::audio`. Every sample buffer is
-//! pre-rendered at startup and ALL-PROCEDURAL (no committed assets, no decoder
-//! dep). Playback rides its own thread behind a bounded channel — the render
-//! loop only ever `try_send`s (drop-on-backpressure, never blocks).
+//! Ambient office audio — the only owner of any audio-device dependency, over the pure
+//! synthesis in `pixtuoid_scene::audio`; every buffer is pre-rendered at startup and
+//! ALL-PROCEDURAL. Playback rides its own thread behind a bounded `try_send` channel.
 
 #[cfg(feature = "audio")]
 pub(crate) mod sink;
@@ -33,8 +31,8 @@ pub(crate) const VOLUME_STEP: f32 = 0.05;
 /// volume-persist debounce window on both painters.
 pub(crate) const VOLUME_FLASH_MS: u128 = 1000;
 
-/// The two audio gestures both painters drive; the KEY→action map is
-/// painter-specific, the state transition ([`apply_audio_action`]) is not.
+/// The two gestures both painters drive; the KEY→action map is painter-specific, the state
+/// transition ([`apply_audio_action`]) is not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AudioAction {
     ToggleMute,
@@ -59,12 +57,11 @@ pub(crate) struct Persist {
     pub(crate) volume_nudged: bool,
 }
 
-/// THE audio mute/volume transition — the single authority both painters run.
-/// Semantics: mute toggles; volume-up from muted IS the un-mute gesture; the
-/// lazy spawn (re)fires whenever sound is wanted but the system is down, so
-/// `+`/`m` are never dead keys (boot-muted and failed-spawn both recover).
-/// `paused` folds an external hold (the TUI's `[p]ause`) into the effective
-/// mute; floating passes `false`.
+/// THE audio mute/volume transition — the single authority both painters run. Mute toggles;
+/// volume-up from muted IS the un-mute gesture; the lazy spawn (re)fires whenever sound is
+/// wanted but the system is down, so `+`/`m` are never dead keys (boot-muted and
+/// failed-spawn both recover). `paused` folds an external hold (the TUI's `[p]ause`) into
+/// the effective mute; floating passes `false`.
 pub(crate) fn apply_audio_action(
     st: &mut AudioUi,
     action: AudioAction,
@@ -237,10 +234,8 @@ mod controller_tests {
     #[test]
     fn new_boot_spawns_only_when_unmuted_and_drop_joins_the_device_thread() {
         use std::sync::atomic::{AtomicBool, Ordering};
-        // A MEASURABLE teardown is what makes the join assert a deterministic
-        // red: without the join, Drop returns while the fake device thread is
-        // still sleeping → `done` is false. A zero-cost teardown would pass
-        // even unfixed.
+        // A MEASURABLE teardown is what makes the join assert a deterministic red: without
+        // the join, Drop returns while the fake device thread still sleeps → `done` is false.
         const TEARDOWN_MS: u64 = 300;
 
         let dir = tempfile::tempdir().unwrap();
@@ -370,10 +365,8 @@ mod controls_tests {
     #[test]
     fn shutdown_joins_the_device_thread_so_its_teardown_runs_before_return() {
         use std::sync::atomic::{AtomicBool, Ordering};
-        // A fake device thread that mirrors run_loop (block on the channel, exit
-        // on disconnect) but takes a MEASURABLE time to finish. That delay is
-        // what makes this a deterministic red: a zero-cost teardown would let an
-        // un-joined thread win the race by luck and pass even unfixed.
+        // A fake device thread mirroring run_loop (block on the channel, exit on disconnect)
+        // but MEASURABLY slow: a zero-cost teardown lets an un-joined thread pass by luck.
         const TEARDOWN_MS: u64 = 300;
 
         let handle = AudioHandle::disabled();
@@ -636,17 +629,16 @@ impl AudioHandle {
                 .spawn(move || run_loop(rx, Box::new(device), muted_for_loop, vol_for_loop))
             {
                 Ok(join) => {
-                    // Replacing the sole sender CLOSES any prior thread's
-                    // channel, so retire that thread rather than leak a device
-                    // thread still holding the output. Both locks are dropped
-                    // before the join, so the keypress path never blocks
-                    // holding one.
+                    // Replacing the sole sender CLOSES a prior thread's channel — retire that
+                    // thread rather than leak one still holding the output.
                     *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = Some(tx);
                     let prior = self
                         .join
                         .lock()
                         .unwrap_or_else(|e| e.into_inner())
                         .replace(join);
+                    // Both locks are dropped before the join: the keypress path must never
+                    // block holding one.
                     if let Some(prior) = prior {
                         join_with_timeout(prior, SHUTDOWN_JOIN_TIMEOUT);
                     }
@@ -656,18 +648,11 @@ impl AudioHandle {
         }
     }
 
-    /// Stop the device thread SYNCHRONOUSLY: drop the sole sender so `run_loop`
-    /// sees the channel close and returns, dropping its `RodioSink` (the OS
-    /// device close), then JOIN so that Drop completes before the process exits.
-    /// Without the join the thread is detached and its Drop races process
-    /// teardown — on macOS CoreAudio a half-closed output strands playback
-    /// (music keeps going; `sudo killall coreaudiod` to recover). Bounded so a
-    /// pathological rodio/cpal Drop can't hang the exit.
-    ///
-    /// INVARIANT: this runs from `AudioController::drop`, only after the
-    /// painter's loop has ended — so `shutdown` / `respawn_in_place` / `frame`
-    /// never run concurrently on the shared `tx`/`join` cells. Idempotent
-    /// (`take()`-based) regardless.
+    /// Stop the device thread SYNCHRONOUSLY: dropping the sole sender makes `run_loop` return
+    /// and drop its `RodioSink` (the OS device close); the JOIN makes that Drop finish before
+    /// the process exits. Detached it races teardown, and on macOS CoreAudio a half-closed
+    /// output strands playback (music keeps going; `sudo killall coreaudiod`). INVARIANT: only
+    /// from `AudioController::drop`, after the painter's loop ended — nothing races `tx`/`join`.
     pub(crate) fn shutdown(&self) {
         *self.tx.lock().unwrap_or_else(|e| e.into_inner()) = None;
         let handle = self.join.lock().unwrap_or_else(|e| e.into_inner()).take();
@@ -715,14 +700,11 @@ pub(crate) fn drain_frames(rx: &mpsc::Receiver<AudioFrame>) -> Vec<AudioFrame> {
 #[cfg(feature = "audio")]
 const TICK_MS: u64 = 50;
 
-/// Upper bound on how long [`AudioHandle::shutdown`] waits for the device
-/// thread's teardown. The common case returns within one `TICK_MS`, but
-/// `run_loop` is BLIND to the closed channel while inside a multi-second
-/// synthesis build, so a quit landing in that window must wait the build out:
-/// a ceiling under a release build's worst case times the join out and leaves
-/// the device thread DETACHED — the very failure the join exists to prevent. A
-/// debug build's longer synth can still exceed this; accepted, debug isn't
-/// shipped.
+/// Upper bound on [`AudioHandle::shutdown`]'s wait for the device thread's teardown. The
+/// common case returns within one [`TICK_MS`], but `run_loop` is BLIND to the closed channel
+/// while inside a multi-second synthesis build, so a quit landing there must wait the build
+/// out: a ceiling under a release build's worst case times the join out and leaves the thread
+/// DETACHED, the very failure the join exists to prevent. Debug's longer synth may exceed it.
 const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(8);
 
 /// Join `handle`, but give up after `timeout` so a hung device-close (or a
@@ -732,9 +714,8 @@ const SHUTDOWN_JOIN_TIMEOUT: std::time::Duration = std::time::Duration::from_sec
 /// std has no timed `JoinHandle::join`, hence the channel dance.
 fn join_with_timeout(handle: std::thread::JoinHandle<()>, timeout: std::time::Duration) {
     let (done_tx, done_rx) = mpsc::channel();
-    // `Builder::spawn` (not `thread::spawn`) so an OS thread-exhaustion failure
-    // returns `Err` instead of PANICKING: this runs from `AudioController::drop`,
-    // which can execute during unwind, where a panic would double-panic → abort.
+    // `Builder::spawn` (not `thread::spawn`) so an OS thread-exhaustion failure returns `Err`
+    // instead of PANICKING: this can run during unwind, where a panic double-panics → abort.
     let spawned = std::thread::Builder::new().spawn(move || {
         let _ = handle.join();
         let _ = done_tx.send(());
@@ -784,16 +765,13 @@ fn run_loop(
 ) {
     use std::sync::atomic::Ordering::Relaxed;
 
-    // The synthesis window: frames try_sent meanwhile drop harmlessly (levels
-    // are re-sent every render frame), and mute rides the atomic so a keypress
-    // landing here can never be lost.
+    // The synthesis window: frames try_sent meanwhile drop harmlessly (levels re-send every
+    // render frame), and mute rides the atomic so a keypress landing here is never lost.
     let built_at = Instant::now();
     let mut rng = dsp::NoiseStream::new(BUILD_SEED);
     let bank = AssetBank::build(&mut rng);
-    // Rain is weather — track-independent, registered once. The TRACK beds wait
-    // for the FIRST frame, which names the right mood for the office's current
-    // hour/weather (booting Day at night would synthesize a track just to
-    // crossfade it away).
+    // Rain is weather — track-independent, registered once. The TRACK beds wait for the FIRST
+    // frame: booting Day at night would synthesize a track just to crossfade it away.
     device.start_loop(LoopStem::Rain, Arc::new(synth::rain_bed(&mut rng)));
     tracing::debug!(
         ms = built_at.elapsed().as_millis(),
@@ -816,9 +794,8 @@ fn run_loop(
         let frame = match msg {
             Ok(frame) => {
                 if !inited {
-                    // The first frame's synth stalls the thread: drop the
-                    // backlog it queued and re-anchor the clock, so the build's
-                    // seconds ramp nothing.
+                    // The first frame's synth stalls the thread: drop the backlog it queued
+                    // and re-anchor the clock, so the build's seconds ramp nothing.
                     let beds = TrackBeds::build(&mut rng, frame.track);
                     for stem in TRACK_STEMS {
                         device.start_loop(stem, beds.bed(stem));
@@ -874,18 +851,13 @@ mod tests {
     #[test]
     fn run_loop_registers_beds_plays_events_and_exits_on_disconnect() {
         let (tx, rx) = mpsc::sync_channel(8);
-        // The recorder rides a `(Mutex, Condvar)` pair so the frame-1 barrier
-        // below BLOCKS on the sink's own progress instead of polling a wall
-        // clock: the wait is machine-speed-bound (the synth bank build
-        // dominates it), and an in-test deadline is the one flakiness knob
-        // `.config/nextest.toml` is structurally powerless over.
+        // A `(Mutex, Condvar)` pair so the frame-1 barrier below BLOCKS on the sink's own
+        // progress: an in-test deadline is the one flakiness knob nextest cannot reach.
         let recorder = Arc::new((
             std::sync::Mutex::new(sink::NullSink::default()),
             std::sync::Condvar::new(),
         ));
-        // `.1` flips when the device run_loop owns is DROPPED. The recorder is a
-        // SEPARATE shared handle that outlives the thread, so it cannot observe
-        // that drop — this flag can.
+        // `.1` flips on the device's Drop, which the outliving recorder cannot observe.
         struct Probe(
             Arc<(std::sync::Mutex<sink::NullSink>, std::sync::Condvar)>,
             Arc<std::sync::atomic::AtomicBool>,
@@ -931,11 +903,8 @@ mod tests {
             track: Default::default(),
         })
         .unwrap();
-        // Wait until the loop has processed frame 1 (the bank build delays it by
-        // seconds) so the mute below deterministically lands BETWEEN the frames,
-        // not before both. UNBOUNDED on purpose — the only way this never wakes
-        // is run_loop failing to play frame 1's one-shots at all, which nextest's
-        // `terminate-after` reports as this named test hanging.
+        // Wait out frame 1 (the bank build delays it by seconds) so the mute lands BETWEEN
+        // the frames. UNBOUNDED on purpose: nextest's `terminate-after` names a stuck loop.
         {
             let (lock, progress) = &*recorder;
             let mut rec = lock.lock().unwrap();
@@ -1005,7 +974,7 @@ mod listen_gate {
         master: Vec<f32>,
         loops: Vec<(Arc<Vec<f32>>, f32)>, // (samples, current gain)
         loop_ids: Vec<LoopStem>,
-        cursor: usize, // master write position (samples)
+        write_pos_samples: usize,
     }
 
     impl OfflineSink {
@@ -1014,13 +983,13 @@ mod listen_gate {
                 master: vec![0.0; (secs * dsp::SAMPLE_RATE as f32) as usize],
                 loops: Vec::new(),
                 loop_ids: Vec::new(),
-                cursor: 0,
+                write_pos_samples: 0,
             }
         }
 
         fn advance(&mut self, n: usize) {
             for i in 0..n {
-                let at = self.cursor + i;
+                let at = self.write_pos_samples + i;
                 if at >= self.master.len() {
                     return;
                 }
@@ -1028,7 +997,7 @@ mod listen_gate {
                     self.master[at] += samples[at % samples.len()] * gain;
                 }
             }
-            self.cursor += n;
+            self.write_pos_samples += n;
         }
     }
 
@@ -1049,7 +1018,7 @@ mod listen_gate {
         }
         fn play_once(&mut self, samples: Arc<Vec<f32>>, gain: f32) {
             for (i, &s) in samples.iter().enumerate() {
-                if let Some(slot) = self.master.get_mut(self.cursor + i) {
+                if let Some(slot) = self.master.get_mut(self.write_pos_samples + i) {
                     *slot += s * gain;
                 }
             }

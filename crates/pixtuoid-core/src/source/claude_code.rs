@@ -40,20 +40,11 @@ pub fn cc_id_from_path(path: &Path) -> String {
         .to_string()
 }
 
-/// CC's source-specific hook arms — `SubagentStart`/`SubagentStop` — which
-/// change the event's SUBJECT to the child's AgentId, something the shared
-/// session-keyed arms cannot express; every other CC hook event falls through
-/// (`Ok(None)`) to those shared arms.
-///
-/// Needed even though CC subagents also register via JSONL: a Workflow-tool
-/// fleet spawns subagents with NO per-agent `Agent` tool_use in the parent
-/// transcript and no end marker in theirs, so without `SubagentStop` finished
-/// fleet agents hold desks until the stale sweeps batch-reap them.
-///
-/// Wire facts: the payload's `agent_id` is BARE hex (no `agent-` prefix) while
-/// the transcript filename stem — the JSONL watcher's id space
-/// (`cc_id_from_path`) — is `agent-<id>`; `SubagentStop` additionally carries
-/// `agent_transcript_path`, which is the authoritative key.
+/// CC's source-specific hook arms — `SubagentStart`/`SubagentStop`, which change
+/// the event's SUBJECT to the child's AgentId; the shared session-keyed arms cannot,
+/// and every other CC hook event falls through (`Ok(None)`). Needed despite JSONL
+/// registration: a Workflow-tool fleet's subagents carry no `Agent` tool_use and no
+/// end marker, so without `SubagentStop` they hold desks until the stale sweep.
 pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>> {
     use anyhow::anyhow;
     let Some(obj) = v.as_object() else {
@@ -67,8 +58,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
         return Ok(None);
     }
     // Registry contract: claim our two events FULLY (Err on malformed), never
-    // fall through. An empty `session_id` or `agent_id` would mint a phantom
-    // that never coalesces with the real subagent transcript.
+    // fall through — an empty id mints a phantom that never coalesces.
     let session_id = obj
         .get("session_id")
         .and_then(|s| s.as_str())
@@ -79,16 +69,14 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("{event} missing/empty agent_id"))?;
-    // Tolerate an already-prefixed wire id (the CC docs' example shows one even
-    // though the live wire sends bare) without double-prefixing.
+    // The wire's `agent_id` is BARE hex while the watcher's id space is
+    // `agent-<id>`; the CC docs' example shows one already prefixed.
     let prefixed = if wire_agent_id.starts_with("agent-") {
         wire_agent_id.to_string()
     } else {
         format!("agent-{wire_agent_id}")
     };
     if event == "SubagentStart" {
-        // The watcher's later SessionStart for the same transcript coalesces
-        // (a duplicate SessionStart is an enrichment no-op in the reducer).
         let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
         Ok(Some(vec![AgentEvent::SessionStart {
             agent_id: AgentId::from_parts(SOURCE_NAME, &prefixed),
@@ -98,10 +86,8 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             parent_id: Some(AgentId::from_parts(SOURCE_NAME, session_id)),
         }]))
     } else {
-        // The authoritative key is the subagent transcript's filename stem
-        // (`cc_id_from_path` on `agent_transcript_path` — exact parity with
-        // the watcher's deriver, immune to a prefix-scheme drift); the
-        // prefixed wire id serves only when the path is absent.
+        // `SubagentStop` also carries `agent_transcript_path`, whose stem is the
+        // authoritative key — exact parity with the watcher's own deriver.
         let path_key = obj
             .get("agent_transcript_path")
             .and_then(|s| s.as_str())
@@ -110,11 +96,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
             .filter(|s| !s.is_empty());
         if let Some(ref k) = path_key {
             if *k != prefixed {
-                // Upstream changed the filename scheme or the prefix. The stem
-                // keeps THIS exit keyed to the watcher, but hook-FIRST
-                // registrations (Start keys on the prefixed form) become
-                // sweep-cleared phantoms — actionable, hence a warn rather
-                // than a per-dispatch breadcrumb.
+                // Upstream scheme change: hook-FIRST Start registrations go phantom.
                 crate::source::drift::shape_drift(
                     SOURCE_NAME,
                     &format!(
@@ -164,11 +146,59 @@ fn carries_turn_payload(obj: &serde_json::Map<String, Value>) -> bool {
         .is_some_and(|m| m.contains_key("role") && m.contains_key("content"))
 }
 
-/// Decode one CC JSONL transcript line into 0..N AgentEvents.
+/// The `attributionAgent` label, namespace-stripped and capped. `None` for an
+/// EMPTY value or a trailing colon ("ns:" splits to an empty segment): a
+/// `Rename { label: "" }` blanks a good hook-derived label with no recovery
+/// until the next Rename. Capped at decode because transcript content persists
+/// in slot state.
+fn attribution_label(obj: &serde_json::Map<String, Value>) -> Option<String> {
+    let name = obj
+        .get("attributionAgent")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())?;
+    let seg = name.rsplit_once(':').map_or(name, |(_, tail)| tail);
+    (!seg.is_empty()).then(|| ellipsize(seg, MAX_DECODED_FIELD_CHARS))
+}
+
+/// The effort an `attachment` line implies. CC stamps a periodic reminder while
+/// ultra-class effort is active, plus an EXIT marker on leaving it, and the wire
+/// carries no effort VALUE — so each marker's label is synthesized here, the
+/// exit's as `ULTRA_EXIT_LABEL`. The `/effort` picker's chosen level is not
+/// derivable at all (empty command args).
+fn attachment_effort(obj: &serde_json::Map<String, Value>) -> Option<&'static str> {
+    match obj
+        .get("attachment")
+        .and_then(|a| a.get("type"))
+        .and_then(|t| t.as_str())?
+    {
+        "ultra_effort_enter" => Some("ultra"),
+        "ultrathink_effort" => Some("ultrathink"),
+        "ultra_effort_exit" => Some(ULTRA_EXIT_LABEL),
+        _ => None,
+    }
+}
+
+/// FRESH spend from an assistant line's `usage` — new input + cache WRITES +
+/// output. `cache_read_input_tokens` is re-served context, not new spend, and
+/// dwarfs the rest. Sidechain lines carry usage too and key to the same session
+/// id, so the meter is the SESSION's burn, subagents included.
+fn fresh_spend(message: &serde_json::Map<String, Value>) -> u64 {
+    let Some(usage) = message.get("usage").and_then(|u| u.as_object()) else {
+        return 0;
+    };
+    let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
+    field("input_tokens")
+        .saturating_add(field("cache_creation_input_tokens"))
+        .saturating_add(field("output_tokens"))
+}
+
+/// Decode one CC JSONL transcript line into 0..N AgentEvents, keyed on the
+/// filename STEM — the hook decoder's `IdKey::SessionId` and the watcher's
+/// deriver key the same way, so every CC keying site coalesces onto one sprite.
+/// There is deliberately NO user-content arm: content is user-controllable and a
+/// message QUOTING the slash-command wrapper would false-positive, so lifecycle
+/// is the SessionEnd hook + the idle sweep.
 pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<Vec<AgentEvent>> {
-    // Key on the filename stem, NOT the raw path — matches the hook decoder's
-    // `IdKey::SessionId` and the watcher's deriver, so all CC keying sites
-    // coalesce onto one sprite.
     let agent_id = AgentId::from_parts(source, &cc_id_from_path(Path::new(transcript_path)));
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -177,8 +207,7 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
     let mut out = Vec::new();
     let ty = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
-    // Both directions of the one rename that can freeze a sprite: the payload
-    // moved out from under the name, or the name moved off the payload.
+    // Both directions of the one rename that can freeze a sprite.
     let message = obj.get("message").and_then(|m| m.as_object());
     if DECODED_TYPES.contains(&ty) {
         if message.is_none() {
@@ -188,55 +217,23 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
         crate::source::drift::unknown_event(source, ty);
     }
 
-    // An empty `attributionAgent` would emit `Rename { label: "" }`, blanking a
-    // good hook-derived label with no recovery until the next Rename.
-    if let Some(name) = obj
-        .get("attributionAgent")
-        .and_then(|v| v.as_str())
-        .filter(|s| !s.is_empty())
-    {
-        // A trailing colon ("ns:") splits to an EMPTY segment, which the
-        // pre-split guard above cannot catch.
-        let seg = name.rsplit_once(':').map_or(name, |(_, tail)| tail);
-        if !seg.is_empty() {
-            // Capped at decode: transcript content that persists in slot state.
-            let label = ellipsize(seg, MAX_DECODED_FIELD_CHARS);
-            out.push(AgentEvent::Rename { agent_id, label });
-        }
+    if let Some(label) = attribution_label(obj) {
+        out.push(AgentEvent::Rename { agent_id, label });
     }
 
-    // CC stamps a periodic reminder attachment while ultra-class effort is
-    // active, plus an EXIT marker on leaving it. The wire carries no effort
-    // VALUE, so the arm synthesizes each marker's own label; the `/effort`
-    // picker's chosen level is not derivable at all (empty command args).
     if ty == "attachment" {
-        if let Some(kind) = obj
-            .get("attachment")
-            .and_then(|a| a.get("type"))
-            .and_then(|t| t.as_str())
-        {
-            let effort = match kind {
-                "ultra_effort_enter" => Some("ultra"),
-                "ultrathink_effort" => Some("ultrathink"),
-                // A label NOT in the scene's MAX_EFFORTS set, so last-seen-wins
-                // drops the boost immediately instead of waiting out the TTL.
-                "ultra_effort_exit" => Some(ULTRA_EXIT_LABEL),
-                _ => None,
-            };
-            if let Some(effort) = effort {
-                out.push(AgentEvent::ModelInfo {
-                    agent_id,
-                    model: None,
-                    effort: Some(effort.to_string()),
-                });
-            }
+        if let Some(effort) = attachment_effort(obj) {
+            out.push(AgentEvent::ModelInfo {
+                agent_id,
+                model: None,
+                effort: Some(effort.to_string()),
+            });
         }
     }
 
     let Some(message) = message else {
         return Ok(out);
     };
-    // Every assistant line carries the model that produced that turn.
     // `<synthetic>` is CC's marker for tool-generated/error turns, not a model.
     if ty == ASSISTANT {
         if let Some(model) = message
@@ -250,21 +247,12 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 effort: None,
             });
         }
-        // FRESH spend only — new input + cache WRITES + output;
-        // `cache_read_input_tokens` is re-served context, not new spend, and
-        // dwarfs the rest. Sidechain lines carry usage too and key to the same
-        // session id, so the meter is the SESSION's burn, subagents included.
-        if let Some(usage) = message.get("usage").and_then(|u| u.as_object()) {
-            let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
-            let fresh = field("input_tokens")
-                .saturating_add(field("cache_creation_input_tokens"))
-                .saturating_add(field("output_tokens"));
-            if fresh > 0 {
-                out.push(AgentEvent::Usage {
-                    agent_id,
-                    fresh_tokens: fresh,
-                });
-            }
+        let fresh = fresh_spend(message);
+        if fresh > 0 {
+            out.push(AgentEvent::Usage {
+                agent_id,
+                fresh_tokens: fresh,
+            });
         }
     }
     let content = message.get("content");
@@ -312,86 +300,65 @@ pub fn decode_cc_line(transcript_path: &str, source: &str, v: Value) -> Result<V
                 });
             }
         }
-        // Deliberately no content arm: user-message content is
-        // user-controllable and must never drive session lifecycle (a message
-        // QUOTING the slash-command wrapper would false-positive). Lifecycle is
-        // the SessionEnd hook + the idle sweep.
         _ => {}
     }
     Ok(out)
 }
 
-/// The CC transcript types whose lines are AGENT TURN activity. Types outside
-/// this list are session-metadata SIDECAR lines unless they carry the turn
-/// payload (see [`cc_activity_recency`]) — which CC appends to a transcript for
-/// reasons unrelated to the owning process being alive: a STARTING session
-/// writes a metadata run (`bridge-session`, `pr-link`, …) into an OTHER,
-/// long-dead session's transcript, bumping an mtime the first-sight gate trusted
-/// as its liveness proxy.
-///
-/// Membership is by TURN-AUTHORSHIP, not by whether we decode the type:
-/// `system` carries no `AgentEvent` but IS the session speaking (it closes live
-/// tails), while `pr-link` carries a timestamp and is NOT.
+/// The CC transcript types whose lines are AGENT TURN activity — membership by
+/// TURN-AUTHORSHIP, not by whether we decode the type. Anything else is session
+/// metadata unless it carries the turn payload (see `cc_activity_recency`): a
+/// STARTING session writes `bridge-session` / `pr-link` runs into an OTHER,
+/// long-dead transcript, bumping the mtime first-sight trusted as liveness.
 const ACTIVITY_TYPES: &[&str] = &[
     "assistant",
     "attachment",
     "file-history-delta",
     "queue-operation",
+    // Carries no `AgentEvent` but IS the session speaking — it closes a live tail.
     "system",
     "user",
 ];
 
 /// The workflow/skills orchestrator writes a `journal.jsonl` sidecar under
 /// `<uuid>/subagents/workflows/wf_*/` — a FOREIGN schema (top-level
-/// `type:"started"`/`"result"`, not CC transcript lines) living in the SAME
-/// projects tree the CC watcher walks, so without this it is watched, tailed and
-/// first-sight-gated as if it were a session transcript.
-///
-/// A denylist, not an allowlist: the real subagent transcripts (including the
-/// ones nested under `workflows/wf_*/`) stay admitted, because misfiltering one
-/// costs a vanished sprite while a future foreign sidecar merely breadcrumbs.
+/// `type:"started"`/`"result"`) in the SAME tree the CC watcher walks. A
+/// DENYLIST: real subagent transcripts nested under `workflows/wf_*/` stay
+/// admitted — misfiltering one costs a sprite, a foreign sidecar breadcrumbs.
 pub(crate) fn admits_transcript(path: &Path) -> bool {
     path.file_name().and_then(|s| s.to_str()) != Some("journal.jsonl")
 }
 
+/// Whether one tail line is a turn: `None` when it classifies as NOTHING — a
+/// non-object, or an object with no `type` — which is not evidence the recent
+/// bytes were metadata. An UNNAMED type still counts as a turn when it carries
+/// the turn payload; the day CC renames one, reading it as "not a turn" would
+/// gate every live session at once.
+fn classifies_as_turn(v: &Value) -> Option<bool> {
+    let obj = v.as_object()?;
+    let ty = obj.get("type").and_then(|t| t.as_str())?;
+    Some(ACTIVITY_TYPES.contains(&ty) || carries_turn_payload(obj))
+}
+
 /// When this transcript's SESSION last wrote, read from its tail — the honest
-/// TIGHTENING of the file's mtime in the first-sight recency gate. See the
-/// `ACTIVITY_TYPES` docs for the write that made mtime lie. Widening the tail
-/// window is NOT an alternative: these lines carry file contents, so no fixed
-/// window bounds them.
-///
-/// An unnamed type still counts as a turn when it carries the turn payload:
-/// the day CC renames one, reading it as "not a turn" would gate every live
-/// session at once. An unnamed type WITHOUT that payload reads as sidecar, so a
-/// rename of the four payload-less activity types (`system`, `attachment`,
-/// `file-history-delta`, `queue-operation`) lands in the residual below rather
-/// than in this guard — on the REVIVE path (`jsonl/walk.rs`) as well as at first
-/// sight, so such a rename also delays an already-gated session's return until
-/// its next payload-carrying line.
-///
-/// Accepted residual: an unvouched live session whose tail is momentarily all
-/// sidecar stays invisible until its next turn. Unvouched covers headless
-/// `claude -p`, a non-standard projects root, and EVERY CC session on Windows,
-/// where `live_cc_session_ids` returns `None` by construction; a session with
-/// working hooks registers through the hook plane regardless.
+/// TIGHTENING of the file's mtime in the first-sight recency gate (`ACTIVITY_TYPES`
+/// documents the write that made mtime lie). Widening the tail window is NOT an
+/// alternative: these lines carry file contents, so no fixed window bounds them.
+/// Accepted residual — an UNVOUCHED session (headless `claude -p`, a non-standard
+/// projects root, EVERY CC session on Windows) whose tail is momentarily all
+/// sidecar is invisible until its next turn; with hooks it registers regardless.
 pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
     let mut newest: Option<u64> = None;
     let mut saw_turn = false;
     let mut saw_classified = false;
     let mut saw_unclassifiable = false;
     for v in parsed_tail_lines(tail) {
-        // A typeless line classifies as NOTHING — it is not evidence the recent
-        // bytes were metadata.
-        let Some(obj) = v.as_object() else {
-            saw_unclassifiable = true;
-            continue;
-        };
-        let Some(ty) = obj.get("type").and_then(|t| t.as_str()) else {
+        let Some(is_turn) = classifies_as_turn(&v) else {
             saw_unclassifiable = true;
             continue;
         };
         saw_classified = true;
-        if !ACTIVITY_TYPES.contains(&ty) && !carries_turn_payload(obj) {
+        if !is_turn {
             continue;
         }
         saw_turn = true;
@@ -405,8 +372,7 @@ pub fn cc_activity_recency(tail: &[u8]) -> TailActivity {
     }
     match newest {
         Some(secs) => TailActivity::At(secs),
-        // A stampless turn means the session DID write here and we merely cannot
-        // date it — the opposite of SidecarOnly, so it must not gate.
+        // A stampless turn still means the session wrote here, so it must not gate.
         None if saw_classified && !saw_turn && !saw_unclassifiable => TailActivity::SidecarOnly,
         None => TailActivity::Unknown,
     }
@@ -434,13 +400,10 @@ pub fn cc_session_ended(tail: &[u8]) -> bool {
     last_is_end
 }
 
-/// CC label: subagent paths → "subagent", otherwise "cc·" + cwd basename.
-///
-/// When `cwd` is unknown (a seed line carrying no `cwd` can still fire the
-/// JSONL Rename), fall back to the CC **project dir** instead of a bare "cc":
-/// its name encodes the cwd path with '/'→'-', so the last segment is the
-/// project basename. Without this an empty-cwd Rename silently degrades a good
-/// hook-derived `cc·dotfiles` back to `cc`.
+/// CC label: subagent paths → "subagent", else "cc·" + cwd basename. With `cwd`
+/// unknown (a seed line carrying no `cwd` still fires the JSONL Rename), fall back
+/// to the CC **project dir**, whose name encodes the cwd with '/'→'-' — or an
+/// empty-cwd Rename silently degrades a good hook-derived `cc·dotfiles` to `cc`.
 pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
     // Slash-bounded, and shared with `detect_parent_id`: a loose `"subagents"`
     // substring mislabels a `subagents-paper` repo's parent transcript.
@@ -458,12 +421,7 @@ pub fn cc_derive_label(path: &Path, source: &str, cwd: &Path) -> String {
         .and_then(|n| n.to_str())
         .and_then(|proj| proj.rsplit('-').find(|s| !s.is_empty()))
     {
-        // Same cap as the `cwd_basename_label` branch, for the reason that
-        // chokepoint exists: an uncapped `AgentSlot.label` reaches the painter
-        // and the headless summary. This branch bypasses it — CC encodes the
-        // whole cwd into ONE project-dir component ('/'→'-'), so a deep path
-        // yields an arbitrarily long segment even though, unlike `cwd`, nothing
-        // here is wire content.
+        // This branch BYPASSES `cwd_basename_label`'s cap chokepoint.
         return format!(
             "{prefix}·{}",
             crate::source::decoder::ellipsize(
@@ -509,10 +467,6 @@ mod tests {
             "user" => json!({"type": "tool_result", "tool_use_id": "t1"}),
             _ => json!({"type": "tool_use", "id": "t1", "name": "Bash"}),
         };
-        // ...and the healthy path stays SILENT: these lines DO carry
-        // `message.role`+`content`, so only the arms being mutually exclusive
-        // keeps them out of the drift log. Split them and every line of the two
-        // hottest types breadcrumbs — #935's flood, aimed at what it protects.
         let out = crate::test_capture::capture_logs(|| {
             for ty in DECODED_TYPES {
                 let line = json!({
@@ -529,7 +483,10 @@ mod tests {
         });
         assert!(
             !out.contains(crate::source::drift::TARGET),
-            "a healthy decoded line reached the drift log:\n{out}"
+            "a healthy decoded line reached the drift log — these lines DO carry \
+             `message.role`+`content`, so only the arms being mutually exclusive \
+             keeps them out; split them and every line of the two hottest types \
+             breadcrumbs, #935's flood aimed at what it protects:\n{out}"
         );
     }
 
@@ -566,9 +523,7 @@ mod tests {
         };
         let turn = r#","message":{"role":"assistant","content":[]}"#;
 
-        // The scan visits EVERY line: a sidecar before a turn must not end it,
-        // and a typeless line must keep the tail unclassifiable rather than
-        // letting the sidecars around it vouch for a dead session.
+        // The scan visits EVERY line, so a two-line tail is the shape to assert on.
         let two = |a: String, b: String| format!("{a}\n{b}\n").into_bytes();
         assert!(
             matches!(
@@ -577,32 +532,29 @@ mod tests {
             ),
             "a sidecar line before a turn must not stop the scan"
         );
-        // Both bails, because they are separate lines of code: a valid-JSON
-        // NON-object, and an object with no `type`. Either must leave the tail
-        // unclassifiable — `SidecarOnly` gates the session, `Unknown` does not.
         for odd in [r#"{"timestamp":"2026-07-29T05:46:24.525Z"}"#, "42"] {
             assert_eq!(
                 cc_activity_recency(&two(odd.to_string(), line("pr-link", ""))),
                 TailActivity::Unknown,
-                "{odd} must leave the tail unclassifiable, never SidecarOnly"
+                "{odd} must leave the tail unclassifiable, never SidecarOnly — both \
+                 bails are separate lines of code (a valid-JSON NON-object, and an \
+                 object with no `type`), and SidecarOnly gates the session while \
+                 Unknown does not, so the sidecars around it must not vouch for it"
             );
         }
 
-        // A renamed turn type keeps its timestamp instead of blanking the tail.
         match cc_activity_recency(line("assistant-v2", turn).as_bytes()) {
             TailActivity::At(_) => {}
             other => panic!("a payload-carrying unnamed type must date the tail, got {other:?}"),
         }
-        // ...and an unnamed type WITHOUT the payload is metadata, so it cannot
-        // vouch for a dead session's mtime.
         assert_eq!(
             cc_activity_recency(line("history-suppression", "").as_bytes()),
             TailActivity::SidecarOnly,
-            "a payload-less unnamed type must read as sidecar"
+            "a payload-less unnamed type must read as sidecar — it is metadata, and \
+             must not vouch for a dead session's mtime"
         );
-        // Spelled out, NOT iterated from `ACTIVITY_TYPES`: a loop over the list
-        // the classifier reads can only prove list members are list members, so
-        // dropping one would shrink the assertion instead of failing it.
+        // Spelled out, NOT iterated from `ACTIVITY_TYPES`: a loop over the list the
+        // classifier reads would shrink on a drop instead of failing.
         let by_name = [
             "assistant",
             "attachment",
@@ -621,8 +573,6 @@ mod tests {
                 "{ty} is a turn by NAME and must date the tail"
             );
         }
-        // The predicate is the CONJUNCTION — a bare `message` envelope, or
-        // half of one, must stay sidecar or a future CC sidecar type floods.
         for half in [
             r#","message":{"role":"assistant"}"#,
             r#","message":{"content":[]}"#,
@@ -630,7 +580,8 @@ mod tests {
             assert_eq!(
                 cc_activity_recency(line("some-new-type", half).as_bytes()),
                 TailActivity::SidecarOnly,
-                "half a message envelope must not read as a turn: {half}"
+                "half a message envelope must not read as a turn — the predicate is \
+                 the CONJUNCTION, or a future CC sidecar type floods: {half}"
             );
         }
     }
@@ -910,16 +861,17 @@ mod tests {
             "project-dir fallback label must be capped, got {} chars: {label:?}",
             label.chars().count()
         );
-        // The binding assertion: exact parity with the sibling branch, which
-        // caps via the `cwd_basename_label` chokepoint. Comparing to the
-        // sibling rather than to a hand-computed width keeps this honest if
-        // `ellipsize`'s accounting ever changes.
         let via_cwd = cc_derive_label(
             Path::new("/x/.claude/projects/-p/abc.jsonl"),
             "claude-code",
             &PathBuf::from(format!("/{long}")),
         );
-        assert_eq!(label, via_cwd, "both label branches must cap identically");
+        assert_eq!(
+            label, via_cwd,
+            "both label branches must cap identically — comparing to the sibling, \
+             which caps via the `cwd_basename_label` chokepoint, rather than to a \
+             hand-computed width keeps this honest if `ellipsize`'s accounting moves"
+        );
     }
 
     #[test]

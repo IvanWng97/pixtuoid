@@ -1,14 +1,8 @@
-//! `pixtuoid doctor` — read-only source self-diagnosis. Surfaces the
-//! decode-drift breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift`
-//! tracing target) that otherwise die in the warn-floor log nobody reads.
-//!
-//! Strictly READ-ONLY: it never writes config (re-connecting hooks stays the
-//! Sources panel's job) and never spawns the TUI. The PROBED CLI is not
-//! read-only about its own state, though — several bootstrap their state dir on
-//! any invocation — so the `<cli> --version` probe is gated by
-//! `may_probe_version` on evidence the user already runs that CLI; see the
-//! `doctor`-probe sharp edge in `crates/pixtuoid/CLAUDE.md`. Untrusted wire
-//! values (event/tool names) are `sanitize`d before display.
+//! `pixtuoid doctor` — read-only source self-diagnosis, surfacing the decode-drift
+//! breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift` tracing target) that
+//! otherwise die in the warn-floor log nobody reads. Strictly READ-ONLY: it never writes
+//! config (re-connecting hooks stays the Sources panel's job) and never spawns the TUI.
+//! The PROBED CLI is not read-only about its own state — see [`may_probe_version`].
 
 use pixtuoid_core::source::{drift, registry};
 
@@ -336,15 +330,15 @@ fn parsed_version_display(s: &str) -> Option<String> {
 /// install target, ○ not installed) are dimmed, not alarmed.
 fn verdict_glyph(row: &DoctorSourceRow, ink: &Ink) -> String {
     if row.diag.is_broken() {
-        ink.bad("\u{2717}") // ✗
+        ink.bad("✗")
     } else if row.diag.drift.total() > 0 {
         ink.warn("!")
     } else if !row.has_target {
-        ink.dim("\u{2013}") // –
+        ink.dim("–")
     } else if !row.hooks_installed {
-        ink.dim("\u{25cb}") // ○
+        ink.dim("○")
     } else {
-        ink.ok("\u{2713}") // ✓
+        ink.ok("✓")
     }
 }
 
@@ -397,9 +391,8 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
     } else {
         "installed"
     };
-    // The RAW probe string, not a lossy reformat (cursor's `2026.06.04-5fd875e`
-    // isn't semver); skew against the verified anchor is the `versions`
-    // category's job.
+    // The RAW probe string, not a lossy reformat (cursor's `2026.06.04-5fd875e` isn't
+    // semver); skew against the verified anchor is the `versions` category's job.
     let version = row
         .installed_version
         .as_deref()
@@ -450,12 +443,11 @@ fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
         .map(sanitize)
 }
 
-/// Probe a source's `<cli> --version` (argv from the static registry — never
-/// user input) → the first non-empty output line, sanitized. Best-effort; a
-/// spawn error, a NONZERO exit (whose error text must never show as a version),
-/// or a hang all yield None. stdin is nulled so the child can't block on the
-/// inherited TTY, and it is killed after a deadline because `output()` has no
-/// timeout.
+/// Probe a source's `<cli> --version` (argv from the static registry — never user input)
+/// → the first non-empty output line, sanitized. Best-effort: a spawn error, a NONZERO
+/// exit (whose error text must never show as a version), or a hang all yield None. stdin
+/// is nulled so the child can't block on the inherited TTY, and it is killed after a
+/// deadline because `output()` has no timeout.
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant};
@@ -542,23 +534,21 @@ fn activation_backend() -> (String, bool) {
     }
 }
 
-/// Is a compositor/display env marker actually SET? EMPTY (or whitespace-only)
-/// counts as UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=`
-/// (systemd user units and non-forwarded ssh sessions leave them routinely)
-/// would otherwise print a confidently wrong verdict at a user whose X11 EWMH
-/// channel works fine. `focus::linux::detect_channel` keys the live channel on
-/// the SAME rule.
+/// Is a compositor/display env marker actually SET? EMPTY (or whitespace-only) counts as
+/// UNSET, NOT bare presence: a leftover `WAYLAND_DISPLAY=`/`SWAYSOCK=` (systemd user units
+/// and non-forwarded ssh sessions leave them routinely) would otherwise print a confidently
+/// wrong verdict at a user whose X11 EWMH channel works fine. `focus::linux::detect_channel`
+/// keys the live channel on the SAME rule.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn marker_set(value: Option<String>) -> bool {
     crate::install::io::nonempty(value).is_some()
 }
 
-/// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC
-/// → X11 EWMH → nothing) — EXCEPT that a Wayland session without a
-/// pid-addressable IPC must NOT be reported as "X11 EWMH ✓": XWayland sets
-/// $DISPLAY, but a native-Wayland terminal never appears in XWayland's client
-/// list and mutter/kwin block focus-steal anyway, so the ✓ would mislead exactly
-/// the users focus fails for.
+/// Mirrors `focus/linux.rs`'s ONE-channel-per-env order (sway IPC → hyprland IPC → X11
+/// EWMH → nothing) — EXCEPT that a Wayland session without a pid-addressable IPC must NOT
+/// be reported as "X11 EWMH ✓": XWayland sets $DISPLAY, but a native-Wayland terminal never
+/// appears in XWayland's client list and mutter/kwin block focus-steal anyway, so the ✓
+/// would mislead exactly the users focus fails for.
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 fn linux_activation_backend(
     sway: bool,
@@ -584,18 +574,14 @@ fn linux_activation_backend(
     }
 }
 
-/// Read the warn-floor log for a drift scan, separating "there is no log yet"
-/// from "the log could not be read" — the latter gets a warning line.
+/// Read the warn-floor log for a drift scan, separating "there is no log yet" from "the log
+/// could not be read" — the latter gets a warning line. A missing log is the ordinary
+/// no-TUI-run-yet state and genuinely means "no drift recorded"; every other error class
+/// leaves the counts UNKNOWN, and folding those into the same silent empty string made
+/// `doctor` positively assert `✓ no decode drift` off an input it never read.
 ///
-/// A missing log is the ordinary no-TUI-run-yet state and genuinely means "no
-/// drift recorded". Every other error class means the drift counts are UNKNOWN,
-/// and folding that into the same silent empty string made `doctor` positively
-/// assert `✓ no decode drift` off an input it never read.
-///
-/// The warning is `sanitize`d where it is MINTED, not per presenter: the path it
-/// interpolates comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`, and the two readers
-/// print it to different terminals — sanitizing per reader is exactly how the
-/// escape reached one of them.
+/// The warning is `sanitize`d where it is MINTED, not per presenter: the path comes from
+/// `PIXTUOID_LOG`/`XDG_STATE_HOME`, and sanitizing per reader is how the escape reached one.
 pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     match std::fs::read_to_string(path) {
         Ok(s) => (s, None),
@@ -707,6 +693,83 @@ impl Ink {
     }
 }
 
+/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): a piped `doctor > file`
+/// would emit escapes and block on an answer that cannot come. That gate is the same
+/// `color_preflight` the launcher acts on, so the row matches `run`. `--graphics off` skips
+/// the graphics ask for a second reason — it spends up to 2s on a fact the flag says not
+/// to use.
+fn probe_terminal_caps(
+    probe_ok: bool,
+    graphics: crate::GraphicsMode,
+) -> (Option<bool>, Option<crate::graphics::Detected>) {
+    let truecolor_probe = if probe_ok {
+        crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
+    } else {
+        None
+    };
+    let ask = probe_ok && graphics != crate::GraphicsMode::Off;
+    (truecolor_probe, ask.then(crate::graphics::detect).flatten())
+}
+
+/// A wrong root has no symptom but an empty office, so state it outright (#880). Goes
+/// through `resolved_source_root` — the SAME call the driver makes, since a second copy
+/// could show a healthy path while the watcher polled another.
+fn collect_roots() -> Vec<RootStatus> {
+    registry::registered_source_names()
+        .filter_map(|src| {
+            let root = pixtuoid_core::source::resolved_source_root(src)?;
+            let env = registry::descriptor_for(src)
+                .and_then(|d| d.home_env)
+                // The SAME `path_env` the resolvers use, or the two disagree: `env::var` reads
+                // a non-UTF-8 override as UNSET, silencing the ⚠ when the root IS wrong (#172).
+                .map(|v| (v, pixtuoid_core::platform::path_env(v).is_some()));
+            let exists = root.is_dir();
+            Some(RootStatus {
+                source: src,
+                root,
+                exists,
+                env,
+            })
+        })
+        .collect()
+}
+
+/// The four hand-written `TranscriptProbe` roots, resolved exactly as the probe resolves
+/// them so the report cannot claim a root the probe would not use. grok's is a registry
+/// FILE, not a directory. DEFAULT resolution throughout: a `--projects-root` /
+/// `--codex-sessions-root` override changes the RUNNING app, but doctor deliberately
+/// diagnoses the default setup.
+struct ProbeRoots {
+    cc_registry: Option<(std::path::PathBuf, bool)>,
+    codex_sessions: std::path::PathBuf,
+    codex_exists: bool,
+    omp_sessions: std::path::PathBuf,
+    omp_exists: bool,
+    grok_registry: std::path::PathBuf,
+    grok_exists: bool,
+}
+
+fn probe_roots() -> ProbeRoots {
+    let cc_projects =
+        pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths().projects_root;
+    let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects).map(|d| {
+        let exists = d.is_dir();
+        (d, exists)
+    });
+    let codex_sessions = pixtuoid_core::source::codex::CodexSource::default_paths().sessions_root;
+    let omp_sessions = pixtuoid_core::source::omp::omp_sessions_dir();
+    let grok_registry = pixtuoid_core::source::grok::grok_home().join("active_sessions.json");
+    ProbeRoots {
+        cc_registry,
+        codex_exists: codex_sessions.is_dir(),
+        codex_sessions,
+        omp_exists: omp_sessions.is_dir(),
+        omp_sessions,
+        grok_exists: grok_registry.is_file(),
+        grok_registry,
+    }
+}
+
 /// All probing, no formatting. `log_path` is injected by `main`, which owns the
 /// log-path resolution; `graphics` is the `--graphics` flag.
 fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorReport {
@@ -718,9 +781,6 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
-    // DECRQSS only on a real tty and a non-dumb $TERM: a piped `doctor > file`
-    // would emit escapes and block on an answer that cannot come. Gated on the
-    // same `color_preflight` the launcher acts on, so the row matches `run`.
     let term_env = std::env::var("TERM").ok();
     let colorterm_env = std::env::var("COLORTERM").ok();
     let clicolor_force = std::env::var("CLICOLOR_FORCE").ok();
@@ -737,18 +797,9 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let truecolor_probe = if probe_ok {
-        crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
-    } else {
-        None
-    };
-    // Same `probe_ok` gate as truecolor, for the same reason. `--graphics off`
-    // also skips: asking spends up to 2s on a fact the flag says not to use.
-    let ask = probe_ok && graphics != crate::GraphicsMode::Off;
-    let detected = ask.then(crate::graphics::detect).flatten();
-    // What a default `run` resolves, user sprites merged over embedded — NOT the
-    // bundled art alone, which would understate a user pack shipping density
-    // variants. Misses only `--pack-dir`, which doctor was not pointed at.
+    let (truecolor_probe, detected) = probe_terminal_caps(probe_ok, graphics);
+    // What a default `run` resolves, user sprites merged over embedded — NOT the bundled
+    // art alone, which understates a user pack shipping density variants.
     let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(None)
         .map_or(1, |p| p.max_density_variant());
 
@@ -776,51 +827,19 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         })
         .collect();
 
-    // A wrong root has no symptom but an empty office, so state it outright
-    // (#880). Via `resolved_source_root` — the SAME call the driver makes, since
-    // a second copy could show a healthy path while the watcher polled another.
-    let roots: Vec<RootStatus> = registry::registered_source_names()
-        .filter_map(|src| {
-            let root = pixtuoid_core::source::resolved_source_root(src)?;
-            let env = registry::descriptor_for(src)
-                .and_then(|d| d.home_env)
-                // Read through the SAME `path_env` the resolvers use, or the two
-                // disagree: a `"  "` override is ignored by both (the #172 class),
-                // and a non-UTF-8 one is HONORED by both — read here with
-                // `env::var` it would look unset, dropping the `via $VAR` suffix
-                // and silencing the ⚠ in exactly the case the root is wrong.
-                .map(|v| (v, pixtuoid_core::platform::path_env(v).is_some()));
-            let exists = root.is_dir();
-            Some(RootStatus {
-                source: src,
-                root,
-                exists,
-                env,
-            })
-        })
-        .collect();
+    let roots = collect_roots();
+    let ProbeRoots {
+        cc_registry,
+        codex_sessions,
+        codex_exists,
+        omp_sessions,
+        omp_exists,
+        grok_registry,
+        grok_exists,
+    } = probe_roots();
 
-    // Probe roots come from the DEFAULT resolution: a --projects-root /
-    // --codex-sessions-root override changes the RUNNING app, but doctor
-    // deliberately diagnoses the default setup.
-    let cc_projects =
-        pixtuoid_core::source::claude_code::ClaudeCodeSource::default_paths().projects_root;
-    let cc_registry = pixtuoid_core::source::cc_registry_dir(&cc_projects).map(|d| {
-        let exists = d.is_dir();
-        (d, exists)
-    });
-    let codex_sessions = pixtuoid_core::source::codex::CodexSource::default_paths().sessions_root;
-    let codex_exists = codex_sessions.is_dir();
-    // Resolved exactly as the probe does, so the report cannot claim a root
-    // the probe would not use. grok's is a registry FILE, not a directory.
-    let omp_sessions = pixtuoid_core::source::omp::omp_sessions_dir();
-    let omp_exists = omp_sessions.is_dir();
-    let grok_registry = pixtuoid_core::source::grok::grok_home().join("active_sessions.json");
-    let grok_exists = grok_registry.is_file();
-
-    // Read as BYTES, lossy ONLY here: the advisory renders these for a human,
-    // it never opens them, so this is the one boundary where losing an
-    // ill-formed byte costs nothing.
+    // Read as BYTES, lossy ONLY here: the advisory renders these for a human and never
+    // opens them, so this is the one boundary where losing an ill-formed byte costs nothing.
     let (home, up) = (
         pixtuoid_core::platform::path_env("HOME"),
         pixtuoid_core::platform::path_env("USERPROFILE"),
@@ -900,9 +919,8 @@ fn terminal_category(r: &DoctorReport) -> Category {
     if let Some(row) = crate::term::color_status_row(r.color_pf) {
         details.push(format!("{DETAIL_INDENT}{row}"));
     }
-    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned
-    // about exactly this terminal and pointed the user here; a skipped probe
-    // (piped) stays ✓.
+    // An ATTEMPTED probe that didn't confirm is a warning — the launcher warned about
+    // exactly this terminal and pointed the user here; a skipped probe (piped) stays ✓.
     let unconfirmed = r.truecolor_probe_ran && !verdict.starts_with("yes");
     let status = if refused || unconfirmed {
         CategoryStatus::Warn
@@ -1246,8 +1264,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
 fn home_split_category(r: &DoctorReport) -> Option<Category> {
     r.home_split.as_ref().map(|adv| Category {
         status: CategoryStatus::Warn,
-        // Not "windows": it renders only ON Windows, where that distinguishes
-        // nothing — the category names the subsystem, like its siblings.
+        // Not "windows": it renders only ON Windows, where that distinguishes nothing.
         name: "home",
         summary: "HOME and USERPROFILE point at different homes".to_string(),
         details: vec![format!("{DETAIL_INDENT}{adv}")],
@@ -1562,18 +1579,35 @@ mod tests {
     #[test]
     fn report_color_truth_table() {
         use crate::term::ColorPreflight as Pf;
-        // tty + Proceed → on; piped + Proceed → off.
-        assert!(report_color(true, Pf::Proceed, None));
-        assert!(!report_color(false, Pf::Proceed, None));
-        // CLICOLOR_FORCE forces even piped; "0"/empty do not.
-        assert!(report_color(false, Pf::Proceed, Some("1")));
-        assert!(!report_color(false, Pf::Proceed, Some("0")));
-        assert!(!report_color(false, Pf::Proceed, Some("  ")));
-        // NO_COLOR refuses; the force overrides it (pf is already ForceColor).
-        assert!(!report_color(true, Pf::RefuseNoColor, None));
-        assert!(report_color(false, Pf::ForceColor, Some("1")));
-        // TERM=dumb outranks everything, force included.
-        assert!(!report_color(true, Pf::RefuseDumbTerm, Some("1")));
+        assert!(report_color(true, Pf::Proceed, None), "tty + Proceed → on");
+        assert!(
+            !report_color(false, Pf::Proceed, None),
+            "piped + Proceed → off"
+        );
+        assert!(
+            report_color(false, Pf::Proceed, Some("1")),
+            "CLICOLOR_FORCE forces even piped"
+        );
+        assert!(
+            !report_color(false, Pf::Proceed, Some("0")),
+            "CLICOLOR_FORCE=0 does not force"
+        );
+        assert!(
+            !report_color(false, Pf::Proceed, Some("  ")),
+            "a whitespace CLICOLOR_FORCE does not force"
+        );
+        assert!(
+            !report_color(true, Pf::RefuseNoColor, None),
+            "NO_COLOR refuses"
+        );
+        assert!(
+            report_color(false, Pf::ForceColor, Some("1")),
+            "the force overrides NO_COLOR (pf is already ForceColor)"
+        );
+        assert!(
+            !report_color(true, Pf::RefuseDumbTerm, Some("1")),
+            "TERM=dumb outranks everything, force included"
+        );
     }
 
     #[test]
@@ -1839,12 +1873,9 @@ mod tests {
 
     #[test]
     fn the_unreadable_log_warning_is_stripped_where_it_is_minted() {
-        // Asserted on `read_log`'s OWN return value, not on either presenter —
-        // sanitizing per presenter is how one of them shipped raw.
         let dir = tempfile::tempdir().unwrap();
-        // Windows forbids codepoints 1-31 in a filename (Microsoft's "Naming Files,
-        // Paths, and Namespaces"), so the Cc half of the vector cannot exist in a
-        // path there; U+202E is unreserved and still reaches the terminal.
+        // Windows forbids codepoints 1-31 in a filename (Microsoft's "Naming Files, Paths,
+        // and Namespaces"), so the Cc half cannot exist in a path there; U+202E can.
         let hostile = if cfg!(windows) {
             dir.path().join("l\u{202e}og")
         } else {
@@ -1855,7 +1886,9 @@ mod tests {
         let warning = warning.expect("an unreadable log must be reported");
         assert!(
             !warning.contains(['\u{1b}', '\u{7}', '\u{202e}']),
-            "the minted warning carries a live OSC / Trojan-Source override: {warning:?}"
+            "asserted on `read_log`'s OWN return, not on either presenter — sanitizing per \
+             presenter is how one of them shipped raw. This warning carries a live OSC / \
+             Trojan-Source override: {warning:?}"
         );
         assert!(warning.contains("log unreadable"), "got: {warning}");
     }
@@ -2014,20 +2047,26 @@ mod tests {
         assert_eq!(scan_log_for_source("", "copilot"), LogScanResult::default());
     }
 
-    // The crafted line carries valid `source=`/`kind=`, so ONLY the missing
-    // structural `target:` marker keeps it out of the tally.
     #[test]
     fn scan_ignores_a_body_mention_of_the_target_string() {
         let line = "2026-06-15T00:00:00Z  WARN pixtuoid::source::manager: a pixtuoid::drift mention source=copilot kind=unknown_event name=X";
-        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+        assert_eq!(
+            scan_log_for_source(line, "copilot").total(),
+            0,
+            "the line carries valid `source=`/`kind=`, so ONLY the missing structural \
+             `target:` marker keeps it out of the tally"
+        );
     }
 
-    // Distinct from the body-mention case above: the marker IS present, so `find`
-    // succeeds and only the space-guard prevents the false count.
     #[test]
     fn scan_rejects_a_longer_target_suffixing_our_token() {
         let line = "2026-06-15T00:00:00Z  WARN myapp::pixtuoid::drift: source=copilot kind=\"unknown_event\" name=X";
-        assert_eq!(scan_log_for_source(line, "copilot").total(), 0);
+        assert_eq!(
+            scan_log_for_source(line, "copilot").total(),
+            0,
+            "unlike the body-mention case, the marker IS present — `find` succeeds and only \
+             the space-guard prevents the false count"
+        );
     }
 
     // No production code wraps a decoder in a `source=`-carrying span today; this
