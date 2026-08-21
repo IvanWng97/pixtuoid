@@ -43,13 +43,11 @@ struct DriftLine<'a> {
     fields: &'a str,
 }
 
-/// Parse a warn-floor log line as a drift breadcrumb, anchored on the STRUCTURAL
-/// tracing-fmt `target:` marker rather than a loose `contains`, so a line that
-/// merely MENTIONS the literal inside a field value isn't matched and a longer
-/// `a::b::pixtuoid::drift` target can't suffix-match ours. `marker` is
-/// `"<TARGET>: "`, hoisted by the caller to avoid a per-line alloc. Accepted
-/// residual: a non-drift line whose value literally embeds
-/// ` <TARGET>: source=… kind=… ` would still match — no in-tree code emits that.
+/// Anchored on the STRUCTURAL tracing-fmt `target:` marker, not a loose
+/// `contains`: a line merely MENTIONING the literal in a field value must not
+/// match, and a longer `a::b::pixtuoid::drift` must not suffix-match ours.
+/// `marker` is `"<TARGET>: "`, hoisted by the caller to avoid a per-line alloc.
+/// Residual: a value literally embedding ` <TARGET>: source=… kind=… ` matches.
 fn parse_drift_line<'a>(line: &'a str, marker: &str) -> Option<DriftLine<'a>> {
     let at = line.find(marker)?;
     if at != 0 && line.as_bytes()[at - 1] != b' ' {
@@ -169,12 +167,11 @@ pub fn footer_warning(source_death: Option<&str>, drifted: &[String]) -> Option<
     Some(format!("decode drift: {prefixes} — run `pixtuoid doctor`"))
 }
 
-/// Windows-only advisory for the "installed but no sprite" path-split class:
-/// when `HOME` is set and differs from `%USERPROFILE%`, a source whose CLI
-/// resolves its home differently than pixtuoid did may have its hooks written
-/// where the CLI never reads. pixtuoid already mirrors the HOME-first CLIs
-/// (`platform::home_first_dir`), so this is a SAFETY NET for a residual resolver
-/// mismatch. Pure (env + platform injected) so it unit-tests on any host.
+/// Windows "installed but no sprite": `HOME` set and differing from
+/// `%USERPROFILE%` can put hooks where the CLI never reads. A SAFETY NET only —
+/// `platform::home_first_dir` already mirrors the HOME-first CLIs, so this
+/// catches a residual resolver mismatch. Pure (env + platform injected) so it
+/// unit-tests on any host.
 pub(crate) fn home_split_advisory(
     is_windows: bool,
     home: Option<&str>,
@@ -716,19 +713,14 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let mut config_warnings = Vec::new();
     let config_path = crate::config::config_path();
     let cfg = crate::config::load(&config_path, &mut config_warnings);
-    // `doctor` is a separate PROCESS from the running TUI, so it derives the
-    // connected-set fresh from config rather than the live in-process
-    // `ConnectedSources` it can't see. That can lag a just-made in-TUI toggle
-    // until it persists, which it always does (persist-first).
+    // A separate PROCESS from the TUI, so the live `ConnectedSources` is
+    // unreachable; persist-first makes the config a complete substitute.
     let connected = crate::config::resolve_connected(&cfg);
     let (log, log_warning) = read_log(log_path);
 
-    // ASK the terminal for truecolor (DECRQSS) — but ONLY when stdout is a real
-    // tty, so a piped `pixtuoid doctor > file` neither emits escape codes nor
-    // blocks (and the capture-output test harness never probes), and only when
-    // $TERM isn't dumb, which can't answer. The same `color_preflight` the
-    // launcher acts on drives both the probe skip and the color-status line, so
-    // the diagnostic matches what `run` would do.
+    // DECRQSS only on a real tty and a non-dumb $TERM: a piped `doctor > file`
+    // would emit escapes and block on an answer that cannot come. Gated on the
+    // same `color_preflight` the launcher acts on, so the row matches `run`.
     let term_env = std::env::var("TERM").ok();
     let colorterm_env = std::env::var("COLORTERM").ok();
     let clicolor_force = std::env::var("CLICOLOR_FORCE").ok();
@@ -741,9 +733,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let probe_ok = tty && color_pf != crate::term::ColorPreflight::RefuseDumbTerm;
     let color = report_color(tty, color_pf, clicolor_force.as_deref());
     if color {
-        // The ForceColor contract (term.rs): crossterm strips color under
-        // `$NO_COLOR` unless the caller forces — pin it rather than rely on the
-        // Display path happening not to check today.
+        // crossterm strips color under `$NO_COLOR` unless forced; pin it rather
+        // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
     let truecolor_probe = if probe_ok {
@@ -751,20 +742,13 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     } else {
         None
     };
-    // Whether this terminal could paint the cutaway profile, gated on the SAME
-    // `probe_ok` as the truecolor row: the capability query writes escape
-    // sequences and reads the replies, so a piped `doctor > file` must neither
-    // emit them nor wait for an answer that cannot come. `--graphics off` skips
-    // it too — the flag says not to consider protocols, so asking anyway would
-    // spend up to 2s establishing a fact the answer cannot use.
+    // Same `probe_ok` gate as truecolor, for the same reason. `--graphics off`
+    // also skips: asking spends up to 2s on a fact the flag says not to use.
     let ask = probe_ok && graphics != crate::GraphicsMode::Off;
     let detected = ask.then(crate::graphics::detect).flatten();
-    // The pack a default `run` resolves — embedded, with the user's
-    // `$XDG_CONFIG_HOME/pixtuoid/sprites` merged over it if they have one.
-    // NOT just the bundled art: a user pack that ships density variants
-    // raises this, and reporting the bundled number would understate what
-    // their own `run` could draw. `--pack-dir` is the one case this misses,
-    // and doctor was not pointed at it.
+    // What a default `run` resolves, user sprites merged over embedded — NOT the
+    // bundled art alone, which would understate a user pack shipping density
+    // variants. Misses only `--pack-dir`, which doctor was not pointed at.
     let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(None)
         .map_or(1, |p| p.max_density_variant());
 
