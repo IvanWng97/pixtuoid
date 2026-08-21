@@ -56,15 +56,9 @@ async function settleReveals(page: Page): Promise<void> {
 }
 
 /**
- * The office canvas's brightest and darkest pixel under an element's box, each
- * composited with the live dimmer. `null` where there is no live office.
- *
- * Both extremes, never an average: day's dimmer lightens the composite toward
- * `--paper` and night's darkens it toward `--bg`.
- *
- * The scroll is load-bearing — the canvas is a viewport-fixed backdrop, so an
- * off-screen box indexes past its buffer and `getImageData` hands back ZEROED
- * pixels, a silent "dimmer over black" grade the assertion below turns loud.
+ * Brightest and darkest office pixel under an element's box, each composited with the live dimmer; `null` with no live office.
+ * Both extremes, never an average: day's dimmer lightens the composite toward `--paper`, night's darkens it toward `--bg`.
+ * The scroll is load-bearing — the canvas is a viewport-fixed backdrop, so an off-screen box indexes past its buffer and `getImageData` hands back ZEROED pixels.
  */
 async function officeGrounds(
   page: Page,
@@ -143,13 +137,9 @@ async function officeGrounds(
 }
 
 /**
- * The worst contrast ratio the element's text ACTUALLY renders at: every
- * ancestor background composited down, every ancestor `opacity` folded into the
- * ink, over the office composite where a live office is the ground and the
- * page's own opaque plate where it is not.
- *
- * Folding `opacity` is the difference between graded and rendered: a group at
- * `opacity: .7` shows 30% of its ground through the glyph.
+ * The worst contrast ratio the element's text ACTUALLY renders at: every ancestor background composited down and every ancestor
+ * `opacity` folded into the ink, over the office composite where a live office is the ground and the page's own plate where it is not.
+ * Folding `opacity` is the difference between graded and rendered — a group at `opacity: .7` shows 30% of its ground through the glyph.
  */
 async function paintedContrast(page: Page, selector: string, nth = 0): Promise<number> {
   const { ink, chain } = await page.evaluate(
@@ -497,18 +487,16 @@ test('audio prewarm fallback: a dead worker leaves the click-time chunked warmup
 test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode does not mute the opt-in', async ({
   page,
 }) => {
-  // iOS Safari routes default WebAudio to the ambient channel (the hardware
-  // Ring/Silent switch mutes it), so the ♩ opt-in sets audioSession.type to
-  // 'playback'. The API is Safari-only — mocked here to verify the WIRING.
+  // iOS Safari routes default WebAudio to the ambient channel (the hardware Ring/Silent switch mutes it), so the ♩ opt-in
+  // sets audioSession.type to 'playback'. The API is Safari-only — mocked here to verify the WIRING.
   await page.addInitScript(() => {
     Object.defineProperty(navigator, 'audioSession', {
       value: { type: 'auto' },
       configurable: true,
       writable: true,
     });
-    // Capture the category AT construction: a context inherits its routing then,
-    // so setting 'playback' afterwards ends AS 'playback' yet still plays on the
-    // ambient channel — a bare end-state check would pass that broken reorder.
+    // Capture the category AT construction: a context inherits its routing then, so setting 'playback' afterwards ends AS
+    // 'playback' yet still plays on the ambient channel — a bare end-state check would pass that broken reorder.
     const w = window as unknown as { __acTypeAtCtor: string | null };
     w.__acTypeAtCtor = null;
     const Real =
@@ -543,10 +531,8 @@ test('enabling ♩ sets navigator.audioSession = playback so iOS silent mode doe
 });
 
 test('a remembered ♩ choice never inverts a direct first click on the button', async ({ page }) => {
-  // If the visitor's FIRST gesture is a direct click on ♩, the remembered-"on"
-  // restore must not fire (→on) and let the button's own click toggle it back
-  // (→off). Pass = playing, or gracefully hidden where WebAudio has no backend;
-  // what must NEVER happen is visible + aria-pressed false.
+  // On a FIRST gesture that is a direct ♩ click, the remembered-"on" restore must not fire (→on) and let the button's own
+  // click toggle it back (→off). Pass = playing, or gracefully hidden where WebAudio has no backend.
   const errors = watchErrors(page);
   await gotoLive(page);
   await page.evaluate(() => localStorage.setItem('pix:audio', '1'));
@@ -565,7 +551,10 @@ test('a remembered ♩ choice never inverts a direct first click on the button',
   const invertedBug =
     (await btn.getAttribute('aria-pressed')) === 'false' &&
     !(await btn.evaluate((el) => (el as HTMLElement).hidden));
-  expect(invertedBug).toBe(false);
+  expect(
+    invertedBug,
+    'the ♩ is visible with aria-pressed=false — the restore inverted the first click'
+  ).toBe(false);
   expect(errors()).toEqual([]);
 });
 
@@ -754,9 +743,8 @@ test('reduced motion stays on the still poster without errors', async ({ browser
 });
 
 test('wasm fetch failure keeps the still poster without an uncaught error', async ({ browser }) => {
-  // The pause control must stay present even so: it governs the wasm-independent
-  // ambient motion (ticker/dust/clips), which a dead office must not strand
-  // uncontrollable (#456).
+  // The pause control must stay present even so: it governs the wasm-independent ambient motion
+  // (ticker/dust/clips), which a dead office must not strand uncontrollable (#456).
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -793,9 +781,8 @@ test('wasm fetch failure keeps the still poster without an uncaught error', asyn
 test('a transient wasm-fetch drop self-heals: the office still goes live via retry', async ({
   browser,
 }) => {
-  // Abort ONLY the FIRST pixtuoid_web_bg.wasm request (the big binary — the
-  // likeliest drop) and let every retry through: one dropped fetch used to
-  // reject the shared __pixWasm promise and strand the office until a reload.
+  // Abort ONLY the FIRST pixtuoid_web_bg.wasm request (the big binary, the likeliest drop) and let every retry through:
+  // one dropped fetch used to reject the shared __pixWasm promise and strand the office until a reload.
   const context = await browser.newContext();
   const page = await context.newPage();
   const errors = watchErrors(page);
@@ -981,11 +968,8 @@ test('statusline install chip on mobile: label stays readable at rest, flash swa
 test('statusline install chip: the ★ star segment renders the overridden count, never a literal null/undefined', async ({
   page,
 }) => {
-  // __GH_STARS__ is a build-time GitHub fetch; `just site-e2e` and CI both set
-  // GH_STARS_OVERRIDE (config/gh-stars.mjs) so this suite's shared build is
-  // deterministic — a build made without it fails here. The shape guard stays
-  // broad so the stringified-null/undefined defect class still fails even if
-  // the override value changes.
+  // `just site-e2e` and CI both set GH_STARS_OVERRIDE (config/gh-stars.mjs) so the build-time __GH_STARS__ fetch is
+  // deterministic — a build made without it fails here, and the broad shape guard keeps the stringified-null class red.
   await gotoLive(page);
   const stars = page.locator('#sl-install .sl__stars');
   await expect(stars).toBeVisible();
@@ -1050,10 +1034,8 @@ test('first visit: boot intro auto-runs, reveals the page, seeds the gate', asyn
 test('the reveal roll survives a main-thread stall instead of snapping past it', async ({
   page,
 }) => {
-  // Safari blocks the main thread for ~1.3-1.5s right after a first visit
-  // settles, inside its own tab-snapshot IPC lock. A wall-clock ramp keeps
-  // advancing while nothing paints, so the roll froze on a half-drawn frame and
-  // then snapped to the settled office — hence a roll driven by PAINTED frames.
+  // Safari blocks the main thread for ~1.3-1.5s right after a first visit settles, inside its own tab-snapshot IPC lock, and a
+  // wall-clock ramp keeps advancing while nothing paints — hence a roll driven by PAINTED frames.
   const errors = watchErrors(page);
   await page.goto('./'); // real first visit — the boot path is the only one that rolls
   await expect(page.locator('.backdrop')).toHaveClass(/\bis-live\b/, { timeout: 15_000 });
@@ -1067,9 +1049,10 @@ test('the reveal roll survives a main-thread stall instead of snapping past it',
       /* synchronous stall — no frames can paint */
     }
   });
-  // A clock-driven ramp is now past REVEAL_MS and would have snapped to the
-  // settled office; a frame-driven one has barely advanced.
-  expect(await settled()).toBe(false);
+  expect(
+    await settled(),
+    'a clock-driven ramp is now past REVEAL_MS and would have snapped to the settled office; a frame-driven one has barely advanced'
+  ).toBe(false);
   await expect.poll(settled, { timeout: 10_000 }).toBe(true);
   expect(errors()).toEqual([]);
 });
@@ -1098,13 +1081,11 @@ test('un-reducing motion mid-session rolls the office in again, it does not snap
 test('the office still goes live on a device that never meets the frame budget', async ({
   page,
 }) => {
-  // The roll's wait for a few on-budget frames is a COURTESY, never a
-  // precondition: a machine that can never meet the budget must still get an
-  // office rather than sit on the cover forever.
+  // The roll's wait for a few on-budget frames is a COURTESY, never a precondition: a machine that can never
+  // meet the budget must still get an office rather than sit on the cover forever.
   const errors = watchErrors(page);
   await page.addInitScript(() => {
-    // Only ONCE the engine is up — starving the wasm boot itself would test a
-    // different thing and never reach the readiness gate this pins.
+    // Only ONCE the engine is up — starving the wasm boot itself never reaches the readiness gate this pins.
     const raf = window.requestAnimationFrame.bind(window);
     window.requestAnimationFrame = (cb) =>
       raf((t) => {
@@ -1126,16 +1107,17 @@ test('a keypress during the Level-2 engine hold force-settles the splash immedia
   page,
 }) => {
   const errors = watchErrors(page);
-  // Hang the wasm fetch forever (never fulfilled/aborted) so __pixEngineReady
-  // never resolves and an unforced finish() would hold the full cap.
+  // Hang the wasm fetch forever (never fulfilled/aborted) so __pixEngineReady never resolves and an unforced finish() holds the full cap.
   await page.route('**/wasm/**', () => {});
   await page.goto('./'); // real first visit — no pix-booted seed
   await expect(page.locator('#boot')).toBeVisible();
   // Last line lit = the moment finish() runs and enters the waitForEngine hold.
   await expect(page.locator('.boot__line').last()).toHaveClass(/\bin\b/, { timeout: 5_000 });
   await page.keyboard.press('Space');
-  // Must clear almost immediately — nowhere near the MAX_ENGINE_WAITS cap.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 700 });
+  await expect(
+    page.locator('html'),
+    'the splash must clear almost immediately — nowhere near the MAX_ENGINE_WAITS cap'
+  ).not.toHaveAttribute('data-booting', '1', { timeout: 700 });
   expect(await page.evaluate(() => document.getElementById('main')!.hasAttribute('inert'))).toBe(
     false
   );
@@ -1145,14 +1127,15 @@ test('a keypress during the Level-2 engine hold force-settles the splash immedia
 test('first visit on an office-less page lifts the splash promptly (no engine-gate hang)', async ({
   page,
 }) => {
-  // window.__pixEngineReady is set ONLY by OfficeBackdrop (index-only), so on
-  // an office-less page the Level-2 gate must fall back to the flat delay.
+  // window.__pixEngineReady is set ONLY by OfficeBackdrop (index-only), so an office-less page's Level-2 gate must fall back to the flat delay.
   const errors = watchErrors(page);
   await page.goto('./architecture/'); // real first visit (no pix-booted), no OfficeBackdrop
   await expect(page.locator('#boot')).toBeVisible();
   await expect(page.locator('#office-live')).toHaveCount(0);
-  // ~2.1s nominal vs the unguarded gate's hang past 5s — 3s separates them.
-  await expect(page.locator('html')).not.toHaveAttribute('data-booting', '1', { timeout: 3_000 });
+  await expect(
+    page.locator('html'),
+    '~2.1s nominal vs the unguarded gate hanging past 5s — 3s separates them'
+  ).not.toHaveAttribute('data-booting', '1', { timeout: 3_000 });
   expect(errors()).toEqual([]);
 });
 
@@ -1343,8 +1326,7 @@ test('VIBING channel: live office paints, is pause-gated, chips drive it', async
   const beforeWeather = await vibingShot();
   const stormChip = page.locator('[data-stage="vibing"] .osd__chip[data-weather="storm"]');
   await stormChip.click();
-  // Deterministic teeth: a frame-changed poll alone passes on ambient sprite
-  // motion regardless.
+  // Deterministic teeth: a frame-changed poll alone passes on ambient sprite motion regardless.
   await expect(stormChip).toHaveClass(/is-active/);
   await expect(stormChip).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(vibingShot, { timeout: 5_000 }).not.toBe(beforeWeather);
@@ -1482,13 +1464,8 @@ test('landing fixed chrome: floating nav, statusline readouts, floor popover', a
 });
 
 test('no horizontal overflow at phone widths (mobile pan guard)', async ({ browser }) => {
-  // `body { overflow-x: hidden }` masks the desktop scrollbar, so a full-width
-  // block whose ::before glow pokes past the viewport is INVISIBLE on desktop
-  // yet PANS the visual viewport on mobile — and a pseudo-element dodges every
-  // querySelectorAll('*') scan, so only a documentElement scrollWidth <=
-  // clientWidth guard catches it. The innerWidth assertion is a second,
-  // DIFFERENT tripwire: under mobile emulation innerWidth expands with
-  // over-wide content while clientWidth stays pinned to the device width.
+  // `body { overflow-x: hidden }` masks the desktop scrollbar, so a full-width block whose ::before glow pokes past the viewport
+  // is INVISIBLE on desktop yet PANS on mobile — and a pseudo-element dodges every querySelectorAll('*') scan.
   for (const [path, width] of [
     ['./', 320], // iPhone SE — the narrowest supported
     ['./', 360],
@@ -1511,8 +1488,7 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
     const page = await context.newPage();
     await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
     await page.goto(path);
-    // The reported symptom is a drag at the BOTTOM — measure there, after any
-    // late layout settles.
+    // The reported symptom is a drag at the BOTTOM — measure there, after any late layout settles.
     await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
     const { scrollW, clientW, innerW } = await page.evaluate(() => ({
       scrollW: document.documentElement.scrollWidth,
@@ -1534,11 +1510,8 @@ test('no horizontal overflow at phone widths (mobile pan guard)', async ({ brows
 test('the hero copy clears the floating nav at phone viewports (vertical overlap guard)', async ({
   browser,
 }) => {
-  // The hero is min-height:100svh with the copy BOTTOM-anchored, so when the
-  // copy outgrows the viewport its TOP is what gives way and the eyebrow slides
-  // under the index's floating (absolute) nav. reducedMotion pins the copy's
-  // `rise` entry to its SETTLED position — the steady-state clearance is small
-  // enough that a mid-animation read could mask a partial regression.
+  // The hero is min-height:100svh with the copy BOTTOM-anchored, so a copy that outgrows the viewport gives way at its TOP and the
+  // eyebrow slides under the floating nav. reducedMotion pins `rise` to its SETTLED position — a mid-animation read masks regressions.
   for (const [width, height] of [
     [402, 700],
     [360, 640],
@@ -1566,10 +1539,8 @@ test('the hero copy clears the floating nav at phone viewports (vertical overlap
 });
 
 test('docs-table code cells render single-line (column-collapse guard)', async ({ browser }) => {
-  // `.prose :not(pre) > code`'s overflow-wrap:anywhere feeds its soft-wrap
-  // opportunities into MIN-CONTENT intrinsic sizing (unlike break-word), so
-  // table auto-layout crushed the /config Key column to ~1ch. The pan guard
-  // above is blind to it — a column collapse never widens the page.
+  // `.prose :not(pre) > code`'s overflow-wrap:anywhere feeds its soft-wrap opportunities into MIN-CONTENT intrinsic sizing (unlike
+  // break-word), so table auto-layout crushed the /config Key column to ~1ch. The pan guard above never sees it: a collapse doesn't widen the page.
   const context = await browser.newContext({
     viewport: { width: 390, height: 820 },
     isMobile: true,
@@ -1595,8 +1566,7 @@ test('docs-table code cells render single-line (column-collapse guard)', async (
 
 test('text over the live office carries its own scrim (.text-scrim)', async ({ page }) => {
   await gotoLive(page);
-  // The hero copy is deliberately BARE (no plate): legibility comes from the
-  // --office-ink tokens, graded by the WCAG test below.
+  // The hero copy is deliberately BARE (no plate): legibility comes from the --office-ink tokens, graded by the WCAG test below.
   const heroBg = await page.evaluate(
     () => getComputedStyle(document.querySelector('.hero .statement-sub')!).backgroundColor
   );
@@ -1621,9 +1591,8 @@ test('text over the live office carries its own scrim (.text-scrim)', async ({ p
 test('bare hero text clears WCAG AA at the real office composite (day + night)', async ({
   page,
 }) => {
-  // The hero copy has no plate, so legibility rests entirely on the ink token
-  // clearing contrast against what the office ACTUALLY renders behind it —
-  // hence `paintedContrast` over real canvas pixels, not a --screen proxy.
+  // The hero copy has no plate, so legibility rests entirely on the ink token clearing contrast against what the office
+  // ACTUALLY renders behind it — hence `paintedContrast` over real canvas pixels, not a --screen proxy.
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -1664,11 +1633,8 @@ test('bare hero text clears WCAG AA at the real office composite (day + night)',
 test('plate and chip text clears WCAG AA in every theme (day + night + dracula)', async ({
   page,
 }) => {
-  // Two DOM-plate populations: the page's OPAQUE plates, and the TRANSLUCENT
-  // --screen chips whose ground is the office pixel seen through the chip.
-  // DRACULA is the point — visitor-reachable via `?theme=dracula`, yet the
-  // office sweep runs day+night and Lighthouse only scores the pinned theme,
-  // so its own --fg-muted/--coral had never been checked against its plates.
+  // Two DOM-plate populations: the page's OPAQUE plates, and the TRANSLUCENT --screen chips whose ground is the office pixel behind them.
+  // DRACULA is the point — visitor-reachable via `?theme=dracula`, yet the office sweep runs day+night and Lighthouse scores one pinned theme.
   const PLATE_SURFACES: Record<string, string[]> = {
     './': [
       '.terminal__title',
@@ -1734,31 +1700,29 @@ test('hero badge row: one chip per registered source, matching the tools-table r
 });
 
 test('hero badge hover expands the full CLI name in place', async ({ page }) => {
-  // Raw mouse.move, NOT page.hover(): the page's html { scroll-behavior: smooth }
-  // lets hover()'s actionability pass queue a smooth CDP scroll that slides the
-  // page out from under the pointer.
+  // Raw mouse.move, NOT page.hover(): the page's html { scroll-behavior: smooth } lets hover()'s actionability pass
+  // queue a smooth CDP scroll that slides the page out from under the pointer.
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
   await page.goto('./');
-  // Let the hero's `rise` entrance settle before capturing the box — a one-shot
-  // mouse.move to a mid-animation center can land off the chip once it settles.
+  // Let the hero's `rise` entrance settle first — a one-shot mouse.move to a mid-animation center lands off the settled chip.
   await page.waitForLoadState('networkidle');
   const chip = page.locator('.hero__badges .hero__badge:not(.hero__badge--more)').nth(6);
   const restBox = (await chip.boundingBox())!;
   await page.mouse.move(restBox.x + restBox.width / 2, restBox.y + restBox.height / 2);
-  // The chip grows RIGHTWARD; its own left edge must not move (jitter-free).
   await expect
     .poll(async () => (await chip.boundingBox())!.width)
     .toBeGreaterThan(restBox.width + 20);
   const hoverBox = (await chip.boundingBox())!;
-  expect(Math.abs(hoverBox.x - restBox.x)).toBeLessThan(1);
+  expect(
+    Math.abs(hoverBox.x - restBox.x),
+    'the chip grows RIGHTWARD — its own left edge must not move (jitter-free)'
+  ).toBeLessThan(1);
   await expect(chip.locator('.hero__badge-name')).toHaveCSS('opacity', '1');
 });
 
 test('reduced motion: the badge hover-expand is instant but still works', async ({ browser }) => {
-  // Under RM the name track's transition is zeroed by global.css's UNIVERSAL
-  // clamp — Hero.astro deliberately carries NO per-component arm (it would be
-  // dead code under that !important). Motion removed ≠ feature removed: the
-  // hover rule still flips the 0fr track, instantly.
+  // Under RM the name track's transition is zeroed by global.css's UNIVERSAL clamp — Hero.astro deliberately carries NO
+  // per-component arm (dead code under that !important). Motion removed ≠ feature removed: the hover rule still flips the 0fr track.
   const context = await browser.newContext({ reducedMotion: 'reduce' });
   const page = await context.newPage();
   await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
@@ -1780,9 +1744,8 @@ test('reduced motion: the badge hover-expand is instant but still works', async 
 test('hero badge hues clear WCAG AA against their theme-aware chip surface (day + night)', async ({
   page,
 }) => {
-  // Same-hue text on same-hue ground is exactly where contrast silently dies:
-  // the cell is TINTED with the badge's own hue per theme, so sweep every
-  // rendered hue in both themes, and both text pairs (code + expanded name).
+  // Same-hue text on same-hue ground is exactly where contrast silently dies: the cell is TINTED with the badge's own hue
+  // per theme, so sweep every rendered hue in both themes, and both text pairs (code + expanded name).
   for (const theme of ['day', 'night'] as const) {
     await page.addInitScript((t) => {
       sessionStorage.setItem('pix-booted', '1');
@@ -1904,10 +1867,8 @@ test('tenant board text (badges, legend, planned rows, soon marks, star plaque) 
     assertPlaqueAA(plaqueColors.engraving, 'plaque engraving');
     assertPlaqueAA(plaqueColors.link, 'plaque link');
 
-    // sources.json currently has zero "planned" rows, so probe the same markup
-    // SupportedTools.astro emits, injected into the real table to pick up the
-    // live cascade. PAIRED-COPY PIN: MARK() is inline and unexported, so this
-    // literal MUST track its 'planned'/'soon' markup by hand.
+    // sources.json currently has zero "planned" rows, so probe the markup SupportedTools.astro emits, injected into the real table
+    // for the live cascade. PAIRED-COPY PIN: MARK() is inline and unexported, so this literal MUST track its markup by hand.
     const planned = await page.evaluate(() => {
       const table = document.querySelector('.tools__board table')!;
       const tbody = document.createElement('tbody');
@@ -1965,9 +1926,8 @@ test('pantry chitchat bubble text clears WCAG AA against its own dark ground (da
 test('docs callout body copy clears WCAG AA against the callout screen (day + night + dracula)', async ({
   page,
 }) => {
-  // `.prose p`/`.prose li` match the callout's own <p>/<li> DIRECTLY, and a
-  // direct match always beats the --chip-ink the .callout__body hands DOWN —
-  // hence the sibling `a`/`code` overrides, and hence sweeping every tag.
+  // `.prose p`/`.prose li` match the callout's own <p>/<li> DIRECTLY, and a direct match always beats the --chip-ink
+  // .callout__body hands DOWN — hence the sibling `a`/`code` overrides, and hence sweeping every tag.
   const TEXT_TAGS = 'p, li, strong, em, a, code';
   for (const theme of ['day', 'night', 'dracula'] as const) {
     await page.addInitScript((t) => localStorage.setItem('pix-theme', t), theme);
@@ -2021,9 +1981,8 @@ test('docs callout body copy clears WCAG AA against the callout screen (day + ni
 test('the statusline feed ellipsizes on the wrapping text span, not the flex row', async ({
   page,
 }) => {
-  // A flex container's own overflow/text-overflow never applies to its children
-  // (the badge `<b>` and the " · {what}" run are separate anonymous flex items),
-  // so the ellipsis must live on `.sl__text` — and must actually be clipping.
+  // A flex container's own overflow/text-overflow never applies to its children (the badge `<b>` and the " · {what}" run are
+  // separate anonymous flex items), so the ellipsis must live on `.sl__text` — and must actually be clipping.
   await page.setViewportSize({ width: 1280, height: 720 });
   await gotoLive(page);
   // The feed's real content is a build-time GH API fetch, so its length varies
@@ -2062,9 +2021,8 @@ test('the feed hides itself, rather than show an unreadably short fragment, at a
 test('the feed pauses while the tab is hidden — no ghosted double-exposure on refocus', async ({
   page,
 }) => {
-  // A hidden tab freezes CSS transitions but NOT setInterval: a feed that kept
-  // rotating would replay its queued `is-on` fades AT ONCE on refocus (the
-  // ghosting bug).
+  // A hidden tab freezes CSS transitions but NOT setInterval: a feed that kept rotating would replay its queued
+  // `is-on` fades AT ONCE on refocus (the ghosting bug).
   await page.setViewportSize({ width: 1280, height: 720 });
   await gotoLive(page);
   await expect(page.locator('.sl__item.is-on')).toHaveCount(1);
@@ -2076,9 +2034,8 @@ test('the feed pauses while the tab is hidden — no ghosted double-exposure on 
       )
     );
 
-  // Force "hidden" AND read the lit line in the SAME synchronous evaluate:
-  // visibilitychange runs stopFeed → showOnlyFeed, so the read can't land in the
-  // fade gap (findIndex → -1) or race a free-running 6s tick.
+  // Force "hidden" AND read the lit line in the SAME synchronous evaluate: visibilitychange runs stopFeed → showOnlyFeed,
+  // so the read can't land in the fade gap (findIndex → -1) or race a free-running 6s tick.
   const before = await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, get: () => true });
     document.dispatchEvent(new Event('visibilitychange'));
@@ -2123,9 +2080,8 @@ test('footer separators never strand alone at a wrap boundary', async ({ page })
 });
 
 test('no footer line begins or ends with a separator dot once the row wraps', async ({ page }) => {
-  // Each dot introduces its FOLLOWING item, so a group that itself wraps still
-  // leads the new line with its own dot. Check RENDERED rows (grouped by top
-  // position): a display:none dot still shows up in textContent.
+  // Each dot introduces its FOLLOWING item, so a group that itself wraps still leads the new line with its own dot.
+  // Check RENDERED rows (grouped by top position): a display:none dot still shows up in textContent.
   await gotoLive(page);
   await page.setViewportSize({ width: 768, height: 900 });
   await page.evaluate(() =>
@@ -2161,18 +2117,13 @@ test('no footer line begins or ends with a separator dot once the row wraps', as
 test('the pause control never overlaps a footer link across the mobile wrap range', async ({
   page,
 }) => {
-  // The footer's wrap count is non-monotonic across viewport widths (3 lines in
-  // the 360-460px band), so a flat clearance offset either overlaps a taller
-  // wrap or overshoots a shorter one — sweep the whole range.
+  // The footer's wrap count is non-monotonic across viewport widths (3 lines in the 360-460px band), so no flat clearance offset works — sweep the whole range.
   await gotoLive(page);
   const widths = [360, 375, 390, 393, 412, 460, 480, 768, 960];
   for (const width of widths) {
     await page.setViewportSize({ width, height: 844 });
-    // expect.poll tolerates the async ResizeObserver round-trip that updates
-    // --footer-h, and re-settles scroll-bottom on each retry. behavior:'instant'
-    // is load-bearing: global.css sets scroll-behavior:smooth, so the 2-arg
-    // scrollTo(x, y) form would still be animating when the rect below is read,
-    // passing on a pre-scroll snapshot with the footer off-screen.
+    // expect.poll tolerates the async ResizeObserver round-trip that updates --footer-h, and re-settles scroll-bottom on each retry.
+    // behavior:'instant' is load-bearing: under global.css's scroll-behavior:smooth, scrollTo(x, y) is still animating when the rect is read.
     await expect
       .poll(() =>
         page.evaluate((w) => {
@@ -2202,11 +2153,8 @@ test('the pause control never overlaps a footer link across the mobile wrap rang
 });
 
 test('the pause control never occludes in-page copy at mobile widths', async ({ page }) => {
-  // .office-ctl is position:fixed, so its on-screen band is CONSTANT across the
-  // whole scroll — every section's copy passes under it at some offset, not just
-  // the footer's. For each spot, scroll so the copy's OWN midpoint lands on the
-  // band's midpoint (the worst-case alignment); scrollIntoView({block:'center'})
-  // centers in the VIEWPORT instead and can miss the real collision.
+  // .office-ctl is position:fixed, so its band is CONSTANT across the whole scroll — every section's copy passes under it, not just the footer's.
+  // Each spot scrolls its OWN midpoint onto the band's midpoint (worst case); scrollIntoView({block:'center'}) centers in the VIEWPORT and misses it.
   await gotoLive(page);
   await page.setViewportSize({ width: 390, height: 844 });
 
