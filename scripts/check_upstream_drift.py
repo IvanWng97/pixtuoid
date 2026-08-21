@@ -225,7 +225,7 @@ class Anchor(typing.NamedTuple):
 
     Never one of those names — that is circular, and the check goes vacuous. And
     absence is evidence of a RENAME only while this still matches: #793 reported
-    three WORKING env vars renamed, off a `pub use` facade that 200s, grep empty."""
+    three WORKING env vars renamed off a `pub use` facade that 200s and greps empty."""
 
     pattern: str
     owns: str
