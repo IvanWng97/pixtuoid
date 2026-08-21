@@ -1,35 +1,9 @@
 #!/usr/bin/env python3
-"""Upstream wire-format drift watch.
+"""Upstream wire-format drift watch: every name we decode still exists upstream.
 
-pixtuoid decodes agent-CLI wire formats (hook event names, the subagent-dispatch
-tool name, transcript type tags) whose names change upstream WITHOUT notice — the
-`Task` -> `Agent` rename shipped undocumented and silently disabled subagent
-suppression. This verifies that every name we depend on still exists at its
-canonical upstream source.
-
-What we depend on is read from `drift-surface.json` — one per crate, GENERATED
-by a test in the crate that owns those (private) names. This file never parses
-our Rust: a scraped `match` arm goes stale silently, so a rename would narrow
-the watch with nothing to show for it.
-
-WHICH surfaces owe a VANISH row is decided by transport and by whether the
-decoder can speak — `crates/pixtuoid-core/src/source/drift.rs`'s header is the
-only statement of that rule. The appearance watches (adopt-a-surface markers,
-safety premises, the sibling sweeps) are declared at their own sweep sites.
-
-Findings carry a DISPOSITION (see `Report`), because "upstream changed" and "our
-probe missed" need different work and only one of them is a statement about
-upstream. Every document swept for name-presence declares an ANCHOR (see
-`ANCHORS`) proving it is still the document that owns those names — no anchor, no
-sweep: a stale pin that still returns 200 as a re-export facade otherwise reads as
-mass drift, and #793's report would have renamed three WORKING env vars.
-
-Exit codes:
-  0  no findings
-  1  actionable (verified drift, a review ping, OR probe health — all three need
-     a human) -> open a tracking issue
-  2  could not check (network/HTTP error) -> transient, do NOT alarm
-"""
+Agent-CLI wire names change with no notice — the `Task` -> `Agent` rename shipped
+undocumented and silently disabled subagent suppression. WHICH surfaces owe a
+VANISH row is stated only in `crates/pixtuoid-core/src/source/drift.rs`'s header."""
 
 from __future__ import annotations
 
@@ -54,16 +28,17 @@ CODEWHALE_HOOK_URL = (
     "crates/tui/src/hooks/config.rs"
 )
 
+# The codex escalation pair is a BOOLEAN check with no breadcrumb possible: a
+# renamed field makes `is_escalated` silently false, and false is a legitimate
+# answer. The pair spans this file and models.rs, so the union is the document.
 CODEX_PROTOCOL_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/"
     "codex-rs/protocol/src/protocol.rs"
 )
 
-# We install a SHELL hook, so the only thing that can make our always-exit-0
-# shim ANSWER an approval is `_BLOCKING_EVENTS` — the set gating
-# `returncode == BLOCK_EXIT_CODE`. An APPEARANCE watch, the opposite direction
-# from every name check here: today the set holds only `pre_tool_call`, where
-# exit 0 means "proceed" and the shim is a correct no-op.
+# An APPEARANCE watch, inverted from every name check here: `_BLOCKING_EVENTS`
+# (the set gating `returncode == BLOCK_EXIT_CODE`) holds only `pre_tool_call`
+# today, where exit 0 means "proceed" and our always-exit-0 shim is a no-op.
 HERMES_SHELL_HOOK_URL = (
     "https://raw.githubusercontent.com/NousResearch/hermes-agent/main/agent/shell_hooks.py"
 )
@@ -98,11 +73,16 @@ OMP_AI_TYPES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/ai/src/types.ts"
 )
 
+# The union IS the document: `ask` is declared only here, the rest only in
+# types.ts, so a single fetch failure must not read as a vanish.
 OMP_ASK_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
     "packages/coding-agent/src/tools/ask.ts"
 )
 
+# omp's entry types are generic English words, so every omp match is
+# QUOTE-anchored: a bare word test stays green on prose. No appearing sweep —
+# single words carry no family signal, and renderable state rides the messages.
 OMP_SESSION_ENTRIES_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/packages/coding-agent/src/session/session-entries.ts"
 )
@@ -122,7 +102,8 @@ GROK_HOOK_URL = (
 )
 
 # The module that WRITES the method into updates.jsonl, so it OWNS the name we
-# gate on — not the notification module, which only mentions it in a `///`.
+# gate on — not the notification module, which only mentions it in a `///`. The
+# ACP-standard `session/update` is a different name, watched off the ACP schema.
 GROK_SESSION_STORAGE_URL = (
     "https://raw.githubusercontent.com/xai-org/grok-build/main/"
     "crates/codegen/xai-grok-shell/src/session/storage/mod.rs"
@@ -136,10 +117,9 @@ GROK_NOTIFICATION_URL = (
     "crates/codegen/xai-grok-shell/src/extensions/notification.rs"
 )
 
-# OpenClaw's own `DEFAULT_GATEWAY_PORT`. A VALUE watch, not a name sweep: the
-# resolved port is the daemon's runtime IDENTITY, so an upstream bump our plugin
-# does not follow stamps a gateway with a stale port and two live gateways
-# collapse onto one mascot.
+# A VALUE watch, not a name sweep: the resolved port is the daemon's runtime
+# IDENTITY, so an upstream bump our plugin does not follow stamps a gateway with a
+# stale port, and two live gateways collapse onto one mascot.
 OPENCLAW_PATHS_URL = (
     "https://raw.githubusercontent.com/openclaw/openclaw/main/src/config/paths.ts"
 )
@@ -153,6 +133,9 @@ OPENCLAW_HOOK_TYPES_URL = (
 # so don't alarm if the bare form isn't found as a `type:` literal.
 OPENCODE_TOLERATED = {"permission.asked"}
 
+# The inventory is SPLIT (`permission.v2.asked` lives in permission.ts), so the
+# union is the document and one fetch failure must not read as a vanish. No
+# appearing sweep: the plugin forwards exactly what the decoder reads, by test.
 OPENCODE_EVENT_URLS = (
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/v1/session.ts",
     "https://raw.githubusercontent.com/anomalyco/opencode/dev/packages/schema/src/permission.ts",
@@ -185,61 +168,48 @@ CC_TOOLS_URL = "https://code.claude.com/docs/en/tools-reference.md"
 CC_HOOKS_URL = "https://code.claude.com/docs/en/hooks.md"
 
 # Documented hooks.md surfaces the burn-tier decoder DEPENDS on: a string
-# VANISHING here is review-class drift (the docs renamed a surface we read).
+# VANISHING here is review-class drift (the docs renamed a surface we read). No
+# appearing sweep — CC breadcrumbs its unknown vocabulary at runtime.
 CC_DEPENDED_DOC_MARKERS = {
     "CLAUDE_EFFORT": "the hook-payload effort surface (effort.level, burn tier)",
     "receive a `model` field": "SessionStart's optional model field (burn tier)",
 }
 
-# APPEARANCE watch, the inverse direction: these are ABSENT from hooks.md today
-# and a HIT is review-class (a surface to adopt), never breaking. CC is a closed
-# binary, so the docs are the only watchable surface. `session_end` is snake_case
-# on purpose — the SessionEnd HOOK name is all over hooks.md and must not match.
-# Adopting a structural end record also means the liveness-probe first-sight
-# bypass (`probe_admits`, core's source/jsonl.rs) needs an ended-check: it skips
-# the gate's ended tail-scan only because no such marker exists.
+# `session_end` is snake_case on purpose — the SessionEnd HOOK name is all over
+# hooks.md and must not match. The effort markers are undocumented today, so their
+# appearing is a ping to re-verify the labels the CC decoder synthesizes.
 CC_LIFECYCLE_SURFACE_MARKERS = {
     "session_end": 'a structural transcript end record (subtype:"session_end")',
     ".claude/sessions/": "the ~/.claude/sessions/<pid>.json session registry",
     "procStart": "the sessions-registry procStart field",
-    # The CC decoder synthesizes effort labels from these undocumented markers;
-    # documenting them upstream is a ping to re-verify our synthesized shape.
     "ultra_effort_enter": "the ultra-effort transcript attachment marker",
     "ultrathink_effort": "the ultrathink transcript attachment marker",
     "ultra_effort_exit": "the ultra-effort EXIT attachment marker (instant flame-off)",
 }
 
 
-# Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest
-# published version, and a drift watch wants the latest shape, not a frozen one.
-# The schema ships inside the platform packages (`@github/copilot` itself is now a
-# loader stub); linux-x64 matches the CI host and every platform package carries
-# an identical copy. ONE-DIRECTIONAL like opencode: only a depended type vanishing
-# alarms.
+# Deliberately UNPINNED: the bare unpkg path 302-redirects to the latest shape,
+# which is what a drift watch wants. `@github/copilot` is now a loader stub, and
+# every platform package carries an identical schema; linux-x64 matches CI.
 COPILOT_SCHEMA_URL = "https://unpkg.com/@github/copilot-linux-x64/schemas/session-events.schema.json"
 
 
-# Cursor is a closed binary, so — like CC — the docs are the only watchable
-# surface. ONE-DIRECTIONAL: only a depended event vanishing alarms. The
-# common-word event `stop` is intrinsically low-confidence (the page contains the
-# word regardless), so its disappearance can be masked; the distinctive
-# `sessionStart`/`sessionEnd`/`preToolUse`/`postToolUse` carry the check.
+# Cursor is a closed binary, so the docs are the only watchable surface.
+# ONE-DIRECTIONAL. The common-word `stop` is intrinsically low-confidence (the
+# page holds the word regardless); the distinctive names carry the check.
 CURSOR_HOOKS_URL = "https://cursor.com/docs/hooks.md"
 
-# Kimi is a pnpm/TS monorepo, but the canonical hook-event list lives in the docs
-# (each name appears verbatim in the summary table AND the payload examples), so —
-# like Cursor — the raw markdown is the watchable surface. ONE-DIRECTIONAL. The
-# common-word event `Stop` is intrinsically low-confidence (the doc contains the
-# word regardless); the distinctive PascalCase names carry the check.
+# Kimi is a TS monorepo, but the canonical hook-event list lives in the docs, each
+# name rendered inline or in the summary table and never as a quoted literal —
+# hence a word-boundary match. `Stop` is low-confidence, as Cursor's `stop` is.
 KIMI_HOOKS_URL = (
     "https://raw.githubusercontent.com/MoonshotAI/kimi-code/main/"
     "docs/en/customization/hooks.md"
 )
 
-# grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of the
-# v1 stable + v1 unstable tag sets — hence two fetches. v2 is a separate, partly
-# non-overlapping line grok does NOT speak, so fetching it would emit false
-# "adopt terminal_update" noise.
+# grok pins `features = ["unstable"]`, so its real ACP surface is the UNION of v1
+# stable + unstable — hence two fetches. v2 is a separate, partly non-overlapping
+# line grok does NOT speak; fetching it emits false "adopt terminal_update" noise.
 ACP_V1_SCHEMA_URL = (
     "https://raw.githubusercontent.com/agentclientprotocol/"
     "agent-client-protocol/main/schema/v1/schema.json"
@@ -251,33 +221,19 @@ ACP_V1_SCHEMA_UNSTABLE_URL = (
 )
 
 class Anchor(typing.NamedTuple):
-    """The declaration that OWNS the names we check a fetched document for."""
+    """The declaration that OWNS the names we check a fetched document for.
+
+    Never one of those names — that is circular, and the check goes vacuous. And
+    absence is evidence of a RENAME only while this still matches: #793 reported
+    three WORKING env vars renamed, off a `pub use` facade that 200s, grep empty."""
 
     pattern: str
     owns: str
 
 
-# Absence is only evidence of an upstream RENAME if the document still contains
-# the declaration that OWNS the name; drop that premise and a stale pin reads as
-# mass drift (#793 reported three working env vars as renamed, because a moved
-# module left a `pub use` facade that fetched 200 and greps empty).
-#
-# Choosing one, in descending strength — take the strongest available, because
-# THIS comment is what picks the next anchor:
-#   1. The DECLARATION that owns the checked names, so an upstream move takes
-#      both and the sweep cannot run against a document missing them.
-#   2. Failing that, a declaration co-located with them in the same file — this
-#      proves file IDENTITY, which is weaker: "declaration X moved out while Y
-#      stayed" satisfies the anchor and still reports phantom renames. Rows
-#      marked `identity` below are that weaker grade; they are not upgradeable
-#      without a parser, and a docs PAGE can only ever be this.
-#   3. Never one of the checked names itself — that is circular and makes the
-#      check vacuous (a rename would take the anchor too, so it could never fire).
-# The three JSON Schemas are parsed STRUCTURALLY (`$defs`/`definitions` walked by
-# `upstream_acp_session_update_tags` / `upstream_copilot_*`), so a text anchor
-# would add nothing a failed parse does not already say. Every OTHER swept
-# document is prose and must declare one — `every_swept_url_declares_an_anchor`
-# is what stops a new sweep quietly skipping the #793 gate.
+# The three JSON Schemas are parsed STRUCTURALLY, so a text anchor would add
+# nothing a failed parse does not already say. Every OTHER swept document is prose
+# and must declare one — `every_swept_url_declares_an_anchor` is that gate.
 UNANCHORED_BY_DESIGN: frozenset[str] = frozenset(
     {ACP_V1_SCHEMA_URL, ACP_V1_SCHEMA_UNSTABLE_URL, COPILOT_SCHEMA_URL}
 )
@@ -289,8 +245,7 @@ GROK_XAI_METHOD_CONST = r"const XAI_SESSION_UPDATE_METHOD\s*:\s*&(?:'static\s+)?
 GROK_XAI_METHOD_DECL = GROK_XAI_METHOD_CONST + r'\s*=\s*"([^"]+)"'
 
 ANCHORS: dict[str, Anchor] = {
-    # owner-grade: the anchor IS the declaration the checked names live inside,
-    # so it cannot hold while the names have moved out from under it.
+    # owner-grade: the anchor IS the declaration the checked names live inside.
     CODEWHALE_HOOK_URL: Anchor(r"pub enum HookEvent\b", "`HookEvent`"),
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
@@ -306,9 +261,8 @@ ANCHORS: dict[str, Anchor] = {
     OPENCLAW_PATHS_URL: Anchor(r"DEFAULT_GATEWAY_PORT\s*=", "`DEFAULT_GATEWAY_PORT`"),
     OPENCODE_EVENT_URLS[0]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
-    # identity-grade: co-located, not owning — a section head, a page title, or a
-    # union whose MEMBERS declare the checked literals. The names could move out
-    # while this still matches.
+    # identity-grade: co-located only — a name moved out still matches, so phantom
+    # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
     OMP_AI_TYPES_URL: Anchor(r"toolCall", "the message block types"),
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
@@ -324,13 +278,10 @@ ANCHORS: dict[str, Anchor] = {
 @dataclasses.dataclass
 class Report:
     """One bucket per DISPOSITION, because each calls for a different action:
-
-    `breaking` = verified upstream change, fix the decoder; `review` = a new
-    surface to adopt or ignore; `blind` = probe health, repin and verify by hand;
-    `errors` = transient. Collapsing `blind` into `breaking` is what made #793
+    `breaking` fix the decoder, `review` adopt or ignore, `blind` repin by hand,
+    `errors` transient. Collapsing `blind` into `breaking` is what made #793
     report five phantom renames. File through `add_*` only — pinned by the
-    selftest.
-    """
+    selftest."""
 
     breaking: list[str] = dataclasses.field(default_factory=list)
     review: list[str] = dataclasses.field(default_factory=list)
@@ -371,12 +322,10 @@ class Report:
         )
 
     def title(self) -> str:
-        """The report's H1, which IS the GitHub issue title.
-
-        upstream-drift.yml reads it back off the rendered report rather than
-        keeping a second, unpinned copy of these strings. Ordered by disposition
-        so the issue list itself carries the strongest finding.
-        """
+        """The report's H1, which IS the GitHub issue title: upstream-drift.yml
+        reads it back off the rendered report rather than keeping a second,
+        unpinned copy. Ordered by disposition so the issue list itself carries the
+        strongest finding."""
         if self.breaking:
             return "Upstream CLI wire-format drift detected"
         if self.review:
@@ -424,14 +373,11 @@ class Report:
         return "\n".join(out)
 
     def exit_code(self) -> int:
-        """0 no findings / 1 actionable / 2 could not check (transient).
+        """0 no findings / 1 actionable (the workflow opens an issue) / 2 transient.
 
-        `blind` is actionable — the watch is DARK for that source until someone
-        repins — so it exits 1 even though the report no longer calls it drift.
-        Drop it from this condition and a report saying the watch is dark exits 0:
-        both `exit == '1'` steps in upstream-drift.yml skip and the weekly run
-        goes green (#454's fail-open).
-        """
+        `blind` is actionable — the watch is DARK until someone repins. Drop it
+        from this condition and a dark-watch report exits 0: both `exit == '1'`
+        steps in upstream-drift.yml skip and the weekly run goes green (#454)."""
         if self.breaking or self.review or self.blind:
             return 1
         if self.errors:
@@ -449,9 +395,8 @@ def try_fetch(url: str, label: str, report: Report) -> str | None:
     """Fetch `url`, classifying failures so a PERMANENT upstream move is loud.
 
     A `PERMANENT_HTTP_STATUS` means our pin is wrong/gone → `blind` (a fact about
-    OUR pin, not about upstream's wire format); everything else → `errors`.
-    Returns None on any failure, and the caller skips that source's checks.
-    """
+    OUR pin, not upstream's wire format); everything else → `errors`. None on any
+    failure, and the caller skips that source's checks."""
     try:
         return fetch(url)
     except urllib.error.HTTPError as e:
@@ -470,17 +415,11 @@ def try_fetch(url: str, label: str, report: Report) -> str | None:
 
 
 def fetch_anchored(url: str, label: str, report: Report) -> str | None:
-    """`try_fetch` plus the identity proof required before sweeping a document.
-
-    Returns the body only when the document still contains its `ANCHORS` entry.
-    A missing anchor means the fetch succeeded but landed on the wrong content
-    (a re-export facade, a restructured page), so every presence check that would
-    have run is SKIPPED and reported as probe health instead of drift.
-
-    An undeclared URL is reported, never swept — deliberately not raised:
-    `run_checks` routes exceptions to the TRANSIENT bucket, so a bare `KeyError`
-    would degrade "someone added an unproven sweep" into a warning on a green run.
-    """
+    """`try_fetch` plus the identity proof required before sweeping a document. A
+    missing anchor means the fetch landed on the wrong content, so the checks riding
+    it are SKIPPED as probe health, not drift. An undeclared URL is reported and
+    never RAISED: `run_checks` routes exceptions to the transient bucket, degrading
+    "someone added an unproven sweep" to a green-run warning."""
     anchor = ANCHORS.get(url)
     if anchor is None:
         report.add_blind(
@@ -560,14 +499,11 @@ GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
 
 
 def sibling_families(decoded: set[str]) -> set[str]:
-    """The trailing word of each name we decode — `function_call` → `call`.
-
-    A vocabulary MISS matters when the new name is a sibling of one we already
-    handle (`custom_tool_call` beside `function_call`, #933's origin), not when
-    upstream merely grows. Only usable where the suffix is a real family: codex's
-    `EventMsg` suffixes are generic lifecycle words (`begin`/`end`/`started`)
-    shared across unrelated subsystems, so it is excluded on purpose.
-    """
+    """The trailing word of each name we decode — `function_call` → `call`. A MISS
+    matters when the new name is a sibling of one we handle (`custom_tool_call`
+    beside `function_call`, #933), not when upstream merely grows. Excluded where the
+    suffix is no real family: codex's `EventMsg` suffixes are generic lifecycle words
+    shared across unrelated subsystems."""
     return {n.rsplit("_", 1)[-1] for n in decoded if "_" in n}
 
 
@@ -592,11 +528,9 @@ def upstream_acp_tool_call_statuses(text: str) -> set[str] | None:
 def upstream_cursor_hook_events(text: str) -> set[str] | None:
     """The per-hook SECTION HEADINGS of cursor's hooks page.
 
-    Word-boundary counting over the page is fail-open here: the names appear
-    5-17 times each in prose and code samples, so a rename would have to erase
-    every occurrence for the check to fire. A heading is the page's own
-    declaration of "this hook exists" and vanishes with the hook.
-    """
+    Word-boundary counting is fail-open here — the names appear 5-17 times each
+    in prose and samples, so a rename would have to erase every one. A heading is
+    the page's own declaration of "this hook exists" and vanishes with the hook."""
     heads = re.findall(r"(?m)^#{2,4} ([a-z][A-Za-z]+)\s*$", text)
     return set(heads) or None
 
@@ -641,10 +575,9 @@ def upstream_copilot_events(text: str) -> set[str] | None:
 def upstream_copilot_namespaces(text: str) -> set[str] | None:
     """The NAMESPACE families of the copilot `SessionEvent` union. Scoped to the
     anyOf union ON PURPOSE: a naive walk of ALL `definitions` also pulls in
-    nested-content type-tags (`audio`/`text`/`image`/…) that share the
-    `type.const` shape but are never a top-level envelope `type`, inflating the
-    set with phantom families. Returns None → the caller files probe health and
-    SKIPS every Copilot check."""
+    nested-content type-tags (`audio`/`text`/…) that share the `type.const` shape
+    but are never a top-level envelope `type`, inflating the set with phantoms.
+    None → the caller files probe health and SKIPS every Copilot check."""
     try:
         defs = json.loads(text).get("definitions", {})
     except (json.JSONDecodeError, AttributeError):
@@ -688,6 +621,11 @@ def upstream_copilot_field_names(text: str) -> set[str] | None:
 
 
 def cc_doc_marker_findings(hooks_doc: str) -> list[str]:
+    """CC is a closed binary, so hooks.md is the only watchable surface, and these
+    markers are depended on for their ABSENCE — nothing of ours to read first, so
+    the scan is unconditional. Adopting a structural end record also means the
+    liveness-probe first-sight bypass (`probe_admits`, core's source/jsonl.rs)
+    needs an ended-check: it skips the ended tail-scan only because none exists."""
     # Depended markers alarm on VANISH, surface markers on APPEARANCE. Not named
     # `review`: the selftest bans a bucket-named local outside `Report`.
     findings: list[str] = []
@@ -758,21 +696,15 @@ PARSE_SOURCES: dict[str, str] = {
 
 
 def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report: Report) -> bool:
-    """The floor, asked BEFORE EITHER direction — files probe health and returns
-    False when the parse is too small to believe.
+    """The floor, asked BEFORE EITHER direction: too small a parse is probe health.
 
-    It used to gate only the review half. The VANISH half — which files ⛔ "fix
-    the decoder", the highest severity this report has — was gated on bare
+    The VANISH half — which files ⛔, the highest severity here — once ran on bare
     non-emptiness, so a reader returning 12 of 37 names could file five ⛔ against
-    working decoders and only then be stopped. That is not hypothetical: #929's
-    false ⛔ against `pre_approval_request` came from exactly a partial document.
-    """
+    working decoders. #929's false ⛔ against `pre_approval_request` was that."""
     # The key IS the `OurNames` field — pinned by the selftest's census.
     handled = getattr(ours, source) or set()
-    # A reader that finds fewer names than we already handle is broken, or — where
-    # the two directions read different populations (cursor's anchor index, kimi's
-    # Event Reference table, against a vanish half that searches raw prose) — it is
-    # degraded. Probe health is the right answer to both.
+    # Fewer names than we already handle means the reader is broken, or degraded
+    # where the two directions read different populations (cursor's anchor index).
     floor = len(handled)
     if len(upstream) < floor:
         report.add_blind(
@@ -786,9 +718,8 @@ def parse_is_believable(source: str, upstream: set[str], ours: OurNames, report:
 
 
 # Each row is one OurNames field and where the emitting crate puts it. The
-# fragments are GENERATED by a test in the crate that owns the names
-# (`src/drift_surface.rs` in each), so a rename is a test failure THERE rather
-# than a parser here quietly returning a smaller set.
+# fragments are GENERATED by a test in the owning crate (`src/drift_surface.rs`),
+# so a rename is a test failure THERE, not a parser here returning a smaller set.
 SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("cc", CORE_BIN_FRAGMENT, "registered", "claude-code"),
     ("cursor", CORE_BIN_FRAGMENT, "registered", "cursor"),
@@ -828,15 +759,11 @@ def load_fragment(rel: str) -> dict:
 
 
 def read_our_names(report: Report) -> OurNames:
-    """Read every depended name from the EMITTED drift surface.
-
-    Per-KEY isolation, as the 16 hand-written parsers had per-reader: a fragment
-    that loads but lacks one row darkens exactly that field. A fragment that does
-    not load at all darkens every field it feeds, which is honest — the file is
-    generated as a whole, so it is never partially stale.
-
-    A gap here means the MONITOR is broken: loud probe health (exit 1), never
-    transient."""
+    """Read every depended name from the EMITTED drift surface. A gap here is the
+    MONITOR broken, so it files probe health (exit 1), never transient. Per-KEY
+    isolation: a fragment that loads but lacks a row darkens exactly that field; one
+    that fails to load darkens every field it feeds, honestly — it is generated as a
+    whole, so it is never partially stale."""
     ours = OurNames()
     frags: dict[str, dict] = {}
     for rel in (CORE_LIB_FRAGMENT, CORE_BIN_FRAGMENT):
@@ -869,22 +796,11 @@ def read_our_names(report: Report) -> OurNames:
 
 
 def strip_rust_comments(body: str) -> str:
-    """Remove Rust `//` and `/* */` comments, PRESERVING string literals.
-
-    A scanner rather than a pair of `re.sub`s, because both regex approaches drop
-    a REAL depended name and so fail SILENTLY OPEN — the watcher stops checking
-    a name and nothing says so:
-
-    - blind `//[^\\n]*` eats to end of line from a `//` inside a STRING, taking
-      every later entry on that line with it;
-    - `/\\*.*?\\*/` stops at the first `*/`, so a nested block comment (legal Rust)
-      leaves its tail behind and re-admits words from inside it.
-
-    `"` is the only string opener tracked: an apostrophe here is far more often a
-    lifetime (`&'a str`), and an ODD count of them would swallow the FOLLOWING
-    comment into a fake literal, re-admitting every word inside it (pinned by
-    `test_rust_comment_strip_is_not_confused_by_lifetimes`).
-    """
+    """Remove Rust `//` and `/* */` comments, PRESERVING string literals. A scanner,
+    not `re.sub`: both regex forms fail SILENTLY OPEN (`/\\*.*?\\*/` stops at the
+    first `*/`, re-admitting a nested comment's tail). Only `"` opens a string — an
+    apostrophe is a lifetime, and an ODD count would swallow the FOLLOWING comment
+    (`test_rust_comment_strip_is_not_confused_by_lifetimes`)."""
     out: list[str] = []
     i, n, depth = 0, len(body), 0
     while i < n:
@@ -928,12 +844,9 @@ def strip_rust_comments(body: str) -> str:
 def rust_block_after(src: str, anchor_re: str) -> str | None:
     """The `{ … }` block following the first `anchor_re` match, `None` if absent.
 
-    Bounding the scrape keeps out text the decoder does not depend on — a
-    `#[cfg(test)] mod tests` constructing the same shape leaks a phantom, and a
-    phantom makes the watcher alarm on a name upstream never had. Run the source
-    through `strip_rust_comments` first so a brace inside a comment or string
-    cannot move the bounds.
-    """
+    Bounding it keeps out text we do not depend on: a `#[cfg(test)] mod tests` of
+    the same shape leaks a phantom the watcher then alarms on. Run the source
+    through `strip_rust_comments` first — a braced comment moves the bounds."""
     m = re.search(anchor_re, src)
     if not m:
         return None
@@ -992,23 +905,11 @@ def check_omp_title_fields(text: str, fields: set[str], report: Report) -> None:
 
 
 def _enum_body(text: str, enum_name: str) -> str | None:
-    """The brace-balanced body of `enum <enum_name> { … }`.
-
-    THE enum-body reader for every Rust surface we watch — do not go back to a
-    regex, because both spellings guess where the body ENDS and break on a
-    harmless upstream refactor:
-
-    * `(.*?)\\}` stops at the FIRST `}`, so one struct variant truncates the enum
-      and every variant after it reads as GONE — a phantom rename per variant.
-    * `(.*?)\\n\\}` demands a column-0 closing brace, so an INDENTED enum runs on
-      to the next top-level one and a variant scrape admits the following `impl`
-      block's CamelCase idents.
-
-    Comments are stripped FIRST because they are scanned for braces otherwise: a
-    `// see Foo { bar }` line inside the enum would unbalance the count.
-    `strip_rust_comments` preserves string literals, so `rename = "…"` attrs that
-    callers read out of the returned body survive.
-    """
+    """The brace-balanced body of `enum <enum_name> { … }`, for every Rust surface
+    we watch. Never a regex: `(.*?)\\}` stops at the FIRST `}`, so one struct
+    variant truncates the enum into a phantom rename per variant, and `(.*?)\\n\\}`
+    demands a column-0 brace, so an INDENTED enum runs on into the next `impl`.
+    Comments go first; string literals stay, so callers still read `rename = "…"`."""
     text = strip_rust_comments(text)
     # `\\s*\\{` (not `\\b`) so a prefix name can't match a longer enum:
     # `HookEvent` must not bind to `enum HookEventName {`.
@@ -1033,13 +934,10 @@ def _snake_case(camel: str) -> str:
 
 def _strip_nested(s: str) -> str:
     """Iteratively strip innermost `(…)`/`{…}` so only top-level variant idents
-    survive — else a CamelCase field/param TYPE reads as a variant.
-
-    PRECONDITION: comments are already gone (every caller passes an `_enum_body`
-    result). Do NOT re-strip them here with a naive `//[^\\n]*`: that eats to
-    end-of-line from a `//` inside a STRING LITERAL, so one `rename = "http://…"`
-    attr would silently delete every variant after it on that line.
-    """
+    survive — else a CamelCase field/param TYPE reads as a variant. PRECONDITION:
+    comments are already gone. Do NOT re-strip them with a naive `//[^\\n]*` — inside
+    a STRING LITERAL that eats to end-of-line, so one `rename = "http://…"` attr
+    deletes every variant after it on that line."""
     prev = None
     while prev != s:
         prev = s
@@ -1063,22 +961,16 @@ def upstream_codex_enum_types(text: str, enum_name: str) -> set[str] | None:
 
 
 def upstream_grok_hooks(text: str) -> set[str] | None:
-    """The HookEventName enum variants (bare Rust idents — registration keys
-    accept the PascalCase spelling, so these ARE the names we register).
-
-    TWO declaration shapes, tried in order, because upstream now GENERATES the
-    enum from a `hook_events! { … }` macro table. The plain-enum regex still
-    matches the macro DEFINITION's body, but that body holds `$variant`
-    placeholders and reads empty — hence the fall-THROUGH: an empty plain-enum
-    parse is not an answer, it is the signal to read the table.
-    """
+    """The HookEventName enum variants — registration keys take the PascalCase
+    spelling, so these ARE the names we register. TWO shapes, because upstream now
+    GENERATES the enum from a `hook_events! {…}` table: the plain-enum regex matches
+    the macro DEFINITION's `$variant` body and reads empty, so an empty parse is not
+    an answer but the signal to fall through."""
     m = re.search(r"pub enum HookEventName \{(.*?)\n\}", text, re.S)
     if m:
         found = set(re.findall(r"(?m)^\s*([A-Z]\w+),", m.group(1)))
         if found:
             return found
-    # Comments first: `rust_block_after` measures braces, and a doc comment on a
-    # row would otherwise read as a variant.
     block = rust_block_after(strip_rust_comments(text), r"(?m)^\s*hook_events!\s*")
     if block is None:
         return None
@@ -1089,12 +981,10 @@ def upstream_grok_hooks(text: str) -> set[str] | None:
 
 
 def upstream_codewhale_hooks(text: str) -> set[str] | None:
-    """The CodeWhale TUI shell-command hook wire names.
-
-    NOT the app-server `codewhale-hooks` sink enum in `crates/hooks` — a different
-    mechanism sharing no configuration. serde `rename_all = "snake_case"`, so each
-    CamelCase variant converts to the name we register.
-    """
+    """The CodeWhale TUI shell-command hook wire names — NOT the app-server
+    `codewhale-hooks` sink enum in `crates/hooks`, a different mechanism sharing no
+    configuration. serde `rename_all = "snake_case"`, so each CamelCase variant
+    converts to the name we register."""
     body = _enum_body(text, "HookEvent")
     if body is None:
         return None
@@ -1128,12 +1018,9 @@ def sole_match(pattern: str, text: str) -> re.Match[str] | None:
 def python_set_literal(src: str, decl: str) -> set[str] | None:
     """The string members of a `NAME: Set[str] = { … }` block.
 
-    Comments are stripped BEFORE the brace scan, for the reason `_enum_body` and
-    `rust_block_after` both state: a brace inside a comment moves the bounds. The
-    first cut scanned raw source, and upstream interleaves prose here — one of its
-    comments quotes `{"action": "continue"}`, and a stray `}` truncated the set
-    SILENTLY while the size floor still passed.
-    """
+    Comments go BEFORE the brace scan: upstream interleaves prose here, and one
+    comment quoting `{"action": "continue"}` truncated the set SILENTLY at the
+    stray `}` while the size floor still passed."""
     if src.count(decl) != 1:
         return None
     i = src.find(decl)
@@ -1153,19 +1040,11 @@ def python_set_literal(src: str, decl: str) -> set[str] | None:
 
 
 def run_checks(ours: OurNames, *, report: Report) -> None:
-    """The upstream comparisons, filing what they find into `report`.
-
-    Split from main() so an UNEXPECTED exception here can be routed to the
-    transient bucket with the partial report intact — without it the interpreter
-    exits 1 and the workflow files a junk drift-titled issue from an empty report.
-
-    Every block guards on its own `ours.<field> is not None`, so one stale reader
-    costs exactly what it fed. No `read_*` may be called from here: an inline read
-    unwinds to that catch-all and is filed TRANSIENT — a warning on a green run —
-    which is strictly worse than the probe-health line `read_our_names` files."""
-    # The ACP method `session/update` and the two `sessionUpdate` tags
-    # `decode_session_update` turns into events. v1 only — grok does not speak v2.
-    # xAI's OWN `_x.ai/session/update` is watched separately, off its declaration.
+    """The upstream comparisons, filing what they find into `report`. Split from
+    main() so an unexpected exception routes to the transient bucket with the
+    partial report intact. No `read_*` here — an inline read unwinds to that
+    catch-all and is filed TRANSIENT, a green-run warning where `read_our_names`
+    would have filed probe health."""
     up_acp: set[str] = set()
     up_acp_status: set[str] = set()
     acp_method_surface = False
@@ -1189,11 +1068,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             up_acp |= tags
             up_acp_status |= upstream_acp_tool_call_statuses(acp_text) or set()
             acp_parsed = True
-            # `"x-method"` is the surface that OWNS the method names, and it is a
-            # generator-emitted vendor extension — a codegen change can move it
-            # wholesale. Its PRESENCE is this check's anchor: absent, the probe
-            # landed on a schema that no longer declares methods (probe health);
-            # present without ours, the name is genuinely gone.
+            # `"x-method"` OWNS the method names and is generator-emitted, so a
+            # codegen change moves it wholesale: absent is probe health, not a rename.
             acp_method_surface |= '"x-method"' in acp_text
             acp_method_declared |= '"session/update"' in acp_text
     if acp_parsed and not acp_method_surface:
@@ -1228,9 +1104,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             )
 
     if acp_parsed:
-        # The appearing direction, scoped to the one family we decode: a new
-        # `tool_call_*` tag (a confirmation, a retry) decodes to nothing and
-        # its calls render wrong for every ACP-speaking source.
         for tag in sorted(up_acp - set(ours.acp_decoded_tags or ())):
             if tag.startswith("tool_call"):
                 report.add_review(
@@ -1248,8 +1121,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
 
     if ours.copilot is not None:
         text = try_fetch(COPILOT_SCHEMA_URL, "Copilot schema", report)
-        # The `SessionEvent` union is this document's ANCHOR: a parseable JSON is
-        # NOT enough, one stray `properties` object reports every field renamed.
         up_ns = upstream_copilot_namespaces(text) if text is not None else None
         if text is not None and up_ns is None:
             report.add_blind(
@@ -1317,8 +1188,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(KIMI_HOOKS_URL, "Kimi hooks doc", report)
         if text is not None:
             for ev in sorted(ours.kimi):
-                # Word-boundary like the Cursor check: the doc renders each name
-                # inline / in a summary table, never as a quoted literal.
                 if not re.search(rf"\b{re.escape(ev)}\b", text):
                     report.add_breaking(
                         f"Kimi hook `{ev}` (registered in KIMI_EVENTS) is GONE from "
@@ -1342,8 +1211,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     f"stale.)"
                 )
 
-    # The lifecycle-marker scan is unconditional: there is nothing to read from
-    # our source first, since we depend on those surfaces' ABSENCE.
     hooks_doc = fetch_anchored(CC_HOOKS_URL, "CC hooks doc", report)
     if hooks_doc is not None:
         if ours.cc is not None:
@@ -1366,8 +1233,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             report.add_review(finding)
 
 
-    # HOOK-REGISTERED sources — the inert-registration clause of
-    # `source/drift.rs`'s header.
     if ours.reasonix is not None:
         text = fetch_anchored(REASONIX_HOOK_URL, "Reasonix hook source", report)
         if text is not None:
@@ -1445,10 +1310,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     )
 
     if ours.hermes is not None:
-        # SHELL_UNSUPPORTED_HOOKS is the OTHER appearance direction on the
-        # plugins document: a hook we register being reclassified as unservable
-        # by a shell hook means the command we write into config.yaml fires
-        # nothing — same silence as a rename, from the opposite edit.
         plugins = fetch_anchored(HERMES_PLUGINS_URL, "Hermes plugins", report)
         if plugins is not None:
             unsupported = python_set_literal(
@@ -1490,11 +1351,7 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                             f"install/hermes.rs, or make the shim decline explicitly."
                         )
 
-    # omp's entry types are generic English words, so the match is QUOTE-anchored:
-    # a bare word test stays green on prose.
     if ours.omp_message_vocab is not None:
-        # The union IS the document: `ask` is declared only in ask.ts, the rest
-        # only in types.ts, so a single fetch failure must not read as a vanish.
         docs = [
             t
             for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)
@@ -1579,18 +1436,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"fires, so the decoder is never reached (no sprite)."
                     )
 
-    # grok's xAI extension is TRANSCRIPT vocabulary whose arm ends
-    # `_ => Ok(vec![])` — the method gates the whole block and each tag decodes
-    # to nothing once renamed, with no breadcrumb either way.
-    # The PREFIX twin, for vocabularies whose family leads the name. The OTHER
-    # vocabularies are out deliberately: copilot's `session.*` is a product-wide
-    # event bus (52 same-namespace additions today — a ledger would mirror it);
-    # omp's entry types are single words with no family signal, and every
-    # renderable state also rides the message stream we decode; codex `EventMsg`
-    # suffixes are generic lifecycle words; CC and antigravity breadcrumb their
-    # unknown vocabulary (the runtime detector); opencode's plugin forwards
-    # exactly what the decoder reads, pinned by test — an upstream addition
-    # never arrives.
+    # The PREFIX twin of the codex suffix sweep. Copilot is deliberately out of this
+    # direction: `session.*` is a product-wide bus a sibling ledger would just mirror.
     if ours.grok_xai_tags is not None:
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
@@ -1608,10 +1455,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.codex_escalation is not None:
-        # A BOOLEAN check with no breadcrumb possible: a renamed field or value
-        # makes `is_escalated` silently false, and false is a legitimate answer,
-        # so codex sessions would sit Active through every approval prompt. The
-        # pair is split across two upstream files, so the union is the document.
         docs = [
             t
             for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)
@@ -1627,9 +1470,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"so a codex session sits Active through every prompt."
                     )
 
-    # The APPEARING direction (#933): a sibling of something we decode, that we
-    # do not. One-directional the other way is what let `custom_tool_call` decode
-    # to nothing for four tool calls a turn.
     for field, url, enum in (
         ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
@@ -1718,9 +1558,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.opencode is not None:
-        # The inventory is SPLIT across two modules — `permission.v2.asked` is
-        # declared in permission.ts, not session.ts — so the union is the
-        # document, and a single fetch failure must not read as a vanish.
         docs = [
             t
             for u in OPENCODE_EVENT_URLS
@@ -1735,9 +1572,6 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"source/opencode.rs) is GONE from upstream — likely renamed; "
                         f"the plugin subscribes to an event it never fires (no sprite)."
                     )
-            # The part-state statuses ride the same two schema documents. The
-            # dispatch ends `_ => Ok(vec![])`, so a renamed `running` silently
-            # stops every opencode tool activity.
             for st in sorted(ours.opencode_part_statuses or ()):
                 # `Schema.Literal(...)` is the DECLARATION; a bare `"error"` also
                 # matches two unrelated `Omit<…, "error">` sites, masking a rename.
