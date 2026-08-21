@@ -1,14 +1,8 @@
-//! The cutaway profile's paint pass — the second reader of `SimFrame`.
-//!
-//! Deliberately partial. Floor, wall band, rooms, desks, furniture and the
-//! cast are here; EFFECTS are not — weather, glow, steam and the pet all
-//! belong to the classic pass and change no part of the question this profile
-//! exists to answer: does an orthographic cutaway of THIS office, at THIS
-//! density, read better than the classic top-down?
-//!
-//! It reads `SimFrame` and never advances anything: the sim already ran, and a
-//! second renderer that could move the world would make the two profiles
-//! disagree about the office.
+//! The cutaway profile's paint pass — the second reader of `SimFrame`, and
+//! deliberately partial: EFFECTS (weather, glow, steam, the pet) stay with the
+//! classic pass, changing no part of the question this profile exists to answer
+//! — does an orthographic cutaway of THIS office read better than the classic
+//! top-down? It never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::{density_variant_name_into, Pack};
@@ -47,12 +41,11 @@ const RAMP_TINT_PCT: u8 = 26;
 /// turning away from the only light loses more than a facing one gains.
 const RAMP_SHADE_PCT: u8 = 34;
 
-/// Rows of chair back visible BELOW a seated occupant.
-///
-/// Deliberately small. A first pass covered the torso from the waist down and
-/// swallowed the figure — the shirt vanished behind a dark block. The occupant
-/// is already grounded by the desk in front of them, so the chair only has to
-/// peek out beneath, not carry the pose.
+/// Rows of chair back visible BELOW a seated occupant. Deliberately small: a
+/// first pass covered the torso from the waist down and swallowed the figure —
+/// the shirt vanished behind a dark block. The occupant is already grounded by
+/// the desk in front of them, so the chair only has to peek out beneath, not
+/// carry the pose.
 const CHAIR_BACK_H: u16 = 3;
 
 /// Narrowest skyline building, in logical units.
@@ -81,10 +74,9 @@ const GLOW_ROW_DENOM: u16 = 8;
 /// Where a painter should hang one agent's name badge, in BUFFER pixels.
 ///
 /// The engine cannot draw text — the font lives in the binary — so the profile
-/// reports anchors and lets the painter render. Crucially these are the
-/// CUTAWAY's anchors: `overlay::build_overlay` derives its own from the classic
-/// projection, so a badge placed with those would float where the classic
-/// painter would have drawn the body, not where this one did.
+/// reports anchors and lets the painter render. These are the CUTAWAY's anchors:
+/// `overlay::build_overlay` derives its own from the classic projection, so a
+/// badge placed with those would float where the classic painter drew the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CutawayLabel {
     /// Index into [`SimFrame::agents`].
@@ -93,12 +85,10 @@ pub struct CutawayLabel {
     pub anchor_px: crate::layout::Point,
 }
 
-/// Paint `frame`'s office into `buf` as an orthographic cutaway.
-///
-/// `layout` is in LOGICAL units and `buf` in buffer pixels; `scale` converts.
-/// The classic painter is untouched — this is its sibling, not its successor.
-///
-/// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
+/// Paint `frame`'s office into `buf` as an orthographic cutaway — the classic
+/// painter's sibling, not its successor. `layout` is in LOGICAL units and `buf`
+/// in buffer pixels; `scale` converts. Returns where each visible agent's badge
+/// belongs; see [`CutawayLabel`].
 #[allow(clippy::too_many_arguments)]
 pub fn render_cutaway(
     frame: &SimFrame,
@@ -113,149 +103,20 @@ pub fn render_cutaway(
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
 
-    // ONE ordered draw list, so a character and the desk it sits at resolve
-    // against each other by depth instead of by which loop ran first. That
-    // ordering IS the occlusion — there is no separate occlusion pass.
+    // ONE ordered draw list, so a character and the desk it sits at resolve against
+    // each other by depth. That ordering IS the occlusion — there is no second pass.
     let mut order: Vec<(Span, PieceKind)> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
-    // A desk's screen is lit iff the sim says someone is seated at it — the
-    // observation is already in the frame, so the profile never re-derives it.
-    let (desk_w, desk_h) = art_size(pack, "desk").unwrap_or((DESK_H, DESK_H));
-    order.extend(layout.home_desks.iter().enumerate().map(|(i, d)| {
-        (
-            // `paint_desk` blits at the classic anchor's 1px monitor-bezel raise
-            // and adds a front face below — that is the box it occupies.
-            piece_span(
-                crate::layout::Anchor::TopLeft,
-                crate::layout::Point {
-                    x: d.x,
-                    y: d.y.saturating_sub(1),
-                },
-                desk_w,
-                desk_h,
-                desk_front_h(),
-            ),
-            PieceKind::Desk {
-                at: *d,
-                lit: frame
-                    .seated_agents
-                    .get(&pixtuoid_core::state::FloorLocalDeskIndex(i))
-                    .copied()
-                    .unwrap_or(false),
-            },
-        )
-    }));
-    // Every centre-anchored prop rides one helper, so none of them can grow its
-    // own convention again.
-    let push_prop =
-        |order: &mut Vec<(Span, PieceKind)>, at: crate::layout::Point, sprite: &'static str| {
-            if let Some((w, h)) = art_size(pack, sprite) {
-                order.push((
-                    // +1 for the contact shadow `paint_prop` stamps under the box.
-                    piece_span(crate::layout::Anchor::Center, at, w, h, 1),
-                    PieceKind::Prop {
-                        at,
-                        sprite,
-                        mirrored: false,
-                    },
-                ));
-            }
-        };
-    for pl in &layout.plants {
-        push_prop(&mut order, pl.pos, pl.kind.sprite_name());
-    }
-    // Standalone waypoint furniture. Seats (MeetingSofa/MeetingChair/Island)
-    // are deliberately absent: they are slots ON a body that is painted once
-    // from the room's trio, so one sprite per seat would triple-paint it.
-    for wp in &layout.waypoints {
-        if let Some(sprite) = waypoint_sprite(wp.kind) {
-            push_prop(&mut order, wp.pos, sprite);
-        }
-    }
-    for d in &layout.pod_decor {
-        push_prop(&mut order, d.pos, d.kind.sprite_name());
-    }
-    // The lounge couch IS a vertical-mirrored meeting sofa, back facing NORTH
-    // toward the windows — the classic painter's rule, read from there rather
-    // than re-guessed. `back_couch` is NOT couch art: the pack documents it as a
-    // character seen from behind, so drawing it here put a headless torso in the
-    // corridor where the couch belongs.
-    if let Some(at) = layout.couch_sprite_center() {
-        push_sofa(&mut order, pack, at, true);
-    }
+    push_desks(frame, layout, pack, &mut order);
+    push_props(layout, pack, &mut order);
     // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
     // with the wall, before anything standing on the floor can occlude it.
     for item in &layout.wall_decor {
         paint_wall_decor(item.pos, item.kind.sprite_name(), pack, scale, buf);
     }
-    // The corridor appliances classic draws procedurally: they have no sprite
-    // to reuse, so the cutaway gives them its own solid geometry.
-    for wp in layout.waypoints.iter().filter(|wp| {
-        matches!(
-            wp.kind,
-            crate::layout::WaypointKind::VendingMachine | crate::layout::WaypointKind::Printer
-        )
-    }) {
-        let def = crate::layout::furniture_def(wp.kind.furniture());
-        order.push((
-            // +1 for `paint_appliance`'s contact shadow.
-            piece_span(
-                crate::layout::Anchor::Center,
-                wp.pos,
-                def.visual.w,
-                def.visual.h,
-                1,
-            ),
-            PieceKind::Appliance {
-                at: wp.pos,
-                kind: wp.kind,
-            },
-        ));
-    }
-    // The meeting trio: two sofa bodies plus the table between them. `sofas[0]`
-    // is the north sofa and `sofas[1]` the south, and only the south one is
-    // mirrored — that is what makes the pair FACE each other across the table
-    // instead of both facing the same way.
-    for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        for (i, sofa) in t.sofas.iter().enumerate() {
-            push_sofa(&mut order, pack, *sofa, i % 2 != 0);
-        }
-        order.push((
-            // A front face below, and (now) a contact shadow under that.
-            piece_span(
-                crate::layout::Anchor::Center,
-                t.table,
-                TABLE_W,
-                TABLE_H,
-                desk_front_h() + 1,
-            ),
-            PieceKind::Table { at: t.table },
-        ));
-    }
-    for (i, c) in frame.characters.iter().enumerate() {
-        let at = cutaway_anchor(c);
-        let Some((w, h)) = art_size(pack, c.anim_name) else {
-            continue;
-        };
-        order.push((
-            // A seated occupant's chair paints under them, so it is part of the
-            // extent they occupy; everyone else carries only their shadow.
-            piece_span(
-                crate::layout::Anchor::TopLeft,
-                at,
-                w,
-                h,
-                if c.seat_desk.is_some() {
-                    CHAIR_BACK_H
-                } else {
-                    1
-                },
-            ),
-            PieceKind::Character { idx: i },
-        ));
-    }
-    // Sorted, not a backdrop: a backdrop wall cannot occlude what is inside
-    // the room. Split into segments first — see `wall_segments`.
+    push_appliances(layout, &mut order);
+    push_meeting_trios(layout, pack, &mut order);
+    push_characters(frame, pack, &mut order);
     wall_segments(layout, &mut order);
     push_pantry_counter(layout, pack, &mut order);
 
@@ -283,7 +144,151 @@ pub fn render_cutaway(
     labels
 }
 
+/// A desk's screen is lit iff the sim says someone is seated at it — the
+/// observation is already in the frame, so the profile never re-derives it.
+fn push_desks(frame: &SimFrame, layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+    let (desk_w, desk_h) = art_size(pack, "desk").unwrap_or((DESK_H, DESK_H));
+    order.extend(layout.home_desks.iter().enumerate().map(|(i, d)| {
+        (
+            // `paint_desk` blits at the classic anchor's 1px monitor-bezel raise
+            // and adds a front face below — that is the box it occupies.
+            piece_span(
+                crate::layout::Anchor::TopLeft,
+                crate::layout::Point {
+                    x: d.x,
+                    y: d.y.saturating_sub(1),
+                },
+                desk_w,
+                desk_h,
+                desk_front_h(),
+            ),
+            PieceKind::Desk {
+                at: *d,
+                lit: frame
+                    .seated_agents
+                    .get(&pixtuoid_core::state::FloorLocalDeskIndex(i))
+                    .copied()
+                    .unwrap_or(false),
+            },
+        )
+    }));
+}
+
+/// Every centre-anchored prop rides one helper, so none of them can grow its own
+/// convention again.
+fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+    let push_prop =
+        |order: &mut Vec<(Span, PieceKind)>, at: crate::layout::Point, sprite: &'static str| {
+            if let Some((w, h)) = art_size(pack, sprite) {
+                order.push((
+                    // +1 for the contact shadow `paint_prop` stamps under the box.
+                    piece_span(crate::layout::Anchor::Center, at, w, h, 1),
+                    PieceKind::Prop {
+                        at,
+                        sprite,
+                        mirrored: false,
+                    },
+                ));
+            }
+        };
+    for pl in &layout.plants {
+        push_prop(order, pl.pos, pl.kind.sprite_name());
+    }
+    // Seats (MeetingSofa/MeetingChair/Island) are deliberately absent: slots ON a
+    // body painted once from the room's trio, so per-seat sprites would triple it.
+    for wp in &layout.waypoints {
+        if let Some(sprite) = waypoint_sprite(wp.kind) {
+            push_prop(order, wp.pos, sprite);
+        }
+    }
+    for d in &layout.pod_decor {
+        push_prop(order, d.pos, d.kind.sprite_name());
+    }
+    // The lounge couch IS a vertical-mirrored meeting sofa, back facing NORTH toward
+    // the windows — the classic painter's rule, read from there, not re-guessed.
+    if let Some(at) = layout.couch_sprite_center() {
+        push_sofa(order, pack, at, true);
+    }
+}
+
+/// The corridor appliances the classic painter draws procedurally: they have no
+/// sprite to reuse, so the cutaway gives them its own solid geometry.
+fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
+    for wp in layout.waypoints.iter().filter(|wp| {
+        matches!(
+            wp.kind,
+            crate::layout::WaypointKind::VendingMachine | crate::layout::WaypointKind::Printer
+        )
+    }) {
+        let def = crate::layout::furniture_def(wp.kind.furniture());
+        order.push((
+            // +1 for `paint_appliance`'s contact shadow.
+            piece_span(
+                crate::layout::Anchor::Center,
+                wp.pos,
+                def.visual.w,
+                def.visual.h,
+                1,
+            ),
+            PieceKind::Appliance {
+                at: wp.pos,
+                kind: wp.kind,
+            },
+        ));
+    }
+}
+
+/// Two sofa bodies plus the table between them. `sofas[0]` is the north sofa and
+/// `sofas[1]` the south, and only the south one is mirrored — that is what makes
+/// the pair FACE each other across the table instead of both facing one way.
+fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+    for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
+        for (i, sofa) in t.sofas.iter().enumerate() {
+            push_sofa(order, pack, *sofa, i % 2 != 0);
+        }
+        order.push((
+            // A front face below, and a contact shadow under that.
+            piece_span(
+                crate::layout::Anchor::Center,
+                t.table,
+                TABLE_W,
+                TABLE_H,
+                desk_front_h() + 1,
+            ),
+            PieceKind::Table { at: t.table },
+        ));
+    }
+}
+
+fn push_characters(frame: &SimFrame, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+    for (i, c) in frame.characters.iter().enumerate() {
+        let at = cutaway_anchor(c);
+        let Some((w, h)) = art_size(pack, c.anim_name) else {
+            continue;
+        };
+        order.push((
+            // A seated occupant's chair paints under them, so it is part of the
+            // extent they occupy; everyone else carries only their shadow.
+            piece_span(
+                crate::layout::Anchor::TopLeft,
+                at,
+                w,
+                h,
+                if c.seat_desk.is_some() {
+                    CHAIR_BACK_H
+                } else {
+                    1
+                },
+            ),
+            PieceKind::Character { idx: i },
+        ));
+    }
+}
+
 /// Queue one `meeting_sofa` body. `mirrored` flips it so its back faces north.
+///
+/// NOT `back_couch`: the pack documents that as a character seen from behind, so
+/// drawing it here put a headless torso in the corridor where the couch belongs.
 fn push_sofa(
     order: &mut Vec<(Span, PieceKind)>,
     pack: &Pack,
@@ -302,21 +307,18 @@ fn push_sofa(
     }
 }
 
-/// Rows of a vertical wall run per sorted segment.
-///
-/// A run spanning a whole room has no meaningful base row — its south edge
-/// would sort the ENTIRE wall in front of everything the room contains — so it
-/// is split into pieces that each do have one. This is the standard treatment
-/// for the long-object case in a painter's-algorithm renderer, and no sort
-/// predicate substitutes for it.
-///
-/// A segment must be no taller than the SHORTEST thing that can pass in front
-/// of it: one segment spanning both sides of a figure has no correct position.
-/// The bundled cast is 12 rows tall; 4 leaves headroom for a shorter pack, at
-/// a piece count the draw list absorbs easily.
+/// Rows of a vertical wall run per sorted segment. A segment must be no taller
+/// than the SHORTEST thing that can pass in front of it: one spanning both sides
+/// of a figure has no correct position. The bundled cast is 12 rows tall; 4
+/// leaves headroom for a shorter pack, at a piece count the draw list absorbs
+/// easily.
 const WALL_SEG_H: u16 = 4;
 
-/// Queue every room's walls as sorted pieces, vertical runs split.
+/// Queue every room's walls as sorted pieces, vertical runs split. A run
+/// spanning a whole room has no meaningful base row — its south edge would sort
+/// the ENTIRE wall in front of everything the room contains — so it is split
+/// into pieces that each do have one: the standard treatment for the long-object
+/// case in a painter's-algorithm renderer, which no sort predicate substitutes for.
 fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     let rooms = layout
         .meeting_rooms
@@ -435,20 +437,11 @@ enum PieceKind {
     },
 }
 
-/// A piece's screen footprint: the box its sprite occupies, plus the `below`
-/// rows its painter draws underneath (a front face, a contact shadow, a chair
-/// back).
-///
-/// Anchoring goes through [`crate::layout::anchored_top_left`], the same
-/// function the walkable mask and the classic painter use, so the box a piece
-/// SORTS by cannot drift from the box it BLITS into.
-///
-/// The desk needs NO special case any more. It used to sort on a surface plane
-/// so a seated occupant would paint over it, but that was compensating for the
-/// occupant ALSO carrying a wrong key: with both measured at their true base
-/// rows the occupant's chair lands several rows south of the desk's front face,
-/// so the ratified "head over the surface" reading falls out of the shared
-/// convention instead of being bought with a divergence.
+/// A piece's screen footprint: the box its sprite occupies plus the `below` rows
+/// its painter draws underneath (a front face, a contact shadow, a chair back).
+/// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
+/// the walkable mask and the classic painter use, so the box a piece SORTS by
+/// cannot drift from the box it BLITS into.
 fn piece_span(
     anchor: crate::layout::Anchor,
     pos: crate::layout::Point,
@@ -473,12 +466,11 @@ fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
 }
 
-/// The wall rows inset above and below the glass run, as a fraction of the
-/// band. A 1/4 inset therefore leaves the middle HALF of the band as glass.
-///
-/// The windows are the cutaway's only light SOURCE on screen, so the band has to
-/// read as glass and not as a stripe — it is what makes the north-to-south floor
-/// falloff legible as light instead of as a gradient someone chose.
+/// The wall rows inset above and below the glass run, as a fraction of the band:
+/// a 1/4 inset leaves the middle HALF of the band as glass. The windows are the
+/// cutaway's only light SOURCE on screen, so the band has to read as glass and
+/// not as a stripe — that is what makes the north-to-south floor falloff legible
+/// as light instead of as a gradient someone chose.
 const WINDOW_INSET_NUMER: u16 = 1;
 /// Denominator of [`WINDOW_INSET_NUMER`].
 const WINDOW_INSET_DENOM: u16 = 4;
@@ -536,12 +528,11 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     );
 }
 
-/// A city skyline standing on the window sill, lit windows scattered through it.
-///
-/// Flat glass reads as a painted stripe; a skyline is what makes the band a
-/// WINDOW, and the lit windows are what make it night. Deterministic from the
-/// layout width so the same office always gets the same city — a per-frame
-/// reshuffle would flicker.
+/// A city skyline on the window sill, lit windows scattered through it. Flat
+/// glass reads as a painted stripe; a skyline is what makes the band a WINDOW,
+/// and the lit windows are what make it night. Deterministic from the layout
+/// width so the same office always gets the same city — a per-frame reshuffle
+/// would flicker.
 fn paint_skyline(
     layout: &Layout,
     theme: &Theme,
@@ -607,11 +598,10 @@ fn paint_skyline(
 }
 
 /// Queue the pantry counter — a fixture the layout already sized, without which
-/// the room reads as an empty glass box.
-///
-/// A sorted piece rather than a backdrop blit: it stands ON the floor, so an
-/// agent at the counter has to resolve against it like any other solid, and it
-/// earns the contact shadow every solid in this profile carries.
+/// the room reads as an empty glass box. A sorted piece rather than a backdrop
+/// blit: it stands ON the floor, so an agent at the counter resolves against it
+/// like any other solid, and it earns the contact shadow every solid in this
+/// profile carries.
 fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
     let Some(pantry) = &layout.pantry else {
         return;
@@ -648,9 +638,8 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
     let w = scale.to_buffer(layout.buf_w);
     fill(buf, 0, 0, w, h, base);
 
-    // Anchored to where the FLOOR starts, not buffer row 0: the wall band
-    // covers everything above `top_margin`, so measuring from the top hides
-    // the lit zone behind it.
+    // Anchored where the FLOOR starts, not buffer row 0: the wall band covers
+    // everything above `top_margin` and would hide the lit zone behind it.
     let floor_top = scale.to_buffer(layout.top_margin);
     let floor_h = h.saturating_sub(floor_top);
 
@@ -680,9 +669,8 @@ fn paint_desk(
 ) {
     let s = scale.get();
     let x = scale.to_buffer(lx);
-    // The bezel raise for the BASE desk art. Classic lifts a `desk_north` by its
-    // extra height on top of this, and the cutaway always blits `desk` — an art
-    // difference, which is the cutaway's own to close, not a seat-side one.
+    // The bezel raise for the BASE desk art. Classic lifts a `desk_north` by its extra
+    // height on top of this — an art difference, the cutaway's own to close.
     let top_y = scale.to_buffer(ly.saturating_sub(1));
 
     let Some((art, blit_at)) = densest_art(pack, "desk", scale) else {
@@ -690,45 +678,16 @@ fn paint_desk(
     };
     blit_frame_scaled(art, x, top_y, blit_at, buf);
 
-    // The front face is the SPRITE'S own material, shaded — sampled from its
-    // base row rather than a theme role. Two reasons: the desk's colour lives in
-    // the PACK (`"D" = #8b5a2b`), not the theme, so `furniture.wood_top` is a
-    // different material entirely and reads nearly identical to the carpet in
-    // some themes; and sampling means a custom `--pack-dir` desk gets a matching
-    // front face for free instead of a mismatched one.
     let Some(material) = dominant_opaque_row(art, art.height().saturating_sub(1)) else {
         return;
     };
-    // An occupied desk spills its screen light onto the surface in front of it.
-    // The office is lit by two things — the windows and the monitors — and this
-    // is the only place the second one shows.
-    //
-    // Full desk WIDTH, not the middle half. The occupant is 8 logical columns
-    // centred on a 14-column desk, and a half-width band is a strict subset of
-    // them on both axes — while `lit` means "someone is seated here", so the
-    // occluder is present exactly when the glow is drawn. The band rendered
-    // zero visible pixels. The wings either side of the body are where a spill
-    // actually reads, and they are also where it belongs physically.
     if lit {
-        let glow = Ramp::from_base(
-            theme.effects.monitor_frame_lit,
-            RAMP_TINT_PCT,
-            RAMP_SHADE_PCT,
-        );
-        fill(
-            buf,
-            x,
-            top_y + art.height() * blit_at.get() * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
-            art.width() * blit_at.get(),
-            s,
-            glow.lit,
-        );
+        paint_desk_glow(x, top_y, art, blit_at, theme, scale, buf);
     }
 
     let ramp = Ramp::from_base(material, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    // Sized off what was ACTUALLY drawn, not off the base sprite: variant art blits
-    // 1:1 and is already in buffer units, so multiplying again would put the
-    // front face a whole desk below the surface it belongs to.
+    // Sized off what was ACTUALLY drawn, not the base sprite: variant art blits 1:1
+    // in buffer units, so multiplying again drops the face a whole desk too low.
     let drawn_w = art.width() * blit_at.get();
     let drawn_h = art.height() * blit_at.get();
     let base_y = top_y + drawn_h;
@@ -754,11 +713,40 @@ fn paint_desk(
     );
 }
 
-/// The most common opaque colour in `row` of `frame`, if any.
-///
-/// How the cutaway learns a sprite's material without hardcoding it: the front
-/// face a top-down sprite never had has to be SOME colour, and the sprite's own
-/// base row is the only answer that stays right for a custom pack.
+/// The screen spill of an occupied desk — the office is lit by the windows and
+/// the monitors, and this is the only place the second one shows. Full desk
+/// WIDTH, not the middle half: the occupant is 8 logical columns centred on a
+/// 14-column desk, so a half-width band is a strict subset of them and rendered
+/// zero visible pixels. The wings either side of the body are where it reads.
+fn paint_desk_glow(
+    x: u16,
+    top_y: u16,
+    art: &pixtuoid_core::sprite::Frame,
+    blit_at: std::num::NonZeroU16,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let glow = Ramp::from_base(
+        theme.effects.monitor_frame_lit,
+        RAMP_TINT_PCT,
+        RAMP_SHADE_PCT,
+    );
+    fill(
+        buf,
+        x,
+        top_y + art.height() * blit_at.get() * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
+        art.width() * blit_at.get(),
+        scale.get(),
+        glow.lit,
+    );
+}
+
+/// The most common opaque colour in `row` of `frame` — how the cutaway learns a
+/// sprite's material without hardcoding it. The front face a top-down sprite
+/// never had has to be SOME colour, and the desk's lives in the PACK
+/// (`"D" = #8b5a2b`), not the theme, where `furniture.wood_top` reads nearly like
+/// the carpet; sampling also earns a custom `--pack-dir` desk a match for free.
 fn dominant_opaque_row(
     frame: &pixtuoid_core::sprite::Frame,
     row: u16,
@@ -779,14 +767,11 @@ fn dominant_opaque_row(
     best.map(|(c, _)| c)
 }
 
-/// Wall-hung decor: blitted at its own `pos`, with NO ground shadow.
-///
-/// Two things separate it from [`paint_prop`], and the cutaway had both wrong
-/// by routing it through there. `WallDecorItem.pos` is TOP-LEFT — the classic
-/// painter blits it at `pos` directly and z-sorts it `Anchor::TopLeft`, unlike
-/// the centre-pinned furniture — so centring it hung every board up and to the
-/// west of where it belongs. And a wall-hung item touches no floor, so the
-/// contact shadow that grounds a solid was landing partway up the wall.
+/// Wall-hung decor: blitted at its own `pos`, with NO ground shadow — two things
+/// [`paint_prop`] gets wrong here, and the cutaway had both. `WallDecorItem.pos`
+/// is TOP-LEFT, like the classic painter's `Anchor::TopLeft` z-sort rather than
+/// the centre-pinned furniture, so centring hung every board up and west of where
+/// it belongs; and touching no floor, its contact shadow landed up the wall.
 fn paint_wall_decor(
     pos: crate::layout::Point,
     sprite: &str,
@@ -842,13 +827,6 @@ fn paint_character(
     )?;
     let (art_w, art_h) = (art.width(), art.height());
 
-    // Ground contact BEFORE the body, so the sprite sits on its own shadow
-    // rather than the shadow being stamped over their feet.
-    //
-    // Only for someone STANDING on the floor. A seated occupant's chair back
-    // starts at exactly the same row and is three rows deep, so the shadow was
-    // drawn and then completely covered — dead pixels, and the chair is already
-    // this figure's ground contact.
     if c.seat_desk.is_none() {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
     }
@@ -859,11 +837,6 @@ fn paint_character(
         scale.factor(),
         buf,
     );
-    // The chair paints straight after ITS occupant rather than as its own
-    // sorted piece: it belongs to exactly one character, so tying it to them
-    // makes the order correct by construction. The trade is that a chair cannot
-    // occlude a DIFFERENT agent walking past — acceptable while the profile has
-    // no walkers rendered at a desk, and the fix is a Piece::Chair when it does.
     if c.seat_desk.is_some() {
         paint_chair(at, art_w, art_h, theme, scale, buf);
     }
@@ -929,10 +902,8 @@ fn densest_art<'a>(
         let Some(art) = pack.animation(&key).and_then(|a| a.frames.first()) else {
             continue;
         };
-        // Saturating for the same reason the validator's twin is: the density
-        // is bounded, the BASE is not. A saturated expectation matches nothing,
-        // so an absurd pair falls through to the base art rather than wrapping
-        // into a size that happens to match.
+        // Saturating like the validator's twin: the BASE is unbounded and a saturated
+        // expectation matches nothing, so an absurd pair falls through to base art.
         if art.width() != base.width().saturating_mul(density)
             || art.height() != base.height().saturating_mul(density)
         {
@@ -946,13 +917,11 @@ fn densest_art<'a>(
     Some((base, scale.factor()))
 }
 
-/// The pack sprite for a waypoint kind, when it has one.
-///
-/// `None` covers three cases, all deliberate: a SEAT slot whose body paints
-/// once elsewhere (MeetingSofa/MeetingChair/Island), a fixture already drawn by
-/// its room (Pantry), and the corridor appliances the classic painter draws
-/// PROCEDURALLY rather than from art (VendingMachine/Printer/Couch) — those
-/// need their own cutaway geometry, not a missing-sprite lookup.
+/// The pack sprite for a waypoint kind, when it has one. `None` covers three
+/// deliberate cases: a SEAT slot whose body paints once elsewhere
+/// (MeetingSofa/MeetingChair/Island), a fixture its room already draws (Pantry),
+/// and the appliances the classic painter draws PROCEDURALLY
+/// (VendingMachine/Printer/Couch), which need cutaway geometry, not a lookup.
 fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
@@ -995,9 +964,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         &Ramp::from_base(theme.furniture.wood_trim, RAMP_TINT_PCT, RAMP_SHADE_PCT),
         scale,
     );
-    // ...and the ground contact every OTHER solid gets. Without it the table
-    // was the one piece in the room with no weight, floating over the carpet
-    // while the sofas either side of it sat on theirs.
+    // ...and the ground contact every OTHER solid gets: without it the table was
+    // the one piece with no weight, floating while the sofas beside it sat.
     contact_shadow(
         crate::layout::Point {
             x,
@@ -1011,13 +979,11 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
     );
 }
 
-/// A corridor appliance as a cutaway solid.
-///
-/// Vending machine and printer have no sprite — classic paints them per-pixel —
-/// so this gives them the same body + front-face + lit-panel treatment every
-/// other solid here gets. Its footprint comes from the SHARED furniture table,
-/// not a second set of numbers, so the cutaway box matches the ground the mask
-/// actually blocks.
+/// A corridor appliance as a cutaway solid. Vending machine and printer have no
+/// sprite — classic paints them per-pixel — so this gives them the same body +
+/// front-face + lit-panel treatment every other solid here gets. Its footprint
+/// comes from the SHARED furniture table, not a second set of numbers, so the
+/// cutaway box matches the ground the mask actually blocks.
 fn paint_appliance(
     at: crate::layout::Point,
     kind: crate::layout::WaypointKind,
@@ -1102,10 +1068,11 @@ fn paint_prop(
     );
 }
 
-/// A tight dark band where a figure meets the floor.
-///
-/// One row, not an ellipse: a wide soft pool reads as a stain on a dark carpet,
-/// while a band the width of the sprite reads as weight.
+/// A tight dark band where a figure meets the floor — one row, not an ellipse: a
+/// wide soft pool reads as a stain on a dark carpet, while a band the width of
+/// the sprite reads as weight. Stamped BEFORE the body so the sprite sits on its
+/// own shadow, and skipped for a seated figure, whose three-row chair back starts
+/// at the same row and covered it completely — dead pixels.
 fn contact_shadow(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1126,10 +1093,11 @@ fn contact_shadow(
     );
 }
 
-/// A chair back covering the occupant's lower torso.
-///
-/// Without it a seated figure floats: the cutaway shows their whole body, where
-/// the classic painter hid the lower half behind the desk's overhang.
+/// A chair back covering the occupant's lower torso — without it a seated figure
+/// floats, since the cutaway shows the body the classic painter hid behind the
+/// desk's overhang. Painted straight after ITS occupant, not as a sorted piece:
+/// it belongs to exactly one character, so the order is correct by construction.
+/// The trade, that it cannot occlude a passing agent, buys a `Piece::Chair`.
 fn paint_chair(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1168,10 +1136,11 @@ mod tests {
         piece_span(anchor, pos, 1, h, below).y1
     }
 
-    /// Every piece's sort row measured the same way: the south base row of what
-    /// it actually blits. The occupant's chair lands south of the desk's front
-    /// face, so the ratified "head over the surface" reading falls out of the
-    /// shared convention — the desk needs no divergence of its own.
+    /// Every piece's sort row measured the same way: the south base row of what it
+    /// actually blits. The desk used to sort on a surface plane to compensate for
+    /// the occupant ALSO carrying a wrong key; measured at their true base rows the
+    /// chair lands south of the desk's front face, so the ratified "head over the
+    /// surface" reading falls out of the shared convention with no divergence.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();
@@ -1357,13 +1326,10 @@ mod tests {
     }
 
     /// The whole draw list of a REAL office, checked against every pairwise
-    /// "must be behind" fact its own geometry states.
-    ///
-    /// This is what a sort key cannot give you. It is also the guard on the
-    /// long-object class: a wall run left unsplit would sort its south end in
-    /// front of the room's contents, and the pantry counter — which stands
-    /// INSIDE a room, between its north and south walls — is exactly the piece
-    /// that catches it.
+    /// "must be behind" fact its own geometry states — what a sort key cannot
+    /// give you. Also the long-object guard: an unsplit wall run would sort its
+    /// south end in front of the room's contents, and the pantry counter, INSIDE
+    /// a room between its north and south walls, is the piece that catches it.
     #[test]
     fn a_real_offices_draw_list_satisfies_every_ordering_constraint() {
         let pack = pack();
@@ -1434,12 +1400,11 @@ mod tests {
         }
     }
 
-    /// THE property the whole mixed-density contract rests on: a density
-    /// variant must change how a piece is DRAWN, never how big it is. The two
-    /// branches return different (frame, factor) pairs whose PRODUCT has to
-    /// agree, and getting that wrong is silent — the desk still renders, just
-    /// with its front face a whole desk below the surface (which is exactly
-    /// what shipped before this test existed).
+    /// THE property the whole mixed-density contract rests on: a density variant
+    /// changes how a piece is DRAWN, never how big it is. The two branches return
+    /// different (frame, factor) pairs whose PRODUCT has to agree, and getting it
+    /// wrong is silent — the desk still renders, with its front face a whole desk
+    /// below the surface, which is exactly what shipped before this test existed.
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
         let pack = pack();

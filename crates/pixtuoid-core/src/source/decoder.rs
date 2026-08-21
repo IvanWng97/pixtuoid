@@ -48,18 +48,11 @@ pub(crate) fn accept_all_paths(_p: &Path) -> bool {
     true
 }
 
-/// Narrow a raw JSON integer to a valid POSIX pid: in `i32` range AND strictly
-/// positive. The `> 0` reject is load-bearing — `kill(0)`/`kill(-n)` target
-/// process GROUPS, and a bogus/zero `_pid` would otherwise synthesize a phantom
-/// exit that flaps a LIVE gateway Down. The ONE narrowing every JSON pid
-/// ingress rides — the hook peek, the openclaw decode, and both session
-/// registries (`cc_probe`, `grok::native`) — so a new ingress can't ship the
-/// N-th unchecked pid. `fd_probe` is deliberately NOT a rider: it filters `> 0`
-/// over kernel-enumerated `pid_t`, where the `i32`-range half is vacuous.
-///
-/// Takes `i64` and narrows HERE so an out-of-range value is a per-entry skip;
-/// deserializing straight into `i32` would fail the whole document, which the
-/// registry probes then report as upstream SHAPE drift (#831).
+/// Narrow a raw JSON integer to a valid POSIX pid: `i32` range AND strictly
+/// positive — `kill(0)`/`kill(-n)` target process GROUPS, so a bogus or zero `_pid`
+/// would synthesize a phantom exit that flaps a LIVE gateway Down. Every JSON pid
+/// ingress rides it; `fd_probe` deliberately does not (kernel-enumerated `pid_t`).
+/// `i64` in, so a wild value is a per-entry skip, not a whole-document fail (#831).
 pub(crate) fn checked_pid(raw: i64) -> Option<i32> {
     i32::try_from(raw).ok().filter(|&p| p > 0)
 }
@@ -81,13 +74,12 @@ pub(crate) fn is_subagent_path(path: &Path) -> bool {
     path.components().any(|c| c.as_os_str() == SUBAGENTS_DIR)
 }
 
-/// `"{prefix}·{basename}"` from a working directory, or `None` when `cwd` has
-/// no final component (empty / the filesystem root).
+/// `"{prefix}·{basename}"` from a working directory, or `None` when `cwd` has no
+/// final component (empty / the filesystem root). The cwd is untrusted
+/// transcript/hook content and a slashless crafted value makes the WHOLE string the
+/// basename, so the cap lands here — one chokepoint for all three derivers.
 pub(crate) fn cwd_basename_label(prefix: &str, cwd: &Path) -> Option<String> {
     let base = cwd.file_name().and_then(|n| n.to_str())?;
-    // The cwd is untrusted transcript/hook content, and a slashless crafted
-    // value makes the whole string the basename — capped here so all three
-    // derivers are bounded at one chokepoint.
     Some(format!(
         "{prefix}·{}",
         ellipsize(base, MAX_DECODED_FIELD_CHARS)
@@ -130,22 +122,19 @@ pub(crate) fn parsed_tail_lines(tail: &[u8]) -> impl Iterator<Item = Value> + '_
     })
 }
 
-/// What a transcript tail says about when its SESSION last wrote — the
-/// per-source refinement of the file mtime the first-sight gate used to trust
-/// outright. Three states because "no activity stamp in the window" splits into
-/// two opposite verdicts.
-// `non_exhaustive` while still unpublished: a fourth state is plausible and this
-// buys it without a break. In-crate exhaustive matches are unaffected.
+/// What a transcript tail says about when its SESSION last wrote — the per-source
+/// refinement of the file mtime the first-sight gate used to trust outright. Three
+/// states, `non_exhaustive` while unpublished because a fourth is plausible.
 #[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TailActivity {
     /// Newest agent-activity line in the tail, epoch seconds.
     At(u64),
-    /// The tail parses, and NONE of it is agent activity — positive evidence
-    /// the recent bytes were not the session writing.
+    /// The tail parses and NONE of it is agent activity — positive evidence the
+    /// recent bytes were not the session writing.
     SidecarOnly,
-    /// The source cannot judge this tail: no probe supplied, nothing parseable,
-    /// or activity lines with no readable stamp. The gate keeps mtime's verdict.
+    /// No verdict: no probe supplied, nothing parseable, or activity lines with no
+    /// readable stamp. The gate keeps mtime's answer.
     Unknown,
 }
 
@@ -199,121 +188,103 @@ pub(crate) fn rfc3339_to_epoch_secs(s: &str) -> Option<u64> {
     u64::try_from(secs).ok()
 }
 
-/// Decode one hook payload into the event sequence the reducer applies.
-///
-/// Tool/permission arms (PreToolUse / PostToolUse / Notification /
-/// PermissionRequest) return TWO events: an [`AgentEvent::Identity`] carrying
-/// the payload's source/session_id/cwd, then the activity event (#221) — so
-/// the reducer's proof-of-life registration for an unknown id lands with REAL
-/// identity instead of a blank `#N` slot. Identity is deliberately NOT attached
-/// to the session-lifecycle arms (SessionStart already carries full identity; an
-/// end for an unknown agent proves nothing worth registering) or the custom
-/// Subagent arms.
-pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
-    let obj = v
-        .as_object()
-        .ok_or_else(|| anyhow!("hook payload must be an object"))?;
-    // CLI attribution comes ONLY from the shim-owned `_pixtuoid_source`. We must
-    // NOT read the public `source` field: CC's SessionStart payload uses it for
-    // the start *reason* (startup/resume/clear/compact), which would namespace
-    // the agent under "startup" and split it from the claude-code-keyed
-    // tool/JSONL/SessionEnd events (an un-reapable ghost).
-    let source = obj
-        .get("_pixtuoid_source")
+/// The CLI a hook envelope belongs to — read ONLY from the shim-owned
+/// `_pixtuoid_source`. CC's public `source` field carries the SessionStart REASON
+/// (startup/resume/clear/compact), so reading it would namespace the agent under
+/// "startup" and split it from the claude-code-keyed tool/JSONL/SessionEnd events:
+/// an un-reapable ghost.
+fn hook_source(obj: &serde_json::Map<String, Value>) -> &str {
+    obj.get("_pixtuoid_source")
         .and_then(|s| s.as_str())
-        .unwrap_or(crate::source::claude_code::SOURCE_NAME);
-    let desc = crate::source::registry::descriptor_for(source);
+        .unwrap_or(crate::source::claude_code::SOURCE_NAME)
+}
 
-    // A DAEMON source produces ZERO AgentEvents — its payloads ride the sibling
-    // presence channel. Short-circuit so a daemon envelope never reaches the
-    // shared agent arms, which would bail on the missing `hook_event_name`.
+/// Envelopes that decode to NOTHING, quietly. A DAEMON source's payloads ride the
+/// sibling presence channel and carry no `hook_event_name` at all. grok scans
+/// `~/.claude/settings.json` AND `~/.cursor/hooks.json` BY DEFAULT and fires the
+/// shim installed there with its OWN camelCase envelope, so a duplicate arrives
+/// tagged `claude-code`/`cursor` beside the grok-tagged one.
+fn decodes_to_nothing(
+    source: &str,
+    obj: &serde_json::Map<String, Value>,
+    desc: Option<&'static crate::source::registry::SourceDescriptor>,
+) -> bool {
     if desc.is_some_and(|d| d.is_daemon()) {
-        return Ok(vec![]);
+        return true;
     }
-
-    // CROSS-FIRE guard: grok scans `~/.claude/settings.json` AND
-    // `~/.cursor/hooks.json` BY DEFAULT and executes the shim commands pixtuoid
-    // installed THERE with its OWN envelope — which then arrives tagged
-    // `claude-code`/`cursor` while a grok-tagged duplicate arrives via our native
-    // `~/.grok/hooks` file. The camelCase `hookEventName` KEY is grok's envelope
-    // fingerprint; a mis-tagged copy is a known duplicate, so drop it QUIETLY
-    // (trace, not warn: it recurs on every tool call of every grok session).
-    // Scoped to those TWO documented targets so a FUTURE camelCase source is NOT
-    // silently swallowed — it falls through to the shared arms and bails on the
-    // missing snake `hook_event_name`, surfacing as an OBSERVED decode error.
-    if (source == crate::source::claude_code::SOURCE_NAME
-        || source == crate::source::cursor::SOURCE_NAME)
-        && obj.contains_key("hookEventName")
-    {
+    let cc = source == crate::source::claude_code::SOURCE_NAME;
+    // trace, not warn — and scoped to those two targets, so a FUTURE camelCase
+    // source falls through and surfaces as an OBSERVED decode error instead.
+    if (cc || source == crate::source::cursor::SOURCE_NAME) && obj.contains_key("hookEventName") {
         tracing::trace!(source, "dropping grok cross-fired hook envelope");
-        return Ok(vec![]);
+        return true;
     }
-
-    // The SAME class from the other direction — cursor's unstamped duplicates,
-    // whose count and losslessness are in `source/cursor.rs`'s module doc.
-    if source == crate::source::claude_code::SOURCE_NAME
-        && obj.contains_key("cursor_version")
-        && !obj.contains_key("_pixtuoid_source")
-    {
+    // cursor's own unstamped duplicates, counted in `source/cursor.rs`'s module doc.
+    if cc && obj.contains_key("cursor_version") && !obj.contains_key("_pixtuoid_source") {
         tracing::trace!("dropping an unstamped cursor hook invocation");
-        return Ok(vec![]);
+        return true;
     }
+    false
+}
 
-    // A source's own hook arms run FIRST — before the shared field requirements
-    // below — so an alien envelope (Reasonix: camelCase, `event` discriminator,
-    // no `session_id` at all) or a subject-changing event (SubagentStart/Stop,
-    // whose AgentId is the CHILD's) decodes in the source's module, not here. An
-    // `Extend` decoder that declines (`Ok(None)`) falls through to the shared
-    // CC-shaped arms; a `ClaimsAll` decoder cannot.
+/// A source's OWN hook arms, run before the shared field requirements so an alien
+/// envelope (Reasonix: camelCase, `event` discriminator, no `session_id` at all) or
+/// a subject-changing event (SubagentStart/Stop, whose AgentId is the CHILD's)
+/// decodes in its own module. An `Extend` decoder that declines (`Ok(None)`) falls
+/// through to the shared CC-shaped arms; a `ClaimsAll` decoder cannot.
+fn source_owned_arms(
+    desc: Option<&'static crate::source::registry::SourceDescriptor>,
+    v: &Value,
+) -> Result<Option<Vec<AgentEvent>>> {
     use crate::source::registry::HookCustom;
     match desc.and_then(|d| d.hook()).and_then(|h| h.custom) {
-        Some(HookCustom::ClaimsAll(decode)) => return decode(&v),
-        Some(HookCustom::Extend(decode)) => {
-            if let Some(evs) = decode(&v)? {
-                return Ok(evs);
-            }
-        }
-        None => {}
+        Some(HookCustom::ClaimsAll(decode)) => decode(v).map(Some),
+        Some(HookCustom::Extend(decode)) => decode(v),
+        None => Ok(None),
     }
+}
 
-    // Both bails below breadcrumb, undeduped — the two fields are the whole
-    // hook plane's chokepoint.
-    let event = obj
-        .get("hook_event_name")
-        .and_then(|s| s.as_str())
-        .ok_or_else(|| {
-            super::drift::missing_field(source, "hook", "hook_event_name");
-            anyhow!("missing hook_event_name")
-        })?;
-
-    // `.filter(non-empty)`: an empty session_id passes `as_str` but, for Codex
-    // (which keys the AgentId on session_id), would mint a phantom agent that
-    // never coalesces with any rollout.
-    let session_id = obj
-        .get("session_id")
+/// The payload's `session_id`, rejected when missing or EMPTY: an empty one passes
+/// `as_str` but, for Codex (which keys the AgentId on it), would mint a phantom
+/// agent that never coalesces with any rollout. This and `hook_event_name`
+/// breadcrumb undeduped — the two fields are the whole hook plane's chokepoint.
+fn hook_session_id(
+    obj: &serde_json::Map<String, Value>,
+    source: &str,
+    event: &str,
+) -> Result<String> {
+    obj.get("session_id")
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| {
             super::drift::missing_field(source, event, "session_id");
             anyhow!("missing/empty session_id")
-        })?
-        .to_string();
-    // The per-session key strategy is registry data (`HookDecoding::id_key`), not
-    // a name match. Codex MUST use `session_id` since its `transcript_path` is
-    // `string | null` (keying on the path would split hook and JSONL into two
-    // sprites); CC keys on it because that UUID equals its transcript filename
-    // stem, so a subagent->parent link survives a git-worktree cwd-split.
+        })
+        .map(str::to_string)
+}
+
+/// The per-session key is registry DATA (`HookDecoding::id_key`), never a name
+/// match. Codex MUST use `session_id`, since its `transcript_path` is
+/// `string | null` and keying on the path would split hook and JSONL into two
+/// sprites; CC keys on it because that UUID equals its transcript filename stem, so
+/// a subagent→parent link survives a git-worktree cwd-split.
+fn hook_agent_id(
+    desc: Option<&'static crate::source::registry::SourceDescriptor>,
+    obj: &serde_json::Map<String, Value>,
+    source: &str,
+    session_id: &str,
+) -> AgentId {
     use crate::source::registry::IdKey;
-    // Normalized transcript_path: fold `\`→`/` + lowercase on Windows so the hook
-    // key and the JSONL watcher key hash to the same AgentId. The session_id
-    // fallback is a UUID — NOT normalized, since case-folded UUIDs could collide
-    // on case-only variants.
+    // Normalized: fold `\`→`/` + lowercase on Windows, so the hook key and the JSONL
+    // watcher key hash to the same AgentId.
     let normalized_transcript_path: String;
     let id_key = match desc
         .and_then(|d| d.hook())
         .map_or(IdKey::TranscriptPathThenSessionId, |h| h.id_key)
     {
-        IdKey::SessionId => session_id.as_str(),
+        // A UUID, deliberately NOT normalized — case folding could collide two
+        // variants that differ only in case.
+        IdKey::SessionId => session_id,
         IdKey::TranscriptPathThenSessionId => {
             match obj
                 .get("transcript_path")
@@ -324,11 +295,92 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                     normalized_transcript_path = normalize_path_key(tp);
                     &normalized_transcript_path
                 }
-                None => session_id.as_str(),
+                None => session_id,
             }
         }
     };
-    let agent_id = AgentId::from_parts(source, id_key);
+    AgentId::from_parts(source, id_key)
+}
+
+/// The identity context the tool/permission arms attach ahead of their activity
+/// event. `cwd` is on the wire for CC tool hooks but absent on e.g. Codex
+/// `PermissionRequest` — absent or empty maps to `None`, so the reducer's cwd-less
+/// registration path (ordinal label, reap-exempt) applies.
+fn hook_identity(
+    agent_id: AgentId,
+    source: &str,
+    session_id: &str,
+    obj: &serde_json::Map<String, Value>,
+) -> AgentEvent {
+    AgentEvent::identity(
+        agent_id,
+        source,
+        session_id,
+        obj.get("cwd")
+            .and_then(|s| s.as_str())
+            .filter(|s| !s.is_empty())
+            .map(std::path::PathBuf::from),
+    )
+}
+
+/// Burn-tier effort observation (CC): tool-context hook payloads carry an
+/// `effort: {level}` object — hooks.md lists low/medium/high/xhigh/max and notes
+/// that ULTRACODE "is not a distinct level and reports as xhigh". Codex hook
+/// payloads carry no such field, and absent emits nothing.
+fn hook_effort(agent_id: AgentId, obj: &serde_json::Map<String, Value>) -> Option<AgentEvent> {
+    obj.get("effort")
+        .and_then(|e| e.get("level"))
+        .and_then(|l| l.as_str())
+        .filter(|l| !l.is_empty())
+        .map(|level| AgentEvent::ModelInfo {
+            agent_id,
+            model: None,
+            effort: Some(ellipsize(level, MAX_DECODED_FIELD_CHARS)),
+        })
+}
+
+/// Decode one hook payload into the event sequence the reducer applies.
+///
+/// The tool/permission arms (PreToolUse / PostToolUse / Notification /
+/// PermissionRequest) lead with an [`AgentEvent::Identity`] carrying the payload's
+/// source/session_id/cwd (#221), so the reducer's proof-of-life registration for an
+/// unknown id lands with REAL identity instead of a blank `#N` slot. The
+/// session-lifecycle and custom Subagent arms deliberately do NOT: SessionStart
+/// already carries identity, and an end for an unknown agent proves nothing.
+pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
+    let obj = v
+        .as_object()
+        .ok_or_else(|| anyhow!("hook payload must be an object"))?;
+    let source = hook_source(obj);
+    let desc = crate::source::registry::descriptor_for(source);
+    if decodes_to_nothing(source, obj, desc) {
+        return Ok(vec![]);
+    }
+    if let Some(evs) = source_owned_arms(desc, &v)? {
+        return Ok(evs);
+    }
+    shared_hook_arms(obj, source, desc)
+}
+
+/// The shared CC-shaped arms, for every source whose row has no claiming decoder.
+/// `UserPromptSubmit` ALSO emits `SessionStart` (idempotent in the reducer) because
+/// Codex's tool hooks fire only for shell/apply_patch/MCP — ~25 other handlers fire
+/// nothing (openai/codex#20204) — and hook firing is version-unstable: a
+/// `matcher="*"` group is silently dropped, some builds emit none (openai/codex#21639).
+fn shared_hook_arms(
+    obj: &serde_json::Map<String, Value>,
+    source: &str,
+    desc: Option<&'static crate::source::registry::SourceDescriptor>,
+) -> Result<Vec<AgentEvent>> {
+    let event = obj
+        .get("hook_event_name")
+        .and_then(|s| s.as_str())
+        .ok_or_else(|| {
+            super::drift::missing_field(source, "hook", "hook_event_name");
+            anyhow!("missing hook_event_name")
+        })?;
+    let session_id = hook_session_id(obj, source, event)?;
+    let agent_id = hook_agent_id(desc, obj, source, &session_id);
     let tool_id_key = desc
         .and_then(|d| d.hook())
         .map_or(crate::source::registry::ToolIdKey::ToolUse, |h| {
@@ -336,51 +388,18 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
         })
         .wire_name();
 
-    // The identity context the tool/permission arms attach ahead of their
-    // activity event. `cwd` is on the wire for CC tool hooks but absent on e.g.
-    // Codex PermissionRequest — absent or empty maps to `None` so the reducer's
-    // cwd-less registration path (ordinal label, reap-exempt) applies.
-    let identity = || {
-        AgentEvent::identity(
-            agent_id,
-            source,
-            session_id.clone(),
-            obj.get("cwd")
-                .and_then(|s| s.as_str())
-                .filter(|s| !s.is_empty())
-                .map(std::path::PathBuf::from),
-        )
-    };
-
-    // Burn-tier effort observation (CC): tool-context hook payloads carry an
-    // `effort: {level}` object (hooks.md — low/medium/high/xhigh/max; ULTRACODE
-    // "is not a distinct level and reports as xhigh"). Codex hook payloads carry
-    // no such field — absent = emit nothing.
-    let effort_info = || {
-        obj.get("effort")
-            .and_then(|e| e.get("level"))
-            .and_then(|l| l.as_str())
-            .filter(|l| !l.is_empty())
-            .map(|level| AgentEvent::ModelInfo {
-                agent_id,
-                model: None,
-                effort: Some(ellipsize(level, MAX_DECODED_FIELD_CHARS)),
-            })
-    };
-
     match event {
         "SessionStart" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
-            let source = source.to_string();
             let mut evs = vec![AgentEvent::SessionStart {
                 agent_id,
-                source: source.clone(),
+                source: source.to_string(),
                 session_id,
                 cwd,
                 parent_id: None,
             }];
-            // "Only SessionStart hooks can receive a `model` field, and it is
-            // not guaranteed to be present" (hooks.md) — take it when offered.
+            // "Only SessionStart hooks can receive a `model` field, and it is not
+            // guaranteed to be present" (hooks.md) — take it when offered.
             if let Some(model) = obj
                 .get("model")
                 .and_then(|m| m.as_str())
@@ -407,14 +426,14 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![
-                identity(),
+                hook_identity(agent_id, source, &session_id, obj),
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id,
                     detail: Some(make_tool_detail(source, tool_name, obj.get("tool_input"))),
                 },
             ];
-            evs.extend(effort_info());
+            evs.extend(hook_effort(agent_id, obj));
             Ok(evs)
         }
         "PostToolUse" => {
@@ -423,13 +442,13 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|s| s.as_str())
                 .map(String::from);
             let mut evs = vec![
-                identity(),
+                hook_identity(agent_id, source, &session_id, obj),
                 AgentEvent::ActivityEnd {
                     agent_id,
                     tool_use_id,
                 },
             ];
-            evs.extend(effort_info());
+            evs.extend(hook_effort(agent_id, obj));
             Ok(evs)
         }
         "Notification" => {
@@ -438,29 +457,22 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 .and_then(|s| s.as_str())
                 .unwrap_or("waiting");
             Ok(vec![
-                identity(),
+                hook_identity(agent_id, source, &session_id, obj),
                 AgentEvent::Waiting {
                     agent_id,
                     reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
                 },
             ])
         }
-        // Codex's permission prompt is a "waiting on the human" signal — maps to
-        // the same Waiting state as Claude's Notification.
+        // Codex's permission prompt is the same "waiting on the human" signal.
         "PermissionRequest" => Ok(vec![
-            identity(),
+            hook_identity(agent_id, source, &session_id, obj),
             AgentEvent::Waiting {
                 agent_id,
                 reason: "permission".into(),
             },
         ]),
-        // Codex agent-creation signal. Codex's tool hooks fire only for
-        // shell/apply_patch/MCP — ~25 other handlers fire nothing
-        // (openai/codex#20204) — and hook firing is version-unstable: a
-        // `matcher="*"` group is silently dropped (hence the matcher-less
-        // install) and some builds emit no hooks at all (openai/codex#21639). So
-        // UserPromptSubmit ALSO emits SessionStart (idempotent in the reducer),
-        // and the JSONL rollout stays the system of record for tool activity.
+        // The JSONL rollout stays the system of record for Codex tool activity.
         "UserPromptSubmit" => {
             let cwd = obj.get("cwd").and_then(|s| s.as_str()).unwrap_or("").into();
             Ok(vec![AgentEvent::SessionStart {
@@ -471,9 +483,8 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
                 parent_id: None,
             }])
         }
-        // Turn end — keep the slot; just settle to idle. NO Identity: an end for
-        // an unknown agent proves nothing worth registering. Stop must not end
-        // the session — turns end many times per session.
+        // Turn end — keep the slot, just settle to idle. Stop must NOT end the
+        // session: turns end many times per session.
         "Stop" => Ok(vec![AgentEvent::ActivityEnd {
             agent_id,
             tool_use_id: None,
@@ -482,10 +493,8 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
             agent_id,
             as_child: false,
         }]),
-        // SubagentStart/SubagentStop live in the source modules' own custom
-        // decoders (dispatched above via the registry) — they change the event's
-        // SUBJECT to the child AgentId, which these shared session-keyed arms
-        // cannot express. A source whose row has no custom decoder bails here.
+        // SubagentStart/Stop change the event's SUBJECT to the child AgentId, which
+        // these session-keyed arms cannot express — see `source_owned_arms`.
         other => {
             super::drift::unknown_event(source, other);
             bail!("unsupported hook_event_name: {}", display_safe(other))
@@ -493,32 +502,27 @@ pub fn decode_hook_payload(v: Value) -> Result<Vec<AgentEvent>> {
     }
 }
 
+/// The dispatch tool's current NAME, renamed from `Task` in CC v2.1.63 with no
+/// announcement. `Workflow` (CC's fleet dispatcher) is DELIBERATELY not a second
+/// entry: its children fire no per-agent tool_use, so one months-long `active_tasks`
+/// entry would sweep-EXEMPT every FINISHED fleet subagent until the workflow ends —
+/// worse desk starvation than the gap. Fleet lifecycle rides the Subagent hooks.
 const DISPATCH_TOOL: &str = "Agent";
 
-/// The subagent-dispatch tool NAME we still recognise — this module's row in the
-/// drift surface. It is a fallback, not the detector: dispatch is found
-/// semantically by `subagent_type` presence, so a rename degrades to a
-/// breadcrumb rather than a miss.
-///
-/// Test-gated: the surface emitter is the only reader.
 #[cfg(test)]
+/// The subagent-dispatch tool NAME we still recognise — this module's row in the
+/// drift surface. A FALLBACK, not the detector: dispatch is found semantically by
+/// `subagent_type` presence, so a rename degrades to a breadcrumb rather than a
+/// miss. Test-gated: the surface emitter is the only reader.
 pub(crate) const DECODED_DISPATCH_NAMES: &[&str] = &[DISPATCH_TOOL];
 
+/// The detail for one tool call. The subagent dispatch is detected SEMANTICALLY, by
+/// the PRESENCE of a `subagent_type` input field — presence, not value, so a renamed
+/// tool emitting `subagent_type: null` is still caught AND still breadcrumbs the
+/// drift. The reducer keys subagent-leak suppression (`active_tasks`) and Task-drain
+/// completion on `is_task()`, so a missed dispatch silently disables both.
 pub(crate) fn make_tool_detail(source: &str, tool_name: &str, input: Option<&Value>) -> ToolDetail {
-    // Detect the subagent-dispatch tool SEMANTICALLY, by the PRESENCE of a
-    // `subagent_type` input field. The dispatch tool was renamed `Task` →
-    // `Agent` (CC v2.1.63, undocumented) and upstream can rename it again, but
-    // the field is stable. Key on presence (not value): a renamed tool emitting
-    // `subagent_type: null` is still caught AND surfaces the drift breadcrumb.
-    // The reducer keys subagent-leak suppression (`active_tasks`) and Task-drain
-    // completion on `is_task()`, so a missed dispatch silently disables both.
     let has_subagent_type = input.and_then(|v| v.get("subagent_type")).is_some();
-    // DELIBERATELY NOT a known name: `Workflow` (CC's fleet dispatcher). Its
-    // children fire no per-agent `Agent` tool_use, so mapping Workflow → Task
-    // would park ONE months-long entry in the parent's `active_tasks` — and the
-    // vouched-Delegating subtree shield would then sweep-EXEMPT every FINISHED
-    // fleet subagent until the workflow ends: worse desk starvation than the gap
-    // it would "fix". Fleet lifecycle rides the SubagentStart/Stop hooks instead.
     let known_name = tool_name == DISPATCH_TOOL;
     if has_subagent_type || known_name {
         if has_subagent_type && !known_name {
@@ -575,18 +579,11 @@ pub(crate) const MAX_TOOL_TARGET_CHARS: usize = 40;
 /// sit in `AgentSlot` for the session's lifetime either way.
 pub(crate) const MAX_DECODED_FIELD_CHARS: usize = 80;
 
-/// Make an untrusted wire value safe to DISPLAY: strip control characters, then
-/// cap at [`MAX_DECODED_FIELD_CHARS`].
-///
-/// The strip covers ASCII/Unicode Cc **and** the Cf bidi controls — `char::is_control`
-/// is Cc-only, and the "Trojan Source" class (CVE-2021-42574) rides exactly that gap,
-/// where a value renders differently from its bytes. Applied where a wire value leaves
-/// the decoder for a HUMAN sink that is NOT a cell buffer: the [`super::drift`]
-/// breadcrumbs and the unsupported-event `bail!`s, whose `tracing` stream writes to raw
-/// stderr — the one sink no cell-clipping or presenter sanitize covers.
-///
-/// The binary keeps `pixtuoid::strip_control_chars` with the SAME predicate: it cannot
-/// reach a `pub(crate)` core item, so the two are per-crate copies — keep them in step.
+/// Make an untrusted wire value safe to DISPLAY: strip control characters, then cap
+/// at [`MAX_DECODED_FIELD_CHARS`]. For the HUMAN sinks that are NOT cell buffers —
+/// the [`super::drift`] breadcrumbs and the unsupported-event `bail!`s, whose
+/// `tracing` writes to raw stderr, which no cell-clipping or presenter sanitize
+/// covers. The binary's `strip_control_chars` is a COPY — keep the two in step.
 pub(crate) fn display_safe(s: &str) -> String {
     let stripped: String = s
         .chars()
@@ -596,14 +593,17 @@ pub(crate) fn display_safe(s: &str) -> String {
 }
 
 /// The Unicode Bidi_Control characters — category Cf, so `char::is_control` (Cc
-/// only) misses them while they REORDER displayed text in a terminal.
+/// only) misses them while they REORDER displayed text in a terminal: exactly the
+/// gap the "Trojan Source" class (CVE-2021-42574) rides, where a value renders
+/// differently from its bytes. In range order: ALM; LRM, RLM; LRE, RLE, PDF, LRO,
+/// RLO; LRI, RLI, FSI, PDI.
 fn is_bidi_control(c: char) -> bool {
     matches!(
         c,
-        '\u{061C}'                    // ALM
-            | '\u{200E}'..='\u{200F}' // LRM, RLM
-            | '\u{202A}'..='\u{202E}' // LRE, RLE, PDF, LRO, RLO
-            | '\u{2066}'..='\u{2069}' // LRI, RLI, FSI, PDI
+        '\u{061C}'
+            | '\u{200E}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
     )
 }
 
@@ -648,9 +648,8 @@ mod tests {
         ] {
             assert_eq!(rfc3339_to_epoch_secs(bad), None, "{bad:?}");
         }
-        // A lower-case `t` is the OTHER accepted date/time separator, so the
-        // gate must not reject it — grok's normalize_path_key'd stamps arrive
-        // lowercased.
+        // A lower-case `t` is the OTHER accepted separator, and grok's
+        // `normalize_path_key`'d stamps arrive lowercased.
         assert_eq!(
             rfc3339_to_epoch_secs("2026-07-16t12:00:05Z"),
             Some(1_784_203_205)
@@ -944,9 +943,8 @@ mod tests {
             } => {
                 assert_eq!(source, "codex");
                 assert_eq!(cwd, std::path::PathBuf::from("/Users/me/work/myrepo"));
-                // Codex keys on session_id, NOT the (here non-null)
-                // transcript_path — keying on the path would produce two sprites
-                // for one session.
+                // Codex keys on session_id, NOT the (here non-null) transcript_path
+                // — keying on the path would produce two sprites for one session.
                 assert_eq!(agent_id, AgentId::from_parts("codex", "codex-sess"));
             }
             other => panic!("expected SessionStart, got {other:?}"),
@@ -1556,9 +1554,8 @@ mod tests {
                 }),
             ),
             (
-                // Kimi rides the SHARED CC-shaped arms (its Extend decoder declines
-                // PreToolUse), so route the whole payload through the dispatcher —
-                // the shared `make_tool_detail` is the chokepoint under test.
+                // Kimi's Extend decoder declines PreToolUse, so route the whole
+                // payload through the dispatcher to reach `make_tool_detail`.
                 kimi::SOURCE_NAME,
                 Box::new(|| {
                     decode_hook_payload(json!({
@@ -1750,9 +1747,8 @@ mod tests {
                 }),
             ),
             (
-                // Wire: the recorded gate carries its WHY on `extra.description`
-                // ("delete in root path"), so the reason must route through
-                // `ellipsize` like every other wire-minted one.
+                // The recorded gate carries its WHY on `extra.description` ("delete
+                // in root path"), so the reason must route through `ellipsize` too.
                 hermes::SOURCE_NAME,
                 ReasonKind::Wire,
                 Box::new(|| {
@@ -1892,9 +1888,8 @@ mod tests {
             "the stamped copy carries the arc"
         );
 
-        // An install written before CC's command gained its env prefix sends a
-        // bare, unstamped payload, so the default that catches it must be
-        // untouched by this guard.
+        // An install written before CC's command gained its env prefix sends a bare,
+        // unstamped payload, so this guard must leave the default that catches it.
         let cc = json!({
             "hook_event_name": "PreToolUse",
             "session_id": "cc1",
