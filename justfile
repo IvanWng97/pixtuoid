@@ -319,6 +319,7 @@ lint:
     run prose   just comment-lint-gate    & pids+=($!)
     run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
+    run starhist just star-history-selftest & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
     for p in "${pids[@]}"; do wait "$p" || fail=1; done
@@ -1417,6 +1418,15 @@ gitenv-selftest:
 [doc("Self-test the TUI capture driver's pure logic")]
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
+
+# The README star chart's renderer — bitmap font, axes, paging — AND the pin that
+# holds its copied office colours to `theme/*.rs`. A theme edit that drifts the
+# chart fails here, not on the README. Runs in `lint`; CI's hygiene job
+# enumerates it separately; the star-history workflow runs it before each render.
+[group('meta')]
+[doc("Self-test the README star-chart renderer and its theme-colour pin")]
+star-history-selftest:
+    python3 scripts/star-history.py --selftest
 
 
 # The capture-tree rules — every scenario declares what
