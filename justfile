@@ -1419,12 +1419,12 @@ gitenv-selftest:
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
-# The README star chart's renderer — bitmap font, axes, paging — AND the pin that
-# holds its copied office colours to `theme/*.rs`. A theme edit that drifts the
-# chart fails here, not on the README. Runs in `lint`; CI's hygiene job
-# enumerates it separately; the star-history workflow runs it before each render.
+# The README star chart's renderer — bitmap font, axes, paging. (Its copied
+# office colours are pinned from Rust: scene's `tests/readme_chart_palette.rs`.)
+# Runs in `lint`; CI's hygiene job enumerates it separately; the star-history
+# workflow runs it before each render.
 [group('meta')]
-[doc("Self-test the README star-chart renderer and its theme-colour pin")]
+[doc("Self-test the README star-chart renderer")]
 star-history-selftest:
     python3 scripts/star-history.py --selftest
 

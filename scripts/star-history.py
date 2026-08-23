@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
 """Render the README's star-history chart from GitHub's own stargazers data.
 
-GitHub limited `stargazers` (the who-starred-when list) to a repository's
-admins and collaborators on 2026-06-30 — the changelog is
+GitHub announced on 2026-06-30 that `stargazers` (the who-starred-when list)
+would be limited to a repository's admins and collaborators —
 https://github.blog/changelog/2026-06-30-upcoming-access-restrictions-to-public-api-endpoints-and-ui-views/
-— so every hosted chart service (star-history.com included) now renders a
-placeholder for every repo it does not own. The repo's own Actions token IS a
-collaborator, so the chart is drawn here and published to the `star-history`
-branch by `.github/workflows/star-history.yml`; nothing leaves the repo.
+— and the cut-over blanked every hosted chart service (star-history.com
+included) for every repo it does not own. The repo's own Actions token is
+assumed to be a collaborator — the changelog names neither GraphQL nor Actions
+tokens, so the first live run is the proof — and the chart is drawn here and
+published to the `star-history` branch by `.github/workflows/star-history.yml`;
+nothing leaves the repo.
 
 Usage: `star-history.py OWNER/REPO OUT_DIR` with the token in `GH_TOKEN`
 (`GITHUB_TOKEN` accepted). Writes `star-history-{light,dark}.svg`.
 `--selftest` exercises the pure halves (bucketing, axes, rendering, paging)
-with no network; exit 0 = pass. No pytest on purpose — the repo has no Python
-test harness.
+with no network; exit 0 = pass.
 """
 
 from __future__ import annotations
@@ -36,6 +37,7 @@ PAGE_SIZE = 100
 STARGAZERS_QUERY = """
 query($owner: String!, $name: String!, $first: Int!, $after: String) {
   repository(owner: $owner, name: $name) {
+    stargazerCount
     stargazers(first: $first, after: $after, orderBy: {field: STARRED_AT, direction: ASC}) {
       edges { starredAt }
       pageInfo { hasNextPage endCursor }
@@ -56,37 +58,20 @@ class Palette(NamedTuple):
     carpet_dark: str
     title: str
     text: str
-    dim: str
     star: str
 
 
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
-# Which `theme/*.rs` each README variant copies; the selftest pins every value
-# below to that file's literal, so a theme edit fails `lint` here, not in the README.
-THEME_SOURCE = {"light": "normal", "dark": "tokyo_night"}
-PALETTE_ROLES = {
-    "wall": "wall",
-    "trim": "wall_trim",
-    "carpet_light": "carpet_light",
-    "carpet_dark": "carpet_dark",
-    "title": "tooltip_title",
-    "text": "tooltip_text",
-    "dim": "tooltip_dim",
-    "star": "desk_lamp",
-}
+# Copied from the themes, not derived — the renderer is Python. The copy's guard
+# is `crates/pixtuoid-scene/tests/readme_chart_palette.rs`, which pins every
+# value to its theme by struct access, so a theme edit fails `just test`.
+PALETTE_PATH = pathlib.Path(__file__).with_name("star-history-palette.json")
 THEMES: dict[str, Palette] = {
-    "light": Palette(
-        wall="#383846", trim="#505064", carpet_light="#b28a60", carpet_dark="#765232",
-        title="#f0f0f0", text="#c8c8d2", dim="#8c8c96", star="#ffd282",
-    ),
-    "dark": Palette(
-        wall="#1a1b26", trim="#414868", carpet_light="#303448", carpet_dark="#1a1c2a",
-        title="#c0cae6", text="#a9b1d6", dim="#414868", star="#ffbe78",
-    ),
+    variant: Palette(**{f: row[f] for f in Palette._fields})
+    for variant, row in json.loads(PALETTE_PATH.read_text(encoding="utf-8")).items()
 }
 
 WIDTH, HEIGHT = 800, 400
-# One chart pixel; the banner's sprites are ~10 real px per pixel, text needs finer.
+# One chart pixel — coarser than a label glyph needs, finer than the README banner's sprites.
 PX = 4
 TITLE_PX, LABEL_PX = 3, 2
 MARGIN_LEFT, MARGIN_RIGHT, MARGIN_TOP, MARGIN_BOTTOM = 64, 32, 56, 44
@@ -94,18 +79,18 @@ PLOT_COLS = (WIDTH - MARGIN_LEFT - MARGIN_RIGHT) // PX
 PLOT_ROWS = (HEIGHT - MARGIN_TOP - MARGIN_BOTTOM) // PX
 Y_TICKS = 5
 X_TICKS = 5
-# Axis-to-label breathing room, and where the header text sits above the plot.
 LABEL_GAP = 3 * PX
 TITLE_Y = MARGIN_TOP - 10 * PX
 STAMP_Y = MARGIN_TOP - 8 * PX
-# The office carpet is a two-tone checkerboard; one tile is two chart pixels.
+# The office carpet's two-tone checkerboard, tiled under the curve.
 TILE = 2 * PX
-# 5×7 forms on a 9-row cell: the two spare rows hold g j p q y's descenders.
+# Forms are BASELINE rows tall on a GLYPH_H-row cell; the spare rows hold g j p q y's descenders.
 GLYPH_W, GLYPH_H, BASELINE = 5, 9, 7
 GLYPH_ADVANCE = GLYPH_W + 1
 
-# Classic dot-matrix forms; `*` is the star. Drawn as rectangles, so the chart
-# needs no font — an SVG inside a GitHub `<img>` can load none anyway.
+# Classic dot-matrix forms; `*` is the star. Drawn as rectangles so the chart
+# needs no font: an SVG inside a GitHub `<img>` can't fetch a webfont, and a
+# system font wouldn't be pixel art.
 _FORMS: dict[str, tuple[str, ...]] = {
     "0": (".###.", "#...#", "#..##", "#.#.#", "##..#", "#...#", ".###."),
     "1": ("..#..", ".##..", "..#..", "..#..", "..#..", "..#..", ".###."),
@@ -174,7 +159,6 @@ _FORMS: dict[str, tuple[str, ...]] = {
     "-": (".....", ".....", ".....", "#####", ".....", ".....", "....."),
     "_": (".....", ".....", ".....", ".....", ".....", ".....", "#####"),
     ".": (".....", ".....", ".....", ".....", ".....", ".##..", ".##.."),
-    ":": (".....", ".##..", ".##..", ".....", ".##..", ".##..", "....."),
     "*": ("..#..", "#.#.#", ".###.", "#####", ".###.", "#.#.#", "..#.."),
 }
 GLYPHS: dict[str, tuple[str, ...]] = {ch: rows + ("." * GLYPH_W,) * (GLYPH_H - len(rows)) for ch, rows in _FORMS.items()}
@@ -239,6 +223,27 @@ def text_path(s: str, x: int, y: int, px: int) -> str:
     return "".join(runs)
 
 
+def x_labels(first: dt.date, last: dt.date) -> list[tuple[int, str]]:
+    """Date labels as (x, text): as many as fit without touching, edge ones flush with the plot, one per day."""
+    span_days = max((last - first).days, 1)
+    fmt = "%b %d" if span_days < 365 else "%b %Y"
+    w = text_width(last.strftime(fmt), LABEL_PX)
+    plot_w = PLOT_COLS * PX
+    # Edge labels are flush, interior ones centred: the first gap is pitch − 1.5·w.
+    ticks = min(X_TICKS, plot_w // (w + w // 2 + LABEL_GAP))
+    placed: list[tuple[int, str]] = []
+    for i in range(ticks + 1):
+        day = first + dt.timedelta(days=round(span_days * i / ticks))
+        if day > last or (placed and placed[-1][1] == day.strftime(fmt)):
+            continue
+        col = MARGIN_LEFT + round((PLOT_COLS - 1) * (day - first).days / span_days) * PX
+        x = col if i == 0 else col + PX - w if i == ticks else col + (PX - w) // 2
+        placed.append((max(MARGIN_LEFT, min(x, MARGIN_LEFT + plot_w - w)), day.strftime(fmt)))
+    if placed and placed[-1][1] != last.strftime(fmt):
+        placed.append((MARGIN_LEFT + plot_w - w, last.strftime(fmt)))
+    return placed
+
+
 def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> str:
     pal = THEMES[theme]
     pts = extend_to(series, today) or [(today, 0)]
@@ -257,7 +262,7 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
     def rows_of(count: int) -> int:
         return round(PLOT_ROWS * count / y_max)
 
-    # Step function: a column shows the total as of its day.
+    # Stepped, not interpolated: a column's height is a count that was true on its day.
     heights = []
     k = 0
     for c in range(PLOT_COLS):
@@ -276,18 +281,13 @@ def render_svg(repo: str, series: list[Point], theme: str, today: dt.date) -> st
     for count in range(0, y_max + 1, step):
         label = compact(count)
         axis.append(text_path(label, plot_x - LABEL_GAP - text_width(label, LABEL_PX), base_y - rows_of(count) * PX - BASELINE * LABEL_PX // 2, LABEL_PX))
-    fmt = "%b %d" if span_days < 365 else "%b %Y"
-    for i in range(X_TICKS + 1):
-        day = first + dt.timedelta(days=round(span_days * i / X_TICKS))
-        label = day.strftime(fmt)
-        w = text_width(label, LABEL_PX)
-        lx = col_x(day) + (0 if i == 0 else PX - w if i == X_TICKS else (PX - w) // 2)
+    for lx, label in x_labels(first, last):
         axis.append(text_path(label, lx, base_y + LABEL_GAP, LABEL_PX))
     stamp = f"updated {today.isoformat()}"
     axis.append(text_path(stamp, WIDTH - MARGIN_RIGHT - text_width(stamp, LABEL_PX), STAMP_Y, LABEL_PX))
     count_label = f"* {top}"
     cw = text_width(count_label, LABEL_PX)
-    cx = min(col_x(last) + PX - cw, WIDTH - MARGIN_RIGHT - cw)
+    cx = max(col_x(last) + PX - cw, plot_x)
     cy = max(base_y - rows_of(top) * PX - (BASELINE + 2) * LABEL_PX, plot_y)
     frame = "".join(
         [_run(0, 0, WIDTH, PX), _run(0, HEIGHT - PX, WIDTH, PX), _run(0, 0, PX, HEIGHT), _run(WIDTH - PX, 0, PX, HEIGHT)]
@@ -341,11 +341,17 @@ def fetch_star_dates(repo: str, token: str, post: Callable[[str, dict, str], dic
         reply = post(STARGAZERS_QUERY, {"owner": owner, "name": name, "first": PAGE_SIZE, "after": after}, token)
         if reply.get("errors"):
             raise RuntimeError(f"GraphQL errors for {repo}: {json.dumps(reply['errors'])}")
-        page = reply["data"]["repository"]["stargazers"]
+        repository = reply["data"]["repository"]
+        page = repository["stargazers"]
         dates.extend(dt.datetime.fromisoformat(e["starredAt"].replace("Z", "+00:00")).date() for e in page["edges"])
-        if not page["pageInfo"]["hasNextPage"]:
-            return dates
-        after = page["pageInfo"]["endCursor"]
+        if page["pageInfo"]["hasNextPage"]:
+            after = page["pageInfo"]["endCursor"]
+            continue
+        # The announced deprecation shape is an EMPTY list, not an error; a blank
+        # chart would replace the README's, so fewer rows than the public count reds the run.
+        if len(dates) < repository["stargazerCount"]:
+            raise RuntimeError(f"{repo}: stargazers returned {len(dates)} rows for stargazerCount {repository['stargazerCount']}")
+        return dates
 
 
 FAILS: list[str] = []
@@ -395,24 +401,11 @@ def test_nice_step_yields_at_most_the_tick_budget() -> None:
 
 
 SVG_NS = "{http://www.w3.org/2000/svg}"
-# One `M x y h w v h h -w z` run per painted rectangle — the shape every path here is built from.
+# One `_run` rectangle; every path here is built from them.
 RUN_RE = re.compile(r"M(-?\d+) (-?\d+)h(\d+)v(\d+)h-\d+z")
 
 
-def test_palettes_are_the_rust_themes_verbatim() -> None:
-    """The chart copies theme colours across a language boundary; this pins each copy to its `theme/*.rs` literal."""
-    for variant, pal in THEMES.items():
-        src = (REPO_ROOT / "crates/pixtuoid-scene/src/theme" / f"{THEME_SOURCE[variant]}.rs").read_text(encoding="utf-8")
-        for field, role in PALETTE_ROLES.items():
-            m = re.search(rf"(?<![a-z_]){role}:\s*Rgb\s*\{{\s*r:\s*(\d+),\s*g:\s*(\d+),\s*b:\s*(\d+)", src)
-            if not m:
-                FAILS.append(f"{THEME_SOURCE[variant]}.rs no longer defines `{role}`; re-point PALETTE_ROLES[{field!r}]")
-                continue
-            want = "#%02x%02x%02x" % tuple(map(int, m.groups()))
-            check(getattr(pal, field) == want, f"THEMES[{variant!r}].{field} = {getattr(pal, field)} but {THEME_SOURCE[variant]}.rs `{role}` = {want}")
-
-
-def test_glyphs_are_five_by_seven_bitmaps() -> None:
+def test_glyphs_fill_the_cell() -> None:
     for ch, rows in GLYPHS.items():
         check(len(rows) == GLYPH_H and all(len(r) == GLYPH_W for r in rows), f"glyph {ch!r} is not {GLYPH_W}x{GLYPH_H}")
         check(all(set(r) <= {"#", "."} for r in rows), f"glyph {ch!r} has a stray character")
@@ -444,12 +437,27 @@ def test_text_path_rejects_a_character_without_a_glyph() -> None:
         FAILS.append("text_path must refuse a character it cannot draw")
 
 
+def test_themes_cover_both_readme_variants() -> None:
+    check(set(THEMES) == {"light", "dark"}, f"the README's <picture> needs exactly light and dark, got {sorted(THEMES)}")
+
+
 def _render_ok(svg: str, label: str) -> ET.Element | None:
     try:
         return ET.fromstring(svg)
     except ET.ParseError as e:
         FAILS.append(f"{label}: render_svg is not well-formed XML: {e}")
         return None
+
+
+def test_x_labels_never_touch_and_stay_on_the_canvas() -> None:
+    today = _d("2026-08-23")
+    for span in (0, 1, 2, 30, 364, 365, 2405):
+        placed = x_labels(today - dt.timedelta(days=span), today)
+        boxes = [(x, x + text_width(label, LABEL_PX)) for x, label in placed]
+        check(len(placed) >= 2 or span == 0, f"span {span}: both ends need a date, got {placed}")
+        check(all(0 <= a and b <= WIDTH for a, b in boxes), f"span {span}: a label leaves the canvas: {boxes}")
+        check(all(boxes[i][1] < boxes[i + 1][0] for i in range(len(boxes) - 1)), f"span {span}: labels collide: {placed}")
+        check(len({label for _, label in placed}) == len(placed), f"span {span}: a date is labelled twice: {placed}")
 
 
 def test_render_is_well_formed_and_carries_the_facts() -> None:
@@ -468,12 +476,19 @@ def test_render_is_well_formed_and_carries_the_facts() -> None:
 
 
 def test_render_paints_only_inside_the_canvas() -> None:
-    for series in ([(_d("2026-05-24"), 1)], [(_d("2020-01-01"), 1), (_d("2026-08-02"), 12345)]):
+    cases = (
+        [(_d("2026-05-24"), 1)],
+        [(_d("2020-01-01"), 1), (_d("2026-08-02"), 12345)],
+        [(_d("2026-08-23"), 1234)],
+        [(_d("2026-08-22"), 1), (_d("2026-08-23"), 2)],
+        [],
+    )
+    for series in cases:
         svg = render_svg("IvanWng97/pixtuoid_with-a.long-name", series, "light", _d("2026-08-23"))
         runs = [tuple(map(int, r)) for r in RUN_RE.findall(svg)]
         check(bool(runs), "the chart must be painted as rectangle runs")
         outside = [r for r in runs if r[0] < 0 or r[1] < 0 or r[0] + r[2] > WIDTH or r[1] + r[3] > HEIGHT]
-        check(not outside, f"runs leave the {WIDTH}x{HEIGHT} canvas: {outside[:3]}")
+        check(not outside, f"{series[:1]}…: runs leave the {WIDTH}x{HEIGHT} canvas: {outside[:3]}")
 
 
 def test_render_handles_a_repo_with_no_stars() -> None:
@@ -485,11 +500,11 @@ def test_render_handles_a_repo_with_no_stars() -> None:
 
 def test_fetch_follows_cursors_until_the_last_page() -> None:
     pages = [
-        {"data": {"repository": {"stargazers": {
+        {"data": {"repository": {"stargazerCount": 3, "stargazers": {
             "edges": [{"starredAt": "2026-05-24T04:01:48Z"}, {"starredAt": "2026-05-24T07:07:52Z"}],
             "pageInfo": {"hasNextPage": True, "endCursor": "c1"},
         }}}},
-        {"data": {"repository": {"stargazers": {
+        {"data": {"repository": {"stargazerCount": 3, "stargazers": {
             "edges": [{"starredAt": "2026-05-25T00:00:00Z"}],
             "pageInfo": {"hasNextPage": False, "endCursor": "c2"},
         }}}},
@@ -504,6 +519,18 @@ def test_fetch_follows_cursors_until_the_last_page() -> None:
     check(got == [_d("2026-05-24"), _d("2026-05-24"), _d("2026-05-25")], f"fetch must flatten pages to dates, got {got}")
     check([v.get("after") for v in seen] == [None, "c1"], f"fetch must thread the cursor, sent {seen}")
     check(seen[0]["owner"] == "IvanWng97" and seen[0]["name"] == "pixtuoid", "fetch must split owner/name")
+
+
+def test_fetch_refuses_a_withheld_list() -> None:
+    def post(query: str, variables: dict, token: str) -> dict:
+        return {"data": {"repository": {"stargazerCount": 452, "stargazers": {"edges": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}
+
+    try:
+        fetch_star_dates("o/r", "t", post=post)
+    except RuntimeError as e:
+        check("452" in str(e) and "0" in str(e), f"the message must show count vs rows: {e}")
+    else:
+        FAILS.append("an empty list under a non-zero stargazerCount is the deprecation shape — it must raise, not publish a blank chart")
 
 
 def test_fetch_raises_on_graphql_errors() -> None:

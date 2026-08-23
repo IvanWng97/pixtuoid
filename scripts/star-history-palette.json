@@ -1,0 +1,22 @@
+{
+  "light": {
+    "theme": "normal",
+    "wall": "#383846",
+    "trim": "#505064",
+    "carpet_light": "#b28a60",
+    "carpet_dark": "#765232",
+    "title": "#f0f0f0",
+    "text": "#c8c8d2",
+    "star": "#ffd282"
+  },
+  "dark": {
+    "theme": "tokyo-night",
+    "wall": "#1a1b26",
+    "trim": "#414868",
+    "carpet_light": "#303448",
+    "carpet_dark": "#1a1c2a",
+    "title": "#c0cae6",
+    "text": "#a9b1d6",
+    "star": "#ffbe78"
+  }
+}

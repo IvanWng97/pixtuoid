@@ -3,7 +3,7 @@ name                   = "pixtuoid-scene"
 description            = "Backend-agnostic render + simulation engine for pixtuoid"
 # Reads ../../site/src/sources.json at runtime, so `cargo test` on the
 # extracted .crate would panic (no workspace tree).
-exclude                = ["tests/site_badge_colors.rs"]
+exclude                = ["tests/site_badge_colors.rs", "tests/readme_chart_palette.rs"]
 version.workspace      = true
 edition.workspace      = true
 rust-version.workspace = true

@@ -1,18 +1,24 @@
 name: star-history
 
-# Draws the README's star chart from this repo's own stargazers data and
-# force-pushes it as ONE orphan commit on the `star-history` branch (the branch
-# never grows; main never sees a bot commit). Self-hosted because GitHub limited
-# the stargazers API to a repo's collaborators (2026-06-30 changelog), which
-# blanked every third-party chart at once; the Actions token is a collaborator.
-# `watch` refreshes on each new star — `cancel-in-progress` folds a burst into
-# one run — and the cron keeps the right edge current on quiet days.
+# Draws the README's star chart and force-pushes it as ONE orphan commit on the
+# `star-history` branch (the branch never grows; main never sees a bot commit).
+# Why self-hosted (the 2026-06-30 stargazers restriction): the docstring of
+# scripts/star-history.py. `watch` refreshes on each new star —
+# `cancel-in-progress` folds a burst into one run — the cron keeps the right
+# edge current on quiet days, and the `push` arm republishes the moment the
+# renderer or this file changes on main (it is also the first run after merge).
 
 on:
   schedule:
     - cron: "23 4 * * *" # daily 04:23 UTC
   watch:
     types: [started]
+  push:
+    branches: [main]
+    paths:
+      - scripts/star-history.py
+      - scripts/star-history-palette.json
+      - .github/workflows/star-history.yml
   workflow_dispatch:
 permissions:
   contents: write
@@ -23,6 +29,7 @@ concurrency:
 jobs:
   chart:
     name: render and publish
+    # A fork would force-push a `star-history` branch into its own repo on every cron.
     if: github.repository == 'IvanWng97/pixtuoid'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -50,10 +57,12 @@ jobs:
           git init --quiet --initial-branch=star-history
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The same header actions/checkout installs, scoped to this throwaway
-          # repo so the token never reaches argv or the real checkout's config.
-          git config http.https://github.com/.extraheader \
-            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
           git add .
           git commit --quiet -m "chart: star history as of $(date -u +%F)"
-          git push --force --quiet "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/star-history
+          # Auth as actions/checkout does (src/git-auth-helper.ts: the
+          # http.<origin>/.extraheader basic credential), but via git's
+          # env-config so the token lands in neither argv nor a file.
+          GIT_CONFIG_COUNT=1 \
+            GIT_CONFIG_KEY_0=http.https://github.com/.extraheader \
+            GIT_CONFIG_VALUE_0="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)" \
+            git push --force --quiet "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/star-history
