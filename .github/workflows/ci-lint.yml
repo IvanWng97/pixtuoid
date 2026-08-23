@@ -147,6 +147,7 @@ jobs:
       - run: just env-paths
       - run: just gitenv-selftest
       - run: just tuidrive-selftest
+      - run: just star-history-selftest
       # `just fixture-metadata` is NOT here: it became Rust tests in #929, so it
       # already rides `just test` in windows-test, macos-test and coverage —
       # three platforms instead of this job's one, and no toolchain in a lint job.

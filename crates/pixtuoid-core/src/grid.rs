@@ -102,9 +102,7 @@ impl<T: Copy> Grid<T> {
     pub fn resize_fill(&mut self, width: u16, height: u16, fill: T) {
         let total = (width as usize) * (height as usize);
         if self.width == width && self.height == height {
-            for p in &mut self.data {
-                *p = fill;
-            }
+            self.data.fill(fill);
             return;
         }
         self.width = width;
