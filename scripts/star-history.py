@@ -239,8 +239,6 @@ def x_labels(first: dt.date, last: dt.date) -> list[tuple[int, str]]:
         col = MARGIN_LEFT + round((PLOT_COLS - 1) * (day - first).days / span_days) * PX
         x = col if i == 0 else col + PX - w if i == ticks else col + (PX - w) // 2
         placed.append((max(MARGIN_LEFT, min(x, MARGIN_LEFT + plot_w - w)), day.strftime(fmt)))
-    if placed and placed[-1][1] != last.strftime(fmt):
-        placed.append((MARGIN_LEFT + plot_w - w, last.strftime(fmt)))
     return placed
 
 
@@ -456,7 +454,7 @@ def test_x_labels_never_touch_and_stay_on_the_canvas() -> None:
         boxes = [(x, x + text_width(label, LABEL_PX)) for x, label in placed]
         check(len(placed) >= 2 or span == 0, f"span {span}: both ends need a date, got {placed}")
         check(all(0 <= a and b <= WIDTH for a, b in boxes), f"span {span}: a label leaves the canvas: {boxes}")
-        check(all(boxes[i][1] < boxes[i + 1][0] for i in range(len(boxes) - 1)), f"span {span}: labels collide: {placed}")
+        check(all(boxes[i + 1][0] - boxes[i][1] >= LABEL_GAP for i in range(len(boxes) - 1)), f"span {span}: labels need LABEL_GAP of air: {placed}")
         check(len({label for _, label in placed}) == len(placed), f"span {span}: a date is labelled twice: {placed}")
 
 
