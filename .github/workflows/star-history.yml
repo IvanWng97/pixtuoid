@@ -1,0 +1,59 @@
+name: star-history
+
+# Draws the README's star chart from this repo's own stargazers data and
+# force-pushes it as ONE orphan commit on the `star-history` branch (the branch
+# never grows; main never sees a bot commit). Self-hosted because GitHub limited
+# the stargazers API to a repo's collaborators (2026-06-30 changelog), which
+# blanked every third-party chart at once; the Actions token is a collaborator.
+# `watch` refreshes on each new star — `cancel-in-progress` folds a burst into
+# one run — and the cron keeps the right edge current on quiet days.
+
+on:
+  schedule:
+    - cron: "23 4 * * *" # daily 04:23 UTC
+  watch:
+    types: [started]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: star-history
+  cancel-in-progress: true
+
+jobs:
+  chart:
+    name: render and publish
+    if: github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      # Guards the renderer before the live run trusts it; ci-lint's hygiene
+      # job runs the same gate but not on the cron or the watch event.
+      - name: Self-test the renderer
+        run: python3 scripts/star-history.py --selftest
+
+      - name: Render the chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/star-history.py "$GITHUB_REPOSITORY" "$RUNNER_TEMP/chart"
+
+      - name: Publish to the star-history branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        working-directory: ${{ runner.temp }}/chart
+        run: |
+          set -euo pipefail
+          git init --quiet --initial-branch=star-history
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The same header actions/checkout installs, scoped to this throwaway
+          # repo so the token never reaches argv or the real checkout's config.
+          git config http.https://github.com/.extraheader \
+            "AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          git add .
+          git commit --quiet -m "chart: star history as of $(date -u +%F)"
+          git push --force --quiet "https://github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/star-history

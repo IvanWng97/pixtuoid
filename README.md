@@ -163,11 +163,11 @@ Inspired by [`pixel-agents`](https://github.com/pablodelucca/pixel-agents) (VS C
 ## Star History
 
 <p align="center">
-  <a href="https://www.star-history.com/?repos=IvanWng97%2Fpixtuoid&type=date&legend=top-left">
+  <a href="https://github.com/IvanWng97/pixtuoid/stargazers">
     <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date&theme=dark" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date" />
-      <img alt="star history chart for IvanWng97/pixtuoid" src="https://api.star-history.com/svg?repos=IvanWng97/pixtuoid&type=Date" width="640" />
+      <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-dark.svg" />
+      <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" />
+      <img alt="star history chart for IvanWng97/pixtuoid" src="https://raw.githubusercontent.com/IvanWng97/pixtuoid/star-history/star-history-light.svg" width="640" />
     </picture>
   </a>
 </p>
