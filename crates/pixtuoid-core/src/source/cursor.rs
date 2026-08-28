@@ -1,62 +1,40 @@
 //! Cursor CLI source — HOOK-ONLY (no JSONL watcher).
 //!
-//! Only one of Cursor's three seams is reachable by a *passive observer*:
-//! `--output-format stream-json` NDJSON is stdout of an invocation we would have
-//! to launch ourselves, and on-disk sessions are SQLite
-//! (`~/.cursor/chats/.../store.db`, hex-encoded blobs). So **Cursor Hooks**
-//! (`~/.cursor/hooks.json`, registered by the Connection panel) is the seam.
+//! Only one of Cursor's three seams is reachable by a passive observer:
+//! `--output-format stream-json` is stdout of an invocation we would have to
+//! launch, and on-disk sessions are SQLite hex blobs. So **Cursor Hooks**
+//! (`~/.cursor/hooks.json`) is the seam. A per-session JSONL transcript does
+//! exist and the envelope carries its `transcript_path` (`null` on
+//! `sessionStart`, set from the first tool event on) — the seam if a watcher is
+//! ever wanted.
 //!
-//! Payloads arrive on the shared hook socket stamped
-//! `_pixtuoid_source: "cursor"`. The envelope reuses CC's `hook_event_name`
-//! field NAME but with **camelCase values**; `tool_name` is PascalCase
-//! (`Shell`/`Grep`/`Read`) and `tool_input` carries
-//! `command`/`pattern`/`file_path`.
-//!
-//! Keyed on **`session_id`** (present + CONSISTENT across every CLI event; ==
-//! `conversation_id` and the transcript filename stem), so concurrent sessions
-//! in one project stay distinct. The TOP-LEVEL `cwd` is EMPTY/absent in CLI
-//! hooks — `workspace_roots[0]` is the real workspace.
+//! The envelope reuses CC's `hook_event_name` field NAME with **camelCase
+//! values**; `tool_name` is PascalCase and the TOP-LEVEL `cwd` is empty —
+//! `workspace_roots[0]` is the real workspace. Keyed on `session_id`, present
+//! and CONSISTENT across every CLI event, so concurrent sessions in one project
+//! stay distinct.
 //!
 //! - **`tool_use_id` IS on the wire and DROPPED deliberately — do not "fix"
-//!   that.** Every `preToolUse` pairs with its `postToolUse` /
-//!   `postToolUseFailure` on the same id, and tools INTERLEAVE (a Read and a
-//!   Shell overlap), so the id looks like exactly what the reducer's per-call
-//!   machinery wants. The trap is `Task`: it fires `preToolUse` and NEVER a
-//!   post (capture-verified — every unpaired id in a delegating run is a `Task`,
-//!   while `subagentStart`/`subagentStop` stay silent). Passing the id through would
-//!   satisfy `track_active_tasks`' `Some(tuid)` + `is_task()` arm, insert a
-//!   tuid nothing ever drains, and strand the parent Delegating for the rest of
-//!   the session — `apply_activity_end` re-enters Delegating on every later
-//!   tool end while `any_active_task` holds. The machinery the id would
-//!   otherwise buy is inert here anyway: hook-wins dedup needs a second
-//!   transport, and precise wait-resolution needs permission events this source
-//!   never emits. Pinned by `tool_use_id_is_dropped_even_though_the_wire_has_one`.
-//! - **cursor runs its hook command 4-6x per event, and only ONE of those keeps
-//!   the `PIXTUOID_SOURCE=` env prefix** its install writes — the others arrive
-//!   with no argv and no stamp (counted against a wrapper on the shim, no
-//!   recorder in the loop; an unrelated hook entry in the same config ran once).
-//!   Unstamped, they fall to the claude-code default and bail on these camelCase
-//!   event values, so `decoder`'s cross-fire guard drops them on `cursor_version`.
-//!   Lossless: the one stamped copy carries the whole arc, which
-//!   `cursor/tool-failure` pins byte for byte — 29 payloads, 8 of them stamped.
-//! - **Subagents render FLAT, never nested — the parent-link is genuinely
-//!   absent.** Each child runs as an INDEPENDENT session and NOTHING links it to
-//!   its parent: `subagentStart`/`subagentStop` don't fire (capture-verified:
-//!   0), the `Task` dispatch carries only the PARENT's id, and child events
-//!   carry no `parentId`. Getting no `sessionEnd`, children age out via the
-//!   idle stale-sweep.
-//! - Exit profile: `sessionEnd` FIRES on clean completion → `has_exit_signal:
-//!   true`. `stop` is turn-end and did NOT fire under `-p` (kept mapped for
-//!   interactive turns). An abrupt exit rides the shim's `_pid` BEST-EFFORT:
-//!   the walk skips the `$SHELL -c` wrapper Cursor `eval`s every hook inside,
-//!   but some hooks arrive through a different non-shell ancestor, so the pid is
-//!   not stable across every event and corroboration often withholds the arm
-//!   (#896).
-//! - A per-session JSONL transcript DOES exist and the envelope now CARRIES its
-//!   path (`transcript_path`: `null` on `sessionStart`, set from the first tool
-//!   event on) — the seam if a watcher is ever wanted, without reconstructing
-//!   `~/.cursor/projects/<proj>/agent-transcripts/<session-id>/<id>.jsonl`
-//!   (its stem == our `session_id` key).
+//!   that.** `Task` fires `preToolUse` and NEVER a post (capture-verified), so
+//!   passing the id through would satisfy `track_active_tasks`' `Some(tuid)` arm,
+//!   insert a tuid nothing drains, and strand the parent Delegating for the rest
+//!   of the session. Pinned by
+//!   `tool_use_id_is_dropped_even_though_the_wire_has_one`.
+//! - **cursor runs its hook command 4-6x per event, and only ONE keeps the
+//!   `PIXTUOID_SOURCE=` env prefix** its install writes. Unstamped copies fall to
+//!   the claude-code default and bail on these camelCase values, so `decoder`'s
+//!   cross-fire guard drops them on `cursor_version`. Lossless — the one stamped
+//!   copy carries the whole arc (`cursor/tool-failure` pins it byte for byte).
+//! - **Subagents render FLAT: the parent-link is genuinely absent.** Each child
+//!   is an INDEPENDENT session, `subagentStart`/`subagentStop` never fire
+//!   (capture-verified: 0), the `Task` dispatch carries only the PARENT's id, and
+//!   child events carry no `parentId`. Getting no `sessionEnd`, children age out
+//!   via the idle stale-sweep.
+//! - `sessionEnd` FIRES on clean completion; `stop` is turn-end and did NOT fire
+//!   under `-p`. An abrupt exit rides the shim's `_pid` BEST-EFFORT: the walk
+//!   skips the `$SHELL -c` wrapper Cursor `eval`s hooks inside, but some hooks
+//!   arrive through a different non-shell ancestor, so the pid is not stable and
+//!   corroboration often withholds the arm (#896).
 
 use anyhow::{anyhow, bail, Result};
 use serde_json::Value;

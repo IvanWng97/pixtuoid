@@ -1208,8 +1208,8 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins why the `block_in_place` wraps were removed — see the tui/CLAUDE.md
-    // `block_on` sharp edge.
+    // Pins why the `block_in_place` wraps were removed: the loop runs as the
+    // `block_on` ROOT future, where `block_in_place` is inert rather than a yield.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()

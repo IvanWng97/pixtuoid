@@ -534,7 +534,7 @@ pub(super) fn compute_with_seed(
         });
 
     // ROUTER granularity, not just the pixel flood's — a ≤3 px channel is
-    // pixel-connected and coarse-IMPASSABLE (scene CLAUDE.md, #566).
+    // pixel-connected and coarse-IMPASSABLE (#566).
     let severed = |mask: &WalkableMask| -> bool {
         if !unreachable_walkable_cells(mask, conn_seed).is_empty() {
             return true;

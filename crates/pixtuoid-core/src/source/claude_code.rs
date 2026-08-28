@@ -116,8 +116,7 @@ pub(crate) fn decode_cc_hook_custom(v: &Value) -> Result<Option<Vec<AgentEvent>>
 /// Resolve `CLAUDE_CONFIG_DIR`. Upstream (read out of the 2.1.226 binary) is
 /// `(env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")).normalize("NFC")` —
 /// nothing else layers on, no XDG / `%APPDATA%` / profile / legacy dir. The two
-/// deliberate divergences (`""`/`"  "` treated as unset, NFC dropped) are in
-/// this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
+/// deliberate divergences are `""`/`"  "` treated as unset, and NFC dropped.
 /// Internal cross-crate helper, not a stable API.
 #[doc(hidden)]
 pub fn claude_config_dir() -> Option<PathBuf> {

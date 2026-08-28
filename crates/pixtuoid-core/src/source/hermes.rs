@@ -46,8 +46,8 @@ pub const SOURCE_NAME: &str = "hermes";
 /// default, which is `%LOCALAPPDATA%\hermes` on Windows and only elsewhere
 /// `<user_home>/.hermes`.
 ///
-/// Hermes PROFILES are applied out-of-band and are deliberately not mirrored —
-/// see this crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
+/// Hermes PROFILES are applied out-of-band and are deliberately not mirrored:
+/// each CLI's resolver is mirrored on its OWN axes, never a generic union.
 pub fn hermes_home() -> Option<PathBuf> {
     let raw = crate::platform::path_env_trimmed("HERMES_HOME");
     let from_env = raw.is_some();

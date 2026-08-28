@@ -1,6 +1,6 @@
 //! Shared **ACP** (Agent Client Protocol) decode — a published multi-vendor wire
 //! STANDARD, so hosting its vocabulary once is the documented exception to
-//! architecture invariant #3 (see `pixtuoid-core/CLAUDE.md`). What stays PER-SOURCE
+//! architecture invariant #3 (the workspace `CLAUDE.md`). What stays PER-SOURCE
 //! and must be injected by the caller: the tool-detail vocabulary + any
 //! Task-detection, and a source's OWN `_`-prefixed extension namespace (grok's
 //! `_x.ai/session/update` is NOT ACP and stays bespoke in grok.rs).

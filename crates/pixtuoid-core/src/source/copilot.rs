@@ -38,8 +38,8 @@ pub const SOURCE_NAME: &str = "copilot";
 /// is unset, `~` is NOT expanded, `<home>/.copilot` on every platform (the
 /// nearby `%LOCALAPPDATA%` branch is the CACHE dir, not this one).
 ///
-/// Whitespace-only, `--config-dir` and XDG are the divergences — see this
-/// crate's `CLAUDE.md` "per-CLI home resolvers" sharp edge.
+/// Whitespace-only, `--config-dir` and XDG are the deliberate divergences: this
+/// mirrors copilot's own resolver, not a generic union of the CLIs' axes.
 pub fn copilot_home() -> PathBuf {
     match crate::platform::path_env("COPILOT_HOME") {
         Some(v) => crate::platform::warn_if_relative_override("COPILOT_HOME", v),
