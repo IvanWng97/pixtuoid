@@ -478,7 +478,7 @@ mod tests {
             assert_eq!(
                 with.pid_of.get("leader-1"),
                 None,
-                "a leader-kept session is deliberately unvouched — see the sharp edge"
+                "a leader-kept session is deliberately unvouched (#826)"
             );
             assert!(
                 with.pid_of.contains_key("client-1"),

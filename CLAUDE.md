@@ -9,8 +9,9 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**What the guides hold.** A nested `CLAUDE.md` says what its crate IS, and
-nothing else. Everything a change actually needs — the constraint that looks
+**What the guides hold.** A nested `CLAUDE.md` says what its crate IS. The
+three that also carry operational content — `pixtuoid-core/tests/`, Raycast,
+site — keep it INLINE there. Everything else a change needs — the constraint that looks
 like a bug, the WHY, the test that pins it — is on the declaration it
 constrains: read the item's doc comment before changing it.
 

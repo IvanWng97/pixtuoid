@@ -144,7 +144,7 @@ impl ToolKind {
 /// What an agent slot is doing right now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivityState {
-    /// No tool running (debounced — see the `Active` sharp edge).
+    /// No tool running (debounced by [`crate::state::reducer::ACTIVE_GRACE_WINDOW`]).
     Idle,
     /// A tool call is in flight (or within the Active→Idle grace window).
     Active {

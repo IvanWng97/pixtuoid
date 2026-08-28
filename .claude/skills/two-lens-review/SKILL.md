@@ -143,12 +143,12 @@ orchestration" section of `pr-review.prompt.md`. In brief:
    specialist sweeps (arch-invariants, concurrency/liveness, security, drift —
    the aggregate-only lenses). Each finder carries the FULL factor checklist.
    Prefer a `Workflow` (pipeline per cell); degrade to parallel `Agent` fan-out.
-3. **Verify** each finding adversarially (default REFUTE; check sharp edges;
-   construct a repro or refute) — a separate skeptic per finding, never the
+3. **Verify** each finding adversarially (default REFUTE; read the doc comment
+   on the declaration it names; construct a repro or refute) — a separate skeptic per finding, never the
    finder self-certifying.
 4. **Dedup + rank** survivors; ship a report ranked by corrected severity,
-   grouped by factor family, KEEPING the refuted-as-deliberate list (coverage
-   proof + sharp-edge context for the next agent).
+   grouped by factor family, KEEPING the refuted-as-deliberate list and the
+   MECHANISM each was refuted by — that is the coverage proof.
 5. **Disposition sweep** (shared, below); end with the repo-wide stale-phrase
    `grep` == 0.
 
@@ -177,7 +177,7 @@ re-litigating (#316's were stale).
 |---------|---------|
 | "It's a tiny/doc-only PR" | The gate has no size exemption; run it (lens count can shrink, the gate can't). |
 | "CI is green, that's enough" | CI can't see design, blast radius, drift, or a deliberate-looking real bug. |
-| "The reviewer said X, so fix X" | Verify the premise first — check sharp edges; a wrong fix contradicts a design decision. |
+| "The reviewer said X, so fix X" | Verify the premise first — read the declaration's doc comment; a wrong fix contradicts a design decision. |
 | "One thorough agent is fine" | Two differentiated lenses is the floor; one lens's blind spots go uncaught. |
 | "I'll note the finding and move on" | Every finding needs a terminal state — dropped findings become release blockers. |
 | "The diff looks clean, we're done" (audit) | The diff scope can't see drift accumulation / design-debt accretion / arch erosion — those need the whole-codebase pass. |
@@ -186,4 +186,4 @@ re-litigating (#316's were stale).
 | "The finder found it, report it" (audit) | Findings self-certify nothing — a separate skeptic must try to REFUTE each survivor first. |
 | "One more fix round will converge" | Measured: rounds ≥2 mostly find defects the fixes introduced + re-litigate settled calls. Two fix rounds is the cap — revert or re-scope. |
 | "This fix needs its own new checker" | Gate-shaped fixes arrive fail-open and feed the next round. Derive from the source of truth, or file the checker as its own PR. |
-| "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); check the sharp edge before proposing a merge. |
+| "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); read the declaration's doc comment before proposing a merge. |

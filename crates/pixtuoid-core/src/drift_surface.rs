@@ -6,8 +6,9 @@
 //! const and the parser returns a smaller set, so the watch narrows with
 //! nothing to show for it. Emitting makes it a test failure HERE.
 //!
-//! `crates/pixtuoid` emits the other half — the `*_EVENTS` sharp edge in its
-//! not an organisational split.
+//! `crates/pixtuoid` emits the other half — what we REGISTER — because a
+//! decode arm with no registration row is a real failure class, not an
+//! organisational split.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

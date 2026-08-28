@@ -532,8 +532,8 @@ fn paint_skyline(
 ) {
     let s = scale.get();
     let sill = glass_top + glass_h;
-    // A local mix, per this crate's documented convention: each noise site owns
-    // its own finaliser over a disjoint domain (see the splitmix sharp edge).
+    // A local mix, per this crate's convention: each noise site owns its own
+    // finaliser over a disjoint domain.
     let mix = |n: u32| -> u32 {
         let mut v = n.wrapping_mul(0x9E37_79B9);
         v ^= v >> 15;

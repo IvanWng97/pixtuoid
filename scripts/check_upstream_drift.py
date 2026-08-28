@@ -159,8 +159,8 @@ REPO = pathlib.Path(__file__).resolve().parent.parent
 # crate that OWNS those names (`src/drift_surface.rs`), so the watcher never
 # parses our source: the crate fails its own test rather than this file silently
 # reading a smaller set. Registration and decoding are separate documents because
-# they answer different questions — see the `*_EVENTS` sharp edge in
-# `crates/pixtuoid/SHARP-EDGES.md`.
+# they answer different questions; `crates/pixtuoid/src/drift_surface.rs`
+# owns the registration half.
 CORE_LIB_FRAGMENT = "crates/pixtuoid-core/drift-surface.json"
 CORE_BIN_FRAGMENT = "crates/pixtuoid/drift-surface.json"
 

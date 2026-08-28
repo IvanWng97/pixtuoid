@@ -15,6 +15,7 @@ categories.workspace   = true
 # .crate. Runtime reads need excluding too: they spare the publish build-verify
 # but not `cargo test` on an extracted crate.
 exclude                = [
+    "tests/pinned_by_claims.rs",
     "tests/socket_path_parity.rs",
     "tests/supported_sources_manifest.rs",
     "tests/proof_fixture_disjointness.rs",

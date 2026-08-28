@@ -888,7 +888,7 @@ fn settle_plant(
     /// How far into the nudge budget the seeded first try may reach — the budget and its
     /// inward direction are the ladder's own, so no new clearance rule and no new container.
     const PLANT_SCATTER_PX: u16 = 4;
-    // The sharp edge's claim — a scattered pot only stands where a DISPLACED one
+    // The claim under test — a scattered pot only stands where a DISPLACED one
     // already could — holds only while the scatter fits inside the dodge budget.
     const _: () = assert!(PLANT_SCATTER_PX <= MAX_PLANT_NUDGE_PX);
     let dir: i16 = if p.pos.x < band.x + band.width / 2 {

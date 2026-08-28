@@ -18,8 +18,7 @@ call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order;
-                  # lint's `prose` arm fetches origin/main, so preflight needs network)
+just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
@@ -144,8 +143,9 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 `beautify-decoration`, `add-source`, `add-theme`, `procedural-lofi`.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
-not scaffold a `CONTEXT.md`/`docs/adr/` convention here — the nested
-`CLAUDE.md` + sharp-edges system is the (only) design record.
+not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
+doc comment is the design record, and the nested `CLAUDE.md` says only what its
+crate IS.
 
 ### The running order
 
