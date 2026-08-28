@@ -296,7 +296,7 @@ pub enum Furniture {
     PlantFicus,
     /// A tall potted plant (shares the ficus pot footprint, taller sprite).
     PlantTall,
-    /// A small flowering plant — de-shared from [`PLANT_FOOTPRINT`] to a 2px
+    /// A small flowering plant — de-shared from `PLANT_FOOTPRINT` to a 2px
     /// terracotta pot at the sprite's south, the bloom overhanging it.
     PlantFlower,
     /// A low succulent — a 3px pot at the sprite's south, leaves overhanging it.
@@ -348,7 +348,7 @@ pub enum Furniture {
     /// Two shapes share it: the E/W FLANKS, pre-positioned CLEAR of the body's
     /// padded footprint, and the BARTENDER pair whose `pos` is INSIDE the body —
     /// a blocked pos is fine for `occupies_pos`, since A\* routes to a
-    /// [`BAR_APPROACH`] cell and the settle glide bridges the rest.
+    /// `BAR_APPROACH` cell and the settle glide bridges the rest.
     IslandStand,
     /// Snack shelf against the pantry's west wall — an approachable obstacle
     /// (vending-machine class): tall shelf sprite, shallow walk-behind base.

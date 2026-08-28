@@ -2,7 +2,7 @@
 //! breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift` tracing target) that
 //! otherwise die in the warn-floor log nobody reads. Strictly READ-ONLY: it never writes
 //! config (re-connecting hooks stays the Sources panel's job) and never spawns the TUI.
-//! The PROBED CLI is not read-only about its own state — see [`may_probe_version`].
+//! The PROBED CLI is not read-only about its own state — see `may_probe_version`.
 
 use pixtuoid_core::source::{drift, registry};
 
