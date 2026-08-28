@@ -42,7 +42,7 @@ fn surface() -> Value {
 
     // SHIPPED, not decoded or registered: the value rides the plugin we install,
     // and the gateway port IS the daemon's runtime identity
-    // (`pixtuoid-core/SHARP-EDGES.md`), so a silent upstream bump collapses two
+    // so a silent upstream bump collapses two
     // live gateways onto one mascot. Read out of the shipped template rather than
     // copied, so the watch compares what actually installs.
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();

@@ -9,11 +9,10 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**How the guides load.** A nested `CLAUDE.md` is an INDEX; the full entries
-live in siblings you must open: `SHARP-EDGES.md` (the edge + WHY + authority)
-and `WHERE-TO-LOOK.md` (non-obvious seams). Before "fixing" anything an index
-line names, open the sibling. Nested guides are NOT re-injected after
-`/compact` — on a long arc, re-open the crate's `SHARP-EDGES.md` itself.
+**How the guides load.** A nested `CLAUDE.md` says what its crate IS and
+nothing else. Everything a change actually needs — the constraint that looks
+like a bug, the WHY, the test that pins it — is on the declaration it
+constrains: read the item's doc comment before changing it.
 
 **A third consumer lives outside this repo**: homebrew-core's `pixtuoid`
 formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
@@ -103,15 +102,16 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 ## Sharp edges (cross-crate ownership)
 
-Don't "fix" documented design. Each crate's guide indexes its own edges
-(verbatim-greppable into its `SHARP-EDGES.md`): **core** owns session
+Don't "fix" documented design. Ownership by crate: **core** owns session
 lifecycle/identity (registration, dedup, first-sight, liveness ladder,
 subagent parenting, feature boundaries) · **scene** owns look/motion (palette
 recolor by RGB equality, walk timing, footprints, sky/light invariants,
 reachability) · **binary** owns install/runtime wiring (config rewriting,
 desk growth, boot order, doctor, daemon announce-only) · **tui** owns the
 flush (popup geometry, hit-test ladders, key dispatch). Terminal cell aspect
-drives sprite design — numbers in `crates/pixtuoid/SHARP-EDGES.md`.
+drives sprite design: the half-block ▀ technique assumes ~1:2 cells, so sprites
+past ~16×16 px break on taller-cell terminals; bundled character sprites max at
+8×12 px.
 
 ## Things NOT to do
 

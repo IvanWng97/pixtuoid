@@ -64,8 +64,7 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 
 ## Negative space (do NOT flag)
 
-- Behavior documented in the crate's `SHARP-EDGES.md` — open the ENTRY (the
-  index line in its `CLAUDE.md` is not the entry).
+- Behavior documented on the declaration's own doc comment — open the item.
 - Absence of defense-in-depth where a primary defense exists; pure style;
   theoretical risks needing unlikely preconditions.
 - Existence/version claims about external artifacts (action tags, crate
@@ -136,7 +135,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 ## Orchestrator notes (diff scope)
 
 Dispatch lenses in parallel, in the worktree, in the background. Verify every
-MEDIUM+ finding's premise (read the SHARP-EDGES entry) before coding a fix.
+MEDIUM+ finding's premise (read the declaration's doc comment) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
 reaches exactly one terminal state in the PR thread (this list is CANONICAL —
 other docs point here): FIXED · REFUTED-with-trace (cite or ADD the sharp

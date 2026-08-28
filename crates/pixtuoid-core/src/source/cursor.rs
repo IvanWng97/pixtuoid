@@ -51,7 +51,7 @@
 //!   the walk skips the `$SHELL -c` wrapper Cursor `eval`s every hook inside,
 //!   but some hooks arrive through a different non-shell ancestor, so the pid is
 //!   not stable across every event and corroboration often withholds the arm
-//!   (#896) — see this crate's `SHARP-EDGES.md`.
+//!   (#896).
 //! - A per-session JSONL transcript DOES exist and the envelope now CARRIES its
 //!   path (`transcript_path`: `null` on `sessionStart`, set from the first tool
 //!   event on) — the seam if a watcher is ever wanted, without reconstructing

@@ -3782,8 +3782,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 }
 
 /// The two emitters this PR added; the ceiling pools and the floor lamp share the
-/// rule but not this pin (`SHARP-EDGES.md` enumerates the set). Dropping either
-/// factor makes that emitter's two readings equal.
+/// rule but not this pin. Dropping either factor makes that emitter's two
+/// readings equal.
 #[test]
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
@@ -3873,9 +3873,8 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     }
 }
 
-/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort, and
-/// `SHARP-EDGES.md` says outright that breaking either paints the chair under
-/// its occupant with every other test still green. This is that gate: it reads
+/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort; breaking
+/// either paints the chair under its occupant with every other test still green. This is that gate: it reads
 /// `paint_frame`'s own source, because the failure is in the call order, not in
 /// any value a fixture can produce.
 #[test]

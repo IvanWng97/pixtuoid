@@ -7,7 +7,7 @@
 //! nothing to show for it. Emitting makes it a test failure HERE.
 //!
 //! `crates/pixtuoid` emits the other half — the `*_EVENTS` sharp edge in its
-//! `SHARP-EDGES.md`, not an organisational split.
+//! not an organisational split.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

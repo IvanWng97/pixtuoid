@@ -19,7 +19,7 @@ pub use crate::state::correlation::{
 pub const EXIT_GRACE_WINDOW: Duration = Duration::from_millis(4500);
 
 /// Defers a drained parent's b1 cascade (#151): one FSEvents coalescing hop,
-/// deliberately NOT the 60s `scan_root` poll backstop. Why: `SHARP-EDGES.md`.
+/// deliberately NOT the 60s `scan_root` poll backstop.
 #[doc(hidden)]
 pub const B1_CASCADE_GRACE: Duration = Duration::from_millis(2500);
 

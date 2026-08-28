@@ -2,7 +2,7 @@
 //!
 //! Wall-clock `SystemTime`, not `Instant`: matches the rest of the animation
 //! state (FloorTransition, LightingState, PoseHistory) — serializable, no
-//! out-of-process consumer today. See CLAUDE.md "Known sharp edges".
+//! out-of-process consumer today.
 
 use std::time::{Duration, SystemTime};
 

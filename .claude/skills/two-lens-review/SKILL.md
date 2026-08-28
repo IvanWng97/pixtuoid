@@ -112,9 +112,8 @@ Hence:
    (PR #455's a11y lens stubbed under an APPROVE-WITH-NITS aggregate; its re-run
    caught a real AA failure). Then for every MEDIUM+ finding, **verify the
    premise yourself before coding a fix** — reviewers have incomplete design
-   context; read the crate's `SHARP-EDGES.md` entry first (its `CLAUDE.md` only
-   INDEXES them — the index line is not the entry; tests/, Raycast and site
-   keep theirs inline in the guide), and if a finding is
+   context; read the doc comment on the declaration the finding names first,
+   and if a finding is
    deliberate design, REFUTE it by citing (or ADDING) that entry.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.

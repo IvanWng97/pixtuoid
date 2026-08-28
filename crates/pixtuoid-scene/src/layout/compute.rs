@@ -598,7 +598,7 @@ pub(super) fn compute_with_seed(
         });
 
     // A narrow band can wall off a back-turned desk's SOUTH front — demote, don't drop.
-    // A NET, not live code — see `SHARP-EDGES.md`.
+    // A NET, not live code.
     let desk_facings: Vec<Facing> = home_desks
         .iter()
         .zip(&desk_facings)

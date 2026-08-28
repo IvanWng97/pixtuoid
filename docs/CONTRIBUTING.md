@@ -6,9 +6,8 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
 nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
-architecture invariants and conventions, and indexes each crate's "known sharp
-edges" — full text in that crate's `SHARP-EDGES.md`. Many things that look like
-bugs are documented, intentional design: read the entry, not just its index line.
+architecture invariants and conventions. Many things that look like bugs are
+documented, intentional design: read the item's doc comment before changing it.
 
 ## Build & test
 
