@@ -70,10 +70,9 @@ impl ExitWatch {
             .name("pixtuoid-exit-watch".into())
             .spawn(move || {
                 imp::run(&thread_shared, &exit_tx);
-                // EVERY run() exit path lands here: mark the handle dead so
-                // `watch()` rejects instead of queueing — long-lived producers
-                // push per hook event for the process lifetime, and with no
-                // drainer `pending` would grow unboundedly.
+                // EVERY run() exit lands here: mark the handle dead so `watch()`
+                // rejects rather than queueing — producers push per hook event, and
+                // with no drainer `pending` grows unboundedly.
                 thread_shared.closed.store(true, Ordering::SeqCst);
                 lock_pending(&thread_shared).clear();
             });

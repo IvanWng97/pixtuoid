@@ -102,10 +102,8 @@ pub(super) async fn scan_root(
                     Ok(Some(entry)) => walk_jsonl(&entry.path(), decoders, ctx).await,
                     Ok(None) => break,
                     Err(e) => {
-                        // The ROOT's twin of the subdirectory arm below, but
-                        // through the latch: truncation here hides every
-                        // remaining PROJECT, not one project's transcripts, and
-                        // there is exactly one root, so this cannot flood.
+                        // Latched, unlike the subdirectory twin below: truncation here
+                        // hides every remaining PROJECT, and there is only one root.
                         if root_health.on_failure() {
                             warn!(
                                 "listing of watched root {} truncated ({e}); some \
@@ -144,19 +142,16 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         check_ended,
         ..
     } = decoders;
-    // symlink_metadata, not metadata: symlinked entries are refused wholesale.
-    // A directory symlink under the watched root would otherwise recurse
-    // unboundedly, or walk foreign `.jsonl` trees into this source's id space.
-    // The ROOT itself may still be a symlink — only entries are checked.
+    // symlink_metadata, not metadata: a directory symlink under the root would
+    // recurse unboundedly, or walk foreign `.jsonl` trees into this source's id
+    // space. The ROOT itself may still be a symlink — only entries are checked.
     let meta = match tokio::fs::symlink_metadata(path).await {
         Ok(m) => m,
         Err(e) => {
             if e.kind() == std::io::ErrorKind::NotFound {
-                // The path is GONE and this walk is the last time the watcher
-                // hears about it: retire its map entries, or every transcript
-                // ever sighted leaks a cursors entry for the process lifetime.
-                // NotFound ONLY — a transient EACCES must not drop a live
-                // session's cursor.
+                // This walk is the last the watcher hears of the path, so retire its
+                // map entries or they leak for the process lifetime. NotFound ONLY —
+                // a transient EACCES must not drop a live session's cursor.
                 cursors.lock().await.remove(path);
                 seen.lock().await.remove(path);
             }
@@ -164,9 +159,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
     };
     use crate::source::admit::{classify, Entry};
-    // One rule, shared with the offline drivers so a fixture can never be
-    // recorded from a file production would not read (#931). The traversal
-    // below — and the cursor retirement above — stay here.
+    // Shared with the offline drivers, so a fixture can never be recorded from a
+    // file production would not read (#931).
     let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
     if entry == Entry::SkipSymlink {
         // debug!, not warn!: a persistent symlink would re-warn every 250ms.
@@ -180,18 +174,15 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     Ok(Some(entry)) => Box::pin(walk_jsonl(&entry.path(), decoders, ctx)).await,
                     Ok(None) => break,
                     Err(e) => {
-                        // Split from `Ok(None)` for the LOG only — the listing
-                        // still stops here, so every later transcript in this
-                        // dir waits for the next rescan. `break` not `continue`:
-                        // a sticky error that never advances would spin.
+                        // Split from `Ok(None)` for the LOG only; the listing stops
+                        // either way. `break` not `continue` — a sticky error spins.
                         debug!("listing of {} truncated: {e}", path.display());
                         break;
                     }
                 }
             },
-            // `debug!`, not the latched `warn!` `scan_root` gives the ROOT: a
-            // subdirectory is re-walked every 250ms rescan, and there is one
-            // root but unboundedly many subdirs, so a warn here floods.
+            // `debug!`, not `scan_root`'s latched `warn!`: subdirs are unbounded and
+            // re-walked every 250ms rescan, so a warn here floods.
             Err(e) => debug!("skipping unreadable directory {}: {e}", path.display()),
         }
         return;
@@ -221,10 +212,9 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         return;
     }
-    // Reset-to-0 is the LIVE-session resync. The exit-path drains must NOT take
-    // this arm — they pre-park a truncated file at its new EOF instead, or the
-    // un-claim right behind the drain turns this reset into a ghost replay (see
-    // park_if_truncated_below_cursor).
+    // Reset-to-0 is the LIVE-session resync. Exit-path drains must NOT take it —
+    // they pre-park at the new EOF, or the un-claim behind the drain turns this
+    // into a ghost replay (`park_if_truncated_below_cursor`).
     if cursor_now > file_len {
         warn!(
             "{} truncated below cursor ({} < {}), resetting cursor",
@@ -244,19 +234,16 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             path.display(),
             MAX_PENDING_BYTES
         );
-        // A skipped span may bury a structural session-end marker; without this
-        // tail-scan the terminator is lost and the slot reaps only via the slow
-        // stale-sweep. Unconditional because a KNOWN file's span can end
-        // mid-skip. Independent of the cursor, so compute it before seeding.
+        // A skipped span may bury the session-end marker, leaving the slot to the
+        // slow stale-sweep. Unconditional (a KNOWN file's span can end mid-skip) and
+        // cursor-independent, so it must run before the seed below.
         let ended_in_skip = check_session_ended(path, check_ended).await;
-        // Seed the cursor to EOF BEFORE the awaited head-read + registration
-        // below, so a concurrent walk_jsonl on this path sees `known` on its
-        // next read and won't re-enter this branch.
+        // Seed to EOF BEFORE the awaited head-read below, so a concurrent
+        // walk_jsonl sees `known` and won't re-enter this branch.
         cursors.lock().await.insert(path.to_path_buf(), file_len);
         if ended_in_skip {
-            // A span that itself ENDED stays unregistered and unscanned — a
-            // SessionStart or a seeded Task after the SessionEnd just sent
-            // would resurrect/animate a ghost.
+            // An already-ENDED span stays unregistered: a SessionStart or seeded
+            // Task after the SessionEnd just sent would animate a ghost.
             let id = AgentId::from_parts(source, &decoders.id_derive.id_for(path));
             let _ = tx
                 .send((
@@ -267,20 +254,15 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     },
                 ))
                 .await;
-            // Un-claim first-sight AFTER forwarding the terminator, so a LATER
-            // append re-registers through emit_first_sight. Leaving the claim in
-            // place pinned the path "registered" forever — a resumed session
-            // could never re-appear without a watcher restart.
+            // Un-claim AFTER the terminator, so a later append re-registers. Leaving
+            // the claim pinned the path "registered" until a watcher restart.
             seen.lock().await.remove(path);
             return;
         }
-        // #204: on the first oversized sight of a recent, live session, still
-        // REGISTER the agent — otherwise a >1 MB transcript stays invisible
-        // until its next small append. The giant backlog is NOT replayed;
-        // cwd/label come from a BOUNDED head read. Keys on `seen` (=
-        // registered), NOT `!known`: a first-sight-GATED file is `known` yet its
-        // first >1 MiB append lands here, and keying on `!known` left that agent
-        // invisible until a later ≤1 MiB append.
+        // #204: register even on an oversized first sight, or a >1 MB transcript
+        // stays invisible until its next small append; the backlog is not replayed.
+        // Keys on `seen`, NOT `!known` — a first-sight-GATED file is already `known`,
+        // and keying on `!known` left it invisible until a later ≤1 MiB append.
         let registered = seen.lock().await.get(path) == Some(&true);
         // The span is too big to hold, so the tail is the instrument — a
         // metadata run always lands at the end.
@@ -292,9 +274,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             Some(super::TailActivity::SidecarOnly)
         );
         if !registered && !metadata_only {
-            // The backlog is skipped wholesale, so the decoder never reaches a
-            // head-borne title — this bounded read is its ONLY carrier, and a
-            // root transcript is usually already past MAX_PENDING_BYTES.
+            // The decoder never reaches a head-borne title once the backlog is
+            // skipped, so this bounded read is its only carrier.
             let (head_cwd, head_label) = match read_head(path, MAX_PENDING_BYTES).await {
                 Some(head) => {
                     extract_head_fields(&head, cwd_extractor_for(source), decoders.head_label)
@@ -303,10 +284,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
             };
             emit_first_sight(path, source, decoders, seen, tx, head_cwd, head_label).await;
         }
-        // #222: the skipped span may bury an IN-FLIGHT Task dispatch — tail-scan
-        // for unmatched Task starts and re-emit exactly those (see
-        // scan_pending_tasks). Only when registered: JSONL events for an unknown
-        // id are reducer no-ops, so an unregistered path skips the decode.
+        // #222: the skipped span may bury an IN-FLIGHT Task dispatch. Only when
+        // registered — JSONL events for an unknown id are reducer no-ops.
         if seen.lock().await.get(path) == Some(&true) {
             scan_pending_tasks(path, decoders, ctx).await;
         }
@@ -344,17 +323,14 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     }
 
     let new_bytes = &new_chunk[..safe_end_relative];
-    // Must be normalized (the same form as `id_derive` above) so that on
-    // Windows the hook key and the per-line key agree — an un-normalized path
-    // here would land every JSONL event on a phantom id.
+    // Normalized like `id_derive` above, or on Windows the hook key and the
+    // per-line key disagree and every JSONL event lands on a phantom id.
     let transcript_path_str = crate::id::normalize_path_key(&path.to_string_lossy());
 
-    // A GATED file revived by an append only reads the tail — and Codex
-    // rollouts carry cwd ONLY on the head session_meta line, so the revive
-    // would register with an empty cwd (→ the unknown-cwd short reap). Fall
-    // back to a bounded head read. The same read carries the head label: a
-    // revival's tail is likewise past a head-borne title, so without this the
-    // revived slot would drop back to the cwd basename.
+    // A revived GATED file reads only the tail, but Codex rollouts carry cwd ONLY
+    // on the head `session_meta` line — so the revive would register empty-cwd onto
+    // the short reap. The same bounded head read also carries the title, which the
+    // tail is likewise past.
     let extract = cwd_extractor_for(source);
     let mut first_sight_cwd = extract_cwd(new_bytes, extract);
     let mut head_label = None;
@@ -417,12 +393,9 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         }
     }
     if session_ended {
-        // Un-claim first-sight so a LATER append re-registers through
-        // emit_first_sight. RELEASED (`false`), not removed: `emit_first_sight`
-        // treats `Some(false)` exactly like an absent entry, while
-        // `revouch_gated_files` (which keys on `contains_key`) can no longer
-        // reset a still-vouched path's cursor to 0 and replay the whole
-        // transcript once per scan pass.
+        // RELEASED (`false`), not removed: `emit_first_sight` treats `Some(false)`
+        // like an absent entry, while `revouch_gated_files` keys on `contains_key`
+        // and would otherwise replay the whole transcript once per scan pass.
         seen.lock().await.insert(path.to_path_buf(), false);
     }
 }
@@ -460,22 +433,19 @@ async fn emit_first_sight(
     cwd: Option<PathBuf>,
     head_label: Option<String>,
 ) {
-    // `Some(false)` — a claim RELEASED by the child-end un-claim (#246) —
-    // registers like an absent entry: a released path's next append IS the
-    // revival the release exists for.
+    // `Some(false)` — released by the child-end un-claim (#246) — registers like
+    // an absent entry: that next append IS the revival the release exists for.
     let already_claimed = seen.lock().await.insert(path.to_path_buf(), true) == Some(true);
     if already_claimed {
         return;
     }
-    // session_id comes from the SAME deriver as the AgentId: the hook
-    // transport's slots carry the bare session UUID and `backfill_identity`
-    // never heals a non-empty session_id, so a raw file-stem here would leave a
-    // JSONL-created slot permanently disagreeing with its hook-created twin.
+    // Same deriver as the AgentId: hook slots carry the bare session UUID and
+    // `backfill_identity` never heals a non-empty session_id, so a raw file-stem
+    // here disagrees with the hook-created twin forever.
     let session_id = decoders.id_derive.id_for(path);
     let id = AgentId::from_parts(source, &session_id);
-    // Content-derived cwd wins; the PATH deriver is the fallback for sources
-    // whose content carries none — an empty cwd would put the slot on the
-    // unknown-cwd short reap.
+    // Content-derived cwd wins; the PATH deriver covers sources carrying none, an
+    // empty cwd being what puts a slot on the unknown-cwd short reap.
     let cwd = cwd
         .or_else(|| (decoders.cwd_derive)(path))
         .unwrap_or_default();
@@ -563,9 +533,8 @@ async fn scan_pending_tasks(path: &Path, decoders: SourceDecoders, ctx: &WatchCt
     };
     let transcript_path_str = crate::id::normalize_path_key(&path.to_string_lossy());
     let mut lines = buf.split(|b| *b == b'\n');
-    // The window ALWAYS starts mid-file (the only caller is the oversized
-    // branch), so its first chunk is almost always a partial line — skip it
-    // rather than decode a fragment that could parse as JSON by accident.
+    // The window always starts mid-file, so its first chunk is a partial line —
+    // skip it rather than decode a fragment that may parse as JSON by accident.
     let _ = lines.next();
     let mut pending: Vec<(String, AgentEvent)> = Vec::new();
     for line in lines {

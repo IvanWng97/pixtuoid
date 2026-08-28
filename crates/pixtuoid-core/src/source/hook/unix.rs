@@ -158,9 +158,8 @@ fn socket_sibling(path: &Path, suffix: &str) -> std::path::PathBuf {
 
 pub(super) struct Listener {
     listener: UnixListener,
-    // Held (never unlocked) for the daemon's lifetime: the kernel releases the
-    // advisory lock when the process dies, however abruptly, so the lock — not
-    // the socket file, which nothing unlinks on exit/crash — is what the next
+    // Never unlocked: the kernel releases it however abruptly the process dies, so
+    // the lock — not the socket file, which nothing unlinks — is what the next
     // bind's liveness arbitration reads.
     _lock: std::fs::File,
 }
@@ -168,15 +167,13 @@ pub(super) struct Listener {
 impl Listener {
     pub(super) async fn bind(path: &Path) -> Result<Self> {
         ensure_owned_socket_dir(path)?;
-        // Liveness arbitration is an EXCLUSIVE advisory lock on a sibling
-        // `<sock>.lock`, NOT connect() errnos: a backlog-saturated LIVE daemon
-        // yields ECONNREFUSED on macOS and EAGAIN on Linux, so an errno-guessing
-        // probe can unlink a live daemon's socket — leaving it accepting on an
-        // anonymous inode forever while every hook-borne signal silently routes
-        // here. The lock file is NEVER unlinked (unlock-then-unlink lets a
-        // waiter on the old inode and a newcomer on a fresh one both "hold" it)
-        // and is derived from the FINAL socket path so both bind branches
-        // arbitrate on the same file.
+        // An EXCLUSIVE advisory lock on a sibling `<sock>.lock`, NOT connect()
+        // errnos: a backlog-saturated LIVE daemon yields ECONNREFUSED on macOS and
+        // EAGAIN on Linux, so an errno-guessing probe unlinks a live socket and
+        // leaves it accepting on an anonymous inode forever. Never unlinked —
+        // unlock-then-unlink lets a waiter on the old inode and a newcomer on a
+        // fresh one both "hold" it — and derived from the FINAL path so both bind
+        // branches arbitrate on the same file.
         let lock_path = socket_sibling(path, "lock");
         let lock = std::fs::OpenOptions::new()
             .create(true)
@@ -184,19 +181,17 @@ impl Listener {
             .write(true)
             .truncate(false)
             .mode(0o600)
-            // O_NOFOLLOW: a symlink planted at `<sock>.lock` (the parent dir may
-            // be a shared /tmp) must fail the open, not make the daemon flock —
-            // and hold for its lifetime — an arbitrary file.
+            // O_NOFOLLOW: the parent dir may be a shared /tmp, and a symlink planted
+            // at `<sock>.lock` would flock an arbitrary file for the daemon's life.
             .custom_flags(libc::O_NOFOLLOW)
             .open(&lock_path)
             .with_context(|| format!("opening hook socket lock at {}", lock_path.display()))?;
         match lock.try_lock() {
             Ok(()) => {}
             Err(std::fs::TryLockError::WouldBlock) => {
-                // A live owner holds the lock. Typed so the CC source can degrade
-                // to transcript-only instead of dying wholesale; of two racing
-                // first starts exactly one acquires the lock, so the loser never
-                // leaves an anonymous listener behind.
+                // Typed so the CC source degrades to transcript-only rather than
+                // dying; of two racing starts exactly one acquires the lock, so the
+                // loser leaves no anonymous listener.
                 return Err(anyhow::Error::new(super::SocketBusy {
                     path: path.to_path_buf(),
                 }));
@@ -207,13 +202,10 @@ impl Listener {
             }
         }
         if path.exists() {
-            // Lock acquired ⇒ any previous lock-holding owner is dead ⇒ the
-            // socket file is residue. Belt-and-braces probe before reclaiming: a
-            // connect that SUCCEEDS — or backlogs (WouldBlock: a full accept
-            // queue only happens on a live listener) — proves a LIVE owner that
-            // predates the lock protocol, so defer to it rather than steal. Any
-            // OTHER connect error is NOT evidence of life — the lock already
-            // arbitrated — so reclaim.
+            // Lock acquired ⇒ the previous owner is dead ⇒ the socket is residue.
+            // Probe anyway: a connect that succeeds, or backlogs (WouldBlock only
+            // happens on a live listener), proves an owner predating the lock
+            // protocol. Any OTHER error is not evidence of life — reclaim.
             let alive = match tokio::net::UnixStream::connect(path).await {
                 Ok(_stream) => true,
                 Err(e) => e.kind() == std::io::ErrorKind::WouldBlock,
@@ -225,16 +217,14 @@ impl Listener {
             }
             let _ = tokio::fs::remove_file(path).await;
         }
-        // Bind at a temp name, chmod to owner-only, then atomically rename onto
-        // the final path (a rename doesn't disturb the listening inode), so the
-        // socket is never reachable at the FINAL path with looser-than-0600
-        // modes — without touching the process-global umask, which would race
-        // every other tokio worker's concurrent file creation.
+        // Bind at a temp name, chmod, then rename onto the final path (which does
+        // not disturb the listening inode), so the socket is never reachable there
+        // looser than 0600 — and without a process-global umask, which would race
+        // every other tokio worker's file creation.
         let tmp = socket_sibling(path, &format!("{}.tmp", std::process::id()));
-        // sun_path caps at 104 bytes (macOS; 108 Linux). A custom
-        // PIXTUOID_SOCKET whose FINAL path fits but whose `.<pid>.tmp` twin
-        // doesn't must not fail the bind — fall back to a direct bind + chmod at
-        // the final name, re-accepting the pre-chmod micro-TOCTOU.
+        // sun_path caps at 104 bytes (macOS; 108 Linux), so a PIXTUOID_SOCKET whose
+        // FINAL path fits but whose `.<pid>.tmp` twin does not falls back to a direct
+        // bind + chmod, re-accepting the pre-chmod micro-TOCTOU.
         if tmp.as_os_str().len() > 100 {
             let listener = UnixListener::bind(path)
                 .with_context(|| format!("binding hook socket at {}", path.display()))?;
@@ -309,10 +299,9 @@ impl Listener {
                     });
                 }
                 Err(e) => {
-                    // A Unix accept error leaves the listener fd valid, so
-                    // retrying is right — just not at CPU speed, and not one warn
-                    // per iteration: a persistent errno would peg a core and
-                    // rotate real diagnostics out of the warn-floor log.
+                    // The listener fd stays valid, so retry — but not at CPU speed
+                    // and not one warn per iteration, or a persistent errno pegs a
+                    // core and rotates real diagnostics out of the log.
                     if accept_health.on_failure() {
                         warn!("hook socket accept error (retrying with backoff): {e}");
                     }
