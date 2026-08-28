@@ -1,23 +1,12 @@
-//! Every `Pinned by `x`` comment names a function that exists.
+//! Every `Pinned by `x`` comment names a function that exists — without this the
+//! citation is the prose the convention replaced.
 //!
-//! Prose outlives the code it describes; a named mechanism cannot. That is the
-//! whole reason a rationale lives on its declaration rather than in a guide —
-//! so the citation has to be checkable, or `Pinned by` is prose again.
+//! It has caught two orphans: a guide entry citing `hit_test_branding`, deleted
+//! long ago, and `codex.rs` citing a test that never existed. `drift_surface.rs`
+//! asserts the same for the `DECODED_*` consts only, so this runs tree-wide.
 //!
-//! It has caught two orphans already: a `SHARP-EDGES.md` entry cited
-//! `hit_test_branding`, deleted long ago, while reading as authoritative; and
-//! `codex.rs` claimed `escalated_permission_is_detected_by_the_exported_pair`,
-//! which never existed. Human review does not catch this class — those two are
-//! what that looks like.
-//!
-//! `drift_surface.rs`'s `PINNED_ELSEWHERE` asserts the same thing for the
-//! `DECODED_*` consts only; the rule is not specific to them, so this runs
-//! tree-wide. A Rust fact checked from Rust — the predecessor was a Python
-//! regex over `.rs` files, which is the wrong layer for it.
-//!
-//! Runtime read of sibling crates, so it is workspace-only and lives in
-//! pixtuoid-core's `exclude` list, like `supported_sources_manifest.rs`.
-
+//! Reads sibling crates at runtime, so it is workspace-only and sits in
+//! `Cargo.toml`'s `exclude`.
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
