@@ -9,11 +9,11 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**What the guides hold.** A nested `CLAUDE.md` says what its crate IS, plus
-the cross-file couplings no declaration can own (site's build inputs, Raycast's
-`package.json` facts). Everything else a change needs — the constraint that looks
-like a bug, the WHY, the test that pins it — is on the declaration it
-constrains: read the item's doc comment before changing it.
+**What the guides hold.** A nested `CLAUDE.md` says what its crate IS, plus the
+facts no declaration can own (site's build inputs, Raycast's `package.json`
+rules, `tests/`'s directory-to-binary layout). Everything else a change needs —
+the constraint that looks like a bug, the WHY, the test that pins it — is on
+the declaration it constrains: read the item's doc comment before changing it.
 
 **A third consumer lives outside this repo**: homebrew-core's `pixtuoid`
 formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
