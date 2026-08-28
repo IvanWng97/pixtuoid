@@ -9,9 +9,9 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**What the guides hold.** A nested `CLAUDE.md` says what its crate IS. The
-three that also carry operational content — `pixtuoid-core/tests/`, Raycast,
-site — keep it INLINE there. Everything else a change needs — the constraint that looks
+**What the guides hold.** A nested `CLAUDE.md` says what its crate IS, plus
+the cross-file couplings no declaration can own (site's build inputs, Raycast's
+`package.json` facts). Everything else a change needs — the constraint that looks
 like a bug, the WHY, the test that pins it — is on the declaration it
 constrains: read the item's doc comment before changing it.
 
@@ -101,9 +101,9 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 5. **The hook shim never blocks CC** — always exit 0 silently; the 200 ms send bound is watchdog-enforced on both platforms. Shim coverage is child-process level only.
 6. **Walkable mask = ground footprint only**; sprite size never moves a sim position — fitting the frame is the painter's job (`keep_sprite_on_canvas`), not the sim's (#912).
 
-## Sharp edges (cross-crate ownership)
+## Ownership by crate
 
-Don't "fix" documented design. Ownership by crate: **core** owns session
+Don't "fix" documented design — the constraint is on the declaration. Who owns what: **core** owns session
 lifecycle/identity (registration, dedup, first-sight, liveness ladder,
 subagent parenting, feature boundaries) · **scene** owns look/motion (palette
 recolor by RGB equality, walk timing, footprints, sky/light invariants,

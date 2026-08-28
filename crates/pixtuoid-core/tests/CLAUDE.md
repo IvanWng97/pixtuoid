@@ -39,7 +39,7 @@ tests/
 ├── render/main.rs       blit + format (+ sprite fixtures)
 └── socket_path_parity.rs · supported_sources_manifest.rs ·
     proof_fixture_disjointness.rs · pinned_by_claims.rs
-                         FLAT + publish-excluded (sharp edge below)
+                         FLAT + publish-excluded (see Cargo.toml's `exclude`)
 ```
 
 Data scopes to the binary that reads it — a module-owned fixture lives with
@@ -76,25 +76,3 @@ under `sources/fixtures/` would be mis-scanned.
 3. **Only for unique behavior** (subagent hooks, custom lifecycle): a
    `tests/sources/<cli>/` module registered in `sources/main.rs`. Plain CLIs
    (antigravity, reasonix) need none.
-
-## Known sharp edges
-
-- **The four FLAT tests stay flat and publish-excluded.** Each reads a
-  sibling outside this crate (`site/src/sources.json`, `Statusline.astro`,
-  the shim's `paths.rs`, the whole `crates/` tree), so all four sit in
-  `Cargo.toml`'s `exclude` and the published tarball builds without them; a grouped binary's submodule
-  can't be individually excluded (the parent `mod` fails on the extracted crate).
-- **A multi-file binary is `tests/<area>/main.rs`, NOT `tests/<area>.rs`** — a
-  top-level `area.rs` is a crate root whose `mod foo;` resolves to a SIBLING
-  `tests/foo.rs`. (nextest runs each `#[test]` in its own process either way.)
-- **`conformance.rs` asserts every dir under `sources/fixtures/` is a
-  registered source with exactly one transcript/hook file → one AgentId** —
-  single-owner multi-payload fixtures would be mis-scanned and panic; they
-  co-locate with their module instead.
-- **insta names = `<binary>__<module>__<explicit-name>`**; decoded bodies hash
-  an `AgentId` from the fixture path relative to `fixtures_root()`, so moving
-  the tree is snapshot-safe iff the per-source suffix is preserved.
-- **Windows parity twins:** `transport/pipe.rs` and the shim's
-  `tests/shim_pipe.rs` are `#[cfg(windows)]` twins of the socket tests, run
-  only on the `windows-test` job — a behavior pinned on one platform's
-  transport stays pinned on the other's twin.

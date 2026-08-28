@@ -41,49 +41,31 @@ generated — eslint/prettier-ignored, never hand-edit them. This is
 (The `source_status_json_shape` / `outcome_row_json_shape` byte tests still pin
 the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
 token plus an optional failure-detail field, split from the old folded
-`failed: <msg>` form back when this in-repo copy was the only consumer — see
-the sharp edge below and `OutcomeRow`'s own doc comment in
-`crates/pixtuoid/src/sources.rs`.)
+`failed: <msg>` form back when this in-repo copy was the only consumer. The
+wire is PUBLISHED — installed store copies parse it independently of the
+binary's version; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
+owns that rule.)
 
-## Sharp edges (don't be surprised by these)
+## Toolchain and audit policy
 
-- **A non-zero CLI exit DISCARDS stdout in the usual `execFile` path** — but the
-  CLI still printed a JSON array. Recover it from `err.stdout` in the bridge; a
-  toast-only error path is dead code (the failed approach). The `--json` outcome
-  rows arrive even on a partial failure.
-- **The `binaryPath` preference is RE-READ on every call**, not cached — only
-  the PATH auto-detect is memoized. A user who fixes the pref mid-session
-  shouldn't have to relaunch.
+`package.json` cannot carry a comment, so these live here.
+
 - **Toolchain bumps must stay within what Raycast DECLARES — check the peers,
   don't guess.** `eslint`/`typescript` are gated by `@raycast/eslint-config`'s
   peerDependencies (2.2.0 declares `eslint ^10`, `typescript <6.1.0` — so
   eslint 10 + TS 6.0 are in-range); `@types/node` stays on the `22.x` MAJOR
   (dependabot bumps minors within it — `.github/dependabot.yml` ignores only
-  the major — so the manifest floats at `^22.x`, currently `^22.20.1`).
-  `@raycast/api`'s exact peer (22.19.17; Raycast's runtime is Node 22) is a
-  warning-level mismatch npm tolerates under the committed lockfile, not a hard
-  pin the manifest must equal. And
-  `ray build` type-checks with its OWN bundled tsc (5.6 as of api 1.104.21),
-  so `tsconfig.json` must stay parseable by BOTH that and the local TS: the
-  TS 6 migration was `moduleResolution: "Bundler"` + an explicit
-  `types: ["node"]` (TS 6.0 stopped auto-including `node_modules/@types`);
-  `ignoreDeprecations: "6.0"` would have broken `ray build` (TS 5.x rejects
-  the value).
-- **`OutcomeRow.outcome` ∈ `connected | disconnected | failed`** (bare tokens)
-  for the single-id `connect`/`disconnect` the extension calls; `no_op` is
-  emitted only by `pixtuoid sources set` (the declarative reconcile this
-  extension never invokes). Failure detail rides in the optional `message`
-  field (present exactly when `outcome === "failed"`) — match tokens exactly,
-  no prefix-stripping. This clean split was made ASSUMING the in-repo extension
-  was the ONLY consumer. **It was not** — the last `ray publish` marker
-  (`__raycast_latest_publish_ext/pixtuoid__` → b870d8ba, 2026-06-19) PREDATES
-  the split (e21ec7f0, 2026-07-02), so the break shipped to the store: what
-  users have installed still prefix-strips `failed: <msg>` and renders a bare
-  `failed` toast with the real reason dropped. A republish clears that; the
-  parse in `src/` is already correct. **Treat the wire as PUBLISHED from here
-  on** (`raycast.com/IvanWng97/pixtuoid`) — installed copies parse it
-  independently of the binary's version, so any further wire change needs a
-  version handshake, not a flag-day edit.
+  the major). `@raycast/api`'s exact peer is a warning-level mismatch npm
+  tolerates under the committed lockfile, not a hard pin the manifest must
+  equal. `ray build` type-checks with its OWN bundled tsc, so `tsconfig.json`
+  must stay parseable by BOTH that and the local TS.
+- **`npm run audit` is plain `npm audit --audit-level=low`.** It was a
+  per-advisory allow-list script until its one entry cleared. `npm audit` has
+  no per-advisory ignore, so if an unfixable advisory recurs, restore that
+  script from history rather than lowering `--audit-level`, which blinds a
+  whole severity band to hide one id. Unfixable is realistic: the last one
+  arrived through a five-deep chain we own no link of, and the override that
+  would have patched it made audit green over code that throws (#792).
 
 ## Gates
 
