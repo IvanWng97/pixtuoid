@@ -30,28 +30,19 @@ build, and every one sits in the `site.yml` / `pages.yml` path filters:
   edit), both workflow path filters, `lighthouserc.json`, and the smoke
   viewport table.
 
-**Mermaid renders at build AND during `astro check`** (why CI installs
-Chromium, BEFORE `npm run check`). A version-mismatched Chromium/Playwright
-collapses `<Content />` to an empty article WITHOUT failing the build, and
-`withastro/action`'s cross-run Astro cache can then serve the empty page back
-forever — hence `pages.yml` pins `package-manager: npm` (#680) and
-`cache: false` (#682). All three historical causes are gated by
-`config/assert-docs-rendered.mjs` (`check:docs`, in `verify` AND the deploy
-build-cmd): every doc `<article>` has a body and `/architecture` keeps its
-`<svg>` — a collapsed render reddens, never deploys.
+**Mermaid renders at build AND during `astro check`** — which is why CI
+installs Chromium BEFORE `npm run check`. The silent-empty-render class it
+opens is gated by `config/assert-docs-rendered.mjs` (`check:docs`), whose
+header owns the mechanism; `pages.yml`'s two pins carry their own.
 
 **Docs shell**: the doc routes (the `DOCS` manifest in `consts.ts` is the
 roster) mount the Statusline doc variant (no PR feed fetch); `Docs.astro`'s
 sidebar reads the one `FLOORS` manifest.
 Blockquotes promote to terminal callouts (`config/rehype-callouts.mjs`,
-unit-tested, registered AFTER `rehypeRepoLinks`). **SHARP EDGE — the callout
-window is a `--screen` panel inside `.prose`, so every `.prose <tag>` colour
-rule beats the ink the callout hands down** (direct match beats inheritance).
-Each such rule needs a twin at `.docs :global(.callout__body <tag>)`, and the
-twin must OUTWEIGH the prose rule — count the specificity, including
-theme-prefixed globals that tie (source order then decides) and second-type
-selectors that outweigh. The smoke suite's callout AA sweep is the proof;
-add a `.prose` colour rule ⇒ add its twin and let the sweep grade it.
+unit-tested, registered AFTER `rehypeRepoLinks`). Adding a `.prose` colour rule
+needs a twin under `.callout__body` — the specificity arithmetic and its
+theme-prefixed tie are on the rule itself in `Docs.astro`, and the smoke
+suite's callout AA sweep grades it.
 
 ## Single-sourced content
 
@@ -60,20 +51,13 @@ Every generated artifact, manifest seam, and rendered-copy sharp edge:
 
 ## CSP (hash-based, two coordinated halves in astro.config.mjs)
 
-Astro 7's `security.csp` owns policy + resource lists; the `cspInlineHashes()`
-`astro:build:done` hook re-derives inline-script hashes from the BUILT html
-(Astro doesn't hash template `is:inline` scripts — verified vs 7.0.5) and
-HOISTS the `<meta>` directly after `<meta charset>` (a meta CSP governs only
-what follows it; Astro emits it below the scripts it hashes). The pure
-transform `rewriteCspMeta` lives in `config/csp-hashes.mjs`, unit-tested.
-Rules: adding/editing an `is:inline` script needs NO manual CSP step;
-hand-written `public/*.js` loaded by URL rides `script-src 'self'`;
-`style-src` keeps `'unsafe-inline'` and must stay hash-free (inline style
-ATTRIBUTES — mermaid SVG, `style={}` — can't be hashed; one hash disables
-unsafe-inline for the directive; keep Prism class-based highlighting, not
-Shiki). `astro dev` serves NO CSP — regressions surface in `just site-e2e`'s
-console watchdog, not dev.
-
+`cspInlineHashes()` in `astro.config.mjs` owns the WHY; `config/csp-hashes.mjs`
+owns the parse. The rules a page author needs: an `is:inline` script needs NO
+manual CSP step; a hand-written `public/*.js` loaded by URL rides
+`script-src 'self'`; `style-src` must stay hash-free (one hash disables
+unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
+so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
+CSP; regressions surface in `just site-e2e`'s console watchdog.
 ## Dev server (agent-driving)
 
 `just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only

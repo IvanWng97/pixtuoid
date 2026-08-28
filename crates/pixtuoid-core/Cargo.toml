@@ -13,7 +13,9 @@ categories.workspace   = true
 # Workspace-only tests that reach outside the crate for a sibling file absent
 # from the published tarball — shipping them would make `cargo test` fail on the
 # .crate. Runtime reads need excluding too: they spare the publish build-verify
-# but not `cargo test` on an extracted crate.
+# but not `cargo test` on an extracted crate. They stay FLAT for the same reason:
+# a grouped binary's submodule cannot be excluded on its own — the parent `mod`
+# then fails on the extracted crate.
 exclude                = [
     "tests/pinned_by_claims.rs",
     "tests/socket_path_parity.rs",
