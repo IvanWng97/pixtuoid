@@ -4,8 +4,7 @@ Canonical for both scopes of `two-lens-review` (diff gate / whole-codebase
 audit). The skill owns *when* to invoke and the convergence contract (round
 caps, blocking bar, churn budget).
 
-**Size budget: the `BUDGETS` byte cap in `scripts/gen-guides.py` (enforced by
-`just lint`); one-in-one-out.** A line lives here only if it
+**One-in-one-out.** A line lives here only if it
 changes reviewer BEHAVIOR: a repo-specific trap whose obvious reading is
 wrong, a rule about what NOT to flag, or a verification act beyond reading
 the diff. Generic defect hunting (logic, races, error handling, unwrap,

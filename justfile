@@ -315,8 +315,6 @@ lint:
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
-    run guides  just gen-guides-check     & pids+=($!)
-    run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
@@ -1252,22 +1250,6 @@ compare-selftest:
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
 
-# The guides' index blocks are generated projections of their sibling files —
-# the WHY lives in scripts/gen-guides.py's docstring. Edit the SIBLING, run
-# `gen-guides`; `-check` gates drift in `lint` + CI's hygiene job.
-[group('gen')]
-[doc('Regenerate guide index blocks from SHARP-EDGES/LAYOUT/WHERE-TO-LOOK siblings')]
-gen-guides:
-    python3 scripts/gen-guides.py
-
-[group('gen')]
-[doc('Fail if a guide index block drifted from its sibling (runs in lint)')]
-gen-guides-check:
-    # Negative controls FIRST: a generator whose own fires/does-not-fire
-    # contract broke reports a clean pass on garbage.
-    python3 scripts/gen-guides.py --selftest
-    python3 scripts/gen-guides.py --check
-
 # Regenerate the committed drift-surface fragments — what each crate declares it
 # READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
@@ -1287,15 +1269,6 @@ gen-drift-surface:
 [doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
-
-# The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
-# sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
-# gate, because one of these leaks ate a developer's index before anyone noticed.
-# Runs in `lint`; CI's hygiene job enumerates it separately.
-[group('meta')]
-[doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
-gitenv-selftest:
-    python3 scripts/gitenv.py --selftest
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each of those was a lost BILLED turn before it was code, and

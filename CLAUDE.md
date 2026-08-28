@@ -11,11 +11,9 @@ in nested guides, auto-loaded when you touch their tree:
 
 **How the guides load.** A nested `CLAUDE.md` is an INDEX; the full entries
 live in siblings you must open: `SHARP-EDGES.md` (the edge + WHY + authority)
-and `WHERE-TO-LOOK.md` (non-obvious seams). Index blocks are GENERATED from
-the siblings (`just gen-guides`; drift fails `lint`) — edit the SIBLING, never
-the block. Before "fixing" anything an index line names, open the sibling.
-Nested guides are NOT re-injected after `/compact` — on a long arc, re-open
-the crate's `SHARP-EDGES.md` itself.
+and `WHERE-TO-LOOK.md` (non-obvious seams). Before "fixing" anything an index
+line names, open the sibling. Nested guides are NOT re-injected after
+`/compact` — on a long arc, re-open the crate's `SHARP-EDGES.md` itself.
 
 **A third consumer lives outside this repo**: homebrew-core's `pixtuoid`
 formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
@@ -121,7 +119,7 @@ drives sprite design — numbers in `crates/pixtuoid/SHARP-EDGES.md`.
 - No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks; budgeted files stay under their `gen-guides` caps (one-in-one-out). No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — he reviews every doc change himself, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
 - No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against sharp edges first.
 

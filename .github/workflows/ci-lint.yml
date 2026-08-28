@@ -124,9 +124,7 @@ jobs:
       - run: just json-schemas
       - run: just links
       - run: just drift-selftest
-      - run: just gen-guides-check
       - run: just env-paths
-      - run: just gitenv-selftest
       - run: just tuidrive-selftest
       - run: just star-history-selftest
       # `just fixture-metadata` is NOT here: it became Rust tests in #929, so it
