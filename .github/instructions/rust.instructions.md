@@ -8,8 +8,8 @@ description: "Rust coding standards for the pixtuoid workspace"
 These apply to all Rust in this Cargo workspace. The authoritative source is the
 root `CLAUDE.md` and the nested `crates/*/CLAUDE.md` — read those for the
 architecture invariants. Many things that look like a bug are documented,
-load-bearing design — read the item's own doc comment. This file is the condensed
-coding-standard slice.
+load-bearing design — read the item's own doc comment. This file is the
+condensed coding-standard slice.
 
 ## Errors & panics
 

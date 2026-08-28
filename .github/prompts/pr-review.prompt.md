@@ -138,8 +138,9 @@ Dispatch lenses in parallel, in the worktree, in the background. Verify every
 MEDIUM+ finding's premise (read the declaration's doc comment) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
 reaches exactly one terminal state in the PR thread (this list is CANONICAL —
-other docs point here): FIXED · REFUTED-with-trace (cite or ADD the sharp
-edge) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
+other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
+refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
+exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: the PR is wrong-sized, split or redesign it
 until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
 to the owner, who decides, whether or not this change touched its file; a

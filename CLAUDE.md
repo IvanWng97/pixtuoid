@@ -9,7 +9,7 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**How the guides load.** A nested `CLAUDE.md` says what its crate IS and
+**What the guides hold.** A nested `CLAUDE.md` says what its crate IS, and
 nothing else. Everything a change actually needs — the constraint that looks
 like a bug, the WHY, the test that pins it — is on the declaration it
 constrains: read the item's doc comment before changing it.
@@ -119,9 +119,9 @@ past ~16×16 px break on taller-cell terminals; bundled character sprites max at
 - No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — he reviews every doc change himself, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against sharp edges first.
+- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the declaration's own doc comment first.
 
 ## Where to look
 
