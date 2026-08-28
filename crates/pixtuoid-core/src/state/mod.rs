@@ -144,7 +144,7 @@ impl ToolKind {
 /// What an agent slot is doing right now.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ActivityState {
-    /// No tool running (debounced — see the `Active` sharp edge).
+    /// No tool running (debounced by [`crate::state::reducer::ACTIVE_GRACE_WINDOW`]).
     Idle,
     /// A tool call is in flight (or within the Active→Idle grace window).
     Active {
@@ -712,7 +712,12 @@ impl SceneState {
         0
     }
 
-    /// Which floor does `desk_index` belong to?
+    /// Which floor does `desk_index` belong to? Recomputed from CURRENT
+    /// capacities, while `AgentSlot.floor_idx` freezes at allocation — so after
+    /// growth `pixtuoid_scene::board::per_floor_counts` still counts an agent
+    /// that `pixtuoid_scene::floor::build_floor_scene` skips. The skip is
+    /// deliberate — desk 0 has a real occupant — and is pinned by
+    /// `build_floor_scene_skips_agent_below_grown_offset`.
     pub fn floor_of(&self, desk_index: GlobalDeskIndex) -> usize {
         self.floor_of_with_offsets(desk_index, &self.cumulative_offsets())
     }

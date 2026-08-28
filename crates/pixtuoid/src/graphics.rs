@@ -97,7 +97,7 @@ pub(crate) struct Detected {
 /// cell wide and half a cell tall. Drawing the SAME logical office into real
 /// pixels makes a logical unit `cell.w` px wide and `cell.h / 2` px tall —
 /// equal exactly when the cell is the ~1:2 the half-block technique already
-/// assumes (the terminal-cell-aspect sharp edge). `RenderScale` is isotropic,
+/// assumes. `RenderScale` is isotropic,
 /// so the SMALLER of the two wins: a non-1:2 cell letterboxes the office
 /// rather than stretching it, and stretched pixel art is the one outcome worth
 /// ruling out by construction.

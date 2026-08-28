@@ -2,9 +2,8 @@
 """Self-test for check_upstream_drift.py — a regex-parser regression is a SILENT
 monitor death: the weekly job either alarms on junk or watches nothing.
 
-Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass).
-No pytest dependency on purpose — the repo has no Python test harness.
-"""
+Run: `python3 scripts/check_upstream_drift_selftest.py` (exit 0 = pass). No pytest
+dependency on purpose — the repo has no Python test harness."""
 
 from __future__ import annotations
 
@@ -18,9 +17,8 @@ import traceback
 import urllib.error
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-# A `__pycache__` hit made this gate test a DIFFERENT file than the one on disk:
-# restoring a same-size checker inside one mtime tick left the .pyc valid, and a
-# reverted mutation kept failing. A gate that can read stale bytes is not a gate.
+# A `__pycache__` hit made this gate test a DIFFERENT file than the one on disk —
+# a same-size restore inside one mtime tick left the .pyc valid. Not a gate, then.
 sys.dont_write_bytecode = True
 import check_upstream_drift as d  # noqa: E402
 
@@ -326,10 +324,9 @@ def test_report_separates_verified_change_from_probe_health() -> None:
             "the probe-health section says what NOT to do",
         )
 
-        # A blind-ONLY case, because the one above cannot test it: with a breaking
-        # line injected, `breaking` carries the exit code and `blind`'s
-        # contribution is never exercised.
         def blind_only(*a: object, report: d.Report, **k: object) -> None:
+            """The case above cannot test this: with a breaking line injected,
+            `breaking` carries the exit code and `blind`'s is never exercised."""
             report.add_blind("PROBE-HEALTH-ONLY", "somewhere", "Checks were SKIPPED.")
 
         d.run_checks = blind_only
@@ -438,9 +435,8 @@ def test_enum_body_survives_struct_variants_and_indentation() -> None:
         f"a variant AFTER a struct variant survives (no first-`}}` truncation): {got}",
     )
 
-    # The OVER-capture direction: `upstream_codex_hooks` scrapes every CamelCase
-    # word, so a spill into the following `impl` becomes phantom variants — and a
-    # phantom is worse than a miss, because it makes a real rename look present.
+    # The OVER-capture direction: a spill into the following `impl` becomes a
+    # phantom variant, worse than a miss — it makes a real rename look present.
     indented = (
         "mod outer {\n"
         "    pub enum HookEventName {\n"
@@ -503,12 +499,10 @@ def test_every_block_reader_strips_comments_before_counting_braces() -> None:
 
 
 def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
-    """#933's direction: upstream GAINING a name we do not decode.
-
-    Scoped to siblings of what we already handle, because "upstream grew" alone
-    is not a signal — codex's `EventMsg` adds names constantly. `custom_tool_call`
-    beside `function_call` is the shape that cost four tool calls a turn.
-    """
+    """#933's direction: upstream GAINING a name we do not decode. Scoped to
+    siblings of what we handle, because "upstream grew" alone is not a signal —
+    codex's `EventMsg` adds names constantly. `custom_tool_call` beside
+    `function_call` is the shape that cost four tool calls a turn."""
     real = d.fetch
     saved = dict(d.CODEX_KNOWN_OMITTED)
     try:
@@ -629,13 +623,10 @@ def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None
 
 
 def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
-    """The stripper's docstring named this test before the test existed.
-
-    Tracking `'` as a string opener swallows the comment AFTER an odd number of
-    lifetimes into a fake literal, re-admitting every word inside it. An EVEN
-    count cannot show this — the fake span closes before the comment — so a
-    two-lifetime fixture passes under both implementations and proves nothing.
-    """
+    """Tracking `'` as a string opener swallows the comment AFTER an odd number of
+    lifetimes into a fake literal, re-admitting every word inside it. An EVEN count
+    cannot show this — the fake span closes before the comment — so a two-lifetime
+    fixture passes under both implementations and proves nothing."""
     odd = "fn f<'a>(x: &'a str) -> &'static u8 { /* PxGhost */ }"
     check("PxGhost" not in d.strip_rust_comments(odd),
           f"lifetimes must not open a string: {d.strip_rust_comments(odd)}")
@@ -645,8 +636,7 @@ def test_rust_comment_strip_is_not_confused_by_lifetimes() -> None:
     check(d.strip_rust_comments(in_string) == in_string,
           f"a `//` inside a string is not a comment: {d.strip_rust_comments(in_string)}")
 
-    # NESTED block comments: `/\\*.*?\\*/` stops at the first `*/` and re-admits
-    # `PxGhost` from inside the comment.
+    # NESTED: `/\\*.*?\\*/` stops at the first `*/` and re-admits `PxGhost`.
     nested = 'A, /* outer /* inner */ PxGhost */ B,'
     stripped = d.strip_rust_comments(nested)
     check("PxGhost" not in stripped, f"a nested comment leaks: {stripped}")
@@ -747,13 +737,10 @@ def test_every_believability_gate_can_name_the_document_it_doubts() -> None:
 
 
 def test_every_swept_url_declares_an_anchor() -> None:
-    """A document is either anchored or deliberately exempt — never neither.
-
-    The anchor gate is #793's fix: a pin that 200s as a facade reads as mass
-    drift without it. A new sweep that declares no anchor and is not listed as
-    structurally parsed would skip that gate silently, which is why this is a
-    classification test over every `*_URL` rather than a floor on ANCHORS.
-    """
+    """A document is either anchored or deliberately exempt — never neither. The
+    anchor gate is #793's fix: a pin that 200s as a facade reads as mass drift
+    without it. A new sweep declaring neither would skip that gate silently — hence
+    a classification test over every `*_URL`, not a floor on ANCHORS."""
     import re as _re
 
     src = (pathlib.Path(__file__).parent / "check_upstream_drift.py").read_text()
@@ -773,15 +760,11 @@ def test_every_swept_url_declares_an_anchor() -> None:
 
 
 def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
-    """`SURFACE_ROWS` maps an `OurNames` field to a key in a fragment the RUST
-    side writes. Nothing in either language binds the two, so a key renamed in
-    `src/drift_surface.rs` would surface only as a probe-health line in the
-    weekly run — loud enough to notice, late enough to have already skipped a
-    sweep. This is the binding, and it runs in `just lint`.
-
-    The reverse direction matters too: a key emitted that nothing consumes is
-    exactly the "maintaining what we don't use" this file exists to delete.
-    """
+    """Nothing in either language binds `SURFACE_ROWS` to the keys the RUST side
+    writes, so a key renamed in `src/drift_surface.rs` would surface only as a
+    probe-health line in the weekly run — late enough to have already skipped a
+    sweep. This is that binding, and it runs in `just lint`. The reverse too: a key
+    nothing consumes is the "maintaining what we don't use" this file deletes."""
     consumed = set()
     for field, rel, group, key in d.SURFACE_ROWS:
         frag = d.load_fragment(rel)
@@ -801,12 +784,10 @@ def test_every_surface_row_names_a_key_the_emitter_actually_writes() -> None:
 
 
 def test_one_absent_surface_row_does_not_blind_the_sources_beside_it() -> None:
-    """A gap in the emitted surface costs exactly what it feeds.
-
-    The 16 hand-written readers this replaced had per-reader `try` for it; the
-    fragments give per-KEY isolation instead, and it has to be the same promise
-    or one missing row silently darkens the whole watch.
-    """
+    """A gap in the emitted surface costs exactly what it feeds. The 16 hand-written
+    readers this replaced had per-reader `try` for it; the fragments give per-KEY
+    isolation instead, and it must be the same promise or one missing row silently
+    darkens the whole watch."""
     real = d.load_fragment
     try:
         full = {rel: real(rel) for rel in (d.CORE_LIB_FRAGMENT, d.CORE_BIN_FRAGMENT)}
@@ -861,14 +842,10 @@ def test_codex_enum_reader_drops_field_types_and_keeps_renames() -> None:
 
 
 def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
-    """Each parser, against a hand-made document of the shape it reads.
-
-    They fail SAFE (an empty parse becomes probe health, not a ⛔), but the
-    selftest's own premise is that a regex-parser regression is a silent monitor
-    death — and these four are what the whole remaining watch stands on. The
-    coverage that used to be here went with the source-scraping parsers it also
-    covered; this is the half that had to come back.
-    """
+    """Each parser, against a hand-made document of the shape it reads. They fail
+    SAFE (an empty parse becomes probe health, not a ⛔), but a regex-parser
+    regression is a silent monitor death, and these four are what the whole
+    remaining watch stands on."""
     cc = d.upstream_cc_hook_events(
         "# Hooks reference\n\n"
         "| Event | When it fires |\n|---|---|\n"
@@ -896,10 +873,8 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
     fields = d.upstream_copilot_field_names(schema)
     check(fields is not None and {"sessionId", "toolCallId"} <= fields, f"fields: {fields}")
 
-    # An unrecognised document must not parse to a NON-EMPTY set: that is what
-    # would report every name we depend on as GONE. Empty and None are both safe
-    # here — the believability gate turns either into probe health — so this
-    # asserts falsiness, not which of the two.
+    # An unrecognised document must not parse to a NON-EMPTY set — that reports
+    # every name as GONE. Empty or None are both safe, so this asserts falsiness.
     for name, fn in (
         ("events", d.upstream_copilot_events),
         ("namespaces", d.upstream_copilot_namespaces),
@@ -999,11 +974,9 @@ def test_omp_title_field_watch_requires_both_carriers() -> None:
 def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> None:
     """The gate #941 asks for: EVERY surface row's check, both directions, offline.
 
-    Each document is BUILT from the set we actually depend on, so adding an event
-    cannot make the test stale — and it is built in the UPSTREAM spelling, which
-    is the trap that hid codewhale's arm during review (upstream declares
-    `MessageSubmit`, we register `message_submit`).
-    """
+    Each document is BUILT from the set we depend on, so an added event cannot make
+    this stale, and in the UPSTREAM spelling — the trap that hid codewhale's arm in
+    review (upstream declares `MessageSubmit`, we register `message_submit`)."""
     real = d.fetch
     try:
         rep0 = d.Report()
@@ -1020,12 +993,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             return f"pub enum {enum} {{\n" + "".join(f"    {n},\n" for n in names) + "}\n"
 
         def tagged_enum(enum: str, names: list[str]) -> str:
-            # Shaped like the REAL codex enums, in the two dimensions the parsers
-            # defend: a STRUCT variant (so `_enum_body` must brace-balance rather
-            # than stop at the first `}`) and PascalCase idents whose snake_case
-            # tags derive — the path that delivers 7/7 of `ResponseItem` and 3/3
-            # of `RolloutItem` upstream, where a `rename` attr delivers almost
-            # none. A unit-variant-only fixture leaves both untested.
+            """Shaped like the REAL codex enums in the two dimensions the parsers
+            defend: a STRUCT variant (so `_enum_body` must brace-balance rather than
+            stop at the first `}`) and PascalCase idents whose snake_case tags derive
+            — the path that delivers 7/7 of `ResponseItem` and 3/3 of `RolloutItem`,
+            where a `rename` attr delivers almost none."""
             rows = "".join(
                 f"    {pascal(n)} {{ pxd: PxdType }},\n" if i == 0 else f"    {pascal(n)},\n"
                 for i, n in enumerate(names)
@@ -1072,10 +1044,8 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "}\n"
             )
 
-        # field -> (upstream spelling, {url: document} built from the given names).
-        # Two fields sharing one URL (codex/codex_event_msg, copilot/copilot_fields)
-        # each render the OTHER's set in full, so a case proves its own arm rather
-        # than riding its neighbour's blind.
+        # Two fields sharing one URL each render the OTHER's set in full, so a case
+        # proves its own arm rather than riding its neighbour's blind.
         cases = [
             ("reasonix", str, lambda ns: {
                 d.REASONIX_HOOK_URL:
@@ -1090,8 +1060,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + tagged_enum("EventMsg", ns)}),
             ("codex_response_item", str, lambda ns: {
                 d.CODEX_MODELS_URL: tagged_enum("ResponseItem", ns)}),
-            # The check reads the UNION of codex's two documents, so a name has to
-            # leave both to count as gone. Each document keeps its own anchor.
             ("codex_escalation", str, lambda ns: {
                 d.CODEX_PROTOCOL_URL: bare_enum("HookEventName", full["codex"])
                 + "".join(f'const {n.upper()}: &str = "{n}";\n' for n in ns),
@@ -1103,11 +1071,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("hermes", str, lambda ns: {
                 d.HERMES_PLUGINS_URL:
                     "VALID_HOOKS: Set[str] = {\n" + "".join(f'    "{n}",\n' for n in ns) + "}\n"}),
-            # Upstream GENERATES the enum from a `hook_events!` table: the
-            # plain-enum regex matches the macro DEFINITION and reads `$variant`
-            # placeholders as zero names, so the real document is only parsed by
-            # the `rust_block_after` fall-through. A plain-enum fixture would
-            # test the branch upstream does not use.
             ("grok", str, lambda ns: {
                 d.GROK_HOOK_URL:
                     "macro_rules! hook_events {\n"
@@ -1119,9 +1082,6 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "}\n\n"
                     "hook_events! {\n"
                     + "".join(f'    {n} {{ alias: "x" }},\n' for n in ns) + "}\n"}),
-            # A VALUE row: the vanish arm is a DIFFERENT port upstream, not an
-            # absent one, so the generic filler drives it by declaring the fillers
-            # instead of ours.
             ("openclaw_gateway_port", str, lambda ns: {
                 d.OPENCLAW_PATHS_URL: f"export const DEFAULT_GATEWAY_PORT = {ns[0]};\n"}),
             ("openclaw", str, lambda ns: {
@@ -1141,16 +1101,12 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                           for i, n in enumerate(full["opencode"]))
                 + "}\n"
                 + "".join(f'const S{i} = Schema.Literal("{st}");\n' for i, st in enumerate(ns)))),
-            # A VALUE row: upstream declares the const ONCE, so the document
-            # carries one declaration and a vanish is a different value in it.
             ("grok_xai_method", str, lambda ns: {
                 d.GROK_SESSION_STORAGE_URL:
                     f'const XAI_SESSION_UPDATE_METHOD: &\'static str = "{ns[0]}";\n'}),
             ("grok_xai_tags", pascal, lambda ns: {
                 d.GROK_NOTIFICATION_URL:
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
-            # Split across two documents like the real vocabulary: `ask` is only
-            # in ask.ts, so a case serving one file could not fire for it.
             ("omp_message_vocab", str, lambda ns: {
                 d.OMP_AI_TYPES_URL:
                     "export type Block = {\n"
@@ -1191,11 +1147,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         check(covered == rows, f"every surface row needs a case; differ: {covered ^ rows}")
 
         def drive(docs: dict[str, str]) -> d.Report:
-            # OFFLINE: every URL this case does not serve raises rather than going
-            # to the network. `else real(u)` made `just lint` issue 208 live
-            # requests per run — and `lint` joins its jobs with `wait`, so a
-            # blackholing network would hang preflight and pre-push at
-            # 30s/request (`just lint`'s parallel job join).
+            """OFFLINE: every URL this case does not serve raises rather than going
+            to the network. `else real(u)` made `just lint` issue 208 live requests
+            per run, and `lint` joins its jobs with `wait`, so a blackholing network
+            would hang preflight and pre-push at 30s/request."""
             def stub(u: str, _d: dict[str, str] = docs) -> str:
                 if u in _d:
                     return _d[u]
@@ -1209,24 +1164,17 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
         for field, spell, build in cases:
             names = full[field]
             check(bool(names), f"{field}: the fragment supplies a set")
-            # The tolerated alias can never fire, so it must not be the victim.
             pool = [n for n in names
                     if field != "opencode" or n not in d.OPENCODE_TOLERATED]
             # `dispatch_names` is an ANY-of check — one surviving documented name
             # clears it — so its vanish arm has to take them all.
             victims = pool if field == "dispatch_names" else pool[:1]
-            # The believability floor refuses a parse smaller than what we handle,
-            # so the vanish arm ADDS names as it drops one — shaped like the name
-            # it extends, since a filler this parser's character class rejects
-            # shrinks the set below the floor and SKIPS the check, proving nothing.
-            # `_` and not case is the axis: cursor's headings take `[a-z][A-Za-z]+`
-            # and its lone all-lowercase `stop` made an `islower()` test pick the
-            # snake_case suffix, silently skipping the whole cursor arm.
+            # The vanish arm ADDS as it drops, in the name's own shape — below the
+            # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
             stem = spell(names[-1])
             if stem.isdigit():
-                # A numeric VALUE row: a `Pxd` suffix still leaves our digits at
-                # the front, where the reader's `(\d+)` finds them and the arm
-                # reads as unchanged. Extra digits are what make it a real vanish.
+                # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,
+                # where the reader's `(\d+)` finds them and the arm reads unchanged.
                 sfx = ("0", "00")
             elif "_" in stem:
                 sfx = ("_pxd", "_pxdb")
@@ -1246,14 +1194,8 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
 
 
 def main() -> int:
-    # Derived, not hand-listed: a test missing from the runner is inert while
-    # the suite still prints "all checks passed". Derivation cannot see the OTHER
-    # half — a second `def` of the same name replaces the binding — so that is an
-    # AST scan, and it runs HERE rather than as a test because a test detecting
-    # duplicate names is itself shadowable by a duplicate.
-    # `ast.walk`, not `.body`: a top-level-only scan misses an `async def`, a
-    # nested `def`, and a rebind — each of which shadows a real test while the
-    # suite prints "all checks passed".
+    # Derived, not hand-listed — a missing test is inert while the suite prints
+    # "all checks passed". `ast.walk` over `.body`: a nested/async def shadows too.
     tree = ast.parse(pathlib.Path(__file__).read_text())
     defined: dict[str, list[int]] = {}
     for n in ast.walk(tree):
@@ -1267,6 +1209,7 @@ def main() -> int:
             )
         if name and name.startswith("test_"):
             defined.setdefault(name, []).append(n.lineno)
+    # Here, not in a test: a test detecting duplicate names is itself shadowable.
     if dupes := sorted(k for k, v in defined.items() if len(v) > 1):
         print(f"DRIFT SELFTEST FAILED:\n  - test name bound twice, shadowing: {dupes}")
         return 1
@@ -1283,9 +1226,8 @@ def main() -> int:
             )
             return 1
     for t in tests:
-        # A raise past a recorded `check()` would otherwise replace the whole
-        # FAILS list — including the line that already explains the failure —
-        # with a traceback from the code that ran on after it.
+        # A raise past a recorded `check()` would otherwise replace the whole FAILS
+        # list — the line that already explains the failure — with a traceback.
         try:
             t()
         except Exception:  # noqa: BLE001 - a raising test is a failing test

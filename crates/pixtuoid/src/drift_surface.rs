@@ -1,11 +1,11 @@
 //! This crate's half of the **drift surface** — the hook events we REGISTER,
 //! emitted as data for `check_upstream_drift.py`.
 //!
-//! `pixtuoid-core` emits the other half (what the decoders READ). Two fragments
-//! because each crate's names are private to it, and because registration and
-//! decoding answer different questions against different upstream documents —
-//! see the `*_EVENTS` sharp edge in `SHARP-EDGES.md`.
-//! `every_registered_*_event_decodes` is what binds them.
+//! `pixtuoid-core` emits what the decoders READ.
+//! `every_registered_*_event_decodes` binds registered→decoded; the reverse is
+//! unbound and is the costly direction — a decode arm with no `*_EVENTS` row
+//! rendered a permission-parked CC session as WORKING. Mechanising it needs the
+//! decoded fragment to mark HOOK names; most is transcript vocabulary.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -42,7 +42,7 @@ fn surface() -> Value {
 
     // SHIPPED, not decoded or registered: the value rides the plugin we install,
     // and the gateway port IS the daemon's runtime identity
-    // (`pixtuoid-core/SHARP-EDGES.md`), so a silent upstream bump collapses two
+    // so a silent upstream bump collapses two
     // live gateways onto one mascot. Read out of the shipped template rather than
     // copied, so the watch compares what actually installs.
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();

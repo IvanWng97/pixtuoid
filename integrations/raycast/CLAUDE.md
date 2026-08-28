@@ -42,8 +42,8 @@ generated — eslint/prettier-ignored, never hand-edit them. This is
 the exact wire JSON; `OutcomeRow` is `{id, outcome, message?}` — a bare machine
 token plus an optional failure-detail field, split from the old folded
 `failed: <msg>` form back when this in-repo copy was the only consumer — see
-the sharp edge below and the wire-shape sharp edge in
-`crates/pixtuoid/SHARP-EDGES.md`.)
+the sharp edge below and `OutcomeRow`'s own doc comment in
+`crates/pixtuoid/src/sources.rs`.)
 
 ## Sharp edges (don't be surprised by these)
 

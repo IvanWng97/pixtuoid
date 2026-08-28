@@ -9,13 +9,11 @@ in nested guides, auto-loaded when you touch their tree:
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
 
-**How the guides load.** A nested `CLAUDE.md` is an INDEX; the full entries
-live in siblings you must open: `SHARP-EDGES.md` (the edge + WHY + authority)
-and `WHERE-TO-LOOK.md` (non-obvious seams). Index blocks are GENERATED from
-the siblings (`just gen-guides`; drift fails `lint`) — edit the SIBLING, never
-the block. Before "fixing" anything an index line names, open the sibling.
-Nested guides are NOT re-injected after `/compact` — on a long arc, re-open
-the crate's `SHARP-EDGES.md` itself.
+**What the guides hold.** A nested `CLAUDE.md` says what its crate IS. The
+three that also carry operational content — `pixtuoid-core/tests/`, Raycast,
+site — keep it INLINE there. Everything else a change needs — the constraint that looks
+like a bug, the WHY, the test that pins it — is on the declaration it
+constrains: read the item's doc comment before changing it.
 
 **A third consumer lives outside this repo**: homebrew-core's `pixtuoid`
 formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
@@ -83,7 +81,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 ## Conventions
 
 - **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
-- **Comments: WHY only.** Only what the code can't say (workaround, constraint, invariant). Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. Fn-body comments ≤2 lines — a longer rationale isn't trimmed, it MOVES onto the declaration or a `SHARP-EDGES.md` entry. The rules are semantic, none demands brevity — a comment that passes them stays at whatever length it earned. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and where rustdoc documents the item (pub in a lib; everything in the bin) the intra-doc link also turns a rename into a `doc-check` red (the magic-number rule, applied to prose).
+- **Comments: WHY only.** Only what the code can't say (workaround, constraint, invariant). Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. Fn-body comments ≤2 lines — a longer rationale isn't trimmed, it MOVES onto the declaration. The rules are semantic, none demands brevity — a comment that passes them stays at whatever length it earned. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and where rustdoc documents the item (pub in a lib; everything in the bin) the intra-doc link also turns a rename into a `doc-check` red (the magic-number rule, applied to prose).
 - **No magic numbers** — reuse the existing authority (a dep's const, our registry/theme/layout value), else ONE named `const` at the narrowest covering scope; prefer a type (enum/newtype) for a related set. Two copies of one value is a latent drift bug — if a copy must cross a boundary, pin the pair with a test. Self-evident `0`/`1`/`2`, indices, and test fixtures stay inline.
 - **Errors**: `anyhow::Result` in app code, `thiserror` in core; hook listener + JSONL watcher log-and-continue, never panic. **No `unwrap()` outside tests.**
 - **Visibility**: layer-internal stays `pub(crate)` (`unreachable_pub` is a hard gate); every `pub` item in a published crate carries a doc comment (`missing_docs`); `#[doc(hidden)] pub` = mechanism-not-contract escape hatch.
@@ -91,7 +89,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding cites (or adds) a sharp edge** — the entry is edge + WHY + authority pointer; `gen-guides` fails past a size ceiling, so split grown entries. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the declaration it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
 ## Architecture invariants (load-bearing)
@@ -105,15 +103,16 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 ## Sharp edges (cross-crate ownership)
 
-Don't "fix" documented design. Each crate's guide indexes its own edges
-(verbatim-greppable into its `SHARP-EDGES.md`): **core** owns session
+Don't "fix" documented design. Ownership by crate: **core** owns session
 lifecycle/identity (registration, dedup, first-sight, liveness ladder,
 subagent parenting, feature boundaries) · **scene** owns look/motion (palette
 recolor by RGB equality, walk timing, footprints, sky/light invariants,
 reachability) · **binary** owns install/runtime wiring (config rewriting,
 desk growth, boot order, doctor, daemon announce-only) · **tui** owns the
 flush (popup geometry, hit-test ladders, key dispatch). Terminal cell aspect
-drives sprite design — numbers in `crates/pixtuoid/SHARP-EDGES.md`.
+drives sprite design: the half-block ▀ technique assumes ~1:2 cells, so sprites
+past ~16×16 px break on taller-cell terminals; bundled character sprites max at
+8×12 px.
 
 ## Things NOT to do
 
@@ -121,9 +120,9 @@ drives sprite design — numbers in `crates/pixtuoid/SHARP-EDGES.md`.
 - No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
 - No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
-- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks; budgeted files stay under their `gen-guides` caps (one-in-one-out). No `git push` without explicit user confirmation.
+- No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against sharp edges first.
+- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the declaration's own doc comment first.
 
 ## Where to look
 

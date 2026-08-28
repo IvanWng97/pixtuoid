@@ -772,7 +772,7 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
 }
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
-/// occupant, so the stable sort paints it over them (`SHARP-EDGES.md`).
+/// occupant, so the stable sort paints it over them.
 fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
     /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
     const CHAIR_BACK_TOP_DY: u16 = 6;

@@ -115,10 +115,9 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
 
     let mut mask = WalkableMask::new_open(buf_w, buf_h);
 
-    // Down to the WALL VISUAL bottom, not the full top_margin — the rows
-    // between are carpet apron under the windows, so blocking them pushed the
-    // walkable boundary south of the visible wall base (mask = ground
-    // projection, invariant #6).
+    // To the WALL VISUAL bottom, not the full top_margin: the rows between are
+    // carpet apron, and blocking them pushed the walkable boundary south of the
+    // visible wall base (invariant #6).
     mask.mark_blocked(
         0,
         0,
@@ -131,11 +130,9 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     let baseboard_top = buf_h.saturating_sub(BASEBOARD_H);
     mask.mark_blocked(0, baseboard_top, buf_w, BASEBOARD_H, 0);
 
-    // Both orientations block their FULL visual footprint (invariant #6). The
-    // only extra is coarse-router clearance, ASYMMETRIC by orientation:
-    // horizontal faces already fill a routing cell on their own, so a pad would
-    // be pure bloat; vertical walls are thinner than a cell and take
-    // `WALL_ROUTING_MARGIN_X` on the THIN axis only, westward.
+    // Both block their FULL visual footprint (invariant #6); only the router
+    // clearance is asymmetric — horizontal faces already fill a routing cell, while
+    // vertical walls are thinner and take `WALL_ROUTING_MARGIN_X` westward.
     for seg in room_walls {
         let (origin, size) = wall_segment_rect(seg, top_margin, room_walls);
         let mx = if seg.start.x == seg.end.x {
@@ -153,12 +150,9 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     }
 
     for desk in home_desks {
-        // The desk is a WALK-BEHIND piece: its footprint is a shallow south
-        // strip at the sprite base, so the monitor + surface overhang NORTH of
-        // the blocked ground. A walker passes behind them and is occluded by the
-        // desk's own y-sorted sprite — no full-body obstacle to weave around,
-        // and routes stay short. Stamped TOP-LEFT (not centred like visited
-        // furniture): the desk pos IS its NW corner.
+        // WALK-BEHIND: the footprint is a shallow south strip at the sprite base, so
+        // the monitor overhangs NORTH and a walker behind it is occluded by the desk's
+        // own y-sorted sprite. Stamped TOP-LEFT — the desk pos IS its NW corner.
         let desk_def = super::decor::desk_furniture_def();
         stamp_ground(
             &mut mask,
@@ -199,15 +193,12 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         else {
             continue;
         };
-        // WAYPOINT_STAMP_PAD_PX (not OBSTACLE_PAD_PX): waypoint furniture paints
-        // after the characters, so a visitor's body is occluded by the sprite
-        // and needs no extra clearance band.
+        // WAYPOINT_STAMP_PAD_PX, not OBSTACLE_PAD_PX: waypoint furniture paints after
+        // the characters, so a visitor is occluded and needs no clearance band.
         if matches!(wp.kind, WaypointKind::Pantry) {
-            // Only the counter's SOUTH base sits on the floor — the receding
-            // cabinet tops + backsplash are elevation that overhangs (invariant
-            // #6), and a character routed behind it is occluded by the counter's
-            // own y-sorted sprite. `stand_point` uses the FULL visual so the
-            // USER parks clear of the whole counter, not inside the upper sprite.
+            // Only the SOUTH base sits on the floor; cabinet tops and backsplash are
+            // overhang (invariant #6). `stand_point` uses the FULL visual instead, so
+            // the USER parks clear of the whole counter rather than inside it.
             let (tl, sz) = pantry_ground_rect(wp.pos, Size { w, h });
             mask.mark_blocked(tl.x, tl.y, sz.w, sz.h, WAYPOINT_STAMP_PAD_PX);
             continue;
@@ -238,17 +229,14 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     }
 
     for &WallDecorItem { kind, pos } in wall_decor {
-        // pad=1 (not OBSTACLE_PAD_PX): these elevated boards/cabinets overhang
-        // nothing solid, so a 2px clearance band on every side just inflated the
-        // blocked rect back to the full sprite width.
+        // pad=1, not OBSTACLE_PAD_PX: these overhang nothing solid, and a 2px band
+        // every side inflated the blocked rect back to the full sprite width.
         let def = furniture_def(kind.furniture());
         stamp_ground(&mut mask, &def, Anchor::TopLeft, pos, 1);
     }
 
-    // PhoneBooth + StandingDesk are also waypoints, so those entries double-block
-    // the same area; `mark_blocked` is idempotent. pad=1 (not OBSTACLE_PAD_PX)
-    // because aisles are tight and an extra pixel each side disconnects the
-    // routing grid through the aisle.
+    // PhoneBooth + StandingDesk double-block as waypoints too; `mark_blocked` is
+    // idempotent. pad=1 because an extra pixel each side disconnects tight aisles.
     for &PodDecorItem { kind, pos } in pod_decor {
         let def = furniture_def(kind.furniture());
         stamp_ground(&mut mask, &def, Anchor::Center, pos, 1);
@@ -380,9 +368,8 @@ mod tests {
 
     #[test]
     fn wall_decor_whiteboard_footprint_centers_under_the_wider_sprite() {
-        // The whiteboard is TopLeft-anchored and its ground footprint is the
-        // WHEEL SPAN, at sprite cols 2 and 11 of the wider sprite — hence the
-        // probe offsets below.
+        // TopLeft-anchored, and its ground footprint is the WHEEL SPAN at sprite
+        // cols 2 and 11 — hence the probe offsets below.
         use crate::layout::WallDecor;
         let pos = Point { x: 40, y: 30 };
         let wall_decor = vec![WallDecorItem {
@@ -454,11 +441,8 @@ mod tests {
     #[test]
     fn topleft_wall_decor_x_centering_is_parity_safe() {
         // `GroundAlign::Center` is center-ON-pos `⌊v/2⌋−⌊f/2⌋`, not center-IN-box
-        // `⌊(v−f)/2⌋`; the two agree ONLY at equal parity and diverge by 1px
-        // otherwise. Every TopLeft-stamped kind today is same-parity, so this
-        // FAILS the day one isn't and the 1px offset becomes a conscious
-        // decision. (Center-ANCHORED pieces are parity-immune — the visual term
-        // cancels.)
+        // `⌊(v−f)/2⌋`: they agree ONLY at equal parity. Every TopLeft kind today is
+        // same-parity, so this FAILS the day one isn't and the 1px becomes a choice.
         for kind in [
             Furniture::Whiteboard,
             Furniture::Bookshelf,
@@ -479,15 +463,12 @@ mod tests {
 
     #[test]
     fn pantry_south_strip_delegation_is_parity_safe() {
-        // `pantry_ground_rect`'s south edge is `pos.y + ⌈counter.h/2⌉`, the
-        // pre-refactor forked strip's was `pos.y + ⌊counter.h/2⌋`; the two agree
-        // ONLY for an EVEN counter.h. Every counter shipping today is even, so
-        // this FAILS the day an odd-height one lands and the 1px offset becomes
-        // a conscious decision. (The x-axis is parity-immune.)
+        // `pantry_ground_rect`'s south edge is `pos.y + ⌈counter.h/2⌉` where the
+        // forked strip used `⌊counter.h/2⌋`: equal only for an EVEN counter.h. This
+        // FAILS the day an odd-height one lands and the 1px becomes a choice.
         let mut counters = vec![crate::layout::rooms::pantry::COMPACT_COUNTER];
-        // Sweep widths so the large kitchen counter comes from the ONE authority
-        // (`compute_with_seed`), never a copy of its height literal. Duplicates
-        // are harmless — the assertion is idempotent per size.
+        // Sweep widths so the counter height comes from `compute_with_seed`, never a
+        // copy of its literal. Duplicates are harmless — the assertion is idempotent.
         for w in (60u16..=260).step_by(20) {
             if let Some(l) = crate::layout::SceneLayout::compute_with_seed(w, 130, None, 0) {
                 counters.push(l.pantry_counter_size());

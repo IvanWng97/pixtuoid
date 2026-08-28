@@ -8,8 +8,7 @@
 //!
 //! ## Why not just sort by the base row
 //!
-//! Today it WOULD be equivalent, and that is worth stating plainly rather than
-//! discovering later. [`Span::behind`] derives its edges from the base row,
+//! Today it WOULD be equivalent. [`Span::behind`] derives its edges from the base row,
 //! which is a total order, so the graph is acyclic by construction and a plain
 //! sort produces the same list. The graph earns its place two other ways:
 //!

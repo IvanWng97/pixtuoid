@@ -190,18 +190,8 @@ struct OnboardingFailure {
     line: String,
 }
 
-/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand back
-/// one presentable failure per failed row.
-///
-/// `choices` and `outcomes` are index-aligned. `NoOp` means "already in the DESIRED
-/// state — nothing written", so it sets the gate to the desired flag rather than
-/// hardcoding it closed: a NoOp for a CHECKED row must leave the gate OPEN, else an
-/// already-connected source the user just confirmed loses its live agents.
-///
-/// The `FailedOp` branches because `Failed` covers all three operations: connect,
-/// disconnect (an UNCHECKED row, which `freeze_for_skip` makes the common case) and the
-/// `HOOK_REMOVAL_FAILED_PREFIX` fold — an otherwise SUCCESSFUL disconnect with a
-/// residual.
+/// Reflect the onboarding apply's outcomes into the LIVE connected-set, and hand back one
+/// presentable failure per failed row. `choices` and `outcomes` are index-aligned.
 ///
 /// The RETURN is the surfacing half: in TUI mode the alternate screen owns the terminal,
 /// so the warn-floor log is not a user surface.
@@ -216,9 +206,13 @@ fn reflect_onboarding_outcomes(
         match oc {
             ChangeOutcome::Connected => connected.set(id, true),
             ChangeOutcome::Disconnected => connected.set(id, false),
+            // "Already in the DESIRED state — nothing written", so a NoOp on a CHECKED row
+            // must leave the gate OPEN, else its live agents vanish on confirmation.
             ChangeOutcome::NoOp => connected.set(id, *want),
             ChangeOutcome::Failed(e) => {
                 connected.set(id, false);
+                // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
+                // row, which `freeze_for_skip` makes the common case), and the fold below.
                 let (op, verb) = if *want {
                     (connection::FailedOp::Connect, "connect")
                 } else {
@@ -227,6 +221,8 @@ fn reflect_onboarding_outcomes(
                 tracing::warn!("onboarding: {id} failed to {verb}: {e}");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
+                // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
+                // presents as its own op rather than as a failed disconnect.
                 let line = match e.strip_prefix(crate::sources::HOOK_REMOVAL_FAILED_PREFIX) {
                     Some(reason) => {
                         connection::format_failure(connection::FailedOp::HookRemoval, name, reason)
@@ -276,7 +272,8 @@ fn is_quit_chord(code: KeyCode, mods: KeyModifiers) -> bool {
 }
 
 /// Windows delivers Press AND Release per keystroke, so without this guard every key
-/// double-fires there — `p` would pause then instantly unpause. Inert on Unix.
+/// double-fires there — `p` would pause then instantly unpause. Inert on Unix, which
+/// is why a local green run is no evidence. Pinned by `only_press_events_dispatch`.
 fn should_dispatch_key(kind: KeyEventKind) -> bool {
     kind == KeyEventKind::Press
 }
@@ -462,6 +459,9 @@ fn dispatch_key(
 
 pub type Term = Terminal<CrosstermBackend<Stdout>>;
 
+/// Enters raw mode + the alternate screen ATOMICALLY: a failure after raw mode is on rolls
+/// the terminal all the way back, or the error path strands the user's shell echo-less
+/// and/or on the alt screen. `Terminal::new`'s `.size()` query can fail too.
 pub fn setup_terminal() -> Result<Term> {
     // On the WinAPI fallback (no VT), crossterm maps Color::Rgb to console attribute 0
     // and the office renders black-on-black invisible. Gate, don't degrade.
@@ -476,10 +476,6 @@ pub fn setup_terminal() -> Result<Term> {
     let mut out = stdout();
     // Mouse capture drives the hover tooltip: terminals emit MouseEventKind::Moved on
     // cursor motion only while it is on.
-    //
-    // Keep setup ATOMIC — a failure after raw mode is on must roll the terminal all the
-    // way back, else the error path strands the user's shell in raw mode (no echo)
-    // and/or the alt screen. `Terminal::new`'s `.size()` query can fail too.
     if let Err(e) = execute!(out, EnterAlternateScreen, EnableMouseCapture) {
         let _ = unwind_terminal_modes(&mut out, disable_raw_mode);
         return Err(e.into());
@@ -491,19 +487,18 @@ pub fn setup_terminal() -> Result<Term> {
     })
 }
 
-/// THE terminal-mode unwind: the ONE definition of the order every exit path takes.
-/// `pub` for the panic hook in `crash.rs`, a module of the BIN crate.
+/// THE terminal-mode unwind: the ONE definition of the order every exit path takes. `pub`
+/// for the panic hook in `crash.rs`, a module of the BIN crate.
 ///
-/// Every step runs even when an earlier one fails, and the FIRST error is returned: a
-/// `?` after the escape-sequence write would skip `disable_raw` exactly when it is
-/// needed most and strand the user's shell echo-less.
+/// Every step runs even when an earlier one fails and the FIRST error is returned — a `?`
+/// after the escape write would skip `disable_raw` exactly when it is needed most. And
+/// DisableMouseCapture must run while raw mode is still ON: on Windows it restores the
+/// input mode snapshotted at Enable time (raw-era), so after `disable_raw_mode` it re-raws
+/// the console. Either slip strands the user's shell echo-less.
 pub fn unwind_terminal_modes<W: std::io::Write>(
     out: &mut W,
     disable_raw: impl FnOnce() -> std::io::Result<()>,
 ) -> Result<()> {
-    // DisableMouseCapture must run while raw mode is still ON: on Windows it restores
-    // the input mode snapshotted at Enable time (raw-era), so running it after
-    // disable_raw_mode re-raws the console and leaves the user's shell echo-less.
     let seq = execute!(out, DisableMouseCapture, LeaveAlternateScreen);
     let raw = disable_raw();
     seq?;
@@ -560,27 +555,21 @@ pub(crate) struct TuiSession {
     pub first_run: bool,
 }
 
-/// Whether a left-click at `(col, row)` landed on the wall's star/repo link,
-/// given the terminal's `(cols, rows)`.
-///
-/// Callers MUST gate this on `renderer.cached_layout().is_some()` — the wall
-/// display only paints with a layout, so an ungated hit phantom-launches a
-/// browser on a too-small frame or mid floor-slide.
-///
-/// Note the asymmetry with [`version_popup_url_clicked`]: this hit-tests the
-/// SCENE rect (footer excluded), that one the full terminal bounds.
+/// Whether a left-click at `(col, row)` landed on the wall's star/repo link, given the
+/// terminal's `(cols, rows)`. Callers MUST gate this on `renderer.cached_layout().is_some()`
+/// — the wall display only paints with a layout, so an ungated hit phantom-launches a
+/// browser on a too-small frame or mid floor-slide. Note the asymmetry with
+/// [`version_popup_url_clicked`]: this hit-tests the SCENE rect, that one the full bounds.
 fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
     let scene = renderer::scene_rect(ratatui::layout::Rect::new(0, 0, term.0, term.1));
     widgets::star_hit_rect(scene)
         .is_some_and(|s| s.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
-/// Whether a left-click at `(col, row)` landed on the version popup's URL,
-/// given the terminal's `(cols, rows)`.
-///
-/// `scale` is the PAINTER's own last frame-scale, so the hit geometry matches
-/// what was actually painted rather than the popup's resting size — the popup
-/// is clickable mid-animation.
+/// Whether a left-click at `(col, row)` landed on the version popup's URL, given the
+/// terminal's `(cols, rows)`. `scale` is the PAINTER's own last frame-scale, so the hit
+/// geometry matches what was actually painted rather than the popup's resting size — the
+/// popup is clickable mid-animation.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
     let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
@@ -606,12 +595,10 @@ struct KeyCtx<'a, B: ratatui::backend::Backend<Error: Send + Sync + 'static>> {
     respawn: fn(&crate::audio::AudioHandle, f32),
 }
 
-/// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the
-/// single piece of control flow the caller's event loop keeps.
-///
-/// Paired with [`dispatch_key`], which decodes; this applies. Splitting them
-/// is what makes the arms reachable from a test at all — `run_tui` needs a
-/// real terminal.
+/// Apply one decoded [`KeyAction`], returning whether it asked to QUIT — the single piece
+/// of control flow the caller's event loop keeps. Paired with [`dispatch_key`], which
+/// decodes; splitting them is what makes the arms reachable from a test at all, since
+/// `run_tui` needs a real terminal.
 fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
     action: KeyAction,
     cx: &mut KeyCtx<'_, B>,
@@ -621,8 +608,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
         KeyAction::Quit => return true,
         KeyAction::TogglePause => {
             cx.ui.toggle_pause();
-            // Unpause restores the user's own m-key state rather than
-            // clobbering it.
+            // Unpause restores the user's own m-key state rather than clobbering it.
             cx.audio_ctl.set_paused(cx.ui.paused());
         }
         KeyAction::ToggleHelp => cx.ui.toggle_help(),
@@ -692,8 +678,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             if cx.ui.connection.open {
                 cx.ui.close_connection();
             } else {
-                // FS reads happen on open and after each toggle, never per
-                // frame.
+                // FS reads happen on open and after each toggle, never per frame.
                 let rows = connection::build_rows(&cx.connected.snapshot(), &cx.ui.read_conn_log());
                 cx.ui.open_connection(rows);
             }
@@ -774,35 +759,154 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cx.ui.close_onboarding();
             surface_onboarding_failures(cx.ui, cx.connected, failed);
         }
-        KeyAction::OnboardingSkip => {
-            // Skip marks onboarding done WITHOUT changing any hooks: freeze each
-            // detected source to its REAL current state — live-gate connected OR
-            // already carrying installed hooks (a pre-0.12 upgrader has hooks but
-            // no `[sources]` flag). The apply below re-installs those idempotently
-            // and leaves the rest disconnected, so `[sources]` becomes non-empty —
-            // onboarding won't re-trigger — yet NO hooks are added or removed.
-            let snap = cx.connected.snapshot();
-            let ids: Vec<&'static str> = cx
-                .ui
-                .onboarding_ui
-                .rows
-                .iter()
-                .map(|r| r.source_id)
-                .collect();
-            let freeze = crate::sources::skip_freeze(ids, &snap);
-            let outcomes = crate::sources::apply_choices(cx.config_path, &freeze);
-            // The freeze persists connected=true for a pre-0.12 upgrader's hooked
-            // sources, so the in-process gate must open THIS session too — else
-            // their office stays empty until the next restart re-seeds it from the
-            // flags.
-            let failed = reflect_onboarding_outcomes(cx.connected, &freeze, &outcomes);
-            cx.ui.close_onboarding();
-            surface_onboarding_failures(cx.ui, cx.connected, failed);
-        }
+        KeyAction::OnboardingSkip => apply_onboarding_skip(cx),
     }
     false
 }
 
+/// Skip marks onboarding done WITHOUT changing any hooks: `skip_freeze` pins each detected
+/// source to its REAL current state — live-gate connected OR already carrying installed
+/// hooks (a pre-0.12 upgrader has hooks but no `[sources]` flag). The apply re-installs
+/// those idempotently and leaves the rest disconnected, so `[sources]` becomes non-empty
+/// (onboarding won't re-trigger) yet NO hooks are added or removed.
+fn apply_onboarding_skip<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    cx: &mut KeyCtx<'_, B>,
+) {
+    let snap = cx.connected.snapshot();
+    let ids: Vec<&'static str> = cx
+        .ui
+        .onboarding_ui
+        .rows
+        .iter()
+        .map(|r| r.source_id)
+        .collect();
+    let freeze = crate::sources::skip_freeze(ids, &snap);
+    let outcomes = crate::sources::apply_choices(cx.config_path, &freeze);
+    // The freeze persists connected=true for a pre-0.12 upgrader's hooked sources, so the
+    // in-process gate must open THIS session too, or their office stays empty until restart.
+    let failed = reflect_onboarding_outcomes(cx.connected, &freeze, &outcomes);
+    cx.ui.close_onboarding();
+    surface_onboarding_failures(cx.ui, cx.connected, failed);
+}
+
+/// The mouse hit-test LADDER, in order: modals swallow first — a click must never leak to the
+/// scene behind them, where a coffee-machine or branding hit launches a browser — then the
+/// version popup's URL, then the scene. Help is tested before the popup guard so it wins even
+/// mid popup-dismiss animation. The picker/dashboard/connection overlays are inert BY DESIGN:
+/// they have explicit close keys (Tab / s / t / Esc), so a click never dismisses them.
+fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
+    m: crossterm::event::MouseEvent,
+    ui: &mut ui_state::UiState,
+    renderer: &mut TuiRenderer<B>,
+    scene_rx: &SceneRx,
+    focus_roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
+    now: SystemTime,
+) {
+    let left_down = matches!(m.kind, MouseEventKind::Down(MouseButton::Left));
+    if ui.onboarding_open() {
+        return;
+    }
+    if ui.help_open() {
+        if left_down {
+            ui.close_help();
+        }
+        return;
+    }
+    if renderer.last_popup_scale() > 0.0 {
+        // Only the URL link is clickable while the popup is animating or visible, at the
+        // painter's own frame-scale so the geometry matches what was actually painted.
+        if left_down
+            && crossterm::terminal::size().is_ok_and(|t| {
+                version_popup_url_clicked(m.column, m.row, renderer.last_popup_scale(), t)
+            })
+        {
+            let _ = open::that(widgets::VERSION_POPUP_URL);
+        }
+        return;
+    }
+    if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open {
+        return;
+    }
+    match m.kind {
+        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+            renderer.set_mouse_pos(Some((m.column, m.row)));
+        }
+        MouseEventKind::Down(MouseButton::Left) => {
+            renderer.set_mouse_pos(Some((m.column, m.row)));
+            let on_star = renderer.cached_layout().is_some()
+                && crossterm::terminal::size().is_ok_and(|t| star_clicked(m.column, m.row, t));
+            if on_star {
+                let _ = open::that(widgets::REPO_URL);
+            } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {
+                // Empty on purpose: the click was consumed. The coffee-before-pet order below
+                // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
+            } else if renderer
+                .cached_layout()
+                .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, m.column, m.row))
+            {
+                let _ = open::that("https://buymeacoffee.com/IvanWng97");
+            } else if let Some(pixtuoid_scene::pet::PetFrame {
+                pos: pet_pos,
+                anim,
+                kind,
+            }) = renderer.cached_pet_pos()
+            {
+                if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
+                    && renderer::hit_test_pet(kind, pet_pos, anim, m.column, m.row)
+                {
+                    renderer.set_active_pet(Some(renderer::PetState {
+                        petted_at: now,
+                        pet_pos,
+                        kind,
+                        floor_idx: renderer.current_floor(),
+                    }));
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The SIGINT arm, pinned ONCE outside the frame loop: a per-iteration `ctrl_c()` drops the
+/// subscription mid-gap, and an external SIGINT would then hit the default disposition and
+/// kill the process mid-altscreen with mouse reporting still on, leaving the shell unusable
+/// until `reset`. BOXED so a registration failure can disarm the arm by swapping in a
+/// pending future — a resolved future must never be polled again.
+fn pin_ctrl_c() -> std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>
+{
+    Box::pin(tokio::signal::ctrl_c())
+}
+
+/// The SIGTERM arm — same terminal-restoring purpose as [`pin_ctrl_c`]. A registration
+/// failure and a closed stream both park on `pending`: this is a `select!` QUIT arm, so
+/// resolving it would tear the office down on a non-event.
+#[cfg(unix)]
+fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
+    let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
+    async move {
+        match sig {
+            Ok(mut s) => {
+                if s.recv().await.is_none() {
+                    std::future::pending::<()>().await;
+                }
+            }
+            Err(e) => {
+                tracing::error!(
+                    %e,
+                    "SIGTERM handler registration failed — an external \
+                     SIGTERM will not restore the terminal"
+                );
+                std::future::pending::<()>().await;
+            }
+        }
+    }
+}
+
+/// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
+/// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
+/// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
+/// `audio_ctl` is a LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
+/// the device thread it owns; built after the pack-load `?`, so a bad `--pack-dir` can't strand it.
 pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
@@ -823,15 +927,10 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let pack = embedded_pack::load_sprite_pack(pack_dir)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
-    // The controller OWNS the audio device thread. Built HERE, after the pack-load `?`
-    // above, so a bad --pack-dir never leaves a spawned thread un-joined; and it is a
-    // `run_tui` local, so EVERY exit below (q / Ctrl-C / terminate / error) drops it and
-    // joins the device thread before the process exits — no manual shutdown call.
     let mut audio_ctl =
         crate::audio::AudioController::new(audio_cfg.muted, audio_cfg.volume, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
-    // With no agent CLIs detected there is nothing to connect, so the overlay stays
-    // closed and the office shows normally.
+    // With no agent CLIs detected there is nothing to connect: the overlay stays closed.
     let detected_clis = if first_run {
         crate::sources::detect()
     } else {
@@ -839,10 +938,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     };
     let onboarding_ui = welcome::WelcomeUi::from_detected(&detected_clis);
 
-    // The version popup yields to onboarding, but still STAMPS `last_seen_version` so
-    // it won't pop later. Gating on the overlay SHOWING rather than on bare `first_run`
-    // is load-bearing: `first_run` stays true forever for a no-CLI user, which would
-    // mute the popup for good.
+    // Yields to onboarding but still STAMPS `last_seen_version`. Gating on the overlay
+    // SHOWING, not on `first_run` — true forever for a no-CLI user — is what unmutes it.
     let version_popup = if !onboarding_ui.is_empty() {
         let _ = resolve_version_popup(&config_path);
         false
@@ -856,37 +953,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     const FRAME_TICK_MS: u64 = 33;
     let tick = Duration::from_millis(FRAME_TICK_MS);
     let result: Result<()> = (async {
-        // An EXTERNAL SIGINT/SIGTERM would otherwise hit the default disposition and
-        // kill the process mid-altscreen with mouse reporting on, leaving the shell
-        // unusable until `reset`. Pinned ONCE outside the loop — a per-iteration
-        // `ctrl_c()` drops the subscription mid-gap — and boxed so a registration
-        // FAILURE can disarm the arm by swapping in a pending future, since a resolved
-        // future must never be polled again.
-        let mut ctrl_c: std::pin::Pin<
-            Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>,
-        > = Box::pin(tokio::signal::ctrl_c());
+        let mut ctrl_c = pin_ctrl_c();
         #[cfg(unix)]
-        let terminate = {
-            let sig = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate());
-            async move {
-                match sig {
-                    Ok(mut s) => {
-                        if s.recv().await.is_none() {
-                            // Stream closed without a signal — never quit on that.
-                            std::future::pending::<()>().await;
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            %e,
-                            "SIGTERM handler registration failed — an external \
-                             SIGTERM will not restore the terminal"
-                        );
-                        std::future::pending::<()>().await;
-                    }
-                }
-            }
-        };
+        let terminate = terminate_signal();
         #[cfg(not(unix))]
         let terminate = std::future::pending::<()>();
         tokio::pin!(terminate);
@@ -908,10 +977,8 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
             renderer.render(&snapshot, &pack, now)?;
 
-            // The sweep's `fetch_max` keeps capacity monotone: a shrink would otherwise
-            // shift the cumulative offsets and remap floor-1+ agents onto the wrong
-            // desks. Agents past the current layout's capacity go invisible but stay
-            // alive, and reappear when the terminal grows back.
+            // `fetch_max` keeps capacity monotone: a shrink would shift the cumulative
+            // offsets and remap floor-1+ agents onto the wrong desks (they go invisible).
             if let Some(layout) = renderer.cached_layout() {
                 cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }
@@ -943,90 +1010,9 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                             },
                         );
                     }
-                    Event::Mouse(_) if ui.onboarding_open() => {
-                        // Modal for the mouse too: swallow every event so nothing leaks
-                        // to the scene behind the overlay.
+                    Event::Mouse(m) => {
+                        handle_mouse_event(m, &mut ui, &mut renderer, &scene_rx, &focus_roots, now)
                     }
-                    Event::Mouse(m) if ui.help_open() => {
-                        // Every mouse event is swallowed so nothing leaks to the scene
-                        // behind it (a coffee-machine / branding click launches a
-                        // browser). Placed before the popup guard so help wins even mid
-                        // popup-dismiss animation.
-                        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left)) {
-                            ui.close_help();
-                        }
-                    }
-                    Event::Mouse(m) if renderer.last_popup_scale() > 0.0 => {
-                        // Only the URL link is clickable while the popup is animating
-                        // or visible. The painter's own frame-scale is used so the click
-                        // geometry matches what was actually painted.
-                        if matches!(m.kind, MouseEventKind::Down(MouseButton::Left))
-                            && crossterm::terminal::size().is_ok_and(|t| {
-                                version_popup_url_clicked(
-                                    m.column,
-                                    m.row,
-                                    renderer.last_popup_scale(),
-                                    t,
-                                )
-                            })
-                        {
-                            let _ = open::that(widgets::VERSION_POPUP_URL);
-                        }
-                    }
-                    Event::Mouse(_)
-                        if ui.theme_picker.is_some() || ui.dashboard.open || ui.connection.open =>
-                    {
-                        // These paint centered over the scene, so a click on an exposed
-                        // edge must not fall through and launch a browser. Inert by
-                        // design: they have explicit close keys (Tab / s / t / Esc), so
-                        // a click does NOT dismiss them.
-                    }
-                    Event::Mouse(m) => match m.kind {
-                        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
-                            renderer.set_mouse_pos(Some((m.column, m.row)));
-                        }
-                        MouseEventKind::Down(MouseButton::Left) => {
-                            renderer.set_mouse_pos(Some((m.column, m.row)));
-                            let on_star = renderer.cached_layout().is_some()
-                                && crossterm::terminal::size()
-                                    .is_ok_and(|t| star_clicked(m.column, m.row, t));
-                            if on_star {
-                                let _ = open::that(widgets::REPO_URL);
-                            } else if focus_clicked_agent(
-                                &mut renderer,
-                                &scene_rx,
-                                &focus_roots,
-                                m.column,
-                                m.row,
-                                now,
-                            ) {
-                                // Empty on purpose: the click was consumed. An agent
-                                // wins over the coffee Easter egg and the pet, matching
-                                // the hover ladder in renderer.rs.
-                            } else if renderer.cached_layout().is_some_and(|layout| {
-                                renderer::hit_test_coffee_machine(layout, m.column, m.row)
-                            }) {
-                                let _ = open::that("https://buymeacoffee.com/IvanWng97");
-                            } else if let Some(pixtuoid_scene::pet::PetFrame {
-                                pos: pet_pos,
-                                anim,
-                                kind,
-                            }) = renderer.cached_pet_pos()
-                            {
-                                if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                                    && renderer::hit_test_pet(kind, pet_pos, anim, m.column, m.row)
-                                {
-                                    renderer.set_active_pet(Some(renderer::PetState {
-                                        petted_at: now,
-                                        pet_pos,
-                                        kind,
-                                        floor_idx: renderer.current_floor(),
-                                    }));
-                                }
-                            }
-                        }
-                        _ => {}
-                    },
                     _ => {}
                 }
                 polled = event::poll(Duration::from_millis(0))?;
@@ -1162,9 +1148,8 @@ mod teardown_tests {
         );
     }
 
-    /// Unix-only: with crossterm's ANSI flag false — as under `windows-test` (piped
-    /// stdout, no console, no `TERM`) — these sequences go to the console API and no
-    /// writer ever sees a byte to assert on.
+    /// Unix-only: with crossterm's ANSI flag false — as under `windows-test` (piped stdout,
+    /// no console, no `TERM`) — these go to the console API and no writer sees a byte.
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
@@ -1223,8 +1208,8 @@ mod teardown_tests {
 
 #[cfg(test)]
 mod runtime_model {
-    // Pins why the `block_in_place` wraps were removed — see the tui/CLAUDE.md
-    // `block_on` sharp edge.
+    // Pins why the `block_in_place` wraps were removed: the loop runs as the
+    // `block_on` ROOT future, where `block_in_place` is inert rather than a yield.
     #[test]
     fn block_in_place_is_inert_on_the_block_on_thread() {
         let rt = tokio::runtime::Builder::new_multi_thread()
@@ -2155,10 +2140,8 @@ mod apply_key_action_tests {
                     &theme::NORMAL,
                     Vec::new(),
                 ),
-                // UNMUTED via `new_with` + a no-op spawn: an unmuted `new`
-                // would open the machine's real output device, and a MUTED
-                // controller makes pause unobservable (`set_paused` ORs the
-                // mute flag in, so the handle stays muted either way).
+                // UNMUTED via `new_with` + a no-op spawn: an unmuted `new` opens the real
+                // device, and a MUTED one hides pause (`set_paused` ORs the mute flag in).
                 audio_ctl: crate::audio::AudioController::new_with(
                     false,
                     1.0,
@@ -2283,16 +2266,11 @@ mod apply_key_action_tests {
         assert_eq!(h.renderer.debug_walkable(), before, "w must flip back");
     }
 
-    /// The click predicates were made pure so they COULD be tested; these are
-    /// that. Both were previously unreachable — they called
-    /// `crossterm::terminal::size()` internally, which under `cargo test` has no
-    /// tty and returned `Err` -> `false` unconditionally.
-    ///
-    /// Deliberately NOT asserted: the scene-rect-vs-full-bounds asymmetry
-    /// between the two. `star_hit_rect` places the star at `scene.y + 1` height
-    /// 1 and `scene_rect` shrinks only HEIGHT, so both framings yield an
-    /// identical star rect on any terminal taller than two rows — an assertion
-    /// there would be near-unfalsifiable.
+    /// The click predicates were made pure so they COULD be tested — both were previously
+    /// unreachable, calling `crossterm::terminal::size()` internally, which under `cargo test`
+    /// has no tty and returned `Err` -> `false` unconditionally. Deliberately NOT asserted:
+    /// the scene-rect-vs-full-bounds asymmetry — `star_hit_rect` puts the star at `scene.y +
+    /// 1` height 1 and `scene_rect` shrinks only HEIGHT, so both framings agree above 2 rows.
     #[test]
     fn star_clicked_hits_only_the_star_span() {
         use crate::tui::widgets::star_hit_rect;

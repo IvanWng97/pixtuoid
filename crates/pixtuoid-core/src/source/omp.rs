@@ -1,34 +1,8 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
-//! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`.
-//! That root is USUALLY `<agent-dir>/sessions`, but the XDG redirect flattens
-//! the `agent/` segment away — see `omp_sessions_dir`, which owns every axis.
-//! TRANSCRIPT-ONLY: omp's "hooks" are in-process TS extension modules, so there
-//! is no shell-hook install target.
-//!
-//! Wire shape (upstream `packages/coding-agent/src/session/`):
-//! - **File**: `${fileSafeTimestamp}_${uuidv7}.jsonl`, under a per-cwd encoded
-//!   dir that always starts with `-`. Line 1 is a fixed-width 256-byte
-//!   `type:"title"` slot rewritten IN PLACE on rename (pwrite at offset 0 —
-//!   the tail cursor sits past byte 256, so it is never re-read); line 2 the
-//!   `type:"session"` header (id, cwd); legacy files lack the slot.
-//! - **Turn**: `type:"message"` entries — `role:"assistant"` content carries
-//!   `type:"toolCall"` blocks (`{id,name,arguments}`); `role:"toolResult"`
-//!   closes one (`toolCallId`). A `custom` entry
-//!   `customType:"tool_execution_start"` duplicates each toolCall right
-//!   before execution — deliberately NOT decoded (same `tool_use_id` would
-//!   double-count `tool_call_count`).
-//! - **Exit**: a `custom` entry `customType:"session_exit"` is appended on
-//!   every clean teardown incl. SIGINT/SIGTERM — the session-ended marker.
-//!   Skipped when the session never produced an assistant message; SIGKILL
-//!   writes nothing → stale-sweep.
-//! - **Subagents**: the `task` tool persists each child as a SEPARATE file
-//!   `<parent-path-minus-.jsonl>/<taskId>.jsonl`, recursively — linkage is the
-//!   PATH NESTING, not a header field (the child header has no
-//!   `parentSession`).
-//!
-//! Sharp edge: fork / branch / version-migration / tool-output pruning REWRITE
-//! the file atomically (temp + rename → new inode); the watcher re-stats by
-//! path, so a rewrite reads as a fresh transcript. Rare enough to live with.
+//! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`;
+//! [`omp_sessions_dir`] owns every axis of that root. TRANSCRIPT-ONLY: omp's
+//! "hooks" are in-process TS extension modules, so there is no shell-hook
+//! install target. Wire shape: upstream `packages/coding-agent/src/session/`.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -52,20 +26,12 @@ pub const SOURCE_NAME: &str = "omp";
 
 /// omp's SESSIONS root, mirroring `dirs.ts` — deliberately NOT
 /// `omp_agent_dir().join("sessions")`, because the XDG redirect FLATTENS the
-/// `agent/` segment away (`$XDG_DATA_HOME/omp/sessions`).
-///
-/// Axes, in precedence order: `PI_CODING_AGENT_DIR` (dropped when it equals the
-/// `PI_PROFILE`-derived dir); `OMP_PROFILE` else `PI_PROFILE` →
-/// `profiles/<name>/agent`, where `OMP_PROFILE` wins whenever PRESENT so an
-/// EMPTY value selects default rather than falling through; `PI_CONFIG_DIR` as
-/// a directory NAME under home; XDG on linux+darwin, only with no override and
-/// only when the target EXISTS (the file's header claims otherwise — its code
-/// calls `fs.existsSync`).
-///
-/// All three directory vars are read through the `.env` overlay first
-/// (`with_omp_dotenv`, upstream `env.ts`), because upstream applies those files
-/// and then REBUILDS this resolver — so a var set only in `~/.env` moves omp's
-/// sessions dir, and reading process env alone would watch an empty directory.
+/// `agent/` segment away (`$XDG_DATA_HOME/omp/sessions`). Every directory var is
+/// read through the `.env` overlay first (`with_omp_dotenv`): upstream applies
+/// those files and then REBUILDS this resolver, so a var set only in `~/.env`
+/// moves the sessions dir and process env alone would watch an empty directory.
+/// The read is deliberately UNBOUNDED, unlike `source/`'s per-refresh probe
+/// reads: a cap could truncate a key upstream's own `parseEnvFile` honors.
 pub fn omp_sessions_dir() -> PathBuf {
     let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
         std::fs::read_to_string(p).ok()
@@ -111,20 +77,11 @@ impl OmpEnv {
     }
 }
 
-/// Node's `path.join` for the ONE place the difference bites: a second segment
-/// that is ROOTED. Node appends it to the base; Rust's `Path::join` discards the
-/// base (`PathBuf::push`: an absolute path "replaces the current path", and one
-/// with a prefix but no root "replaces self"). omp joins `PI_CONFIG_DIR` under
-/// the home dir, so Rust's semantics would let it escape a home it never escapes
-/// upstream.
-///
-/// Dropping the PREFIX matters as much as the root, and only on Windows: there
-/// `C:\srv\omp` parses as Prefix+RootDir and replaces the base, while on Unix it
-/// is one ordinary component that never could. Node keeps that `C:` as a literal
-/// segment (`<home>\C:\srv\omp`), which Windows cannot even create — so for that
-/// pathological input we deliberately produce the BOUND `<home>\srv\omp` rather
-/// than reproduce an unusable path byte-for-byte. `..` is likewise left literal
-/// rather than lexically normalized; the filesystem resolves it the same way.
+/// Node's `path.join` for the ONE place the difference bites: a ROOTED second
+/// segment, which Node appends while Rust's `Path::join` lets it REPLACE the base
+/// — and omp joins `PI_CONFIG_DIR` under a home it never escapes upstream. The
+/// PREFIX matters as much, and only on Windows: `C:\srv\omp` stays bound to
+/// `<home>\srv\omp`, not Node's literal, uncreatable `<home>\C:\srv\omp`.
 fn node_join(base: &Path, segment: &str) -> PathBuf {
     let mut out = base.to_path_buf();
     for c in Path::new(segment).components() {
@@ -188,15 +145,16 @@ fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
 }
 
 /// `DirResolver`'s `agentDir`, plus the `isDefault` flag the XDG arm gates on.
+/// Precedence: a named profile derives its own agent dir and IGNORES the override;
+/// otherwise `PI_CODING_AGENT_DIR` wins, except when it equals the
+/// `PI_PROFILE`-derived dir — `resolvePreProfileAgentDir` drops that value, since a
+/// parent's `setProfile` exported it rather than the user choosing it.
 fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<String>)> {
     let profile = resolve_profile(env);
     let default_agent = omp_config_root(env, profile.as_deref())?.join("agent");
     if profile.is_some() {
-        // A named profile derives its own agent dir; the override is ignored.
         return Some((default_agent, true, profile));
     }
-    // `resolvePreProfileAgentDir`: drop a value that IS the PI_PROFILE-derived
-    // agent dir — it was exported by a parent's setProfile, not chosen here.
     // The LIVE `PI_PROFILE`: upstream's override resolver re-reads it after the
     // `.env` overlay, where the frozen `pi_profile` above selected the profile.
     let override_dir = env.agent_dir.clone().filter(|v| {
@@ -218,8 +176,7 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
 fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
     resolve_omp_agent_dir_parts(env)
         .map(|(d, _, _)| d)
-        // The home-less fallback keeps the pre-#880 shape rather than inventing
-        // a new one: an unresolvable home was already `/tmp`-rooted by `user_home`.
+        // Keeps the pre-#880 shape: an unresolvable home is already `/tmp`-rooted.
         .unwrap_or_else(|| crate::platform::user_home().join(".omp").join("agent"))
 }
 
@@ -241,8 +198,10 @@ fn resolve_omp_sessions_dir(
 }
 
 /// `resolveIf`: `$XDG_DATA_HOME/omp` (or its `profiles/<name>` child) when that
-/// directory EXISTS — the existence gate is what makes a not-yet-migrated user
-/// keep the home-rooted layout.
+/// directory EXISTS — the existence gate is what keeps a not-yet-migrated user on
+/// the home-rooted layout. Linux and macOS only, and only for a DEFAULT agent dir.
+/// The file's own header claims there is no existence check; its code calls
+/// `fs.existsSync`.
 fn xdg_app_root(
     xdg_data_home: Option<&Path>,
     profile: Option<&str>,
@@ -256,31 +215,11 @@ fn xdg_app_root(
     exists(&candidate).then_some(candidate)
 }
 
-/// Overlay omp's `.env` files onto `env`, mirroring upstream `env.ts`: it applies
-/// them to `Bun.env` and then calls `refreshDirsFromEnv()`, so a directory var
-/// living ONLY in `~/.env` still moves omp's sessions dir — and a watcher reading
-/// process env alone sits on an empty directory forever. That ORDER is the whole
-/// point: the files are located with the resolver frozen at module load, then the
-/// resolver is rebuilt from the merged env, which is why this runs BEFORE
-/// [`resolve_omp_sessions_dir`] and locates its files from the PRE-overlay `env`.
-///
-/// Precedence is upstream's: the shell env wins over every file (its falsy
-/// `!Bun.env[key]` test, so a set-but-EMPTY var still yields), and among files the
-/// first to define a key wins. Upstream reads a fourth, higher-precedence
-/// `$CWD/.env`; that one is unreachable, because an out-of-process observer cannot
-/// know which directory omp was launched from.
-///
-/// The profile SELECTION is deliberately not overlaid: `refreshDirsFromEnv`
-/// rebuilds the resolver but REUSES the profile frozen at module load, so a
-/// file-borne `OMP_PROFILE` moves nothing upstream either. `PI_PROFILE` is the
-/// exception, and only for the agent-dir DROP check — `resolveActiveAgentDirOverride`
-/// re-reads it live, so a `.env` naming both a profile and its own derived agent
-/// dir must still drop that override, exactly as upstream does.
-///
-/// The reads are deliberately UNBOUNDED, unlike `source/`'s probe reads: those
-/// re-read per probe refresh, this answers a startup or click-time question, and a
-/// cap could truncate a key upstream's own unbounded `parseEnvFile` would honor.
-/// (`read_bounded_bytes` is `cfg(unix)` besides; this resolver builds on Windows.)
+/// Overlay omp's `.env` files onto `env`, mirroring `env.ts`: located with the
+/// resolver frozen at module load (hence the PRE-overlay `env`), then the resolver
+/// is REBUILT from the merged env. Shell wins over every file, the first file to
+/// define a key wins, and profile SELECTION is deliberately NOT overlaid — upstream
+/// reuses the frozen profile. Its fourth `$CWD/.env` is unreachable out-of-process.
 fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpEnv {
     let agent_dir = resolve_omp_agent_dir_parts(env).map(|(dir, _, _)| dir);
     let config_root = omp_config_root(env, resolve_profile(env).as_deref());
@@ -297,10 +236,8 @@ fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpE
         .filter_map(|p| read(&p))
         .flat_map(parse_omp_env_file)
     {
-        // Upstream's fill test is FALSY (`!Bun.env[key]`), so a set-but-blank
-        // shell value still yields to a file. The two kinds carry that
-        // differently: a NAME keeps whatever the shell had, so the blank check
-        // is here, while `path_env` already resolved a blank PATH to `None`.
+        // The falsy fill test (`!Bun.env[key]`) splits by kind: a NAME keeps whatever
+        // the shell had, while `path_env` already resolved a blank PATH to `None`.
         match key.as_str() {
             "PI_CONFIG_DIR" => fill_name(&mut out.config_dir_name, value),
             "PI_PROFILE" => fill_name(&mut out.pi_profile_live, value),
@@ -411,13 +348,10 @@ fn looks_like_session_stem(s: &str) -> bool {
 }
 
 /// The stem chain from the root session down to this transcript, e.g.
-/// `["<ts>_<uuid>", "Alpha", "Child"]` for a nested subagent file
-/// `…/<ts>_<uuid>/Alpha/Child.jsonl`. A root transcript is `[stem]`.
-///
-/// PURE and case-preserving: raw in → raw out on every platform, so the
-/// fixture-fed conformance goldens stay platform-invariant. The Windows
-/// case-fold belongs at the WATCHER seam (walk.rs, and the probe's own
-/// boundary), never here.
+/// `["<ts>_<uuid>", "Alpha", "Child"]` for `…/<ts>_<uuid>/Alpha/Child.jsonl`; a
+/// root transcript is `[stem]`. PURE and case-preserving, so the fixture-fed
+/// conformance goldens stay platform-invariant — the Windows case-fold belongs at
+/// the WATCHER seam (`walk.rs`, and the probe's own boundary), never here.
 fn stem_chain(path: &Path) -> Vec<String> {
     let own = path
         .file_stem()
@@ -434,16 +368,13 @@ fn stem_chain(path: &Path) -> Vec<String> {
             chain.push(name.to_string());
             break;
         }
-        // Bound the climb at omp's layout boundaries (the `-`-prefixed per-cwd
-        // dir, the `sessions` root). Without this the walk continues into the
-        // USER'S path above the watched root, where a date-shaped component
-        // (`~/backups/2026-…_snap/agent/…`) would misclassify every root
-        // transcript as a subagent chain.
+        // Bound the climb at omp's layout boundaries: above the watched root a
+        // date-shaped dir (`~/backups/2026-…_snap/`) would fake a subagent chain.
         if name == "sessions" || name.starts_with('-') {
             break;
         }
-        // A task-id dir is indistinguishable from a foreign dir until the root
-        // stem shows up above it, so collect speculatively and discard below.
+        // A task-id dir is indistinguishable from a foreign one until the root stem
+        // shows up above it, so collect speculatively and discard below.
         chain.push(name.to_string());
         cur = dir.parent();
     }
@@ -456,22 +387,26 @@ fn stem_chain(path: &Path) -> Vec<String> {
     }
 }
 
-/// AgentId key: the root stem for a root transcript; the `/`-joined stem
-/// chain for a (nested) subagent, so `Alpha` under two different sessions
-/// never collides.
+/// AgentId key: the root stem for a root transcript; the `/`-joined stem chain for
+/// a (nested) subagent, so `Alpha` under two different sessions never collides.
+/// Also the `session_id` [`decode_omp_line`] mints, so its `SessionStart` and the
+/// watcher's first-sight one agree on one key.
 pub fn omp_id_from_path(path: &Path) -> String {
     stem_chain(path).join("/")
 }
 
-/// The parent's key (the chain minus the last segment); `None` for a root.
+/// The parent's key (the chain minus the last segment); `None` for a root. The
+/// `task` tool persists each child as a SEPARATE file
+/// `<parent-path-minus-.jsonl>/<taskId>.jsonl`, recursively — the linkage is that
+/// PATH NESTING, never a header field (a child header carries no `parentSession`).
 pub(crate) fn omp_parent_key_from_path(path: &Path) -> Option<String> {
     let chain = stem_chain(path);
     (chain.len() > 1).then(|| chain[..chain.len() - 1].join("/"))
 }
 
 /// The session-entry `type` values this decoder maps — this module's row in the
-/// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so
-/// this watch is the ONLY signal an entry type rename gives us.
+/// drift surface. `decode_omp_line` ends `_ => vec![]` with no breadcrumb, so this
+/// watch is the ONLY signal an entry type rename gives us.
 #[cfg(test)]
 pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
     SESSION,
@@ -488,35 +423,72 @@ pub(crate) const DECODED_ENTRY_TYPES: &[&str] = &[
 #[cfg(test)]
 pub(crate) const DECODED_TITLE_FIELDS: &[&str] = &[TITLE_FIELD];
 
+/// The header entry (line 2; line 1 is a fixed-width 256-byte `title` slot that omp
+/// rewrites IN PLACE — pwrite at offset 0, and the tail cursor sits past it, so it
+/// is never re-read; legacy files lack the slot). Fork, branch, version migration
+/// and tool-output pruning REWRITE the file atomically (temp + rename → new inode)
+/// and the watcher re-stats by path, so a rewrite reads as a fresh transcript.
 const SESSION: &str = "session";
+
+/// A turn entry. `role:"assistant"` content carries `toolCall` blocks
+/// (`{id,name,arguments}`); `role:"toolResult"` closes one by `toolCallId`. Its
+/// `usage.input` EXCLUDES the cache share (`totalTokens` = input + output +
+/// cacheRead + cacheWrite), so fresh spend is input + cacheWrite + output — cache
+/// READS are re-served context, not new spend.
 const MESSAGE: &str = "message";
+
+/// The `custom` entry envelope. Its `customType:"tool_execution_start"` duplicates
+/// each toolCall right before execution and is deliberately NOT decoded — the same
+/// `tool_use_id` would double-count `tool_call_count`.
 const CUSTOM: &str = "custom";
+
+/// A `--thinking` pin change, forwarded RAW: omp's vocabulary already contains
+/// `burn::MAX_EFFORTS` verbatim, so translating would be a second vocabulary to
+/// keep in sync. Its `configured` field is the user's PIN, not the turn's level.
 const THINKING_LEVEL_CHANGE: &str = "thinking_level_change";
 const TITLE: &str = "title";
 const TITLE_CHANGE: &str = "title_change";
 const TITLE_FIELD: &str = "title";
 
-/// The `customType` marking a clean teardown — the ONLY structural end omp
-/// writes. Exported for the drift surface because the guard below falls through
-/// to `_ => vec![]`: rename it upstream and no omp session ever ends cleanly,
-/// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 #[cfg(test)]
+/// The `customType` marking a clean teardown — the ONLY structural end omp writes.
+/// Exported for the drift surface because the guard below falls through to
+/// `_ => vec![]`: rename it upstream and no omp session ever ends cleanly, with no
+/// breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
+/// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
+/// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
+/// end. Skipped when the session never produced an assistant message, and SIGKILL
+/// writes nothing — both fall through to the stale-sweep.
 const SESSION_EXIT: &str = "session_exit";
 
+/// The turn role carrying tool calls. Its `model` is read BARE, never the
+/// provider-prefixed `model_change` form, so `TOP_MODELS` prefix matching sees the
+/// vocabulary CC/codex/copilot emit. `model_change` itself stays undecoded: every
+/// assistant message re-stamps the bare `model` anyway — one turn's lag.
 const ROLE_ASSISTANT: &str = "assistant";
+
 const ROLE_TOOL_RESULT: &str = "toolResult";
+
+/// The assistant-content block a tool call arrives in. Its `id` is a REQUIRED
+/// pairing key on a block we decode, so an absent one is upstream drift rather than
+/// a line we ignore — breadcrumb, then drop. An unkeyable `toolResult` is the same
+/// case: it could never close its Start, leaking Active forever.
 const BLOCK_TOOL_CALL: &str = "toolCall";
+
+/// The tool that BLOCKS on human input: its `ActivityStart` binds the reducer's
+/// `gated_before_waiting` gate to the ask's own tool_use_id, so the answer's
+/// `toolResult` resolves the Wait. Ask pairs are appended LAST — a sibling's later
+/// ActivityStart would flip the slot back to Active, drop the gate, and strand the
+/// Wait forever.
 const TOOL_ASK: &str = "ask";
 
-/// The message-level wire vocabulary this decoder keys on — the two roles it
-/// reads, the block type carrying tool calls, and the `ask` tool whose Start
-/// binds the reducer's Waiting gate. Exported because each is an equality guard
-/// falling through to a silent path: a rename decodes the turn to nothing, or
-/// strands a Wait forever. Pinned by
-/// `the_exported_message_vocabulary_is_exactly_what_the_arms_match`.
 #[cfg(test)]
+/// The message-level wire vocabulary this decoder keys on. Exported because each is
+/// an equality guard falling through to a silent path: a rename decodes the turn to
+/// nothing, or strands a Wait forever. Pinned by
+/// `the_exported_message_vocabulary_is_exactly_what_the_arms_match`.
 pub(crate) const DECODED_MESSAGE_VOCAB: &[&str] =
     &[ROLE_ASSISTANT, ROLE_TOOL_RESULT, BLOCK_TOOL_CALL, TOOL_ASK];
 
@@ -581,8 +553,6 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
     let kind = obj.get("type").and_then(|s| s.as_str()).unwrap_or("");
 
     let out = match kind {
-        // session_id must be the SAME id-deriver key the watcher's first-sight
-        // registration uses, so the two SessionStarts agree.
         SESSION => {
             let cwd = obj.get("cwd").and_then(|c| c.as_str()).unwrap_or_else(|| {
                 crate::source::drift::missing_field(source, "session", "cwd");
@@ -604,9 +574,6 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             match msg.get("role").and_then(|r| r.as_str()) {
                 Some(ROLE_ASSISTANT) => {
                     let mut out = Vec::new();
-                    // The BARE `model` field, never the provider-prefixed
-                    // `model_change` form, so TOP_MODELS prefix matching sees
-                    // the same vocabulary CC/codex/copilot emit.
                     if let Some(model) = msg
                         .get("model")
                         .and_then(|m| m.as_str())
@@ -618,10 +585,6 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             effort: None,
                         });
                     }
-                    // omp's `usage.input` EXCLUDES the cache share
-                    // (totalTokens = input + output + cacheRead + cacheWrite),
-                    // so fresh = input + cacheWrite + output — cache READS are
-                    // re-served context, not new spend.
                     if let Some(usage) = msg.get("usage").and_then(|u| u.as_object()) {
                         let field = |k: &str| usage.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
                         let fresh = field("input")
@@ -637,20 +600,11 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                     let Some(blocks) = msg.get("content").and_then(|c| c.as_array()) else {
                         return Ok(out);
                     };
-                    // `ask` BLOCKS on human input: its Start binds the
-                    // reducer's `gated_before_waiting` gate to the ask's own
-                    // tool_use_id, so the answer's toolResult resolves the
-                    // Wait. Ask pairs are appended LAST because a sibling's
-                    // later ActivityStart would flip the slot back to Active
-                    // and drop the gate, stranding the Wait forever.
                     let mut asks = Vec::new();
                     for b in blocks
                         .iter()
                         .filter(|b| b.get("type").and_then(|t| t.as_str()) == Some(BLOCK_TOOL_CALL))
                     {
-                        // `id` is a REQUIRED pairing key on a block we decode,
-                        // so its absence is upstream drift, not a line we
-                        // ignore — breadcrumb before dropping.
                         let Some(id) = b.get("id").and_then(|i| i.as_str()) else {
                             crate::source::drift::missing_field(source, BLOCK_TOOL_CALL, "id");
                             continue;
@@ -678,8 +632,6 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 }
                 Some(ROLE_TOOL_RESULT) => {
                     let Some(tool_call_id) = msg.get("toolCallId").and_then(|i| i.as_str()) else {
-                        // An unkeyable End can never close its Start (leaks
-                        // Active forever) — breadcrumb, then drop.
                         crate::source::drift::missing_field(source, "toolResult", "toolCallId");
                         return Ok(vec![]);
                     };
@@ -692,17 +644,12 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                 _ => vec![],
             }
         }
-        // Clean teardown marker: reason/kind ignored — every kind
-        // ("normal"|"signal"|"fatal"|"process_exit") IS an end.
         CUSTOM if obj.get("customType").and_then(|c| c.as_str()) == Some(SESSION_EXIT) => {
             vec![AgentEvent::SessionEnd {
                 agent_id: acting,
                 as_child: omp_parent_key_from_path(path).is_some(),
             }]
         }
-        // Forwarded RAW: omp's `--thinking` vocabulary already contains
-        // `burn::MAX_EFFORTS` verbatim, so translating would be a second
-        // vocabulary to sync. `configured` is the user's PIN, not the turn's.
         THINKING_LEVEL_CHANGE => match obj.get("thinkingLevel").and_then(|l| l.as_str()) {
             Some(level) if !level.is_empty() => vec![AgentEvent::ModelInfo {
                 agent_id: acting,
@@ -711,12 +658,9 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             }],
             _ => vec![],
         },
-        // The only human-readable name a ROOT transcript has — its stem is a
-        // timestamp+uuid and its cwd basename is shared with every concurrent
-        // session in the repo. The EMPTY guard is load-bearing: omp writes the
-        // slot at birth and fills it later, and leaves SUBAGENT titles empty
-        // forever, so an unguarded Rename would blank a root's label and wipe
-        // every subagent's dispatch-name label.
+        // The only human-readable name a ROOT transcript has. An unguarded Rename
+        // would blank it and wipe every subagent's dispatch-name label — the empty
+        // slot's WHY is on `omp_head_title`.
         TITLE | TITLE_CHANGE => match obj.get(TITLE_FIELD).and_then(|t| t.as_str()) {
             Some(title) if !title.is_empty() => vec![AgentEvent::Rename {
                 agent_id: acting,
@@ -724,10 +668,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             }],
             _ => vec![],
         },
-        // Not sprite-visible.
-        // (model_change stays undecoded even though the burn tier reads model:
-        // its value is the provider-prefixed combined form, and every assistant
-        // message re-stamps the bare `model` anyway — one turn's lag.)
+        // Not sprite-visible (`model_change` among them — see `ROLE_ASSISTANT`).
         _ => vec![],
     };
     Ok(out)
@@ -740,12 +681,9 @@ fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if tool == "task" {
         return ToolDetail::Task;
     }
-    // `i` is omp's universal per-call INTENT ("Reading the burn tier"), which
-    // its tool schemas mandate — so it sits LAST, below every concrete target:
-    // a path beats a paraphrase of that path. It earns its place on the tools
-    // that have no keyed target at all (`edit`, `todo`, `job`, `hub`, …),
-    // which otherwise render as a bare verb. `omp_ask_reason` already leans on
-    // the same field for the Waiting prompt.
+    // `i` is omp's mandated per-call INTENT, so it sits LAST, below every concrete
+    // target — a path beats a paraphrase of that path. It earns its place on the
+    // tools with no keyed target at all (`edit`, `todo`, `job`, `hub`, …).
     const KEYS: &[&str] = &["command", "path", "pattern", "query", "i"];
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }
@@ -807,16 +745,15 @@ mod tests {
         assert!(!drive("checkpoint"), "an unread entry type reaches neither");
     }
 
+    /// The length gate is EXCLUSIVE: `<19-char ts>_` is the longest stem that still
+    /// carries no uuid. A subagent task id can never reach the date shape, so the
+    /// `_` separator is what makes a stem a root. The `T` check stays
+    /// case-insensitive for the lowercased Windows key.
     #[test]
     fn a_root_stem_needs_both_the_date_shape_and_the_uuid_separator() {
-        // The length gate is EXCLUSIVE: `<19-char ts>_` is the longest stem that
-        // still carries no uuid, so it must not read as a root.
         assert!(!looks_like_session_stem("2026-07-16T12-00-05_"));
         assert!(looks_like_session_stem("2026-07-16T12-00-05_abc"));
-        // Date-shaped and long enough, but no `_` at all — a subagent task id
-        // can never reach this shape, so the separator is what makes it a root.
         assert!(!looks_like_session_stem("2026-07-16T12-00-05-999999"));
-        // The `T` check stays case-insensitive for the lowercased Windows key.
         assert!(looks_like_session_stem("2026-07-16t12-00-05_abc"));
     }
 
@@ -1083,12 +1020,10 @@ mod tests {
         }
     }
 
-    /// Every exported message-level name reaches a real arm.
-    ///
-    /// Each is an equality guard whose miss is SILENT — a renamed role decodes
-    /// the turn to nothing, a renamed block type finds no tool calls, a renamed
-    /// `ask` strands the Waiting gate — so the export is the only thing the
-    /// drift watch can compare upstream.
+    /// Every exported message-level name reaches a real arm. Each is an equality
+    /// guard whose miss is SILENT — a renamed role decodes the turn to nothing, a
+    /// renamed block type finds no tool calls, a renamed `ask` strands the Waiting
+    /// gate — so the export is the only thing the drift watch can compare upstream.
     #[test]
     fn the_exported_message_vocabulary_is_exactly_what_the_arms_match() {
         let turn = |role: &str, block: &str, tool: &str| {
@@ -1278,9 +1213,8 @@ mod tests {
         }
         let empty = r#"{"type":"message","id":"m3","timestamp":"t","message":{"role":"assistant","model":"","content":[],"timestamp":3}}"#;
         assert!(decode(empty).is_empty());
-        // Defensive: pi-ai types.ts requires `content`, so a content-ABSENT
-        // message can't occur on real wire — this pins the let-else early
-        // return's `Ok(out)`, not `Ok(vec![])`.
+        // pi-ai `types.ts` requires `content`, so this shape cannot occur on real
+        // wire — it pins the let-else early return's `Ok(out)`, not `Ok(vec![])`.
         let no_content = r#"{"type":"message","id":"m4","timestamp":"t","message":{"role":"assistant","model":"claude-fable-5","timestamp":4}}"#;
         match &decode(no_content)[..] {
             [AgentEvent::ModelInfo { model: Some(m), .. }] => {
@@ -1566,13 +1500,11 @@ mod tests {
         }
     }
 
-    /// `PI_CONFIG_DIR` is user-controlled, so the invariant is that NO value
-    /// escapes home. Its TEETH are Windows-CI-only, and deliberately so: the
-    /// drive-letter escape exists only there (`C:\\srv` parses as Prefix+RootDir
-    /// and replaces the base), while on Unix the same string is one ordinary
-    /// component that never could — so a green macOS run does NOT prove this,
-    /// exactly like the windows-test class the root `CLAUDE.md` describes. The
-    /// earlier test pinned only the POSIX form and was blind to it.
+    /// `PI_CONFIG_DIR` is user-controlled, so the invariant is that NO value escapes
+    /// home. Its TEETH are Windows-CI-only, and deliberately so: the drive-letter
+    /// escape exists only there (`C:\\srv` parses as Prefix+RootDir and replaces the
+    /// base), while on Unix that string is one ordinary component that never could —
+    /// so a green macOS run does NOT prove this (the `windows-test` class).
     #[test]
     fn node_join_never_lets_a_rooted_segment_escape_the_base() {
         let base = Path::new("/home/u");
@@ -1762,10 +1694,8 @@ mod tests {
                 .find(|(n, _)| *n == k)
                 .map(|(_, v)| (*v).to_owned())
         };
-        // The PATH slots come from `platform::path_env` in production, which
-        // maps a blank value to `None` — so a "set but empty" shell var must
-        // collapse here too, or the yields-to-a-file case tests a shape the
-        // resolver never sees.
+        // Production reads PATH slots through `platform::path_env`, which maps a
+        // blank to `None` — collapse here too, or the yields case tests a fiction.
         let get_path = |k: &str| get(k).filter(|v| !v.trim().is_empty()).map(PathBuf::from);
         let env = OmpEnv {
             home: Some("/home/u".into()),
@@ -1787,9 +1717,11 @@ mod tests {
         })
     }
 
-    /// omp applies its `.env` files and then REBUILDS the resolver, so a
-    /// directory var living only in a file still moves the sessions dir —
-    /// reading process env alone leaves those users watching an empty dir.
+    /// omp applies its `.env` files and then REBUILDS the resolver, so a directory
+    /// var living only in a file still moves the sessions dir — reading process env
+    /// alone leaves those users watching an empty dir. The PATH half of the falsy
+    /// fill test is settled earlier, by `path_env` at the READ, and pinned end to
+    /// end by `omp_sessions_dir_honors_non_empty_env_override`.
     #[test]
     fn a_dotenv_directory_var_moves_the_sessions_dir_the_way_omp_does() {
         const HOME_ENV: &str = "/home/u/.env";
@@ -1815,12 +1747,8 @@ mod tests {
             ),
             Path::new("/shell/agent/sessions")
         );
-        // …and its test is FALSY. For a PATH var `path_env` already collapsed a
-        // blank shell value to `None` at the READ, so the yielding is settled
-        // before the overlay sees it (pinned end to end by
-        // `omp_sessions_dir_honors_non_empty_env_override`). A NAME var reaches
-        // the overlay with the blank still on it, so THIS is where the falsy
-        // test has to live: an exported `PI_CONFIG_DIR=` must still yield.
+        // …and its test is FALSY. A NAME var reaches the overlay with the blank
+        // still on it, so an exported `PI_CONFIG_DIR=` must still yield here.
         assert_eq!(
             dotenv_sessions(
                 &[("PI_CONFIG_DIR", "")],
@@ -1830,9 +1758,8 @@ mod tests {
             Path::new("/home/u/.pi/agent/sessions"),
             "a set-but-blank NAME yields to a file, as upstream's falsy test does"
         );
-        // The other direction of the same rule: a blank value IN a file is not a
-        // definition, so it neither overrides the shell nor consumes the
-        // first-to-define slot the next file is entitled to.
+        // The other direction: a blank value IN a file is not a definition, so it
+        // never claims the first-to-define slot from a later file.
         assert_eq!(
             dotenv_sessions(
                 &[],
@@ -1863,7 +1790,6 @@ mod tests {
             dotenv_sessions(&[], &all[2..], None),
             Path::new("/from/home/sessions")
         );
-        // The other two directory vars ride the same overlay.
         assert_eq!(
             dotenv_sessions(&[], &[(HOME_ENV, "PI_CONFIG_DIR=.pi")], None),
             Path::new("/home/u/.pi/agent/sessions")
@@ -2007,32 +1933,25 @@ mod tests {
         for skipped in ["", "   ", "# A=1", "NOEQUALS", "1BAD=x", "A-B=x", "=x"] {
             assert_eq!(got(skipped), None, "{skipped:?} is not a dotenv assignment");
         }
-        // An inline comment needs the preceding whitespace upstream requires.
         assert_eq!(got("A=hello # trailing"), kv("A", "hello"));
         assert_eq!(got("A=hello#nospace"), kv("A", "hello#nospace"));
-        // The `trimEnd` on an unquoted value, which only a MULTI-space run can
-        // pin — `.pi ` names a directory omp never created.
+        // `trimEnd`: untrimmed, `.pi ` names a directory omp never created.
         assert_eq!(got("A=.pi  # note"), kv("A", ".pi"));
         assert_eq!(got("A=.pi   "), kv("A", ".pi"));
-        // Quoting keeps a `#` literal; all three of Bun's quote forms count.
         assert_eq!(got(r#"A="hello # keep""#), kv("A", "hello # keep"));
         assert_eq!(got("A='hello # keep'"), kv("A", "hello # keep"));
         assert_eq!(got("A=`hello # keep`"), kv("A", "hello # keep"));
-        // An ESCAPED quote does not close the value, and upstream keeps the
-        // backslash — the raw slice is the value, there is no unescape pass.
+        // An ESCAPED quote does not close the value, and upstream keeps the slash.
         assert_eq!(got(r#"A="esc\"aped""#), kv("A", r#"esc\"aped"#));
-        // An EMPTY quoted value closes at index 0, the one input that reaches
-        // the escape check with nothing before the quote to inspect.
+        // An EMPTY quoted value closes at index 0 — nothing precedes it to inspect.
         for empty in [r#"A="""#, "A=''", "A=``"] {
             assert_eq!(got(empty), kv("A", ""), "{empty:?} is an empty value");
         }
         assert_eq!(got(r#"A="unterminated"#), kv("A", "unterminated"));
-        // Multi-byte bytes either side of the escape, so the quote-scan index
-        // arithmetic is pinned against a slice panic rather than reasoned about.
+        // Multi-byte either side of the escape pins the quote-scan index arithmetic.
         assert_eq!(got(r#"A="café\"ﬁn" # x"#), kv("A", r#"café\"ﬁn"#));
         assert_eq!(got("A=café # x"), kv("A", "café"));
-        // A CRLF file: upstream splits on `\n` and `trim`s the `\r` off; our
-        // `.lines()` strips it earlier, and both must reach the same value.
+        // CRLF: upstream trims the `\r`, our `.lines()` strips it — same value.
         assert_eq!(got("A=1\r"), kv("A", "1"));
         // `isSafeEnvValue`: a NUL would corrupt the C string of a real spawn.
         assert_eq!(got("A=a\0b"), None);

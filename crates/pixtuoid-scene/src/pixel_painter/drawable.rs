@@ -237,8 +237,7 @@ fn paint_mascot_bubbles(buf: &mut RgbBuffer, pos: Point, frame_h: u16, runs: u32
 /// integer arithmetic. If a scaled classic painter is ever built, halve the
 /// sprite in LOGICAL space and convert AFTERWARDS — halving an already-scaled
 /// width drifts odd-width art half a logical unit off the footprint its mask
-/// stamped, and no scale-1 test can see it (`pixtuoid-scene/CLAUDE.md`, the
-/// render-scale sharp edge).
+/// stamped, and no scale-1 test can see it.
 fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
     let px = pos.x.saturating_sub(frame.width() / 2);
     let py = pos.y.saturating_sub(frame.height() / 2);

@@ -6,9 +6,8 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
 nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
-architecture invariants and conventions, and indexes each crate's "known sharp
-edges" — full text in that crate's `SHARP-EDGES.md`. Many things that look like
-bugs are documented, intentional design: read the entry, not just its index line.
+architecture invariants and conventions. Many things that look like bugs are
+documented, intentional design: read the item's doc comment before changing it.
 
 ## Build & test
 
@@ -19,8 +18,7 @@ call the same recipes.
 
 ```bash
 just              # list recipes
-just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order;
-                  # lint's `prose` arm fetches origin/main, so preflight needs network)
+just preflight    # full pre-push gate: lint → clippy → hack → test (the exact CI order)
 just fmt          # auto-format
 just test         # the whole suite (cargo-nextest if installed, else cargo test)
 cargo nextest run -p <crate> <filter>   # fast loop while iterating on one crate
@@ -145,8 +143,9 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 `beautify-decoration`, `add-source`, `add-theme`, `procedural-lofi`.
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
-not scaffold a `CONTEXT.md`/`docs/adr/` convention here — the nested
-`CLAUDE.md` + sharp-edges system is the (only) design record.
+not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
+doc comment is the design record, and the nested `CLAUDE.md` says only what its
+crate IS.
 
 ### The running order
 
@@ -172,10 +171,7 @@ entry are listed `NOT COVERED`, never skipped silently).
 Advisory backstops that surface risk but never gate:
 `scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
-`just bench` / CodSpeed (local numbers authoritative; CI benches advisory) ·
-`just comment-lint`'s ast-grep arm. Which `comment-lint` arms BLOCK is stated
-once, in `gate_fails`' docstring in `scripts/comment-lint.py` — not restated
-here.
+`just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
 
 ## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 

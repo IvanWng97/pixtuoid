@@ -184,10 +184,9 @@ fn plugin_dir() -> Result<PathBuf> {
 /// Sources panel OFFERS it? Probes OpenClaw's OWN dir, NOT our plugin/config —
 /// keying on our artifact would chicken-and-egg.
 pub(crate) fn detect_installed() -> bool {
-    // Normalize the SAME env vars the SAME way `openclaw_state_dir()` does. Without
-    // the `~`-expansion a `~`-prefixed override installs into the EXPANDED dir but
-    // probes the literal `~/…` → `false` → the Sources panel never offers the
-    // OpenClaw it just installed into.
+    // The SAME env vars the SAME way `openclaw_state_dir()` does: without the
+    // `~`-expansion an override installs into the EXPANDED dir but probes the
+    // literal `~/…`, so the panel never offers the OpenClaw it just wrote to.
     let home = pixtuoid_core::platform::home_first_dir();
     resolve_openclaw_detect(
         io::nonempty_env("OPENCLAW_STATE_DIR").map(|v| io::expand_tilde(&v, home.as_deref())),
@@ -276,7 +275,10 @@ fn contains_include(v: &Value) -> bool {
 /// writer emits strict JSON. Our read→merge→write round-trip re-serializes through
 /// `serde_json`, which cannot represent any of that: parsing it would mean silently
 /// DELETING the user's comments on their next `connect`. So a non-strict document
-/// is refused with the owner-CLI path instead of being rewritten.
+/// is refused with the owner-CLI path instead of being rewritten. Upstream's own
+/// `openclaw config patch` re-serializes strict and loses them too — measured, so
+/// don't re-propose it as the fix without re-measuring. Pinned by
+/// `merge_refuses_a_json5_document_instead_of_dropping_its_comments`.
 fn parse_for_merge(content: &str) -> Result<Value> {
     if content.trim().is_empty() {
         return Ok(json!({}));
@@ -330,10 +332,9 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
             json!({ "enabled": true, "hooks": { "allowConversationAccess": true } }),
         );
 
-        // `plugins.allow` is fail-closed only while NON-EMPTY: upstream gates on
-        // `allow.length === 0 || allow.includes(id)`, so a curated list that omits
-        // us means the plugin never loads however enabled its entry is. An EMPTY
-        // `allow: []` is already NO restriction, so there is nothing to join.
+        // Upstream gates on `allow.length === 0 || allow.includes(id)`, so a curated
+        // list omitting us never loads the plugin however enabled its entry — while
+        // an EMPTY list is already NO restriction, with nothing to join.
         if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
             if !allow.is_empty() && !allow.iter().any(is_plugin_id) {
                 allow.push(json!(PLUGIN_ID));
@@ -354,10 +355,9 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let dir_str = dir.to_str().map(str::to_string);
     let mut root = parse_for_merge(content)?;
     let before = root.clone();
-    // Did we remove anything OF OURS? `has_hooks` asks "does a dry-run uninstall
-    // CHANGE the parsed doc", so pruning a pre-existing empty `plugins: {}` — a
-    // shape we never wrote — would report OpenClaw as hooks-installed to a user
-    // who never connected.
+    // `has_hooks` asks whether a dry-run uninstall CHANGES the parsed doc, so
+    // pruning a pre-existing empty `plugins: {}` — a shape we never wrote — reports
+    // hooks-installed to a user who never connected.
     let mut removed = false;
     if let Some(plugins) = root.get_mut("plugins").and_then(Value::as_object_mut) {
         if let Some(paths) = plugins
@@ -374,25 +374,21 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
             removed |= entries.remove(PLUGIN_ID).is_some();
         }
         if removed {
-            // Undo the `plugins.allow` JOIN symmetrically — but NEVER by emptying the
-            // list: dropping the LAST member turns `["pixtuoid"]` into `[]`, which
-            // upstream reads as NO restriction, i.e. an uninstall that flips a
-            // fail-closed key fail-OPEN. A dangling id is not inert either (a live
-            // `openclaw plugins list` reports it as a stale config entry), but a
-            // single-member list is one we never wrote (install only joins a list
-            // that ALREADY had members), so leaving it is the fail-CLOSED residue.
+            // NEVER by emptying the list: dropping the last member turns
+            // `["pixtuoid"]` into `[]`, which upstream reads as NO restriction — an
+            // uninstall flipping a fail-closed key fail-OPEN. A single-member list is
+            // one we never wrote (install only joins a list that already had
+            // members), so leaving the dangling id is the fail-CLOSED residue.
             if let Some(allow) = plugins.get_mut("allow").and_then(Value::as_array_mut) {
-                // Guard the POST-condition, not a pre-count: `["pixtuoid", " pixtuoid "]`
-                // is two entries that are BOTH ours, so a `len() > 1` pre-check let the
-                // retain empty the list.
+                // POST-condition, not a pre-count: `["pixtuoid", " pixtuoid "]` is two
+                // entries BOTH ours, so a `len() > 1` pre-check let the retain empty it.
                 let kept: Vec<Value> = allow.iter().filter(|v| !is_plugin_id(v)).cloned().collect();
                 if !kept.is_empty() {
                     *allow = kept;
                 }
             }
-            // PRUNE the containers that are now OURS-ONLY-AND-EMPTY, so a disconnect
-            // leaves OpenClaw's config as it found it instead of a husk. A container
-            // the user has anything else in is never touched.
+            // Prune containers now OURS-ONLY-AND-EMPTY so a disconnect leaves the
+            // config as it found it; one holding anything else is never touched.
             prune_empty(plugins, "entries");
             if let Some(load) = plugins.get_mut("load").and_then(Value::as_object_mut) {
                 prune_empty(load, "paths");
@@ -418,10 +414,9 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     let Ok(root) = serde_json::from_str::<Value>(content) else {
-        // NOT "broken": OpenClaw reads this file as JSON5, so a document our strict
-        // parser rejects can be perfectly valid and LOADING FINE. Reporting a hard
-        // break here told the user to "reconnect openclaw" — advice that cannot
-        // succeed, because the merge refuses the same document by design.
+        // NOT "broken": OpenClaw reads this as JSON5, so a document our strict parser
+        // rejects may be loading fine. Reporting a break told the user to "reconnect
+        // openclaw" — advice that cannot succeed, the merge refusing the same doc.
         return SchemaParse {
             issues: vec![],
             notes: vec![format!(
@@ -449,10 +444,9 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                 .into(),
         );
     }
-    // `plugins.enabled` gates the WHOLE plugin system upstream. An ABSENT key means
-    // enabled — OpenClaw's own `plugins enable` writes only the entry, never this —
-    // so only an EXPLICIT `false` is reportable, and it is the user's own global
-    // switch: a NOTE, never our break.
+    // Gates the WHOLE plugin system upstream, and an ABSENT key means enabled
+    // (`plugins enable` writes only the entry, never this), so only an EXPLICIT
+    // `false` is reportable — and as the user's own switch it is a NOTE.
     if root["plugins"]["enabled"] == json!(false) {
         notes.push(
             "openclaw.json `plugins.enabled = false` — OpenClaw loads NO plugin at all (your \
@@ -460,11 +454,9 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
                 .into(),
         );
     }
-    // A reload mode that will never APPLY our write: upstream marks `plugins.load`
-    // (the key we write) `kind: "restart"`, so `off` (no reload at all) and `hot`
-    // (hot-kind changes only) leave a RUNNING gateway serving without the plugin,
-    // while `restart`/`hybrid` (the default) pick it up on their own. The user's own
-    // switch, so a NOTE: the install is sound, it just has not taken effect yet.
+    // Upstream marks `plugins.load` — the key we write — `kind: "restart"`, so `off`
+    // and `hot` leave a RUNNING gateway serving without the plugin while
+    // `restart`/`hybrid` pick it up. A NOTE: the install is sound, just not applied.
     if let Some(mode) = root["gateway"]["reload"]["mode"].as_str() {
         if mode == "off" || mode == "hot" {
             notes.push(format!(
@@ -474,9 +466,8 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
             ));
         }
     }
-    // `plugins.allow`/`plugins.deny` are both FAIL-CLOSED for us and invisible to
-    // the entry/paths checks above. An EMPTY allow list is NO restriction upstream
-    // (`allow.length === 0 || allow.includes(id)`), so it stays silent.
+    // Both FAIL-CLOSED for us and invisible to the checks above. An EMPTY allow list
+    // is NO restriction upstream (`allow.length === 0 || …`), so it stays silent.
     if root["plugins"]["allow"]
         .as_array()
         .is_some_and(|allow| !allow.is_empty() && !allow.iter().any(is_plugin_id))
@@ -709,10 +700,9 @@ mod tests {
 
     #[test]
     fn install_renders_plugin_with_baked_shim_path_and_sentinel() {
-        // Resolves the OpenClaw state dir from HOME/USERPROFILE — serialize against
-        // config.rs's env-mutating tests, which null both in a window that would
-        // else make home_first_dir() return None → unwrap panic under plain
-        // `cargo test` (nextest's per-process isolation masks it).
+        // Serialize against config.rs's env-mutating tests, which null HOME and
+        // USERPROFILE in a window that makes `home_first_dir()` return None under
+        // plain `cargo test` — nextest's per-process isolation masks it.
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());

@@ -1,26 +1,8 @@
-//! The per-source fact table — ONE row per agent CLI for the cross-source facts
-//! core needs (label prefix, JSONL decoder, hook keying, reducer capability
-//! flags).
-//!
-//! **What earns a column, BOTH parts required.** (1) A GENERIC caller — one that
-//! does not own the source — must pick the fn by NAME; a fn the source's own
-//! `run()` hands to the watcher through a `with_*` builder needs no row, that
-//! caller already knows which source it is. (2) The answer must be one
-//! production DEPENDS on, not one a report consults. The `ActivityRecency` clock
-//! is the near-miss that fails (2) and `should_seed_at_eof` the one that fails
-//! it hardest — both stay owner-passed.
-//!
-//! **ONE deliberate exception, and it is a different KIND of column:
-//! `home_env`.** It fails (2) outright — only `doctor` and a test read it — and
-//! it stays because its value is not the datum but the QUESTION a struct literal
-//! forces. `ActivityRecency` was rejected because owner-passing already got the
-//! answer to whoever needed it; here the failure mode is that NOBODY asks, which
-//! is how three sources shipped an unverified home resolver (#880, after
-//! #343/#342/#195 each adjudicated the same lesson). A checklist bullet had
-//! already failed at that job three times; a required field cannot be skipped.
-//! So the bar for a future column like this is narrow: it must force an answer
-//! that a reviewer would otherwise have to REMEMBER to ask for, and it must come
-//! with a test proving the declaration is true rather than decorative.
+//! ONE row per agent CLI. A column must BOTH be picked by NAME by a generic
+//! caller AND be depended on by production, not merely reported (`ActivityRecency`,
+//! `should_seed_at_eof` fail that half). `home_env` is the deliberate exception:
+//! its value is not the datum but the QUESTION a struct literal forces, after a
+//! checklist bullet let three sources ship an unverified resolver (#880/#343/#342/#195).
 
 use anyhow::Result;
 use serde_json::Value;
@@ -423,9 +405,8 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
             // (not the cwd-derived path) survives a git-worktree cwd-split.
             id_key: IdKey::SessionId,
             tool_id_key: ToolIdKey::ToolUse,
-            // SubagentStart/Stop change the event's SUBJECT (child AgentId ≠
-            // session AgentId) — inexpressible in the shared arms. The Stop is
-            // the ONLY end signal a Workflow-fleet subagent gets (#241).
+            // They swap the event's SUBJECT (child AgentId ≠ session AgentId), which
+            // the shared arms can't express; Stop is a fleet subagent's ONLY end (#241).
             custom: Some(HookCustom::Extend(claude_code::decode_cc_hook_custom)),
         }),
         caps: SourceCaps {
@@ -462,10 +443,8 @@ const CODEX: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::Extend(codex::decode_codex_hook_custom)),
         }),
         caps: SourceCaps {
-            // DELIBERATELY still false after #710 registered Codex's SessionEnd
-            // hook: a teardown-only best-effort hook (abrupt exits fire
-            // nothing) is not reliable enough to retire the 5-min short-idle
-            // reaper — flipping this regresses abrupt-exit reaping to 30 min.
+            // Still false after #710 registered Codex's SessionEnd hook: it is
+            // teardown-only, so flipping this regresses abrupt exits to a 30-min reap.
             has_exit_signal: false,
             resurrects_on_prompt: true,
             delegations_are_hook_silent: false,
@@ -491,21 +470,17 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             // matches and the label falls back to the bare `ag` prefix.
             cwd_extractor: extract_top_level_cwd,
         }),
-        // A real hook spec despite the missing install target (unlike
-        // copilot/omp, which have no hook path at all): an antigravity hook
-        // payload really does decode via the shared path-keyed arms.
+        // A real spec despite the missing install target (unlike copilot/omp, which
+        // have no hook path at all): the payload does decode via the shared arms.
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
             tool_id_key: ToolIdKey::ToolUse,
             custom: None,
         }),
-        // Both false is VERIFIED, not unexamined: the transcript carries no end
-        // marker (`status` is per-step and always DONE), and a swept session
-        // cannot walk back in — JSONL lines for an unknown id are no-ops, and
-        // the hook spec above never fires because there is no install target.
-        // So the long stale sweep is the only correct reaper here; flipping
-        // `resurrects_on_prompt` to earn the 5-min one would strand a live
-        // idle session permanently.
+        // Both false is VERIFIED: no end marker (`status` is per-step, always DONE),
+        // and nothing re-registers a swept session — unknown-id JSONL lines are
+        // no-ops and the hook never fires without an install target. Flipping
+        // `resurrects_on_prompt` for the 5-min reaper strands a live idle session.
         caps: SourceCaps {
             has_exit_signal: false,
             resurrects_on_prompt: false,
@@ -538,9 +513,8 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
             // UserPromptSubmit re-emits SessionStart, so a swept-but-live
             // session walks back in on the next prompt.
             resurrects_on_prompt: true,
-            // Subagents run in-process with hooks disabled upstream — the
-            // Delegating slot emits NOTHING until the dispatch tool's
-            // PostToolUse.
+            // Subagents run in-process with hooks disabled upstream, so the slot
+            // emits NOTHING until the dispatch tool's PostToolUse.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
@@ -572,12 +546,9 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
             // message_submit re-emits SessionStart, so a swept-but-live session
             // walks back in on the next prompt.
             resurrects_on_prompt: true,
-            // Conservative, and the open question is narrower than "no capture":
-            // the recorded `codewhale/fixtures` DOES hold a real dispatch, but
-            // only its BOUNDARIES (`subagent_spawn`, `subagent_complete`). What
-            // this flag asks is whether the child's work fires anything BETWEEN
-            // them — nothing we hold answers that, and `true` can only over-retain
-            // a dead Delegating slot, never reap a live one.
+            // The fixture holds a real dispatch but only its BOUNDARIES
+            // (`subagent_spawn`/`subagent_complete`) — nothing says whether the child
+            // fires anything BETWEEN them, and `true` can only over-retain a dead slot.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
@@ -598,17 +569,14 @@ const OPENCODE: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(opencode::decode_oc_hook_payload)),
         }),
         caps: SourceCaps {
-            // `session.deleted` → SessionEnd on a clean close, and an abrupt
-            // exit kills the process → `hook::HookPidWatch` ends every bound
-            // sprite (the plugin stamps `_pid`).
+            // `session.deleted` → SessionEnd on a clean close; an abrupt exit kills
+            // the process, and `hook::HookPidWatch` ends every `_pid`-bound sprite.
             has_exit_signal: true,
-            // Sessions are persistent SQLite rows: a follow-up prompt continues
-            // the SAME session and emits NO new `session.created`, so a swept
-            // session does not walk back in.
+            // Sessions are persistent SQLite rows: a follow-up prompt continues the
+            // SAME one and emits no new `session.created`, so a sweep is permanent.
             resurrects_on_prompt: false,
-            // The `task` tool emits both a `running` and a `completed`/`error`
-            // part, and liveness also flows UP from the child session, so a
-            // delegation is not hook-silent.
+            // The `task` tool emits `running` then `completed`/`error`, and liveness
+            // also flows UP from the child session.
             delegations_are_hook_silent: false,
         },
         focus: FocusChannel::PluginStamp,
@@ -682,16 +650,15 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(cursor::decode_cursor_hook_payload)),
         }),
         caps: SourceCaps {
-            // `sessionEnd` fires on clean completion — best-effort counts.
-            // An abrupt exit rides the shim-stamped pid, which reaches the CLI
-            // only because the walk skips Cursor's wrapper shell (#896).
+            // `sessionEnd` fires on clean completion. An abrupt exit rides the
+            // shim-stamped pid, which reaches the CLI only because the ancestor walk
+            // skips Cursor's wrapper shell (#896).
             has_exit_signal: true,
             // Each `cursor-agent` invocation is a NEW session_id, so a swept
             // session never walks back in.
             resurrects_on_prompt: false,
-            // A `Task` dispatch gets NO `postToolUse`, so the parent is
-            // hook-silent for the whole delegation (its children are separate,
-            // unlinkable sessions).
+            // A `Task` dispatch gets NO `postToolUse`, and its children are separate
+            // unlinkable sessions.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
@@ -718,12 +685,9 @@ const HERMES: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(hermes::decode_hermes_hook_payload)),
         }),
         caps: SourceCaps {
-            // `on_session_finalize`, which upstream's atexit-registered
-            // `_run_cleanup` fires with `reason="shutdown"` — so a clean quit DOES
-            // leave an end signal, which is this field's whole question.
-            // `on_session_end` is not it: that one is a TURN boundary (see
-            // `source/hermes.rs`). Policy is unchanged either way here, since
-            // `short_idle_reap` also needs `resurrects_on_prompt`.
+            // `on_session_finalize`, fired by upstream's atexit `_run_cleanup` with
+            // `reason="shutdown"`. NOT `on_session_end`, which despite the name is a
+            // TURN boundary (`source/hermes.rs`).
             has_exit_signal: true,
             resurrects_on_prompt: false,
             // No subagent nesting on the wire — sessions render flat.
@@ -763,24 +727,20 @@ const GROK: SourceDescriptor = SourceDescriptor {
             custom: Some(HookCustom::ClaimsAll(grok::decode_grok_hook_payload)),
         }),
         caps: SourceCaps {
-            // `session_end` does NOT fire on a plain TUI quit (the event loop
-            // breaks without draining the session actor), so the DOMINANT exit
-            // path is signal-less. The reliable exit authority is the liveness
-            // ladder over grok's own `active_sessions.json` — a probe, not a
-            // wire signal.
+            // `session_end` does NOT fire on a plain TUI quit (the loop breaks without
+            // draining the session actor), so the DOMINANT exit is signal-less; the
+            // authority is the liveness probe over grok's `active_sessions.json`.
             has_exit_signal: false,
-            // Every prompt fires `user_prompt_submit` (decoded → SessionStart),
-            // so a swept LIVE session walks back in. With !has_exit_signal this
-            // opts grok into the short idle reap — correct for its untracked
-            // headless one-shots, while live TUI sessions are probe-exempt.
+            // Every prompt fires `user_prompt_submit` (→ SessionStart), so a swept
+            // LIVE session walks back in — which is what makes the short idle reap
+            // safe for grok's untracked headless one-shots.
             resurrects_on_prompt: true,
             // A BLOCKING spawn's Task detail gets its post_tool_use at
             // completion, and a background spawn never mints a Task at all.
             delegations_are_hook_silent: false,
         },
-        // First-party pid registry (`active_sessions.json`: session_id → pid,
-        // recycle-guarded by `opened_at`) answers focus clicks; a shim stamp
-        // would shadow it with an ancestor walk carrying no such guard (#527).
+        // `active_sessions.json` maps session_id → pid with an `opened_at` recycle
+        // guard; a shim stamp would shadow it with a walk carrying no guard (#527).
         focus: FocusChannel::TranscriptProbe,
     },
 };
@@ -817,10 +777,9 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // AND the child persists its own parent-linked transcript.
             delegations_are_hook_silent: false,
         },
-        // omp holds a for-lifetime append fd on its session file, so the SAME
-        // `live_omp_session_ids` snapshot that vouches for liveness also names
-        // the owning pid — click-time resolution re-runs it via
-        // `omp_pid_for_session`. There is no shim to stamp a pid.
+        // omp holds a lifetime append fd on its session file, so the same
+        // `live_omp_session_ids` snapshot that vouches liveness also names the pid
+        // (`omp_pid_for_session`). There is no shim to stamp one.
         focus: FocusChannel::TranscriptProbe,
     },
 };
@@ -854,14 +813,10 @@ const KIMI: SourceDescriptor = SourceDescriptor {
             // SessionStart is the registration carrier, not UserPromptSubmit, so
             // a swept session does not walk back in.
             resurrects_on_prompt: false,
-            // CONSUMED, not decorative — for the `Agent` tool: 0.36.1's
-            // `AgentToolInputSchema` (installed bundle) injects
-            // `subagent_type: "coder"` when the model omits it, so
-            // `make_tool_detail` mints Task semantically. `AgentSwarm` has NO
-            // such injection (its subagent_type is optional with a prose-only
-            // default), so an omitting swarm call mints Generic and this flag
-            // is not consumed on that path. The child's own hook payloads stay
-            // unmodeled either way; `true` can only over-retain a dead slot.
+            // Consumed via the `Agent` tool: 0.36.1's `AgentToolInputSchema` injects
+            // `subagent_type: "coder"` when the model omits it, so `make_tool_detail`
+            // mints Task. `AgentSwarm` has NO such injection, so an omitting swarm
+            // call mints Generic instead; `true` can only over-retain a dead slot.
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
@@ -1209,10 +1164,9 @@ mod tests {
     }
 
     proptest! {
-        // An `Err` is fine — the mere call under proptest's `catch_unwind` IS
-        // the property (the watcher LOGS+CONTINUES on a malformed line, but a
-        // panic would take it down). Iterated from REGISTRY so a newly-added
-        // source is covered with zero test edits.
+        // An `Err` is fine: the watcher logs-and-continues on a malformed line, so
+        // the property is only that it does not PANIC. Iterated from REGISTRY, so a
+        // new source is covered with no test edit.
         #[test]
         fn every_line_decoder_never_panics_on_arbitrary_json(v in arb_json()) {
             for d in REGISTRY {
@@ -1256,11 +1210,9 @@ mod tests {
             .lock()
             .unwrap_or_else(|e| e.into_inner());
 
-        // A dev with OMP_PROFILE/PI_PROFILE exported reds this gate with a
-        // message blaming the resolver, when the resolver is right: a named
-        // profile derives its own agent dir and IGNORES the override
-        // (`dirs.ts`, pinned in omp's own matrix). Scrub them for the duration —
-        // we already hold TEST_ENV_LOCK.
+        // A named profile derives its own agent dir and IGNORES the override
+        // (`dirs.ts`), so an exported OMP_PROFILE/PI_PROFILE reds this gate blaming
+        // the resolver. Scrub them — we already hold TEST_ENV_LOCK.
         let saved_profiles: Vec<_> = ["OMP_PROFILE", "PI_PROFILE"]
             .iter()
             .map(|k| (*k, std::env::var_os(k)))
@@ -1282,9 +1234,8 @@ mod tests {
         // scrubbed profile vars into every later test in this process.
         let mut failures: Vec<String> = Vec::new();
         for (name, var) in declared {
-            // A REAL dir, because codex gates `CODEX_HOME` on the path existing
-            // (upstream `find_codex_home` does) — a bare string would silently
-            // fall back and read as "the override doesn't work".
+            // A REAL dir: upstream `find_codex_home` gates `CODEX_HOME` on the path
+            // existing, so a bare string silently falls back.
             let tmp = tempfile::tempdir().expect("tempdir");
             let root_env = tmp.path().to_path_buf();
             let saved = std::env::var_os(var);

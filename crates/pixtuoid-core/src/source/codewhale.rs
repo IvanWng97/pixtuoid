@@ -13,8 +13,6 @@
 //! {"event":"tool_call_before","cwd":"/repo","tool":"exec_shell","tool_args":"{\"command\":\"ls -la\"}"}
 //! ```
 //!
-//! The load-bearing decisions:
-//!
 //! - **Key on `cwd`, NOT `session_id`.** `DEEPSEEK_SESSION_ID` is INCONSISTENT
 //!   across a single session's events — `sess_<8hex>` on session/turn/tool-after
 //!   events but a raw turn UUID on `tool_call_before`, which a different code

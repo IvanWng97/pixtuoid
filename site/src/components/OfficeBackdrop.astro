@@ -97,8 +97,6 @@ const officeDriverUrl = asset('office-driver.js');
 </button>
 
 <style is:global>
-  /* The fixed canvas sits at z:-1; the body's opaque background would hide it.
-     The html root keeps --bg, so there's no white flash. */
   body {
     background: transparent;
   }
@@ -117,23 +115,17 @@ const officeDriverUrl = asset('office-driver.js');
     height: 100%;
     object-fit: cover;
   }
-  /* The canvas is BOTH the office AND — until it rolls in — the load-gap cover.
-     Default 0 so every NON-boot path shows the poster; the boot path raises it to
-     1 so the canvas's own bg tone (which tracks the wall clock) hides the baked
-     poster, and the reveal never cross-dissolves a wrong-time still. */
+  /* Default 0: every NON-boot path shows the poster, and boot's own bg-tone cover never cross-dissolves a wrong-time still. */
   .backdrop__live {
     opacity: 0;
     background: var(--bg);
   }
-  /* reduced motion IS the still-poster design — never cover it (wins even before
-     the script runs) */
+  /* reduced motion IS the still-poster design — never cover it, and win before the script even runs */
   @media (prefers-reduced-motion: reduce) {
     .backdrop__live {
       opacity: 0 !important;
     }
   }
-  /* Shares the canvas's box exactly, so a viewport-space point maps 1:1 into it
-     — the script positions each span by the canvas's object-fit:cover geometry. */
   .backdrop__overlay {
     position: absolute;
     inset: 0;
@@ -152,8 +144,6 @@ const officeDriverUrl = asset('office-driver.js');
       display: none !important;
     }
   }
-  /* The dark text-shadow keeps a name badge legible over any office tone — day
-     cream, night navy, or a bright window behind it. */
   .ov-label {
     position: absolute;
     left: 0;
@@ -205,12 +195,9 @@ const officeDriverUrl = asset('office-driver.js');
     }
   }
   :root {
-    /* the button's own footprint, named so the ≤760px content-gutter rule
-       below can reserve exactly this much (never a second copy to drift). */
     --office-ctl-edge: 10px;
     --office-ctl-w: 36px;
   }
-  /* the class display beats [hidden]'s UA rule — restate it */
   .office-ctl[hidden] {
     display: none;
   }
@@ -234,21 +221,12 @@ const officeDriverUrl = asset('office-driver.js');
     opacity: 0.45;
     transition: opacity 0.15s ease;
   }
-  /* Footer.astro's row wraps once it goes full-width here, overlapping this
-     control's fixed band. Its wrap count varies non-monotonically with viewport
-     width, so a flat pixel offset either overlaps a taller wrap or overshoots a
-     shorter one — --footer-h tracks the footer's REAL rendered height instead,
-     and the var() fallback only ever shows pre-JS. */
+  /* Footer.astro's row wraps non-monotonically with viewport width, so no flat offset clears it — --footer-h tracks its REAL height, the fallback shows pre-JS only. */
   @media (max-width: 960px) {
     .office-ctl {
       bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + var(--footer-h, 74px) + 10px);
     }
   }
-  /* .office-ctl is position:fixed, so EVERY section's copy passes under it at
-     some scroll offset, not just the footer's. At ≤760px .container has no side
-     margin wide enough to clear it, so widen its END padding by the button's own
-     footprint. The office-gap captions render OUTSIDE .container, so they need
-     the same reservation via a matching max-width. */
   @media (max-width: 760px) {
     .container {
       padding-inline-end: calc(
@@ -269,7 +247,7 @@ const officeDriverUrl = asset('office-driver.js');
   .office-ctl:focus-visible {
     outline: 2px solid var(--focus-ring);
     outline-offset: 2px;
-    border-radius: 0; /* the global :focus-visible rounds 3px — keep the pixel edge */
+    border-radius: 0;
   }
   .office-ctl:active {
     transform: translate(1px, 1px);
@@ -288,8 +266,6 @@ const officeDriverUrl = asset('office-driver.js');
     display: block;
     color: var(--led);
   }
-  /* The ♩ toggle stacks directly above the pause button on the SAME right edge,
-     so the ≤760px container reservation still only has to cover one column. */
   #office-audio {
     bottom: calc(2rem + env(safe-area-inset-bottom, 0px) + 10px + var(--office-ctl-w) + 8px);
   }
@@ -329,32 +305,26 @@ const officeDriverUrl = asset('office-driver.js');
     const canvas = document.getElementById('office-live');
     if (!wrap || !canvas) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
-    // The office needs WebAssembly, but the pause CONTROL does not: it governs
-    // the page's wasm-independent ambient motion via pix:paused, so it must stay
-    // reachable even on a no-wasm engine or a failed fetch.
     const hasWasm = typeof WebAssembly !== 'undefined';
 
-    // ONE object, not four flat lets: they share one LIFECYCLE — every re-live
-    // restarts ALL of them, and a flat set lets a later edit reset three of four.
+    // ONE object, not four flat lets: every re-live restarts ALL of them, and a flat set lets a later edit reset three of four.
     function freshReveal() {
       return {
-        elapsed: 0, // roll progress, accumulated from PAINTED frames only
+        elapsed: 0, // accumulated from PAINTED frames only
         lastSim: 0,
         ready: 0,
         waited: 0,
       };
     }
     let reveal = freshReveal();
-    let splashCleared = !!window.__pixRevealed; // seeded/repeat visit: already lifted
+    let splashCleared = !!window.__pixRevealed;
     function cover() {
       canvas.style.opacity = '1';
     }
     function uncover() {
       canvas.style.opacity = '0';
     }
-    // Tell the boot splash the office boot RESOLVED (came up, failed, or is
-    // unsupported) so its gate lifts — a polled flag, not an event, so there's
-    // no ordering race with the splash.
+    // A polled flag, not an event: the splash's gate lifts on a RESOLVED boot (up, failed, or unsupported) with no ordering race.
     function markEngineResolved() {
       window.__pixEngineReady = true;
     }
@@ -362,52 +332,37 @@ const officeDriverUrl = asset('office-driver.js');
       splashCleared = true;
     });
     if (hasWasm && !mq.matches) cover();
-    else markEngineResolved(); // no office will boot → don't make the splash wait
+    else markEngineResolved();
 
-    // Sprites are fixed-size, so a smaller buffer IS zoom: this is a deliberately
-    // closer camera than the app's, and the hero reads as a scene, not a schematic.
     const BUF_H = 130;
-    const FRAME_MS = 33; // ~30fps cap
-    // ONE office for the whole page (user-pinned): seed 0 is the app's 1F Standard
-    // look — a richer left column at this closer camera than Dense's.
+    const FRAME_MS = 33;
+    // ONE office for the whole page (user-pinned): seed 0 is the app's 1F Standard look.
     const SEED = 0;
-    // REVEAL_MS = roll length; FLOORS_PAST = how many floors scroll by;
-    // CHROMA_SPLIT_PX = the faint CRT fringe at the start (set 0 to drop it).
     const REVEAL_MS = 1600;
     const FLOORS_PAST = 3.2;
     const CHROMA_SPLIT_PX = 3;
-    // The roll advances by PAINTED FRAMES, not the wall clock: Safari blocks the
-    // main thread for over a second inside its tab-snapshot IPC on the same "page
-    // settled" signal the splash gates the reveal on, so a clock ramp froze the
-    // roll on a half-drawn frame and SNAPPED to the settled office. Clamping the
-    // step makes a hitch PAUSE the roll instead of skipping it.
-    // DERIVED from the paint gate, never a second literal: a step can never be
-    // below FRAME_MS, so a hardcoded budget FRAME_MS could later rise to meet
-    // would put EVERY frame over budget — the gate would never pass and every
-    // reveal would take the MAX_WAIT fallback, green, with no test able to see it.
+    // DERIVED from FRAME_MS, never a second literal: a budget the paint gate could later rise to meet
+    // puts EVERY frame over budget, so every reveal takes the MAX_WAIT fallback — green, and untestable.
     const REVEAL_MAX_STEP_MS = Math.round(FRAME_MS * 1.5);
-    const REVEAL_READY_FRAMES = 3; // consecutive on-budget frames before the roll starts
-    // ...but a device that never sustains the budget must still get its office:
-    // the gate is a courtesy, never a precondition for going live.
-    const REVEAL_READY_MAX_WAIT = Math.round(1000 / FRAME_MS); // ~1s of frames
+    const REVEAL_READY_FRAMES = 3;
+    // A device that never sustains the budget must still get its office: the gate is a courtesy, never a precondition.
+    const REVEAL_READY_MAX_WAIT = Math.round(1000 / FRAME_MS);
 
     let office = null;
     let wasm = null;
-    let officeDriver = null; // { sharedWasm, officeFrameView } from office-driver.js
+    let officeDriver = null;
     let ctx2d = null;
     let img = null;
     let bufW = 0;
     let raf = 0;
     let last = 0;
     let live = false;
-    // `pauseOffset` is the total user-paused time, so resuming continues from the
-    // frozen moment instead of lurch-jumping the timeline forward. Tab-hidden
-    // stops take NO offset on purpose — the office keeps living while you're away.
     const pauseBtn = document.getElementById('office-pause');
     let paused = false;
     let pauseOffset = 0;
     let pausedAt = 0;
 
+    // Sprites are fixed-size, so a smaller buffer IS zoom — deliberately a closer camera than the app's.
     function sizeBuffer() {
       const w = window.innerWidth;
       const h = window.innerHeight;
@@ -458,8 +413,7 @@ const officeDriverUrl = asset('office-driver.js');
       }
     }
 
-    // object-fit:cover mapping: office-buffer point (bx,by) → viewport px.
-    // scale = max(disp/buf) (cover fills then crops); the buffer is centered.
+    // object-fit:cover mapping: scale = max(disp/buf) — cover fills then crops, buffer centered.
     function coverMap() {
       const r = canvas.getBoundingClientRect();
       const s = Math.max(r.width / bufW, r.height / BUF_H);
@@ -490,9 +444,8 @@ const officeDriverUrl = asset('office-driver.js');
         if (!el) {
           el = document.createElement('span');
           el.className = 'ov-label';
-          // Two fixed child spans (● status dot, then the name). Child
-          // textContent concatenates to the full label, so hit-tests and text
-          // assertions read it unchanged.
+          // Two fixed child spans (● dot, then the name): their textContent concatenates to
+          // the full label, so hit-tests and text assertions read it unchanged.
           for (let k = 0; k < 2; k++) el.appendChild(document.createElement('span'));
           overlayEl.appendChild(el);
           labelPool[i] = el;
@@ -545,27 +498,20 @@ const officeDriverUrl = asset('office-driver.js');
     }
 
     function paint(nowMs) {
-      if (!img) return; // sizeBuffer bailed on a <1px viewport → no buffer to write
+      if (!img) return;
       office.step(nowMs, bufW, BUF_H);
-      // The frame-memory view must re-read ptr/len every frame — resize and
-      // memory.grow move them.
+      // Re-read ptr/len every frame — resize and memory.grow move the frame view.
       const view = officeDriver.officeFrameView(office, wasm);
       if (view.length !== img.data.length) return;
-      markEngineResolved(); // first good frame = engine is up
-      // Hold on the bg-tone cover until the boot splash lifts, so the roll is
-      // never played hidden behind the overlay.
+      markEngineResolved();
+      // Hold on the bg-tone cover until the boot splash lifts: the roll is never played hidden behind the overlay.
       if (!splashCleared) return;
-      // Per-frame delta off the SIM clock, so an explicit pause freezes the roll
-      // exactly as it freezes the office.
       const step = reveal.lastSim ? nowMs - reveal.lastSim : 0;
       reveal.lastSim = nowMs;
       const onBudget = step > 0 && step <= REVEAL_MAX_STEP_MS;
-      // Under reduced motion the office is a poster-still: no stray repaint (a
-      // resize, a background tick) may undo the mq listener's de-live.
+      // Under reduced motion the office is a poster-still — no stray repaint (a resize, a background tick) may undo the mq listener's de-live.
       if (!live && !mq.matches) {
-        // Frames must be flowing before the roll starts: that keeps a stall on
-        // the flat bg tone, and defers `is-live` / pix:onair / the ♩ button, so
-        // an office about to freeze never announces itself live.
+        // Frames must flow before the roll starts: a stall holds on the flat bg tone, and `is-live` / pix:onair / the ♩ button are deferred, so an office about to freeze never announces itself live.
         reveal.ready = onBudget ? reveal.ready + 1 : 0;
         reveal.waited++;
         if (reveal.ready < REVEAL_READY_FRAMES && reveal.waited < REVEAL_READY_MAX_WAIT) return;
@@ -574,8 +520,8 @@ const officeDriverUrl = asset('office-driver.js');
         document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: true } }));
         showAudioBtn();
       }
-      // Date.now() is not monotonic, so a backward clock jump holds the roll
-      // rather than rewinding it.
+      // Safari blocks the main thread for over a second inside its tab-snapshot IPC, so the roll rides PAINTED
+      // frames: the clamp makes a hitch PAUSE it, and Date.now()'s backward jumps hold it rather than rewind.
       reveal.elapsed += Math.max(0, Math.min(step, REVEAL_MAX_STEP_MS));
       const rt = mq.matches ? 1 : reveal.elapsed / REVEAL_MS;
       if (rt < 1) {
@@ -583,8 +529,7 @@ const officeDriverUrl = asset('office-driver.js');
       } else {
         img.data.set(view);
         ctx2d.putImageData(img, 0, 0);
-        // Caption the settled office only: labels track the FINAL sprite
-        // positions, so they'd smear over the rolling floors.
+        // Caption the settled office only: labels track the FINAL sprite positions, so they'd smear over the rolling floors.
         updateOverlay();
         if (overlayEl) overlayEl.classList.add('is-on');
       }
@@ -622,12 +567,10 @@ const officeDriverUrl = asset('office-driver.js');
       if (document.hidden) return;
       if (t - last >= FRAME_MS) {
         last = t;
-        // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as
-        // calendar time (browser-local day/night + wall clock).
+        // Date.now(), NOT the rAF timestamp: the engine decodes now_ms as calendar time (browser-local day/night).
         const nowMs = Date.now() - pauseOffset;
         paint(nowMs);
-        // Audio rides the SAME sim clock as the render, and ticks AFTER paint so
-        // office.step has set the frame's clock the AudioFrame reads.
+        // Ticks AFTER paint, on the same sim clock: office.step has set the frame's clock the AudioFrame reads.
         audioTick(nowMs);
       }
       raf = requestAnimationFrame(frame);
@@ -641,11 +584,11 @@ const officeDriverUrl = asset('office-driver.js');
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
     }
+    // pauseOffset resumes from the frozen moment; tab-hidden stops take NO offset on purpose — the office keeps living while you're away.
     function setPaused(p) {
       paused = p;
       if (pauseBtn) pauseBtn.setAttribute('aria-pressed', String(p));
-      // fan the pause out to every OTHER auto-motion surface, so ONE control
-      // governs page motion — WCAG 2.2.2 covers the page, not just this canvas.
+      // WCAG 2.2.2 covers the page, not just this canvas — ONE control fans out to every other auto-motion surface.
       document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: p } }));
       if (audioCtx && audioPlaying) {
         if (p) audioCtx.suspend();
@@ -664,36 +607,31 @@ const officeDriverUrl = asset('office-driver.js');
         setPaused(!paused);
       });
     }
+    // The pause control governs the page's wasm-independent ambient motion via pix:paused, so it stays reachable on a no-wasm engine or a failed fetch (#456).
     function syncPauseBtn() {
       if (pauseBtn) pauseBtn.hidden = mq.matches;
     }
     syncPauseBtn();
 
-    // The engine records per-tick gain/play/swap commands (office.audio_tick)
-    // and JS is dumb glue — the mixing decisions all live in Rust.
+    // The engine records per-tick gain/play/swap commands (office.audio_tick) and JS is dumb glue — the mixing decisions all live in Rust.
     const audioBtn = document.getElementById('office-audio');
-    const AUDIO_PREF = 'pix:audio'; // remembered CHOICE — never auto-plays without a gesture
+    const AUDIO_PREF = 'pix:audio';
     let audioCtx = null;
-    let audioReady = false; // beds synthesized + buffers uploaded
+    let audioReady = false;
     let audioPlaying = false;
-    let audioBooting = false; // warmup pump in flight (ignore re-clicks)
-    let audioUnavailable = false; // WebAudio failed (no device / locked down) — ♩ disabled
-    let restoreArmed = false; // the remembered-pref restore listeners attach ONCE
-    const LOOP_STEM_COUNT = 7; // LoopStem::ALL.len() — 0=Pad … 6=Rain
-    const TRACK_STEM_COUNT = 6; // bank::TRACK_STEMS.len() — a swap replaces these; rain is weather
-    let loopGains = []; // LOOP_STEM_COUNT GainNodes in LoopStem::ALL order
+    let audioBooting = false;
+    let audioUnavailable = false;
+    let restoreArmed = false;
+    // Stem counts mirror Rust: LoopStem::ALL.len() (0=Pad … 6=Rain) and bank::TRACK_STEMS.len().
+    const LOOP_STEM_COUNT = 7;
+    const TRACK_STEM_COUNT = 6;
+    let loopGains = [];
     let loopSources = [];
-    let oneShotBufs = {}; // pool wire → [AudioBuffer]
-    let audioSR = 44100; // engine sample rate, read ONCE at upload (see below)
-    // Pool WIRES only; the COUNT is discovered from the engine (audio_oneshot_len
-    // == 0 past the pool end) so the Rust-side pool sizes aren't duplicated here
-    // across the wasm/JS wire.
+    let oneShotBufs = {};
+    let audioSR = 44100;
     const ONESHOT_WIRES = [0, 1, 2, 3, 4];
 
-    // Copy f32 samples OUT of wasm linear memory (a view would dangle on the next
-    // memory.grow) into an AudioBuffer. `audioSR` is passed in, NOT re-read here,
-    // so no wasm call sits between the view and the copy — a grow there would
-    // detach the view mid-`.set`.
+    // Copy OUT of wasm memory before the next memory.grow detaches the view — audioSR is a param so no wasm call splits the view from the copy.
     function audioMakeBuffer(ptr, len) {
       if (!len) return null;
       const view = new Float32Array(wasm.memory.buffer, ptr, len);
@@ -723,9 +661,8 @@ const officeDriverUrl = asset('office-driver.js');
       oneShotBufs = {};
       for (const wire of ONESHOT_WIRES) {
         oneShotBufs[wire] = [];
-        // grow the pool until the engine reports an empty slot (len 0). POOL_MAX
-        // is belt-and-braces: a regression that returned non-empty unboundedly
-        // must never hang the main thread here.
+        // Grow until the engine reports an empty slot, so the Rust-side pool size is never duplicated across the wire.
+        // POOL_MAX is belt-and-braces: a regression returning non-empty unboundedly must never hang the main thread.
         const POOL_MAX = 1024;
         for (let j = 0; j < POOL_MAX && office.audio_oneshot_len(wire, j) > 0; j++) {
           oneShotBufs[wire].push(
@@ -734,8 +671,7 @@ const officeDriverUrl = asset('office-driver.js');
         }
       }
     }
-    // A mood-track swap replaces the TRACK-stem loop buffers in place; rain
-    // (the last stem) is weather, untouched.
+    // A mood-track swap replaces the TRACK-stem loop buffers in place; rain (the last stem) is weather, untouched.
     function audioSwapLoops() {
       for (let i = 0; i < TRACK_STEM_COUNT; i++) {
         const s = audioCtx.createBufferSource();
@@ -753,24 +689,20 @@ const officeDriverUrl = asset('office-driver.js');
     }
     function audioTick(nowMs) {
       if (!audioReady || !audioCtx) return;
-      // ALWAYS advance the engine even while MUTED: skipping the tick freezes
-      // the cue tracker, which then replays a stacked one-shot volley on unmute.
+      // ALWAYS advance the engine even while MUTED: skipping the tick freezes the cue tracker, which then replays a stacked one-shot volley on unmute.
       let cmd;
       try {
         cmd = JSON.parse(office.audio_tick(nowMs));
       } catch (e) {
         return; // a bad frame degrades to holding the last gains, never a throw
       }
-      // Muted = the AudioContext is suspended; keep the engine live but schedule
-      // no WebAudio — nodes queued against a suspended context all fire on resume.
+      // Muted = a suspended AudioContext: nodes queued against one all fire at once on resume, so schedule nothing.
       if (!audioPlaying) return;
-      // A node op can still throw if the context died mid-session — degrade
-      // rather than spam the console every frame.
+      // A node op can still throw if the context died mid-session — degrade rather than spam the console every frame.
       try {
         const now = audioCtx.currentTime;
-        // The mixer already crossfades, so a short setTargetAtTime just
-        // de-zippers the ~30fps steps.
-        // the wire itself is the width authority here
+        // The mixer already crossfades, so a short setTargetAtTime just de-zippers the ~30fps steps.
+        // The wire itself is the width authority here.
         for (let i = 0; i < cmd.gains.length; i++) {
           loopGains[i].gain.setTargetAtTime(cmd.gains[i], now, 0.03);
         }
@@ -791,16 +723,14 @@ const officeDriverUrl = asset('office-driver.js');
         audioDisable();
       }
     }
-    // WebAudio can fail outright (headless CI, locked-down browser, no output
-    // device): hide the ♩ and stop re-trying, so no "playing" button is left
-    // making no sound.
+    // WebAudio can fail outright (headless CI, locked-down browser, no output device): hide the ♩ and stop
+    // re-trying, so no "playing" button is left making no sound.
     function audioDisable() {
       audioReady = false;
       audioPlaying = false;
       audioBooting = false;
       audioUnavailable = true;
-      // tear down any in-flight prewarm too — fields directly (NOT
-      // prewarmSettle: its deferred-click resume would re-enter audio)
+      // Tear down any in-flight prewarm by field, NOT via prewarmSettle — its deferred-click resume would re-enter audio.
       prewarmClickPending = false;
       if (prewarmWorker) {
         prewarmWorker.terminate();
@@ -827,18 +757,14 @@ const officeDriverUrl = asset('office-driver.js');
         audioBtn.hidden = true;
       }
     }
-    // Synthesis runs OFF the main thread — a main-thread idle pump starved
-    // clicks/UI on slow hardware. At page idle a module worker loads its OWN wasm
-    // instance, builds the whole take and transfers the buffers back; the
-    // click-time chunked pump below stays as the fallback (dead worker / no
-    // module-worker support / reduced motion).
-    let prewarm = 'idle'; // 'idle' | 'running' | 'adopted' | 'failed'
+    let prewarm = 'idle';
     let prewarmWorker = null;
     let prewarmTimer = 0;
     let prewarmClickPending = false;
-    const PREWARM_TIMEOUT_MS = 15000; // a hung worker must never strand a deferred click
-    const PREWARM_IDLE_FALLBACK_MS = 1500; // rIC-less Safari: idle ≈ shortly after load
-    const PREWARM_IDLE_TIMEOUT_MS = 4000; // rIC must fire even on a never-idle page
+    const PREWARM_TIMEOUT_MS = 15000;
+    // rIC-less Safari never idles the callback and a never-idle page never fires it — both bounds are fallbacks, not schedules.
+    const PREWARM_IDLE_FALLBACK_MS = 1500;
+    const PREWARM_IDLE_TIMEOUT_MS = 4000;
     window.__pixAudioPrewarm = 'idle'; // e2e observability (polled global, like __pixLights)
     function prewarmSettle(state) {
       prewarm = state;
@@ -863,8 +789,7 @@ const officeDriverUrl = asset('office-driver.js');
         }
       }
     }
-    // Copy the transferred take into the driver one piece per tick, so no single
-    // main-thread block is bigger than one buffer.
+    // Copy the transferred take into the driver one piece per tick, so no single main-thread block is bigger than one buffer.
     function prewarmAdopt(data) {
       try {
         office.audio_adopt_begin(!!data.night, data.epoch);
@@ -873,8 +798,7 @@ const officeDriverUrl = asset('office-driver.js');
         return;
       }
       const pieces = [];
-      // the worker's loop list is sized by the Rust-side loop_count() authority
-      // — adopt whatever it sent; audio_adopt_loop validates
+      // The worker's loop list is sized by the Rust-side loop_count() authority — adopt whatever it sent; audio_adopt_loop validates.
       for (let i = 0; i < data.loops.length; i++) pieces.push({ loop: i, buf: data.loops[i] });
       for (const wire of ONESHOT_WIRES) {
         for (const buf of data.oneshots[wire] || []) pieces.push({ wire: wire, buf: buf });
@@ -908,10 +832,11 @@ const officeDriverUrl = asset('office-driver.js');
       }
       pump();
     }
+    // Synthesis runs OFF the main thread — a main-thread idle pump starved clicks/UI on slow hardware. A module worker
+    // loads its OWN wasm instance and transfers the take back; the click-time chunked pump stays as the fallback.
     function prewarmSpawn() {
-      // reduced-motion is a low-power signal: those visitors keep the click-time
-      // chunked path. audioReady/Booting: a ♩ click that landed BEFORE this idle
-      // callback already warms on the main thread.
+      // reduced-motion is a low-power signal: those visitors keep the click-time chunked path. audioReady/Booting:
+      // a ♩ click that landed BEFORE this idle callback already warms on the main thread.
       if (
         prewarm !== 'idle' ||
         !office ||
@@ -933,7 +858,7 @@ const officeDriverUrl = asset('office-driver.js');
       prewarmTimer = setTimeout(function () {
         prewarmTimer = 0;
         prewarmSettle('failed');
-      }, PREWARM_TIMEOUT_MS);
+      }, PREWARM_TIMEOUT_MS); // a hung worker must never strand a deferred click
       prewarmWorker.onmessage = function (e) {
         prewarmWorker = null; // it closes itself after its one message
         if (!e.data || !e.data.ok) prewarmSettle('failed');
@@ -944,8 +869,7 @@ const officeDriverUrl = asset('office-driver.js');
       };
       prewarmWorker.postMessage({ wasmJsUrl: wasmJsUrl, nowMs: Date.now() });
     }
-    // Pump the chunked synthesis off setTimeout(0) so the main thread never
-    // blocks on the multi-second bank/rain/beds build in one go.
+    // Pump the chunked synthesis off setTimeout(0), so the main thread never blocks on the multi-second bank/rain/beds build in one go.
     function audioPumpWarmup() {
       try {
         if (office.audio_warmup_step() > 0) {
@@ -954,7 +878,7 @@ const officeDriverUrl = asset('office-driver.js');
         }
         audioUploadBuffers(); // createBuffer here — the usual failure point
         audioReady = true;
-        audioBooting = false; // pump done — clear the in-flight flag on success too
+        audioBooting = false;
         window.__pixAudioReadyAt = performance.now(); // e2e: click→sound latency
       } catch (e) {
         audioDisable();
@@ -964,20 +888,16 @@ const officeDriverUrl = asset('office-driver.js');
       if (audioBooting || audioUnavailable || !office || !wasm) return;
       audioBooting = true;
       try {
-        // iOS mutes default WebAudio on the Ring/Silent switch; 'playback' routes
-        // to the media channel so the deliberate ♩ tap plays even on silent.
+        // iOS mutes default WebAudio on the Ring/Silent switch; 'playback' routes to the media channel so the deliberate ♩ tap plays even on silent.
         if ('audioSession' in navigator) navigator.audioSession.type = 'playback';
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
       } catch (e) {
-        // WebAudio unavailable (Tor / hardened Firefox / enterprise lockdown):
-        // HIDE the ♩ too, not just a flag-set — a visible button lets the click
-        // handler flip to a silent "playing" state and persist AUDIO_PREF=1.
+        // WebAudio unavailable (Tor / hardened Firefox / enterprise lockdown): HIDE the ♩ too, not just a flag-set —
+        // a visible button lets the click handler flip to a silent "playing" state and persist AUDIO_PREF=1.
         audioDisable();
         return;
       }
-      // The worker is mid-synthesis: defer to prewarmSettle (audioBooting stays
-      // set, blocking re-clicks) — it resumes this click on either outcome
-      // instead of racing a second driver against the adoption.
+      // The worker is mid-synthesis: defer to prewarmSettle (audioBooting blocks re-clicks) rather than race a second driver against the adoption.
       if (prewarm === 'running') {
         prewarmClickPending = true;
         return;
@@ -999,16 +919,14 @@ const officeDriverUrl = asset('office-driver.js');
     }
     if (audioBtn) {
       audioBtn.addEventListener('click', function () {
-        if (audioUnavailable) return; // WebAudio failed earlier — ♩ is a no-op
-        if (!audioReady && !audioBooting) audioStart(); // first click: gesture-gated boot
+        if (audioUnavailable) return;
+        if (!audioReady && !audioBooting) audioStart();
         if (audioUnavailable) return; // audioStart just failed (ctor threw) → don't flip to a silent "playing"
         setAudioPlaying(!audioPlaying);
       });
     }
-    // If the visitor turned sound ON before, restore it on their FIRST gesture
-    // this visit — autoplay policy forbids resuming without one, so this can
-    // never become an on-load restore.
     let audioBtnShown = false;
+    // AUDIO_PREF is a remembered CHOICE restored on the visitor's FIRST gesture: autoplay policy forbids resuming without one, so this can never become an on-load restore.
     function showAudioBtn() {
       if (!audioBtn || mq.matches || audioBtnShown) return;
       audioBtn.hidden = false;
@@ -1016,16 +934,13 @@ const officeDriverUrl = asset('office-driver.js');
       let remembered = false;
       try {
         remembered = window.localStorage.getItem(AUDIO_PREF) === '1';
-      } catch (e) {
-        /* private mode */
-      }
+      } catch (e) {}
       if (!remembered) return;
       const restore = function (e) {
         window.removeEventListener('pointerdown', restore, true);
         window.removeEventListener('keydown', restore, true);
-        // If the gesture IS the ♩ button, let its OWN click handler own the
-        // toggle — a capture-phase restore→on followed by the click→off would
-        // invert the returning visitor's very first press.
+        // If the gesture IS the ♩ button, let its OWN click handler own the toggle — a capture-phase
+        // restore→on followed by the click→off would invert the returning visitor's very first press.
         if ((e && e.target && audioBtn.contains(e.target)) || audioReady || audioBooting) return;
         audioStart();
         setAudioPlaying(true);
@@ -1036,9 +951,8 @@ const officeDriverUrl = asset('office-driver.js');
       window.addEventListener('keydown', restore, true);
     }
 
-    // Publishes --footer-h for .office-ctl's ≤960px clearance. DEFERRED: this
-    // is:inline script renders BEFORE <footer>, so a parse-time querySelector
-    // sees no footer yet.
+    // Publishes --footer-h for .office-ctl's ≤960px clearance. DEFERRED: this is:inline script renders
+    // BEFORE <footer>, so a parse-time querySelector sees no footer yet.
     function wireFooterHeight() {
       const footerEl = document.querySelector('.footer');
       if (!footerEl) return;
@@ -1059,38 +973,25 @@ const officeDriverUrl = asset('office-driver.js');
       wireFooterHeight();
     }
 
-    // Copying the install line hires a coworker into the office. The engine's own
-    // return value is the admission signal, so the JS side never mirrors the
-    // concurrent cap and the receipt can't drift from what was actually admitted.
     document.addEventListener('pix:install-copy', function () {
       if (!window.__pixHire) return;
-      if (!window.__pixHire()) return; // engine refused: cap reached or no free desk
+      if (!window.__pixHire()) return; // the engine's return IS the admission signal — never mirror the cap here
       document.dispatchEvent(new CustomEvent('pix:hired', { detail: { name: 'cc·yours' } }));
     });
 
-    // Reduced motion defers the wasm fetch entirely (still poster only), but a
-    // LIVE un-reduce should still bring the office up — so the fetch lives behind
-    // a one-shot boot() the mq listener can trigger later.
     let booted = false;
     function boot() {
       if (booted) return;
       booted = true;
-      // Showcase.astro's VIBING channel boots a SECOND Office off the SAME wasm
-      // module, and the generated glue's __wbg_init memoizes only the RESOLVED
-      // instance, not the in-flight promise — two `mod.default()` calls racing
-      // before either resolves each instantiate a separate wasm instance and stomp
-      // the one module-global `wasm`, leaving whichever Office built against the
-      // loser reading the wrong linear memory forever. drv.sharedWasm memoizes ONE
-      // init promise on `window`. Dynamic import because this is an is:inline
-      // script the bundler doesn't process.
+      // Showcase.astro's VIBING channel boots a SECOND Office off the SAME wasm module, and __wbg_init memoizes only the RESOLVED
+      // instance — two racing `mod.default()` calls each instantiate and stomp the one module-global `wasm`, so drv.sharedWasm memoizes ONE init promise.
       import(officeDriverUrl)
         .then(function (drv) {
           officeDriver = drv;
           return drv.sharedWasm(wasmJsUrl);
         })
         .then(function (mod) {
-          // __wbg_init is idempotent once resolved, so this just hands back
-          // the already-instantiated exports (no second fetch/instantiate).
+          // __wbg_init is idempotent once resolved: this hands back the already-instantiated exports, with no second fetch.
           return mod.default().then(function (w) {
             wasm = w;
             office = new mod.Office(SEED);
@@ -1112,17 +1013,13 @@ const officeDriverUrl = asset('office-driver.js');
           });
         })
         .catch(function () {
-          // wasm never loaded after the bounded retry: null the shared promise so a
-          // LATER-booting consumer (Showcase VIBING, scrolled in after the network
-          // recovers) can retry instead of inheriting this rejection.
+          // Null the shared promise so a LATER-booting consumer (VIBING, scrolled in once the network recovers) retries instead of inheriting this rejection.
           window.__pixWasm = null;
           uncover();
           markEngineResolved();
         });
     }
-    // Defer the wasm fetch OUT of the render-critical window: kick it after
-    // `load`, at idle, so it stops competing with the above-fold poster / fonts /
-    // CSS (LCP is the H1 text). The bg-tone cover holds until the first frame.
+    // Kicked after `load`, at idle, so the wasm fetch never competes with the above-fold poster / fonts / CSS (LCP is the H1 text).
     function deferBoot() {
       if (mq.matches) return;
       (
@@ -1148,12 +1045,6 @@ const officeDriverUrl = asset('office-driver.js');
         if (paused && live) paint(pausedAt - pauseOffset);
       });
     });
-    // Background PLAYBACK (owner decision): the office is a radio first, so
-    // switching tabs must not stop the music. It is the SAME full tick as
-    // frame(), just at 1 Hz, so the sim keeps advancing — the cue tracker sees
-    // real edges instead of a return-burst volley, and the next rAF frame reads
-    // the same clock the background ticks did. The explicit PAUSE button still
-    // silences everything.
     let bgTimer = 0;
     function stopBgTicks() {
       if (bgTimer) clearInterval(bgTimer);
@@ -1162,10 +1053,11 @@ const officeDriverUrl = asset('office-driver.js');
     document.addEventListener('visibilitychange', function () {
       if (document.hidden) {
         stop();
+        // Background PLAYBACK (owner decision): the office is a radio first, so switching tabs must not stop the music. The
+        // SAME full tick as frame() at 1 Hz keeps the sim advancing, so the cue tracker sees real edges, not a return-burst volley.
         if (audioCtx && audioPlaying && !paused && !bgTimer) {
           bgTimer = setInterval(function () {
-            // reduced-motion may engage while hidden: paint() would re-live
-            // the poster-still office
+            // reduced-motion may engage while hidden: paint() would re-live the poster-still office
             if (paused || !audioPlaying || mq.matches) return;
             const nowMs = Date.now() - pauseOffset;
             paint(nowMs);
@@ -1186,34 +1078,27 @@ const officeDriverUrl = asset('office-driver.js');
         if (mq.matches) {
           stop();
           stopBgTicks(); // hidden-tab playback must not re-animate a poster-still office
-          // Reduced motion IS the poster-still design: nothing auto-animates, so
-          // reset the pause flag or the statusline feed / hero dust stay stuck
-          // paused after a later un-reduce.
+          // Reduced motion IS the poster-still design: reset the pause flag, or the statusline feed / hero dust stay stuck paused after a later un-reduce.
           paused = false;
           if (pauseBtn) pauseBtn.setAttribute('aria-pressed', 'false');
           document.dispatchEvent(new CustomEvent('pix:paused', { detail: { paused: false } }));
           wrap.classList.remove('is-live');
           if (overlayEl) overlayEl.classList.remove('is-on');
           live = false;
-          // …and rewind the reveal with it, or the accumulated progress survives,
-          // rt is already >= 1, and the office SNAPS back in on un-reduce.
+          // …and rewind the reveal with it, or the surviving progress leaves rt >= 1 and the office SNAPS back in on un-reduce.
           reveal = freshReveal();
           document.dispatchEvent(new CustomEvent('pix:onair', { detail: { live: false } }));
-          // Reduced motion stops the rAF loop, so the sound loops would drone
-          // unfed behind the poster — suspend, keeping the flag on so an
-          // un-reduce resumes it. Re-arm the ♩ or showAudioBtn's once-guard
-          // keeps it hidden through the fresh boot.
+          // Reduced motion stops the rAF loop, so the sound loops would drone unfed behind the poster — suspend, keeping the
+          // flag on so an un-reduce resumes it. Re-arm the ♩, or showAudioBtn's once-guard keeps it hidden through the fresh boot.
           if (audioCtx && audioPlaying) audioCtx.suspend();
           if (audioBtn) audioBtn.hidden = true;
           audioBtnShown = false;
         } else if (hasWasm) {
-          cover(); // re-cover before the fresh boot rolls the live office in
-          boot(); // no-op if already booted; a reduced-motion first visit fetches here
+          cover();
+          boot();
           start();
           if (audioCtx && audioPlaying) audioCtx.resume();
         }
-        // ambient motion stops on reduce and resumes on un-reduce — show/hide the
-        // control to match, in BOTH directions.
         syncPauseBtn();
       });
     }
@@ -1221,30 +1106,27 @@ const officeDriverUrl = asset('office-driver.js');
 </script>
 
 <script is:inline>
-  // Scrolling is the light switch: every [data-lit] block pulls darkness in as it
-  // approaches the viewport center and releases it in the observation gaps. One
-  // style.opacity write per changed frame keeps it compositor-only.
+  // Scrolling is the light switch: every [data-lit] block pulls darkness in as it approaches the viewport
+  // center and releases it in the gaps. One style.opacity write per changed frame keeps it compositor-only.
   (function () {
     const dimmer = document.getElementById('dimmer');
     if (!dimmer) return;
     const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
     const DIM_MAX = 0.86;
 
-    let blocks = []; // cached page-space rects; re-measured on resize/body-reflow
+    let blocks = [];
     let lastY = -1;
     let lastOp = -1;
     let raf = 0;
-    let active = null; // the currently-faded [data-lit] block
+    let active = null;
 
     // smoothstep — darkness eases in/out with approach, no linear pop
     function ease(t) {
       return t * t * (3 - 2 * t);
     }
 
-    // Every caller must run this SYNCHRONOUSLY, re-measure paths included. A
-    // content reflow above the viewport moves window.scrollY in the same task, so
-    // deferring the recompute to the next frame() tick paints one wrong frame —
-    // anchor-adjusted y against stale blocks selects the wrong [data-lit] block.
+    // Every caller must run this SYNCHRONOUSLY, re-measure paths included: a content reflow above the viewport moves
+    // window.scrollY in the same task, so deferring paints one wrong frame off stale blocks.
     function recompute(y) {
       lastY = y;
       const center = y + window.innerHeight / 2;
@@ -1260,15 +1142,14 @@ const officeDriverUrl = asset('office-driver.js');
           bestEl = b.el;
         }
       }
-      // A block may cap its own darkness below DIM_MAX via data-lit-max: the hero
-      // holds a lower ceiling so the LIVE office actually reads above the fold.
+      // data-lit-max caps a block's own darkness below DIM_MAX: the hero holds a lower ceiling so the LIVE office reads above the fold.
       const cap = bestEl && bestEl.dataset.litMax ? parseFloat(bestEl.dataset.litMax) : DIM_MAX;
       const op = cap * ease(best);
       if (Math.abs(op - lastOp) > 0.002) {
         lastOp = op;
         dimmer.style.opacity = op.toFixed(3);
-        // Polled global, deliberately NOT an event (contrast pix:onair): a
-        // continuous per-frame value is read at the consumer's own cadence.
+        // Polled global, deliberately NOT an event (contrast pix:onair): a continuous
+        // per-frame value is read at the consumer's own cadence.
         window.__pixLights = op;
       }
       // Only the active block and the one it replaces are ever written.
@@ -1301,9 +1182,8 @@ const officeDriverUrl = asset('office-driver.js');
       raf = requestAnimationFrame(frame);
     }
 
-    // Registered UNCONDITIONALLY, not behind the reduced-motion gate: a page
-    // loaded reduced then un-reduced mid-session must not run the controller
-    // forever on the single stale snapshot the un-reduce branch measured.
+    // Registered UNCONDITIONALLY, not behind the reduced-motion gate: a page loaded reduced then un-reduced
+    // mid-session must not run forever on the single stale snapshot the un-reduce branch measured.
     let rraf = 0;
     window.addEventListener('resize', function () {
       if (rraf) return;
@@ -1314,9 +1194,8 @@ const officeDriverUrl = asset('office-driver.js');
     });
     // content below (boot reveal, lazy media) can shift rects after load
     window.addEventListener('load', measure);
-    // A Showcase channel tune swaps stages of different heights, which resize and
-    // load alone miss. Call measure() DIRECTLY, with no rAF deferral: deferring by
-    // a frame is exactly what lets the stale-block glitch reach the screen.
+    // A Showcase channel tune swaps stages of different heights, which resize and load alone miss. Call measure()
+    // DIRECTLY, with no rAF deferral — deferring by a frame is exactly what lets the stale-block glitch reach the screen.
     if ('ResizeObserver' in window) {
       new ResizeObserver(measure).observe(document.body);
     }
@@ -1326,8 +1205,7 @@ const officeDriverUrl = asset('office-driver.js');
       measure();
       raf = requestAnimationFrame(frame);
     }
-    // DEFERRED: this is:inline script renders BEFORE <main>, so a parse-time
-    // querySelectorAll sees zero [data-lit] blocks.
+    // DEFERRED: this is:inline script renders BEFORE <main>, so a parse-time querySelectorAll sees zero [data-lit] blocks.
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', wire, { once: true });
     } else {
@@ -1339,9 +1217,8 @@ const officeDriverUrl = asset('office-driver.js');
           cancelAnimationFrame(raf);
           raf = 0;
           dimmer.style.opacity = ''; // CSS reduced-motion rule takes over
-          // Reset EVERY faded block, not just `active`: one left at inline opacity
-          // 0.001 (invisible h1/CTA) has no recovery while reduce stays on, and
-          // the stranded block is often no longer the active one.
+          // Reset EVERY faded block, not just `active`: one left at inline opacity 0.001 (invisible h1/CTA)
+          // has no recovery while reduce stays on, and the stranded block is often no longer the active one.
           document.querySelectorAll('[data-lit="fade"]').forEach(function (el) {
             el.style.opacity = '';
             el.style.transform = '';

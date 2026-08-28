@@ -1308,6 +1308,23 @@ fn door_frame_closed_when_no_agents() {
 }
 
 #[test]
+fn wall_clock_epoch_ms_survives_an_f32_cast_only_after_an_integer_reduction() {
+    // The freeze is invisible at a test-scale `now`; it needs the real ~1.7e12
+    // magnitude, so this fixture counts from the epoch like production does.
+    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+    let a_second_later = now + std::time::Duration::from_secs(1);
+
+    // An f32 ULP up here is ~131 s, so a whole second vanishes in the cast.
+    assert_eq!(epoch_ms(now) as f32, epoch_ms(a_second_later) as f32);
+
+    const CYCLE_MS: u64 = 4500;
+    assert_ne!(
+        (epoch_ms(now) % CYCLE_MS) as f32,
+        (epoch_ms(a_second_later) % CYCLE_MS) as f32
+    );
+}
+
+#[test]
 fn door_frame_just_spawned_is_half_open() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
     // 50 ms into the 200 ms opening ramp — first half = frame 1.
@@ -3765,8 +3782,8 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
 }
 
 /// The two emitters this PR added; the ceiling pools and the floor lamp share the
-/// rule but not this pin (`SHARP-EDGES.md` enumerates the set). Dropping either
-/// factor makes that emitter's two readings equal.
+/// rule but not this pin. Dropping either factor makes that emitter's two
+/// readings equal.
 #[test]
 fn an_emptied_floor_takes_both_desk_emitters_down_with_the_level() {
     use crate::layout::Facing;
@@ -3856,9 +3873,8 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
     }
 }
 
-/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort, and
-/// `SHARP-EDGES.md` says outright that breaking either paints the chair under
-/// its occupant with every other test still green. This is that gate: it reads
+/// The chair's z-tie is carried by INSERTION ORDER plus a STABLE sort; breaking
+/// either paints the chair under its occupant with every other test still green. This is that gate: it reads
 /// `paint_frame`'s own source, because the failure is in the call order, not in
 /// any value a fixture can produce.
 #[test]

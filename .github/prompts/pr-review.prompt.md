@@ -4,8 +4,7 @@ Canonical for both scopes of `two-lens-review` (diff gate / whole-codebase
 audit). The skill owns *when* to invoke and the convergence contract (round
 caps, blocking bar, churn budget).
 
-**Size budget: the `BUDGETS` byte cap in `scripts/gen-guides.py` (enforced by
-`just lint`); one-in-one-out.** A line lives here only if it
+**One-in-one-out.** A line lives here only if it
 changes reviewer BEHAVIOR: a repo-specific trap whose obvious reading is
 wrong, a rule about what NOT to flag, or a verification act beyond reading
 the diff. Generic defect hunting (logic, races, error handling, unwrap,
@@ -65,8 +64,7 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 
 ## Negative space (do NOT flag)
 
-- Behavior documented in the crate's `SHARP-EDGES.md` — open the ENTRY (the
-  index line in its `CLAUDE.md` is not the entry).
+- Behavior documented on the declaration's own doc comment — open the item.
 - Absence of defense-in-depth where a primary defense exists; pure style;
   theoretical risks needing unlikely preconditions.
 - Existence/version claims about external artifacts (action tags, crate
@@ -137,11 +135,12 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 ## Orchestrator notes (diff scope)
 
 Dispatch lenses in parallel, in the worktree, in the background. Verify every
-MEDIUM+ finding's premise (read the SHARP-EDGES entry) before coding a fix.
+MEDIUM+ finding's premise (read the declaration's doc comment) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
 reaches exactly one terminal state in the PR thread (this list is CANONICAL —
-other docs point here): FIXED · REFUTED-with-trace (cite or ADD the sharp
-edge) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
+other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that
+refutes it — a test, a compile-time constraint, a CI gate; ADD one where none
+exists, never prose) · RE-SCOPED (real and INTRODUCED — or first made reachable — by this
 change, and bigger than the PR: the PR is wrong-sized, split or redesign it
 until the finding is IN scope) · SURFACED (real and PRE-EXISTING — one line
 to the owner, who decides, whether or not this change touched its file; a

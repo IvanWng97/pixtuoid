@@ -4,7 +4,7 @@
 //! diverge there:
 //! - **`boot_caps`**: the TUI measures the terminal (footer-subtracting,
 //!   cap-clamped, headless arms); floating measures its window pixels — a
-//!   documented sharp edge (reusing the TUI math over-seeds and strands agents on
+//!   deliberate divergence (reusing the TUI math over-seeds and strands agents on
 //!   non-existent desks), so the pipeline takes the seed as a PARAMETER and must
 //!   never compute it. It is also WHEN they diverge: floating cannot seed until a
 //!   real window exists, so it calls this from `window::resumed`, not at boot.

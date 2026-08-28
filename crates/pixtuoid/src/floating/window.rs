@@ -300,8 +300,10 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
                 return;
             }
         };
-        // Seeded from the REAL window — the first physical size there is. Past
-        // the window/surface failure arms, so a failed boot binds no socket.
+        // Seeded from the REAL window — the first PHYSICAL size there is, never the
+        // logical config size (#803: buffer size is not monotone in scale factor).
+        // Past the window/surface failure arms, so a failed boot binds no socket.
+        // Pinned by `the_boot_seed_tracks_the_physical_window_not_the_logical_config`.
         if let Some(boot) = self.boot.take() {
             self.live = Some(boot.spawn(window.inner_size()));
         }

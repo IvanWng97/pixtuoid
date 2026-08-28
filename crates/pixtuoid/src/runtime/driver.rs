@@ -128,17 +128,15 @@ pub(crate) fn build_source_set(
         codex_src.sessions_root = p;
     }
 
-    // ONE shared child-end un-claim handle: the HookRouter's hook tee is the sole
-    // PRODUCER, and each watcher drains only the ids whose transcripts it claims
-    // (AgentId is source-namespaced), so a Codex child's id waits for the Codex
-    // watcher even though the router decoded its hook.
+    // The hook tee is the sole PRODUCER, and each watcher drains only ids whose
+    // transcripts it claims (AgentId is source-namespaced), so a Codex child waits
+    // for the Codex watcher even though the router decoded its hook.
     let child_end_unclaims = ChildEndUnclaims::new();
     cc_src.child_end_unclaims = Some(child_end_unclaims.clone());
     codex_src.child_end_unclaims = Some(child_end_unclaims.clone());
 
-    // grok consumes too: its subagent_stop/subagent_end hooks decode to
-    // Hook-transport `SessionEnd{as_child:true}` (the tee's trigger), and the
-    // grok watcher releases the ended child's flat-sibling transcript claim.
+    // grok consumes too: its subagent_stop/end hooks decode to Hook-transport
+    // `SessionEnd{as_child:true}`, the tee's trigger.
     let mut grok_src = GrokSource::default_paths();
     grok_src.child_end_unclaims = Some(child_end_unclaims.clone());
 
@@ -172,10 +170,9 @@ pub(crate) async fn reducer_task(
     // Disabled once the presence channel closes (all senders dropped) so its
     // `recv() -> None` branch can't busy-loop the select.
     let mut presence_open = true;
-    // Registered sources already announced as gated. `&'static str`, NOT the raw
-    // wire name: `_pixtuoid_source` arrives verbatim from socket JSON with no
-    // registry check and no length cap, so keying on it would let a long-lived
-    // `run` accumulate one entry per distinct name seen.
+    // `&'static str`, NOT the raw wire name: `_pixtuoid_source` arrives verbatim
+    // from socket JSON with no registry check and no length cap, so keying on it
+    // lets a long-lived `run` accumulate an entry per distinct name seen.
     let mut gate_logged: std::collections::HashSet<&'static str> = std::collections::HashSet::new();
     let initial_caps: [usize; MAX_FLOORS] =
         std::array::from_fn(|i| floor_caps[i].load(Ordering::Relaxed));
@@ -208,10 +205,9 @@ pub(crate) async fn reducer_task(
                     break;
                 }
             }
-            // Daemon-presence deltas are merged into SceneState::daemons, NEVER
-            // through Reducer::apply (which is AgentId-pure). They route by
-            // `DaemonInstanceKey`, so N instances of one daemon (two OpenClaw
-            // gateways) need no per-source special-casing.
+            // Merged into SceneState::daemons, NEVER through the AgentId-pure
+            // `Reducer::apply`. Routed by `DaemonInstanceKey`, so N instances of one
+            // daemon need no per-source special-casing.
             update = presence_rx.recv(), if presence_open => {
                 match update {
                     Some(PresenceMsg { key, delta }) => {

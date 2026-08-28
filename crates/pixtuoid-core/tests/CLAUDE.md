@@ -37,7 +37,8 @@ tests/
 │                        drives committed wire through a real Reducer)
 ├── transport/main.rs    #[cfg(unix)] socket / #[cfg(windows)] pipe
 ├── render/main.rs       blit + format (+ sprite fixtures)
-└── socket_path_parity.rs · supported_sources_manifest.rs · proof_fixture_disjointness.rs
+└── socket_path_parity.rs · supported_sources_manifest.rs ·
+    proof_fixture_disjointness.rs · pinned_by_claims.rs
                          FLAT + publish-excluded (sharp edge below)
 ```
 
@@ -78,10 +79,10 @@ under `sources/fixtures/` would be mis-scanned.
 
 ## Known sharp edges
 
-- **The three FLAT tests stay flat and publish-excluded.** Each reads a
+- **The four FLAT tests stay flat and publish-excluded.** Each reads a
   sibling outside this crate (`site/src/sources.json`, `Statusline.astro`,
-  the shim's `paths.rs`), so all three sit in `Cargo.toml`'s `exclude` and
-  the published tarball builds without them; a grouped binary's submodule
+  the shim's `paths.rs`, the whole `crates/` tree), so all four sit in
+  `Cargo.toml`'s `exclude` and the published tarball builds without them; a grouped binary's submodule
   can't be individually excluded (the parent `mod` fails on the extracted crate).
 - **A multi-file binary is `tests/<area>/main.rs`, NOT `tests/<area>.rs`** — a
   top-level `area.rs` is a crate root whose `mod foo;` resolves to a SIBLING

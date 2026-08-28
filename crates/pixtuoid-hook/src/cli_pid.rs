@@ -5,9 +5,7 @@
 //! ours, which therefore cannot exec-replace itself with us — Cursor `eval`s
 //! the hook mid-script and then dumps shell state (#896), so stamping it would
 //! aim focus-jump at a corpse. (Ending a SESSION on a bad pid is separately
-//! guarded — see `HookPidWatch`'s corroboration entry in
-//! `pixtuoid-core/SHARP-EDGES.md`.) Residuals are in
-//! `pixtuoid-core/CLAUDE.md`'s focus-jump section.
+//! guarded — see `HookPidWatch`.)
 //!
 //! Only the row READ is per-OS, hand-rolled rather than `sysinfo` because this
 //! runs on every tool call of every agent inside the shim's send bound.

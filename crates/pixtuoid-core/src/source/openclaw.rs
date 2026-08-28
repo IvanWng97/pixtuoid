@@ -102,6 +102,10 @@ pub fn decode_openclaw_hook_payload(v: &Value) -> Result<DecodedPresence> {
         .get("_pid")
         .and_then(|p| p.as_i64())
         .and_then(crate::source::decoder::checked_pid);
+    // Presence is ANNOUNCE-only: upstream fires `gateway_start` once per gateway
+    // PROCESS start, so a gateway already running when pixtuoid boots stays
+    // invisible until it restarts. That is upstream's contract, not a hole to
+    // "fix" with a poll.
     let mut out = match event {
         "gateway_start" => vec![DaemonPresenceUpdate::GatewayUp { pid }],
         "gateway_stop" => vec![DaemonPresenceUpdate::GatewayDown],

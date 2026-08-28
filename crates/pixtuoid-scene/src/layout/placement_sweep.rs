@@ -1,9 +1,8 @@
 //! The generative placement-invariant sweep over a sizes × seeds grid.
 //!
-//! Piece rects come from the SAME `mask::ground_rect` / `pantry_ground_rect`
-//! the walkable mask stamps, so the sweep can never drift from the collision
-//! truth, and [`pieces`] destructures `SceneLayout` with NO `..` so a new
-//! furniture collection fails compilation here until it is swept or exempted.
+//! The routability guards live HERE, on the same [`SWEEP_SIZES`] axis as the
+//! placement ones, so the two can't disagree — they did, and the narrow band
+//! was swept for placement but never for routability.
 
 use super::decor::DESK_GROUND_H;
 use super::mask::pantry_ground_rect;
@@ -15,10 +14,6 @@ use super::*;
 /// px = 24-30 rows, which the old hand-written floor refused sight-unseen), the
 /// decor-vs-wall and Y-overflow corners, the golden and live wasm hero buffers,
 /// and a spread wide enough that the appliance kinds appear.
-///
-/// Module-private on purpose: the routability guards that need this axis live
-/// HERE so the placement axis and the routability axis can't disagree — they
-/// did, and the narrow band was swept for placement but never for routability.
 const SWEEP_SIZES: &[(u16, u16)] = &[
     (super::compute::MIN_LAYOUT_W, super::compute::MIN_LAYOUT_H),
     (super::compute::MIN_LAYOUT_W, 60),
@@ -36,8 +31,7 @@ const SWEEP_SIZES: &[(u16, u16)] = &[
     (super::compute::MIN_LAYOUT_W + 4, 160),
     (48, 60),
     (50, 80),
-    // The only size here that reaches the #566 guard, so every invariant below gets one
-    // layout whose decor the guard degraded.
+    // The only size here reaching the #566 guard: one layout whose decor it degraded.
     (59, 148),
     (64, 130),
     (96, 60),
@@ -83,9 +77,8 @@ fn sweep_over(
                     );
                     f(w, h, seed, &l);
                 }
-                // Not "assert this refusal is legitimate": every entry is meant to be
-                // above both floors, so a refusal means a floor rose past a hand-pinned
-                // size and this axis lost that point SILENTLY.
+                // Every entry is meant to sit above both floors, so a refusal means a
+                // floor rose past a hand-pinned size and this axis lost it SILENTLY.
                 None => panic!(
                     "{w}x{h} seed {seed}: a SWEEP_SIZES entry fell under the floor \
                      ({}x{}) — the sweep lost it",
@@ -171,36 +164,56 @@ impl Piece {
     }
 }
 
-/// Enumerate EVERY placed piece of a layout. The destructure below has no `..`
-/// on purpose: a field that contributes no piece is bound and discarded with
-/// the WHY on the same line.
+/// Enumerate EVERY placed piece of a layout, with rects from the SAME
+/// `mask::ground_rect` / `pantry_ground_rect` the walkable mask stamps — the
+/// sweep can never drift from the collision truth. The destructure has NO `..`,
+/// so a new furniture collection fails compilation here until it is swept, or
+/// bound and discarded with the WHY beside it.
 fn pieces(l: &SceneLayout) -> Vec<Piece> {
     let SceneLayout {
-        buf_w: _, // the Buffer container, read by the invariants directly
+        // Buffer bounds and band containers the invariants read directly, not pieces.
+        buf_w: _,
         buf_h: _,
-        cubicle_band: _,  // container, not a piece
-        cubicle_aisle: _, // container, not a piece
+        cubicle_band: _,
+        cubicle_aisle: _,
         home_desks,
-        desk_facings: _, // a desk ATTRIBUTE, not a piece; length pinned by `every_desk_has_a_facing`
+        // A desk ATTRIBUTE, not a piece; length pinned by `every_desk_has_a_facing`.
+        desk_facings: _,
         waypoints,
         plants,
         wall_decor,
         pod_decor,
         lounge,
-        door: _, // architecture, not furniture: it PUNCHES walkability through the band
-        door_threshold: _, // a walkable POINT, asserted by the connectivity tests
+        // Architecture, not furniture: the door PUNCHES walkability through the band
+        // and its threshold is a walkable POINT the connectivity guards assert.
+        door: _,
+        door_threshold: _,
         meeting_rooms,
         pantry,
-        room_walls: _, // the containers' edges; overlap-vs-walls is its own invariant
-        doorways: _,   // architectural openings, not furniture
-        top_margin: _, // wall-band geometry, read via wall_band_h() in invariants
-        corridor: _,   // router/pet zone, spans the full width by design
-        walkable: _,   // probed directly by the connectivity invariant
-        reachable: _,  // conservative routing truth, exercised by pathfind tests
+        // The containers' own edges and openings; overlap-vs-walls is its own invariant.
+        room_walls: _,
+        doorways: _,
+        // Wall-band geometry, read via `wall_band_h()`, and the full-width router zone.
+        top_margin: _,
+        corridor: _,
+        // The masks the connectivity and pathfind guards probe directly.
+        walkable: _,
+        reachable: _,
     } = l;
 
     let mut out = Vec::new();
+    push_desks(home_desks, &mut out);
+    push_pod_decor(pod_decor, &mut out);
+    push_plants(l, plants, &mut out);
+    push_wall_decor(wall_decor, &mut out);
+    push_waypoints(l, waypoints, &mut out);
+    push_meeting_rooms(meeting_rooms, &mut out);
+    push_lounge(lounge.as_ref(), &mut out);
+    push_kitchen_island(pantry.as_ref(), &mut out);
+    out
+}
 
+fn push_desks(home_desks: &[Point], out: &mut Vec<Piece>) {
     for (i, &d) in home_desks.iter().enumerate() {
         out.push(Piece::table(
             format!("desk[{i}]"),
@@ -211,7 +224,9 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             None,
         ));
     }
+}
 
+fn push_pod_decor(pod_decor: &[PodDecorItem], out: &mut Vec<Piece>) {
     for (i, pd) in pod_decor.iter().enumerate() {
         let mut piece = Piece::table(
             format!("pod_decor[{i}] {:?}", pd.kind),
@@ -224,10 +239,12 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         piece.visual_in_container = true;
         out.push(piece);
     }
+}
 
+/// Per-ITEM container, picked by POSITION: a plant that `settle_plant` moved
+/// beside a corner appliance adopts the blocker's AISLE row.
+fn push_plants(l: &SceneLayout, plants: &[PlantItem], out: &mut Vec<Piece>) {
     for (i, p) in plants.iter().enumerate() {
-        // Per-ITEM container, picked by POSITION: a plant that settle_plant
-        // moved beside a corner appliance adopts the blocker's AISLE row.
         let in_meeting = l
             .meeting_room_bounds(0)
             .map(|mr| contains_point(mr, p.pos))
@@ -248,7 +265,9 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             None,
         ));
     }
+}
 
+fn push_wall_decor(wall_decor: &[WallDecorItem], out: &mut Vec<Piece>) {
     for (i, wd) in wall_decor.iter().enumerate() {
         let container = match wd.kind {
             // Free-standing floor furniture despite living in the wall_decor
@@ -268,12 +287,13 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             None,
         ));
     }
+}
 
+fn push_waypoints(l: &SceneLayout, waypoints: &[Waypoint], out: &mut Vec<Piece>) {
     for (i, wp) in waypoints.iter().enumerate() {
         match wp.kind {
-            // Each seat stamps its own body into the mask and their union IS
-            // the couch's blocked ground, so model the seats and group them.
-            // `couch_sprite_center` is NOT used here — it under-models the union.
+            // Each seat stamps its own body and their union IS the couch's blocked
+            // ground, so model the seats — `couch_sprite_center` under-models it.
             WaypointKind::Couch => {
                 out.push(Piece::table(
                     format!("waypoint[{i}] Couch seat"),
@@ -284,15 +304,13 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     Some(2),
                 ));
             }
-            // Promoted pod_decor slots at the same pos — the pod_decor entry
-            // above carries their geometry.
+            // Promoted pod_decor slots at the same pos — that entry carries the geometry.
             WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
             // No obstacle of their own; containment is the pos-in-room check in
             // `every_meeting_slot_sits_in_its_room`.
             WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {}
             WaypointKind::Pantry => {
-                // Runtime-sized: geometry comes from the shared
-                // pantry_ground_rect, not the (deliberately empty) table row.
+                // Runtime-sized via `pantry_ground_rect` — the table row is empty ON PURPOSE.
                 let counter = l.pantry_counter_size();
                 out.push(Piece {
                     label: format!("waypoint[{i}] Pantry counter"),
@@ -327,12 +345,13 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
                     None,
                 ));
             }
-            // Stands carry no ground: the island BODY registers via
-            // `kitchen_island` below.
+            // Stands carry no ground; the island BODY registers in `push_kitchen_island`.
             WaypointKind::Island => {}
         }
     }
+}
 
+fn push_meeting_rooms(meeting_rooms: &[MeetingRoom], out: &mut Vec<Piece>) {
     for (room, r) in meeting_rooms.iter().enumerate() {
         // No `..` here either, so a NEW field on either struct is a compile
         // error until its pieces are registered.
@@ -363,42 +382,47 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             None,
         ));
     }
+}
 
-    // ONE authored cluster: the table tucks against the couch's west armrest
-    // and the lamp hugs its east side BY DESIGN, so they share overlap group 2
-    // and the goldens (not the overlap invariant) pin their internal geometry.
-    if let Some(lounge) = lounge {
+/// ONE authored cluster: the table tucks against the couch's west armrest and
+/// the lamp hugs its east side BY DESIGN, so they share overlap group 2 and the
+/// goldens — not the overlap invariant — pin their internal geometry.
+fn push_lounge(lounge: Option<&Lounge>, out: &mut Vec<Piece>) {
+    let Some(lounge) = lounge else {
+        return;
+    };
+    out.push(Piece::table(
+        "floor_lamp".into(),
+        Anchor::Center,
+        lounge.floor_lamp,
+        Furniture::FloorLamp,
+        Container::Band,
+        Some(2),
+    ));
+    out.push(Piece::table(
+        "lounge_side_table".into(),
+        Anchor::Center,
+        lounge.side_table,
+        Furniture::LoungeSideTable,
+        Container::Band,
+        Some(2),
+    ));
+    if let Some(tank) = lounge.fish_tank {
         out.push(Piece::table(
-            "floor_lamp".into(),
+            "fish_tank".into(),
             Anchor::Center,
-            lounge.floor_lamp,
-            Furniture::FloorLamp,
+            tank,
+            Furniture::FishTank,
             Container::Band,
             Some(2),
         ));
-        out.push(Piece::table(
-            "lounge_side_table".into(),
-            Anchor::Center,
-            lounge.side_table,
-            Furniture::LoungeSideTable,
-            Container::Band,
-            Some(2),
-        ));
-        if let Some(tank) = lounge.fish_tank {
-            out.push(Piece::table(
-                "fish_tank".into(),
-                Anchor::Center,
-                tank,
-                Furniture::FishTank,
-                Container::Band,
-                Some(2),
-            ));
-        }
-        // lounge.couch_center contributes no Piece: its geometry comes from the
-        // seat waypoints above, the mask's truth.
     }
+    // `lounge.couch_center` contributes no Piece: its geometry comes from the
+    // seat waypoints, the mask's truth.
+}
 
-    let island = pantry.as_ref().and_then(|p| {
+fn push_kitchen_island(pantry: Option<&PantryRoom>, out: &mut Vec<Piece>) {
+    let island = pantry.and_then(|p| {
         let PantryRoom {
             bounds: _,       // container, asserted by Container::Pantry below
             counter_size: _, // its counter piece registers via the Pantry arm above
@@ -416,8 +440,6 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
             None,
         ));
     }
-
-    out
 }
 
 fn contains_point(b: Bounds, p: Point) -> bool {
@@ -561,10 +583,10 @@ fn every_piece_ground_is_blocked_in_the_mask() {
     assert_no_violations("mask-parity", v);
 }
 
+/// Only the BLOCKED grounds: sprite overhangs may overlap freely — that is
+/// occlusion, not placement.
 #[test]
 fn no_two_furniture_grounds_overlap() {
-    // Only the BLOCKED grounds: sprite overhangs may overlap freely — that is
-    // occlusion, not placement.
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
         let ps: Vec<Piece> = pieces(l)
@@ -592,10 +614,10 @@ fn no_two_furniture_grounds_overlap() {
     assert_no_violations("furniture-overlap", v);
 }
 
+/// UNPADDED grounds only — a padded rect legitimately touches a wall, because
+/// the pad is routing slack.
 #[test]
 fn no_furniture_ground_overlaps_a_wall() {
-    // UNPADDED grounds only — a padded rect legitimately touches a wall,
-    // because the pad is routing slack.
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
         let walls: Vec<(Point, Size)> = l
@@ -646,15 +668,11 @@ fn walkable_is_one_connected_region() {
     sweep(assert_walkable_connected);
 }
 
-/// The elevator spawn must land on OPEN FLOOR — at or south of `top_margin` —
-/// never on the carpet apron where the straddling wall decor stamps its ground.
-///
-/// Deliberately a one-sided bound, not `assert_eq!` against the spawn formula,
-/// which would pin nothing. Walkability is NOT the discriminator and a
-/// routability sweep is blind to this: with the spawn moved north of the floor
-/// line `is_walkable(dt)` stays true and every routing assertion still passes
-/// (both `find_path` and `ReachSet::from_mask` SNAP a displaced seed back into
-/// the component) — only this floor-line bound fails.
+/// Deliberately a one-sided bound on `top_margin`, not `assert_eq!` against the
+/// spawn formula, which would pin nothing. Walkability is NOT the discriminator
+/// and a routability sweep is blind here: `find_path` and `ReachSet::from_mask`
+/// both SNAP a displaced seed back into the component, so every routing assert
+/// still passes with the spawn north of the floor line — only this one fails.
 fn assert_spawn_stands_on_open_floor(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     let Some(dt) = l.door_threshold else {
         panic!("{w}x{h} seed {seed}: layout has no door threshold");
@@ -675,21 +693,18 @@ fn the_spawn_threshold_stands_on_the_floor_not_the_wall_apron() {
     sweep_production_floors(assert_spawn_stands_on_open_floor);
 }
 
-/// Every destination the wander can hand out must be `find_path`-routable from
-/// the leg's real ORIGIN, or the leg degrades to a straight line through
-/// furniture.
-///
-/// Routes from `pose::desk_leg_endpoint(desk, l).0`, the endpoint the production
-/// wander-out leg starts at — NOT from the door. Routing from the door made a
-/// desk an origin-free bystander, so a desk stranded on the severed side of a
-/// coarse cut never appeared as a route START and the whole class passed
-/// through. The `(origin, approach)` pair is deduped because the desk loop
-/// otherwise re-routes it once per desk sharing an approach cell.
+/// Routes from `pose::desk_leg_endpoint(desk, l).0`, where the production
+/// wander-out leg starts — NOT from the door. Routing from the door made a desk
+/// an origin-free bystander, so one stranded on the severed side of a coarse cut
+/// never appeared as a route START and the whole class passed through; an
+/// unroutable destination degrades the leg to a straight line through furniture.
 #[test]
 fn every_wander_destination_is_routable_from_its_desk() {
     use crate::pathfind::find_path;
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     sweep(|w, h, seed, l| {
+        // Deduped: the desk loop otherwise re-routes one `(origin, approach)` pair
+        // once per desk sharing that approach cell.
         let mut seen: std::collections::HashSet<(Point, Point)> = std::collections::HashSet::new();
         for &desk in &l.home_desks {
             let (origin, _) = crate::pose::desk_leg_endpoint(desk, l);
@@ -732,16 +747,14 @@ fn assert_every_desk_has_a_facing(w: u16, h: u16, seed: u64, l: &SceneLayout) {
     );
 }
 
-/// The COARSE twin of [`assert_walkable_connected`]. That one is a 4-connected
+/// The COARSE twin of [`assert_walkable_connected`]: that one is a 4-connected
 /// PIXEL flood, but the router runs on the 4×4 grid, so a ≤3px channel is
-/// pixel-connected and coarse-IMPASSABLE — the office reads as ONE region at
-/// pixel granularity and TWO at router granularity. When that happens,
-/// `desk_approach_cell` returns its no-valid-approach sentinel and every leg for
-/// the severed desks degrades to a straight `door→chair` line through furniture.
-///
-/// A free fn, not a closure, because THREE sweeps need it: the placement seed
-/// axis, the production floor seeds, and the step-1 `NARROW_BAND` width scan.
+/// pixel-connected and coarse-IMPASSABLE — `desk_approach_cell` then returns its
+/// no-valid-approach sentinel and every leg for the severed desks degrades to a
+/// straight `door→chair` line through furniture.
 fn assert_home_desk_approaches_are_routable(w: u16, h: u16, seed: u64, l: &SceneLayout) {
+    // A free fn, not a closure: three sweeps share it — the placement seed axis,
+    // the production floor seeds, and the step-1 `NARROW_BAND` width scan.
     use crate::pathfind::find_path;
     let overlay = pixtuoid_core::walkable::OccupancyOverlay::new();
     let Some(door) = l.door_threshold else {
@@ -806,11 +819,11 @@ fn back_turned_desks_face_a_partner_across_the_pod_gap() {
     sweep_production_floors(assert_back_turned_desks_face_a_partner);
 }
 
+/// A divider crossed by an E-W wall is TWO vertical segments meeting at the
+/// cross wall; every corner row must be solid across the wall's whole width, or
+/// a walker can stand IN the divider.
 #[test]
 fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
-    // A divider crossed by an E-W wall is TWO vertical segments meeting at the
-    // cross wall; every corner row must be solid across the wall's whole width,
-    // or a walker can stand IN the divider.
     sweep(|w, h, seed, l| {
         let h_walls: Vec<_> = l
             .room_walls
@@ -879,8 +892,7 @@ fn short_band_connectivity_boundary_scan() {
 #[test]
 fn narrow_band_connectivity_boundary_scan() {
     for w in NARROW_BAND {
-        // 46 reaches the SHORT band the derived floor opened, where `pod_rows`
-        // collapses to 1 and the appliance aisle sits at its 8px minimum.
+        // 46 reaches the SHORT band, where the appliance aisle sits at its 8px minimum.
         for &h in &[46u16, 80, 100, 120, 148, 160] {
             for seed in SWEEP_SEEDS {
                 let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
@@ -915,11 +927,11 @@ fn door_threshold_walkable_at_a_band_split_to_thirty() {
     );
 }
 
+/// At 59x160 seed 3 the band fits ONE pod column, so the only aisle drain is the
+/// intra-pod gap — a scatter plant settling onto the printer's row plugs it and
+/// seals the whole appliance strip.
 #[test]
 fn appliance_strip_not_sealed_at_a_single_pod_band() {
-    // At 59x160 seed 3 the band fits ONE pod column, so the only aisle drain is
-    // the intra-pod gap — a scatter plant settling onto the printer's row plugs
-    // it and seals the whole appliance strip.
     let l = SceneLayout::compute_with_seed(59, 160, None, 3).expect("59x160 lays out");
     assert_walkable_connected(59, 160, 3, &l);
 }
@@ -995,12 +1007,11 @@ fn the_whiteboard_lands_whenever_an_inter_pod_aisle_exists() {
     sweep_production_floors(assert_the_whiteboard_lands_when_an_aisle_exists);
 }
 
-/// The 32x120 seed-3 repro that forced the aisle rule — board +3px east of the divider,
-/// wall flush west, desk column east, sealing the south — is under `MIN_LAYOUT_W` now, so
-/// this re-pins at the width floor. Still the snap's own guard: unsnapped, the board makes
-/// two desks' south approach unroutable, `severed` fires on that arm instead of a pocket,
-/// and the connectivity guard spends the board — reverting `snap_inter_pod_ground_y` reds
-/// the `wall_decor` assert below.
+/// The 32x120 seed-3 repro that forced the aisle rule — board +3px east of the
+/// divider, wall flush west, desk column east, sealing the south — is under
+/// `MIN_LAYOUT_W` now, so this re-pins at the width floor. Unsnapped, two desks'
+/// south approach goes unroutable (`severed` fires, not a pocket) and the guard
+/// spends the board: reverting `snap_inter_pod_ground_y` reds the assert below.
 #[test]
 fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
     let (w, h, seed) = (super::compute::MIN_LAYOUT_W, 120, 3);
@@ -1020,13 +1031,13 @@ fn free_standing_whiteboard_survives_the_west_aisle_it_used_to_seal() {
     );
 }
 
+/// The boundary scan can't catch an over-drop: dropping the couch only IMPROVES
+/// connectivity. 40x160 seed 1 is the KNIFE-EDGE — the couch clears the door by
+/// exactly 1 px, so it pins couch_east_ground on the seat pad
+/// (`WAYPOINT_STAMP_PAD_PX`), not `OBSTACLE_PAD_PX`. 48x160 seed 0 clears
+/// comfortably.
 #[test]
 fn couch_survives_a_narrow_band_that_clears_the_door() {
-    // The boundary scan can't catch an over-drop: dropping the couch only
-    // IMPROVES connectivity. 40x160 seed 1 is the KNIFE-EDGE — the couch clears
-    // the door by exactly 1 px, so it pins couch_east_ground on the seat pad
-    // (`WAYPOINT_STAMP_PAD_PX`), not `OBSTACLE_PAD_PX`. 48x160 seed 0 clears
-    // comfortably.
     for &(w, h, seed) in &[(40u16, 160u16, 1u64), (48, 160, 0)] {
         let l = SceneLayout::compute_with_seed(w, h, None, seed).expect("lays out");
         assert!(
@@ -1144,10 +1155,10 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
     );
 }
 
+/// Seat waypoints carry no ground (the sofa body does), so their honest
+/// containment is pos-in-room.
 #[test]
 fn every_meeting_slot_sits_in_its_room() {
-    // Seat waypoints carry no ground (the sofa body does), so their honest
-    // containment is pos-in-room.
     sweep(|w, h, seed, l| {
         for wp in &l.waypoints {
             let Some(room_id) = wp.room_id else { continue };
@@ -1168,12 +1179,12 @@ fn every_meeting_slot_sits_in_its_room() {
     });
 }
 
+/// Variant internals are private, so the shapes are compared observationally.
+/// The signature needs `cubicle_band.x`: Senior differs from Standard, and
+/// Lounge from OpenPlan, ONLY by the left-column percent — room presence alone
+/// collapses the 5 variants to 3 shapes.
 #[test]
 fn the_sweep_reaches_every_floor_variant() {
-    // Variant internals are private, so the shapes are compared observationally.
-    // The signature needs cubicle_band.x: Senior differs from Standard, and
-    // Lounge from OpenPlan, ONLY by the left-column percent — room presence
-    // alone collapses the 5 variants to 3 shapes.
     use std::collections::BTreeSet;
     let mut shapes: BTreeSet<(bool, bool, bool, u16)> = BTreeSet::new();
     for seed in SWEEP_SEEDS {
@@ -1193,9 +1204,9 @@ fn the_sweep_reaches_every_floor_variant() {
     );
 }
 
+/// Positions are arbitrary — only presence/absence in the census matters.
 #[test]
 fn plant_obstacle_census_honors_repels_plants() {
-    // Positions are arbitrary — only presence/absence in the census matters.
     let p = |x: u16, y: u16| Point { x, y };
     let rects = super::compute::plant_obstacle_rects(
         Some(p(10, 10)), // fish tank      -> repels -> in
@@ -1228,7 +1239,6 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
             v,
         )
     };
-    // Inflate the obstacle box by the clearance on every side, then test overlap.
     // The center-anchored predicate the WAYPOINT family needs; the fixed
     // non-waypoint singletons ride `plant_obstacle_rects` instead.
     let within_clearance = |plant_box: (Point, Size), obs_pos: Point, obs_v: Size| {
@@ -1251,9 +1261,8 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
         for p in &l.plants {
             let pv = furniture_def(p.kind.furniture()).visual;
             let plant_box = visual_tl(p.pos, pv);
-            // The SAME `plant_obstacle_rects` census the production settle path
-            // uses, never a hand-re-derived second copy: a census miss here IS a
-            // plant interpenetration.
+            // The SAME `plant_obstacle_rects` census the production settle path uses,
+            // never a second copy: a census miss here IS a plant interpenetration.
             for (otl, osz) in super::compute::plant_obstacle_rects(
                 l.fish_tank(),
                 l.floor_lamp(),
@@ -1285,9 +1294,8 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
                 }
             }
         }
-        // Greenery pin only where room exists: on a narrower band the slide has
-        // nowhere to land and tiny-floor degradation is the house norm. The pin
-        // guards against an office-WIDE loss at flagship sizes.
+        // Pinned only where room exists — a narrower band leaves the slide nowhere
+        // to land — so this guards an office-WIDE loss at flagship sizes only.
         if l.cubicle_band.width >= ROOMY_BAND_MIN_W {
             let has = |k: WaypointKind| l.waypoints.iter().any(|w| w.kind == k);
             let corridor_plant = |kind: PlantKind| {
@@ -1315,10 +1323,9 @@ fn scatter_plants_keep_obstacle_clearance_and_survive_by_sliding() {
     );
 }
 
-/// `is_visually_clear`'s completeness, checked against the enumeration that is
-/// ALREADY compile-forced. The predicate destructures `SceneLayout` with no `..`,
-/// so the compiler catches a new COLLECTION; this catches a member of an existing
-/// one that the predicate reads with the wrong anchor, kind or size — the class
+/// `is_visually_clear`'s completeness against the already-compile-forced
+/// enumeration. Its no-`..` destructure catches a new COLLECTION; this catches a
+/// member of an existing one read with the wrong anchor, kind or size — the class
 /// that shipped incomplete twice (lounge + the runtime-sized kinds, then the
 /// free-standing whiteboard).
 #[test]

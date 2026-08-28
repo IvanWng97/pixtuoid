@@ -81,12 +81,9 @@ pub(crate) fn detect_installed() -> bool {
     cursor_config_dir().is_some_and(|d| d.exists()) || io::home_relative(".cursor").exists()
 }
 
-/// Cursor runs the `command` under a shell, so the OS forms mirror Codex/Reasonix:
-/// - **Unix**: env-prefix `PIXTUOID_SOURCE=cursor '<abs-path>'` (single-quoted).
-/// - **Windows**: BARE `<abs-path> --source cursor` (8.3 short name for a
-///   space/metacharacter path, else reject).
-///
-/// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
+/// Cursor runs the `command` under a shell, so the OS forms are
+/// [`crate::install::hook_cmd::shell_hook_command`]'s. Err on non-UTF-8 (prevents
+/// the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, "cursor")

@@ -138,15 +138,9 @@ fn user_config_dir_checked(
     ))
 }
 
-/// Reasonix runs the `command` string under a shell — `sh -c` on Unix, `cmd.exe
-/// /c` on Windows:
-/// - **Unix**: env-prefix `PIXTUOID_SOURCE=reasonix '<abs-path>'` (single-quoted).
-/// - **Windows**: BARE `<abs-path> --source reasonix` — cmd.exe can't express the
-///   env-prefix, so the source rides as the shim's `--source` flag, and a
-///   space/metacharacter path uses its 8.3 short name because a quoted path
-///   can't survive cmd /C.
-///
-/// Err on non-UTF-8 (prevents the to_string_lossy dead-hook).
+/// Reasonix runs the `command` string under a shell (`sh -c` / `cmd.exe /c`), so
+/// the OS forms are [`crate::install::hook_cmd::shell_hook_command`]'s. Err on
+/// non-UTF-8 (prevents the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Reasonix always
     // embeds the absolute path, so the flag changes nothing here.

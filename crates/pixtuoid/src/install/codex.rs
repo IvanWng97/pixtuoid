@@ -28,17 +28,9 @@ pub(crate) fn default_config_path() -> Result<PathBuf> {
 }
 
 /// The Codex hook `command`. Codex runs it under a shell (`/bin/sh -lc` on Unix,
-/// `cmd.exe /C` on Windows) and reads the plain `command` field on every OS, so
-/// the OS-correct form is written here rather than a `commandWindows` override.
-///
-/// - **Unix**: env-prefix form `PIXTUOID_SOURCE=codex '<path>'`.
-/// - **Windows**: BARE exec form `<path> --source codex`. Do NOT quote the path:
-///   codex passes the string through `Command::arg`, whose Windows quoting escapes
-///   an embedded `"` to `\"`, which `cmd.exe /C` then mangles — the path comes out
-///   corrupted and the hook silently never fires. The env-prefix form is invalid
-///   under cmd.exe, so the source rides as the shim's `--source` flag. A path with
-///   a SPACE or cmd metacharacter (`& | < > ( ) ^ %`) is substituted by its DOS
-///   8.3 SHORT name, and REJECTED only if 8.3 generation is off on the volume (#195).
+/// `cmd.exe /C` on Windows) and reads the plain `command` field on every OS, so the
+/// OS-correct form is written here rather than a `commandWindows` override. The
+/// forms themselves are [`crate::install::hook_cmd::shell_hook_command`]'s (#195).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     // `_explicit` is Claude's bare-name-vs-absolute switch — Codex always
     // embeds the absolute path, so the flag changes nothing here.

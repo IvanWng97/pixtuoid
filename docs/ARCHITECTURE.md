@@ -5,7 +5,7 @@ How a running coding-agent session becomes a moving sprite in the office.
 > This file is the **single source** for pixtuoid's architecture overview. It
 > renders on the website at [`/architecture`](https://pixtuoid.dev/architecture)
 > and on GitHub (the diagram below is native Mermaid). Contributor-level
-> detail lives in `CLAUDE.md` and each crate's `SHARP-EDGES.md`.
+> detail lives in `CLAUDE.md` and the code's own doc comments.
 
 ## The shape of it
 

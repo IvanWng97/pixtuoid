@@ -262,8 +262,8 @@ pub fn apply_presence(
         SessionEnded => {
             // Saturating: a pre-attach session_start we never saw must not underflow.
             p.active_sessions = p.active_sessions.saturating_sub(1);
-            // Deliberately does NOT resurrect, unlike its sibling arms — see
-            // SHARP-EDGES.md; pinned by `session_end_after_a_gateway_stop_leaves_it_down`.
+            // Deliberately does NOT resurrect, unlike its sibling arms.
+            // Pinned by `session_end_after_a_gateway_stop_leaves_it_down`.
         }
         RunStarted { run_key } => {
             // Stamped with THIS observation, so the run ages on its own clock.

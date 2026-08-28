@@ -315,9 +315,6 @@ lint:
     run schemas just json-schemas         & pids+=($!)
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
-    run guides  just gen-guides-check     & pids+=($!)
-    run prose   just comment-lint-gate    & pids+=($!)
-    run gitenv  just gitenv-selftest      & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
@@ -548,21 +545,6 @@ mutants *args:
         exit 1
     fi
     cargo mutants --in-diff target/mutants.diff {{ args }}
-
-# Comment-slop advisory: flag NEW runs of 3+ consecutive line comments (Rust
-# `//`, Python `#`) inside a function body, AND new `///`/`//!` runs past
-# `DOC_RUN_MAX` (the ast-grep regexes exclude doc comments, where most bloat lands) (the repo's "fn-body comments ≤2
-# lines" convention — pr-review.prompt.md's comment-value factor). DIFF-SCOPED
-# like `mutants` (`scripts/comment-lint.py` over the ast-grep rules in
-# `.ast-grep/rules/`), so the ~5k pre-existing legitimate WHY comments are
-# grandfathered and only new code is checked. ADVISORY by default (prints + exit 0); `--gate` makes
-# the RE-PARENT and PROSE arms exit 1 — the ast-grep and doc-run-length arms only ever report,
-# `--worktree` lints uncommitted edits, `--github` emits inline PR annotations.
-# Needs ast-grep (setup-tools) + python3. Forwards args (e.g. a different base).
-[group('meta')]
-[doc('Advisory: flag NEW comment runs — fn-body `//` and over-long `///` (diff-scoped)')]
-comment-lint *args:
-    python3 scripts/comment-lint.py {{ args }}
 
 # Record a conformance fixture from bytes a real CLI actually sent. Hook-only
 # sources have no persistent corpus — hook events are transient — so their
@@ -1197,13 +1179,12 @@ setup-tools:
     # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    # ast-grep backs the `comment-lint` advisory (structural Rust + Python rules in
-    # .ast-grep/rules/); shfmt/actionlint/shellcheck/zizmor back workflow
-    # linting, while yq + jq + Conftest/OPA evaluate repository-specific policy.
+    # shfmt/actionlint/shellcheck/zizmor back workflow linting, while yq + jq +
+    # Conftest/OPA evaluate repository-specific policy.
     # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
     # recipe cannot run at all (it does not degrade to a weaker scan, because a
     # weaker scan is what it replaced).
-    for t in shfmt actionlint shellcheck zizmor ast-grep yq jq conftest opa regal check-jsonschema gitleaks; do
+    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -1269,22 +1250,6 @@ compare-selftest:
     if [ -x .venv/bin/python3 ]; then py=.venv/bin/python3; else py=python3; fi
     "$py" scripts/compare-screenshots.py --selftest
 
-# The guides' index blocks are generated projections of their sibling files —
-# the WHY lives in scripts/gen-guides.py's docstring. Edit the SIBLING, run
-# `gen-guides`; `-check` gates drift in `lint` + CI's hygiene job.
-[group('gen')]
-[doc('Regenerate guide index blocks from SHARP-EDGES/LAYOUT/WHERE-TO-LOOK siblings')]
-gen-guides:
-    python3 scripts/gen-guides.py
-
-[group('gen')]
-[doc('Fail if a guide index block drifted from its sibling (runs in lint)')]
-gen-guides-check:
-    # Negative controls FIRST (the ast-grep-test idiom): a generator whose own
-    # fires/does-not-fire contract broke reports a clean pass on garbage.
-    python3 scripts/gen-guides.py --selftest
-    python3 scripts/gen-guides.py --check
-
 # Regenerate the committed drift-surface fragments — what each crate declares it
 # READS (pixtuoid-core) and REGISTERS (pixtuoid). `check_upstream_drift.py` reads
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
@@ -1304,110 +1269,6 @@ gen-drift-surface:
 [doc('Self-test the upstream-drift watcher (parsers + fetch classifier)')]
 drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
-
-# Both-directions pins for the ast-grep rules themselves: `valid:` cases must
-# stay silent, `invalid:` must fire. Snapshots skipped — the cases assert
-# fires/does-not-fire, which is the contract; snapshots would only add churn.
-# Invoked by the `comment-lint` CI job (the one that pins ast-grep), so a broken
-# rule contract cannot rot unseen.
-[group('meta')]
-[doc('Test the ast-grep comment-slop rules (both directions)')]
-ast-grep-test:
-    ast-grep test --skip-snapshot-tests
-
-# The DRIVER's own half: which files it diffs, and which it scans. The rules
-# have `ast-grep-test`; this pins the pathspec + the hidden-dir flag, on a
-# throwaway repo. Invoked by the `comment-lint` CI job alongside the rule tests.
-[group('meta')]
-[doc('Self-test the comment-lint driver (pathspec + hidden-dir scan)')]
-comment-lint-selftest:
-    python3 scripts/comment-lint.py --selftest
-
-# The comment checks as a GATE. Wired in two places that must stay in step:
-# `just lint` (so preflight and pre-push block) and the `comment gate` job in
-# ci-lint.yml. The ast-grep arm stays advisory in ci-supplemental — its npm
-# install must never gate.
-[group('meta')]
-[doc('Gate the comment checks: selftest, then --gate against a FRESH origin/main')]
-comment-lint-gate:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # A stale `origin/main` moves the merge-base back: the re-parent arm then
-    # blocks on other people's merged commits and the prose RATIO is diluted by
-    # them. CI fetches (ci-lint.yml); refusing beats measuring against a stale ref.
-    # Bounded by GIT's own stall detector, not `timeout(1)` — that is coreutils,
-    # absent on a stock macOS box. `lint` joins its jobs with `wait`, so an
-    # unbounded fetch on a captive-portal network hangs preflight and pre-push.
-    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
-      || { echo "comment-lint-gate: cannot reach origin — the gate needs a fresh main" >&2; exit 1; }
-    python3 scripts/comment-lint.py --selftest
-    python3 scripts/comment-lint.py origin/main --gate
-
-# Prices any proposal to make an arm BLOCK: today's rules replayed against
-# already-merged commits, so each finding is a block the proposal would have
-# imposed on work that shipped. On-demand like `fuzz` — N checkouts, origin/main.
-[group('meta')]
-[doc('Replay the comment-lint arms against the last N merged commits (default 20)')]
-comment-lint-replay n="20":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    # Without it the fn-body count is 0 for every commit and the run still exits
-    # 0 — the fail-open `fuzz` guards for the same reason.
-    command -v ast-grep >/dev/null \
-      || { echo "comment-lint-replay: needs ast-grep — run \`just setup-tools\`" >&2; exit 1; }
-    root="$(git rev-parse --show-toplevel)"
-    tmp="$(mktemp -d)"
-    trap 'git worktree remove --force "$tmp/wt" >/dev/null 2>&1 || true; rm -rf "$tmp"' EXIT
-    git worktree add -q --detach "$tmp/wt" HEAD
-    git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20 fetch --quiet origin main \
-      || { echo "comment-lint-replay: cannot reach origin" >&2; exit 1; }
-    total=0 advisory=0 gated=0 flagged=0
-    for sha in $(git log --first-parent --format=%H -n {{ n }} origin/main); do
-      git -C "$tmp/wt" checkout -q --force --detach "$sha"
-      # Only the RULES are injected — YAML, outside the scanned pathspec.
-      # Injecting the scripts counts their own comments as the commit's.
-      rm -rf "$tmp/wt/.ast-grep"
-      cp -R "$root/.ast-grep" "$root/sgconfig.yml" "$tmp/wt/"
-      rc=0
-      out="$(cd "$tmp/wt" && python3 "$root/scripts/comment-lint.py" "$sha^" --gate 2>&1)" || rc=$?
-      # Every path through the script prints a `comment-lint:` line (pinned by its
-      # selftest); a crash prints none, and would count as zero findings. Matched
-      # off a HERESTRING: `grep -q` quits early, and through a pipe that SIGPIPEs
-      # the writer, which `pipefail` then reads as no-match on a long verdict.
-      if grep -qE '^comment-lint: [0-9]+ new comment-slop' <<<"$out"; then
-        n_hit="$(printf '%s\n' "$out" | sed -n 's/^comment-lint: \([0-9]*\) new comment-slop.*/\1/p')"
-      elif grep -q '^comment-lint: ' <<<"$out"; then
-        n_hit=0
-      else
-        echo "comment-lint-replay: no verdict from ${sha:0:8} — the replay is broken, not the commit" >&2
-        printf '%s\n' "$out" >&2
-        exit 1
-      fi
-      total=$((total + 1)) flagged=$((flagged + n_hit))
-      if [ "$rc" -ne 0 ]; then
-        gated=$((gated + 1))
-        echo "GATE REDS ${sha:0:8}  $(git log -1 --format=%s "$sha")"
-      fi
-      if [ "$n_hit" -gt 0 ]; then
-        advisory=$((advisory + 1))
-        printf '  %s  %-4s %s\n' "${sha:0:8}" "$n_hit" "$(git log -1 --format=%s "$sha" | cut -c1-52)"
-      fi
-    done
-    # A bad N leaves the `for` word list empty without tripping `set -e`, and the
-    # summary then reports its most reassuring shape.
-    [ "$total" -gt 0 ] || { echo "comment-lint-replay: no commits walked — check N" >&2; exit 1; }
-    echo "fn-body arm (advisory): $advisory/$total merged commits, $flagged lines"
-    echo "blocking arms (--gate): $gated/$total merged commits — an arm reds the"
-    echo "  commits that predate its own calibration, so read this against \`git log -S\`"
-
-# The seam's WHY lives in scripts/gitenv.py's docstring. This pins the scrub AND
-# sweeps scripts/ for anything spawning git outside `gitenv.git()` — the recurrence
-# gate, because one of these leaks ate a developer's index before anyone noticed.
-# Runs in `lint`; CI's hygiene job enumerates it separately.
-[group('meta')]
-[doc("Self-test the scripts' git-env scrub + sweep for bypasses")]
-gitenv-selftest:
-    python3 scripts/gitenv.py --selftest
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each of those was a lost BILLED turn before it was code, and

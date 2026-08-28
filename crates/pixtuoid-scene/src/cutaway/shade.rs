@@ -17,8 +17,8 @@ use crate::render_scale::RenderScale;
 
 /// A material's three tones under the cutaway's single key light.
 ///
-/// Every surface in the profile carries one. Uniformity is the point: the room
-/// reads as lit from one direction only because nothing opts out.
+/// Every surface in the profile carries one, so the room reads as lit from a
+/// single direction — nothing opts out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ramp {
     /// The face turned toward the key light — the mass's north edge.

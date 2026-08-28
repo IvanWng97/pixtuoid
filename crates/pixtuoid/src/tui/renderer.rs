@@ -430,6 +430,9 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
             if let Some((mx, my)) = mouse_pos {
                 // `.filter` keeps the pet arm a single branch, so a
                 // present-but-not-hit pet falls through to the next arm.
+                // Coffee before pet here must match the click arms in
+                // `tui::run_tui`; the agent-wins half above needs no such care,
+                // `hovered.is_none()` skips this block outright.
                 let pet_hit = ctx
                     .last_pet_pos
                     .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, mx, my));

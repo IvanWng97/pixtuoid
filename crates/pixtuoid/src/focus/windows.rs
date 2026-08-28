@@ -5,8 +5,6 @@
 //! A console app owns no window and never receives the click, so
 //! `SetForegroundWindow` normally refuses it and flashes the taskbar instead.
 //! [`activate_os`] borrows the foreground thread's input state to get the right.
-//! Why not the better-known bypasses, and what the attach costs: the binary
-//! guide's foreground-lock sharp edge.
 
 use windows_sys::Win32::Foundation::{
     CloseHandle, FALSE, HWND, INVALID_HANDLE_VALUE, LPARAM, TRUE,

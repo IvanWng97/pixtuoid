@@ -21,7 +21,7 @@ fn first_cmd_unsafe_char(p: &str) -> Option<char> {
 }
 
 /// The BARE Windows hook `command` for a CLI whose hook runner shells via
-/// `cmd.exe /C` (Codex and Reasonix). Form: `<path> --source <name>` — the source
+/// `cmd.exe /C`. Form: `<path> --source <name>` — the source
 /// rides as a flag because cmd.exe has no `VAR=value cmd` env-prefix. The path is
 /// UNQUOTED because a quoted one can't survive `cmd /C` (the host's argv-quoting
 /// escapes `"`→`\"`, which cmd then mangles), so cmd PARSES the path and any

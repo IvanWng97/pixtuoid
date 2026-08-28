@@ -94,8 +94,7 @@ struct SourceDecoders {
 /// Every id in the watcher must be derived from a path folded through
 /// [`walk::id_path`], or the consumer computes it in a different id-space than
 /// the producer. That invariant used to be a comment, and 3 of 7 call sites
-/// drifted un-folded under it (#832, #861) — two of them fixed and a third
-/// missed in the same PR. The fn pointer now lives in a module the sibling
+/// drifted un-folded under it (#832, #861). The fn pointer now lives in a module the sibling
 /// `walk`/`liveness`/`unclaim` modules are not inside, so an un-folded
 /// derivation is a compile error rather than a review catch.
 mod folded {
@@ -186,7 +185,7 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// backend (`notify::PollWatcher`) at `interval`, instead of the native
 /// FSEvents/inotify watcher. Set once — later calls are ignored. Integration
 /// tests use it because a real FSEvents stream costs tens of seconds of
-/// setup/teardown per `TempDir` on macOS. Never called in production.
+/// setup/teardown per `TempDir` on macOS.
 #[doc(hidden)]
 pub fn force_polling_backend_for_tests(interval: Duration) {
     let _ = TEST_POLL_OVERRIDE.set(interval);

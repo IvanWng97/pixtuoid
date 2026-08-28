@@ -140,8 +140,7 @@ pub(super) fn waypoint_rank_offset_x(kind: WaypointKind, rank: usize) -> i16 {
 ///
 /// Clamped so a DEFAULT-size frame lands inside `layout`'s buffer, keeping the
 /// badge and the tui hit box on pixels the sprite occupies — the twin of the
-/// sprite's own guard in `sim::resolve_characters` (`SHARP-EDGES.md`: "clamped
-/// to the canvas TWICE").
+/// sprite's own guard in `sim::resolve_characters` — clamped to the canvas TWICE.
 pub fn character_anchor(
     agent: &AgentSlot,
     layout: &crate::layout::Layout,
@@ -169,7 +168,7 @@ pub fn character_anchor(
             let stand = layout.stand_point(wp_obj.kind, wp_obj.pos, desk, wp_obj.facing);
             // Via the ONE authority the sprite blit uses, so label-vs-sprite
             // drift is structurally impossible UPSTREAM of the canvas clamps
-            // (`SHARP-EDGES.md`: "clamped to the canvas TWICE").
+            // (clamped to the canvas TWICE).
             Seat::at_waypoint(kind, stand, wp_obj.facing).render_anchor(w)
         }
         Pose::AimlessAt { dest } => waypoint_anchor(dest, w),

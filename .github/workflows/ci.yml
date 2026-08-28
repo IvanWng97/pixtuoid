@@ -31,11 +31,6 @@ jobs:
       id-token: write
     uses: ./.github/workflows/ci-tests.yml
 
-  # Advisory checks stay visible without entering the stable protected gate.
-  supplemental:
-    name: Supplemental Checks
-    uses: ./.github/workflows/ci-supplemental.yml
-
   gate:
     name: ci-gate
     if: ${{ always() }}
