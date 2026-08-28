@@ -88,10 +88,9 @@ pub(crate) fn detect_installed() -> bool {
     kimi_config_dir().is_some_and(|d| d.exists())
 }
 
-/// Kimi runs the `command` under a shell (module doc), so the OS forms mirror
-/// Codex/CodeWhale: Unix env-prefix `PIXTUOID_SOURCE=kimi '<abs>'`, Windows bare
-/// `<abs> --source kimi`. Err on non-UTF-8 (prevents the to_string_lossy
-/// dead-hook).
+/// Kimi runs the `command` under a shell (module doc), so the OS forms are
+/// [`crate::install::hook_cmd::shell_hook_command`]'s. Err on non-UTF-8 (prevents
+/// the to_string_lossy dead-hook).
 pub(crate) fn hook_command(resolved: &Path, _explicit: bool) -> Result<String> {
     let p = crate::install::merge::hook_path_str(resolved)?;
     crate::install::hook_cmd::shell_hook_command(p, SOURCE_NAME)

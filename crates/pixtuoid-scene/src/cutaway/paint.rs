@@ -1,8 +1,7 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`, and
 //! deliberately partial: EFFECTS (weather, glow, steam, the pet) stay with the
-//! classic pass, changing no part of the question this profile exists to answer
-//! — does an orthographic cutaway of THIS office read better than the classic
-//! top-down? It never advances the sim; a mover here would desync the profiles.
+//! classic pass. It never advances the sim; a mover here would desync the
+//! profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::{density_variant_name_into, Pack};
@@ -16,10 +15,8 @@ use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
 /// How much of a desk's height is its FRONT face rather than its top surface.
-///
-/// The one number that turns a top-down rectangle into a solid: without a front
-/// face there is no thickness, and the office reads as a floor plan. Kept a
-/// fraction of `DESK_H` so it tracks the desk rather than drifting from it.
+/// Without one there is no thickness and the office reads as a floor plan. Kept
+/// a fraction of `DESK_H` so it tracks the desk rather than drifting from it.
 const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
 const DESK_FRONT_DENOM: u16 = 5;
@@ -395,17 +392,9 @@ fn paint_wall_seg(
 /// What a piece IS, paired with its [`Span`] in the draw list.
 ///
 /// The span is computed WHERE THE PIECE IS BUILT, by [`piece_span`] over the
-/// same anchor and painted extent the piece's paint fn uses — the extent
-/// depends on the PACK, so a sprite's height is not knowable from its layout
-/// point, and geometry derived from anything other than where the sprite lands
-/// is geometry that can drift from it.
-///
-/// This replaced three incompatible hand-rolled conventions: a desk sorted on a
-/// footprint-derived surface plane four rows above its art, centre-anchored
-/// props sorted on their MIDDLE row while painting from their centre, and a
-/// seated character kept the CLASSIC projection's key after the cutaway had
-/// re-projected where it paints. Any prop whose centre fell between a desk and
-/// its occupant painted over the occupant while standing behind them.
+/// same anchor and painted extent the piece's paint fn uses — the extent depends
+/// on the PACK, so a sprite's height is not knowable from its layout point, and
+/// geometry derived from anywhere but where the sprite lands can drift from it.
 enum PieceKind {
     /// One segment of a room's wall run.
     WallSeg {
@@ -873,10 +862,8 @@ fn label_anchor(
 /// the remaining factor, so 4x art still halves the upscale on an 8x render
 /// instead of being discarded for not being an exact match.
 ///
-/// This is the whole mixed-density contract, and its direction is the point:
-/// richer art REMOVES the upscale rather than fighting it, so the asset work
-/// can land one piece at a time instead of as a flag day. A pack with no
-/// variants renders exactly as it did before this existed.
+/// A pack with no variants renders exactly as it did before this existed, so
+/// richer art can land one piece at a time rather than as a flag day.
 ///
 /// A variant whose size is not its base's times the density its NAME claims is
 /// SKIPPED rather than drawn wrong. `validate_pack_animations` reports it as a
@@ -1027,8 +1014,7 @@ fn paint_appliance(
 /// Blit a floor-standing prop from the pack, centred on its layout point.
 ///
 /// The layout already places these and the pack already draws them; the cutaway
-/// only adds the ground contact a top-down view never needed. Reusing the art
-/// rather than re-inventing it is the whole shape of this profile's asset work.
+/// only adds the ground contact a top-down view never needed.
 fn paint_prop(
     at: crate::layout::Point,
     sprite: &str,
@@ -1137,10 +1123,9 @@ mod tests {
     }
 
     /// Every piece's sort row measured the same way: the south base row of what it
-    /// actually blits. The desk used to sort on a surface plane to compensate for
-    /// the occupant ALSO carrying a wrong key; measured at their true base rows the
-    /// chair lands south of the desk's front face, so the ratified "head over the
-    /// surface" reading falls out of the shared convention with no divergence.
+    /// actually blits. At their true base rows the chair lands south of the desk's
+    /// front face, so the ratified "head over the surface" reading falls out of the
+    /// shared convention with no divergence.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();

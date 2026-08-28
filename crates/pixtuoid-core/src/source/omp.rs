@@ -658,12 +658,9 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
             }],
             _ => vec![],
         },
-        // The only human-readable name a ROOT transcript has — its stem is a
-        // timestamp+uuid and its cwd basename is shared with every concurrent
-        // session in the repo. The EMPTY guard is load-bearing: omp writes the
-        // slot at birth and fills it later, and leaves SUBAGENT titles empty
-        // forever, so an unguarded Rename would blank a root's label and wipe
-        // every subagent's dispatch-name label.
+        // The only human-readable name a ROOT transcript has. An unguarded Rename
+        // would blank it and wipe every subagent's dispatch-name label — the empty
+        // slot's WHY is on `omp_head_title`.
         TITLE | TITLE_CHANGE => match obj.get(TITLE_FIELD).and_then(|t| t.as_str()) {
             Some(title) if !title.is_empty() => vec![AgentEvent::Rename {
                 agent_id: acting,
@@ -684,12 +681,9 @@ fn omp_tool_detail(tool: &str, args: Option<&Value>) -> ToolDetail {
     if tool == "task" {
         return ToolDetail::Task;
     }
-    // `i` is omp's universal per-call INTENT ("Reading the burn tier"), which
-    // its tool schemas mandate — so it sits LAST, below every concrete target:
-    // a path beats a paraphrase of that path. It earns its place on the tools
-    // that have no keyed target at all (`edit`, `todo`, `job`, `hub`, …),
-    // which otherwise render as a bare verb. `omp_ask_reason` already leans on
-    // the same field for the Waiting prompt.
+    // `i` is omp's mandated per-call INTENT, so it sits LAST, below every concrete
+    // target — a path beats a paraphrase of that path. It earns its place on the
+    // tools with no keyed target at all (`edit`, `todo`, `job`, `hub`, …).
     const KEYS: &[&str] = &["command", "path", "pattern", "query", "i"];
     crate::source::decoder::generic_keyed_detail(tool, args, KEYS)
 }

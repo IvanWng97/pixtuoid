@@ -94,8 +94,7 @@ struct SourceDecoders {
 /// Every id in the watcher must be derived from a path folded through
 /// [`walk::id_path`], or the consumer computes it in a different id-space than
 /// the producer. That invariant used to be a comment, and 3 of 7 call sites
-/// drifted un-folded under it (#832, #861) — two of them fixed and a third
-/// missed in the same PR. The fn pointer now lives in a module the sibling
+/// drifted un-folded under it (#832, #861). The fn pointer now lives in a module the sibling
 /// `walk`/`liveness`/`unclaim` modules are not inside, so an un-folded
 /// derivation is a compile error rather than a review catch.
 mod folded {
