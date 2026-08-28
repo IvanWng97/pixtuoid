@@ -172,10 +172,7 @@ entry are listed `NOT COVERED`, never skipped silently).
 Advisory backstops that surface risk but never gate:
 `scripts/check_upstream_drift.py` (wire-format drift) · `just fixture-age`
 (which recorded fixtures a local CLI has moved past; LOCAL-only) ·
-`just bench` / CodSpeed (local numbers authoritative; CI benches advisory) ·
-`just comment-lint`'s ast-grep arm. Which `comment-lint` arms BLOCK is stated
-once, in `gate_fails`' docstring in `scripts/comment-lint.py` — not restated
-here.
+`just bench` / CodSpeed (local numbers authoritative; CI benches advisory).
 
 ## Conventions (the short version — see [`CLAUDE.md`](../CLAUDE.md) for the full set)
 

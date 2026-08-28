@@ -1,6 +1,0 @@
-# Run via `just comment-lint` (diff-scoped advisory) or `ast-grep scan`
-# (whole-repo, mostly grandfathered hits). Each rule's own header explains its WHY.
-ruleDirs:
-  - .ast-grep/rules
-testConfigs:
-  - testDir: .ast-grep/rule-tests

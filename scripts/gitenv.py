@@ -5,7 +5,7 @@ and `cwd=` — so a tool that drives a throwaway repo silently drives the REAL o
 `gen-guides.py --selftest` emptied the pusher's index to one phantom
 `crate/CLAUDE.md`, and it PERSISTED: `--check` then died on a path that was never
 on disk, which reads as a broken guide index rather than a broken index file.
-`comment-lint.py` went further and wrote two commits. Both printed a clean pass
+A second tool went further and wrote two commits. Both printed a clean pass
 while doing it. githooks(5) prescribes the remedy: code invoking git "in a
 foreign repository … should clear these environment variables".
 
@@ -19,11 +19,10 @@ scrub lives in `git()` and `bypass_sweep()` fails the build for any git argv in
 than oversight: nothing in `scripts/*.sh` or `*.mjs` spawns git at all, and the
 class that bit us twice was the Python tools that drive throwaway repos.
 
-Only `comment-lint`'s selftest still builds one — its pathspec control has to
-drive a real `git diff`. `gen-guides` injects `tracked_guides` instead, so its
-fixture is a plain directory that cannot reach an index at all. Removing the
-precondition is why the controls below are this small: with `git()` the only
-path, there is no per-`main()` call left to forget.
+No script builds a throwaway repo any more — `gen-guides` injects
+`tracked_guides`, so its fixture is a plain directory that cannot reach an index
+at all. Removing the precondition is why the controls below are this small: with
+`git()` the only path, there is no per-`main()` call left to forget.
 """
 
 from __future__ import annotations
