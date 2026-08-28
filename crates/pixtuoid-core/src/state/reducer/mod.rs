@@ -584,7 +584,8 @@ impl Reducer {
         now: SystemTime,
     ) {
         // JSONL must never synthesize — a transcript line can be a historical
-        // replay. No path emits this today; the guard IS the boundary.
+        // replay. No in-tree JSONL path emits Identity today; the guard IS the
+        // boundary, not dead code.
         if from != Transport::Hook {
             tracing::debug!(?agent_id, "ignoring Identity on a non-hook transport");
             return;

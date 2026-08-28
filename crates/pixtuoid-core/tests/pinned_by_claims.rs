@@ -1,9 +1,14 @@
 //! Every `Pinned by `x`` comment names a function that exists — without this the
-//! citation is the prose the convention replaced.
+//! citation is the prose the convention replaced. It caught `codex.rs` citing
+//! `escalated_permission_is_detected_by_the_exported_pair`, which had never
+//! existed.
 //!
-//! It has caught two orphans: a guide entry citing `hit_test_branding`, deleted
-//! long ago, and `codex.rs` citing a test that never existed. `drift_surface.rs`
-//! asserts the same for the `DECODED_*` consts only, so this runs tree-wide.
+//! Three gaps, none currently harbouring an orphan — widen before trusting it
+//! further: the walk is `.rs` under `crates/`, so the claims in `desk.sprite`
+//! and `add-source.prompt.md` go unchecked; the collapse below anchors at
+//! column 0, so an INDENTED wrapped claim is skipped silently; and `declared`
+//! is a raw text scan, so `fn foo` written in prose counts as a declaration.
+//! It checks the name EXISTS, never that the test pins the claim.
 //!
 //! Reads sibling crates at runtime, so it is workspace-only and sits in
 //! `Cargo.toml`'s `exclude`.
@@ -38,7 +43,9 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
 ///
 /// Matched on text with comment leaders collapsed to a space first: a claim
 /// wrapped across two `///` lines is exactly the shape a line-at-a-time matcher
-/// passes silently, so the wrap has to be gone before the scan.
+/// passes silently, so the wrap has to be gone before the scan. The collapse
+/// anchors at column 0 — an indented leader survives it and the claim is
+/// skipped, which is why the module doc lists that as a gap.
 fn claims_in(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;

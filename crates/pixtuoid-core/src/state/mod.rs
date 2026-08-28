@@ -712,10 +712,12 @@ impl SceneState {
         0
     }
 
-    /// Which floor does `desk_index` belong to? Recomputed from CURRENT capacities
-    /// while `AgentSlot.floor_idx` freezes at allocation, so growth renders an agent
-    /// on no floor that `per_floor_counts` still counts. Don't harmonize the two —
-    /// mint a `DeskPlacement` at allocation instead.
+    /// Which floor does `desk_index` belong to? Recomputed from CURRENT
+    /// capacities, while `AgentSlot.floor_idx` freezes at allocation — so after
+    /// growth `pixtuoid_scene::board::per_floor_counts` still counts an agent
+    /// that `pixtuoid_scene::floor::build_floor_scene` skips. The skip is
+    /// deliberate — desk 0 has a real occupant — and is pinned by
+    /// `build_floor_scene_skips_agent_below_grown_offset`.
     pub fn floor_of(&self, desk_index: GlobalDeskIndex) -> usize {
         self.floor_of_with_offsets(desk_index, &self.cumulative_offsets())
     }

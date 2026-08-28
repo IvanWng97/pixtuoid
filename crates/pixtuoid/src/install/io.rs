@@ -329,7 +329,6 @@ impl ConfigLock {
         read_resolved(&self.target)
     }
 
-    /// APPENDS `suffix` — `with_extension` truncates a multi-dot name.
     pub(crate) fn backup_once(&self, suffix: &str) -> Result<Option<PathBuf>> {
         backup_once_resolved(&self.target, suffix)
     }
