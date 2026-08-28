@@ -25,3 +25,25 @@ e2e_require_bin() {
 e2e_sandbox() {
     mktemp -d
 }
+
+# A throwaway git repo at $1, for the CLIs that refuse to act outside one.
+#
+# The scrub is the whole point. A git hook exports GIT_DIR and GIT_INDEX_FILE
+# into every child, and those OUTRANK `git -C <dir>` — so run from a hook, a
+# bare `git -C "$WS" add -A` stages the REAL repo while printing nothing (#893,
+# which landed twice). `just live-sources` is manual today, so nothing reaches
+# this from a hook; the scrub is what keeps that true for the next caller.
+#
+# The list comes from `git rev-parse --local-env-vars`, git's own answer, not a
+# GIT_* prefix match — that would also strip GIT_SSH_COMMAND and the
+# GIT_COMMITTER_* identity, neither of which relocates a repo.
+e2e_init_repo() {
+    local ws="$1" scrub
+    scrub=$(git rev-parse --local-env-vars | sed 's/^/-u /' | tr '\n' ' ')
+    # shellcheck disable=SC2086  # $scrub is a flag LIST and must word-split
+    env $scrub git init -q "$ws"
+    # shellcheck disable=SC2086
+    env $scrub git -C "$ws" add -A
+    # shellcheck disable=SC2086
+    env $scrub git -C "$ws" -c user.email=e2e@pixtuoid -c user.name=e2e commit -qm init
+}
