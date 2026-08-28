@@ -185,7 +185,7 @@ const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 /// backend (`notify::PollWatcher`) at `interval`, instead of the native
 /// FSEvents/inotify watcher. Set once — later calls are ignored. Integration
 /// tests use it because a real FSEvents stream costs tens of seconds of
-/// setup/teardown per `TempDir` on macOS. Never called in production.
+/// setup/teardown per `TempDir` on macOS.
 #[doc(hidden)]
 pub fn force_polling_backend_for_tests(interval: Duration) {
     let _ = TEST_POLL_OVERRIDE.set(interval);
