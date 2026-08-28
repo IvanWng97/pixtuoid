@@ -46,6 +46,11 @@ fn glass_tones(theme: &crate::theme::Theme) -> (Rgb, Rgb, Rgb) {
     )
 }
 
+/// The H twin of [`paint_glass_wall_v`]. They stay SEPARATE — don't hoist a
+/// `paint_glass_strip(axis, alphas)` helper. They share only the tone-ladder
+/// SKELETON and diverge at every load-bearing point, so the unifier's interface
+/// would be as wide as the body it hides. Revisit only if a THIRD wall
+/// orientation appears.
 pub(super) fn paint_glass_wall_h(
     buf: &mut RgbBuffer,
     theme: &crate::theme::Theme,

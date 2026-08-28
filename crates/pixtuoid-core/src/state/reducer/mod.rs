@@ -40,7 +40,8 @@ pub const STALE_UNKNOWN_CWD_TIMEOUT: Duration = Duration::from_secs(3 * 60);
 
 /// For `SourceCaps::short_idle_reap()`. Codex motivates it: its `SessionEnd`
 /// hook covers only graceful teardown, its payloads carry no PID, and
-/// `ShutdownComplete` never reaches the rollout — no other reaper exists.
+/// `ShutdownComplete` never reaches the rollout — no other reaper exists. CC has
+/// a clean-exit hook, so it keeps the 30-min one; don't give it this.
 #[doc(hidden)]
 pub const STALE_SHORT_IDLE_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 

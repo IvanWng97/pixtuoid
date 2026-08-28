@@ -712,7 +712,10 @@ impl SceneState {
         0
     }
 
-    /// Which floor does `desk_index` belong to?
+    /// Which floor does `desk_index` belong to? Recomputed from CURRENT capacities
+    /// while `AgentSlot.floor_idx` freezes at allocation, so growth renders an agent
+    /// on no floor that `per_floor_counts` still counts. Don't harmonize the two —
+    /// mint a `DeskPlacement` at allocation instead.
     pub fn floor_of(&self, desk_index: GlobalDeskIndex) -> usize {
         self.floor_of_with_offsets(desk_index, &self.cumulative_offsets())
     }
