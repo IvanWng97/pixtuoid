@@ -40,11 +40,13 @@ e2e_sandbox() {
 e2e_init_repo() {
     local ws="$1" scrub
     scrub=$(git rev-parse --local-env-vars | sed 's/^/-u /' | tr '\n' ' ')
-    # An empty list is indistinguishable from "nothing to scrub", so the git calls
-    # below would silently inherit the caller's GIT_DIR — the bug this guards.
+    # An empty list is the scrub silently NOT happening, not "nothing to scrub":
+    # `git init` would then land wherever an ambient GIT_DIR points, and exit 0.
+    # `exit 2` (not `return`) because no caller checks the status — matches
+    # `e2e_require_bin` above.
     if [ -z "$scrub" ]; then
-        printf 'e2e_init_repo: git rev-parse --local-env-vars gave nothing\n' >&2
-        return 1
+        echo "e2e_init_repo: git gave no --local-env-vars; refusing to init unscrubbed" >&2
+        exit 2
     fi
     # shellcheck disable=SC2086  # $scrub is a flag LIST and must word-split
     env $scrub git init -q "$ws"
