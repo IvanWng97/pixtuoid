@@ -58,6 +58,7 @@ manual CSP step; a hand-written `public/*.js` loaded by URL rides
 unsafe-inline for the directive, and inline style ATTRIBUTES cannot be hashed —
 so keep Prism's class-based highlighting, not Shiki). `astro dev` serves NO
 CSP; regressions surface in `just site-e2e`'s console watchdog.
+
 ## Dev server (agent-driving)
 
 `just site-dev-bg` daemonizes (`astro dev --background`, polls the dev-only

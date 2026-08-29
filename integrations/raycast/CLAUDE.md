@@ -47,14 +47,15 @@ binary's version; `OutcomeRow`'s doc comment in `crates/pixtuoid/src/sources.rs`
 owns that rule.)
 
 **A republish may still be owed.** The split (`e21ec7f0`, 2026-07-02) landed
-AFTER the last publish marker in history (`b870d8ba`, 2026-06-19), so the
-version in the store was built against the folded `failed: <msg>` form: it
-prefix-strips, and renders a bare `failed` toast with the reason dropped. The
-parse in `src/` is already correct, so a republish is the whole fix. Whether one
-has happened since is not checkable from this repo — read the store listing
-before assuming it is clear.
+AFTER the local `ray publish` marker `__raycast_latest_publish_ext/pixtuoid__`
+(`b870d8ba`, 2026-06-19), so the version in the store was built against the
+folded `failed: <msg>` form: it prefix-strips, and renders a bare `failed` toast
+with the reason dropped. The parse in `src/` is already correct, so a republish
+is the whole fix. That tag is never pushed, so a fresh clone has no copy — check
+your own, then the listing at `raycast.com/IvanWng97/pixtuoid`, before assuming
+it is clear.
 
-## Toolchain and audit policy
+## Toolchain policy
 
 `package.json` cannot carry a comment, so these live here.
 
@@ -65,15 +66,12 @@ before assuming it is clear.
   (dependabot bumps minors within it — `.github/dependabot.yml` ignores only
   the major). `@raycast/api`'s exact peer is a warning-level mismatch npm
   tolerates under the committed lockfile, not a hard pin the manifest must
-  equal. `ray build` type-checks with its OWN bundled tsc, so `tsconfig.json`
-  must stay parseable by BOTH that and the local TS.
-- **`npm run audit` is plain `npm audit --audit-level=low`.** It was a
-  per-advisory allow-list script until its one entry cleared. `npm audit` has
-  no per-advisory ignore, so if an unfixable advisory recurs, restore that
-  script from history rather than lowering `--audit-level`, which blinds a
-  whole severity band to hide one id. Unfixable is realistic: the last one
-  arrived through a five-deep chain we own no link of, and the override that
-  would have patched it made audit green over code that throws (#792).
+  equal. `ray build` type-checks with its OWN bundled tsc (5.6 as of api
+  1.104.21), so `tsconfig.json` must stay parseable by BOTH that and the local
+  TS: the TS 6 migration was `moduleResolution: "Bundler"` + an explicit
+  `types: ["node"]` (TS 6.0 stopped auto-including `node_modules/@types`);
+  `ignoreDeprecations: "6.0"` would have broken `ray build` (TS 5.x rejects the
+  value).
 
 ## Gates
 

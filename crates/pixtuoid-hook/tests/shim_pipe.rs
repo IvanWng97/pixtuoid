@@ -1,5 +1,5 @@
-//! The named-pipe twin of `shim.rs`, run only by the `windows-test` job: a
-//! behavior pinned on one platform's transport stays pinned on the other's.
+//! The named-pipe twin of `shim.rs`, compiled only on Windows: mirror here any
+//! behavior pinned there. Nothing enforces the parity, and the rosters differ.
 #![cfg(windows)]
 
 use std::io::Write;

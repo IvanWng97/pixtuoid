@@ -1,5 +1,5 @@
-//! The named-pipe twin of `socket.rs`, run only by the `windows-test` job: a
-//! behavior pinned on one platform's transport stays pinned on the other's.
+//! The named-pipe twin of `socket.rs`, compiled only on Windows: mirror here any
+//! behavior pinned there. Nothing enforces the parity, and the rosters differ.
 #![cfg(windows)]
 
 use std::time::Duration;
