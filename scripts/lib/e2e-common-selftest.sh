@@ -6,6 +6,14 @@
 # Everything happens inside one `mktemp -d`; the real repo is never a target.
 set -uo pipefail
 
+# A LINKED worktree's pre-push exports GIT_DIR (a plain checkout's does not), and
+# `just lint` reaches this file from pre-push — so without this the fixture setup
+# below builds no repo of its own and commits into the developer's: #893, inside
+# the file that pins #893. It has to happen HERE, before anything builds a repo;
+# the suite's own GIT_* exports come later and are unaffected.
+# shellcheck disable=SC2046  # githooks(5)'s own idiom — the list must word-split
+unset $(git rev-parse --local-env-vars)
+
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=/dev/null
 . "$here/e2e-common.sh"
@@ -93,6 +101,11 @@ printf 'stray\n' >"$scrubbed/NOTE.txt"
 head_before=$(head_of_real)
 e2e_init_repo "$scrubbed" >/dev/null 2>&1
 
+# Both sides of the next check read `head_of_real`, so an absent fixture repo
+# would compare empty to empty and pass — the exact state a leaked GIT_DIR
+# produces, which is when that check most needs to fire.
+check "the fixture repo has a HEAD to compare against" \
+    test -n "$head_before"
 check "e2e_init_repo does not commit to the REAL repo" \
     test "$(head_of_real)" = "$head_before"
 check "e2e_init_repo leaves the real repo's index untouched" \
