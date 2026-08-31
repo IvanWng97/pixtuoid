@@ -155,10 +155,11 @@ function rehypeRepoLinks() {
 }
 
 // Astro's built-in CSP (`security.csp` below) does NOT hash template-level
-// `is:inline` scripts — the only kind this site has — it appends style hashes
-// (which make browsers IGNORE the 'unsafe-inline' Shiki/mermaid needs), and it
-// emits its <meta> BELOW scripts the layout already wrote, which a meta policy
-// does not govern. This hook closes all three from the BUILT html.
+// `is:inline` scripts (verified vs Astro 7.0.5) — the only kind this site has —
+// it appends style hashes (which make browsers IGNORE the 'unsafe-inline'
+// Shiki/mermaid needs), and it emits its <meta> BELOW scripts the layout
+// already wrote, which a meta policy does not govern. This hook closes all
+// three from the BUILT html.
 function cspInlineHashes() {
   return {
     name: 'csp-inline-hashes',

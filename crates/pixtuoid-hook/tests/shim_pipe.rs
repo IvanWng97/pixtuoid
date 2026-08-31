@@ -1,3 +1,5 @@
+//! The named-pipe twin of `shim.rs`, compiled only on Windows: mirror here any
+//! behavior pinned there. Nothing enforces the parity, and the rosters differ.
 #![cfg(windows)]
 
 use std::io::Write;

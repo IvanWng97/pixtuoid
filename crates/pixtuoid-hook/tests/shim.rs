@@ -1,6 +1,7 @@
 #![cfg(unix)]
 //! Integration tests for the hook shim BINARY's I/O contract (invariant #5:
-//! "always exit 0, never block CC").
+//! "always exit 0, never block CC"). `shim_pipe.rs` is the Windows twin —
+//! mirror there any behavior pinned here.
 
 use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;

@@ -1,3 +1,6 @@
+//! The Unix-socket twin of `pipe.rs`, compiled only on Unix: mirror there any
+//! behavior pinned here. The Windows half never compiles on a macOS box, so
+//! only CI will tell you it drifted.
 #![cfg(unix)]
 use std::time::Duration;
 
