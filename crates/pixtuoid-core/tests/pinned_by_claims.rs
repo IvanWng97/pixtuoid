@@ -3,12 +3,11 @@
 //! `escalated_permission_is_detected_by_the_exported_pair`, which had never
 //! existed.
 //!
-//! Three gaps, none currently harbouring an orphan — widen before trusting it
-//! further: the walk is `.rs` under `crates/`, so the claims in `desk.sprite`
-//! and `add-source.prompt.md` go unchecked; the collapse below anchors at
-//! column 0, so an INDENTED wrapped claim is skipped silently; and `declared`
-//! is a raw text scan, so `fn foo` written in prose counts as a declaration.
-//! It checks the name EXISTS, never that the test pins the claim.
+//! Two gaps, neither currently harbouring an orphan — widen before trusting it
+//! further: the walk is `.rs` under `crates/`, so a claim anywhere else — a
+//! sprite header, a prompt, `docs/` — goes unchecked; and `declared` is a raw
+//! text scan, so `fn foo` written in prose counts as a declaration. It checks
+//! the name EXISTS, never that the test pins the claim.
 //!
 //! Reads sibling crates at runtime, so it is workspace-only and sits in
 //! `Cargo.toml`'s `exclude`.
@@ -39,13 +38,26 @@ fn rust_sources(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// Collapse the comment leaders so a wrapped claim reads as one string.
+///
+/// Indentation is stripped per line first: anchoring the replace at column 0
+/// left an indented leader intact, and the claim wrapped under it was skipped
+/// silently (this file's module doc used to list that as a known gap).
+fn flatten_wrapped_comments(src: &str) -> String {
+    src.lines()
+        .map(str::trim_start)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .replace("\n///", " ")
+        .replace("\n//!", " ")
+        .replace("\n//", " ")
+}
+
 /// The identifier a `Pinned by` claim names, if the line makes one.
 ///
 /// Matched on text with comment leaders collapsed to a space first: a claim
 /// wrapped across two `///` lines is exactly the shape a line-at-a-time matcher
-/// passes silently, so the wrap has to be gone before the scan. The collapse
-/// anchors at column 0 — an indented leader survives it and the claim is
-/// skipped, which is why the module doc lists that as a gap.
+/// passes silently, so the wrap has to be gone before the scan.
 fn claims_in(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut rest = text;
@@ -93,12 +105,11 @@ fn every_pinned_by_claim_names_a_function_that_exists() {
                 declared.insert(name);
             }
         }
-        // Collapse the comment leaders so a wrapped claim reads as one string.
-        let flat = src
-            .replace("\n///", " ")
-            .replace("\n//!", " ")
-            .replace("\n//", " ");
-        claims.extend(claims_in(&flat).into_iter().map(|n| (path.clone(), n)));
+        claims.extend(
+            claims_in(&flatten_wrapped_comments(&src))
+                .into_iter()
+                .map(|n| (path.clone(), n)),
+        );
     }
 
     assert!(
@@ -128,13 +139,24 @@ fn the_claim_scanner_fires_on_an_orphan_and_stays_silent_on_a_real_one() {
         ["some_test_name"]
     );
     assert_eq!(
-        claims_in("/// Pinned by  `wrapped_across_lines`."),
+        claims_in(&flatten_wrapped_comments(
+            "/// Pinned by\n/// `wrapped_across_lines`."
+        )),
         ["wrapped_across_lines"],
-        "a claim whose leaders were collapsed must still match"
+        "a wrapped claim must survive the REAL collapse — the old hand-flattened \
+         fixture never exercised it, which is how the column-0 gap stayed hidden"
     );
     assert_eq!(
         claims_in("/// pinned by [`bracketed_link`]"),
         ["bracketed_link"]
+    );
+    assert_eq!(
+        claims_in(&flatten_wrapped_comments(
+            "    // Pinned by\n    // `indented_wrapped_name`.\n    for x in y {"
+        )),
+        ["indented_wrapped_name"],
+        "an INDENTED wrapped claim is a live shape in the tree — \
+         a column-0-anchored collapse skips it silently"
     );
     assert!(claims_in("/// Pinned by the shared harness.").is_empty());
     assert!(
