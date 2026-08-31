@@ -316,6 +316,7 @@ lint:
     run links   just links               & pids+=($!)
     run drift   just drift-selftest       & pids+=($!)
     run tuidrive just tuidrive-selftest   & pids+=($!)
+    run e2escrub just e2e-scrub-selftest  & pids+=($!)
     run starhist just star-history-selftest & pids+=($!)
     run fixpii  just fixture-pii          & pids+=($!)
     run piiself just fixture-pii-selftest & pids+=($!)
@@ -1279,6 +1280,16 @@ drift-selftest:
 [doc("Self-test the TUI capture driver's pure logic")]
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
+
+# `e2e_init_repo`'s env scrub. A git hook exports GIT_DIR/GIT_INDEX_FILE into
+# every child and those OUTRANK `git -C <dir>`, so an unscrubbed helper COMMITS
+# to the developer's real repo while printing nothing (#893, twice). The suite
+# runs the naive form first and proves it corrupts, so a scrub that stopped
+# scrubbing cannot pass. Hermetic: one mktemp -d, no network, no real repo.
+[group('meta')]
+[doc("Self-test the e2e helper's git env scrub")]
+e2e-scrub-selftest:
+    bash scripts/lib/e2e-common-selftest.sh
 
 # The README star chart's renderer — bitmap font, axes, paging. (Its copied
 # office colours are pinned from Rust: scene's `tests/readme_chart_palette.rs`.)

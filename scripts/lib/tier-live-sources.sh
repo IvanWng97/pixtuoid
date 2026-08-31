@@ -75,9 +75,7 @@ printf 'pong\n' >"$WS/NOTE.txt"
 # A git repo, because several CLIs refuse to act outside one (codex: "Not inside
 # a trusted directory"). Cheaper than a per-CLI trust flag, and it is what a real
 # user's workspace looks like anyway.
-git init -q "$WS" 2>/dev/null
-git -C "$WS" add -A 2>/dev/null
-git -C "$WS" -c user.email=e2e@pixtuoid -c user.name=e2e commit -qm init 2>/dev/null
+e2e_init_repo "$WS"
 PIXPID=""
 CLIPID=""
 

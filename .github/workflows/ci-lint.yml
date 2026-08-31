@@ -126,6 +126,7 @@ jobs:
       - run: just drift-selftest
       - run: just env-paths
       - run: just tuidrive-selftest
+      - run: just e2e-scrub-selftest
       - run: just star-history-selftest
       # `just fixture-metadata` is NOT here: it became Rust tests in #929, so it
       # already rides `just test` in windows-test, macos-test and coverage —
