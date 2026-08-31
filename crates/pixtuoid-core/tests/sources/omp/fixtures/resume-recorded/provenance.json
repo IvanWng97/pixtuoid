@@ -1,0 +1,8 @@
+{
+  "captured": "2026-08-31",
+  "cli": "omp",
+  "command": "omp -c -p Reply with exactly: bye",
+  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim. omp -c resumes the last persisted session in a fresh process: the bridge fires session_start on the EXISTING transcript (re-registration), no new file is born",
+  "origin": "recorded",
+  "version": "omp/18.0.11"
+}

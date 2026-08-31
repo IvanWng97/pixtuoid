@@ -253,11 +253,19 @@ mod tests {
             "every registration must go through the FORWARD loop, so the pin \
              on FORWARD covers the whole registered set"
         );
-        // `await ` (the expression form) — prose in comments says "awaited".
+        // The ONE awaited thing is the 200ms-watchdogged shim: Bun.spawn
+        // has no detached mode, and without the await the exiting process
+        // wins the race and drops the empty-session `session_shutdown`.
+        assert_eq!(
+            EXTENSION_TEMPLATE.matches("await proc.exited").count(),
+            1,
+            "exactly one await point — the bounded shim"
+        );
         assert!(
-            !EXTENSION_TEMPLATE.contains("await ") && !EXTENSION_TEMPLATE.contains("async "),
-            "nothing may be awaited — session_shutdown runs during process \
-             exit and a slow shim must never hold omp's handler budget"
+            !EXTENSION_TEMPLATE
+                .replace("await proc.exited", "")
+                .contains("await "),
+            "anything else awaited can hold omp's handler budget"
         );
         for gate in ["tool_call", "tool_result", "input", "session_before"] {
             assert!(

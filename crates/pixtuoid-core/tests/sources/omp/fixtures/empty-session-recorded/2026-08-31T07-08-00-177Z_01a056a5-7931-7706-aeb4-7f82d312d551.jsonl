@@ -1,0 +1,4 @@
+{"type":"title","v":1,"title":"","updatedAt":"2026-08-31T07:08:00.177Z","pad":"                                                                                                                                                                              "}
+{"type":"session","version":3,"id":"01a056a5-7931-7706-aeb4-7f82d312d551","timestamp":"2026-08-31T07:08:00.177Z","cwd":"/tmp/pixtuoid-capture/proj"}
+{"type":"model_change","id":"1e83b577","parentId":null,"timestamp":"2026-08-31T07:08:00.211Z","model":"deepseek/deepseek-v4-flash","resolvedModelIsFallback":false}
+{"type":"thinking_level_change","id":"d668e5db","parentId":"1e83b577","timestamp":"2026-08-31T07:08:00.212Z","thinkingLevel":"high","configured":null}

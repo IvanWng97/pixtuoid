@@ -1,0 +1,72 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- Rename:
+    agent_id: 15502413814127749057
+    label: om·Run shell command echo hi
+- SessionStart:
+    agent_id: 15502413814127749057
+    source: omp
+    session_id: 2026-08-31T07-02-35-451Z_01a056a0-84bb-70be-baac-037e1dd92a5b
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 15502413814127749057
+    model: ~
+    effort: high
+- Rename:
+    agent_id: 15502413814127749057
+    label: om·Run shell command echo hi
+- ModelInfo:
+    agent_id: 15502413814127749057
+    model: deepseek-v4-flash
+    effort: ~
+- Usage:
+    agent_id: 15502413814127749057
+    fresh_tokens: 204
+- ActivityStart:
+    agent_id: 15502413814127749057
+    tool_use_id: call_00_K2GftAqdqb2EuXy95yND7293
+    detail:
+      Generic:
+        display: "bash: echo hi"
+- ActivityEnd:
+    agent_id: 15502413814127749057
+    tool_use_id: call_00_K2GftAqdqb2EuXy95yND7293
+- ModelInfo:
+    agent_id: 15502413814127749057
+    model: deepseek-v4-flash
+    effort: ~
+- Usage:
+    agent_id: 15502413814127749057
+    fresh_tokens: 135
+- SessionEnd:
+    agent_id: 15502413814127749057
+    as_child: false
+- SessionStart:
+    agent_id: 15502413814127749057
+    source: omp
+    session_id: 2026-08-31T07-02-35-451Z_01a056a0-84bb-70be-baac-037e1dd92a5b
+    cwd: /tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 15502413814127749057
+    source: omp
+    session_id: 2026-08-31T07-02-35-451Z_01a056a0-84bb-70be-baac-037e1dd92a5b
+    cwd: /tmp/pixtuoid-capture/proj
+- Waiting:
+    agent_id: 15502413814127749057
+    reason: bash
+    tool_use_id: call_00_K2GftAqdqb2EuXy95yND7293
+- Identity:
+    agent_id: 15502413814127749057
+    source: omp
+    session_id: 2026-08-31T07-02-35-451Z_01a056a0-84bb-70be-baac-037e1dd92a5b
+    cwd: /tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 15502413814127749057
+    tool_use_id: call_00_K2GftAqdqb2EuXy95yND7293
+- SessionEnd:
+    agent_id: 15502413814127749057
+    as_child: false

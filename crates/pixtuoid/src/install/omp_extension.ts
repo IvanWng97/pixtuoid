@@ -4,8 +4,11 @@
 // ONLY what they can never carry — pre-persist presence, empty-session
 // shutdown, and the tool-approval wait — into the `pixtuoid-hook` shim.
 // It NEVER blocks omp: it registers NO gating handlers (omp's `tool_call`
-// gate fails CLOSED on a throw/timeout), every handler is try/catch'd, and
-// nothing is awaited — the shim self-bounds at 200ms and always exits 0.
+// gate fails CLOSED on a throw/timeout), and every handler is try/catch'd.
+// The ONE awaited thing is the shim itself — self-bounded at 200ms, always exit 0 —
+// because Bun.spawn has no detached mode and `session_shutdown` fires during
+// process exit: an un-awaited child loses the race and the empty-session
+// shutdown never arrives (capture-verified on omp 18.0.11).
 //
 // Privacy allowlist: event type, session file/id, cwd, tool name, tool call
 // id, approval state/reason, and process.pid. Never prompts, messages, tool
@@ -29,7 +32,7 @@ const FORWARD = new Set<string>([
 ])
 
 export default function (pi: any) {
-  const forward = (name: string, ev: any, ctx: any) => {
+  const forward = async (name: string, ev: any, ctx: any) => {
     try {
       const payload: Record<string, unknown> = { type: name }
       try {
@@ -47,14 +50,16 @@ export default function (pi: any) {
       // The omp process pid (extensions run in-process); the daemon's
       // HookPidWatch can end every bound sprite when it dies.
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
-      // Buffer stdin (no writable stream, no EPIPE window) and NOTHING
-      // awaited: `session_shutdown` runs during process exit, and a slow
-      // shim must never hold omp's 30s handler budget.
-      Bun.spawn([HOOK_PATH, "--source", "omp"], {
+      // Buffer stdin (no writable stream, no EPIPE window). Awaiting the
+      // 200ms-watchdogged shim keeps the exiting process alive just long
+      // enough for `session_shutdown` to land, and keeps an event burst from
+      // orphaning a pile of spawns (the opencode-plugin posture).
+      const proc = Bun.spawn([HOOK_PATH, "--source", "omp"], {
         stdin: new TextEncoder().encode(JSON.stringify(payload)),
         stdout: "ignore",
         stderr: "ignore",
       })
+      await proc.exited
     } catch {
       // Best-effort: a broken shim must never surface in omp.
     }
@@ -63,9 +68,7 @@ export default function (pi: any) {
     // Per-event registration is try/catch'd so one unknown event name on an
     // older omp cannot take the whole bridge down.
     try {
-      pi.on(name, (ev: any, ctx: any) => {
-        forward(name, ev, ctx)
-      })
+      pi.on(name, (ev: any, ctx: any) => forward(name, ev, ctx))
     } catch {}
   }
 }
