@@ -434,7 +434,6 @@ fn display_name_for(source_id: &'static str) -> &'static str {
     match source_id {
         "antigravity" => "Antigravity",
         "copilot" => "Copilot CLI",
-        "omp" => "Oh My Pi",
         other => other,
     }
 }
@@ -552,8 +551,14 @@ mod tests {
             "and name the runnable command, so the user need not guess — got {hint:?}"
         );
 
+        let hint = post_install_hint("omp").expect("omp needs a restart step");
+        assert!(
+            hint.contains("restart"),
+            "extensions load once at startup, so the step is a session restart — got {hint:?}"
+        );
+
         for id in pixtuoid_core::source::registry::registered_source_names() {
-            if id == "openclaw" {
+            if id == "openclaw" || id == "omp" {
                 continue;
             }
             assert!(

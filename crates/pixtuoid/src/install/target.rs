@@ -245,8 +245,27 @@ pub(crate) const KIMI: Target = Target {
     post_install_hint: None,
 };
 
+pub(crate) const OMP: Target = Target {
+    name: "omp",
+    core_source: pixtuoid_core::source::omp::SOURCE_NAME,
+    display_name: "Oh My Pi",
+    default_config_path: crate::install::omp::default_config_path,
+    hook_command: crate::install::omp::hook_command,
+    merge_install: crate::install::omp::merge_install,
+    merge_uninstall: crate::install::omp::merge_uninstall,
+    verify_schema: crate::install::omp::verify_schema,
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
+    // A post-uninstall stub still exists, so detect on omp's own agent dir
+    // rather than our file.
+    presence_probe: Some(crate::install::omp::detect_installed),
+    extra_artifacts: None,
+    // Extensions load once at startup (`discoverAndLoadExtensions`).
+    post_install_hint: Some("already-running omp sessions must restart to load the bridge"),
+};
+
 pub const TARGETS: &[&Target] = &[
     &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK, &KIMI,
+    &OMP,
 ];
 
 // No prod caller: prod joins on the source id via `by_source`. Kept for the

@@ -376,10 +376,10 @@ fn format_connect_result_renders_connected_plus_backup_and_path_notes() {
 }
 
 #[test]
-fn only_openclaw_declares_a_post_install_step_and_it_names_the_restart() {
-    // OpenClaw is the only target whose write does not take effect on the CLI's
-    // next run: upstream's own reload plan marks `plugins.load` as
-    // `kind: "restart"`.
+fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
+    // A hint exists only where the write does not take effect on the CLI's
+    // next run: OpenClaw's reload plan marks `plugins.load` as
+    // `kind: "restart"`, and omp loads extensions once at session startup.
     let mut with_hint = Vec::new();
     for t in crate::install::TARGETS {
         if let Some(h) = t.post_install_hint {
@@ -393,8 +393,11 @@ fn only_openclaw_declares_a_post_install_step_and_it_names_the_restart() {
     }
     assert_eq!(
         with_hint,
-        vec![pixtuoid_core::source::openclaw::SOURCE_NAME],
-        "only openclaw needs a post-install step today"
+        vec![
+            pixtuoid_core::source::openclaw::SOURCE_NAME,
+            pixtuoid_core::source::omp::SOURCE_NAME,
+        ],
+        "only openclaw and omp need a post-install step today"
     );
 }
 

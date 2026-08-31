@@ -47,6 +47,21 @@ pub fn omp_sessions_dir() -> PathBuf {
     )
 }
 
+/// omp's ACTIVE agent directory, the root its extension loader scans
+/// (`<agent-dir>/extensions/*.ts` — upstream `discovery/builtin.ts` joins
+/// `"extensions"` onto `getAgentDir()`). Same `.env` overlay as
+/// [`omp_sessions_dir`], same profile/override precedence, but NO XDG
+/// flatten: upstream's `getAgentDir()` returns `dirs.agentDir` un-redirected
+/// (`dirs.ts` applies XDG only per-category via `agentSubdir`), so a
+/// migrated-XDG user's extensions still load from here. Exported for the
+/// install target — a second resolver copy is the #880 drift class.
+pub fn omp_agent_dir() -> PathBuf {
+    let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
+        std::fs::read_to_string(p).ok()
+    });
+    resolve_omp_agent_dir(&env)
+}
+
 /// The process environment omp's resolver reads, injected so every arm — the
 /// Windows one, the XDG one, the profile ones — unit-tests on any host.
 #[derive(Clone)]
@@ -1802,6 +1817,51 @@ mod tests {
     }
 
     /// XDG changes the SHAPE, not the prefix: it replaces the base.
+    #[test]
+    /// The extensions root (`omp_agent_dir`) never XDG-flattens: upstream's
+    /// `getAgentDir()` is `dirs.agentDir` un-redirected, XDG applies only
+    /// per-category through `agentSubdir` — write the bridge to a flattened
+    /// path and omp never loads it while verify reads healthy (#951).
+    #[test]
+    fn the_agent_dir_ignores_xdg_where_the_sessions_dir_flattens() {
+        let env = OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: None,
+            omp_profile: None,
+            pi_profile: None,
+            pi_profile_live: None,
+            agent_dir: None,
+            xdg_data_home: Some("/xdg".into()),
+        };
+        assert_eq!(
+            resolve_omp_sessions_dir(&env, true, &|p| p == Path::new("/xdg/omp")),
+            PathBuf::from("/xdg/omp/sessions"),
+            "precondition: this env DOES flatten the sessions dir"
+        );
+        assert_eq!(
+            resolve_omp_agent_dir(&env),
+            PathBuf::from("/home/u/.omp/agent")
+        );
+        let overridden = OmpEnv {
+            agent_dir: Some("/custom/agent".into()),
+            ..env.clone()
+        };
+        assert_eq!(
+            resolve_omp_agent_dir(&overridden),
+            PathBuf::from("/custom/agent"),
+            "PI_CODING_AGENT_DIR moves the extensions root"
+        );
+        let profiled = OmpEnv {
+            omp_profile: Some("work".into()),
+            ..env
+        };
+        assert_eq!(
+            resolve_omp_agent_dir(&profiled),
+            PathBuf::from("/home/u/.omp/profiles/work/agent"),
+            "a named profile derives its own agent dir"
+        );
+    }
+
     #[test]
     fn omp_xdg_flattens_the_agent_segment_and_only_when_the_dir_exists() {
         let env = |xdg: Option<&str>, profile: Option<&str>, agent: Option<&str>| OmpEnv {
