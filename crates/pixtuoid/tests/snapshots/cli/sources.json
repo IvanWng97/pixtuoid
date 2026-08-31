@@ -1,93 +1,93 @@
 [
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "claude-code",
     "display_name": "Claude Code",
-    "health": null,
-    "id": "claude-code"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "codex",
     "display_name": "Codex",
-    "health": null,
-    "id": "codex"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": true,
-    "connected": false,
+    "id": "antigravity",
     "display_name": "Antigravity",
-    "health": null,
-    "id": "antigravity"
+    "connected": false,
+    "cli_present": true,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "reasonix",
     "display_name": "Reasonix",
-    "health": null,
-    "id": "reasonix"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "codewhale",
     "display_name": "CodeWhale",
-    "health": null,
-    "id": "codewhale"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "opencode",
     "display_name": "opencode",
-    "health": null,
-    "id": "opencode"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": true,
-    "connected": false,
+    "id": "copilot",
     "display_name": "Copilot CLI",
-    "health": null,
-    "id": "copilot"
-  },
-  {
-    "cli_present": false,
     "connected": false,
-    "display_name": "Cursor CLI",
-    "health": null,
-    "id": "cursor"
-  },
-  {
-    "cli_present": false,
-    "connected": false,
-    "display_name": "Hermes Agent",
-    "health": null,
-    "id": "hermes"
-  },
-  {
     "cli_present": true,
+    "health": null
+  },
+  {
+    "id": "cursor",
+    "display_name": "Cursor CLI",
     "connected": false,
+    "cli_present": false,
+    "health": null
+  },
+  {
+    "id": "hermes",
+    "display_name": "Hermes Agent",
+    "connected": false,
+    "cli_present": false,
+    "health": null
+  },
+  {
+    "id": "omp",
     "display_name": "Oh My Pi",
-    "health": null,
-    "id": "omp"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "openclaw",
     "display_name": "OpenClaw",
-    "health": null,
-    "id": "openclaw"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "grok",
     "display_name": "Grok Build",
-    "health": null,
-    "id": "grok"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   },
   {
-    "cli_present": false,
-    "connected": false,
+    "id": "kimi",
     "display_name": "Kimi Code CLI",
-    "health": null,
-    "id": "kimi"
+    "connected": false,
+    "cli_present": false,
+    "health": null
   }
 ]

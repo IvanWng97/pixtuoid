@@ -538,7 +538,10 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::source::omp::OmpSource
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::source::omp::OmpSource
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::source::omp::OmpSource
 pub const pixtuoid_core::source::omp::SOURCE_NAME: &str
+pub fn pixtuoid_core::source::omp::decode_omp_hook_payload(&serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub fn pixtuoid_core::source::omp::decode_omp_line(&str, &str, serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
+pub fn pixtuoid_core::source::omp::omp_agent_dir() -> std::path::PathBuf
+pub fn pixtuoid_core::source::omp::omp_extensions_dir() -> std::path::PathBuf
 pub fn pixtuoid_core::source::omp::omp_id_from_path(&std::path::Path) -> alloc::string::String
 pub fn pixtuoid_core::source::omp::omp_sessions_dir() -> std::path::PathBuf
 pub mod pixtuoid_core::source::openclaw
@@ -588,6 +591,7 @@ pub pixtuoid_core::source::AgentEvent::Usage::fresh_tokens: u64
 pub pixtuoid_core::source::AgentEvent::Waiting
 pub pixtuoid_core::source::AgentEvent::Waiting::agent_id: pixtuoid_core::id::AgentId
 pub pixtuoid_core::source::AgentEvent::Waiting::reason: alloc::string::String
+pub pixtuoid_core::source::AgentEvent::Waiting::tool_use_id: core::option::Option<alloc::string::String>
 impl pixtuoid_core::source::AgentEvent
 pub fn pixtuoid_core::source::AgentEvent::agent_id(&self) -> pixtuoid_core::id::AgentId
 impl core::clone::Clone for pixtuoid_core::source::AgentEvent
@@ -1373,6 +1377,7 @@ pub pixtuoid_core::AgentEvent::Usage::fresh_tokens: u64
 pub pixtuoid_core::AgentEvent::Waiting
 pub pixtuoid_core::AgentEvent::Waiting::agent_id: pixtuoid_core::id::AgentId
 pub pixtuoid_core::AgentEvent::Waiting::reason: alloc::string::String
+pub pixtuoid_core::AgentEvent::Waiting::tool_use_id: core::option::Option<alloc::string::String>
 impl pixtuoid_core::source::AgentEvent
 pub fn pixtuoid_core::source::AgentEvent::agent_id(&self) -> pixtuoid_core::id::AgentId
 impl core::clone::Clone for pixtuoid_core::source::AgentEvent

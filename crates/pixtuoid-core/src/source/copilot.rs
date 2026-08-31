@@ -244,6 +244,7 @@ pub fn decode_copilot_line(
             vec![AgentEvent::Waiting {
                 agent_id: acting,
                 reason,
+                tool_use_id: None,
             }]
         }
         // On APPROVED the gated tool's own `tool.execution_start` follows and
@@ -756,7 +757,9 @@ mod tests {
     fn permission_requested_waits_and_completed_clears() {
         let req = r#"{"type":"permission.requested","data":{"requestId":"8c508e21-0a6c-4a06-8824-3930476499ea","permissionRequest":{"kind":"shell","toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2","fullCommandText":"cat /etc/hostname","intention":"Print /etc/hostname contents","commands":[{"identifier":"cat","readOnly":true}],"possiblePaths":["/etc/hostname"],"possibleUrls":[],"hasWriteFileRedirection":false,"canOfferSessionApproval":true},"promptRequest":{"kind":"path","accessKind":"shell","paths":["/etc/hostname"],"toolCallId":"call_K8WLZkwufHsI9bTvkZmMKec2"}},"id":"1f975691-a108-4d6f-924b-d48263d46274","timestamp":"2026-06-14T21:35:55.637Z","parentId":"e0a534c6-d548-4def-b0bd-316c83efe5fd"}"#;
         match &decode(req)[..] {
-            [AgentEvent::Waiting { agent_id, reason }] => {
+            [AgentEvent::Waiting {
+                agent_id, reason, ..
+            }] => {
                 assert_eq!(*agent_id, root());
                 assert!(reason.contains("shell"), "reason names the gate: {reason}");
             }

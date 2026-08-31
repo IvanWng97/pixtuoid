@@ -23,6 +23,9 @@ tests/
 │   │                    single-owner fixtures/hook-payloads.jsonl (NOT scanned)
 │   ├── cursor/ grok/    DELEGATING captures — a child is an independent session (two
 │   │                    sprites), so these can't live under the one-AgentId rule
+│   ├── omp/             the bridge-extension rounds (#951) — hook keys FOLD
+│   │                    platform-dependently, so expectations derive through the
+│   │                    fold, not the platform-invariant conformance goldens
 │   ├── delegation/      the NAME-KEYED family (a tool literally called `task`):
 │   │                    opencode, copilot, omp — one rule, one table
 │   ├── snapshots/       insta snaps (sources__conformance__<source>__<scenario>)

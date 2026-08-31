@@ -92,6 +92,36 @@ OMP_SESSION_ENTRIES_URL = (
 # that unrelated survivor mask both carrier renames.
 OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
 
+# The bridge extension's surface (#951) — `check_omp_extension_reads` routes
+# each name to the file that declares it.
+OMP_EXT_SHARED_EVENTS_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/extensibility/shared-events.ts"
+)
+OMP_EXT_TYPES_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/extensibility/extensions/types.ts"
+)
+OMP_SESSION_MANAGER_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/session/session-manager.ts"
+)
+
+# There is no second detector for the discovery seam: install writes the file,
+# `verify_schema` reads our own bytes back, and a file omp silently skips
+# leaves no decode breadcrumb.
+OMP_EXT_DISCOVERY_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/discovery/builtin.ts"
+)
+OMP_DIRS_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/utils/src/dirs.ts"
+)
+
+# The interface bodies carrying the approval fields the extension forwards.
+OMP_APPROVAL_EVENT_CARRIERS = ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent")
+
 CODEX_ROLLOUT_ITEM_URL = (
     "https://raw.githubusercontent.com/openai/codex/main/codex-rs/history/src/lib.rs"
 )
@@ -267,6 +297,13 @@ ANCHORS: dict[str, Anchor] = {
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
+    OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
+    OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
+    OMP_SESSION_MANAGER_URL: Anchor(r"getSessionFile", "`getSessionFile`"),
+    OMP_EXT_DISCOVERY_URL: Anchor(
+        r"discoverExtensionModulePaths", "`discoverExtensionModulePaths`"
+    ),
+    OMP_DIRS_URL: Anchor(r"export function getAgentDir", "`getAgentDir`"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
@@ -667,6 +704,9 @@ class OurNames:
     omp_exit_marker: set[str] | None = None
     omp_message_vocab: set[str] | None = None
     omp_title_fields: set[str] | None = None
+    omp_hook_events: set[str] | None = None
+    omp_extension_reads: set[str] | None = None
+    omp_extension_subdir: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
@@ -734,6 +774,9 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("omp_exit_marker", CORE_LIB_FRAGMENT, "decoded", "omp.exit_marker"),
     ("omp_message_vocab", CORE_LIB_FRAGMENT, "decoded", "omp.message_vocab"),
     ("omp_title_fields", CORE_LIB_FRAGMENT, "decoded", "omp.title_fields"),
+    ("omp_hook_events", CORE_LIB_FRAGMENT, "decoded", "omp.hook_events"),
+    ("omp_extension_reads", CORE_BIN_FRAGMENT, "shipped", "omp.extension_reads"),
+    ("omp_extension_subdir", CORE_LIB_FRAGMENT, "shipped", "omp.extension_subdir"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
@@ -901,6 +944,86 @@ def check_omp_title_fields(text: str, fields: set[str], report: Report) -> None:
                 + ", ".join(f"`{name}`" for name in missing_owners)
                 + " in session-entries.ts — renamed; first sight or live updates lose "
                 "the only human-readable root label and fall back to cwd."
+            )
+
+
+def check_omp_extension_reads(
+    shared: str, ext_types: str, session_manager: str, fields: set[str], report: Report
+) -> None:
+    """Every name the bundled bridge extension reads is still DECLARED upstream.
+
+    Routed per name to its declaration site: approval fields inside their
+    carrier interface bodies, `previousSessionFile` in shared-events.ts,
+    `cwd` inside `ExtensionContext`, the getters by method name in
+    session-manager.ts. A name this router does not know means the template
+    grew a read without a check — flagged blind, never silently green.
+    """
+    carriers = {
+        name: typescript_interface_body(ext_types, name)
+        for name in OMP_APPROVAL_EVENT_CARRIERS
+    }
+    missing_carriers = [name for name, body in carriers.items() if body is None]
+    if missing_carriers:
+        report.add_blind(
+            "omp approval-event carriers "
+            + ", ".join(f"`{name}`" for name in missing_carriers),
+            "extensions/types.ts",
+            "The omp approval-field checks were SKIPPED.",
+        )
+    approval_bodies = "\n".join(body for body in carriers.values() if body)
+    ctx_body = typescript_interface_body(ext_types, "ExtensionContext")
+    if ctx_body is None:
+        report.add_blind(
+            "`ExtensionContext`",
+            "extensions/types.ts",
+            "The omp `cwd` context check was SKIPPED.",
+        )
+
+    def declares(body: str | None, field: str) -> bool:
+        if body is None:
+            # An unverifiable carrier was already reported blind above; do not
+            # double-report every field as a rename.
+            return True
+        return (
+            re.search(
+                rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", body
+            )
+            is not None
+        )
+
+    # The presence matcher's `\??` cannot see required->optional, and `approved`
+    # is the one field whose optionality carries semantics.
+    if "approved" in fields and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies):
+        report.add_breaking(
+            "omp's `approved` became OPTIONAL upstream — the decoder reads an "
+            "absent value as a DENIAL, so every approval would drop the sprite "
+            "to idle mid-run with no breadcrumb. Decide an explicit missing-"
+            "field policy before trusting this event again."
+        )
+
+    for field in sorted(fields):
+        if field in ("getSessionFile", "getSessionId"):
+            ok = f"{field}(" in session_manager
+        elif field == "previousSessionFile":
+            ok = re.search(rf"(?m)^\s*{field}\??\s*:", shared) is not None
+        elif field == "cwd":
+            ok = declares(ctx_body, field)
+        elif field in ("toolCallId", "toolName", "reason", "approved"):
+            ok = declares(approval_bodies, field)
+        else:
+            report.add_blind(
+                f"omp extension read `{field}`",
+                "omp_extension.ts",
+                "The template reads a name this check has no declaration site "
+                "for — teach check_omp_extension_reads where it lives.",
+            )
+            continue
+        if not ok:
+            report.add_breaking(
+                f"omp extension-API name `{field}` (read by the installed "
+                f"omp_extension.ts) is GONE from upstream — renamed; the bridge "
+                f"forwards an undefined value and that signal quietly dies "
+                f"(approval waits, lifecycle, or identity)."
             )
 
 
@@ -1392,6 +1515,50 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
             if ours.omp_title_fields is not None:
                 check_omp_title_fields(text, ours.omp_title_fields, report)
+
+    if ours.omp_hook_events is not None or ours.omp_extension_reads is not None:
+        shared = fetch_anchored(OMP_EXT_SHARED_EVENTS_URL, "omp extension shared-events", report)
+        ext_types = fetch_anchored(OMP_EXT_TYPES_URL, "omp extension types", report)
+        if shared is not None and ext_types is not None:
+            joined = shared + "\n" + ext_types
+            for name in sorted(ours.omp_hook_events or ()):
+                # The declaration form — bare quoted names also live in prose.
+                if f'type: "{name}"' not in joined:
+                    report.add_breaking(
+                        f"omp extension event `{name}` (registered by the installed "
+                        f"omp_extension.ts, decoded in source/omp.rs) is GONE from the "
+                        f"extension API — renamed; the bridge subscribes to an event omp "
+                        f"never fires (approval waits or lifecycle silently stop arriving)."
+                    )
+            if ours.omp_extension_reads is not None:
+                sm = fetch_anchored(OMP_SESSION_MANAGER_URL, "omp session-manager", report)
+                if sm is not None:
+                    check_omp_extension_reads(
+                        shared, ext_types, sm, ours.omp_extension_reads, report
+                    )
+
+    if ours.omp_extension_subdir is not None:
+        disco = fetch_anchored(OMP_EXT_DISCOVERY_URL, "omp extension discovery", report)
+        if disco is not None:
+            for sub in sorted(ours.omp_extension_subdir):
+                if f'path.join(dir, "{sub}")' not in disco:
+                    report.add_breaking(
+                        f"omp's extension loader no longer joins `\"{sub}\"` onto its "
+                        f"config dirs — the installed bridge lands where omp never "
+                        f"looks, installs cleanly, and never loads (no local check "
+                        f"can see this)."
+                    )
+        dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
+        if dirs is not None and re.search(
+            r"(?ms)^export function getAgentDir\(\): string \{\s*return dirs\.agentDir;",
+            dirs,
+        ) is None:
+            report.add_breaking(
+                "omp's `getAgentDir()` no longer returns the resolver's agent dir "
+                "verbatim — if it gained a redirect (XDG or otherwise), "
+                "`omp_agent_dir()`'s no-flatten rule is stale and the bridge "
+                "installs where omp never scans. Re-verify dirs.ts by hand."
+            )
 
     for field, url, enum, label in (
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem", "rollout OUTER"),

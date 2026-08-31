@@ -249,7 +249,11 @@ fn decode_permission(props: &Value) -> Result<Vec<AgentEvent>> {
         .unwrap_or_else(|| "permission".to_string());
     Ok(vec![
         oc_identity(agent_id, session_id),
-        AgentEvent::Waiting { agent_id, reason },
+        AgentEvent::Waiting {
+            agent_id,
+            reason,
+            tool_use_id: None,
+        },
     ])
 }
 
@@ -548,7 +552,9 @@ mod tests {
             let events = decode_all(json!({"type": ty, "properties": props}));
             assert_eq!(events.len(), 2, "{ty}: Identity + Waiting");
             match &events[1] {
-                AgentEvent::Waiting { agent_id, reason } => {
+                AgentEvent::Waiting {
+                    agent_id, reason, ..
+                } => {
                     assert_eq!(*agent_id, AgentId::from_parts(SOURCE_NAME, "ses_x"));
                     assert_eq!(reason, want);
                 }

@@ -92,6 +92,14 @@
     "omp.exit_marker": [
       "session_exit"
     ],
+    "omp.hook_events": [
+      "session_start",
+      "session_switch",
+      "session_branch",
+      "session_shutdown",
+      "tool_approval_requested",
+      "tool_approval_resolved"
+    ],
     "omp.message_vocab": [
       "assistant",
       "toolResult",
@@ -112,6 +120,11 @@
       "running",
       "completed",
       "error"
+    ]
+  },
+  "shipped": {
+    "omp.extension_subdir": [
+      "extensions"
     ]
   }
 }

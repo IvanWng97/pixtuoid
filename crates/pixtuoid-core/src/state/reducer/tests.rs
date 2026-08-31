@@ -54,7 +54,7 @@ fn stale_timeout_constants_have_their_intended_durations() {
     assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600));
     assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180));
     assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300));
-    assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150)); // 2.5× the 60s poll
+    assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150));
 }
 
 // Synthetic caps on an unregistered source, so the POLICY half stays covered
@@ -214,6 +214,7 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
         AgentEvent::Waiting {
             agent_id: id,
             reason: "perm".into(),
+            tool_use_id: None,
         },
         t0,
         Transport::Hook,
@@ -293,6 +294,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         AgentEvent::Waiting {
             agent_id: id,
             reason: "perm".into(),
+            tool_use_id: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -481,12 +483,12 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
-    /// ~3× the widest steady-state working set (CHILD_END_RELINK_TTL = 300s at
-    /// ~1 event/s ⇒ ~300 entries) and FAR below ITERS. A bound that merely
-    /// clears the steady state proves nothing about a slow leak.
+    /// ~3× the widest steady-state working set (`CHILD_END_RELINK_TTL` at
+    /// ~1 event/s) and FAR below ITERS. A bound that merely clears the steady
+    /// state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
-    const MAP_NAMES: [&str; 7] = [
+    const MAP_NAMES: [&str; 8] = [
         "recent_hook_tool_uses",
         "recent_hook_session_ends",
         "active_tasks",
@@ -494,6 +496,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         "child_ledger",
         "recent_proof_of_life",
         "gated_before_waiting",
+        "counted_calls",
     ];
 
     let mut r = super::Reducer::new();
@@ -503,7 +506,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     let mut scene = SceneState::uniform(32);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    let mut peak = [0usize; 7];
+    let mut peak = [0usize; 8];
 
     for i in 0..ITERS {
         let now = t0 + Duration::from_secs(i);
@@ -557,6 +560,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             AgentEvent::Waiting {
                 agent_id: a,
                 reason: "perm".into(),
+                tool_use_id: None,
             },
             now,
             Transport::Hook,
@@ -610,6 +614,11 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             r.corr.child_ledger.len(),
             r.corr.recent_proof_of_life.len(),
             r.corr.gated_before_waiting.len(),
+            r.corr
+                .counted_calls
+                .values()
+                .map(std::collections::HashMap::len)
+                .sum(),
         ];
         for (p, &l) in peak.iter_mut().zip(lens.iter()) {
             *p = (*p).max(l);

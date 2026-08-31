@@ -1,8 +1,12 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
 //! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`;
-//! [`omp_sessions_dir`] owns every axis of that root. TRANSCRIPT-ONLY: omp's
-//! "hooks" are in-process TS extension modules, so there is no shell-hook
-//! install target. Wire shape: upstream `packages/coding-agent/src/session/`.
+//! [`omp_sessions_dir`] owns every axis of that root. omp has no shell-hook
+//! seam — its hooks are in-process TS extension modules — so the hook plane
+//! is a pixtuoid-owned bridge extension
+//! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
+//! [`decode_omp_hook_payload`] claims (#951). Wire shape: upstream
+//! `packages/coding-agent/src/session/` (transcript) and `src/extensibility/`
+//! (extension events).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -41,6 +45,34 @@ pub fn omp_sessions_dir() -> PathBuf {
         cfg!(any(target_os = "linux", target_os = "macos")),
         &|p| p.exists(),
     )
+}
+
+/// omp's ACTIVE agent directory, the root its extension loader scans (its
+/// `EXTENSIONS_SUBDIR` child). Same `.env` overlay as
+/// [`omp_sessions_dir`], same profile/override precedence, but NO XDG
+/// flatten: upstream's `getAgentDir()` returns `dirs.agentDir` un-redirected
+/// (`dirs.ts` applies XDG only per-category via `agentSubdir`), so a
+/// migrated-XDG user's extensions still load from here. Exported for the
+/// install target — a second resolver copy is the #880 drift class.
+pub fn omp_agent_dir() -> PathBuf {
+    let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
+        std::fs::read_to_string(p).ok()
+    });
+    resolve_omp_agent_dir(&env)
+}
+
+/// The subdirectory omp's loader scans for extension modules — upstream
+/// `discovery/builtin.ts` joins this onto `getAgentDir()`. Watched by the
+/// drift surface (`omp.extension_subdir`): a silent upstream rename would
+/// leave the installer writing where omp never looks while every local check
+/// reads green.
+pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
+
+/// Where the bridge extension installs: [`omp_agent_dir`] +
+/// `EXTENSIONS_SUBDIR` (private: the name still greps; rustdoc denies links
+/// to non-public items).
+pub fn omp_extensions_dir() -> PathBuf {
+    omp_agent_dir().join(EXTENSIONS_SUBDIR)
 }
 
 /// The process environment omp's resolver reads, injected so every arm — the
@@ -155,8 +187,6 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
     if profile.is_some() {
         return Some((default_agent, true, profile));
     }
-    // The LIVE `PI_PROFILE`: upstream's override resolver re-reads it after the
-    // `.env` overlay, where the frozen `pi_profile` above selected the profile.
     let override_dir = env.agent_dir.clone().filter(|v| {
         let derived = normalize_profile_name(env.pi_profile_live.as_deref())
             .and_then(|p| omp_config_root(env, Some(&p)))
@@ -219,7 +249,11 @@ fn xdg_app_root(
 /// resolver frozen at module load (hence the PRE-overlay `env`), then the resolver
 /// is REBUILT from the merged env. Shell wins over every file, the first file to
 /// define a key wins, and profile SELECTION is deliberately NOT overlaid — upstream
-/// reuses the frozen profile. Its fourth `$CWD/.env` is unreachable out-of-process.
+/// reuses the frozen profile. Upstream's `$CWD/.env` is the FIRST and
+/// strongest of its four files (`env.ts` iterates project→agent→config→home,
+/// first-wins, and Bun autoloads the cwd dotenv before the resolver freezes),
+/// unreachable out-of-process because pixtuoid never knows which directory
+/// omp was launched from.
 fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpEnv {
     let agent_dir = resolve_omp_agent_dir_parts(env).map(|(dir, _, _)| dir);
     let config_root = omp_config_root(env, resolve_profile(env).as_deref());
@@ -453,14 +487,15 @@ const TITLE_FIELD: &str = "title";
 #[cfg(test)]
 /// The `customType` marking a clean teardown — the ONLY structural end omp writes.
 /// Exported for the drift surface because the guard below falls through to
-/// `_ => vec![]`: rename it upstream and no omp session ever ends cleanly, with no
-/// breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
+/// `_ => vec![]`: rename it upstream and no omp TRANSCRIPT ever ends cleanly,
+/// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 /// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
 /// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
 /// end. Skipped when the session never produced an assistant message, and SIGKILL
-/// writes nothing — both fall through to the stale-sweep.
+/// writes nothing — both fall to the stale-sweep, except that the bridge's
+/// `session_shutdown` ends the empty session outright.
 const SESSION_EXIT: &str = "session_exit";
 
 /// The turn role carrying tool calls. Its `model` is read BARE, never the
@@ -624,6 +659,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             asks.push(AgentEvent::Waiting {
                                 agent_id: acting,
                                 reason: omp_ask_reason(b.get("arguments")),
+                                tool_use_id: None,
                             });
                         }
                     }
@@ -701,6 +737,189 @@ fn omp_ask_reason(args: Option<&Value>) -> String {
     })
     .map(|t| ellipsize(t, MAX_DECODED_FIELD_CHARS))
     .unwrap_or_else(|| "ask".to_string())
+}
+
+// --- extension-bridge hook payloads (#951) ---------------------------------
+
+/// The bridge extension's lifecycle event names, verbatim from omp's
+/// extension API (`extensibility/shared-events.ts`), forwarded by
+/// `install/omp_extension.ts`.
+const HOOK_SESSION_START: &str = "session_start";
+const HOOK_SESSION_SWITCH: &str = "session_switch";
+const HOOK_SESSION_BRANCH: &str = "session_branch";
+const HOOK_SESSION_SHUTDOWN: &str = "session_shutdown";
+/// The approval pair (`extensibility/extensions/types.ts`) — the state the
+/// transcript can never carry: omp does not persist approval waits.
+const HOOK_APPROVAL_REQUESTED: &str = "tool_approval_requested";
+const HOOK_APPROVAL_RESOLVED: &str = "tool_approval_resolved";
+
+/// The hook event types this decoder turns into events — this module's
+/// hook row in the drift surface, pinned to the dispatch arms by the
+/// drift-surface census (`every_exported_set_is_exactly_its_dispatch_arms`)
+/// and to the TS extension's registration list by the install-side
+/// two-language pin.
+#[cfg(test)]
+pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
+    HOOK_SESSION_START,
+    HOOK_SESSION_SWITCH,
+    HOOK_SESSION_BRANCH,
+    HOOK_SESSION_SHUTDOWN,
+    HOOK_APPROVAL_REQUESTED,
+    HOOK_APPROVAL_RESOLVED,
+];
+
+/// Decode one bridge-extension payload (already routed here by
+/// `_pixtuoid_source == "omp"`). pixtuoid authors the envelope
+/// (`install/omp_extension.ts`), so an unknown `type` is foreign or a stale
+/// installed extension — a drift breadcrumb and a benign skip, never a bail:
+/// the hook plane log-and-continues (workspace convention) and a stale
+/// bridge is a supported state `verify_schema` reports.
+///
+/// Identity: `sessionFile` (the ALLOCATED path — omp exposes it before the
+/// lazy persist materializes the JSONL) through the watcher's own
+/// `normalize_path_key` fold then [`omp_id_from_path`], so both transports
+/// mint ONE AgentId per session, nested task children included. `sessionId`
+/// (the bare header UUID, a keyspace no stem can collide with — stems carry
+/// the date shape and `_`) covers `--no-session`, where no transcript will
+/// ever exist to coalesce with.
+///
+/// A switch/branch means this omp process now drives the CURRENT file: the
+/// previous one gets its End without waiting for the stale sweep, and the
+/// upstream `reason` (`"new" | "resume" | "fork"`) is deliberately dropped —
+/// the End+Start pair keys on `previousSessionFile` alone, identically for
+/// all three.
+pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
+    let Some(obj) = v.as_object() else {
+        return Ok(vec![]);
+    };
+    let Some(ty) = obj.get("type").and_then(|t| t.as_str()) else {
+        crate::source::drift::missing_field(SOURCE_NAME, "hook", "type");
+        return Ok(vec![]);
+    };
+    let (key, parent_key) = match omp_hook_session_key(obj) {
+        Some(k) => k,
+        None => {
+            crate::source::drift::missing_field(SOURCE_NAME, ty, "sessionFile");
+            return Ok(vec![]);
+        }
+    };
+    let agent_id = AgentId::from_parts(SOURCE_NAME, &key);
+    let cwd = || {
+        obj.get("cwd")
+            .and_then(|c| c.as_str())
+            .map(std::path::PathBuf::from)
+    };
+    let session_start = || AgentEvent::SessionStart {
+        agent_id,
+        source: SOURCE_NAME.to_string(),
+        session_id: key.clone(),
+        cwd: cwd().unwrap_or_default(),
+        parent_id: parent_key
+            .as_deref()
+            .map(|p| AgentId::from_parts(SOURCE_NAME, p)),
+    };
+    let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key.clone(), cwd());
+
+    match ty {
+        HOOK_SESSION_START => Ok(vec![session_start()]),
+        // previous == current is the in-place branch REWRITE — an End+Start
+        // pair there would walk the sprite out for its own rewrite.
+        HOOK_SESSION_SWITCH | HOOK_SESSION_BRANCH => {
+            let mut evs = Vec::new();
+            if let Some(prev) = obj
+                .get("previousSessionFile")
+                .and_then(|p| p.as_str())
+                .filter(|p| !p.is_empty())
+            {
+                let prev_key = omp_id_from_path(Path::new(&crate::id::normalize_path_key(prev)));
+                if prev_key != key {
+                    evs.push(AgentEvent::SessionEnd {
+                        agent_id: AgentId::from_parts(SOURCE_NAME, &prev_key),
+                        as_child: omp_parent_key_from_path(Path::new(
+                            &crate::id::normalize_path_key(prev),
+                        ))
+                        .is_some(),
+                    });
+                }
+            }
+            evs.push(session_start());
+            Ok(evs)
+        }
+        HOOK_SESSION_SHUTDOWN => Ok(vec![AgentEvent::SessionEnd {
+            agent_id,
+            as_child: parent_key.is_some(),
+        }]),
+        HOOK_APPROVAL_REQUESTED | HOOK_APPROVAL_RESOLVED => {
+            let Some(tool_call_id) = obj.get("toolCallId").and_then(|t| t.as_str()) else {
+                crate::source::drift::missing_field(SOURCE_NAME, ty, "toolCallId");
+                return Ok(vec![]);
+            };
+            let tool = obj.get("toolName").and_then(|t| t.as_str()).unwrap_or("");
+            let event = if ty == HOOK_APPROVAL_REQUESTED {
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason: omp_approval_reason(obj, tool),
+                    tool_use_id: Some(tool_call_id.to_string()),
+                }
+            } else if obj.get("approved").and_then(|a| a.as_bool()) == Some(true) {
+                // The resume. copilot's approve-emits-nothing shape doesn't fit
+                // omp: the transcript wrote this call BEFORE the request, so
+                // only this Start can lift the wait.
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id: Some(tool_call_id.to_string()),
+                    detail: Some(omp_tool_detail(tool, None)),
+                }
+            } else {
+                // Denial: resolves the gated wait now; the transcript's
+                // isError toolResult later is the deduped/no-op backstop.
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id: Some(tool_call_id.to_string()),
+                }
+            };
+            Ok(vec![identity(), event])
+        }
+        _ => {
+            crate::source::drift::unknown_event(SOURCE_NAME, ty);
+            Ok(vec![])
+        }
+    }
+}
+
+/// The session key (and parent key) for one hook payload: the folded
+/// `sessionFile` stem chain, else the bare `sessionId` UUID.
+fn omp_hook_session_key(obj: &serde_json::Map<String, Value>) -> Option<(String, Option<String>)> {
+    if let Some(file) = obj
+        .get("sessionFile")
+        .and_then(|f| f.as_str())
+        .filter(|f| !f.is_empty())
+    {
+        let folded = crate::id::normalize_path_key(file);
+        return Some((
+            omp_id_from_path(Path::new(&folded)),
+            omp_parent_key_from_path(Path::new(&folded)),
+        ));
+    }
+    obj.get("sessionId")
+        .and_then(|s| s.as_str())
+        .filter(|s| !s.is_empty())
+        .map(|s| (s.to_string(), None))
+}
+
+/// The Waiting reason for an approval gate: the wire's `reason` when it says
+/// anything (a plain bash gate sends none — probe-verified at this source's
+/// `verified_version`), else the tool name, else the literal gate.
+fn omp_approval_reason(obj: &serde_json::Map<String, Value>, tool: &str) -> String {
+    let wire = obj
+        .get("reason")
+        .and_then(|r| r.as_str())
+        .filter(|r| !r.is_empty());
+    match wire {
+        Some(r) => ellipsize(r, MAX_DECODED_FIELD_CHARS),
+        None if !tool.is_empty() => ellipsize(tool, MAX_DECODED_FIELD_CHARS),
+        None => "approval".to_string(),
+    }
 }
 
 #[cfg(test)]
@@ -1332,6 +1551,7 @@ mod tests {
             }, AgentEvent::Waiting {
                 agent_id: wid,
                 reason,
+                ..
             }] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(*wid, root());
@@ -1617,6 +1837,48 @@ mod tests {
         );
     }
 
+    /// Write the bridge to a flattened path and omp never loads it while
+    /// verify reads healthy (#951); `omp_agent_dir` owns the mechanism.
+    #[test]
+    fn the_agent_dir_ignores_xdg_where_the_sessions_dir_flattens() {
+        let env = OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: None,
+            omp_profile: None,
+            pi_profile: None,
+            pi_profile_live: None,
+            agent_dir: None,
+            xdg_data_home: Some("/xdg".into()),
+        };
+        assert_eq!(
+            resolve_omp_sessions_dir(&env, true, &|p| p == Path::new("/xdg/omp")),
+            PathBuf::from("/xdg/omp/sessions"),
+            "precondition: this env DOES flatten the sessions dir"
+        );
+        assert_eq!(
+            resolve_omp_agent_dir(&env),
+            PathBuf::from("/home/u/.omp/agent")
+        );
+        let overridden = OmpEnv {
+            agent_dir: Some("/custom/agent".into()),
+            ..env.clone()
+        };
+        assert_eq!(
+            resolve_omp_agent_dir(&overridden),
+            PathBuf::from("/custom/agent"),
+            "PI_CODING_AGENT_DIR moves the extensions root"
+        );
+        let profiled = OmpEnv {
+            omp_profile: Some("work".into()),
+            ..env
+        };
+        assert_eq!(
+            resolve_omp_agent_dir(&profiled),
+            PathBuf::from("/home/u/.omp/profiles/work/agent"),
+            "a named profile derives its own agent dir"
+        );
+    }
+
     /// XDG changes the SHAPE, not the prefix: it replaces the base.
     #[test]
     fn omp_xdg_flattens_the_agent_segment_and_only_when_the_dir_exists() {
@@ -1717,10 +1979,9 @@ mod tests {
         })
     }
 
-    /// omp applies its `.env` files and then REBUILDS the resolver, so a directory
-    /// var living only in a file still moves the sessions dir — reading process env
-    /// alone leaves those users watching an empty dir. The PATH half of the falsy
-    /// fill test is settled earlier, by `path_env` at the READ, and pinned end to
+    /// The `.env` overlay's directory axes — `with_omp_dotenv` owns why a
+    /// file-only var still moves this root. The PATH half of the falsy fill
+    /// test is settled earlier, by `path_env` at the READ, and pinned end to
     /// end by `omp_sessions_dir_honors_non_empty_env_override`.
     #[test]
     fn a_dotenv_directory_var_moves_the_sessions_dir_the_way_omp_does() {
@@ -1988,6 +2249,295 @@ mod tests {
         match saved {
             Some(v) => std::env::set_var("PI_CODING_AGENT_DIR", v),
             None => std::env::remove_var("PI_CODING_AGENT_DIR"),
+        }
+    }
+
+    // -- extension-bridge hook payloads (#951) ------------------------------
+
+    const HOOK_ROOT: &str = "/h/.omp/agent/sessions/-repo/2026-08-31T06-00-52-863Z_01a05668-057f-7559-8fed-f28ff062e3ca.jsonl";
+    /// The RAW wire stem, for building inputs; expectations derive through
+    /// [`hook_key`] instead — the decoder folds, so a literal expectation
+    /// holds on Unix and reds only in `windows-test` (the #520 class).
+    const HOOK_ROOT_KEY: &str = "2026-08-31T06-00-52-863Z_01a05668-057f-7559-8fed-f28ff062e3ca";
+
+    /// A raw wire path's session key, through the decoder's own fold.
+    fn hook_key(raw: &str) -> String {
+        omp_id_from_path(Path::new(&crate::id::normalize_path_key(raw)))
+    }
+
+    /// The folded key as an AgentId, the shape every expectation compares.
+    fn hook_id(raw: &str) -> AgentId {
+        AgentId::from_parts("omp", &hook_key(raw))
+    }
+
+    fn hook(v: serde_json::Value) -> Vec<AgentEvent> {
+        decode_omp_hook_payload(&v).unwrap()
+    }
+
+    #[test]
+    fn hook_session_start_registers_with_path_keyed_identity() {
+        let evs = hook(serde_json::json!({
+            "type": "session_start", "sessionFile": HOOK_ROOT,
+            "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
+        }));
+        match &evs[..] {
+            [AgentEvent::SessionStart {
+                agent_id,
+                source,
+                session_id,
+                cwd,
+                parent_id,
+            }] => {
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
+                assert_eq!(source, "omp");
+                assert_eq!(session_id, &hook_key(HOOK_ROOT));
+                assert_eq!(cwd, &std::path::PathBuf::from("/repo"));
+                assert_eq!(*parent_id, None);
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_session_start_for_a_nested_task_file_links_the_parent() {
+        let child = format!("/h/.omp/agent/sessions/-repo/{HOOK_ROOT_KEY}/Alpha.jsonl");
+        let evs = hook(serde_json::json!({
+            "type": "session_start", "sessionFile": child,
+            "sessionId": "01a05668-0f13-7438-82b1-d239cb124270", "cwd": "/repo",
+        }));
+        match &evs[..] {
+            [AgentEvent::SessionStart {
+                agent_id,
+                session_id,
+                parent_id,
+                ..
+            }] => {
+                let key = hook_key(&child);
+                assert_eq!(*agent_id, AgentId::from_parts("omp", &key));
+                assert_eq!(session_id, &key);
+                assert_eq!(*parent_id, Some(hook_id(HOOK_ROOT)));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_session_start_without_a_file_keys_on_the_bare_uuid() {
+        let evs = hook(serde_json::json!({
+            "type": "session_start",
+            "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
+        }));
+        match &evs[..] {
+            [AgentEvent::SessionStart {
+                agent_id,
+                session_id,
+                ..
+            }] => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts("omp", "01a05668-057f-7559-8fed-f28ff062e3ca")
+                );
+                assert_eq!(session_id, "01a05668-057f-7559-8fed-f28ff062e3ca");
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_shutdown_ends_the_session_and_a_nested_one_as_child() {
+        let evs = hook(serde_json::json!({
+            "type": "session_shutdown", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+        }));
+        assert!(matches!(
+            &evs[..],
+            [AgentEvent::SessionEnd {
+                as_child: false,
+                ..
+            }]
+        ));
+        let child = format!("/h/.omp/agent/sessions/-repo/{HOOK_ROOT_KEY}/Alpha.jsonl");
+        let evs = hook(serde_json::json!({
+            "type": "session_shutdown", "sessionFile": child,
+            "sessionId": "x", "cwd": "/repo",
+        }));
+        assert!(matches!(
+            &evs[..],
+            [AgentEvent::SessionEnd { as_child: true, .. }]
+        ));
+    }
+
+    #[test]
+    fn hook_switch_ends_the_previous_session_and_starts_the_current() {
+        let prev = "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-000000000009.jsonl";
+        let evs = hook(serde_json::json!({
+            "type": "session_switch", "sessionFile": HOOK_ROOT,
+            "previousSessionFile": prev,
+            "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
+        }));
+        match &evs[..] {
+            [AgentEvent::SessionEnd {
+                agent_id: ended,
+                as_child: false,
+            }, AgentEvent::SessionStart {
+                agent_id: started, ..
+            }] => {
+                assert_eq!(*ended, hook_id(prev));
+                assert_eq!(*started, hook_id(HOOK_ROOT));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_branch_onto_the_same_path_emits_no_end() {
+        // An in-place branch REWRITES the file: previous == current.
+        let evs = hook(serde_json::json!({
+            "type": "session_branch", "sessionFile": HOOK_ROOT,
+            "previousSessionFile": HOOK_ROOT,
+            "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
+        }));
+        assert!(
+            matches!(&evs[..], [AgentEvent::SessionStart { .. }]),
+            "same-path branch must not End: {evs:?}"
+        );
+    }
+
+    #[test]
+    fn hook_approval_requested_waits_on_the_named_call_with_identity_ahead() {
+        let evs = hook(serde_json::json!({
+            "type": "tool_approval_requested", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+            "toolCallId": "call_1", "toolName": "bash",
+        }));
+        match &evs[..] {
+            [AgentEvent::Identity { agent_id: iid, .. }, AgentEvent::Waiting {
+                agent_id,
+                reason,
+                tool_use_id,
+            }] => {
+                assert_eq!(iid, agent_id);
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
+                assert_eq!(reason, "bash", "empty reason falls back to the tool name");
+                assert_eq!(tool_use_id.as_deref(), Some("call_1"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+        // A wire reason wins over the tool-name fallback.
+        let evs = hook(serde_json::json!({
+            "type": "tool_approval_requested", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+            "toolCallId": "call_1", "toolName": "bash", "reason": "outside workspace",
+        }));
+        match &evs[..] {
+            [_, AgentEvent::Waiting { reason, .. }] => assert_eq!(reason, "outside workspace"),
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_approval_resolved_approved_resumes_the_call() {
+        let evs = hook(serde_json::json!({
+            "type": "tool_approval_resolved", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+            "toolCallId": "call_1", "toolName": "bash", "approved": true,
+        }));
+        match &evs[..] {
+            [AgentEvent::Identity { .. }, AgentEvent::ActivityStart {
+                agent_id,
+                tool_use_id,
+                detail,
+            }] => {
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
+                assert_eq!(tool_use_id.as_deref(), Some("call_1"));
+                assert_eq!(detail.as_ref().map(|d| d.display()), Some("bash"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hook_approval_resolved_denied_ends_the_call() {
+        let evs = hook(serde_json::json!({
+            "type": "tool_approval_resolved", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+            "toolCallId": "call_1", "toolName": "bash", "approved": false,
+            "reason": "denied by user",
+        }));
+        match &evs[..] {
+            [AgentEvent::Identity { .. }, AgentEvent::ActivityEnd {
+                agent_id,
+                tool_use_id,
+            }] => {
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
+                assert_eq!(tool_use_id.as_deref(), Some("call_1"));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_hook_type_decodes_to_nothing() {
+        assert!(hook(serde_json::json!({
+            "type": "credential_disabled", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+        }))
+        .is_empty());
+        assert!(hook(serde_json::json!({"no_type": true})).is_empty());
+    }
+
+    #[test]
+    fn a_task_approval_resume_carries_the_task_detail() {
+        let evs = hook(serde_json::json!({
+            "type": "tool_approval_resolved", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+            "toolCallId": "call_t", "toolName": "task", "approved": true,
+        }));
+        match &evs[..] {
+            [_, AgentEvent::ActivityStart { detail, .. }] => {
+                assert!(detail.as_ref().is_some_and(|d| d.is_task()));
+            }
+            other => panic!("unexpected: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_stamped_omp_payload_routes_to_this_decoder_through_the_registry() {
+        // Red until the registry row carries `HookCustom::ClaimsAll`: without
+        // it the payload falls through to the CC-shaped shared arms, which
+        // find no `hook_event_name` and decode nothing.
+        let evs = crate::source::decoder::decode_hook_payload(serde_json::json!({
+            "_pixtuoid_source": "omp",
+            "type": "session_start", "sessionFile": HOOK_ROOT,
+            "sessionId": "x", "cwd": "/repo",
+        }))
+        .unwrap();
+        assert!(
+            matches!(&evs[..], [AgentEvent::SessionStart { agent_id, .. }]
+                if *agent_id == hook_id(HOOK_ROOT)),
+            "expected the ClaimsAll route: {evs:?}"
+        );
+    }
+
+    #[test]
+    fn a_raw_windows_hook_path_folds_to_the_watcher_key() {
+        // The hook path arrives RAW from the TS extension; the decoder must
+        // apply the same seam fold the JSONL watcher applies, or the two
+        // transports mint two AgentIds for one session (PR #520 lesson).
+        let raw = r"C:\Users\Dev\.omp\agent\sessions\-repo\2026-08-31T06-00-52-863Z_01A05668-057F-7559-8FED-F28FF062E3CA.jsonl";
+        let folded = crate::id::normalize_path_key(raw);
+        let evs = hook(serde_json::json!({
+            "type": "session_start", "sessionFile": raw,
+            "sessionId": "x", "cwd": "/repo",
+        }));
+        match &evs[..] {
+            [AgentEvent::SessionStart { agent_id, .. }] => {
+                assert_eq!(
+                    *agent_id,
+                    AgentId::from_parts("omp", &omp_id_from_path(Path::new(&folded)))
+                );
+            }
+            other => panic!("unexpected: {other:?}"),
         }
     }
 }

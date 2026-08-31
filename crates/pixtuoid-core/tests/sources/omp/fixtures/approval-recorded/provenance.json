@@ -1,0 +1,8 @@
+{
+  "captured": "2026-08-31",
+  "cli": "omp",
+  "command": "omp --approval-mode always-ask (interactive TUI, driven by scripts/lib/capture-omp-tui.py approve 'Run the shell command: echo hi')",
+  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim. interactive TUI driven under a pty; Enter approves the always-ask gate",
+  "origin": "recorded",
+  "version": "omp/18.0.11"
+}

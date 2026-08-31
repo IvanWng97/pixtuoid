@@ -182,6 +182,7 @@ pub fn decode_codex_line(transcript_path: &str, source: &str, v: Value) -> Resul
                 vec![AgentEvent::Waiting {
                     agent_id,
                     reason: "permission".to_string(),
+                    tool_use_id: None,
                 }]
             } else {
                 vec![codex_tool_start(agent_id, payload)]

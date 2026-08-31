@@ -1370,6 +1370,7 @@ fixture-pii-selftest:
     # both sailed through the first form of this rule.
     printf '/Users/dev-ops\n'  > "$d/probe/identity-prefix.txt"
     printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
+    printf -- '--Users-carol-Desktop-proj--\n' > "$d/probe/identity-dashed.txt"
     printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
     printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"
     printf '{"authorization":"Bearer %s"}\n' "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9x" \
@@ -1387,6 +1388,8 @@ fixture-pii-selftest:
     printf '{"api_key":"msg_%s"}\n' "Kd8sQm2zXv6bTn4wRj9c" > "$d/quiet/cred-residual.txt"
     printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
         > "$d/quiet/identity.txt"
+    printf -- '--private-tmp-pixtuoid-capture-proj--\n--Users-dev-proj--\n-home-runner-work\n' \
+        > "$d/quiet/identity-dashed.txt"
     printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
     printf 'Bearer short\n' > "$d/quiet/bearer.txt"
     printf 'msg_%s\n%s\n' "0123456789abcdefghij" "20260815_120000_a1b2c3" > "$d/quiet/cred.txt"
@@ -1399,7 +1402,7 @@ fixture-pii-selftest:
     # The credential config does NOT own the identity class — its default global
     # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
-                ".gitleaks-identity.toml=identity-bearer.txt,identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+                ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
         got=$(fired "$cfg" "$d/probe")
         if [ "$got" != "$want" ]; then

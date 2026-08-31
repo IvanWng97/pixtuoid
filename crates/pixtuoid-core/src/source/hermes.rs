@@ -176,7 +176,14 @@ pub fn decode_hermes_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 .filter(|s| !s.is_empty())
                 .map(|d| crate::source::decoder::ellipsize(d, MAX_DECODED_FIELD_CHARS))
                 .unwrap_or_else(|| "permission".to_string());
-            Ok(vec![identity(), AgentEvent::Waiting { agent_id, reason }])
+            Ok(vec![
+                identity(),
+                AgentEvent::Waiting {
+                    agent_id,
+                    reason,
+                    tool_use_id: None,
+                },
+            ])
         }
         // THE session end, as `on_session_end` is not: `lifecycle.py::finalize_session`
         // hard-closes the Relay conversation under the SAME `session_id` it sends

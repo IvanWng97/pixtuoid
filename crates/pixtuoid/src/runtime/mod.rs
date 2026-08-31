@@ -414,6 +414,7 @@ mod tests {
             AgentEvent::Waiting {
                 agent_id: b,
                 reason: "permission".into(),
+                tool_use_id: None,
             },
             now,
             Transport::Hook,
@@ -527,6 +528,7 @@ mod tests {
             AgentEvent::Waiting {
                 agent_id: id,
                 reason: "needs \u{1b}[2J approval".to_string(),
+                tool_use_id: None,
             },
             now,
             Transport::Hook,

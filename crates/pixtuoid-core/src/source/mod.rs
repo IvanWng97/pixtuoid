@@ -113,6 +113,14 @@ pub enum AgentEvent {
         agent_id: AgentId,
         /// Why it is waiting (the prompt/notification reason).
         reason: String,
+        /// The gated tool call's id, when the wire names one (omp
+        /// `tool_approval_requested`). Binds the wait to that call so the
+        /// approval resume/denial resolves it regardless of which transport's
+        /// events arrive first; `None` keeps the reducer's slot-state
+        /// inference. Skipped when serialized so None-emitting sources keep
+        /// their recorded goldens byte-stable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_use_id: Option<String>,
     },
     /// Late-discovered display name (e.g. CC subagent `attributionAgent`).
     /// Reducer overrides the slot label; noop if the slot doesn't exist.

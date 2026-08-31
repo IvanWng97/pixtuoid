@@ -1,0 +1,9 @@
+{
+  "captured": "2026-08-31",
+  "cli": "omp",
+  "command": "omp -p {prompt}",
+  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim. payloads only: the harvested CHILD transcript embedded the recorder machine whole skill roster via a session_init entry, so it is withheld (delegation/fixtures/omp carries the transcript-side task evidence); the payloads show the parent AND the nested child (<parent-stem>/SayHi.jsonl) each firing their own lifecycle under one pid",
+  "origin": "recorded",
+  "prompt": "Use your task tool to spawn exactly one subagent named SayHi whose task is to reply with the single word hi. Then reply hi yourself.",
+  "version": "omp/18.0.11"
+}

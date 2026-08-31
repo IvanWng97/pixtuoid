@@ -92,6 +92,16 @@
     ]
   },
   "shipped": {
+    "omp.extension_reads": [
+      "approved",
+      "cwd",
+      "getSessionFile",
+      "getSessionId",
+      "previousSessionFile",
+      "reason",
+      "toolCallId",
+      "toolName"
+    ],
     "openclaw.default_gateway_port": [
       "18789"
     ]

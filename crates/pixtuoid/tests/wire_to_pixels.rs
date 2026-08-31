@@ -211,6 +211,15 @@ fn agent_cases() -> Vec<WireCase> {
             must_reach: &[Reach::Active],
         },
         WireCase {
+            name: "omp-bridge",
+            source: "omp",
+            // The bridge's approval round: the Waiting the transcript can
+            // never carry must survive all the way to pixels (#951).
+            fixture: "omp/fixtures/approval-recorded/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[Reach::Waiting, Reach::Active],
+        },
+        WireCase {
             name: "grok",
             source: "grok",
             fixture: "fixtures/grok/permission-recorded/01a0059d-ece9-7931-8e07-c91d77ba5943/updates.jsonl",
@@ -370,6 +379,11 @@ fn copilot_transcript_line_renders_a_painted_sprite() {
 #[test]
 fn omp_transcript_line_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("omp"));
+}
+
+#[test]
+fn omp_bridge_approval_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("omp-bridge"));
 }
 
 #[test]

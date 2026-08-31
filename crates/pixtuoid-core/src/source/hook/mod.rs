@@ -388,8 +388,6 @@ mod tests {
         }
     }
 
-    /// A `TranscriptProbe` source is excluded: its `_pid` is declared untrusted,
-    /// and it has an authoritative pid of its own.
     /// The guard `handle_conn` relies on: a batch yields at most ONE sighting per
     /// agent, so a payload can never corroborate its own pid. No decoder pairs
     /// two bind-target events today, so this pins the FORWARD guard directly —
@@ -482,6 +480,7 @@ mod tests {
             AgentEvent::Waiting {
                 agent_id: id,
                 reason: "x".into(),
+                tool_use_id: None,
             },
             AgentEvent::SessionEnd {
                 agent_id: id,

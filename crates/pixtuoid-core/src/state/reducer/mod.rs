@@ -190,6 +190,7 @@ impl Reducer {
     /// pending-idle timers fire even when no event arrives to drive `apply`.
     pub fn tick(&mut self, scene: &mut SceneState, now: SystemTime) {
         self.corr.gc(now);
+        self.corr.gc_slow(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
         self.fire_pending_b1_cascades(scene, now);
@@ -272,6 +273,7 @@ impl Reducer {
                 tool_use_id,
                 detail,
                 tracking.handled_by_task_start,
+                from,
                 now,
             ),
             AgentEvent::ActivityEnd {
@@ -285,8 +287,12 @@ impl Reducer {
                 from,
                 now,
             ),
-            AgentEvent::Waiting { agent_id, reason } => {
-                self.apply_waiting(scene, agent_id, &reason, now);
+            AgentEvent::Waiting {
+                agent_id,
+                reason,
+                tool_use_id,
+            } => {
+                self.apply_waiting(scene, agent_id, &reason, tool_use_id.as_deref(), now);
             }
             AgentEvent::Rename { agent_id, label } => {
                 Self::apply_rename(scene, agent_id, &label, now);
@@ -414,6 +420,20 @@ impl Reducer {
 
     /// The `ActivityStart` arm. Skipped entirely when the pre-pass tracker
     /// already applied this event as a Task dispatch.
+    ///
+    /// A Start whose id is a GATED member is the same call re-observed across
+    /// an approval round (#951): on Jsonl it is the transcript's Start landing
+    /// while the human still decides — count it, keep Waiting, and drop its
+    /// richer detail, since a Waiting slot has none to set and the hook resume
+    /// re-labels from the wire's `toolName` (a label-only cost, pinned by
+    /// `the_approval_resume_labels_from_the_wire_tool_name`). On Hook it is the
+    /// approval resume — return to Active.
+    ///
+    /// An UNGATED Start moots the gate list, except while the slot still WAITS
+    /// (a parallel auto-approved tool must not strip a pending approval) or for
+    /// an already-counted id — a late transcript twin whose approval round may
+    /// have queued siblings.
+    #[allow(clippy::too_many_arguments)]
     fn apply_activity_start(
         &mut self,
         scene: &mut SceneState,
@@ -421,18 +441,40 @@ impl Reducer {
         tool_use_id: Option<String>,
         detail: Option<crate::source::ToolDetail>,
         handled_by_task_start: bool,
+        from: Transport,
         now: SystemTime,
     ) {
         if handled_by_task_start {
             return;
         }
-        // Resuming to Active makes any pending gated-permission correlation
-        // moot.
-        self.corr.gated_before_waiting.remove(&agent_id);
-        if let Some(slot) = scene.agents.get_mut(&agent_id) {
-            if !detail.as_ref().is_some_and(|d| d.is_task()) {
-                slot.tool_call_count += 1;
+        let gated = tool_use_id
+            .as_deref()
+            .is_some_and(|t| self.corr.gate_matches(&agent_id, t));
+        if gated && from == Transport::Jsonl {
+            self.count_call(scene, agent_id, tool_use_id.as_deref(), &detail, now);
+            return;
+        }
+        if gated {
+            if let Some(t) = tool_use_id.as_deref() {
+                self.corr.remove_gate_member(&agent_id, t);
             }
+        } else {
+            let already_counted = tool_use_id.as_deref().is_some_and(|t| {
+                self.corr
+                    .counted_calls
+                    .get(&agent_id)
+                    .is_some_and(|calls| calls.contains_key(t))
+            });
+            let waiting = scene
+                .agents
+                .get(&agent_id)
+                .is_some_and(|s| matches!(s.state, ActivityState::Waiting { .. }));
+            if !waiting && !already_counted {
+                self.corr.gated_before_waiting.remove(&agent_id);
+            }
+        }
+        self.count_call(scene, agent_id, tool_use_id.as_deref(), &detail, now);
+        if let Some(slot) = scene.agents.get_mut(&agent_id) {
             // Derive the category from the typed detail BEFORE it is erased to
             // the HUD display string.
             let kind = detail
@@ -445,6 +487,34 @@ impl Reducer {
                 kind,
                 now,
             );
+        }
+    }
+
+    /// Count a tool call ONCE per (agent, call id) life; the id-less path
+    /// (Codex JSONL) counts every time.
+    fn count_call(
+        &mut self,
+        scene: &mut SceneState,
+        agent_id: AgentId,
+        tool_use_id: Option<&str>,
+        detail: &Option<crate::source::ToolDetail>,
+        now: SystemTime,
+    ) {
+        if detail.as_ref().is_some_and(|d| d.is_task()) {
+            return;
+        }
+        let Some(slot) = scene.agents.get_mut(&agent_id) else {
+            return;
+        };
+        match tool_use_id {
+            Some(t) => {
+                let calls = self.corr.counted_calls.entry(agent_id).or_default();
+                if !calls.contains_key(t) {
+                    calls.insert(t.to_string(), now);
+                    slot.tool_call_count += 1;
+                }
+            }
+            None => slot.tool_call_count += 1,
         }
     }
 
@@ -466,9 +536,7 @@ impl Reducer {
         );
         is_waiting
             && match tool_use_id {
-                Some(tuid) => {
-                    self.corr.gated_before_waiting.get(&agent_id).map(|g| &**g) == Some(tuid)
-                }
+                Some(tuid) => self.corr.gate_matches(&agent_id, tuid),
                 None => from == Transport::Hook,
             }
     }
@@ -490,7 +558,13 @@ impl Reducer {
             return;
         }
         let resolves_wait = self.wait_resolved_by(scene, agent_id, tool_use_id, from);
-        if resolves_wait {
+        if let Some(t) = tool_use_id {
+            // A call's End retires ITS gate whether or not it resolved a wait
+            // (a denial, or a parallel tool finishing past its own gate).
+            self.corr.remove_gate_member(&agent_id, t);
+        } else if resolves_wait {
+            // A None-id hook end is a TURN end: every gate on this agent is
+            // stale.
             self.corr.gated_before_waiting.remove(&agent_id);
         }
         // A delegating parent's own parallel tool ending must not settle it to
@@ -512,19 +586,27 @@ impl Reducer {
         scene: &mut SceneState,
         agent_id: AgentId,
         reason: &str,
+        tool_use_id: Option<&str>,
         now: SystemTime,
     ) {
         if let Some(slot) = scene.agents.get_mut(&agent_id) {
-            // Remember the mid-flight tool so its later PostToolUse (same
-            // tool_use_id) can resolve this permission Wait.
-            if let ActivityState::Active {
+            if let Some(t) = tool_use_id {
+                // The wire NAMED the gated call (#951): push it, keeping any
+                // sibling gate a parallel approval already queued.
+                let gates = self.corr.gated_before_waiting.entry(agent_id).or_default();
+                if !gates.iter().any(|m| &**m == t) {
+                    gates.push(Arc::from(t));
+                }
+            } else if let ActivityState::Active {
                 tool_use_id: Some(tuid),
                 ..
             } = &slot.state
             {
+                // REPLACE, not push: an inferred member is a guess, and stale
+                // guesses would accrete with nothing to clear them.
                 self.corr
                     .gated_before_waiting
-                    .insert(agent_id, tuid.clone());
+                    .insert(agent_id, vec![tuid.clone()]);
             } else if !matches!(slot.state, ActivityState::Waiting { .. }) {
                 // A re-notified Waiting slot is the SAME gate: CC follows its
                 // tool-less PermissionRequest with an idle Notification.
@@ -583,9 +665,8 @@ impl Reducer {
         from: Transport,
         now: SystemTime,
     ) {
-        // JSONL must never synthesize — a transcript line can be a historical
-        // replay. No in-tree JSONL path emits Identity today; the guard IS the
-        // boundary, not dead code.
+        // No in-tree JSONL path emits Identity today; the guard IS the
+        // boundary, not dead code (replay hazard: see hook synthesis).
         if from != Transport::Hook {
             tracing::debug!(?agent_id, "ignoring Identity on a non-hook transport");
             return;
@@ -935,7 +1016,10 @@ impl Reducer {
     /// Hook transport only: with any Task in flight, hook ActivityStart/End for
     /// this AgentId is almost certainly subagent work misattributed to the
     /// parent. Drop it and defer to JSONL, which targets the subagent's own
-    /// AgentId. The Task's own PostToolUse is exempt — its tool_use_id matches.
+    /// AgentId. Two exemptions: the Task's own PostToolUse (its tool_use_id
+    /// matches), and a GATED member's Start/End — the parent's own approval
+    /// round (#951), which eating would strand in Waiting until the parent's
+    /// next own event or the stale sweep.
     fn suppress_subagent_leak(
         &mut self,
         scene: &mut SceneState,
@@ -945,13 +1029,18 @@ impl Reducer {
     ) -> bool {
         let tasks = self.corr.active_tasks.get(&id);
         let in_task = tasks.is_some_and(|s| !s.is_empty());
+        let is_gated = |tool_use_id: &Option<String>| {
+            tool_use_id
+                .as_deref()
+                .is_some_and(|t| self.corr.gate_matches(&id, t))
+        };
         let suppress = match event {
-            AgentEvent::ActivityStart { .. } => in_task,
+            AgentEvent::ActivityStart { tool_use_id, .. } => in_task && !is_gated(tool_use_id),
             AgentEvent::ActivityEnd { tool_use_id, .. } => {
                 let is_task_self_end = tool_use_id
                     .as_ref()
                     .is_some_and(|t| tasks.is_some_and(|s| s.contains(t)));
-                in_task && !is_task_self_end
+                in_task && !is_task_self_end && !is_gated(tool_use_id)
             }
             _ => false,
         };
@@ -960,11 +1049,10 @@ impl Reducer {
             // misattributed gate resolved — unless the tuid ∉ `active_tasks`.
             if let Some(slot) = scene.agents.get_mut(&id) {
                 if matches!(slot.state, ActivityState::Waiting { .. }) {
-                    let gate_is_own_tool = self
-                        .corr
-                        .gated_before_waiting
-                        .get(&id)
-                        .is_some_and(|g| !tasks.is_some_and(|s| s.contains(&**g)));
+                    let gate_is_own_tool =
+                        self.corr.gated_before_waiting.get(&id).is_some_and(|g| {
+                            g.iter().any(|m| !tasks.is_some_and(|s| s.contains(&**m)))
+                        });
                     if !gate_is_own_tool {
                         let task_tuid = self.corr.any_active_task(&id);
                         fsm::enter_delegating(slot, task_tuid, now);
@@ -1026,11 +1114,9 @@ impl Reducer {
                             .recent_task_drains
                             .insert((*agent_id, tuid.clone()), now);
                         // #152: the drain skips the main arm, so a gate on THIS
-                        // tuid goes stale. Clear ONLY ours — parallels survive.
-                        if self.corr.gated_before_waiting.get(agent_id).map(|g| &**g)
-                            == Some(tuid.as_str())
-                        {
-                            self.corr.gated_before_waiting.remove(agent_id);
+                        // tuid goes stale. Inline: `set` still borrows `corr`.
+                        if let Some(g) = self.corr.gated_before_waiting.get_mut(agent_id) {
+                            g.retain(|m| &**m != tuid.as_str());
                         }
                         if let Some(slot) = scene.agents.get_mut(agent_id) {
                             slot.last_event_at = now;
@@ -1170,6 +1256,7 @@ impl Reducer {
     fn remove_agent_correlation(&mut self, id: &AgentId) {
         self.corr.active_tasks.remove(id);
         self.corr.gated_before_waiting.remove(id);
+        self.corr.counted_calls.remove(id);
         self.pending_b1_cascades.remove(id);
     }
 

@@ -98,7 +98,7 @@ pub(super) enum ToolEventKind {
     End,
 }
 
-/// The seven reducer-private correlation maps. In/out criterion for a future
+/// The reducer-private correlation maps. In/out criterion for a future
 /// map: PASSIVE cross-event memory (consulted to interpret a later event)
 /// lives here; ARMED actions that mutate the scene on a schedule
 /// (`pending_b1_cascades` and its fire pass) stay on `Reducer`.
@@ -138,15 +138,40 @@ pub(super) struct Correlation {
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection.
     pub(super) recent_proof_of_life: HashMap<AgentId, SystemTime>,
-    /// `tool_use_id` that was Active immediately before an agent entered
-    /// `Waiting` (a CC permission `Notification` fires mid-tool). When THAT
-    /// tool's `ActivityEnd` arrives the permission has been resolved, so the
-    /// Waiting resolves instead of lingering until the agent's next tool; a
-    /// *parallel* tool ending carries a different id and cannot false-clear a
-    /// still-pending permission. Codex never populates this — its tool events
-    /// carry no `tool_use_id`.
-    pub(super) gated_before_waiting: HashMap<AgentId, Arc<str>>,
+    /// The tool calls an agent's `Waiting` is gated on. Singly populated by
+    /// inference — the `tool_use_id` that was Active immediately before the
+    /// Waiting (a CC permission `Notification` fires mid-tool) — or pushed
+    /// explicitly by a `Waiting` that NAMES its gated call (omp
+    /// `tool_approval_requested`, which can queue several, #951). When a
+    /// member's `ActivityEnd` arrives the permission has been resolved, so
+    /// the Waiting resolves instead of lingering until the agent's next tool;
+    /// a *parallel* tool ending carries a non-member id and cannot
+    /// false-clear a still-pending permission. Codex never populates this —
+    /// its tool events carry no `tool_use_id`.
+    pub(super) gated_before_waiting: HashMap<AgentId, Vec<Arc<str>>>,
+    /// Tool calls already counted into `tool_call_count`, so the SAME logical
+    /// call re-observed on the other transport counts once (#951). Not
+    /// [`HOOK_WINS_WINDOW`]'s job: omp's transcript writes the call BEFORE the
+    /// approval request goes out, so the two Starts are separated by HUMAN
+    /// approval latency and no dedup window can span them. The backstop TTL is
+    /// the Waiting ceiling because that bounds how long they can straddle; past
+    /// it the cost is one HUD re-count. Nested (not `(AgentId, String)`-keyed)
+    /// so the per-Start membership probe borrows `&str` without allocating and
+    /// a life's eviction is one `remove`; swept in [`Self::gc_slow`], never the
+    /// per-event [`Self::gc`] — with the longest TTL of the maps it is the one
+    /// whose retain does real per-event work (CodSpeed showed -55% on the hook
+    /// path).
+    pub(super) counted_calls: HashMap<AgentId, HashMap<String, SystemTime>>,
+    /// When [`Self::gc_slow`] last swept, so its cost is once per
+    /// [`COUNTED_SWEEP_INTERVAL`] no matter how often the caller runs — the
+    /// bench harness ticks per EVENT, and production ticks per frame.
+    counted_swept_at: Option<SystemTime>,
 }
+
+/// How often `counted_calls` is TTL-swept. Minutes of slack against an
+/// hour-scale ceiling cost nothing; sweeping on every tick re-created the
+/// per-event scan `gc_slow` exists to avoid.
+const COUNTED_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Freshness under a TTL, clock-regression-safe: `duration_since` returns
 /// `Err` when `ts` is in the future, which folds to NOT-fresh. The ONE
@@ -166,7 +191,7 @@ pub(super) fn elapsed_at_least(now: SystemTime, ts: SystemTime, ttl: Duration) -
 }
 
 /// [`elapsed_at_least`] with a STRICT `>`. The exit-grace GC's boundary rides
-/// this, so it stays distinct from the inclusive variant.
+/// this.
 pub(super) fn elapsed_past(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
     now.duration_since(ts).is_ok_and(|d| d > ttl)
 }
@@ -231,6 +256,39 @@ impl Correlation {
             None => true,
             Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
         });
+    }
+
+    /// The sweeps too costly for the per-event [`Self::gc`]: `counted_calls`
+    /// keeps entries for up to the Waiting ceiling, so its retain scans real
+    /// state. Self-amortized to [`COUNTED_SWEEP_INTERVAL`] — callers may run
+    /// this as often as they like.
+    pub(super) fn gc_slow(&mut self, now: SystemTime) {
+        if self
+            .counted_swept_at
+            .is_some_and(|at| is_fresh(now, at, COUNTED_SWEEP_INTERVAL))
+        {
+            return;
+        }
+        self.counted_swept_at = Some(now);
+        self.counted_calls.retain(|_, calls| {
+            calls.retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
+            !calls.is_empty()
+        });
+    }
+
+    /// Whether `tuid` is a live gate member for `id` — THE membership
+    /// predicate, so the member-vs-whole-set decisions can't drift per site.
+    pub(super) fn gate_matches(&self, id: &AgentId, tuid: &str) -> bool {
+        self.gated_before_waiting
+            .get(id)
+            .is_some_and(|g| g.iter().any(|m| &**m == tuid))
+    }
+
+    /// Remove ONE gate member; a parallel approval keeps its own.
+    pub(super) fn remove_gate_member(&mut self, id: &AgentId, tuid: &str) {
+        if let Some(g) = self.gated_before_waiting.get_mut(id) {
+            g.retain(|m| &**m != tuid);
+        }
     }
 
     /// Whether `id` holds a FRESH probe vouch. The single freshness predicate
@@ -401,6 +459,22 @@ mod tests {
         assert!(!corr.child_ledger.contains_key(&old));
         assert!(corr.child_ledger.contains_key(&young));
         assert!(corr.child_ledger.contains_key(&alive));
+
+        let mut corr = Correlation::default();
+        corr.counted_calls
+            .entry(old)
+            .or_default()
+            .insert("t1".into(), t0());
+        corr.counted_calls
+            .entry(young)
+            .or_default()
+            .insert("t2".into(), t0() + step);
+        corr.gc_slow(t0() + crate::state::reducer::STALE_WAITING_TIMEOUT);
+        assert!(
+            !corr.counted_calls.contains_key(&old),
+            "the swept life's emptied submap is dropped with it"
+        );
+        assert!(corr.counted_calls[&young].contains_key("t2"));
     }
 
     #[test]

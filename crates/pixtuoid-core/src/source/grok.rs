@@ -205,6 +205,7 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                         AgentEvent::Waiting {
                             agent_id,
                             reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
+                            tool_use_id: None,
                         },
                     ])
                 }
@@ -1403,7 +1404,6 @@ mod tests {
             matches!(&evs[..], [AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
                 if m == "grok-4-code" && e == "high")
         );
-        // Effort is optional on the wire.
         assert!(decode_line(xai_line(json!({"sessionUpdate": "model_changed"}))).is_empty());
     }
 

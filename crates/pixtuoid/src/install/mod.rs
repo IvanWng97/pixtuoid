@@ -11,6 +11,7 @@ pub(crate) mod kimi;
 pub(crate) mod io;
 pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod merge;
+pub(crate) mod omp;
 pub(crate) mod openclaw;
 pub(crate) mod opencode;
 pub(crate) mod reasonix;
@@ -126,7 +127,8 @@ pub(crate) fn verify_target(
 /// the plugin FILES the gateway loads (the OpenClaw plugin DIR) are missing. INVARIANT
 /// (#387): a NEW code-shipping path in `install_target` MUST gain a check here, UNLESS the
 /// artifact IS that target's own config — with no `extra_artifacts` to ride this loop it
-/// belongs in that target's `verify_schema` instead (opencode's plugin is the one shape).
+/// belongs in that target's `verify_schema` instead (the opencode plugin and the omp
+/// bridge extension are that shape).
 fn verify_extra_artifacts(t: &Target, issues: &mut Vec<String>, notes: &mut Vec<String>) {
     let Some(make) = t.extra_artifacts else {
         return;

@@ -65,6 +65,7 @@ fn scripted_timeline_drives_scene_through_states() {
         vec![AgentEvent::Waiting {
             agent_id: id,
             reason: "permission?".into(),
+            tool_use_id: None,
         }],
         50,
         &mut reducer,
@@ -90,8 +91,8 @@ fn scripted_timeline_drives_scene_through_states() {
         snaps[1].agents.get(&id).unwrap().state,
         ActivityState::Active { .. }
     ));
-    // ActivityEnd only arms `pending_idle_at`: the slot stays Active for the
-    // grace window so rapid tool chains read as continuous work; `tick` realizes Idle.
+    // ActivityEnd only arms `pending_idle_at` — the slot stays Active for
+    // `ACTIVE_GRACE_WINDOW`; `tick` realizes Idle.
     let slot2 = snaps[2].agents.get(&id).unwrap();
     assert!(matches!(slot2.state, ActivityState::Active { .. }));
     assert!(slot2.pending_idle_at.is_some());

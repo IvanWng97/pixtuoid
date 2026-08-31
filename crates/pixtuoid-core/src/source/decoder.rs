@@ -461,6 +461,7 @@ fn shared_hook_arms(
                 AgentEvent::Waiting {
                     agent_id,
                     reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
+                    tool_use_id: None,
                 },
             ])
         }
@@ -470,6 +471,7 @@ fn shared_hook_arms(
             AgentEvent::Waiting {
                 agent_id,
                 reason: "permission".into(),
+                tool_use_id: None,
             },
         ]),
         // The JSONL rollout stays the system of record for Codex tool activity.

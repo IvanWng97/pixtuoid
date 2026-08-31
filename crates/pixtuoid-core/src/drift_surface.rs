@@ -79,6 +79,10 @@ fn surface() -> Value {
         json!(crate::source::omp::DECODED_TITLE_FIELDS),
     );
     decoded.insert(
+        "omp.hook_events",
+        json!(crate::source::omp::DECODED_HOOK_EVENTS),
+    );
+    decoded.insert(
         "copilot.kinds",
         json!(crate::source::copilot::DECODED_KINDS),
     );
@@ -99,10 +103,19 @@ fn surface() -> Value {
         json!(crate::source::opencode::DECODED_EVENTS),
     );
 
+    // SHIPPED, not decoded: the value rides the file the installer writes; why
+    // this one is watched is on `omp::EXTENSIONS_SUBDIR`.
+    let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
+    shipped.insert(
+        "omp.extension_subdir",
+        json!([crate::source::omp::EXTENSIONS_SUBDIR]),
+    );
+
     // Through a BTreeMap, never a `json!` object literal — see
     // `every_emitted_object_has_sorted_keys` for why that distinction is a gate.
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("decoded", json!(decoded));
+    root.insert("shipped", json!(shipped));
     json!(root)
 }
 
@@ -291,6 +304,7 @@ mod tests {
             ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
             ("opencode.rs", "match status {", "DECODED_PART_STATUSES"),
+            ("omp.rs", "match ty {", "DECODED_HOOK_EVENTS"),
         ];
         for (file, dispatch, export) in rows {
             assert_arms_match_export(file, dispatch, export);

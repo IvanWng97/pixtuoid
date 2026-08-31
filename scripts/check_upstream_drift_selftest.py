@@ -103,6 +103,15 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
     d.OMP_AI_TYPES_URL: 'export type Block = { type: "toolCall" };\n',
+    d.OMP_EXT_SHARED_EVENTS_URL:
+        'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
+    d.OMP_EXT_TYPES_URL:
+        'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
+    d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
+    d.OMP_EXT_DISCOVERY_URL:
+        'export async function discoverExtensionModulePaths() {}\n',
+    d.OMP_DIRS_URL:
+        'export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n',
     d.OMP_ASK_URL: 'export class AskTool { name = "ask"; }\n',
     d.CODEX_ROLLOUT_ITEM_URL: "pub enum RolloutItem {\n    SessionMeta,\n}\n",
     d.CODEX_MODELS_URL: "pub enum ResponseItem {\n    FunctionCall,\n}\n",
@@ -884,6 +893,40 @@ def test_the_surviving_upstream_parsers_extract_from_a_snippet() -> None:
         check(not got, f"copilot {name}: an unrecognised schema must not parse to a set, got {got}")
 
 
+def test_omp_approved_optionality_is_watched() -> None:
+    """required->optional on `approved` must fire — the presence matcher alone
+    accepts `approved?:` and the decoder reads absent-as-denied."""
+    shared = (
+        'export interface SessionSwitchEvent {\n'
+        '\tpreviousSessionFile: string | undefined;\n}\n'
+    )
+    sm = "getSessionFile(): x {}\ngetSessionId(): x {}\n"
+
+    def types(approved: str) -> str:
+        return (
+            "export interface ToolApprovalRequestedEvent {\n"
+            "\ttoolCallId: string;\n\ttoolName: string;\n\treason: string;\n}\n"
+            "export interface ToolApprovalResolvedEvent {\n"
+            f"\ttoolCallId: string;\n\ttoolName: string;\n\treason: string;\n\t{approved}\n"
+            "}\n"
+            "export interface ExtensionContext {\n\tcwd: string;\n}\n"
+        )
+
+    fields = {
+        "approved", "cwd", "getSessionFile", "getSessionId",
+        "previousSessionFile", "reason", "toolCallId", "toolName",
+    }
+    r = d.Report()
+    d.check_omp_extension_reads(shared, types("approved: boolean;"), sm, fields, r)
+    check(not r.breaking, f"required `approved` is clean, got {r.breaking}")
+    r = d.Report()
+    d.check_omp_extension_reads(shared, types("approved?: boolean;"), sm, fields, r)
+    check(
+        any("OPTIONAL" in x for x in r.breaking),
+        f"`approved?:` must fire the optionality arm, got {r.breaking}",
+    )
+
+
 def test_omp_title_field_watch_requires_both_carriers() -> None:
     """A same-named SessionHeader field must not mask either carrier's rename."""
     def document(
@@ -1044,6 +1087,59 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + "}\n"
             )
 
+        def omp_extension_docs(events: list[str], reads: list[str]) -> dict[str, str]:
+            """The three extension-API docs, shaped like upstream: constant
+            interface names (the anchors) whose `type:`/field lines exist only
+            for the names still in the mutated sets — exactly an upstream
+            rename's silhouette."""
+            lifecycle = {
+                "session_start": "SessionStartEvent",
+                "session_switch": "SessionSwitchEvent",
+                "session_branch": "SessionBranchEvent",
+                "session_shutdown": "SessionShutdownEvent",
+            }
+            shared = ""
+            for name, iface in lifecycle.items():
+                tag = f'\ttype: "{name}";\n' if name in events else ""
+                prev = (
+                    "\tpreviousSessionFile: string | undefined;\n"
+                    if iface == "SessionSwitchEvent" and "previousSessionFile" in reads
+                    else ""
+                )
+                shared += f"export interface {iface} {{\n{tag}{prev}}}\n"
+            approval_fields = {
+                "toolCallId": "string",
+                "toolName": "string",
+                "reason": "string",
+                "approved": "boolean",
+            }
+            ext = ""
+            for name, iface in (
+                ("tool_approval_requested", "ToolApprovalRequestedEvent"),
+                ("tool_approval_resolved", "ToolApprovalResolvedEvent"),
+            ):
+                tag = f'\ttype: "{name}";\n' if name in events else ""
+                body = "".join(
+                    f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
+                )
+                ext += f"export interface {iface} {{\n{tag}{body}}}\n"
+            cwd = '\tcwd: string;\n' if "cwd" in reads else ""
+            ext += (
+                "export interface ExtensionContext {\n"
+                + cwd
+                + "\tsessionManager: ReadonlySessionManager;\n}\n"
+            )
+            sm = "// ReadonlySessionManager picks getSessionFile / getSessionId\n" + "".join(
+                f"\t{g}(): string {{\n\t}}\n"
+                for g in ("getSessionFile", "getSessionId")
+                if g in reads
+            )
+            return {
+                d.OMP_EXT_SHARED_EVENTS_URL: shared,
+                d.OMP_EXT_TYPES_URL: ext,
+                d.OMP_SESSION_MANAGER_URL: sm,
+            }
+
         # Two fields sharing one URL each render the OTHER's set in full, so a case
         # proves its own arm rather than riding its neighbour's blind.
         cases = [
@@ -1123,6 +1219,20 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("omp_title_fields", str, lambda ns: {
                 d.OMP_SESSION_ENTRIES_URL:
                     omp_session_entries(full["omp"], ns)}),
+            ("omp_hook_events", str, lambda ns: omp_extension_docs(
+                ns, full["omp_extension_reads"])),
+            ("omp_extension_reads", str, lambda ns: omp_extension_docs(
+                full["omp_hook_events"], ns)),
+            ("omp_extension_subdir", str, lambda ns: {
+                d.OMP_EXT_DISCOVERY_URL:
+                    "export async function discoverExtensionModulePaths() {}\n"
+                    + "".join(
+                        f'discoverExtensionModulePaths(ctx, path.join(dir, "{n}"))\n'
+                        for n in ns
+                    ),
+                d.OMP_DIRS_URL:
+                    "export function getAgentDir(): string {\n"
+                    "\treturn dirs.agentDir;\n}\n"}),
             ("cursor", str, lambda ns: {
                 d.CURSOR_HOOKS_URL: "### Hook events\n\n" + "".join(f"#### {n}\n\n" for n in ns)}),
             ("kimi", str, lambda ns: {

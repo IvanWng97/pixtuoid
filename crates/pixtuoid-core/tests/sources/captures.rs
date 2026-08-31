@@ -110,13 +110,22 @@ pub(crate) fn fixtures_root() -> PathBuf {
 
 /// The registered source a capture dir belongs to, from the LAYOUT alone.
 /// Three shapes exist: `fixtures/<source>/<scenario>/`, `<module>/fixtures/`,
-/// and `<module>/fixtures/<sub>/`.
+/// and `<module>/fixtures/<sub>/` — where the third's owner is the MODULE
+/// when it is itself a registered source (`omp/fixtures/<scenario>/`, a
+/// source-owned multi-scenario tree), else the SUB (`delegation/fixtures/omp/`,
+/// a cross-source rule family keyed per source).
 fn source_of(dir: &Path) -> Option<String> {
     let rel = dir.strip_prefix(sources_root()).ok()?;
     let parts: Vec<&str> = rel.iter().filter_map(|s| s.to_str()).collect();
     let raw = match parts.as_slice() {
         ["fixtures", source, _scenario] => *source,
-        [_module, "fixtures", sub] => *sub,
+        [module, "fixtures", sub] => {
+            if registry::descriptor_for(module).is_some() {
+                *module
+            } else {
+                *sub
+            }
+        }
         [module, "fixtures"] => *module,
         _ => return None,
     };
@@ -421,16 +430,26 @@ fn a_recorded_capture_that_was_edited_says_so() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
     )
     .expect(".gitleaks-identity.toml");
-    let names = allow
+    // Both the path rule and the dash-encoded rule carry the placeholder
+    // alternation; they must AGREE, or whichever this positional read lands on
+    // silently narrows the sentinel set.
+    let mut alternations: Vec<&str> = allow
         .split("(?:dev|")
-        .nth(1)
-        .and_then(|s| s.split(')').next())
-        .expect(
-            "the placeholder alternation moved — re-derive this from the rule. Only \
-             the PLACEHOLDER line: the sibling line names infrastructure accounts a \
-             real UNEDITED capture can carry, and reading both made an honest note \
-             look like a silent one",
-        );
+        .skip(1)
+        .filter_map(|s| s.split(')').next())
+        .collect();
+    alternations.dedup();
+    assert_eq!(
+        alternations.len(),
+        1,
+        "the placeholder alternations diverged across rules — re-align them: {alternations:?}",
+    );
+    let names = *alternations.first().expect(
+        "the placeholder alternation moved — re-derive this from the rule. Only \
+         the PLACEHOLDER lines: the sibling lines name infrastructure accounts a \
+         real UNEDITED capture can carry, and reading those made an honest note \
+         look like a silent one",
+    );
     let mut sentinels: Vec<String> = Vec::new();
     for root in ["/Users/", "/home/"] {
         for who in std::iter::once("dev").chain(names.split('|')) {
@@ -540,7 +559,7 @@ fn banner_version_matches_doctors_documented_cases() {
         ("Hermes Agent v0.20.1 (2026.8.13)", Some("0.20.1")),
         ("grok 0.2.102 (ab5ebf69acec) [stable]", Some("0.2.102")),
         ("2026.08.11-e8db854", Some("2026.08.11")),
-        ("omp/17.3.4", Some("17.3.4")),
+        ("omp/18.0.11", Some("18.0.11")),
         ("no version here", None),
         // The shape that caught the mirror drifting: doctor keeps a trailing-dot
         // run and filters empty parts after, so this is a version to both.
@@ -971,6 +990,7 @@ const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
     "codewhale",
     "grok",
     "hermes",
+    "omp",
     "opencode",
     "reasonix",
     // LIVE (`custom: None`), just unexercised: a hook spec with no install target,

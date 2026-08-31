@@ -1,0 +1,8 @@
+{
+  "captured": "2026-08-31",
+  "cli": "omp",
+  "command": "omp -p {prompt}",
+  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim",
+  "origin": "recorded",
+  "version": "omp/18.0.11"
+}
