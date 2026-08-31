@@ -136,7 +136,8 @@ hook_hands_just() {
     mkdir -p "$s/bin" "$s/repo"
     # Cleared for the fixture's OWN init: this suite exports GIT_DIR at the top,
     # so a bare `git init` here re-inits THAT repo, leaves $s/repo without a
-    # .git, and the hook then dies before `exec` — passing the check vacuously.
+    # .git — the hook then dies before `exec`, which the died-before-exec check
+    # below turns into a red rather than the silent pass it used to be.
     # shellcheck disable=SC2046  # the var list must word-split
     (unset $(git rev-parse --local-env-vars) && git init -q "$s/repo")
     # Reports EVERY local-env-var still set, not just GIT_DIR: a scrub narrowed
@@ -147,12 +148,23 @@ hook_hands_just() {
     chmod +x "$s/bin/just"
     # SKIP_PREFLIGHT is cleared so an operator's exported bypass cannot send the
     # hook down its early exit during the test — that path never reaches `exec`.
-    (cd "$s/repo" && env PATH="$s/bin:$PATH" SKIP_PREFLIGHT= GIT_DIR="$s/repo/.git" \
+    (cd "$s/repo" && env -u SKIP_PREFLIGHT PATH="$s/bin:$PATH" GIT_DIR="$s/repo/.git" \
         GIT_INDEX_FILE="$s/repo/.git/index" GIT_WORK_TREE="$s/repo" \
         bash "$hook" origin y </dev/null) >/dev/null 2>&1
-    # A missing `seen` means the hook died BEFORE `exec` — emitted as a leak so
-    # the clean check cannot pass vacuously on a hook that never ran its child.
-    cat "$s/seen" 2>/dev/null || printf 'hook-died-before-exec'
+    # Two channels: stdout is the leak list; the exit status (cat's own) says
+    # whether the hook reached `exec` at all. Folding "died before exec" into
+    # stdout as a sentinel would satisfy the control's `-n` and flip its
+    # diagnosis when the harness itself is broken.
+    cat "$s/seen" 2>/dev/null
+}
+
+# The hook reached its `exec` AND handed the child no repo-relocating env.
+# Split from a bare `-z` because a `seen` never written reads identically to
+# one written empty — the died-before-exec vacuous pass.
+hook_scrubs_clean() {
+    local out
+    out=$(hook_hands_just "$1") || return 1
+    [ -z "$out" ]
 }
 
 # Written out, never derived from a real hook: a control cut with `grep -v`
@@ -162,11 +174,20 @@ printf '#!/usr/bin/env bash\nexec just preflight\n' >"$root/unscrubbed-hook"
 check "the harness actually poisons a hook's env (control fires)" \
     test -n "$(hook_hands_just "$root/unscrubbed-hook")"
 
+# The died-before-exec detector needs its own control: without one, an edit
+# that breaks the exit-status channel turns that class back into a silent pass.
+printf '#!/usr/bin/env bash\nexit 7\n' >"$root/dies-before-exec-hook"
+died_hook_reads_dirty() {
+    ! hook_scrubs_clean "$root/dies-before-exec-hook"
+}
+check "a hook that dies before exec reads as dirty, never clean" \
+    died_hook_reads_dirty
+
 for hook in "$(e2e_repo_root)"/.githooks/*; do
     name=$(basename "$hook")
     case " $hooks_exempt_from_scrub " in *" $name "*) continue ;; esac
-    check "$name leaks no repo-relocating git env to preflight" \
-        test -z "$(hook_hands_just "$hook")"
+    check "$name reaches its exec with no repo-relocating git env" \
+        hook_scrubs_clean "$hook"
 done
 
 if [ "$fails" -eq 0 ]; then
