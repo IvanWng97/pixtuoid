@@ -162,7 +162,16 @@ pub(super) struct Correlation {
     /// whose retain does real per-event work (CodSpeed showed -55% on the hook
     /// path).
     pub(super) counted_calls: HashMap<AgentId, HashMap<String, SystemTime>>,
+    /// When [`Self::gc_slow`] last swept, so its cost is once per
+    /// [`COUNTED_SWEEP_INTERVAL`] no matter how often the caller runs — the
+    /// bench harness ticks per EVENT, and production ticks per frame.
+    counted_swept_at: Option<SystemTime>,
 }
+
+/// How often `counted_calls` is TTL-swept. Minutes of slack against an
+/// hour-scale ceiling cost nothing; sweeping on every tick re-created the
+/// per-event scan `gc_slow` exists to avoid.
+const COUNTED_SWEEP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Freshness under a TTL, clock-regression-safe: `duration_since` returns
 /// `Err` when `ts` is in the future, which folds to NOT-fresh. The ONE
@@ -251,8 +260,16 @@ impl Correlation {
 
     /// The sweeps too costly for the per-event [`Self::gc`]: `counted_calls`
     /// keeps entries for up to the Waiting ceiling, so its retain scans real
-    /// state — tick cadence loses nothing against an hour-scale TTL.
+    /// state. Self-amortized to [`COUNTED_SWEEP_INTERVAL`] — callers may run
+    /// this as often as they like.
     pub(super) fn gc_slow(&mut self, now: SystemTime) {
+        if self
+            .counted_swept_at
+            .is_some_and(|at| is_fresh(now, at, COUNTED_SWEEP_INTERVAL))
+        {
+            return;
+        }
+        self.counted_swept_at = Some(now);
         self.counted_calls.retain(|_, calls| {
             calls.retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
             !calls.is_empty()
