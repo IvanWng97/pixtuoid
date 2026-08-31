@@ -8,6 +8,16 @@
 # Bypass with `--no-verify` or `SKIP_PREFLIGHT=1 git push`.
 set -euo pipefail
 
+# git exports GIT_DIR into every child of a hook, and from a LINKED worktree it
+# outranks `git -C <dir>` — so anything preflight runs that builds a throwaway
+# repo writes into THIS one instead, exit 0 and silent (#893, twice; then #958's
+# own selftest). Clearing it HERE means no downstream script has to remember.
+# githooks(5) prescribes this idiom for git commands aimed at a foreign
+# repository; the working directory git sets for a hook still resolves the
+# worktree, so nothing below loses its bearings.
+# shellcheck disable=SC2046  # the var list must word-split
+unset $(git rev-parse --local-env-vars)
+
 if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
     printf '\033[33m[pre-push] SKIP_PREFLIGHT=1 — skipping preflight\033[0m\n' >&2
     exit 0
