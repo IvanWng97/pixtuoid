@@ -747,7 +747,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 
 /// Oh My Pi (`omp`, omp.sh). HYBRID: the durable authority is the transcript
 /// at `<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`; the bridge
-/// extension (`install/omp_extension.ts`, auto-discovered from the agent
+/// extension (`pixtuoid/src/install/omp_extension.ts`, auto-discovered from the agent
 /// dir's `extensions/`) forwards what the transcript can never carry —
 /// pre-persist presence, empty-session shutdown, and the approval wait
 /// (#951). Both transports key on the sessionFile stem chain
@@ -784,17 +784,23 @@ const OMP: SourceDescriptor = SourceDescriptor {
             has_exit_signal: true,
             // The header `SessionStart` decodes once per transcript life. A
             // `--resume` fires the bridge's `session_start` on the SAME id
-            // (probe-verified, omp 18.0.11), so an ended session CAN walk
-            // back in — through the SessionStart arm's ordinary parentless
-            // re-registration, not this prompt-resurrect flag.
+            // (probe-verified at this row's `verified_version`), so an ended
+            // session CAN walk back in — through the SessionStart arm's
+            // ordinary parentless re-registration, not this prompt-resurrect
+            // flag.
             resurrects_on_prompt: false,
             // The `task` dispatch emits a toolCall/toolResult pair on the parent
             // AND the child persists its own parent-linked transcript.
             delegations_are_hook_silent: false,
         },
         // omp holds a lifetime append fd on its session file, so the same
-        // `live_omp_session_ids` snapshot that vouches liveness also names the pid
-        // (`omp_pid_for_session`). There is no shim to stamp one.
+        // `live_omp_session_ids` snapshot that vouches liveness also names the
+        // pid (`omp_pid_for_session`). The bridge extension DOES stamp `_pid`,
+        // and this channel discards it (recycle-guard rationale, #527-class);
+        // the stamp ships anyway so the wire shape is already right if a
+        // plugin-stamp channel ever lands. Known boundary: a bridge-only slot
+        // (pre-persist, or an empty session) has no transcript for the probe,
+        // so a focus click on it is a silent no-op.
         focus: FocusChannel::TranscriptProbe,
     },
 };

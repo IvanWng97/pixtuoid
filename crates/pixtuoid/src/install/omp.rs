@@ -16,7 +16,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 
 use crate::install::target::MergeOutcome;
 
@@ -31,13 +31,26 @@ pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
 /// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
 const REMOVED_STUB: &str = "// pixtuoid omp extension removed by disconnecting omp in pixtuoid's Sources panel (press s).\nexport default function () {}\n";
 
-/// The extensions root is the ACTIVE agent dir (profile-, override-, and
-/// `.env`-aware; deliberately NOT XDG-flattened) — core's resolver owns every
-/// axis, a second copy here would be the #880 drift class.
+/// The extensions root is core's [`omp_extensions_dir`] (profile-, override-,
+/// and `.env`-aware; deliberately NOT XDG-flattened) — a second resolver copy
+/// here would be the #880 drift class. A RELATIVE `PI_CODING_AGENT_DIR` is
+/// refused rather than resolved: upstream resolves it against OMP's own cwd,
+/// which pixtuoid cannot know, so any absolutization here would be a
+/// confidently wrong write. Accepted residual: omp discovers extensions
+/// through a gitignore-filtered glob, so a dotfiles-repo ignore rule covering
+/// this path can suppress loading while every check here reads green.
+///
+/// [`omp_extensions_dir`]: pixtuoid_core::source::omp::omp_extensions_dir
 pub(crate) fn default_config_path() -> Result<PathBuf> {
-    Ok(pixtuoid_core::source::omp::omp_agent_dir()
-        .join("extensions")
-        .join("pixtuoid.ts"))
+    let dir = pixtuoid_core::source::omp::omp_extensions_dir();
+    if !dir.is_absolute() {
+        bail!(
+            "omp's agent dir resolved to the relative path {} — PI_CODING_AGENT_DIR \
+             must be an absolute path for pixtuoid to install the bridge",
+            dir.display()
+        );
+    }
+    Ok(dir.join("pixtuoid.ts"))
 }
 
 /// Presence probe for auto-detect: probe omp's OWN agent dir, NOT our
@@ -78,8 +91,13 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The managed extension is a CODE artifact, so there is no per-event config
-/// to check — only that the sentinel is present, the shim-path placeholder was
-/// substituted, and the baked `HOOK_PATH` is readable for the on-disk stat.
+/// to check: the sentinel, the substituted shim-path placeholder, the
+/// readable baked `HOOK_PATH` for the on-disk stat, and a re-render match.
+/// Nothing re-installs on a pixtuoid upgrade (the opencode precedent), so
+/// without that last one an upgrader keeps their old FORWARD set forever and
+/// doctor says fine — `omp_extension_forward_set_is_pinned` only makes a
+/// change deliberate on the AUTHORING side, leaving the installed base
+/// silent.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     if !content.contains(SENTINEL) {
@@ -95,11 +113,6 @@ pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaPars
     let Some(p) = crate::install::verify::baked_hook_path(content) else {
         return SchemaParse::broken("could not read HOOK_PATH from the omp extension");
     };
-    // Nothing re-installs on a pixtuoid upgrade, so without this an upgrader
-    // keeps their old FORWARD set forever and doctor says fine (the opencode
-    // precedent; `omp_extension_forward_set_is_pinned` makes a change
-    // deliberate on the AUTHORING side while leaving the installed base
-    // silent).
     let stale = render_extension(&p.to_string_lossy())
         .map(|want| want.trim() != content.trim())
         .unwrap_or(false);
@@ -253,9 +266,8 @@ mod tests {
             "every registration must go through the FORWARD loop, so the pin \
              on FORWARD covers the whole registered set"
         );
-        // The ONE awaited thing is the 200ms-watchdogged shim: Bun.spawn
-        // has no detached mode, and without the await the exiting process
-        // wins the race and drops the empty-session `session_shutdown`.
+        // The one awaited thing is the shim, bounded by its own
+        // `transport::WRITE_TIMEOUT_MS` watchdog.
         assert_eq!(
             EXTENSION_TEMPLATE.matches("await proc.exited").count(),
             1,
@@ -391,6 +403,14 @@ mod tests {
         assert!(!merge_uninstall(foreign).unwrap().changed);
         assert!(!merge_uninstall(REMOVED_STUB).unwrap().changed);
         assert!(!merge_uninstall("").unwrap().changed);
+    }
+
+    /// The one string deciding whether omp ever LOADS what install writes;
+    /// its upstream twin rides the drift watch (`omp.extension_subdir`).
+    #[test]
+    fn default_path_is_the_extension_under_the_agent_dirs_extensions() {
+        let p = default_config_path().expect("resolvable in a dev environment");
+        assert!(p.ends_with("extensions/pixtuoid.ts"), "got {}", p.display());
     }
 
     #[test]

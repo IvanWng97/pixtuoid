@@ -19,8 +19,8 @@ name = "pixtuoid"
 path = "src/main.rs"
 
 [dependencies]
-pixtuoid-core  = { path = "../pixtuoid-core", version = "0.17.0" }
-pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.17.0" }
+pixtuoid-core  = { path = "../pixtuoid-core", version = "0.18.0" }
+pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.18.0" }
 # AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces. Its
 # per-pixel coverage callback (`OutlinedGlyph::draw`) suits our callback-based
 # `aa_text::draw_text_at` better than fontdue's raw-bitmap API. Binary-only: the
@@ -127,7 +127,7 @@ windows-sys = { version = "0.61", features = [
 [dev-dependencies]
 # `tests/wire_to_pixels.rs` drives real fixture bytes through the shared
 # `pixtuoid_core::harness` pipeline, which is behind core's dev-only feature.
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.17.0", features = ["harness"] }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.18.0", features = ["harness"] }
 tempfile = "3"
 # End-to-end CLI golden for `sources --json`, the Raycast contract (tests/cli_json.rs).
 # Goldens update with SNAPSHOTS=overwrite.

@@ -121,5 +121,10 @@
       "completed",
       "error"
     ]
+  },
+  "shipped": {
+    "omp.extension_subdir": [
+      "extensions"
+    ]
   }
 }

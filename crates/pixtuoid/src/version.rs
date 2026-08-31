@@ -72,6 +72,11 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         // anchoring on a marker is whitespace-independent, where matching the
         // `match` brace would silently break if the indentation ever shifted.
         // [bump-inject-here]
+        "0.18.0" => Some(&[
+            "Oh My Pi can now connect — a tiny bridge extension makes its approval prompts show as real waits, brand-new sessions walk in before their first reply, and an abandoned empty session leaves promptly instead of idling for half an hour",
+            "Approvals read true — the wait names exactly the tool call it gates, an approval returns the desk to work, a denial clears it, and parallel prompts each keep their own gate",
+            "One call, one count — the same tool call seen by both a hook and the transcript no longer double-increments the desk tally, however far apart the two land",
+        ]),
         "0.17.0" => Some(&[
             "`pixtuoid doctor` is one report — sources, install health, CLI versions and decode drift, categorized and colorized, each row carrying the thing to run next",
             "The office reads better — desks face each other across the pods, lamps take over after dark, and a plain 80x24 terminal lays out a real office again instead of refusing",
@@ -203,8 +208,8 @@ mod tests {
     /// the twin of the `[bump-inject-here]` match-arm injection.
     const SHIPPED_VERSIONS: &[&str] = &[
         // [bump-version-list-here]
-        "0.17.0", "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0", "0.10.0",
-        "0.9.0", "0.8.0", "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
+        "0.18.0", "0.17.0", "0.16.0", "0.15.0", "0.14.0", "0.13.0", "0.12.0", "0.11.1", "0.11.0",
+        "0.10.0", "0.9.0", "0.8.0", "0.7.0", "0.6.1", "0.6.0", "0.5.0", "0.4.1",
     ];
 
     #[test]

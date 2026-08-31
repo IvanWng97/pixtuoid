@@ -110,6 +110,22 @@ OMP_SESSION_MANAGER_URL = (
     "packages/coding-agent/src/session/session-manager.ts"
 )
 
+# The discovery seam the installer writes INTO: `builtin.ts` joins the
+# extensions subdir onto `getAgentDir()`, and `getAgentDir()` returns the
+# resolver's agent dir un-redirected. There is no second detector for either
+# fact — install writes the file, `verify_schema` reads our own bytes back,
+# and a file omp silently skips leaves no decode breadcrumb — so this watch
+# is the only thing standing between an upstream move and a bridge that
+# installs cleanly and never loads.
+OMP_EXT_DISCOVERY_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/coding-agent/src/discovery/builtin.ts"
+)
+OMP_DIRS_URL = (
+    "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
+    "packages/utils/src/dirs.ts"
+)
+
 # The interface bodies carrying the approval fields the extension forwards.
 OMP_APPROVAL_EVENT_CARRIERS = ("ToolApprovalRequestedEvent", "ToolApprovalResolvedEvent")
 
@@ -291,6 +307,10 @@ ANCHORS: dict[str, Anchor] = {
     OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
     OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
     OMP_SESSION_MANAGER_URL: Anchor(r"getSessionFile", "`getSessionFile`"),
+    OMP_EXT_DISCOVERY_URL: Anchor(
+        r"discoverExtensionModulePaths", "`discoverExtensionModulePaths`"
+    ),
+    OMP_DIRS_URL: Anchor(r"export function getAgentDir", "`getAgentDir`"),
     CC_HOOKS_URL: Anchor(r"(?m)^# Hooks reference", "the hooks-reference page"),
     CC_TOOLS_URL: Anchor(r"(?m)^# Tools reference", "the tools-reference page"),
     CURSOR_HOOKS_URL: Anchor(r"(?m)^#{2,4} Hook events", "the hook-events section"),
@@ -693,6 +713,7 @@ class OurNames:
     omp_title_fields: set[str] | None = None
     omp_hook_events: set[str] | None = None
     omp_extension_reads: set[str] | None = None
+    omp_extension_subdir: set[str] | None = None
     codex_event_msg: set[str] | None = None
     codex_response_item: set[str] | None = None
     codex_outers: set[str] | None = None
@@ -762,6 +783,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("omp_title_fields", CORE_LIB_FRAGMENT, "decoded", "omp.title_fields"),
     ("omp_hook_events", CORE_LIB_FRAGMENT, "decoded", "omp.hook_events"),
     ("omp_extension_reads", CORE_BIN_FRAGMENT, "shipped", "omp.extension_reads"),
+    ("omp_extension_subdir", CORE_LIB_FRAGMENT, "shipped", "omp.extension_subdir"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
     ("codex_response_item", CORE_LIB_FRAGMENT, "decoded", "codex.response_item"),
     ("codex_outers", CORE_LIB_FRAGMENT, "decoded", "codex.rollout_outers"),
@@ -974,6 +996,17 @@ def check_omp_extension_reads(
                 rf"(?m)^\s*(?:readonly\s+)?{re.escape(field)}\??\s*:", body
             )
             is not None
+        )
+
+    # `approved` is the one field whose OPTIONALITY carries semantics: the
+    # decoder reads absent-as-denied, safe only while upstream declares it
+    # required. The presence matcher's `\??` cannot see required->optional.
+    if "approved" in fields and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies):
+        report.add_breaking(
+            "omp's `approved` became OPTIONAL upstream — the decoder reads an "
+            "absent value as a DENIAL, so every approval would drop the sprite "
+            "to idle mid-run with no breadcrumb. Decide an explicit missing-"
+            "field policy before trusting this event again."
         )
 
     for field in sorted(fields):
@@ -1511,6 +1544,29 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     check_omp_extension_reads(
                         shared, ext_types, sm, ours.omp_extension_reads, report
                     )
+
+    if ours.omp_extension_subdir is not None:
+        disco = fetch_anchored(OMP_EXT_DISCOVERY_URL, "omp extension discovery", report)
+        if disco is not None:
+            for sub in sorted(ours.omp_extension_subdir):
+                if f'path.join(dir, "{sub}")' not in disco:
+                    report.add_breaking(
+                        f"omp's extension loader no longer joins `\"{sub}\"` onto its "
+                        f"config dirs — the installed bridge lands where omp never "
+                        f"looks, installs cleanly, and never loads (no local check "
+                        f"can see this)."
+                    )
+        dirs = fetch_anchored(OMP_DIRS_URL, "omp dirs resolver", report)
+        if dirs is not None and re.search(
+            r"(?ms)^export function getAgentDir\(\): string \{\s*return dirs\.agentDir;",
+            dirs,
+        ) is None:
+            report.add_breaking(
+                "omp's `getAgentDir()` no longer returns the resolver's agent dir "
+                "verbatim — if it gained a redirect (XDG or otherwise), "
+                "`omp_agent_dir()`'s no-flatten rule is stale and the bridge "
+                "installs where omp never scans. Re-verify dirs.ts by hand."
+            )
 
     for field, url, enum, label in (
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem", "rollout OUTER"),

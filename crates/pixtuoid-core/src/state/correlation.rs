@@ -150,11 +150,16 @@ pub(super) struct Correlation {
     /// its tool events carry no `tool_use_id`.
     pub(super) gated_before_waiting: HashMap<AgentId, Vec<Arc<str>>>,
     /// Tool calls already counted into `tool_call_count`, so the SAME logical
-    /// call re-observed on the other transport counts once — the approval
-    /// round's Start twins are separated by HUMAN latency, which no
-    /// `recent_hook_tool_uses`-style window can cover (#951). Evicted with
+    /// call re-observed on the other transport counts once (#951). omp cannot
+    /// use copilot's approve-emits-nothing shape: its transcript writes the
+    /// call BEFORE the approval request goes out (4 ms apart in
+    /// `approval-recorded`), so no later transcript Start exists to clear the
+    /// wait and the resume must be synthesized from the hook — leaving Start
+    /// twins separated by HUMAN latency (7.5 s recorded, 15x
+    /// [`HOOK_WINS_WINDOW`]), which no dedup window can cover. Evicted with
     /// the slot's correlation (per-life) and TTL-swept at the Waiting
-    /// ceiling, past which no approval round can still be open.
+    /// ceiling as a backstop (a liveness-vouched slot can wait longer; the
+    /// cost past the ceiling is one HUD re-count).
     pub(super) counted_calls: HashMap<(AgentId, String), SystemTime>,
 }
 
@@ -243,6 +248,21 @@ impl Correlation {
         });
         self.counted_calls
             .retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
+    }
+
+    /// Whether `tuid` is a live gate member for `id` — THE membership
+    /// predicate, so the member-vs-whole-set decisions can't drift per site.
+    pub(super) fn gate_matches(&self, id: &AgentId, tuid: &str) -> bool {
+        self.gated_before_waiting
+            .get(id)
+            .is_some_and(|g| g.iter().any(|m| &**m == tuid))
+    }
+
+    /// Remove ONE gate member; a parallel approval keeps its own.
+    pub(super) fn remove_gate_member(&mut self, id: &AgentId, tuid: &str) {
+        if let Some(g) = self.gated_before_waiting.get_mut(id) {
+            g.retain(|m| &**m != tuid);
+        }
     }
 
     /// Whether `id` holds a FRESH probe vouch. The single freshness predicate

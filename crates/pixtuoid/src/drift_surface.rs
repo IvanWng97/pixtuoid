@@ -51,9 +51,6 @@ fn surface() -> Value {
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
-    // The omp bridge extension reads these names off omp's EXTENSION API
-    // (event fields + ExtensionContext surface) — upstream renames break the
-    // installed TS silently, so the watch carries what the template touches.
     shipped.insert("omp.extension_reads", json!(omp_extension_reads()));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();

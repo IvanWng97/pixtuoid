@@ -27,7 +27,7 @@ default = ["native"]
 native  = ["pixtuoid-core/native"]
 
 [dependencies]
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.17.0", default-features = false }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.18.0", default-features = false }
 anyhow        = { workspace = true }
 tracing       = { workspace = true }
 # `clock` gives Local::now() w/ system timezone for the wall clock.
@@ -39,7 +39,7 @@ palette       = { version = "0.7", default-features = false, features = ["std"] 
 [dev-dependencies]
 # `harness` is dev-only (see core's manifest), so `examples/corpus_check.rs`
 # requests it here rather than in [dependencies].
-pixtuoid-core = { path = "../pixtuoid-core", version = "0.17.0", default-features = false, features = ["harness"] }
+pixtuoid-core = { path = "../pixtuoid-core", version = "0.18.0", default-features = false, features = ["harness"] }
 serde_json = { workspace = true }
 proptest   = "1"
 tempfile   = "3"

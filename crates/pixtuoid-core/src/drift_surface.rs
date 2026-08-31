@@ -105,8 +105,20 @@ fn surface() -> Value {
 
     // Through a BTreeMap, never a `json!` object literal — see
     // `every_emitted_object_has_sorted_keys` for why that distinction is a gate.
+    // SHIPPED, not decoded: the value rides the file the installer writes.
+    // The extensions subdir is the ONE string deciding whether omp ever LOADS
+    // the bridge, and nothing else can detect its drift — install writes it,
+    // `verify_schema` reads our own bytes back, and no decode breadcrumb ever
+    // fires for a file omp silently skips.
+    let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
+    shipped.insert(
+        "omp.extension_subdir",
+        json!([crate::source::omp::EXTENSIONS_SUBDIR]),
+    );
+
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("decoded", json!(decoded));
+    root.insert("shipped", json!(shipped));
     json!(root)
 }
 

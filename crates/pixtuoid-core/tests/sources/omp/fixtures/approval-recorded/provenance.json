@@ -1,7 +1,7 @@
 {
   "captured": "2026-08-31",
   "cli": "omp",
-  "command": "python3 /private/tmp/claude-501/-Users-navepnow-Desktop-pixtuoid-nosync/44c2169f-d3da-45d6-a416-0f1b58a83d21/scratchpad/pty-approval.py approve Run the shell command: echo hi",
+  "command": "omp --approval-mode always-ask (interactive TUI, driven by scripts/lib/capture-omp-tui.py approve 'Run the shell command: echo hi')",
   "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim. interactive TUI driven under a pty; Enter approves the always-ask gate",
   "origin": "recorded",
   "version": "omp/18.0.11"

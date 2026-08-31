@@ -488,7 +488,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     /// clears the steady state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
-    const MAP_NAMES: [&str; 7] = [
+    const MAP_NAMES: [&str; 8] = [
         "recent_hook_tool_uses",
         "recent_hook_session_ends",
         "active_tasks",
@@ -496,6 +496,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         "child_ledger",
         "recent_proof_of_life",
         "gated_before_waiting",
+        "counted_calls",
     ];
 
     let mut r = super::Reducer::new();
@@ -505,7 +506,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     let mut scene = SceneState::uniform(32);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    let mut peak = [0usize; 7];
+    let mut peak = [0usize; 8];
 
     for i in 0..ITERS {
         let now = t0 + Duration::from_secs(i);
@@ -613,6 +614,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             r.corr.child_ledger.len(),
             r.corr.recent_proof_of_life.len(),
             r.corr.gated_before_waiting.len(),
+            r.corr.counted_calls.len(),
         ];
         for (p, &l) in peak.iter_mut().zip(lens.iter()) {
             *p = (*p).max(l);

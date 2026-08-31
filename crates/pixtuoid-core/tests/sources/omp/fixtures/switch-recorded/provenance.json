@@ -1,0 +1,8 @@
+{
+  "captured": "2026-08-31",
+  "cli": "omp",
+  "command": "omp (interactive TUI, driven by scripts/lib/capture-omp-tui.py switch \u2014 /new then /exit)",
+  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim. omp (interactive TUI, driven by scripts/lib/capture-omp-tui.py switch \u2014 /new then /exit, no prompt): the in-TUI switch fires with the NEW session current and the previous file named",
+  "origin": "recorded",
+  "version": "omp/18.0.11"
+}

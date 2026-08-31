@@ -215,7 +215,7 @@ fn agent_cases() -> Vec<WireCase> {
             source: "omp",
             // The bridge's approval round: the Waiting the transcript can
             // never carry must survive all the way to pixels (#951).
-            fixture: "fixtures/omp/approval-recorded/hook-payloads.jsonl",
+            fixture: "omp/fixtures/approval-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Waiting, Reach::Active],
         },

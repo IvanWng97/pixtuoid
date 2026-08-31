@@ -5,10 +5,10 @@
 // shutdown, and the tool-approval wait — into the `pixtuoid-hook` shim.
 // It NEVER blocks omp: it registers NO gating handlers (omp's `tool_call`
 // gate fails CLOSED on a throw/timeout), and every handler is try/catch'd.
-// The ONE awaited thing is the shim itself — self-bounded at 200ms, always exit 0 —
-// because Bun.spawn has no detached mode and `session_shutdown` fires during
-// process exit: an un-awaited child loses the race and the empty-session
-// shutdown never arrives (capture-verified on omp 18.0.11).
+// The ONE awaited thing is the shim itself — bounded by its own write-timeout
+// watchdog, always exit 0 — because Bun.spawn has no detached mode and
+// `session_shutdown` fires during process exit: an un-awaited child loses the
+// race and the empty-session shutdown never arrives (capture-verified).
 //
 // Privacy allowlist: event type, session file/id, cwd, tool name, tool call
 // id, approval state/reason, and process.pid. Never prompts, messages, tool
@@ -35,6 +35,9 @@ export default function (pi: any) {
   const forward = async (name: string, ev: any, ctx: any) => {
     try {
       const payload: Record<string, unknown> = { type: name }
+      // The CONTEXT's session, deliberately not the event's own copy (the
+      // approval events carry one): ctx names the FILE both transports key
+      // on, and the two agree in every recorded round.
       try {
         payload.sessionFile = ctx?.sessionManager?.getSessionFile?.()
       } catch {}
@@ -47,13 +50,12 @@ export default function (pi: any) {
       if (typeof ev?.toolName === "string") payload.toolName = ev.toolName
       if (typeof ev?.reason === "string") payload.reason = ev.reason
       if (typeof ev?.approved === "boolean") payload.approved = ev.approved
-      // The omp process pid (extensions run in-process); the daemon's
-      // HookPidWatch can end every bound sprite when it dies.
+      // The omp process pid (extensions run in-process). Rust DISCARDS it
+      // today — omp's focus channel is the transcript probe — but stamping it
+      // now means the wire shape is already right if a plugin-stamp channel
+      // ever lands.
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
-      // Buffer stdin (no writable stream, no EPIPE window). Awaiting the
-      // 200ms-watchdogged shim keeps the exiting process alive just long
-      // enough for `session_shutdown` to land, and keeps an event burst from
-      // orphaning a pile of spawns (the opencode-plugin posture).
+      // Buffer stdin: no writable stream, no EPIPE window.
       const proc = Bun.spawn([HOOK_PATH, "--source", "omp"], {
         stdin: new TextEncoder().encode(JSON.stringify(payload)),
         stdout: "ignore",

@@ -2,7 +2,7 @@
 //! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`;
 //! [`omp_sessions_dir`] owns every axis of that root. omp has no shell-hook
 //! seam — its hooks are in-process TS extension modules — so the hook plane
-//! is a pixtuoid-owned bridge extension (`install/omp_extension.ts`) whose
+//! is a pixtuoid-owned bridge extension (`pixtuoid/src/install/omp_extension.ts`) whose
 //! payloads [`decode_omp_hook_payload`] claims (#951); the transcript stays
 //! the durable authority and works alone under `omp --no-extensions`. Wire
 //! shape: upstream `packages/coding-agent/src/session/` (transcript) and
@@ -60,6 +60,20 @@ pub fn omp_agent_dir() -> PathBuf {
         std::fs::read_to_string(p).ok()
     });
     resolve_omp_agent_dir(&env)
+}
+
+/// The subdirectory omp's loader scans for extension modules — upstream
+/// `discovery/builtin.ts` joins this onto `getAgentDir()`. Watched by the
+/// drift surface (`omp.extension_subdir`): a silent upstream rename would
+/// leave the installer writing where omp never looks while every local check
+/// reads green.
+pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
+
+/// Where the bridge extension installs: [`omp_agent_dir`] +
+/// [`EXTENSIONS_SUBDIR`]. Lives here rather than in the install target so the
+/// segment sits with the authority that names it.
+pub fn omp_extensions_dir() -> PathBuf {
+    omp_agent_dir().join(EXTENSIONS_SUBDIR)
 }
 
 /// The process environment omp's resolver reads, injected so every arm — the
@@ -238,7 +252,11 @@ fn xdg_app_root(
 /// resolver frozen at module load (hence the PRE-overlay `env`), then the resolver
 /// is REBUILT from the merged env. Shell wins over every file, the first file to
 /// define a key wins, and profile SELECTION is deliberately NOT overlaid — upstream
-/// reuses the frozen profile. Its fourth `$CWD/.env` is unreachable out-of-process.
+/// reuses the frozen profile. Upstream's `$CWD/.env` is the FIRST and
+/// strongest of its four files (`env.ts` iterates project→agent→config→home,
+/// first-wins, and Bun autoloads the cwd dotenv before the resolver freezes)
+/// — unreachable out-of-process because pixtuoid never knows which directory
+/// omp was launched from, not because it is lowest-priority.
 fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpEnv {
     let agent_dir = resolve_omp_agent_dir_parts(env).map(|(dir, _, _)| dir);
     let config_root = omp_config_root(env, resolve_profile(env).as_deref());
@@ -762,10 +780,20 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// Identity: `sessionFile` (the ALLOCATED path — omp exposes it before the
 /// lazy persist materializes the JSONL) through the watcher's own
 /// `normalize_path_key` fold then [`omp_id_from_path`], so both transports
-/// mint ONE AgentId per session, nested task children included. `sessionId`
-/// (the bare header UUID, a keyspace no stem can collide with — stems carry
-/// the date shape and `_`) covers `--no-session`, where no transcript will
-/// ever exist to coalesce with.
+/// mint ONE AgentId per session, nested task children included. The fold
+/// makes every hook-derived key PLATFORM-DEPENDENT (Windows lowercases omp's
+/// case-carrying stems), which is why the bridge's recorded rounds live in
+/// the `tests/sources/omp` module suite deriving expectations through the
+/// same fold, never under the platform-invariant conformance goldens.
+/// `sessionId` (the bare header UUID, a keyspace no stem can collide with —
+/// stems carry the date shape and `_`) covers `--no-session`, where no
+/// transcript will ever exist to coalesce with.
+///
+/// A switch/branch means this omp process now drives the CURRENT file: the
+/// previous one gets its End without waiting for the stale sweep, and the
+/// upstream `reason` (`"new" | "resume" | "fork"`) is deliberately dropped —
+/// the End+Start pair keys on `previousSessionFile` alone, identically for
+/// all three.
 pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -800,8 +828,6 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
 
     match ty {
         HOOK_SESSION_START => Ok(vec![session_start()]),
-        // A switch/branch means this omp process now drives the CURRENT file;
-        // the previous one gets its End without waiting for the stale sweep.
         // previous == current is the in-place branch REWRITE — an End+Start
         // pair there would walk the sprite out for its own rewrite.
         HOOK_SESSION_SWITCH | HOOK_SESSION_BRANCH => {
@@ -887,8 +913,8 @@ fn omp_hook_session_key(obj: &serde_json::Map<String, Value>) -> Option<(String,
 }
 
 /// The Waiting reason for an approval gate: the wire's `reason` when it says
-/// anything (a plain bash gate sends none — probe-verified on omp 18.0.11),
-/// else the tool name, else the literal gate.
+/// anything (a plain bash gate sends none — probe-verified at this source's
+/// `verified_version`), else the tool name, else the literal gate.
 fn omp_approval_reason(obj: &serde_json::Map<String, Value>, tool: &str) -> String {
     let wire = obj
         .get("reason")
@@ -2237,7 +2263,20 @@ mod tests {
     // -- extension-bridge hook payloads (#951) ------------------------------
 
     const HOOK_ROOT: &str = "/h/.omp/agent/sessions/-repo/2026-08-31T06-00-52-863Z_01a05668-057f-7559-8fed-f28ff062e3ca.jsonl";
+    /// The RAW wire stem, for building inputs; expectations derive through
+    /// [`hook_key`] instead — the decoder folds, so a literal expectation
+    /// holds on Unix and reds only in `windows-test` (the #520 class).
     const HOOK_ROOT_KEY: &str = "2026-08-31T06-00-52-863Z_01a05668-057f-7559-8fed-f28ff062e3ca";
+
+    /// A raw wire path's session key, through the decoder's own fold.
+    fn hook_key(raw: &str) -> String {
+        omp_id_from_path(Path::new(&crate::id::normalize_path_key(raw)))
+    }
+
+    /// The folded key as an AgentId, the shape every expectation compares.
+    fn hook_id(raw: &str) -> AgentId {
+        AgentId::from_parts("omp", &hook_key(raw))
+    }
 
     fn hook(v: serde_json::Value) -> Vec<AgentEvent> {
         decode_omp_hook_payload(&v).unwrap()
@@ -2257,9 +2296,9 @@ mod tests {
                 cwd,
                 parent_id,
             }] => {
-                assert_eq!(*agent_id, AgentId::from_parts("omp", HOOK_ROOT_KEY));
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(source, "omp");
-                assert_eq!(session_id, HOOK_ROOT_KEY);
+                assert_eq!(session_id, &hook_key(HOOK_ROOT));
                 assert_eq!(cwd, &std::path::PathBuf::from("/repo"));
                 assert_eq!(*parent_id, None);
             }
@@ -2281,10 +2320,10 @@ mod tests {
                 parent_id,
                 ..
             }] => {
-                let key = format!("{HOOK_ROOT_KEY}/Alpha");
+                let key = hook_key(&child);
                 assert_eq!(*agent_id, AgentId::from_parts("omp", &key));
                 assert_eq!(session_id, &key);
-                assert_eq!(*parent_id, Some(AgentId::from_parts("omp", HOOK_ROOT_KEY)));
+                assert_eq!(*parent_id, Some(hook_id(HOOK_ROOT)));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -2351,14 +2390,8 @@ mod tests {
             }, AgentEvent::SessionStart {
                 agent_id: started, ..
             }] => {
-                assert_eq!(
-                    *ended,
-                    AgentId::from_parts(
-                        "omp",
-                        "2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-000000000009"
-                    )
-                );
-                assert_eq!(*started, AgentId::from_parts("omp", HOOK_ROOT_KEY));
+                assert_eq!(*ended, hook_id(prev));
+                assert_eq!(*started, hook_id(HOOK_ROOT));
             }
             other => panic!("unexpected: {other:?}"),
         }
@@ -2366,8 +2399,7 @@ mod tests {
 
     #[test]
     fn hook_branch_onto_the_same_path_emits_no_end() {
-        // An in-place branch REWRITES the file: previous == current, and an
-        // End+Start pair would walk the sprite out for its own rewrite.
+        // An in-place branch REWRITES the file: previous == current.
         let evs = hook(serde_json::json!({
             "type": "session_branch", "sessionFile": HOOK_ROOT,
             "previousSessionFile": HOOK_ROOT,
@@ -2393,7 +2425,7 @@ mod tests {
                 tool_use_id,
             }] => {
                 assert_eq!(iid, agent_id);
-                assert_eq!(*agent_id, AgentId::from_parts("omp", HOOK_ROOT_KEY));
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(reason, "bash", "empty reason falls back to the tool name");
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
             }
@@ -2424,7 +2456,7 @@ mod tests {
                 tool_use_id,
                 detail,
             }] => {
-                assert_eq!(*agent_id, AgentId::from_parts("omp", HOOK_ROOT_KEY));
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
                 assert_eq!(detail.as_ref().map(|d| d.display()), Some("bash"));
             }
@@ -2445,7 +2477,7 @@ mod tests {
                 agent_id,
                 tool_use_id,
             }] => {
-                assert_eq!(*agent_id, AgentId::from_parts("omp", HOOK_ROOT_KEY));
+                assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(tool_use_id.as_deref(), Some("call_1"));
             }
             other => panic!("unexpected: {other:?}"),
@@ -2490,7 +2522,7 @@ mod tests {
         .unwrap();
         assert!(
             matches!(&evs[..], [AgentEvent::SessionStart { agent_id, .. }]
-                if *agent_id == AgentId::from_parts("omp", HOOK_ROOT_KEY)),
+                if *agent_id == hook_id(HOOK_ROOT)),
             "expected the ClaimsAll route: {evs:?}"
         );
     }
