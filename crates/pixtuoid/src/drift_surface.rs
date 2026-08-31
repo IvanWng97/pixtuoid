@@ -51,6 +51,10 @@ fn surface() -> Value {
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
+    // The omp bridge extension reads these names off omp's EXTENSION API
+    // (event fields + ExtensionContext surface) — upstream renames break the
+    // installed TS silently, so the watch carries what the template touches.
+    shipped.insert("omp.extension_reads", json!(omp_extension_reads()));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
     root.insert("registered", json!(registered));
@@ -69,6 +73,35 @@ fn openclaw_default_gateway_port() -> Option<&'static str> {
     let digits = after.trim_start();
     let end = digits.find(|c: char| !c.is_ascii_digit())?;
     (end > 0).then(|| &digits[..end])
+}
+
+/// The upstream extension-API names the bundled omp bridge reads, extracted
+/// from the shipped template itself so the drift watch never compares against
+/// a second copy: every `ev?.<field>` access, plus the `ctx` surface the
+/// forwarder touches (`cwd` and the two `sessionManager` getters).
+fn omp_extension_reads() -> Vec<String> {
+    let template = crate::install::omp::EXTENSION_TEMPLATE;
+    let mut names: Vec<String> = template
+        .match_indices("ev?.")
+        .map(|(i, m)| {
+            template[i + m.len()..]
+                .chars()
+                .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+                .collect()
+        })
+        .collect();
+    for (probe, name) in [
+        (".getSessionFile", "getSessionFile"),
+        (".getSessionId", "getSessionId"),
+        ("ctx?.cwd", "cwd"),
+    ] {
+        if template.contains(probe) {
+            names.push(name.to_string());
+        }
+    }
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 fn fragment_path() -> PathBuf {

@@ -26,7 +26,7 @@ const SENTINEL: &str = "@pixtuoid-omp-extension";
 
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
-const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
+pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
 
 /// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
 const REMOVED_STUB: &str = "// pixtuoid omp extension removed by disconnecting omp in pixtuoid's Sources panel (press s).\nexport default function () {}\n";
