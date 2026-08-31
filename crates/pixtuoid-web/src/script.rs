@@ -373,6 +373,7 @@ pub(crate) fn hero_script() -> Vec<Beat> {
         event: AgentEvent::Waiting {
             agent_id: cast_id(6),
             reason: "permission".to_string(),
+            tool_use_id: None,
         },
     });
     b.push(Beat {

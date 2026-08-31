@@ -117,6 +117,7 @@ fn waiting(
         AgentEvent::Waiting {
             agent_id: id,
             reason: reason.into(),
+            tool_use_id: None,
         },
         at,
         tp,

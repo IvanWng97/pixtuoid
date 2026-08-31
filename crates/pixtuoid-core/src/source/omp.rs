@@ -624,6 +624,7 @@ pub fn decode_omp_line(transcript_path: &str, source: &str, v: Value) -> Result<
                             asks.push(AgentEvent::Waiting {
                                 agent_id: acting,
                                 reason: omp_ask_reason(b.get("arguments")),
+                                tool_use_id: None,
                             });
                         }
                     }
@@ -1332,6 +1333,7 @@ mod tests {
             }, AgentEvent::Waiting {
                 agent_id: wid,
                 reason,
+                ..
             }] => {
                 assert_eq!(*agent_id, root());
                 assert_eq!(*wid, root());

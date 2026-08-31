@@ -214,6 +214,7 @@ fn gated_before_waiting_evicted_on_apply_path_sweep() {
         AgentEvent::Waiting {
             agent_id: id,
             reason: "perm".into(),
+            tool_use_id: None,
         },
         t0,
         Transport::Hook,
@@ -293,6 +294,7 @@ fn resurrect_in_place_evicts_correlation_maps_but_keeps_proof_of_life() {
         AgentEvent::Waiting {
             agent_id: id,
             reason: "perm".into(),
+            tool_use_id: None,
         },
         t0 + Duration::from_secs(1),
         Transport::Hook,
@@ -557,6 +559,7 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             AgentEvent::Waiting {
                 agent_id: a,
                 reason: "perm".into(),
+                tool_use_id: None,
             },
             now,
             Transport::Hook,

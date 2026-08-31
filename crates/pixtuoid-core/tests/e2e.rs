@@ -65,6 +65,7 @@ fn scripted_timeline_drives_scene_through_states() {
         vec![AgentEvent::Waiting {
             agent_id: id,
             reason: "permission?".into(),
+            tool_use_id: None,
         }],
         50,
         &mut reducer,

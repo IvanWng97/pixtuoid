@@ -105,6 +105,7 @@ fn decode_ag_tool_call(
         return AgentEvent::Waiting {
             agent_id,
             reason: "asking permission".to_string(),
+            tool_use_id: None,
         };
     }
     let target = ag_tool_target(args);

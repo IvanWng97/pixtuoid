@@ -205,6 +205,7 @@ pub fn decode_grok_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                         AgentEvent::Waiting {
                             agent_id,
                             reason: ellipsize(msg, MAX_DECODED_FIELD_CHARS),
+                            tool_use_id: None,
                         },
                     ])
                 }

@@ -285,7 +285,9 @@ impl Reducer {
                 from,
                 now,
             ),
-            AgentEvent::Waiting { agent_id, reason } => {
+            AgentEvent::Waiting {
+                agent_id, reason, ..
+            } => {
                 self.apply_waiting(scene, agent_id, &reason, now);
             }
             AgentEvent::Rename { agent_id, label } => {

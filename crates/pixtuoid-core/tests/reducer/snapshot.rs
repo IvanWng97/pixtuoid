@@ -92,6 +92,7 @@ fn full_scene_serialization_is_stable() {
         AgentEvent::Waiting {
             agent_id: solo,
             reason: "permission: Bash".into(),
+            tool_use_id: None,
         },
         at(4),
         Transport::Hook,

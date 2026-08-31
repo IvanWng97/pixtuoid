@@ -482,6 +482,7 @@ mod tests {
             AgentEvent::Waiting {
                 agent_id: id,
                 reason: "x".into(),
+                tool_use_id: None,
             },
             AgentEvent::SessionEnd {
                 agent_id: id,
