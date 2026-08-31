@@ -48,7 +48,7 @@ pub fn omp_sessions_dir() -> PathBuf {
 }
 
 /// omp's ACTIVE agent directory, the root its extension loader scans (its
-/// [`EXTENSIONS_SUBDIR`] child). Same `.env` overlay as
+/// `EXTENSIONS_SUBDIR` child). Same `.env` overlay as
 /// [`omp_sessions_dir`], same profile/override precedence, but NO XDG
 /// flatten: upstream's `getAgentDir()` returns `dirs.agentDir` un-redirected
 /// (`dirs.ts` applies XDG only per-category via `agentSubdir`), so a
@@ -69,7 +69,8 @@ pub fn omp_agent_dir() -> PathBuf {
 pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
 
 /// Where the bridge extension installs: [`omp_agent_dir`] +
-/// [`EXTENSIONS_SUBDIR`].
+/// `EXTENSIONS_SUBDIR` (private: the name still greps; rustdoc denies links
+/// to non-public items).
 pub fn omp_extensions_dir() -> PathBuf {
     omp_agent_dir().join(EXTENSIONS_SUBDIR)
 }

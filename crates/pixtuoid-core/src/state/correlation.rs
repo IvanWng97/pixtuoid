@@ -155,8 +155,13 @@ pub(super) struct Correlation {
     /// approval request goes out, so the two Starts are separated by HUMAN
     /// approval latency and no dedup window can span them. The backstop TTL is
     /// the Waiting ceiling because that bounds how long they can straddle; past
-    /// it the cost is one HUD re-count.
-    pub(super) counted_calls: HashMap<(AgentId, String), SystemTime>,
+    /// it the cost is one HUD re-count. Nested (not `(AgentId, String)`-keyed)
+    /// so the per-Start membership probe borrows `&str` without allocating and
+    /// a life's eviction is one `remove`; swept in [`Self::gc_slow`], never the
+    /// per-event [`Self::gc`] — with the longest TTL of the maps it is the one
+    /// whose retain does real per-event work (CodSpeed showed -55% on the hook
+    /// path).
+    pub(super) counted_calls: HashMap<AgentId, HashMap<String, SystemTime>>,
 }
 
 /// Freshness under a TTL, clock-regression-safe: `duration_since` returns
@@ -242,8 +247,16 @@ impl Correlation {
             None => true,
             Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
         });
-        self.counted_calls
-            .retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
+    }
+
+    /// The sweeps too costly for the per-event [`Self::gc`]: `counted_calls`
+    /// keeps entries for up to the Waiting ceiling, so its retain scans real
+    /// state — tick cadence loses nothing against an hour-scale TTL.
+    pub(super) fn gc_slow(&mut self, now: SystemTime) {
+        self.counted_calls.retain(|_, calls| {
+            calls.retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
+            !calls.is_empty()
+        });
     }
 
     /// Whether `tuid` is a live gate member for `id` — THE membership
@@ -431,11 +444,20 @@ mod tests {
         assert!(corr.child_ledger.contains_key(&alive));
 
         let mut corr = Correlation::default();
-        corr.counted_calls.insert((old, "t1".into()), t0());
-        corr.counted_calls.insert((young, "t2".into()), t0() + step);
-        corr.gc(t0() + crate::state::reducer::STALE_WAITING_TIMEOUT);
-        assert!(!corr.counted_calls.contains_key(&(old, "t1".into())));
-        assert!(corr.counted_calls.contains_key(&(young, "t2".into())));
+        corr.counted_calls
+            .entry(old)
+            .or_default()
+            .insert("t1".into(), t0());
+        corr.counted_calls
+            .entry(young)
+            .or_default()
+            .insert("t2".into(), t0() + step);
+        corr.gc_slow(t0() + crate::state::reducer::STALE_WAITING_TIMEOUT);
+        assert!(
+            !corr.counted_calls.contains_key(&old),
+            "the swept life's emptied submap is dropped with it"
+        );
+        assert!(corr.counted_calls[&young].contains_key("t2"));
     }
 
     #[test]

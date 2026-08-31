@@ -190,6 +190,7 @@ impl Reducer {
     /// pending-idle timers fire even when no event arrives to drive `apply`.
     pub fn tick(&mut self, scene: &mut SceneState, now: SystemTime) {
         self.corr.gc(now);
+        self.corr.gc_slow(now);
         self.sweep_exited(scene, now);
         self.expire_pending_idles(scene, now);
         self.fire_pending_b1_cascades(scene, now);
@@ -461,7 +462,8 @@ impl Reducer {
             let already_counted = tool_use_id.as_deref().is_some_and(|t| {
                 self.corr
                     .counted_calls
-                    .contains_key(&(agent_id, t.to_string()))
+                    .get(&agent_id)
+                    .is_some_and(|calls| calls.contains_key(t))
             });
             let waiting = scene
                 .agents
@@ -506,12 +508,9 @@ impl Reducer {
         };
         match tool_use_id {
             Some(t) => {
-                if self
-                    .corr
-                    .counted_calls
-                    .insert((agent_id, t.to_string()), now)
-                    .is_none()
-                {
+                let calls = self.corr.counted_calls.entry(agent_id).or_default();
+                if !calls.contains_key(t) {
+                    calls.insert(t.to_string(), now);
                     slot.tool_call_count += 1;
                 }
             }
@@ -1257,7 +1256,7 @@ impl Reducer {
     fn remove_agent_correlation(&mut self, id: &AgentId) {
         self.corr.active_tasks.remove(id);
         self.corr.gated_before_waiting.remove(id);
-        self.corr.counted_calls.retain(|(cid, _), _| cid != id);
+        self.corr.counted_calls.remove(id);
         self.pending_b1_cascades.remove(id);
     }
 

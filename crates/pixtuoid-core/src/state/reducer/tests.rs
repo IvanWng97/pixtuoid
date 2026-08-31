@@ -614,7 +614,11 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
             r.corr.child_ledger.len(),
             r.corr.recent_proof_of_life.len(),
             r.corr.gated_before_waiting.len(),
-            r.corr.counted_calls.len(),
+            r.corr
+                .counted_calls
+                .values()
+                .map(std::collections::HashMap::len)
+                .sum(),
         ];
         for (p, &l) in peak.iter_mut().zip(lens.iter()) {
             *p = (*p).max(l);
