@@ -1816,8 +1816,6 @@ mod tests {
         );
     }
 
-    /// XDG changes the SHAPE, not the prefix: it replaces the base.
-    #[test]
     /// The extensions root (`omp_agent_dir`) never XDG-flattens: upstream's
     /// `getAgentDir()` is `dirs.agentDir` un-redirected, XDG applies only
     /// per-category through `agentSubdir` — write the bridge to a flattened
@@ -1862,6 +1860,7 @@ mod tests {
         );
     }
 
+    /// XDG changes the SHAPE, not the prefix: it replaces the base.
     #[test]
     fn omp_xdg_flattens_the_agent_segment_and_only_when_the_dir_exists() {
         let env = |xdg: Option<&str>, profile: Option<&str>, agent: Option<&str>| OmpEnv {
