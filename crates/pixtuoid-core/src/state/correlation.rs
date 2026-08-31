@@ -98,7 +98,7 @@ pub(super) enum ToolEventKind {
     End,
 }
 
-/// The seven reducer-private correlation maps. In/out criterion for a future
+/// The eight reducer-private correlation maps. In/out criterion for a future
 /// map: PASSIVE cross-event memory (consulted to interpret a later event)
 /// lives here; ARMED actions that mutate the scene on a schedule
 /// (`pending_b1_cascades` and its fire pass) stay on `Reducer`.
@@ -138,14 +138,24 @@ pub(super) struct Correlation {
     /// a slot vouched for within [`PROOF_OF_LIFE_TTL`] is skipped by
     /// `sweep_stale`'s candidate collection.
     pub(super) recent_proof_of_life: HashMap<AgentId, SystemTime>,
-    /// `tool_use_id` that was Active immediately before an agent entered
-    /// `Waiting` (a CC permission `Notification` fires mid-tool). When THAT
-    /// tool's `ActivityEnd` arrives the permission has been resolved, so the
-    /// Waiting resolves instead of lingering until the agent's next tool; a
-    /// *parallel* tool ending carries a different id and cannot false-clear a
-    /// still-pending permission. Codex never populates this — its tool events
-    /// carry no `tool_use_id`.
-    pub(super) gated_before_waiting: HashMap<AgentId, Arc<str>>,
+    /// The tool calls an agent's `Waiting` is gated on. Singly populated by
+    /// inference — the `tool_use_id` that was Active immediately before the
+    /// Waiting (a CC permission `Notification` fires mid-tool) — or pushed
+    /// explicitly by a `Waiting` that NAMES its gated call (omp
+    /// `tool_approval_requested`, which can queue several, #951). When a
+    /// member's `ActivityEnd` arrives the permission has been resolved, so
+    /// the Waiting resolves instead of lingering until the agent's next tool;
+    /// a *parallel* tool ending carries a non-member id and cannot
+    /// false-clear a still-pending permission. Codex never populates this —
+    /// its tool events carry no `tool_use_id`.
+    pub(super) gated_before_waiting: HashMap<AgentId, Vec<Arc<str>>>,
+    /// Tool calls already counted into `tool_call_count`, so the SAME logical
+    /// call re-observed on the other transport counts once — the approval
+    /// round's Start twins are separated by HUMAN latency, which no
+    /// `recent_hook_tool_uses`-style window can cover (#951). Evicted with
+    /// the slot's correlation (per-life) and TTL-swept at the Waiting
+    /// ceiling, past which no approval round can still be open.
+    pub(super) counted_calls: HashMap<(AgentId, String), SystemTime>,
 }
 
 /// Freshness under a TTL, clock-regression-safe: `duration_since` returns
@@ -231,6 +241,8 @@ impl Correlation {
             None => true,
             Some(ts) => is_fresh(now, ts, CHILD_END_RELINK_TTL),
         });
+        self.counted_calls
+            .retain(|_, ts| is_fresh(now, *ts, super::reducer::STALE_WAITING_TIMEOUT));
     }
 
     /// Whether `id` holds a FRESH probe vouch. The single freshness predicate
@@ -401,6 +413,13 @@ mod tests {
         assert!(!corr.child_ledger.contains_key(&old));
         assert!(corr.child_ledger.contains_key(&young));
         assert!(corr.child_ledger.contains_key(&alive));
+
+        let mut corr = Correlation::default();
+        corr.counted_calls.insert((old, "t1".into()), t0());
+        corr.counted_calls.insert((young, "t2".into()), t0() + step);
+        corr.gc(t0() + crate::state::reducer::STALE_WAITING_TIMEOUT);
+        assert!(!corr.counted_calls.contains_key(&(old, "t1".into())));
+        assert!(corr.counted_calls.contains_key(&(young, "t2".into())));
     }
 
     #[test]
