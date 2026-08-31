@@ -545,6 +545,29 @@ test_zizmor_pin_policy_cannot_be_tightened_or_disabled_silently if {
 	sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path]) in violations
 }
 
+test_zizmor_self_repository_disable_cannot_be_dropped_silently if {
+	fixture := {"documents": [{
+		"path": zizmor_config_path,
+		"contents": {"rules": {"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must keep the self-repository audit disabled until the actionlint pin understands `$/` (rhysd/actionlint#711)", [zizmor_config_path]) in violations
+	not sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path]) in violations
+}
+
+test_zizmor_rules_cannot_grow_a_third_entry_silently if {
+	fixture := {"documents": [{
+		"path": zizmor_config_path,
+		"contents": {"rules": {
+			"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}},
+			"self-repository": {"disable": true},
+			"template-injection": {"disable": true},
+		}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must hold exactly the two pinned rule entries — a new zizmor rule needs its own policy pin", [zizmor_config_path]) in violations
+}
+
 zizmor_fixture(contents) := {"documents": [{"path": lint_workflow_path, "contents": contents}]}
 
 zizmor_token_message(job_name) := sprintf(

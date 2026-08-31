@@ -41,9 +41,7 @@ jobs:
         with:
           prefix-key: v1-rust
       - uses: taiki-e/install-action@cargo-nextest
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - name: Validate tag commit is on main
         # A release tag pushed at an arbitrary (unreviewed) commit must not build +
         # publish (#215). Pre-release tester tags are exempt — they test pre-merge.
@@ -111,9 +109,7 @@ jobs:
           prefix-key: v1-rust
           key: ${{ matrix.target }}
 
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
 
       - name: Install cross
         if: matrix.cross
@@ -186,9 +182,7 @@ jobs:
           prefix-key: v1-rust
           key: deb-${{ matrix.target }}
 
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
 
       - name: Install cross
         if: matrix.cross
@@ -349,9 +343,7 @@ jobs:
       # above STAYS: it is what triggers npm's OIDC detection. Pinned EXACTLY, not
       # @11 — an irreversible publish must not float with the registry.
       - run: npm install -g npm@11.5.1 # zizmor: ignore[adhoc-packages] exact OIDC-capable npm bootstrap for trusted publishing
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
 
       - name: Download build artifacts
         uses: actions/download-artifact@v8

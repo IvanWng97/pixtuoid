@@ -50,9 +50,7 @@ jobs:
       # No setup-cargo-just: nothing compiles here, so the runner's preinstalled
       # cargo is enough — but cargo-deny DOES shell out to `cargo metadata`.
       - uses: taiki-e/install-action@cargo-deny
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just deny
 
   machete:
@@ -65,9 +63,7 @@ jobs:
           persist-credentials: false
       # cargo-machete parses manifests and does not need a Rust toolchain.
       - uses: taiki-e/install-action@cargo-machete
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just machete
 
   hygiene:
@@ -116,9 +112,7 @@ jobs:
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp gitleaks
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just shfmt-check
       - run: just shellcheck
       - run: just actionlint
@@ -153,9 +147,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev
       # No rust-cache on purpose: it would key the runner's stable compiler,
       # while the MSRV recipe installs the exact rust-version toolchain.
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just msrv
 
   notes-curated:
@@ -166,9 +158,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just notes-curated
 
   npm-gen:
@@ -183,9 +173,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just npm-check
 
   readme:
@@ -201,9 +189,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just gen-readme-check
 
   # cargo-public-api complements semver: one classifies compatibility, while
@@ -224,9 +210,7 @@ jobs:
           tool: cargo-binstall
       - name: Install cargo-public-api (pinned to match the committed goldens)
         run: cargo binstall -y cargo-public-api@0.52.0
-      - uses: extractions/setup-just@v4
-        with:
-          just-version: "1.58.0"
+      - uses: ./.github/actions/setup-just
       - run: just api-surface-check
 
   # rustdoc warnings and doctests are invisible to clippy and nextest.
