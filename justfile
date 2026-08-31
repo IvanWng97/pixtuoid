@@ -1281,13 +1281,14 @@ drift-selftest:
 tuidrive-selftest:
     python3 scripts/lib/tuidrive.py --selftest
 
-# `e2e_init_repo`'s env scrub. A git hook exports GIT_DIR/GIT_INDEX_FILE into
-# every child and those OUTRANK `git -C <dir>`, so an unscrubbed helper COMMITS
-# to the developer's real repo while printing nothing (#893, twice). The suite
-# runs the naive form first and proves it corrupts, so a scrub that stopped
-# scrubbing cannot pass. Hermetic: one mktemp -d, no network, no real repo.
+# The git env scrub, both copies: `e2e_init_repo` and the pre-push hook. A git
+# hook exports GIT_DIR/GIT_INDEX_FILE into every child and those OUTRANK
+# `git -C <dir>`, so an unscrubbed helper COMMITS to the developer's real repo
+# while printing nothing (#893, twice). The suite runs the unscrubbed form first
+# and proves it leaks, so a scrub that stopped scrubbing cannot pass. Hermetic:
+# one mktemp -d, no network, no real repo.
 [group('meta')]
-[doc("Self-test the e2e helper's git env scrub")]
+[doc("Self-test the git env scrub — the e2e helper and the pre-push hook")]
 e2e-scrub-selftest:
     bash scripts/lib/e2e-common-selftest.sh
 

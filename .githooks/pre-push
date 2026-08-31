@@ -8,12 +8,30 @@
 # Bypass with `--no-verify` or `SKIP_PREFLIGHT=1 git push`.
 set -euo pipefail
 
+# Ahead of the scrub, so that bypass still covers everything below it.
 if [[ "${SKIP_PREFLIGHT:-0}" == "1" ]]; then
     printf '\033[33m[pre-push] SKIP_PREFLIGHT=1 — skipping preflight\033[0m\n' >&2
     exit 0
 fi
 
-cd "$(git rev-parse --show-toplevel)"
+# Resolved before the scrub drops GIT_DIR: when the hook's CWD is outside the
+# worktree (`git --git-dir=… push` from elsewhere) that is the only locator.
+toplevel=$(git rev-parse --show-toplevel)
+
+# A LINKED worktree's hook exports GIT_DIR to its children, and it outranks
+# `git -C <dir>`: anything preflight runs that builds a throwaway repo then
+# silently writes into THIS one (#893) — githooks(5)'s idiom, applied here
+# rather than per-script so nothing downstream has to remember it.
+# A failed or empty list would leave the scrub silently not happening, and
+# `unset $(...)` discards the substitution's status so `set -e` never sees it.
+if ! scrub=$(git rev-parse --local-env-vars) || [ -z "$scrub" ]; then
+    printf '\033[31m[pre-push] git gave no local-env-vars — refusing to run unscrubbed\033[0m\n' >&2
+    exit 1
+fi
+# shellcheck disable=SC2086  # the var list must word-split
+unset $scrub
+
+cd "$toplevel"
 
 if ! command -v just &>/dev/null; then
     # shellcheck disable=SC2016  # backticks are literal text, not expansion
