@@ -3,71 +3,175 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 23083
+    agent_id: 5970872754560808625
+    fresh_tokens: 8508
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 23083
+    agent_id: 5970872754560808625
+    fresh_tokens: 8508
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
+    effort: ~
+- Usage:
+    agent_id: 5970872754560808625
+    fresh_tokens: 8508
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
+    effort: ~
+- Usage:
+    agent_id: 5970872754560808625
+    fresh_tokens: 8508
 - ActivityStart:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_01WQdam2yMPBpSyi8DyYFKjK
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
 - ActivityEnd:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_01WQdam2yMPBpSyi8DyYFKjK
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 216
+    agent_id: 5970872754560808625
+    fresh_tokens: 429
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 216
+    agent_id: 5970872754560808625
+    fresh_tokens: 429
 - ActivityStart:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_01QLL91i5SQ7Bm9G7VAnbGnF
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
     detail:
       Generic:
         display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ActivityEnd:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_01QLL91i5SQ7Bm9G7VAnbGnF
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 209
+    agent_id: 5970872754560808625
+    fresh_tokens: 29471
 - ActivityStart:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_012pbWTpWwzWdLVbCWtwSKLv
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
 - ActivityEnd:
-    agent_id: 3086511642454220307
-    tool_use_id: toolu_012pbWTpWwzWdLVbCWtwSKLv
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
 - ModelInfo:
-    agent_id: 3086511642454220307
-    model: claude-opus-5
+    agent_id: 5970872754560808625
+    model: claude-opus-4-8
     effort: ~
 - Usage:
-    agent_id: 3086511642454220307
-    fresh_tokens: 212
+    agent_id: 5970872754560808625
+    fresh_tokens: 282
+- SessionStart:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+    detail:
+      Generic:
+        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+    detail:
+      Generic:
+        display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+    detail:
+      Generic:
+        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- Identity:
+    agent_id: 5970872754560808625
+    source: claude-code
+    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 5970872754560808625
+    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+- ModelInfo:
+    agent_id: 5970872754560808625
+    model: ~
+    effort: xhigh
+- SessionEnd:
+    agent_id: 5970872754560808625
+    as_child: false

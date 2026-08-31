@@ -1023,6 +1023,9 @@ mod tests {
                 json!({"type": "quantum-line", "foo": 1}),
                 // #935's instance: shipped by CC and read by nothing here.
                 json!({"type": "history-suppression", "cause": "x"}),
+                // #959's instances, new in CC 2.1.251.
+                json!({"type": "atis-latch", "atis": {}, "sessionId": "s"}),
+                json!({"type": "cost-state", "totalCostUSD": 0.5, "sessionId": "s"}),
                 // TYPELESS but payload-carrying: the `!ty.is_empty()` guard, or
                 // the breadcrumb names nothing at all.
                 json!({"message": {"role": "assistant", "content": []}}),

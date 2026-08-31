@@ -1,8 +1,8 @@
 {
-  "origin": "recorded",
+  "captured": "2026-08-31",
   "cli": "claude",
-  "version": "2.1.233 (Claude Code)",
-  "captured": "2026-08-14",
   "command": "claude -p {prompt} --allowedTools Read Bash",
-  "note": "Redacted: the recorder's own MCP server / skill inventory (tool NAMES only, no credentials) to generic placeholders \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields."
+  "note": "Redacted: the recorder's own skill inventory (names + description text, no credentials) to generic placeholders, and the recorder's home path to /Users/dev in hook payloads \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields.",
+  "origin": "recorded",
+  "version": "2.1.251 (Claude Code)"
 }
