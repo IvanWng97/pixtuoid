@@ -27,8 +27,8 @@ fn full_scene_serialization_is_stable() {
     let idle = AgentId::from_transcript_path("/idle/sess.jsonl");
     let winding = AgentId::from_transcript_path("/wind/sess.jsonl");
 
-    // The five agents cover all FOUR ActivityState shapes plus a populated
-    // Option<SystemTime>, across three sources.
+    // The five agents cover all three ActivityState variants (Active in both
+    // ToolDetail shapes) plus a populated Option<SystemTime>, across two sources.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {
@@ -110,7 +110,7 @@ fn full_scene_serialization_is_stable() {
         Transport::Hook,
     );
     // Active→Idle debounce: the trailing ActivityEnd arms pending_idle_at but
-    // keeps Active, pinning a populated Option<SystemTime>.
+    // keeps Active.
     r.apply(
         &mut scene,
         AgentEvent::SessionStart {

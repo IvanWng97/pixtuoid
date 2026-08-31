@@ -31,14 +31,13 @@ pub(crate) const EXTENSION_TEMPLATE: &str = include_str!("omp_extension.ts");
 /// A valid empty ES module WITHOUT the sentinel, so a re-uninstall is a no-op.
 const REMOVED_STUB: &str = "// pixtuoid omp extension removed by disconnecting omp in pixtuoid's Sources panel (press s).\nexport default function () {}\n";
 
-/// The extensions root is core's [`omp_extensions_dir`] (profile-, override-,
-/// and `.env`-aware; deliberately NOT XDG-flattened) — a second resolver copy
-/// here would be the #880 drift class. A RELATIVE `PI_CODING_AGENT_DIR` is
-/// refused rather than resolved: upstream resolves it against OMP's own cwd,
-/// which pixtuoid cannot know, so any absolutization here would be a
-/// confidently wrong write. Accepted residual: omp discovers extensions
-/// through a gitignore-filtered glob, so a dotfiles-repo ignore rule covering
-/// this path can suppress loading while every check here reads green.
+/// The extensions root is core's [`omp_extensions_dir`], never a second copy of
+/// that resolver (#880). A RELATIVE `PI_CODING_AGENT_DIR` is refused rather
+/// than resolved: upstream resolves it against OMP's own cwd, which pixtuoid
+/// cannot know, so any absolutization here would be a confidently wrong write.
+/// Accepted residual: omp discovers extensions through a gitignore-filtered
+/// glob, so a dotfiles-repo ignore rule covering this path can suppress loading
+/// while every check here reads green.
 ///
 /// [`omp_extensions_dir`]: pixtuoid_core::source::omp::omp_extensions_dir
 pub(crate) fn default_config_path() -> Result<PathBuf> {
@@ -91,13 +90,11 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The managed extension is a CODE artifact, so there is no per-event config
-/// to check: the sentinel, the substituted shim-path placeholder, the
-/// readable baked `HOOK_PATH` for the on-disk stat, and a re-render match.
-/// Nothing re-installs on a pixtuoid upgrade (the opencode precedent), so
-/// without that last one an upgrader keeps their old FORWARD set forever and
-/// doctor says fine — `omp_extension_forward_set_is_pinned` only makes a
-/// change deliberate on the AUTHORING side, leaving the installed base
-/// silent.
+/// to check. The re-render match is the check that isn't obvious: nothing
+/// re-installs on a pixtuoid upgrade (the opencode precedent), so without it an
+/// upgrader keeps their old FORWARD set forever and doctor says fine —
+/// `omp_extension_forward_set_is_pinned` only makes a change deliberate on the
+/// AUTHORING side, leaving the installed base silent.
 pub(crate) fn verify_schema(content: &str) -> crate::install::verify::SchemaParse {
     use crate::install::verify::{SchemaParse, ShimRef};
     if !content.contains(SENTINEL) {
@@ -188,9 +185,10 @@ mod tests {
     }
 
     /// The registered set is a TS `Set`, not a Rust const, so the `*_EVENTS`
-    /// membership pins cannot reach it — an event dropped here never reaches
-    /// the shim, and no other test can see it (the opencode
-    /// `permission.v2.asked` hole).
+    /// membership pins cannot reach it. The binding test above catches a
+    /// one-sided drop; this pin is what stops a SYMMETRIC one — extension and
+    /// decoder deleted together — from shipping silently, the hole opencode's
+    /// `permission.v2.asked` demonstrated.
     #[test]
     fn omp_extension_forward_set_is_pinned() {
         use std::collections::BTreeSet;

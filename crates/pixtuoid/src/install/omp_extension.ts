@@ -10,9 +10,10 @@
 // `session_shutdown` fires during process exit: an un-awaited child loses the
 // race and the empty-session shutdown never arrives (capture-verified).
 //
-// Privacy allowlist: event type, session file/id, cwd, tool name, tool call
-// id, approval state/reason, and process.pid. Never prompts, messages, tool
-// arguments, tool results, or model output.
+// Privacy allowlist: event type, session file/id (plus the previous session's
+// file on a switch or branch), cwd, tool name, tool call id, approval
+// state/reason, and process.pid. Never prompts, messages, tool arguments, tool
+// results, or model output.
 //
 // HOOK_PATH is baked in at install time (a JSON-encoded absolute path). Safe
 // to delete — disconnecting omp in pixtuoid's Sources panel replaces this
@@ -35,9 +36,8 @@ export default function (pi: any) {
   const forward = async (name: string, ev: any, ctx: any) => {
     try {
       const payload: Record<string, unknown> = { type: name }
-      // The CONTEXT's session, deliberately not the event's own copy (the
-      // approval events carry one): ctx names the FILE both transports key
-      // on, and the two agree in every recorded round.
+      // The CONTEXT's session, not the events' own copy: ctx names the FILE
+      // both transports key on, and the two agreed in every recorded round.
       try {
         payload.sessionFile = ctx?.sessionManager?.getSessionFile?.()
       } catch {}
@@ -51,9 +51,8 @@ export default function (pi: any) {
       if (typeof ev?.reason === "string") payload.reason = ev.reason
       if (typeof ev?.approved === "boolean") payload.approved = ev.approved
       // The omp process pid (extensions run in-process). Rust DISCARDS it
-      // today — omp's focus channel is the transcript probe — but stamping it
-      // now means the wire shape is already right if a plugin-stamp channel
-      // ever lands.
+      // today (omp's focus channel is the transcript probe), but stamping it
+      // keeps the wire shape right for a plugin-stamp channel.
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
       // Buffer stdin: no writable stream, no EPIPE window.
       const proc = Bun.spawn([HOOK_PATH, "--source", "omp"], {

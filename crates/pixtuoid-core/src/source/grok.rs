@@ -1404,7 +1404,6 @@ mod tests {
             matches!(&evs[..], [AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
                 if m == "grok-4-code" && e == "high")
         );
-        // Effort is optional on the wire.
         assert!(decode_line(xai_line(json!({"sessionUpdate": "model_changed"}))).is_empty());
     }
 

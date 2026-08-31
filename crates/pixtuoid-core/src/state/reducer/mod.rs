@@ -422,9 +422,16 @@ impl Reducer {
     ///
     /// A Start whose id is a GATED member is the same call re-observed across
     /// an approval round (#951): on Jsonl it is the transcript's Start landing
-    /// while the human still decides — count it, keep Waiting; on Hook it is
-    /// the approval resume — return to Active. Either way `counted_calls`
-    /// keeps one logical call at one count.
+    /// while the human still decides — count it, keep Waiting, and drop its
+    /// richer detail, since a Waiting slot has none to set and the hook resume
+    /// re-labels from the wire's `toolName` (a label-only cost, pinned by
+    /// `the_approval_resume_labels_from_the_wire_tool_name`). On Hook it is the
+    /// approval resume — return to Active.
+    ///
+    /// An UNGATED Start moots the gate list, except while the slot still WAITS
+    /// (a parallel auto-approved tool must not strip a pending approval) or for
+    /// an already-counted id — a late transcript twin whose approval round may
+    /// have queued siblings.
     #[allow(clippy::too_many_arguments)]
     fn apply_activity_start(
         &mut self,
@@ -443,25 +450,14 @@ impl Reducer {
             .as_deref()
             .is_some_and(|t| self.corr.gate_matches(&agent_id, t));
         if gated && from == Transport::Jsonl {
-            // The gated call re-observed on the transcript: count it, keep
-            // Waiting, and deliberately DROP its richer detail — the slot is
-            // Waiting (no Active detail to set) and the hook resume re-labels
-            // from the wire's toolName. A label-only cost, pinned by
-            // `the_approval_resume_labels_from_the_wire_tool_name`.
             self.count_call(scene, agent_id, tool_use_id.as_deref(), &detail, now);
             return;
         }
         if gated {
-            // The approval resume consumes ITS member; parallel gates survive.
             if let Some(t) = tool_use_id.as_deref() {
                 self.corr.remove_gate_member(&agent_id, t);
             }
         } else {
-            // A genuinely NEW tool starting makes the gated correlation moot —
-            // but not while the slot still WAITS (an auto-approved parallel
-            // tool must not strip a pending approval's gate), and not for a
-            // late transcript twin of an already-counted call (its approval
-            // round may have queued siblings).
             let already_counted = tool_use_id.as_deref().is_some_and(|t| {
                 self.corr
                     .counted_calls
@@ -565,8 +561,7 @@ impl Reducer {
         let resolves_wait = self.wait_resolved_by(scene, agent_id, tool_use_id, from);
         if let Some(t) = tool_use_id {
             // A call's End retires ITS gate whether or not it resolved a wait
-            // (a denial, or a parallel tool finishing past its own gate);
-            // sibling approvals keep theirs.
+            // (a denial, or a parallel tool finishing past its own gate).
             self.corr.remove_gate_member(&agent_id, t);
         } else if resolves_wait {
             // A None-id hook end is a TURN end: every gate on this agent is
@@ -608,10 +603,8 @@ impl Reducer {
                 ..
             } = &slot.state
             {
-                // Remember the mid-flight tool so its later PostToolUse (same
-                // tool_use_id) can resolve this permission Wait. REPLACE, not
-                // push: inference is the CC-shaped single-gate path, and
-                // accreting stale inferred members would never self-heal.
+                // REPLACE, not push: an inferred member is a guess, and stale
+                // guesses would accrete with nothing to clear them.
                 self.corr
                     .gated_before_waiting
                     .insert(agent_id, vec![tuid.clone()]);
@@ -673,9 +666,8 @@ impl Reducer {
         from: Transport,
         now: SystemTime,
     ) {
-        // JSONL must never synthesize — a transcript line can be a historical
-        // replay. No in-tree JSONL path emits Identity today; the guard IS the
-        // boundary, not dead code.
+        // No in-tree JSONL path emits Identity today; the guard IS the
+        // boundary, not dead code (replay hazard: see hook synthesis).
         if from != Transport::Hook {
             tracing::debug!(?agent_id, "ignoring Identity on a non-hook transport");
             return;
@@ -1123,10 +1115,7 @@ impl Reducer {
                             .recent_task_drains
                             .insert((*agent_id, tuid.clone()), now);
                         // #152: the drain skips the main arm, so a gate on THIS
-                        // tuid goes stale. Clear ONLY ours — parallels survive.
-                        // Inline (not `remove_gate_member`): `set` still
-                        // borrows `corr.active_tasks`, and a `&mut self` call
-                        // here would be a second mutable borrow.
+                        // tuid goes stale. Inline: `set` still borrows `corr`.
                         if let Some(g) = self.corr.gated_before_waiting.get_mut(agent_id) {
                             g.retain(|m| &**m != tuid.as_str());
                         }

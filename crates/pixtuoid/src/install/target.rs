@@ -154,8 +154,8 @@ pub(crate) const OPENCODE: Target = Target {
     merge_uninstall: crate::install::opencode::merge_uninstall,
     verify_schema: crate::install::opencode::verify_schema,
     binary_strategy: BinaryStrategy::EmbedAbsolute,
-    // A post-uninstall stub still exists, so detect on the plugin sentinel rather
-    // than mere file existence.
+    // A post-uninstall stub still exists, so detect on opencode's own dirs
+    // rather than our plugin file.
     presence_probe: Some(crate::install::opencode::detect_installed),
     extra_artifacts: None,
     post_install_hint: None,

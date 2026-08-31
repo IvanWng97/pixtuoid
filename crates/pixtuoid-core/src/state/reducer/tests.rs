@@ -54,7 +54,7 @@ fn stale_timeout_constants_have_their_intended_durations() {
     assert_eq!(STALE_WAITING_TIMEOUT, Duration::from_secs(3600));
     assert_eq!(STALE_UNKNOWN_CWD_TIMEOUT, Duration::from_secs(180));
     assert_eq!(STALE_SHORT_IDLE_TIMEOUT, Duration::from_secs(300));
-    assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150)); // 2.5× the 60s poll
+    assert_eq!(PROOF_OF_LIFE_TTL, Duration::from_secs(150));
 }
 
 // Synthetic caps on an unregistered source, so the POLICY half stays covered
@@ -483,9 +483,9 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
     use std::path::PathBuf;
     use std::time::{Duration, SystemTime};
 
-    /// ~3× the widest steady-state working set (CHILD_END_RELINK_TTL = 300s at
-    /// ~1 event/s ⇒ ~300 entries) and FAR below ITERS. A bound that merely
-    /// clears the steady state proves nothing about a slow leak.
+    /// ~3× the widest steady-state working set (`CHILD_END_RELINK_TTL` at
+    /// ~1 event/s) and FAR below ITERS. A bound that merely clears the steady
+    /// state proves nothing about a slow leak.
     const MAX_CORR_ENTRIES: usize = 1024;
     const ITERS: u64 = 3_000;
     const MAP_NAMES: [&str; 8] = [

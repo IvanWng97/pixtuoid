@@ -63,8 +63,7 @@ pub fn decode_rx_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
         .and_then(|s| s.as_str())
         .filter(|s| !s.is_empty())
         .ok_or_else(|| anyhow!("reasonix payload missing/empty cwd"))?;
-    // Merged on cwd, either session's end walks the shared sprite out. Older
-    // builds carried no id, which is why the cwd fallback stays.
+    // Merged on cwd, either session's end walks the shared sprite out.
     let key = obj
         .get("sessionId")
         .and_then(|s| s.as_str())

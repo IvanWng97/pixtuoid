@@ -3,13 +3,9 @@
 //! `sources/fixtures/omp/` because the hook decoder derives its keys through
 //! the watcher's `normalize_path_key` FOLD — platform-dependent on Windows,
 //! where omp's stems carry case — while the conformance goldens are
-//! deliberately platform-invariant. Every expectation here derives through
-//! the same fold instead. (Two rounds also break conformance's shape
-//! anyway: a resume's file predates the run, and a task run is two sprites.)
-//!
-//! An "empty" session persists a header (title/session/model entries) but
-//! never a `session_exit` — the bridge's `session_shutdown` is its only end
-//! signal.
+//! deliberately platform-invariant. (Two rounds also break conformance's
+//! shape anyway: a resume's file predates the run, and a task run is two
+//! sprites.)
 
 use std::time::{Duration, SystemTime};
 
@@ -44,7 +40,7 @@ fn events(scenario: &str) -> Vec<AgentEvent> {
 /// The issue's empty-session criterion: a session that shuts down before any
 /// assistant message persists only a header — never a `session_exit` — so
 /// the bridge's `session_shutdown` is the only end signal, and it must
-/// remove the slot on the exit grace, not the 30-minute stale sweep.
+/// remove the slot on the exit grace, not the stale sweep.
 #[test]
 fn an_empty_session_round_registers_then_leaves_on_the_exit_grace() {
     let evs = events("empty-session-recorded");
@@ -77,7 +73,7 @@ fn an_empty_session_round_registers_then_leaves_on_the_exit_grace() {
     );
 }
 
-/// `omp --continue` in a fresh process fires `session_start` on the SAME
+/// `omp -c` in a fresh process fires `session_start` on the SAME
 /// stem-keyed id the earlier life used — the ended session walks back in
 /// through ordinary parentless re-registration (registry row doc).
 #[test]
@@ -173,7 +169,6 @@ fn a_task_round_is_two_linked_lifecycles_under_one_pid() {
         "the root ends as a root, the nested child as a child"
     );
 
-    // One in-process pid on the raw wire — the whole fan-out is one omp.
     let pids: std::collections::BTreeSet<i64> = lines("task-recorded")
         .iter()
         .map(|l| {
@@ -224,12 +219,8 @@ fn each_bridge_round_coalesces_both_transports_onto_one_id() {
             assert_eq!(ev.agent_id(), id, "{scenario}: hook half split");
         }
 
-        // The recorded human ordering: the bridge announces the session, the
-        // transcript persists through the gated call's Start, the approval
-        // round rides the hooks, then the transcript's result + exit land and
-        // the bridge shuts down. (Whole-transcript-first would end the FIRST
-        // life and make the hook round a resurrect — a different, also-valid
-        // path that per-life counting deliberately restarts.)
+        // The recorded human ordering: whole-transcript-first would end the
+        // FIRST life, making the hook round a resurrect that restarts counting.
         let cut = jsonl
             .iter()
             .position(|e| matches!(e, AgentEvent::ActivityEnd { .. }))

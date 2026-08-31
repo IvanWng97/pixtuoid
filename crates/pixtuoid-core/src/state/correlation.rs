@@ -98,7 +98,7 @@ pub(super) enum ToolEventKind {
     End,
 }
 
-/// The eight reducer-private correlation maps. In/out criterion for a future
+/// The reducer-private correlation maps. In/out criterion for a future
 /// map: PASSIVE cross-event memory (consulted to interpret a later event)
 /// lives here; ARMED actions that mutate the scene on a schedule
 /// (`pending_b1_cascades` and its fire pass) stay on `Reducer`.
@@ -150,16 +150,12 @@ pub(super) struct Correlation {
     /// its tool events carry no `tool_use_id`.
     pub(super) gated_before_waiting: HashMap<AgentId, Vec<Arc<str>>>,
     /// Tool calls already counted into `tool_call_count`, so the SAME logical
-    /// call re-observed on the other transport counts once (#951). omp cannot
-    /// use copilot's approve-emits-nothing shape: its transcript writes the
-    /// call BEFORE the approval request goes out (4 ms apart in
-    /// `approval-recorded`), so no later transcript Start exists to clear the
-    /// wait and the resume must be synthesized from the hook — leaving Start
-    /// twins separated by HUMAN latency (7.5 s recorded, 15x
-    /// [`HOOK_WINS_WINDOW`]), which no dedup window can cover. Evicted with
-    /// the slot's correlation (per-life) and TTL-swept at the Waiting
-    /// ceiling as a backstop (a liveness-vouched slot can wait longer; the
-    /// cost past the ceiling is one HUD re-count).
+    /// call re-observed on the other transport counts once (#951). Not
+    /// [`HOOK_WINS_WINDOW`]'s job: omp's transcript writes the call BEFORE the
+    /// approval request goes out, so the two Starts are separated by HUMAN
+    /// approval latency and no dedup window can span them. The backstop TTL is
+    /// the Waiting ceiling because that bounds how long they can straddle; past
+    /// it the cost is one HUD re-count.
     pub(super) counted_calls: HashMap<(AgentId, String), SystemTime>,
 }
 
@@ -181,7 +177,7 @@ pub(super) fn elapsed_at_least(now: SystemTime, ts: SystemTime, ttl: Duration) -
 }
 
 /// [`elapsed_at_least`] with a STRICT `>`. The exit-grace GC's boundary rides
-/// this, so it stays distinct from the inclusive variant.
+/// this.
 pub(super) fn elapsed_past(now: SystemTime, ts: SystemTime, ttl: Duration) -> bool {
     now.duration_since(ts).is_ok_and(|d| d > ttl)
 }

@@ -430,16 +430,26 @@ fn a_recorded_capture_that_was_edited_says_so() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../.gitleaks-identity.toml"),
     )
     .expect(".gitleaks-identity.toml");
-    let names = allow
+    // Both the path rule and the dash-encoded rule carry the placeholder
+    // alternation; they must AGREE, or whichever this positional read lands on
+    // silently narrows the sentinel set.
+    let mut alternations: Vec<&str> = allow
         .split("(?:dev|")
-        .nth(1)
-        .and_then(|s| s.split(')').next())
-        .expect(
-            "the placeholder alternation moved — re-derive this from the rule. Only \
-             the PLACEHOLDER line: the sibling line names infrastructure accounts a \
-             real UNEDITED capture can carry, and reading both made an honest note \
-             look like a silent one",
-        );
+        .skip(1)
+        .filter_map(|s| s.split(')').next())
+        .collect();
+    alternations.dedup();
+    assert_eq!(
+        alternations.len(),
+        1,
+        "the placeholder alternations diverged across rules — re-align them: {alternations:?}",
+    );
+    let names = *alternations.first().expect(
+        "the placeholder alternation moved — re-derive this from the rule. Only \
+         the PLACEHOLDER lines: the sibling lines name infrastructure accounts a \
+         real UNEDITED capture can carry, and reading those made an honest note \
+         look like a silent one",
+    );
     let mut sentinels: Vec<String> = Vec::new();
     for root in ["/Users/", "/home/"] {
         for who in std::iter::once("dev").chain(names.split('|')) {

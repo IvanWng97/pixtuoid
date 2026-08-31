@@ -2,11 +2,11 @@
 //! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`;
 //! [`omp_sessions_dir`] owns every axis of that root. omp has no shell-hook
 //! seam — its hooks are in-process TS extension modules — so the hook plane
-//! is a pixtuoid-owned bridge extension (`pixtuoid/src/install/omp_extension.ts`) whose
-//! payloads [`decode_omp_hook_payload`] claims (#951); the transcript stays
-//! the durable authority and works alone under `omp --no-extensions`. Wire
-//! shape: upstream `packages/coding-agent/src/session/` (transcript) and
-//! `src/extensibility/` (extension events).
+//! is a pixtuoid-owned bridge extension
+//! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
+//! [`decode_omp_hook_payload`] claims (#951). Wire shape: upstream
+//! `packages/coding-agent/src/session/` (transcript) and `src/extensibility/`
+//! (extension events).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -47,9 +47,8 @@ pub fn omp_sessions_dir() -> PathBuf {
     )
 }
 
-/// omp's ACTIVE agent directory, the root its extension loader scans
-/// (`<agent-dir>/extensions/*.ts` — upstream `discovery/builtin.ts` joins
-/// `"extensions"` onto `getAgentDir()`). Same `.env` overlay as
+/// omp's ACTIVE agent directory, the root its extension loader scans (its
+/// [`EXTENSIONS_SUBDIR`] child). Same `.env` overlay as
 /// [`omp_sessions_dir`], same profile/override precedence, but NO XDG
 /// flatten: upstream's `getAgentDir()` returns `dirs.agentDir` un-redirected
 /// (`dirs.ts` applies XDG only per-category via `agentSubdir`), so a
@@ -70,8 +69,7 @@ pub fn omp_agent_dir() -> PathBuf {
 pub(crate) const EXTENSIONS_SUBDIR: &str = "extensions";
 
 /// Where the bridge extension installs: [`omp_agent_dir`] +
-/// [`EXTENSIONS_SUBDIR`]. Lives here rather than in the install target so the
-/// segment sits with the authority that names it.
+/// [`EXTENSIONS_SUBDIR`].
 pub fn omp_extensions_dir() -> PathBuf {
     omp_agent_dir().join(EXTENSIONS_SUBDIR)
 }
@@ -188,8 +186,6 @@ fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<St
     if profile.is_some() {
         return Some((default_agent, true, profile));
     }
-    // The LIVE `PI_PROFILE`: upstream's override resolver re-reads it after the
-    // `.env` overlay, where the frozen `pi_profile` above selected the profile.
     let override_dir = env.agent_dir.clone().filter(|v| {
         let derived = normalize_profile_name(env.pi_profile_live.as_deref())
             .and_then(|p| omp_config_root(env, Some(&p)))
@@ -254,9 +250,9 @@ fn xdg_app_root(
 /// define a key wins, and profile SELECTION is deliberately NOT overlaid — upstream
 /// reuses the frozen profile. Upstream's `$CWD/.env` is the FIRST and
 /// strongest of its four files (`env.ts` iterates project→agent→config→home,
-/// first-wins, and Bun autoloads the cwd dotenv before the resolver freezes)
-/// — unreachable out-of-process because pixtuoid never knows which directory
-/// omp was launched from, not because it is lowest-priority.
+/// first-wins, and Bun autoloads the cwd dotenv before the resolver freezes),
+/// unreachable out-of-process because pixtuoid never knows which directory
+/// omp was launched from.
 fn with_omp_dotenv(env: &OmpEnv, read: &dyn Fn(&Path) -> Option<String>) -> OmpEnv {
     let agent_dir = resolve_omp_agent_dir_parts(env).map(|(dir, _, _)| dir);
     let config_root = omp_config_root(env, resolve_profile(env).as_deref());
@@ -490,14 +486,15 @@ const TITLE_FIELD: &str = "title";
 #[cfg(test)]
 /// The `customType` marking a clean teardown — the ONLY structural end omp writes.
 /// Exported for the drift surface because the guard below falls through to
-/// `_ => vec![]`: rename it upstream and no omp session ever ends cleanly, with no
-/// breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
+/// `_ => vec![]`: rename it upstream and no omp TRANSCRIPT ever ends cleanly,
+/// with no breadcrumb. Pinned by `session_exit_ends_root_not_as_child`.
 pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 /// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
 /// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
 /// end. Skipped when the session never produced an assistant message, and SIGKILL
-/// writes nothing — both fall through to the stale-sweep.
+/// writes nothing — both fall to the stale-sweep, except that the bridge's
+/// `session_shutdown` ends the empty session outright.
 const SESSION_EXIT: &str = "session_exit";
 
 /// The turn role carrying tool calls. Its `model` is read BARE, never the
@@ -780,14 +777,10 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// Identity: `sessionFile` (the ALLOCATED path — omp exposes it before the
 /// lazy persist materializes the JSONL) through the watcher's own
 /// `normalize_path_key` fold then [`omp_id_from_path`], so both transports
-/// mint ONE AgentId per session, nested task children included. The fold
-/// makes every hook-derived key PLATFORM-DEPENDENT (Windows lowercases omp's
-/// case-carrying stems), which is why the bridge's recorded rounds live in
-/// the `tests/sources/omp` module suite deriving expectations through the
-/// same fold, never under the platform-invariant conformance goldens.
-/// `sessionId` (the bare header UUID, a keyspace no stem can collide with —
-/// stems carry the date shape and `_`) covers `--no-session`, where no
-/// transcript will ever exist to coalesce with.
+/// mint ONE AgentId per session, nested task children included. `sessionId`
+/// (the bare header UUID, a keyspace no stem can collide with — stems carry
+/// the date shape and `_`) covers `--no-session`, where no transcript will
+/// ever exist to coalesce with.
 ///
 /// A switch/branch means this omp process now drives the CURRENT file: the
 /// previous one gets its End without waiting for the stale sweep, and the
@@ -868,8 +861,9 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                     tool_use_id: Some(tool_call_id.to_string()),
                 }
             } else if obj.get("approved").and_then(|a| a.as_bool()) == Some(true) {
-                // The resume: `counted_calls` + the gated-member rules keep the
-                // transcript twin of this Start at one count, any order.
+                // The resume. copilot's approve-emits-nothing shape doesn't fit
+                // omp: the transcript wrote this call BEFORE the request, so
+                // only this Start can lift the wait.
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: Some(tool_call_id.to_string()),
@@ -1842,10 +1836,8 @@ mod tests {
         );
     }
 
-    /// The extensions root (`omp_agent_dir`) never XDG-flattens: upstream's
-    /// `getAgentDir()` is `dirs.agentDir` un-redirected, XDG applies only
-    /// per-category through `agentSubdir` — write the bridge to a flattened
-    /// path and omp never loads it while verify reads healthy (#951).
+    /// Write the bridge to a flattened path and omp never loads it while
+    /// verify reads healthy (#951); `omp_agent_dir` owns the mechanism.
     #[test]
     fn the_agent_dir_ignores_xdg_where_the_sessions_dir_flattens() {
         let env = OmpEnv {
@@ -1986,10 +1978,9 @@ mod tests {
         })
     }
 
-    /// omp applies its `.env` files and then REBUILDS the resolver, so a directory
-    /// var living only in a file still moves the sessions dir — reading process env
-    /// alone leaves those users watching an empty dir. The PATH half of the falsy
-    /// fill test is settled earlier, by `path_env` at the READ, and pinned end to
+    /// The `.env` overlay's directory axes — `with_omp_dotenv` owns why a
+    /// file-only var still moves this root. The PATH half of the falsy fill
+    /// test is settled earlier, by `path_env` at the READ, and pinned end to
     /// end by `omp_sessions_dir_honors_non_empty_env_override`.
     #[test]
     fn a_dotenv_directory_var_moves_the_sessions_dir_the_way_omp_does() {

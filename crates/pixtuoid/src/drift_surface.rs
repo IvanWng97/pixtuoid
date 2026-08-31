@@ -1,5 +1,6 @@
-//! This crate's half of the **drift surface** — the hook events we REGISTER,
-//! emitted as data for `check_upstream_drift.py`.
+//! This crate's half of the **drift surface** — the hook events we REGISTER and
+//! the values our shipped artifacts bake in, emitted as data for
+//! `check_upstream_drift.py`.
 //!
 //! `pixtuoid-core` emits what the decoders READ.
 //! `every_registered_*_event_decodes` binds registered→decoded; the reverse is
@@ -40,11 +41,8 @@ fn surface() -> Value {
     registered.insert("openclaw", json!(crate::install::openclaw::OPENCLAW_EVENTS));
     registered.insert("reasonix", json!(crate::install::reasonix::REASONIX_EVENTS));
 
-    // SHIPPED, not decoded or registered: the value rides the plugin we install,
-    // and the gateway port IS the daemon's runtime identity
-    // so a silent upstream bump collapses two
-    // live gateways onto one mascot. Read out of the shipped template rather than
-    // copied, so the watch compares what actually installs.
+    // SHIPPED, not decoded or registered: values that ride the artifacts we
+    // install, read out of those templates so the watch compares what installs.
     let mut shipped: BTreeMap<&str, Value> = BTreeMap::new();
     shipped.insert(
         "openclaw.default_gateway_port",
@@ -59,8 +57,9 @@ fn surface() -> Value {
     json!(root)
 }
 
-/// The fallback port the bundled OpenClaw plugin ships with, read out of the
-/// template itself so the drift watch never compares against a second copy.
+/// The fallback port the bundled OpenClaw plugin ships with. The port IS the
+/// daemon's runtime identity, so a silent upstream bump collapses two live
+/// gateways onto one mascot.
 fn openclaw_default_gateway_port() -> Option<&'static str> {
     let after = crate::install::openclaw::PLUGIN_TEMPLATE
         .split_once("const DEFAULT_GATEWAY_PORT")?
@@ -72,10 +71,7 @@ fn openclaw_default_gateway_port() -> Option<&'static str> {
     (end > 0).then(|| &digits[..end])
 }
 
-/// The upstream extension-API names the bundled omp bridge reads, extracted
-/// from the shipped template itself so the drift watch never compares against
-/// a second copy: every `ev?.<field>` access, plus the `ctx` surface the
-/// forwarder touches (`cwd` and the two `sessionManager` getters).
+/// The upstream extension-API names the bundled omp bridge reads.
 fn omp_extension_reads() -> Vec<String> {
     let template = crate::install::omp::EXTENSION_TEMPLATE;
     let mut names: Vec<String> = template
@@ -154,8 +150,8 @@ mod tests {
     /// rule needs: a hook-registered CLI whose names the watcher never sees has
     /// no upstream watch at all, and every gate stays green because both sides
     /// omit it symmetrically. Derived from the consts themselves, so there is no
-    /// exemption list to drift (opencode registers through its TS plugin's
-    /// FORWARD set and declares no `*_EVENTS` const, so it is absent by
+    /// exemption list to drift (opencode and omp register through their TS
+    /// FORWARD sets and declare no `*_EVENTS` const, so both are absent by
     /// construction, not by exception).
     #[test]
     fn every_install_events_const_reaches_the_fragment() {
@@ -267,7 +263,7 @@ mod tests {
 
     /// Byte-stability across feature unification — the WHY is on
     /// `pixtuoid_core`'s twin of this test, which this deliberately duplicates
-    /// rather than share: a 15-line walker is under the extract-a-helper bar,
+    /// rather than share: a small walker is under the extract-a-helper bar,
     /// and each crate's fragment has to be gated where it is emitted.
     #[test]
     fn every_emitted_object_has_sorted_keys() {

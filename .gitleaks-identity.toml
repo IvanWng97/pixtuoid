@@ -84,9 +84,9 @@ id = "pixtuoid-dash-encoded-home"
 description = "A home path in omp's dash-encoded cwd-directory form"
 # omp encodes a session's cwd into its directory name by replacing separators
 # with dashes, so `/Users/<person>/proj` ships as `--Users-<person>-proj--` —
-# a shape the path rule above cannot see. Keyed on the `-Users-`/`-home-`
-# prefix plus a name segment, never on dash-encoding generally (every omp
-# capture dir legitimately carries `--private-tmp-pixtuoid-capture-proj--`).
+# a shape the path rule above cannot see. Never keyed on dash-encoding
+# generally: every omp capture dir legitimately carries
+# `--private-tmp-pixtuoid-capture-proj--`.
 # KNOWN RESIDUAL: a real account whose name itself contains a dash
 # (`dev-ops`) encodes indistinguishably from placeholder-plus-path-segment
 # and is waived by the anchored allowlist below.

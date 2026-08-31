@@ -1370,7 +1370,6 @@ fixture-pii-selftest:
     # both sailed through the first form of this rule.
     printf '/Users/dev-ops\n'  > "$d/probe/identity-prefix.txt"
     printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
-    # omp's dash-encoded cwd-directory form of a home path.
     printf -- '--Users-carol-Desktop-proj--\n' > "$d/probe/identity-dashed.txt"
     printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
     printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"

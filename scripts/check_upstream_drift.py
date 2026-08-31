@@ -92,11 +92,8 @@ OMP_SESSION_ENTRIES_URL = (
 # that unrelated survivor mask both carrier renames.
 OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
 
-# The bridge extension's surface (#951): lifecycle event declarations live in
-# shared-events.ts, the approval pair + ExtensionContext in the extensions
-# subsystem's types.ts, and the two sessionManager getters the forwarder calls
-# in session-manager.ts. Several names are generic words, so every check below
-# anchors on the DECLARATION form, never a bare quoted word.
+# The bridge extension's surface (#951) — `check_omp_extension_reads` routes
+# each name to the file that declares it.
 OMP_EXT_SHARED_EVENTS_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
     "packages/coding-agent/src/extensibility/shared-events.ts"
@@ -110,13 +107,9 @@ OMP_SESSION_MANAGER_URL = (
     "packages/coding-agent/src/session/session-manager.ts"
 )
 
-# The discovery seam the installer writes INTO: `builtin.ts` joins the
-# extensions subdir onto `getAgentDir()`, and `getAgentDir()` returns the
-# resolver's agent dir un-redirected. There is no second detector for either
-# fact — install writes the file, `verify_schema` reads our own bytes back,
-# and a file omp silently skips leaves no decode breadcrumb — so this watch
-# is the only thing standing between an upstream move and a bridge that
-# installs cleanly and never loads.
+# There is no second detector for the discovery seam: install writes the file,
+# `verify_schema` reads our own bytes back, and a file omp silently skips
+# leaves no decode breadcrumb.
 OMP_EXT_DISCOVERY_URL = (
     "https://raw.githubusercontent.com/can1357/oh-my-pi/main/"
     "packages/coding-agent/src/discovery/builtin.ts"
@@ -957,7 +950,7 @@ def check_omp_title_fields(text: str, fields: set[str], report: Report) -> None:
 def check_omp_extension_reads(
     shared: str, ext_types: str, session_manager: str, fields: set[str], report: Report
 ) -> None:
-    """Each upstream name the bundled bridge extension reads still declares.
+    """Every name the bundled bridge extension reads is still DECLARED upstream.
 
     Routed per name to its declaration site: approval fields inside their
     carrier interface bodies, `previousSessionFile` in shared-events.ts,
@@ -998,9 +991,8 @@ def check_omp_extension_reads(
             is not None
         )
 
-    # `approved` is the one field whose OPTIONALITY carries semantics: the
-    # decoder reads absent-as-denied, safe only while upstream declares it
-    # required. The presence matcher's `\??` cannot see required->optional.
+    # The presence matcher's `\??` cannot see required->optional, and `approved`
+    # is the one field whose optionality carries semantics.
     if "approved" in fields and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies):
         report.add_breaking(
             "omp's `approved` became OPTIONAL upstream — the decoder reads an "

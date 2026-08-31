@@ -96,7 +96,6 @@ fn activity_start_inside_grace_window_cancels_debounce() {
         Transport::Hook,
     );
     assert!(scene.agents.get(&id).unwrap().pending_idle_at.is_some());
-    // A second tool starts well inside the grace window.
     act_start(
         &mut r,
         &mut scene,
@@ -244,8 +243,7 @@ fn active_ms_does_not_double_count_on_duplicate_activity_end() {
 
     r.tick(&mut scene, t1 + Duration::from_secs(3));
     let slot = scene.agents.get(&id).unwrap();
-    // 2600ms = the ONE span t0 → t1+600, EXTENDED by the late end; a second
-    // folded span would read ~4600.
+    // A second folded span would read ~4600.
     assert_eq!(
         slot.active_ms, 2600,
         "active_ms should be the single t0→t1+600 span (2600ms), not double-counted"
@@ -272,7 +270,6 @@ fn active_ms_preserved_when_task_arrives_during_active_tool() {
         Transport::Hook,
     );
 
-    // Task arrives while still Active (within the grace window).
     let t1 = t0 + Duration::from_secs(2);
     r.apply(
         &mut scene,
@@ -353,7 +350,6 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
         Transport::Hook,
     );
 
-    // The gated tool's own PostToolUse arrives.
     let end = t0 + Duration::from_millis(1000);
     act_end(&mut r, &mut scene, id, Some("t1"), end, Transport::Hook);
     let slot = scene.agents.get(&id).unwrap();
@@ -378,12 +374,12 @@ fn gated_tool_end_while_waiting_resolves_to_idle_after_grace() {
     );
 }
 
+/// CC's recorded gate fires PermissionRequest (no tool_use_id) and then, if the
+/// prompt sits, the idle Notification — both decode to Waiting. The second one
+/// must not erase the tool the first remembered, or the approved tool's
+/// PostToolUse resolves nothing and the slot never leaves Waiting.
 #[test]
 fn a_second_waiting_keeps_the_gate_the_first_one_remembered() {
-    // CC's recorded gate fires PermissionRequest (no tool_use_id) and then, if
-    // the prompt sits, the idle Notification — both decode to Waiting. The
-    // second one must not erase the tool the first remembered, or the approved
-    // tool's PostToolUse resolves nothing and the slot never leaves Waiting.
     use pixtuoid_core::state::reducer::ACTIVE_GRACE_WINDOW;
     let mut scene = SceneState::uniform(4);
     let mut r = Reducer::new();
@@ -457,7 +453,6 @@ fn parallel_tool_end_while_waiting_keeps_waiting() {
         Transport::Hook,
     );
 
-    // A different tool ends.
     act_end(
         &mut r,
         &mut scene,
@@ -717,11 +712,9 @@ fn omp_ask_round_waits_then_answer_clears_through_the_reducer() {
 }
 
 // ---------------------------------------------------------------------------
-// omp extension-bridge approval rounds (#951): a hook `Waiting` carrying the
-// gated toolCallId binds the wait to that call, the approval resume/denial
-// resolves it from the Hook transport, and one logical call counts ONCE no
-// matter which transport's events arrive first (human approval latency defeats
-// the HOOK_WINS_WINDOW, so these interleavings are all reachable).
+// omp extension-bridge approval rounds (#951): the interleavings human approval
+// latency makes reachable past `HOOK_WINS_WINDOW` (`counted_calls`' own doc) —
+// each must bind the wait to the gated call id and count it ONCE.
 // ---------------------------------------------------------------------------
 
 use crate::waiting_for;
@@ -765,7 +758,7 @@ fn approval_transcript_start_first_waits_then_resumes_active_counting_once() {
         ActivityState::Waiting { .. }
     ));
 
-    // The approval resume: same call id, Hook transport, seconds later.
+    // The approval resume.
     let t2 = beyond_dedup(beyond_dedup(t0)) + Duration::from_secs(5);
     act_start(
         &mut r,
@@ -806,8 +799,7 @@ fn approval_hook_waiting_first_survives_a_late_transcript_start() {
         ActivityState::Waiting { .. }
     ));
 
-    // The transcript's Start for the SAME gated call lands while the human is
-    // still deciding: it must count the call but NOT lift the Waiting.
+    // The transcript's Start for the SAME gated call, while the human decides.
     let t1 = beyond_dedup(t0);
     act_start(
         &mut r,
@@ -1184,9 +1176,7 @@ fn a_denial_resolving_one_gate_keeps_the_queued_siblings() {
         Transport::Hook,
     );
 
-    // Denying x1 must not forget x2: its later resume is still the approval
-    // round, so it must lift the re-raised wait rather than read as a new
-    // call.
+    // Denying x1 must not forget x2's still-pending gate.
     let t2 = beyond_dedup(t1) + Duration::from_secs(3);
     act_end(&mut r, &mut scene, id, Some("x1"), t2, Transport::Hook);
     let t3 = t2 + Duration::from_secs(1);
@@ -1270,8 +1260,7 @@ fn an_already_resolved_calls_late_transcript_start_keeps_a_sibling_gate() {
         t3,
         Transport::Jsonl,
     );
-    // The straggler counted nothing new and must not have wiped x2's gate:
-    // x2's hook resume still resolves without a re-count.
+    // The straggler must not have wiped x2's gate.
     let t4 = beyond_dedup(t3) + Duration::from_secs(2);
     act_start(
         &mut r,
@@ -1344,6 +1333,9 @@ fn an_auto_approved_parallel_tool_does_not_strip_a_pending_gate() {
     );
 }
 
+/// Hook-first ordering: the transcript's richer detail lands while the slot
+/// Waits and is deliberately dropped, so the resume re-labels from the wire's
+/// toolName — the gated-Jsonl arm's documented label-only cost.
 #[test]
 fn the_approval_resume_labels_from_the_wire_tool_name() {
     let mut scene = SceneState::uniform(4);
@@ -1352,9 +1344,6 @@ fn the_approval_resume_labels_from_the_wire_tool_name() {
     start(&mut r, &mut scene, id);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    // Hook-first ordering: the transcript's richer detail lands while the
-    // slot Waits and is deliberately dropped; the resume re-labels from the
-    // wire's toolName (the gated-Jsonl arm's documented label-only cost).
     waiting_for(
         &mut r,
         &mut scene,
@@ -1392,6 +1381,9 @@ fn the_approval_resume_labels_from_the_wire_tool_name() {
     }
 }
 
+/// The CC shape, not omp's: a hook Start whose JSONL twin lands past
+/// `HOOK_WINS_WINDOW` (an FSEvents-coalesced poll). Before `counted_calls` this
+/// double-incremented the HUD count.
 #[test]
 fn a_transcript_twin_past_the_dedup_window_counts_once() {
     let mut scene = SceneState::uniform(4);
@@ -1400,9 +1392,6 @@ fn a_transcript_twin_past_the_dedup_window_counts_once() {
     start(&mut r, &mut scene, id);
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
 
-    // The CC shape: a hook Start whose JSONL twin lands past
-    // HOOK_WINS_WINDOW (an FSEvents-coalesced poll). Before `counted_calls`
-    // this double-incremented the HUD count.
     act_start(
         &mut r,
         &mut scene,
