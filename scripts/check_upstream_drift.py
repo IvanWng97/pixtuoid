@@ -523,6 +523,9 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
 CODEX_KNOWN_OMITTED: dict[str, str] = {
     "local_shell_call": "no `local_shell_call_output` sibling exists to end it",
     "image_generation_call": "no `image_generation_call_output` sibling exists to end it",
+    "realtime_item": "voice-mode presentation reconstruction — upstream's own doc calls "
+    "it 'sparse, model-invisible facts used to reconstruct realtime presentation'; its "
+    "speech segments are content, which no decoder here reads",
 }
 
 
