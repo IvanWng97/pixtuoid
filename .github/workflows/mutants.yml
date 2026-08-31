@@ -31,6 +31,8 @@ jobs:
       - uses: taiki-e/install-action@cargo-mutants
       - uses: taiki-e/install-action@cargo-nextest
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       # workflow_dispatch has no pull_request context, so MUTANTS_BASE is left
       # empty — `just mutants` falls back to its origin/main default.
       - name: Mutation-test the diff vs main (advisory, non-blocking)

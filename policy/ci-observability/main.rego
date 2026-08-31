@@ -100,7 +100,13 @@ expected_actionlint_paths := {
 	release_workflow_path: {"ignore": [actionlint_release_queue_ignore]},
 }
 
-expected_zizmor_rules := {"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}}
+expected_zizmor_rules := {
+	# Disabled until the actionlint pin understands the `$/` syntax the audit
+	# nudges toward (see the config file's own comment).
+	"self-repository": {"disable": true},
+	"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}},
+}
+
 expected_claude_oauth_fallback := "${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}"
 
 codecov_oidc_job_names := {

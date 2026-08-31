@@ -23,6 +23,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
 
       # Guards the parsers before the live check trusts them. Duplicates
       # ci-lint.yml's `hygiene` job because ci-lint does not run on the cron.

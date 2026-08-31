@@ -1,6 +1,11 @@
 # yaml-language-server: $schema=https://json.schemastore.org/zizmor.json
 
 rules:
+  # actionlint's released generation (v1.7.12) rejects the `$/` self-repository
+  # syntax this audit nudges toward; re-enable when the actionlint pin
+  # understands it.
+  self-repository:
+    disable: true
   unpinned-uses:
     config:
       # Symbolic refs are accepted by repository policy; zizmor still rejects

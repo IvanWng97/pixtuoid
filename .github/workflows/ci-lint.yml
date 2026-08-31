@@ -51,6 +51,8 @@ jobs:
       # cargo is enough — but cargo-deny DOES shell out to `cargo metadata`.
       - uses: taiki-e/install-action@cargo-deny
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just deny
 
   machete:
@@ -64,6 +66,8 @@ jobs:
       # cargo-machete parses manifests and does not need a Rust toolchain.
       - uses: taiki-e/install-action@cargo-machete
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just machete
 
   hygiene:
@@ -93,7 +97,7 @@ jobs:
         run: pipx install check-jsonschema==0.37.4
       - uses: taiki-e/install-action@v2
         with:
-          tool: lychee@0.24.2,zizmor@1.28.0
+          tool: lychee@0.24.2,zizmor@1.30.0
           fallback: cargo-binstall
       - uses: taiki-e/install-action@v2
         with:
@@ -113,6 +117,8 @@ jobs:
           sudo install -m 0755 /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just shfmt-check
       - run: just shellcheck
       - run: just actionlint
@@ -148,6 +154,8 @@ jobs:
       # No rust-cache on purpose: it would key the runner's stable compiler,
       # while the MSRV recipe installs the exact rust-version toolchain.
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just msrv
 
   notes-curated:
@@ -159,6 +167,8 @@ jobs:
         with:
           persist-credentials: false
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just notes-curated
 
   npm-gen:
@@ -174,6 +184,8 @@ jobs:
         with:
           node-version: 22
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just npm-check
 
   readme:
@@ -190,6 +202,8 @@ jobs:
         with:
           node-version: 22
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just gen-readme-check
 
   # cargo-public-api complements semver: one classifies compatibility, while
@@ -211,6 +225,8 @@ jobs:
       - name: Install cargo-public-api (pinned to match the committed goldens)
         run: cargo binstall -y cargo-public-api@0.52.0
       - uses: extractions/setup-just@v4
+        with:
+          just-version: "1.58.0"
       - run: just api-surface-check
 
   # rustdoc warnings and doctests are invisible to clippy and nextest.

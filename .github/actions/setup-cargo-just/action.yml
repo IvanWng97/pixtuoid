@@ -31,3 +31,5 @@ runs:
         prefix-key: v1-rust
 
     - uses: extractions/setup-just@v4
+      with:
+        just-version: "1.58.0"
