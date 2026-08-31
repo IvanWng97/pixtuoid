@@ -139,11 +139,15 @@ hook_hands_just() {
     # .git, and the hook then dies before `exec` — passing the check vacuously.
     # shellcheck disable=SC2046  # the var list must word-split
     (unset $(git rev-parse --local-env-vars) && git init -q "$s/repo")
+    # Reports EVERY local-env-var still set, not just GIT_DIR: a scrub narrowed
+    # to GIT_DIR alone leaves GIT_INDEX_FILE relocating the index, which is half
+    # of what outranks `git -C <dir>` in #893, and would otherwise pass here.
     # shellcheck disable=SC2016  # the stub's own script text, not expansion
-    printf '#!/usr/bin/env bash\nprintf "%%s" "${GIT_DIR:-}" >"%s/seen"\n' "$s" >"$s/bin/just"
+    printf '#!/usr/bin/env bash\nfor v in $(git rev-parse --local-env-vars); do [ -n "${!v:-}" ] && printf "%%s " "$v"; done >"%s/seen"\nexit 0\n' "$s" >"$s/bin/just"
     chmod +x "$s/bin/just"
     (cd "$s/repo" && env PATH="$s/bin:$PATH" GIT_DIR="$s/repo/.git" \
-        GIT_INDEX_FILE="$s/repo/.git/index" bash "$hook" origin y </dev/null) >/dev/null 2>&1
+        GIT_INDEX_FILE="$s/repo/.git/index" GIT_WORK_TREE="$s/repo" \
+        bash "$hook" origin y </dev/null) >/dev/null 2>&1
     cat "$s/seen" 2>/dev/null
 }
 
@@ -157,7 +161,7 @@ check "the harness actually poisons a hook's env (control fires)" \
 for hook in "$(e2e_repo_root)"/.githooks/*; do
     name=$(basename "$hook")
     case " $hooks_exempt_from_scrub " in *" $name "*) continue ;; esac
-    check "$name hands preflight no repo-relocating GIT_DIR" \
+    check "$name leaks no repo-relocating git env to preflight" \
         test -z "$(hook_hands_just "$hook")"
 done
 
