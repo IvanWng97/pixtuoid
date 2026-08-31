@@ -79,6 +79,10 @@ fn surface() -> Value {
         json!(crate::source::omp::DECODED_TITLE_FIELDS),
     );
     decoded.insert(
+        "omp.hook_events",
+        json!(crate::source::omp::DECODED_HOOK_EVENTS),
+    );
+    decoded.insert(
         "copilot.kinds",
         json!(crate::source::copilot::DECODED_KINDS),
     );
@@ -291,6 +295,7 @@ mod tests {
             ("copilot.rs", "let out = match kind {", "DECODED_KINDS"),
             ("opencode.rs", "match event {", "DECODED_EVENTS"),
             ("opencode.rs", "match status {", "DECODED_PART_STATUSES"),
+            ("omp.rs", "match ty {", "DECODED_HOOK_EVENTS"),
         ];
         for (file, dispatch, export) in rows {
             assert_arms_match_export(file, dispatch, export);

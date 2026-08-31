@@ -470,8 +470,8 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
             // matches and the label falls back to the bare `ag` prefix.
             cwd_extractor: extract_top_level_cwd,
         }),
-        // A real spec despite the missing install target (unlike copilot/omp, which
-        // have no hook path at all): the payload does decode via the shared arms.
+        // A real spec despite the missing install target (unlike copilot, which
+        // has no hook path at all): the payload does decode via the shared arms.
         hook: Some(HookDecoding {
             id_key: IdKey::TranscriptPathThenSessionId,
             tool_id_key: ToolIdKey::ToolUse,
@@ -745,11 +745,17 @@ const GROK: SourceDescriptor = SourceDescriptor {
     },
 };
 
-/// Oh My Pi (`omp`, omp.sh). TRANSCRIPT-ONLY: the whole lifecycle is persisted
-/// to `<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl` and omp has NO
-/// shell-hook seam (its hooks are in-process TS extensions), so it needs no
-/// install target and no custom hook decoder. Subagents persist as SEPARATE
-/// nested files (`<parent-stem>/<taskId>.jsonl`), parent-linked by path.
+/// Oh My Pi (`omp`, omp.sh). HYBRID: the durable authority is the transcript
+/// at `<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`; the bridge
+/// extension (`install/omp_extension.ts`, auto-discovered from the agent
+/// dir's `extensions/`) forwards what the transcript can never carry —
+/// pre-persist presence, empty-session shutdown, and the approval wait
+/// (#951). Both transports key on the sessionFile stem chain
+/// ([`omp::omp_id_from_path`]), so they mint ONE AgentId per session — the
+/// grok same-key pattern. Under `omp --no-extensions`, or with the bridge
+/// broken or absent, the transcript path IS the old transcript-only source.
+/// Subagents persist as SEPARATE nested files (`<parent-stem>/<taskId>.jsonl`),
+/// parent-linked by path.
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
@@ -765,13 +771,22 @@ const OMP: SourceDescriptor = SourceDescriptor {
             path_filter: accept_all_paths,
             cwd_extractor: extract_top_level_cwd,
         }),
-        hook: None,
+        hook: Some(HookDecoding {
+            id_key: IdKey::SessionId,        // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse, // inert: custom claims all
+            custom: Some(HookCustom::ClaimsAll(omp::decode_omp_hook_payload)),
+        }),
         caps: SourceCaps {
             // The `session_exit` entry is appended + flushed on every clean
-            // teardown incl. SIGINT/SIGTERM; SIGKILL falls to the stale-sweep.
+            // teardown incl. SIGINT/SIGTERM (and the bridge fires
+            // `session_shutdown` even for empty sessions the entry skips);
+            // SIGKILL falls to the stale-sweep.
             has_exit_signal: true,
-            // The header `SessionStart` decodes once per transcript life, so a
-            // swept session does not walk back in.
+            // The header `SessionStart` decodes once per transcript life. A
+            // `--resume` fires the bridge's `session_start` on the SAME id
+            // (probe-verified, omp 18.0.11), so an ended session CAN walk
+            // back in — through the SessionStart arm's ordinary parentless
+            // re-registration, not this prompt-resurrect flag.
             resurrects_on_prompt: false,
             // The `task` dispatch emits a toolCall/toolResult pair on the parent
             // AND the child persists its own parent-linked transcript.

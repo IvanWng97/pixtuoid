@@ -971,6 +971,7 @@ const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
     "codewhale",
     "grok",
     "hermes",
+    "omp",
     "opencode",
     "reasonix",
     // LIVE (`custom: None`), just unexercised: a hook spec with no install target,
