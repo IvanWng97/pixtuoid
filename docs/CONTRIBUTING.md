@@ -128,7 +128,12 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
 5. **Mock gate** (taste/visual work only) — ratify the AFTER visual before code
    (`beautify-decoration` skill).
 6. **Build** — TDD: failing test → minimal impl → commit.
-7. **Self-review** — a standards+spec pass before pushing. Not the merge gate.
+7. **Self-review** — a standards+spec pass before pushing, INCLUDING the
+   whole-file comment audit: every file the PR touches — even by one line —
+   gets its entire comment population re-read against `CLAUDE.md`'s comment
+   rules, and the cleanup rides the same PR (population and dispositions:
+   [`pr-review.prompt.md`](../.github/prompts/pr-review.prompt.md)'s
+   always-on comment row). Not the merge gate.
 8. **Merge gate (non-negotiable)** — the **two-lens review** (2+ differentiated
    lenses on the diff) + green CI + every online-bot finding dispositioned,
    judged under the `two-lens-review` skill's **convergence contract**: churn
