@@ -80,7 +80,7 @@ export function apply(ctx) {
           send({
             type: "tool_call",
             ...base(header),
-            callId: String(d.callId),
+            ...(d.callId ? { callId: String(d.callId) } : {}),
             toolName: d.name,
           })
           break

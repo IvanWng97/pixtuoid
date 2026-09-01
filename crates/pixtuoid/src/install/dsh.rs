@@ -186,9 +186,10 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The patch file carries the MOUNT, not the shim (that is baked inside the
-/// plugin file) — so `shim` stays `Unknown` here; a stale or missing plugin
-/// file is `verify_extra_artifacts`' whole-file compare (nothing re-installs
-/// on a pixtuoid upgrade — that check is what catches an old bake).
+/// plugin file) — so `shim` stays `Unknown` here; a missing plugin file is
+/// `verify_extra_artifacts`' existence check and a stale one its whole-file
+/// compare (nothing re-installs on a pixtuoid upgrade). The schema's own,
+/// stat-free half is the row-vs-home path match below.
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let rows = match parse_rows(content) {
         Ok(rows) => rows,
@@ -222,8 +223,22 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             match name {
                 // PURE over the content (`target.rs` schema contract): file
                 // existence/staleness is `verify_extra_artifacts`' stat +
-                // whole-file compare, never checked here.
-                Some(n) if Path::new(&n).is_absolute() => {}
+                // whole-file compare, never checked here. The HOME match is
+                // this check's own: the artifact loop stats only the path
+                // derived from the current `$DSH_HOME`, so a row carried
+                // over from a relocated home would verify green while dsh
+                // imports a path that is gone.
+                Some(n) if Path::new(&n).is_absolute() => {
+                    if let Ok(expected) = plugin_path() {
+                        if Path::new(&n) != expected {
+                            parse.issues.push(format!(
+                                "the mount row points at {n}, not this home's \
+                                 plugin ({}) — reconnect dsh to re-mount",
+                                expected.display()
+                            ));
+                        }
+                    }
+                }
                 Some(n) => parse.issues.push(format!(
                     "the mount row's plugin path {n} is not absolute — dsh's loader only \
                      imports bare absolute paths"
@@ -284,8 +299,8 @@ mod tests {
         for ty in plugin_wire_types() {
             let payload = serde_json::json!({
                 "type": ty, "sessionId": sid, "cwd": "/r",
-                "callId": "c1", "toolName": "bash", "approvalId": "a1",
-                "outcome": "allowed-once", "model": "m", "provider": "p",
+                "callId": "c1", "toolName": "bash",
+                "outcome": "allowed-once", "model": "m",
                 "inputTokens": 1, "outputTokens": 1,
             });
             let evs = decode_dsh_payload(&payload).expect("decodes");
@@ -323,6 +338,23 @@ mod tests {
         assert!(
             !PLUGIN_TEMPLATE.contains("await"),
             "an await inside a listener is a stall waiting to be awaited"
+        );
+        // The scanners key on the literal `ctx.on(` — a `ctx.on?.(` variant
+        // would register a listener both they and the allowlist miss.
+        assert_eq!(PLUGIN_TEMPLATE.matches("ctx.on").count(), 3);
+    }
+
+    #[test]
+    fn the_plugin_guards_call_id_against_stringified_undefined() {
+        // `String(undefined)` is the literal "undefined" on the wire, which
+        // defeats the decoder's missing-field breadcrumb (JSON.stringify
+        // drops undefined VALUES, but String() manufactures one).
+        assert_eq!(
+            PLUGIN_TEMPLATE
+                .matches(r#"...(d.callId ? { callId: String(d.callId) } : {})"#)
+                .count(),
+            2,
+            "tool/call and approval/asked both guard callId"
         );
     }
 
@@ -412,6 +444,20 @@ mod tests {
         let merged = merge_install("", "/unused").unwrap();
         let ok = verify_schema(&merged.content);
         assert!(ok.issues.is_empty(), "{ok:?}");
+
+        // A row carried over from a relocated home: the artifact loop stats
+        // only the CURRENT home's derived path, so the schema owns this.
+        let other = tempfile::tempdir().unwrap();
+        std::env::set_var("DSH_HOME", other.path());
+        let stale = verify_schema(&merged.content);
+        assert!(
+            stale
+                .issues
+                .iter()
+                .any(|i| i.contains("not this home's plugin")),
+            "{stale:?}"
+        );
+        std::env::set_var("DSH_HOME", home.path());
 
         let relative = "- insert:\n    - id: pixtuoid\n      name: relative/plugin.mjs\n";
         let rel = verify_schema(relative);

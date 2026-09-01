@@ -1,6 +1,5 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
-assertion_line: 347
 expression: events
 ---
 - SessionStart:

@@ -223,7 +223,6 @@ mod tests {
     fn session_start_registers_and_trails_the_pid_carrier() {
         let evs = decode(json!({
             "type": "session_start", "sessionId": SID, "cwd": "/repo",
-            "reason": "startup",
         }));
         match &evs[..] {
             [AgentEvent::SessionStart {
@@ -248,7 +247,7 @@ mod tests {
         let parent = "01b00000-0000-7000-8000-0000000000aa";
         let evs = decode(json!({
             "type": "session_start", "sessionId": SID, "cwd": "/repo",
-            "parentSession": parent, "reason": "startup",
+            "parentSession": parent,
         }));
         assert!(
             matches!(&evs[..], [AgentEvent::SessionStart { parent_id: Some(p), .. }, AgentEvent::Identity { .. }]
@@ -297,7 +296,6 @@ mod tests {
         }
         let evs = decode(json!({
             "type": "tool_result", "sessionId": SID, "callId": "call_1",
-            "isError": false,
         }));
         assert!(matches!(
             &evs[..],
@@ -310,7 +308,7 @@ mod tests {
     fn approval_asked_waits_on_the_named_call_and_allowed_once_resumes_it() {
         let evs = decode(json!({
             "type": "approval_asked", "sessionId": SID,
-            "approvalId": "ap_1", "callId": "call_9",
+            "callId": "call_9",
             "toolName": "bash", "reason": "rm -rf",
         }));
         match &evs[..] {
@@ -326,7 +324,7 @@ mod tests {
         }
         let evs = decode(json!({
             "type": "approval_decided", "sessionId": SID,
-            "approvalId": "ap_1", "callId": "call_9",
+            "callId": "call_9",
             "toolName": "bash", "outcome": "allowed-once",
         }));
         assert!(matches!(
@@ -341,7 +339,7 @@ mod tests {
         for outcome in ["rejected", "cancelled", "unavailable"] {
             let evs = decode(json!({
                 "type": "approval_decided", "sessionId": SID,
-                "approvalId": "ap_1", "callId": "call_9", "outcome": outcome,
+                "callId": "call_9", "outcome": outcome,
             }));
             assert!(
                 matches!(
@@ -358,7 +356,7 @@ mod tests {
     fn model_and_usage_map_to_their_events_with_fresh_spend_semantics() {
         let evs = decode(json!({
             "type": "model", "sessionId": SID,
-            "provider": "deepseek", "model": "deepseek-v3", "reasoningEffort": "high",
+            "model": "deepseek-v3", "reasoningEffort": "high",
         }));
         assert!(matches!(
             &evs[..],
