@@ -1,0 +1,24 @@
+name: 'Require Jobs'
+description: 'Fails unless every needed job succeeded — skipped and cancelled red too'
+
+inputs:
+  results:
+    description: 'toJSON(needs) of the calling aggregator job'
+    required: true
+  label:
+    description: 'Failure-message prefix naming the group'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - shell: bash
+      env:
+        RESULTS: ${{ inputs.results }}
+        LABEL: ${{ inputs.label }}
+      run: |
+        failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
+        if [[ -n "$failures" ]]; then
+          echo "::error::${LABEL}: ${failures//$'\n'/, }"
+          exit 1
+        fi

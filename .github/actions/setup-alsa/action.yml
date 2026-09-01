@@ -1,0 +1,25 @@
+name: 'Setup ALSA'
+description: 'Installs the ALSA headers the default-on audio feature needs on Linux'
+
+runs:
+  using: 'composite'
+  steps:
+    # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD on
+    # Linux (#633) — alsa-sys's build script PANICS when pkg-config can't find
+    # them. Bound flaky hosted-runner mirrors and retry the complete apt
+    # operation (the smoke job's ffmpeg envelope).
+    - name: Install ALSA headers
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
+        for attempt in 1 2 3; do
+          if sudo apt-get update "${apt_opts[@]}" \
+            && sudo apt-get install -y "${apt_opts[@]}" libasound2-dev; then
+            exit 0
+          fi
+          echo "ALSA install attempt $attempt failed; retrying in $((attempt * 15))s..." >&2
+          sleep "$((attempt * 15))"
+        done
+        echo "ALSA install failed after 3 attempts" >&2
+        exit 1

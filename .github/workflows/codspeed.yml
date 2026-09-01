@@ -26,8 +26,11 @@ on:
       - "Cargo.lock"
       - ".github/workflows/codspeed.yml"
 
-permissions:
-  contents: read
+concurrency:
+  group: codspeed-${{ github.ref }}
+  # Same rule as ci.yml: never cancel an in-flight main run — that is the trend
+  # point; stacked PR pushes cancel.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   codspeed:
