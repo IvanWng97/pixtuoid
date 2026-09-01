@@ -18,7 +18,7 @@ use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, Yam
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
-/// The mount row's `id` — uninstall and the one-row verify both key on it.
+/// The mount entry's `id` — uninstall and the one-entry verify key on it.
 const PLUGIN_ID: &str = "pixtuoid";
 
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
@@ -250,7 +250,7 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     match ours.len() {
         0 => parse
             .issues
-            .push("no pixtuoid mount row — dsh never loads the plugin".to_string()),
+            .push("no pixtuoid mount entry — dsh never loads the plugin".to_string()),
         1 => {
             let name = ours[0].get(&ystr("name")).and_then(|n| match n {
                 YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
@@ -268,7 +268,7 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                     if let Ok(expected) = plugin_path() {
                         if Path::new(&n) != expected {
                             parse.issues.push(format!(
-                                "the mount row points at {n}, not this home's \
+                                "the mount entry points at {n}, not this home's \
                                  plugin ({}) — reconnect dsh to re-mount",
                                 expected.display()
                             ));
@@ -276,12 +276,12 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                     }
                 }
                 Some(n) => parse.issues.push(format!(
-                    "the mount row's plugin path {n} is not absolute — dsh's loader only \
+                    "the mount entry's plugin path {n} is not absolute — dsh's loader only \
                      imports bare absolute paths"
                 )),
                 None => parse
                     .issues
-                    .push("the pixtuoid mount row carries no plugin path".to_string()),
+                    .push("the pixtuoid mount entry carries no plugin path".to_string()),
             }
         }
         n => parse.issues.push(format!(
@@ -295,8 +295,9 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
 mod tests {
     use super::*;
 
-    /// The template's leading marker — uninstall keys on the patch ROW (not
-    /// this), so the sentinel is a recognizer for humans and this test only.
+    /// The template's leading marker — uninstall keys on the entry's `id`
+    /// (not this), so the sentinel is a recognizer for humans and this test
+    /// only.
     const SENTINEL: &str = "@pixtuoid-dsh-plugin";
 
     /// Every `type: "<wire name>"` the plugin sends, extracted from the template.
@@ -511,7 +512,7 @@ mod tests {
         assert!(none
             .issues
             .iter()
-            .any(|i| i.contains("no pixtuoid mount row")));
+            .any(|i| i.contains("no pixtuoid mount entry")));
 
         // The plugin file does not exist on disk, yet the schema reads
         // clean: verify_schema is PURE over the content — a missing file is
