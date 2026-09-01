@@ -10,10 +10,7 @@ runs:
         prefix-key: v1-rust
         # rust-cache isolates by OS, so one shared-key is safe across platforms.
         shared-key: packaging-build
-    - name: Install ALSA headers (Linux only)
-      if: runner.os == 'Linux'
-      shell: bash
-      run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+    - uses: ./.github/actions/setup-alsa
     - name: cargo install --locked (both binaries, default features)
       shell: bash
       run: |

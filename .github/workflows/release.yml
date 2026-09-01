@@ -30,10 +30,7 @@ jobs:
           # Full history for the tag-on-main ancestry check below.
           fetch-depth: 0
           persist-credentials: false
-      # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD on
-      # Linux (#633) — alsa-sys's build script PANICS when pkg-config can't find them.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
@@ -58,7 +55,7 @@ jobs:
           # so it validates against the base version.
           TAG_VERSION="${GITHUB_REF_NAME#v}"
           TAG_VERSION="${TAG_VERSION%%-*}"
-          CARGO_VERSION=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          CARGO_VERSION=$(just workspace-version)
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
             echo "::error::Tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${CARGO_VERSION}"
             exit 1
@@ -120,9 +117,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y musl-tools
 
       - name: Build
-        # Linux artifacts build WITHOUT the audio feature: musl can't link ALSA
-        # statically and the aarch64 cross image has no ALSA headers (#633).
-        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
+        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}"
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
@@ -192,9 +187,7 @@ jobs:
         uses: taiki-e/install-action@cargo-deb
 
       - name: Build
-        # Linux artifacts build WITHOUT the audio feature: musl can't link ALSA
-        # statically and the aarch64 cross image has no ALSA headers (#633).
-        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}" "${{ contains(matrix.target, 'linux') && '--no-default-features' || '' }}"
+        run: just build-target ${{ matrix.target }} "${{ matrix.cross || 'false' }}"
 
       - name: Build .deb packages
         run: just deb ${{ matrix.target }}
@@ -278,12 +271,12 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      # `cargo publish` BUILDS each crate to verify it, and default features pull
-      # rodio -> cpal -> ALSA headers. Without these the loop irreversibly publishes
-      # the earlier crates, then fails to compile pixtuoid — stranding the release
-      # half-published at a version that can never be reused.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      # `cargo publish` BUILDS each crate to verify it, and default features
+      # pull rodio -> cpal -> the ALSA headers. Without them the loop
+      # irreversibly publishes the earlier crates, then fails to compile
+      # pixtuoid — stranding the release half-published at a version that can
+      # never be reused.
+      - uses: ./.github/actions/setup-alsa
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust

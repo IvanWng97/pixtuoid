@@ -33,9 +33,14 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 SHELL_SOURCES := "scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
-# nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
-# cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
+# nightly-only). Provisioned by `_api-toolchain`.
 API_NIGHTLY := "nightly-2026-07-22"
+
+# The cargo-public-api the api/ goldens are reproducible against — tool-exact:
+# a different version rewrites them all. ci-lint.yml installs its own copy;
+# `_api-toolchain` asserts the pair, so divergence fails loud instead of
+# churning goldens.
+API_PUBLIC_API := "0.52.0"
 
 # List available recipes.
 default:
@@ -421,7 +426,7 @@ semver:
 # public surface changes.
 [group('rust')]
 [doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
-api-surface: _api-nightly
+api-surface: _api-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
     # cargo-public-api only honors RUSTUP_TOOLCHAIN when the invoked `cargo` is
@@ -436,7 +441,7 @@ api-surface: _api-nightly
 
 [group('rust')]
 [doc("Fail if a published crate's public API drifted from the api/ goldens (CI-only)")]
-api-surface-check: _api-nightly
+api-surface-check: _api-toolchain
     #!/usr/bin/env bash
     set -euo pipefail
     # See `api-surface`: force the rustup proxy cargo so RUSTUP_TOOLCHAIN is honored.
@@ -453,14 +458,23 @@ api-surface-check: _api-nightly
     done
     exit "$fail"
 
-# Self-provision the api-surface pinned nightly (rustdoc JSON is nightly-only) if
-# it isn't already installed — the same idempotent posture as setup-tools. The
-# minimal profile carries rustdoc (bundled with rustc), all cargo-public-api
-# needs to build the crate's rustdoc JSON.
+# Both halves of the goldens' reproducibility contract: refuse a mismatched
+# cargo-public-api, then self-provision the pinned nightly (rustdoc JSON is
+# nightly-only) if it isn't already installed. The minimal profile carries
+# rustdoc (bundled with rustc), all cargo-public-api needs.
 [private]
-_api-nightly:
+_api-toolchain:
     #!/usr/bin/env bash
     set -euo pipefail
+    have="$(cargo public-api --version 2>/dev/null | awk '{print $NF}' || true)"
+    if [ -z "$have" ]; then
+        echo "error: cargo-public-api not installed — goldens need {{ API_PUBLIC_API }} (just setup-tools)" >&2
+        exit 1
+    fi
+    if [ "$have" != "{{ API_PUBLIC_API }}" ]; then
+        echo "error: cargo-public-api $have installed, goldens need {{ API_PUBLIC_API }} (just setup-tools)" >&2
+        exit 1
+    fi
     command -v rustup >/dev/null || { echo "rustup not found — install {{API_NIGHTLY}} manually for api-surface" >&2; exit 1; }
     rustup toolchain list | grep -q '{{API_NIGHTLY}}' && exit 0
     echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
@@ -690,15 +704,22 @@ replay fixture delay="3":
 build *args:
     cargo build --workspace {{ args }}
 
+# packaging-build/action.yml keeps its own just-free parse of the same line —
+# that composite deliberately never installs just (see ci-builds.yml).
+[group('rust')]
+[doc("Print the workspace version — release.yml's tag check and `just bump` read it")]
+workspace-version:
+    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
+
 # Cross-compile a release build for ONE target triple (release.yml's build
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
 # (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
 # than defaulted because callers pass it POSITIONALLY: an unquoted, unset
-# matrix.cross expands to nothing, and the collapse slid `flags` into this slot
-# on both Linux legs that omit the key — pinned by the arg-shift case below.
+# matrix.cross once slid the next argument into this slot on both Linux legs
+# that omit the key — pinned by the arg-shift case below.
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
-build-target target cross="false" flags="":
+build-target target cross="false":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
@@ -711,14 +732,20 @@ build-target target cross="false" flags="":
         exit 1
         ;;
     esac
-    # flags: extra cargo flags — release.yml passes --no-default-features for
-    # every LINUX artifact (musl can't link ALSA statically; the aarch64 cross
-    # image has no ALSA headers), so prebuilt Linux binaries ship SILENT and
-    # Linux audio is a from-source feature (#633; see docs/CONFIGURATION.md).
+    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
+    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
+    # Linux binaries ship SILENT and Linux audio is a from-source feature
+    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag
+    # is a property of the target. $flags stays UNQUOTED below — quoting the
+    # empty non-Linux case would pass cargo an empty positional arg.
+    flags=""
+    case "{{ target }}" in
+    *linux*) flags="--no-default-features" ;;
+    esac
     if [ "$use_cross" = "true" ]; then
-        cross build --release --target "{{ target }}" {{ flags }}
+        cross build --release --target "{{ target }}" $flags
     else
-        cargo build --release --target "{{ target }}" {{ flags }}
+        cargo build --release --target "{{ target }}" $flags
     fi
 
 # Package the .deb for ONE already-built target (release.yml's deb job, hence
@@ -1020,7 +1047,7 @@ bump version:
     if ! git diff --quiet || ! git diff --cached --quiet; then
         echo "error: uncommitted changes — commit or stash before bumping" >&2; exit 1; fi
 
-    cur="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+    cur="$(just workspace-version)"
 
     # 3. must be strictly newer than the current version
     if [[ "$ver" == "$cur" || "$(printf '%s\n%s\n' "$cur" "$ver" | sort -V | tail -1)" != "$ver" ]]; then
@@ -1154,9 +1181,8 @@ verify: preflight site-check gen-check
 setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
-    # cargo-public-api is PINNED (the `just api-surface` goldens are reproducible
-    # only against an exact tool + nightly pair — see the api-surface recipe).
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@0.52.0)
+    # cargo-public-api rides API_PUBLIC_API — the tool-exact story lives there.
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else

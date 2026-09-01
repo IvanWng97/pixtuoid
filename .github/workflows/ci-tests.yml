@@ -72,9 +72,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The default-on audio feature must compile through ALSA on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: llvm-tools-preview
@@ -170,9 +168,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Snapshot tests compile the default-on audio feature on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
       - uses: taiki-e/install-action@cargo-nextest
       - uses: taiki-e/install-action@cargo-insta
@@ -189,9 +185,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The release build compiles the default-on audio feature on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
       - name: Build release binaries + examples
         run: just build --release --bins --examples
@@ -208,8 +202,8 @@ jobs:
         with:
           node-version: 22
       - name: Install ffmpeg
-        # Bound flaky hosted-runner mirrors and retry the complete apt operation;
-        # do not pipe the version command through head under pipefail.
+        # setup-alsa's mirror-retry envelope, for a package that composite
+        # doesn't own; do not pipe the version command through head under pipefail.
         run: |
           apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30)
           for attempt in 1 2 3; do
@@ -256,12 +250,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every test job to pass
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: |
-          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
-          if [[ -n "$failures" ]]; then
-            echo "::error::Required test job failed: ${failures//$'\n'/, }"
-            exit 1
-          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Required test job failed"

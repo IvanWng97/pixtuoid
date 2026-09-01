@@ -31,9 +31,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The default-on audio feature compiles through ALSA on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
         with:
           components: clippy
@@ -76,9 +74,21 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # Lychee is not manifest-managed by install-action, so its documented
-      # cargo-binstall fallback installs our pinned version.
+      # Keyed on this workflow file: a version bump edits it, so the cache can
+      # never serve a stale binary; any other ci-lint edit costs one cold
+      # reinstall. ~/go/bin is spelled, not derived: GOPATH is the runner
+      # default, and deriving it here while the cache stores a literal is how
+      # a hit could restore binaries to a directory that is not on PATH.
+      - name: Cache the Go-built tools
+        id: go-tools
+        uses: actions/cache@v6
+        with:
+          path: ~/go/bin
+          key: go-tools-${{ runner.os }}-${{ hashFiles('.github/workflows/ci-lint.yml') }}
+      - name: Expose Go tool binaries
+        run: echo "$HOME/go/bin" >> "$GITHUB_PATH"
       - name: Install workflow lint + policy tools
+        if: steps.go-tools.outputs.cache-hit != 'true'
         run: |
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
@@ -88,9 +98,10 @@ jobs:
           # the OPA binary owns both.
           go install github.com/open-policy-agent/opa@v1.18.2
           go install github.com/open-policy-agent/regal@v0.42.0
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Install the JSON Schema validator
         run: pipx install check-jsonschema==0.37.4
+      # Lychee is not manifest-managed by install-action, so its documented
+      # cargo-binstall fallback installs our pinned version.
       - uses: taiki-e/install-action@v2
         with:
           tool: lychee@0.24.2,zizmor@1.30.0
@@ -142,9 +153,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The default-on audio feature must compile through ALSA on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       # No rust-cache on purpose: it would key the runner's stable compiler,
       # while the MSRV recipe installs the exact rust-version toolchain.
       - uses: ./.github/actions/setup-just
@@ -208,6 +217,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-binstall
+      # The justfile's API_PUBLIC_API is the authority; api-surface-check
+      # asserts this copy against it before reading a golden.
       - name: Install cargo-public-api (pinned to match the committed goldens)
         run: cargo binstall -y cargo-public-api@0.52.0
       - uses: ./.github/actions/setup-just
@@ -222,9 +233,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      # The default-on audio feature must compile through ALSA on Linux.
-      - name: Install ALSA headers
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev
+      - uses: ./.github/actions/setup-alsa
       - uses: ./.github/actions/setup-cargo-just
       - run: just doc-check
 
@@ -237,12 +246,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every lint job to pass
-        env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: |
-          failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
-          if [[ -n "$failures" ]]; then
-            echo "::error::Required lint job failed: ${failures//$'\n'/, }"
-            exit 1
-          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "Required lint job failed"

@@ -666,7 +666,7 @@ nested_manifest_needs(path) := {name |
 # the results it reads ARE the merge gate. Each reusable workflow already pins
 # its own nested job membership; nothing pinned the level above, where adding a
 # group and forgetting to gate it leaves the single required check green while
-# that group is free to fail. `supplemental` is advisory by design.
+# that group is free to fail.
 
 # A job-level `uses:` IS a reusable-workflow call — a job cannot carry both
 # `uses:` and `steps:`. Matching on the `./.github/workflows/` prefix instead
@@ -680,14 +680,11 @@ calls_a_reusable_workflow(job) if {
 
 ci_gate_job_key := "gate"
 
-ci_advisory_job_keys := {"supplemental"}
-
 ci_gate_job := object.get(ci_jobs, ci_gate_job_key, {})
 
 ci_group_job_keys contains name if {
 	some name, job in ci_jobs
 	calls_a_reusable_workflow(job)
-	not name in ci_advisory_job_keys
 }
 
 ci_gate_needs := {name | some name in object.get(ci_gate_job, "needs", [])}
@@ -1093,7 +1090,7 @@ deny contains msg if {
 	_ := documents[ci_workflow_path]
 	ci_gate_needs != ci_group_job_keys
 	msg := sprintf(
-		"%s %s must gate exactly the non-advisory group jobs %v, not %v",
+		"%s %s must gate exactly the group jobs %v, not %v",
 		[ci_workflow_path, ci_gate_job_key, ci_group_job_keys, ci_gate_needs],
 	)
 }

@@ -45,17 +45,17 @@ jobs:
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
-      # Chromium must be installed BEFORE `npm run check`: `astro check` renders
-      # /architecture's ```mermaid block via rehype-mermaid (headless Playwright),
-      # and a browserless render takes the deploy red at check:docs. Name
-      # `chromium-headless-shell` too, so a cache holding chromium-but-not-the-shell
-      # can't skip it.
       - name: Install site dependencies
         working-directory: site
         run: npm ci
       - name: Audit site dependencies
         working-directory: site
         run: npm run audit
+      # Chromium must be installed BEFORE `npm run check`: `astro check` renders
+      # /architecture's ```mermaid block via rehype-mermaid (headless Playwright),
+      # and a browserless render takes the deploy red at check:docs. Name
+      # `chromium-headless-shell` too, so a cache holding chromium-but-not-the-shell
+      # can't skip it.
       - name: Install Chromium for the diagram
         working-directory: site
         run: npx playwright install --with-deps chromium chromium-headless-shell
