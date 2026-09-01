@@ -30,4 +30,4 @@ runs:
       with:
         prefix-key: v1-rust
 
-    - uses: extractions/setup-just@v4
+    - uses: ./.github/actions/setup-just

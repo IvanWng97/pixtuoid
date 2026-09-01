@@ -1,0 +1,11 @@
+name: 'Setup Just'
+description: 'Installs just — the single authority for its pinned version'
+
+runs:
+  using: 'composite'
+  steps:
+    # Dependabot bumps the action ref but never a `with:` input, so this
+    # version moves only by hand.
+    - uses: extractions/setup-just@v4
+      with:
+        just-version: "1.58.0"

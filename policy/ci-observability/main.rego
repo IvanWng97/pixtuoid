@@ -100,7 +100,16 @@ expected_actionlint_paths := {
 	release_workflow_path: {"ignore": [actionlint_release_queue_ignore]},
 }
 
-expected_zizmor_rules := {"unpinned-uses": {"config": {"policies": {"*": "ref-pin"}}}}
+# Two unrelated requirements ride the one config file, so each gets its own
+# deny — a whole-shape compare fires the ref-pin message at whoever edits the
+# other entry (the separate-rules precedent on the zizmor env pins).
+expected_zizmor_ref_pin := {"config": {"policies": {"*": "ref-pin"}}}
+
+# Disabled with its reason in .github/zizmor.yml.
+expected_zizmor_self_repository := {"disable": true}
+
+expected_zizmor_rule_names := {"self-repository", "unpinned-uses"}
+
 expected_claude_oauth_fallback := "${{ vars.ANTHROPIC_FEDERATION_RULE_ID == '' && vars.ANTHROPIC_ORGANIZATION_ID == '' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}"
 
 codecov_oidc_job_names := {
@@ -1252,8 +1261,21 @@ deny contains msg if {
 
 deny contains msg if {
 	config := documents[zizmor_config_path]
-	object.get(config, "rules", {}) != expected_zizmor_rules
+	object.get(config, ["rules", "unpinned-uses"], {}) != expected_zizmor_ref_pin
 	msg := sprintf("%s must require every action to use a symbolic ref or SHA", [zizmor_config_path])
+}
+
+deny contains msg if {
+	config := documents[zizmor_config_path]
+	object.get(config, ["rules", "self-repository"], {}) != expected_zizmor_self_repository
+	msg := sprintf("%s must keep the self-repository audit disabled until the actionlint pin understands `$/` (rhysd/actionlint#711)", [zizmor_config_path])
+}
+
+deny contains msg if {
+	config := documents[zizmor_config_path]
+	names := {name | some name, _ in object.get(config, "rules", {})}
+	names != expected_zizmor_rule_names
+	msg := sprintf("%s must hold exactly the two pinned rule entries — a new zizmor rule needs its own policy pin", [zizmor_config_path])
 }
 
 # The actions ignore rule below suppresses patch and minor, so MAJOR is the only

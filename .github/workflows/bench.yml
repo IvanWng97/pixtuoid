@@ -27,7 +27,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           prefix-key: v1-rust # match setup-cargo-just's default cache namespace
-      - uses: extractions/setup-just@v4
+      - uses: ./.github/actions/setup-just
       - name: Run frame + wire benchmarks (advisory, non-blocking)
         run: just bench
       # JSON measurements only — the lean criterion feature set builds no HTML.

@@ -517,12 +517,19 @@ def upstream_acp_session_update_tags(text: str) -> set[str] | None:
     return tags or None
 
 
-# Codex variants we know about and deliberately do not decode. Each would START
-# an activity with no upstream event to END it, so decoding one strands the
-# session Active until the stale sweep — worse than not decoding it.
+# Codex variants we know about and deliberately do not decode — read by BOTH
+# the ResponseItem and RolloutItem sweeps, so one name exempts either enum;
+# each entry's value is its own WHY. For the two `*_call` entries the cost is
+# concrete: an activity START with no upstream END strands the session Active
+# until the stale sweep — worse than not decoding it.
 CODEX_KNOWN_OMITTED: dict[str, str] = {
     "local_shell_call": "no `local_shell_call_output` sibling exists to end it",
     "image_generation_call": "no `image_generation_call_output` sibling exists to end it",
+    "realtime_item": "a realtime VOICE sub-session's items (protocol/src/realtime.rs), "
+    "keyed by `realtime_session_id` — not the agent session's key space: "
+    "Started/Closed bracket the voice layer, speech segments are content no "
+    "decoder reads, and `BemItemPromoted` re-presents items already decoded "
+    "from `response_item` (upstream: 'sparse, model-invisible facts')",
 }
 
 

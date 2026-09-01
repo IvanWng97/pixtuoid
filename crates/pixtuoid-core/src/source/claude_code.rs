@@ -163,7 +163,8 @@ fn attribution_label(obj: &serde_json::Map<String, Value>) -> Option<String> {
 /// ultra-class effort is active, plus an EXIT marker on leaving it, and the wire
 /// carries no effort VALUE — so each marker's label is synthesized here, the
 /// exit's as `ULTRA_EXIT_LABEL`. The `/effort` picker's chosen level is not
-/// derivable at all (empty command args).
+/// derivable from the transcript (empty command args); the hook path reads it
+/// (`hook_effort`).
 fn attachment_effort(obj: &serde_json::Map<String, Value>) -> Option<&'static str> {
     match obj
         .get("attachment")
@@ -1023,6 +1024,11 @@ mod tests {
                 json!({"type": "quantum-line", "foo": 1}),
                 // #935's instance: shipped by CC and read by nothing here.
                 json!({"type": "history-suppression", "cause": "x"}),
+                // #959's instances — message-less sidecars seen since CC 2.1.211
+                // (atis-latch's line is in tool-run-recorded; cost-state is
+                // corpus-sampled and abridged).
+                json!({"type": "atis-latch", "atis": "", "sessionId": "s"}),
+                json!({"type": "cost-state", "totalCostUSD": 0.5, "sessionId": "s"}),
                 // TYPELESS but payload-carrying: the `!ty.is_empty()` guard, or
                 // the breadcrumb names nothing at all.
                 json!({"message": {"role": "assistant", "content": []}}),
