@@ -74,9 +74,10 @@ pub(crate) struct FocusPaths<'a> {
     /// — `focus_slot` resolves it from `grok_home()`; the field exists so tests
     /// inject it like the other two.
     pub grok_root: Option<&'a Path>,
-    /// omp's sessions root (`omp_sessions_dir()`) for the fd probe. Like
-    /// `grok_root` it has no CLI override — `focus_slot` derives it.
-    pub omp_sessions_root: Option<&'a Path>,
+    /// omp's sessions roots — the primary plus every profile's — for the fd
+    /// probe. Like `grok_root` there is no CLI override — `focus_slot`
+    /// derives them.
+    pub omp_sessions_roots: &'a [std::path::PathBuf],
 }
 
 /// Resolve the agent's OS pid. Precedence: the slot's cached pid (hook-family
@@ -130,8 +131,9 @@ pub(crate) fn resolve_pid(
             .grok_root
             .and_then(|d| pixtuoid_core::source::grok_pid_for_session(d, &slot.session_id)),
         s if s == pixtuoid_core::source::omp::SOURCE_NAME => paths
-            .omp_sessions_root
-            .and_then(|d| pixtuoid_core::source::omp_pid_for_session(d, &slot.session_id)),
+            .omp_sessions_roots
+            .iter()
+            .find_map(|d| pixtuoid_core::source::omp_pid_for_session(d, &slot.session_id)),
         _ => None,
     }
 }
@@ -144,12 +146,13 @@ pub(crate) fn focus_slot(
     roots: &(Option<std::path::PathBuf>, Option<std::path::PathBuf>),
 ) {
     let grok_home = pixtuoid_core::source::grok::grok_home();
-    let omp_sessions = pixtuoid_core::source::omp::omp_sessions_dir();
+    let mut omp_sessions = vec![pixtuoid_core::source::omp::omp_sessions_dir()];
+    omp_sessions.extend(pixtuoid_core::source::omp::omp_profile_sessions_dirs());
     let paths = FocusPaths {
         cc_projects_root: roots.0.as_deref(),
         codex_sessions_root: roots.1.as_deref(),
         grok_root: Some(&grok_home),
-        omp_sessions_root: Some(&omp_sessions),
+        omp_sessions_roots: &omp_sessions,
     };
     focus_agent(slot, &paths, &OsProcessTable, activate_os);
 }
@@ -307,7 +310,7 @@ mod tests {
         cc_projects_root: None,
         codex_sessions_root: None,
         grok_root: None,
-        omp_sessions_root: None,
+        omp_sessions_roots: &[],
     };
 
     fn empty_table() -> MockTable {

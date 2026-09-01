@@ -270,10 +270,11 @@ impl AgentEvent {
     }
 }
 
-/// The on-disk root a source resolves, through the SAME `default_paths()` the
-/// driver calls — a second copy of the resolution is the #880 defect one layer
-/// up. `None` = no single root (a daemon is port-keyed; a hook-only CLI's
-/// config root lives with its install target).
+/// The PRIMARY on-disk root a source resolves, through the SAME
+/// `default_paths()` the driver calls — a second copy of the resolution is the
+/// #880 defect one layer up. `None` = no such root (a daemon is port-keyed; a
+/// hook-only CLI's config root lives with its install target). omp watches
+/// further profile roots beyond this one (`omp_profile_sessions_dirs`).
 ///
 /// LOCKSTEP with [`registry::SourceDescriptor::home_env`]: a row declaring an
 /// override with no arm here fails

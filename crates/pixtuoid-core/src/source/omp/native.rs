@@ -37,15 +37,20 @@ pub struct OmpSource {
     /// The watched primary omp `sessions` root.
     pub sessions_root: PathBuf,
     /// The OTHER profiles' sessions roots, one watcher each. Filled by
-    /// [`Self::default_paths`]' enumeration; [`Self::run`]'s rescan appends
-    /// newcomers.
+    /// [`Self::default_paths`]' enumeration.
     pub profile_sessions_roots: Vec<PathBuf>,
     /// Re-lists the profile roots each rescan tick (a profile created mid-run
     /// gains a watcher without a restart).
+    #[doc(hidden)]
     pub rescan: OmpProfileEnumerate,
     /// How often [`Self::rescan`] runs; production stays on the watcher poll
     /// authority, tests shrink it.
+    #[doc(hidden)]
     pub rescan_interval: Duration,
+    /// Roots here came from the resolver (never user-supplied), so every
+    /// watcher gets the fd probe without the replay-excluding layout gate.
+    /// Only [`Self::default_paths`] sets it.
+    first_party_roots: bool,
 }
 
 impl OmpSource {
@@ -57,25 +62,32 @@ impl OmpSource {
             rescan: Arc::new(omp_profile_sessions_dirs),
             rescan_interval: DEFAULT_POLL_INTERVAL,
             sessions_root: omp_sessions_dir(),
+            first_party_roots: true,
         }
     }
 
     /// A source over one root with no profile set — the test/replay shape.
+    #[doc(hidden)]
     pub fn single_root(sessions_root: PathBuf) -> Self {
         Self {
             sessions_root,
             profile_sessions_roots: Vec::new(),
             rescan: Arc::new(Vec::new),
             rescan_interval: DEFAULT_POLL_INTERVAL,
+            first_party_roots: false,
         }
     }
 }
 
-/// One watcher over `root`, probe attached where the layout gate allows.
+/// One watcher over `root`. A first-party root (resolver-enumerated, never
+/// user-supplied) gets the fd probe unconditionally; anything else goes
+/// through [`omp_probe_root`]'s replay-excluding gate. `started` keeps every
+/// root ever spawned, so a failed one is not respawn-thrashed by the rescan.
 fn spawn_watcher(
     set: &mut tokio::task::JoinSet<Result<()>>,
     started: &mut HashSet<PathBuf>,
     root: PathBuf,
+    first_party: bool,
     tx: TaggedSender,
 ) {
     let mut watcher = JsonlWatcher::new(
@@ -86,7 +98,12 @@ fn spawn_watcher(
     )
     .with_label_deriver(omp_derive_label)
     .with_head_label(omp_head_title);
-    if let Some(probe_root) = omp_probe_root(&root) {
+    let probe_root = if first_party {
+        Some(root.clone())
+    } else {
+        omp_probe_root(&root)
+    };
+    if let Some(probe_root) = probe_root {
         watcher = watcher.with_liveness_probe(Arc::new(move || live_omp_session_ids(&probe_root)));
     }
     started.insert(root);
@@ -104,33 +121,59 @@ impl Source for OmpSource {
             profile_sessions_roots,
             rescan,
             rescan_interval,
+            first_party_roots,
         } = *self;
         let mut set = tokio::task::JoinSet::new();
         let mut started = HashSet::new();
-        spawn_watcher(&mut set, &mut started, sessions_root, tx.clone());
+        let mut last_error = None;
+        spawn_watcher(
+            &mut set,
+            &mut started,
+            sessions_root,
+            first_party_roots,
+            tx.clone(),
+        );
         for root in profile_sessions_roots {
             if !started.contains(&root) {
-                spawn_watcher(&mut set, &mut started, root, tx.clone());
+                spawn_watcher(&mut set, &mut started, root, first_party_roots, tx.clone());
             }
         }
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(rescan_interval) => {
-                    for root in rescan() {
+                    // Off the worker: the enumeration does blocking fs reads
+                    // (the liveness probes set the precedent).
+                    let listed = tokio::task::spawn_blocking({
+                        let rescan = rescan.clone();
+                        move || rescan()
+                    })
+                    .await;
+                    for root in listed.unwrap_or_default() {
                         if !started.contains(&root) {
-                            spawn_watcher(&mut set, &mut started, root, tx.clone());
+                            spawn_watcher(&mut set, &mut started, root, first_party_roots, tx.clone());
                         }
                     }
                 }
                 Some(finished) = set.join_next() => {
-                    // Log-and-continue: one root failing must not silence the
-                    // rest. `started` keeps the entry, so a failed root is not
-                    // respawn-thrashed by the next rescan.
-                    if let Ok(Err(e)) = finished {
-                        tracing::warn!(source = SOURCE_NAME, error = %e, "omp watcher exited");
+                    // Log-and-continue per root, but REMEMBER the failure: a
+                    // source watching nothing must reach the deaths surface
+                    // the user sees (#157), not only the log.
+                    match finished {
+                        Ok(Err(e)) => {
+                            tracing::warn!(source = SOURCE_NAME, error = %e, "omp watcher exited");
+                            last_error = Some(e);
+                        }
+                        Err(join) => {
+                            tracing::warn!(source = SOURCE_NAME, error = %join, "omp watcher task died");
+                            last_error = Some(join.into());
+                        }
+                        Ok(Ok(())) => {}
                     }
                     if set.is_empty() {
-                        return Ok(());
+                        return match last_error {
+                            Some(e) => Err(e),
+                            None => Ok(()),
+                        };
                     }
                 }
             }
@@ -191,18 +234,13 @@ fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Op
         return None;
     }
     let parent = sessions_root.parent();
-    let name_at = |depth: usize| {
-        let mut dir = parent;
-        for _ in 0..depth {
-            dir = dir.and_then(Path::parent);
-        }
-        dir.and_then(Path::file_name).and_then(|n| n.to_str())
-    };
-    let parent_is_dot_omp_agent = name_at(0) == Some("agent")
-        && (name_at(1) == Some(".omp")
-            // The profiles layout, held to the same rigor: every fixed segment
-            // of `.omp/profiles/<name>/agent/sessions` must be in place.
-            || (name_at(2) == Some("profiles") && name_at(3) == Some(".omp")));
+    let parent_is_dot_omp_agent = parent.is_some_and(|p| {
+        p.file_name().and_then(|n| n.to_str()) == Some("agent")
+            && p.parent()
+                .and_then(|g| g.file_name())
+                .and_then(|n| n.to_str())
+                == Some(".omp")
+    });
     // Covers every relocating axis at once: this gate and `default_paths` call
     // the SAME `omp_sessions_dir()`, so they cannot disagree.
     let is_resolved_root = sessions_root == resolved_sessions;
@@ -218,45 +256,6 @@ fn omp_probe_root_resolved(sessions_root: &Path, resolved_sessions: &Path) -> Op
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn probe_root_accepts_the_profiles_layout_with_the_same_rigor() {
-        let home = tempfile::tempdir().unwrap();
-        let elsewhere = home.path().join("pi-coding-agent").join("sessions");
-
-        let profiled = home
-            .path()
-            .join(".omp")
-            .join("profiles")
-            .join("work")
-            .join("agent")
-            .join("sessions");
-        assert_eq!(
-            omp_probe_root_resolved(&profiled, &elsewhere),
-            Some(profiled.clone()),
-            "`.omp/profiles/<name>/agent/sessions` is first-party"
-        );
-
-        // Both outer segments must hold, or any `profiles/x/agent/sessions`
-        // replay tree would be vouched for.
-        let no_dot_omp = home
-            .path()
-            .join("work")
-            .join("profiles")
-            .join("x")
-            .join("agent")
-            .join("sessions");
-        assert_eq!(omp_probe_root_resolved(&no_dot_omp, &elsewhere), None);
-
-        let no_agent = home
-            .path()
-            .join(".omp")
-            .join("profiles")
-            .join("work")
-            .join("other")
-            .join("sessions");
-        assert_eq!(omp_probe_root_resolved(&no_agent, &elsewhere), None);
-    }
 
     #[test]
     fn probe_root_accepts_the_dot_omp_agent_layout_and_nothing_that_merely_resembles_it() {

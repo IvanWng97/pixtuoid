@@ -1074,9 +1074,10 @@ fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
     }
 }
 
-/// One row per source with a single on-disk root. A FACT row, not an alarm — a
-/// missing root is normal for a CLI the user never runs, so the only alarm is
-/// missing WHILE that source's override is set (#880).
+/// One row per source with a PRIMARY on-disk root (omp may watch further
+/// profile roots this row does not list). A FACT row, not an alarm — a missing
+/// root is normal for a CLI the user never runs, so the only alarm is missing
+/// WHILE that source's override is set (#880).
 fn format_root_row(r: &RootStatus, ink: &Ink) -> String {
     let via = match r.env {
         Some((var, true)) => format!(" (via ${var})"),

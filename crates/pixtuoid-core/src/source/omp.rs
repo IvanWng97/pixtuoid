@@ -1,8 +1,7 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
 //! (`<sessions-root>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via one `JsonlWatcher`
-//! per root: [`omp_sessions_dir`] owns every axis of the primary root, and
-//! `omp_profile_sessions_dirs` adds every OTHER profile's (each profile keeps
-//! its own sessions tree). omp has no shell-hook
+//! per root: [`omp_sessions_dir`] owns every axis of the primary root,
+//! [`omp_profile_sessions_dirs`] adds every other profile's. omp has no shell-hook
 //! seam — its hooks are in-process TS extension modules — so the hook plane
 //! is a pixtuoid-owned bridge extension
 //! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
@@ -165,6 +164,13 @@ fn resolve_profile(env: &OmpEnv) -> Option<String> {
 }
 
 /// `getProfileConfigRoot` — `<home>/<PI_CONFIG_DIR|.omp>[/profiles/<profile>]`.
+/// The fixed path segments of a profile's tree, named once — `dirs.ts` joins
+/// these literals, and a silent rename upstream is the drift class
+/// `EXTENSIONS_SUBDIR` already guards its own segment against.
+const PROFILES_SUBDIR: &str = "profiles";
+/// The agent-dir segment under a config root (flattened away by the XDG arm).
+const AGENT_SUBDIR: &str = "agent";
+
 fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
     let name = env
         .config_dir_name
@@ -173,7 +179,7 @@ fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
         .unwrap_or(".omp");
     let root = node_join(env.home.as_deref()?, name);
     Some(match profile {
-        Some(p) => root.join("profiles").join(p),
+        Some(p) => root.join(PROFILES_SUBDIR).join(p),
         None => root,
     })
 }
@@ -185,14 +191,14 @@ fn omp_config_root(env: &OmpEnv, profile: Option<&str>) -> Option<PathBuf> {
 /// parent's `setProfile` exported it rather than the user choosing it.
 fn resolve_omp_agent_dir_parts(env: &OmpEnv) -> Option<(PathBuf, bool, Option<String>)> {
     let profile = resolve_profile(env);
-    let default_agent = omp_config_root(env, profile.as_deref())?.join("agent");
+    let default_agent = omp_config_root(env, profile.as_deref())?.join(AGENT_SUBDIR);
     if profile.is_some() {
         return Some((default_agent, true, profile));
     }
     let override_dir = env.agent_dir.clone().filter(|v| {
         let derived = normalize_profile_name(env.pi_profile_live.as_deref())
             .and_then(|p| omp_config_root(env, Some(&p)))
-            .map(|r| r.join("agent"));
+            .map(|r| r.join(AGENT_SUBDIR));
         derived.is_none_or(|d| *v != d)
     });
     match override_dir {
@@ -209,7 +215,7 @@ fn resolve_omp_agent_dir(env: &OmpEnv) -> PathBuf {
     resolve_omp_agent_dir_parts(env)
         .map(|(d, _, _)| d)
         // Keeps the pre-#880 shape: an unresolvable home is already `/tmp`-rooted.
-        .unwrap_or_else(|| crate::platform::user_home().join(".omp").join("agent"))
+        .unwrap_or_else(|| crate::platform::user_home().join(".omp").join(AGENT_SUBDIR))
 }
 
 /// `getSessionsDir()` = `agentSubdir(undefined, "sessions", "data")`.
@@ -235,8 +241,10 @@ fn resolve_omp_sessions_dir(
 /// precedence as the selected profile (its own `agent` dir; the XDG arm
 /// flattens `agent/` away where its candidate exists). The env-selected
 /// profile is excluded: its dir IS the primary root. Sorted so the watcher
-/// set is deterministic.
-pub(crate) fn omp_profile_sessions_dirs() -> Vec<PathBuf> {
+/// set is deterministic. Only the SELECTED profile's `.env` files overlay the
+/// env (upstream freezes the resolver per process the same way), so another
+/// profile's own `.env` relocations are unseen here.
+pub fn omp_profile_sessions_dirs() -> Vec<PathBuf> {
     let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
         std::fs::read_to_string(p).ok()
     });
@@ -267,12 +275,18 @@ fn omp_profile_sessions_dirs_resolved(
         return Vec::new();
     };
     let primary = resolve_omp_sessions_dir(env, xdg_platform, exists);
-    let mut names = list_profiles(&base.join("profiles"));
+    // Through the same validator omp applies: a dir failing its name regex (or
+    // a stray `default`) is one omp can never select, and enumerating it would
+    // make the watcher MATERIALIZE junk roots via its create_dir_all.
+    let mut names: Vec<String> = list_profiles(&base.join(PROFILES_SUBDIR))
+        .iter()
+        .filter_map(|n| normalize_profile_name(Some(n)))
+        .collect();
     names.sort();
     names
         .iter()
         .filter_map(|p| {
-            let agent = omp_config_root(env, Some(p))?.join("agent");
+            let agent = omp_config_root(env, Some(p))?.join(AGENT_SUBDIR);
             let xdg = xdg_platform
                 .then(|| xdg_app_root(env.xdg_data_home.as_deref(), Some(p), exists))
                 .flatten();
@@ -294,7 +308,7 @@ fn xdg_app_root(
 ) -> Option<PathBuf> {
     let app_root = node_join(xdg_data_home?, "omp");
     let candidate = match profile {
-        Some(p) => app_root.join("profiles").join(p),
+        Some(p) => app_root.join(PROFILES_SUBDIR).join(p),
         None => app_root,
     };
     exists(&candidate).then_some(candidate)
@@ -1981,6 +1995,19 @@ mod tests {
         let list = |_: &Path| vec!["work".to_string(), "other".to_string()];
         assert_eq!(
             omp_profile_sessions_dirs_resolved(&env, false, &none, &list),
+            vec![PathBuf::from("/home/u/.omp/profiles/other/agent/sessions")]
+        );
+        // Names omp's own validator refuses — a stray `default` dir, a case
+        // violation — never become roots (the watcher would materialize them).
+        let junk = |_: &Path| {
+            vec![
+                "default".to_string(),
+                "Work".to_string(),
+                "other".to_string(),
+            ]
+        };
+        assert_eq!(
+            omp_profile_sessions_dirs_resolved(&env, false, &none, &junk),
             vec![PathBuf::from("/home/u/.omp/profiles/other/agent/sessions")]
         );
         // No profiles dir at all -> nothing to add.

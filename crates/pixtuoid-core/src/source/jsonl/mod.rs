@@ -179,8 +179,8 @@ pub struct JsonlWatcher {
 }
 
 const DEFAULT_INITIAL_WINDOW: Duration = Duration::from_secs(3600);
-/// The watcher's poll backstop — also the cadence omp's profile rescan rides,
-/// so "how often we look at the filesystem" has one authority.
+/// The watcher's poll backstop — also the cadence profile rescans ride, so
+/// "how often we look at the filesystem" has one authority.
 pub(crate) const DEFAULT_POLL_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Test-only seam: forces every `JsonlWatcher` in this process onto a polling

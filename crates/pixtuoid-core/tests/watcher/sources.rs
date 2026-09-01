@@ -363,9 +363,6 @@ async fn grok_source_run_emits_events_from_updates_jsonl() {
     handle.abort();
 }
 
-// Layout: <sessions_root>/<encoded-cwd>/<ts>_<uuid>.jsonl with a subagent child
-// at <sessions_root>/<encoded-cwd>/<ts>_<uuid>/<taskId>.jsonl — the root keys on
-// its stem, the child on the stem CHAIN.
 #[tokio::test]
 async fn omp_source_run_watches_profile_roots_beside_the_primary() {
     use pixtuoid_core::source::omp::OmpSource;
@@ -443,7 +440,49 @@ async fn omp_source_rescan_hot_plugs_a_profile_created_mid_run() {
         wait_for_session_start(&mut rx, want).await,
         "a profile announced after startup must gain a watcher without a restart"
     );
+
+    // Re-announcing the SAME root must not disturb it: a later transcript
+    // still registers. (Watcher-count dedup itself is not observable here —
+    // one watcher already emits SessionStart twice, seed + decoded header.)
+    announced.lock().unwrap().push(late_profile.clone());
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    const STEM2: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000023";
+    let second = cwd_dir.join(format!("{STEM2}.jsonl"));
+    write_omp_header(&second, "0197f0aa-0000-7000-8000-000000000023").await;
+    let want2 = AgentId::from_parts("omp", &omp_watcher_key(&second));
+    assert!(
+        wait_for_session_start(&mut rx, want2).await,
+        "a re-announced root must keep registering new transcripts"
+    );
     handle.abort();
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn omp_source_run_reports_total_watch_failure_instead_of_swallowing_it() {
+    use pixtuoid_core::source::omp::OmpSource;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Deliberately NOT fast_watch(): the forced PollWatcher tolerates a
+    // missing root (walk latches and warns), so only the native backend's
+    // watch() error can exercise the death path.
+    let dir = TempDir::new().unwrap();
+    let sealed = dir.path().join("sealed");
+    tokio::fs::create_dir(&sealed).await.unwrap();
+    let mut perms = std::fs::metadata(&sealed).unwrap().permissions();
+    perms.set_mode(0o000);
+    std::fs::set_permissions(&sealed, perms.clone()).unwrap();
+
+    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
+    let result = Box::new(OmpSource::single_root(sealed.join("sessions")))
+        .run(tx)
+        .await;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&sealed, perms).unwrap();
+    assert!(
+        result.is_err(),
+        "every watcher failing must propagate to the deaths surface (#157), got Ok"
+    );
 }
 
 /// The expected-id seam shared by the omp cases: the SAME fold + deriver the
@@ -490,6 +529,9 @@ async fn wait_for_session_start(
     false
 }
 
+// Layout: <sessions_root>/<encoded-cwd>/<ts>_<uuid>.jsonl with a subagent child
+// at <sessions_root>/<encoded-cwd>/<ts>_<uuid>/<taskId>.jsonl — the root keys on
+// its stem, the child on the stem CHAIN.
 #[tokio::test]
 async fn omp_source_run_links_a_nested_subagent_to_its_root() {
     use pixtuoid_core::source::omp::OmpSource;
@@ -518,17 +560,8 @@ async fn omp_source_run_links_a_nested_subagent_to_its_root() {
         write_omp_header(path, id).await;
     }
 
-    // Expected ids must go through the SAME seam fold + deriver the watcher uses:
-    // a raw-case literal here passes on Unix and fails ONLY on windows-test,
-    // where the id-space is normalize_path_key-folded.
-    use pixtuoid_core::source::omp::omp_id_from_path;
-    let watcher_key = |p: &std::path::Path| {
-        omp_id_from_path(std::path::Path::new(
-            &pixtuoid_core::id::normalize_path_key(&p.to_string_lossy()),
-        ))
-    };
-    let root_id = AgentId::from_parts("omp", &watcher_key(&root_transcript));
-    let child_id = AgentId::from_parts("omp", &watcher_key(&child_transcript));
+    let root_id = AgentId::from_parts("omp", &omp_watcher_key(&root_transcript));
+    let child_id = AgentId::from_parts("omp", &omp_watcher_key(&child_transcript));
     let mut child_linked = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && !child_linked {
