@@ -187,3 +187,4 @@ re-litigating (#316's were stale).
 | "One more fix round will converge" | Measured: rounds ≥2 mostly find defects the fixes introduced + re-litigate settled calls. Two fix rounds is the cap — revert or re-scope. |
 | "This fix needs its own new checker" | Gate-shaped fixes arrive fail-open and feed the next round. Derive from the source of truth, or file the checker as its own PR. |
 | "Just unify the duplication" | Some duplication is documented deliberate separation (per-source decoders, per-CLI targets); read the declaration's doc comment before proposing a merge. |
+| "The fold is committed — the bots will catch the rest" | Bots review the PR head, not the dispositions; a fold above ~100 behavioral lines is the one unreviewed commit — dispatch the round-2 delta verify the moment it lands, in parallel with the push. |
