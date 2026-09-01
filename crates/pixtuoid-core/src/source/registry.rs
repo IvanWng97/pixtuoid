@@ -793,15 +793,15 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // AND the child persists its own parent-linked transcript.
             delegations_are_hook_silent: false,
         },
-        // omp holds a lifetime append fd on its session file, so the same
-        // `live_omp_session_ids` snapshot that vouches liveness also names the
-        // pid (`omp_pid_for_session`). The bridge extension DOES stamp `_pid`,
-        // and this channel discards it (recycle-guard rationale, #527-class);
-        // the stamp ships anyway so the wire shape is already right if a
-        // plugin-stamp channel ever lands. Known boundary: a bridge-only slot
-        // (pre-persist, or an empty session) has no transcript for the probe,
-        // so a focus click on it is a silent no-op.
-        focus: FocusChannel::TranscriptProbe,
+        // The bridge extension runs IN-PROCESS, so its stamped `process.pid`
+        // IS omp's own — PluginStamp trust, recycle-guarded by the router's
+        // start marker (#527). This also puts omp on `HookPidWatch`, so an
+        // abruptly killed omp leaves promptly instead of waiting out the
+        // stale-sweep, and a bridge-only (never-persisted) session is
+        // focusable from birth. Under `--no-extensions` no stamp arrives and
+        // focus falls back to the append-fd probe (`omp_pid_for_session` —
+        // the focus dispatch tries it by source name, not by this channel).
+        focus: FocusChannel::PluginStamp,
     },
 };
 

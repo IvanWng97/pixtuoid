@@ -192,9 +192,9 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
 }
 
 /// The batch's bind targets, at most one per agent: a payload must not
-/// corroborate its own pid. No decoder pairs two bind-target events for one
-/// agent today (activity events are not bind targets), so this is a FORWARD
-/// guard — pinned by `a_batch_yields_one_bind_target_per_agent`.
+/// corroborate its own pid. omp pairs `SessionStart` + `Identity` in its
+/// session batches (activity events are not bind targets), so the collapse is
+/// load-bearing — pinned by `a_batch_yields_one_bind_target_per_agent`.
 fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool> {
     evs.iter().filter_map(pid_bind_target).collect()
 }
@@ -372,7 +372,14 @@ mod tests {
                 "{source} Identity must stay pid: None"
             );
         }
-        for source in ["opencode", "cursor", "codewhale", "hermes", "reasonix"] {
+        for source in [
+            "opencode",
+            "cursor",
+            "codewhale",
+            "hermes",
+            "reasonix",
+            "omp",
+        ] {
             let mut evs = vec![AgentEvent::Identity {
                 agent_id: AgentId::from_parts(source, "ses_t"),
                 source: source.into(),
@@ -389,9 +396,9 @@ mod tests {
     }
 
     /// The guard `handle_conn` relies on: a batch yields at most ONE sighting per
-    /// agent, so a payload can never corroborate its own pid. No decoder pairs
-    /// two bind-target events today, so this pins the FORWARD guard directly —
-    /// the handle_conn-level test cannot, it would pass with the dedupe deleted.
+    /// agent, so a payload can never corroborate its own pid. Pinned directly
+    /// (the handle_conn-level test would pass with the dedupe deleted); omp's
+    /// session batches exercise it for real, the live pin below.
     #[test]
     fn a_batch_yields_one_bind_target_per_agent() {
         let id = AgentId::from_parts("cursor", "sess-A");
@@ -420,6 +427,34 @@ mod tests {
             bind_targets(&batch).get(&id),
             Some(&true),
             "cursor is ShimStamp — its pid is a guess and needs corroborating"
+        );
+    }
+
+    /// omp is the first decoder that really pairs `SessionStart` + `Identity`
+    /// in one batch, so the collapse the guard above pinned synthetically is
+    /// now load-bearing — and a PluginStamp pid needs no corroboration.
+    #[test]
+    fn an_omp_session_batch_pairs_start_and_identity_and_binds_once_trusted() {
+        let evs = crate::source::omp::decode_omp_hook_payload(&serde_json::json!({
+            "type": "session_start",
+            "sessionFile": "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-000000000001.jsonl",
+            "sessionId": "01a00000-0000-7000-8000-000000000001",
+            "cwd": "/repo",
+        }))
+        .unwrap();
+        assert!(
+            matches!(
+                &evs[..],
+                [AgentEvent::SessionStart { .. }, AgentEvent::Identity { .. }]
+            ),
+            "the pair this test exists for: {evs:?}"
+        );
+        let targets = bind_targets(&evs);
+        assert_eq!(targets.len(), 1, "the pair must collapse to one sighting");
+        assert_eq!(
+            targets.values().next(),
+            Some(&false),
+            "a PluginStamp pid is the CLI's own — no corroboration"
         );
     }
 

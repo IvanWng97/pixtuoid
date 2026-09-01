@@ -287,13 +287,23 @@ fn a_recorded_switch_ends_the_previous_session_and_starts_the_current() {
             AgentEvent::SessionStart { agent_id, .. } if *agent_id == cur_id => "start-cur",
             AgentEvent::SessionEnd { agent_id, .. } if *agent_id == prev_id => "end-prev",
             AgentEvent::SessionEnd { agent_id, .. } if *agent_id == cur_id => "end-cur",
+            // The pid carrier behind each session arm (see the decoder).
+            AgentEvent::Identity { agent_id, .. } if *agent_id == cur_id => "identity-cur",
+            AgentEvent::Identity { agent_id, .. } if *agent_id == prev_id => "identity-prev",
             other => panic!("unexpected event in the switch round: {other:?}"),
         })
         .map(str::to_string)
         .collect();
     assert_eq!(
         kinds,
-        ["start-prev", "end-prev", "start-cur", "end-cur"],
+        [
+            "start-prev",
+            "identity-prev",
+            "end-prev",
+            "start-cur",
+            "identity-cur",
+            "end-cur",
+        ],
         "the switch decodes as End(previous) + Start(current)"
     );
 }
