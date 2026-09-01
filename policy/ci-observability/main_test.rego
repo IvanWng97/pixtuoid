@@ -265,7 +265,7 @@ test_pages_workflow_must_call_the_site_node_composite if {
 test_a_conditioned_site_node_call_does_not_count if {
 	fixture := {"documents": [{
 		"path": pages_workflow_path,
-		"contents": {"jobs": {"build": {"steps": [{"uses": "./.github/actions/setup-site-node", "if": "false"}]}}},
+		"contents": {"jobs": {"build": {"steps": [{"uses": site_node_action_ref, "if": "false"}]}}},
 	}]}
 	violations := deny with input as fixture
 	sprintf("%s must run %s exactly once", [pages_workflow_path, site_node_action_ref]) in violations

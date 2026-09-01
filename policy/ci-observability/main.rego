@@ -280,9 +280,8 @@ dependency_audit_steps(path, job_name) := [step |
 	effective_working_directory(job, step) == "site"
 ]
 
-# The pinned bootstrap lives in the shared composite; each site workflow proves
-# it runs it by calling the composite un-conditioned, and the composite proves
-# it still performs the exact install.
+# The pinned bootstrap lives in the shared composite, which must still perform
+# the exact install.
 site_node_action_installs := [step |
 	action := documents[site_node_action_path]
 	steps := object.get(object.get(action, "runs", {}), "steps", [])
@@ -292,6 +291,8 @@ site_node_action_installs := [step |
 	object.get(step, "continue-on-error", false) == false
 ]
 
+# Each site workflow proves it runs the bootstrap by calling the composite
+# un-conditioned.
 site_node_call_steps(path, job_name) := [step |
 	workflow := documents[path]
 	jobs := object.get(workflow, "jobs", {})

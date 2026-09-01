@@ -5,7 +5,7 @@ on:
   # silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml', '.github/actions/setup-site-node/**']
   workflow_dispatch:
 
 # Least-privilege: the build job runs third-party code (npm postinstall
@@ -56,9 +56,9 @@ jobs:
           # ```mermaid block. Cost of `false` is a cold content-layer rebuild.
           cache: false
           # PIN npm: v6's detection otherwise falls back to pnpm, whose fresh
-          # install resolves a DIFFERENT Playwright than the Chromium installed
-          # above, so rehype-mermaid's render of /architecture fails and silently
-          # ships an EMPTY page.
+          # install resolves a DIFFERENT Playwright than the Chromium
+          # setup-site-node installed, so rehype-mermaid's render of
+          # /architecture fails and silently ships an EMPTY page.
           package-manager: npm
           # Assert every doc page rendered a body IN the action's own context,
           # before it uploads: rehype-mermaid can collapse a doc's <Content /> to
