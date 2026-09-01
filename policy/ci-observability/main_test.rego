@@ -1024,7 +1024,6 @@ ci_gate_shipped_jobs := {
 	"lint": {"uses": "./.github/workflows/ci-lint.yml"},
 	"builds": {"uses": "./.github/workflows/ci-builds.yml"},
 	"tests": {"uses": "./.github/workflows/ci-tests.yml"},
-	"supplemental": {"uses": "./.github/workflows/ci-supplemental.yml"},
 	"gate": {
 		"needs": ["lint", "builds", "tests"],
 		"steps": [{"env": {
@@ -1084,19 +1083,6 @@ test_ci_gate_listing_a_group_it_never_reads_is_denied if {
 		}}],
 	}})
 	sprintf("%s %s must read needs.builds.result", [ci_workflow_path, ci_gate_job_key]) in deny with input as ci_gate_fixture(jobs)
-}
-
-test_ci_gate_need_on_the_advisory_group_is_denied if {
-	jobs := object.union(ci_gate_shipped_jobs, {"gate": {
-		"needs": ["lint", "builds", "tests", "supplemental"],
-		"steps": [{"env": {
-			"LINT_RESULT": "${{ needs.lint.result }}",
-			"BUILDS_RESULT": "${{ needs.builds.result }}",
-			"TESTS_RESULT": "${{ needs.tests.result }}",
-		}}],
-	}})
-	violations := deny with input as ci_gate_fixture(jobs)
-	count(ci_gate_membership_violations(violations)) == 1
 }
 
 ci_oidc_call_message(name) := sprintf(

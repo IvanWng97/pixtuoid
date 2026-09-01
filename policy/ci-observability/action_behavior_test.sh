@@ -345,17 +345,26 @@ printf '%s\n' \
     >"$fake_bin/gh"
 chmod +x "$fake_bin/gh"
 
+# One publisher invocation over the shared fixture env; cases vary only the
+# review body and the head pair.
+run_publisher() {
+    local review_json="$1"
+    local fake_head="${2:-abc123}"
+    local expected_head="${3:-abc123}"
+    PATH="$fake_bin:$PATH" \
+        FAKE_PR_HEAD="$fake_head" \
+        PUBLISHED_COMMENT="$published_comment" \
+        EXPECTED_HEAD_SHA="$expected_head" \
+        PR_NUMBER="42" \
+        REPOSITORY="owner/repo" \
+        REVIEW_JSON="$review_json" \
+        REVIEW_MARKER="claude-auto-review" \
+        REVIEW_TITLE="Claude Review" \
+        bash -c "$publisher_script"
+}
+
 valid_review='{"summary":"No correctness findings.","findings":[]}'
-PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$valid_review" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" ||
+run_publisher "$valid_review" ||
     fail "Claude publisher rejected a valid zero-finding review"
 [[ -s "$published_comment" ]] ||
     fail "Claude publisher posted no review body"
@@ -366,16 +375,7 @@ published_content="$(<"$published_comment")"
     fail "Claude publisher omitted the zero-finding count"
 
 multi_review='{"summary":"Two verified findings.","findings":[{"severity":"HIGH","path":"src/lib.rs","line":7,"body":"Primary invariant violation."},{"severity":"MEDIUM","path":"tests/review.rs","line":11,"body":"Missing refusal-path coverage."}]}'
-PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$multi_review" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" ||
+run_publisher "$multi_review" ||
     fail "Claude publisher rejected a valid multi-finding review"
 published_content="$(<"$published_comment")"
 [[ "$published_content" == *"**Findings: 2** (1 high, 1 medium)"* ]] ||
@@ -390,44 +390,17 @@ expected_location="\`src/lib.rs:7\`"
 # "the bot never posted", not "the bot was blocked", and the merge gate silently
 # becomes unsatisfiable for every finding on those files.
 variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"MEDIUM","path":"crates/pixtuoid-scene/sprites/default/desk@4x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
-PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$variant_review" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" ||
+run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
 [[ "$published_content" == *"\`crates/pixtuoid-scene/sprites/default/desk@4x.sprite:6\`"* ]] ||
     fail "Claude publisher omitted the density-variant finding location"
 
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="new-head" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="old-head" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$valid_review" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" >/dev/null 2>&1; then
+if run_publisher "$valid_review" new-head old-head >/dev/null 2>&1; then
     fail "Claude publisher accepted a stale review"
 fi
 
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON='{"summary":' \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" >/dev/null 2>&1; then
+if run_publisher '{"summary":' >/dev/null 2>&1; then
     fail "Claude publisher accepted malformed JSON"
 fi
 
@@ -444,16 +417,7 @@ oversized_findings="$(
         ]
     }'
 )"
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$oversized_findings" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" >/dev/null 2>&1; then
+if run_publisher "$oversized_findings" >/dev/null 2>&1; then
     fail "Claude publisher accepted more than five findings"
 fi
 
@@ -461,30 +425,12 @@ oversized_summary="$(
     jq -n --arg summary "$(printf 's%.0s' {1..8001})" \
         '{summary: $summary, findings: []}'
 )"
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$oversized_summary" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" >/dev/null 2>&1; then
+if run_publisher "$oversized_summary" >/dev/null 2>&1; then
     fail "Claude publisher accepted an oversized summary"
 fi
 
 unsafe_path_review='{"summary":"finding","findings":[{"severity":"HIGH","path":"../outside","line":1,"body":"bad"}]}'
-if PATH="$fake_bin:$PATH" \
-    FAKE_PR_HEAD="abc123" \
-    PUBLISHED_COMMENT="$published_comment" \
-    EXPECTED_HEAD_SHA="abc123" \
-    PR_NUMBER="42" \
-    REPOSITORY="owner/repo" \
-    REVIEW_JSON="$unsafe_path_review" \
-    REVIEW_MARKER="claude-auto-review" \
-    REVIEW_TITLE="Claude Review" \
-    bash -c "$publisher_script" >/dev/null 2>&1; then
+if run_publisher "$unsafe_path_review" >/dev/null 2>&1; then
     fail "Claude publisher accepted an unsafe finding path"
 fi
 
