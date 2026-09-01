@@ -37,13 +37,23 @@ const USAGE: &str = "usage";
 /// (`ApprovalOutcome`); every other outcome leaves the call unrun.
 const OUTCOME_ALLOWED: &str = "allowed-once";
 
-/// dsh's subagent dispatch tool, capture-verified (`delegation/fixtures/dsh`):
-/// the parent streams `tool_call {toolName: "subagent"}`, the child arrives as
-/// its own `parentSession`-linked session, and the parent's `tool_result`
-/// lands only after the child's `session_end`. Name-keyed like the codewhale
-/// family — the wire carries no `subagent_type`, so the NAME is the claim and
-/// a model-authored argument cannot spoof a delegation.
-const DISPATCH_TOOL: &str = "subagent";
+/// dsh's subagent dispatch tools. The first is capture-verified
+/// (`delegation/fixtures/dsh`: the parent streams a `tool_call` naming it,
+/// the child arrives as its own `parentSession`-linked session, and the
+/// parent's `tool_result` lands only after the child's `session_end`). The
+/// second is preset-verified: the tool NAME is
+/// per-instance config (`dsh-tool-subagent` `toolName`, default `subagent`),
+/// and the standard preset ships BOTH instances enabled
+/// (`packages/preset/agent-presets/presets/standard/agent.cordis.yml`,
+/// fetched 2026-09-01) while `child-agent.ts` stamps the same
+/// `parentSession`/`origin` header pair for every provider. The two
+/// `disabled: true` remote instances (`subagent_codex`,
+/// `subagent_claude_code`) publish no local child and stay out. Name-keyed
+/// like the delegation suite's other members, and structurally so: the
+/// plugin's privacy
+/// allowlist forwards only `callId`/`toolName` for a tool call, so no
+/// argument — spoofed or real — ever reaches this decoder.
+const SUBAGENT_TOOLS: &[&str] = &["subagent", "subagent_fork"];
 
 fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v str> {
     obj.get(key)
@@ -89,7 +99,7 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             .unwrap_or_default()
     };
     let tool_detail = || {
-        if field(obj, "toolName") == Some(DISPATCH_TOOL) {
+        if field(obj, "toolName").is_some_and(|t| SUBAGENT_TOOLS.contains(&t)) {
             ToolDetail::Task
         } else {
             ToolDetail::Generic {
@@ -168,11 +178,18 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             let event = if outcome == Some(OUTCOME_ALLOWED) {
                 // The resume: the gated call now runs; its `tool_call` was
                 // already streamed before the gate, so only this Start lifts
-                // the wait.
+                // the wait. GENERIC even for a dispatch: the reducer's Task
+                // pre-pass keyed this tuid at the original `tool_call`
+                // (Delegating already entered), and a second Task Start for
+                // a known tuid is treated as a replay — `handled_by_task_start`
+                // skips the Waiting→Active resume arm and the slot would
+                // strand in Waiting for the whole delegation.
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: call_id(),
-                    detail: Some(tool_detail()),
+                    detail: Some(ToolDetail::Generic {
+                        display: tool_display(),
+                    }),
                 }
             } else {
                 // rejected | cancelled | unavailable: the call never runs.
@@ -341,6 +358,25 @@ mod tests {
             [AgentEvent::Identity { .. }, AgentEvent::ActivityStart { tool_use_id: Some(t), .. }]
                 if t == "call_9"
         ));
+        // A GATED dispatch resumes GENERIC on purpose: the Task pre-pass
+        // keyed the tuid at the original `tool_call`, so a second Task Start
+        // for it reads as a replay and would strand the slot in Waiting (the
+        // decoder arm's comment owns the mechanism).
+        let evs = decode(json!({
+            "type": "approval_decided", "sessionId": SID,
+            "callId": "call_10",
+            "toolName": "subagent", "outcome": "allowed-once",
+        }));
+        assert!(matches!(
+            &evs[..],
+            [
+                _,
+                AgentEvent::ActivityStart {
+                    detail: Some(ToolDetail::Generic { .. }),
+                    ..
+                }
+            ]
+        ));
     }
 
     #[test]
@@ -397,6 +433,23 @@ mod tests {
         let evs = decode(json!({
             "type": "tool_call", "sessionId": SID,
             "callId": "c1", "toolName": "subagent",
+        }));
+        assert!(
+            matches!(
+                &evs[..],
+                [
+                    _,
+                    AgentEvent::ActivityStart {
+                        detail: Some(ToolDetail::Task),
+                        ..
+                    }
+                ]
+            ),
+            "{evs:?}"
+        );
+        let evs = decode(json!({
+            "type": "tool_call", "sessionId": SID,
+            "callId": "c3", "toolName": "subagent_fork",
         }));
         assert!(
             matches!(

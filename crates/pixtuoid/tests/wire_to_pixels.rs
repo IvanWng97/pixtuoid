@@ -276,13 +276,22 @@ fn agent_cases() -> Vec<WireCase> {
         },
         WireCase {
             // The authed capture (read/bash/read rounds) pins Active on real
-            // wire; the delegation capture is two sprites and lives in the
-            // delegation suite instead.
+            // wire.
             name: "dsh",
             source: "dsh",
             fixture: "fixtures/dsh/tool-round-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
             must_reach: &[Reach::Active],
+        },
+        WireCase {
+            // The delegation capture: two sessions (so it lives outside
+            // `fixtures/`, like cursor's), pinning the parent's Delegating
+            // through the `subagent` dispatch.
+            name: "dsh-delegation",
+            source: "dsh",
+            fixture: "delegation/fixtures/dsh/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[Reach::Active, Reach::Delegating],
         },
         WireCase {
             name: "kimi",

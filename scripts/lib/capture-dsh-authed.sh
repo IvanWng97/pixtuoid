@@ -26,13 +26,23 @@ if [[ ! -x $shim ]]; then
 fi
 
 plugin="$DSH_HOME/pixtuoid/pixtuoid-dsh.mjs"
-python3 - "$repo" "$plugin" "$shim" <<'PY'
+# Fail-loud render: a missing template or a renamed placeholder would
+# otherwise yield a plugin whose spawn fails silently — a billed run
+# recording zero payloads.
+if ! python3 - "$repo" "$plugin" "$shim" <<'PY'
 import json, pathlib, sys
 repo = pathlib.Path(sys.argv[1])
 template = (repo / "crates/pixtuoid/src/install/dsh_plugin.mjs").read_text()
-rendered = template.replace('"{{HOOK_PATH_JSON}}"', json.dumps(sys.argv[3]))
+marker = '"{{HOOK_PATH_JSON}}"'
+if marker not in template:
+    sys.exit("dsh_plugin.mjs lost the HOOK_PATH placeholder")
+rendered = template.replace(marker, json.dumps(sys.argv[3]))
 pathlib.Path(sys.argv[2]).write_text(rendered)
 PY
+then
+    echo "capture driver: plugin render failed" >&2
+    exit 1
+fi
 
 cat >"$DSH_HOME/cordis.patch.yml" <<EOF
 - insert:

@@ -1,5 +1,5 @@
-//! The NAME-KEYED delegation family: sources whose subagent dispatch is a tool
-//! literally called `task` (dsh's is called `subagent`). They claim the Task detail by tool NAME and
+//! The NAME-KEYED delegation family: sources whose subagent dispatch is a
+//! tool literally called `task` — `subagent` for dsh. They claim the Task detail by tool NAME and
 //! deliberately NOT by the presence of a `subagent_type` key, so a
 //! model-authored argument on an ordinary tool cannot spoof a delegation, seed
 //! `active_tasks`, and cascade a real child out on drain.
@@ -102,7 +102,8 @@ fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
     }
 }
 
-/// The call id sitting beside a `dispatch`-named tool in the SAME raw object.
+/// The call id sitting beside the tool named by `dispatch` in the SAME raw
+/// object.
 fn task_call_ids(raw: &[String], dispatch: &str) -> std::collections::BTreeSet<String> {
     fn walk(v: &serde_json::Value, dispatch: &str, out: &mut std::collections::BTreeSet<String>) {
         match v {
@@ -183,7 +184,7 @@ fn the_task_detail_lands_on_the_call_actually_named_task() {
             let named_task = id.as_deref().is_some_and(|i| dispatch.contains(i));
             assert_eq!(
                 *is_task, named_task,
-                "{cli}: the Task detail must sit on the `task` call ({dispatch:?}) and \
+                "{cli}: the Task detail must sit on the dispatch call ({dispatch:?}) and \
                  on no other — start {id:?} claims Task={is_task}"
             );
         }
