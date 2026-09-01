@@ -33,9 +33,13 @@ PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 SHELL_SOURCES := "scripts/lib/*.sh .githooks/* policy/ci-observability/*.sh"
 
 # The nightly the api-surface goldens are pinned to (rustdoc JSON is
-# nightly-only). Self-installed by `_api-nightly`; CI + setup-tools pin
-# cargo-public-api 0.52.0 to match. Bump both together or the golden churns.
+# nightly-only). Self-installed by `_api-nightly`, which also asserts the
+# [`API_PUBLIC_API`] pin — ci-lint.yml installs its own copy of that version,
+# and silent divergence churned goldens before the assert existed.
 API_NIGHTLY := "nightly-2026-07-22"
+
+# The cargo-public-api the api/ goldens are reproducible against.
+API_PUBLIC_API := "0.52.0"
 
 # List available recipes.
 default:
@@ -461,6 +465,12 @@ api-surface-check: _api-nightly
 _api-nightly:
     #!/usr/bin/env bash
     set -euo pipefail
+    # Goldens are tool-exact: a different cargo-public-api rewrites them all.
+    have="$(cargo public-api --version 2>/dev/null | awk '{print $NF}' || true)"
+    if [ "${have:-missing}" != "{{ API_PUBLIC_API }}" ]; then
+        echo "error: cargo-public-api ${have:-missing} installed, goldens need {{ API_PUBLIC_API }} (just setup-tools)" >&2
+        exit 1
+    fi
     command -v rustup >/dev/null || { echo "rustup not found — install {{API_NIGHTLY}} manually for api-surface" >&2; exit 1; }
     rustup toolchain list | grep -q '{{API_NIGHTLY}}' && exit 0
     echo "installing {{API_NIGHTLY}} (api-surface needs nightly rustdoc JSON)…" >&2
@@ -686,6 +696,11 @@ replay fixture delay="3":
 #   just build --release                      # release
 #   just build --release --bins --examples    # what ci-tests.yml's smoke job builds
 [group('rust')]
+[doc('Print the workspace version — the one authority for tag/packaging checks')]
+workspace-version:
+    @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
+
+[group('rust')]
 [doc('Compile the workspace; forwards args (e.g. --release --bins --examples)')]
 build *args:
     cargo build --workspace {{ args }}
@@ -694,11 +709,11 @@ build *args:
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
 # (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
 # than defaulted because callers pass it POSITIONALLY: an unquoted, unset
-# matrix.cross expands to nothing, and the collapse slid `flags` into this slot
-# on both Linux legs that omit the key — pinned by the arg-shift case below.
+# matrix.cross once slid the next argument into this slot on both Linux legs
+# that omit the key — pinned by the arg-shift case below.
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
-build-target target cross="false" flags="":
+build-target target cross="false":
     #!/usr/bin/env bash
     set -euo pipefail
     use_cross="{{ cross }}"
@@ -711,14 +726,20 @@ build-target target cross="false" flags="":
         exit 1
         ;;
     esac
-    # flags: extra cargo flags — release.yml passes --no-default-features for
-    # every LINUX artifact (musl can't link ALSA statically; the aarch64 cross
-    # image has no ALSA headers), so prebuilt Linux binaries ship SILENT and
-    # Linux audio is a from-source feature (#633; see docs/CONFIGURATION.md).
+    # Every LINUX artifact builds --no-default-features (musl can't link ALSA
+    # statically; the aarch64 cross image has no ALSA headers), so prebuilt
+    # Linux binaries ship SILENT and Linux audio is a from-source feature
+    # (#633; see docs/CONFIGURATION.md). Derived here, not passed: the flag is
+    # a property of the target, and the two callers restating it drifted apart
+    # from this WHY once already.
+    flags=""
+    case "{{ target }}" in
+    *linux*) flags="--no-default-features" ;;
+    esac
     if [ "$use_cross" = "true" ]; then
-        cross build --release --target "{{ target }}" {{ flags }}
+        cross build --release --target "{{ target }}" $flags
     else
-        cargo build --release --target "{{ target }}" {{ flags }}
+        cargo build --release --target "{{ target }}" $flags
     fi
 
 # Package the .deb for ONE already-built target (release.yml's deb job, hence
@@ -1020,7 +1041,7 @@ bump version:
     if ! git diff --quiet || ! git diff --cached --quiet; then
         echo "error: uncommitted changes — commit or stash before bumping" >&2; exit 1; fi
 
-    cur="$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)"
+    cur="$(just workspace-version)"
 
     # 3. must be strictly newer than the current version
     if [[ "$ver" == "$cur" || "$(printf '%s\n%s\n' "$cur" "$ver" | sort -V | tail -1)" != "$ver" ]]; then
@@ -1156,7 +1177,7 @@ setup-tools:
     set -euo pipefail
     # cargo-public-api is PINNED (the `just api-surface` goldens are reproducible
     # only against an exact tool + nightly pair — see the api-surface recipe).
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@0.52.0)
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else
