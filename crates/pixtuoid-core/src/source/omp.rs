@@ -1,6 +1,8 @@
 //! Oh My Pi (`omp`, omp.sh) source. Watches the omp session transcripts
-//! (`<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via `JsonlWatcher`;
-//! [`omp_sessions_dir`] owns every axis of that root. omp has no shell-hook
+//! (`<sessions-root>/<encoded-cwd>/<ts>_<uuid>.jsonl`) via one `JsonlWatcher`
+//! per root: [`omp_sessions_dir`] owns every axis of the primary root, and
+//! `omp_profile_sessions_dirs` adds every OTHER profile's (each profile keeps
+//! its own sessions tree). omp has no shell-hook
 //! seam — its hooks are in-process TS extension modules — so the hook plane
 //! is a pixtuoid-owned bridge extension
 //! (`pixtuoid/src/install/omp_extension.ts`) whose payloads
@@ -23,7 +25,7 @@ mod native;
 #[cfg(feature = "native")]
 pub(crate) use native::live_omp_session_ids_for_focus;
 #[cfg(feature = "native")]
-pub use native::OmpSource;
+pub use native::{OmpProfileEnumerate, OmpSource};
 
 /// The Oh My Pi (omp) source's registry name (its `SourceDescriptor.name`).
 pub const SOURCE_NAME: &str = "omp";
@@ -225,6 +227,59 @@ fn resolve_omp_sessions_dir(
     // The flatten lives here: with XDG the base REPLACES `<…>/agent`, it does
     // not sit under it.
     xdg.unwrap_or(agent_dir).join("sessions")
+}
+
+/// Sessions dirs of every OTHER profile — the roots the primary
+/// [`omp_sessions_dir`] resolution does not cover. Enumerated from the
+/// `profiles/` child of the base config root, each derived with the SAME
+/// precedence as the selected profile (its own `agent` dir; the XDG arm
+/// flattens `agent/` away where its candidate exists). The env-selected
+/// profile is excluded: its dir IS the primary root. Sorted so the watcher
+/// set is deterministic.
+pub(crate) fn omp_profile_sessions_dirs() -> Vec<PathBuf> {
+    let env = with_omp_dotenv(&OmpEnv::from_process(), &|p| {
+        std::fs::read_to_string(p).ok()
+    });
+    omp_profile_sessions_dirs_resolved(
+        &env,
+        cfg!(any(target_os = "linux", target_os = "macos")),
+        &|p| p.exists(),
+        &|profiles| {
+            let Ok(entries) = std::fs::read_dir(profiles) else {
+                return Vec::new();
+            };
+            entries
+                .filter_map(|e| e.ok())
+                .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+                .filter_map(|e| e.file_name().into_string().ok())
+                .collect()
+        },
+    )
+}
+
+fn omp_profile_sessions_dirs_resolved(
+    env: &OmpEnv,
+    xdg_platform: bool,
+    exists: &dyn Fn(&Path) -> bool,
+    list_profiles: &dyn Fn(&Path) -> Vec<String>,
+) -> Vec<PathBuf> {
+    let Some(base) = omp_config_root(env, None) else {
+        return Vec::new();
+    };
+    let primary = resolve_omp_sessions_dir(env, xdg_platform, exists);
+    let mut names = list_profiles(&base.join("profiles"));
+    names.sort();
+    names
+        .iter()
+        .filter_map(|p| {
+            let agent = omp_config_root(env, Some(p))?.join("agent");
+            let xdg = xdg_platform
+                .then(|| xdg_app_root(env.xdg_data_home.as_deref(), Some(p), exists))
+                .flatten();
+            Some(xdg.unwrap_or(agent).join("sessions"))
+        })
+        .filter(|d| *d != primary)
+        .collect()
 }
 
 /// `resolveIf`: `$XDG_DATA_HOME/omp` (or its `profiles/<name>` child) when that
@@ -1876,6 +1931,69 @@ mod tests {
             resolve_omp_agent_dir(&profiled),
             PathBuf::from("/home/u/.omp/profiles/work/agent"),
             "a named profile derives its own agent dir"
+        );
+    }
+
+    #[test]
+    fn profile_enumeration_derives_each_profiles_sessions_dir() {
+        let env = OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: None,
+            omp_profile: None,
+            pi_profile: None,
+            pi_profile_live: None,
+            agent_dir: None,
+            xdg_data_home: Some("/xdg".into()),
+        };
+        let list = |p: &Path| {
+            assert_eq!(
+                p,
+                Path::new("/home/u/.omp/profiles"),
+                "enumerates the profiles dir"
+            );
+            vec!["play".to_string(), "work".to_string()]
+        };
+        // XDG exists only for `work`, so `work` gets the flattened shape and
+        // `play` the standard profile agent shape.
+        let exists = |p: &Path| p == Path::new("/xdg/omp/profiles/work");
+        assert_eq!(
+            omp_profile_sessions_dirs_resolved(&env, true, &exists, &list),
+            vec![
+                PathBuf::from("/home/u/.omp/profiles/play/agent/sessions"),
+                PathBuf::from("/xdg/omp/profiles/work/sessions"),
+            ]
+        );
+    }
+
+    #[test]
+    fn profile_enumeration_skips_the_selected_profile_and_survives_no_profiles_dir() {
+        let mut env = OmpEnv {
+            home: Some("/home/u".into()),
+            config_dir_name: None,
+            omp_profile: Some("work".into()),
+            pi_profile: None,
+            pi_profile_live: None,
+            agent_dir: None,
+            xdg_data_home: None,
+        };
+        let none = |_: &Path| false;
+        // `work` is the PRIMARY root (env-selected); only `other` is extra.
+        let list = |_: &Path| vec!["work".to_string(), "other".to_string()];
+        assert_eq!(
+            omp_profile_sessions_dirs_resolved(&env, false, &none, &list),
+            vec![PathBuf::from("/home/u/.omp/profiles/other/agent/sessions")]
+        );
+        // No profiles dir at all -> nothing to add.
+        let empty = |_: &Path| Vec::new();
+        assert_eq!(
+            omp_profile_sessions_dirs_resolved(&env, false, &none, &empty),
+            Vec::<PathBuf>::new()
+        );
+        // An unresolvable home enumerates nothing rather than panicking.
+        env.home = None;
+        assert_eq!(
+            omp_profile_sessions_dirs_resolved(&env, false, &none, &list),
+            Vec::<PathBuf>::new()
         );
     }
 
