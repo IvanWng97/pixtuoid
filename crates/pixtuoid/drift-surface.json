@@ -99,6 +99,7 @@
       "approval/decided",
       "assistant/message",
       "request/header",
+      "session/event",
       "tool/call",
       "tool/result"
     ],

@@ -277,8 +277,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             // Lifecycle only — the no-auth capture holds no tool round (the
             // model call dies on MISSING_CREDENTIAL), so the pin here is
-            // registration + paint; Active waits on an authed capture
-            // (`TOOL_ID_KEY_UNPROVEN` carries the sibling note).
+            // registration + paint; Active waits on an authed capture (#928).
             name: "dsh",
             source: "dsh",
             fixture: "fixtures/dsh/boot-lifecycle-recorded/hook-payloads.jsonl",

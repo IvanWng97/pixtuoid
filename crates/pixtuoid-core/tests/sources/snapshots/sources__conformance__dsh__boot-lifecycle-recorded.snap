@@ -1,5 +1,6 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - SessionStart:
@@ -8,6 +9,11 @@ expression: events
     session_id: session-d597e513-a91f-42ab-8f78-627607505edb
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
+- Identity:
+    agent_id: 6320276561204388767
+    source: dsh
+    session_id: session-d597e513-a91f-42ab-8f78-627607505edb
+    cwd: /private/tmp/pixtuoid-capture/proj
 - Identity:
     agent_id: 6320276561204388767
     source: dsh

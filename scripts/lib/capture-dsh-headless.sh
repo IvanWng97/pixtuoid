@@ -14,19 +14,27 @@ export DSH_HOME=/tmp/pixtuoid-capture/dsh-home
 rm -rf "$DSH_HOME"
 mkdir -p "$DSH_HOME/pixtuoid"
 
-python3 - "$repo" <<'PY'
+# A missing shim would otherwise yield a silently EMPTY (still billed)
+# capture: the plugin spawns it fire-and-forget with errors swallowed.
+shim="$repo/target/release/pixtuoid-hook"
+if [[ ! -x $shim ]]; then
+    echo "capture-dsh-headless: missing $shim — run 'just build --release' first" >&2
+    exit 1
+fi
+
+plugin="$DSH_HOME/pixtuoid/pixtuoid-dsh.mjs"
+python3 - "$repo" "$plugin" "$shim" <<'PY'
 import json, pathlib, sys
 repo = pathlib.Path(sys.argv[1])
 template = (repo / "crates/pixtuoid/src/install/dsh_plugin.mjs").read_text()
-shim = repo / "target/release/pixtuoid-hook"
-rendered = template.replace('"{{HOOK_PATH_JSON}}"', json.dumps(str(shim)))
-pathlib.Path("/tmp/pixtuoid-capture/dsh-home/pixtuoid/pixtuoid-dsh.mjs").write_text(rendered)
+rendered = template.replace('"{{HOOK_PATH_JSON}}"', json.dumps(sys.argv[3]))
+pathlib.Path(sys.argv[2]).write_text(rendered)
 PY
 
-cat >"$DSH_HOME/cordis.patch.yml" <<'EOF'
+cat >"$DSH_HOME/cordis.patch.yml" <<EOF
 - insert:
     - id: pixtuoid
-      name: /tmp/pixtuoid-capture/dsh-home/pixtuoid/pixtuoid-dsh.mjs
+      name: $plugin
 EOF
 
 # The credential failure is this run's EXPECTED exit; the lifecycle events all

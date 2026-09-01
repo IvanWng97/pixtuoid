@@ -1,10 +1,12 @@
-//! DeepSeek Harness (`dsh`) source. Hook-only: the transcript is
-//! zstd-compressed (`session.jsonl.zstd`, concatenated frames — not
-//! line-readable), so the ONLY plane is a pixtuoid-owned cordis plugin
-//! (`pixtuoid/src/install/dsh_plugin.mjs`) mounted through the home-level
-//! `$DSH_HOME/cordis.patch.yml`, forwarding emit-only events (never a
-//! waterfall/serial listener, so it structurally cannot block dsh) through the
-//! shim. Wire shape: upstream `packages/core/session/src/types.ts` (the
+//! DeepSeek Harness (`dsh`) source. Hook-only: the transcript is not
+//! line-readable (the `DSH` registry row owns that story), so the only plane
+//! is a pixtuoid-owned cordis plugin (`pixtuoid/src/install/dsh_plugin.mjs`)
+//! mounted through the home-level `$DSH_HOME/cordis.patch.yml`, forwarding
+//! emit-only events through the shim. A REMOTE subagent provider
+//! (`dsh-subagent-claude-code`/`-codex`/`-acp`) publishes no local child
+//! session, so such a delegation paints nothing here — at most the spawned
+//! CLI's own source shows a parentless sprite while the dsh parent stays
+//! Active on the dispatch call. Wire shape: upstream `packages/core/session/src/types.ts` (the
 //! `session/event` feed), `packages/interaction/user-approval/src/types.ts`
 //! (the log-only approval audit pair), `packages/core/agent/src/runtime-types.ts`
 //! (#928). One dsh process hosts MANY sessions (the `web` profile is a
@@ -43,12 +45,15 @@ fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v s
 
 /// Decode one plugin payload into `AgentEvent`s (`HookCustom::ClaimsAll`).
 ///
-/// Every arm leads or trails an [`AgentEvent::identity`]: activity arms lead
-/// (the hook-family pattern — the event may target a slot registered before
-/// this daemon attached), session arms trail (the focus-pid carrier, armed
-/// from birth — the omp-reviewed shape). The approval pair maps onto the
-/// reducer's gated-wait mechanics keyed by `callId`: `asked` opens the wait
-/// naming the call it gates, `allowed-once` resumes it, anything else ends it.
+/// Every arm except `session_end` leads or trails an
+/// [`AgentEvent::identity`]: activity and telemetry arms lead (the
+/// hook-family pattern — the event may target a slot registered before this
+/// daemon attached, and a chat-only `web` session may never run a tool),
+/// `session_start` trails (the focus-pid carrier, armed from birth);
+/// `session_end` emits none — never re-register a closing session. The
+/// approval pair maps onto the reducer's gated-wait mechanics keyed by
+/// `callId`: `asked` opens the wait naming the call it gates,
+/// `allowed-once` resumes it, anything else ends it.
 pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -91,27 +96,40 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             agent_id,
             as_child: parent_id.is_some(),
         }]),
-        TOOL_CALL => Ok(vec![
-            identity(),
-            AgentEvent::ActivityStart {
-                agent_id,
-                tool_use_id: call_id(),
-                // Delegation classification is deliberately absent: dsh's
-                // dispatch tool name is unverified upstream, and a wrong
-                // `Task` here suppresses the parent's real activity. Settled
-                // at first capture (`TOOL_ID_KEY_UNPROVEN` sibling note).
-                detail: Some(ToolDetail::Generic {
-                    display: tool_display(),
-                }),
-            },
-        ]),
-        TOOL_RESULT => Ok(vec![
-            identity(),
-            AgentEvent::ActivityEnd {
-                agent_id,
-                tool_use_id: call_id(),
-            },
-        ]),
+        TOOL_CALL => {
+            if field(obj, "callId").is_none() {
+                crate::source::drift::missing_field(SOURCE_NAME, TOOL_CALL, "callId");
+            }
+            if field(obj, "toolName").is_none() {
+                crate::source::drift::missing_field(SOURCE_NAME, TOOL_CALL, "toolName");
+            }
+            Ok(vec![
+                identity(),
+                AgentEvent::ActivityStart {
+                    agent_id,
+                    tool_use_id: call_id(),
+                    // Delegation classification is deliberately absent: dsh's
+                    // dispatch tool name is unverified upstream, and a wrong
+                    // `Task` here suppresses the parent's real activity. Settled
+                    // at the first authed capture (#928 tracks it).
+                    detail: Some(ToolDetail::Generic {
+                        display: tool_display(),
+                    }),
+                },
+            ])
+        }
+        TOOL_RESULT => {
+            if field(obj, "callId").is_none() {
+                crate::source::drift::missing_field(SOURCE_NAME, TOOL_RESULT, "callId");
+            }
+            Ok(vec![
+                identity(),
+                AgentEvent::ActivityEnd {
+                    agent_id,
+                    tool_use_id: call_id(),
+                },
+            ])
+        }
         APPROVAL_ASKED => {
             let reason = match (field(obj, "toolName"), field(obj, "reason")) {
                 (Some(t), Some(r)) => format!("{t}: {r}"),
@@ -129,10 +147,17 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             ])
         }
         APPROVAL_DECIDED => {
-            let event = if field(obj, "outcome") == Some(OUTCOME_ALLOWED) {
+            // A renamed/dropped `outcome` would fail CLOSED (every grant
+            // decodes as the deny arm's End) — breadcrumb it, because no
+            // event-name drift row can see a field rename.
+            let outcome = field(obj, "outcome");
+            if outcome.is_none() {
+                crate::source::drift::missing_field(SOURCE_NAME, APPROVAL_DECIDED, "outcome");
+            }
+            let event = if outcome == Some(OUTCOME_ALLOWED) {
                 // The resume: the gated call now runs; its `tool_call` was
                 // already streamed before the gate, so only this Start lifts
-                // the wait (the omp shape).
+                // the wait.
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: call_id(),
@@ -149,21 +174,28 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             };
             Ok(vec![identity(), event])
         }
-        MODEL => Ok(vec![AgentEvent::ModelInfo {
-            agent_id,
-            model: field(obj, "model").map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS)),
-            effort: field(obj, "reasoningEffort").map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS)),
-        }]),
+        MODEL => Ok(vec![
+            identity(),
+            AgentEvent::ModelInfo {
+                agent_id,
+                model: field(obj, "model").map(|m| ellipsize(m, MAX_DECODED_FIELD_CHARS)),
+                effort: field(obj, "reasoningEffort")
+                    .map(|e| ellipsize(e, MAX_DECODED_FIELD_CHARS)),
+            },
+        ]),
         USAGE => {
             let n = |k: &str| obj.get(k).and_then(|v| v.as_u64()).unwrap_or(0);
             // Fresh spend only: input + output + cache WRITES; cache reads are
             // re-served context (the CC `fresh_spend` semantics).
-            Ok(vec![AgentEvent::Usage {
-                agent_id,
-                fresh_tokens: n("inputTokens")
-                    .saturating_add(n("outputTokens"))
-                    .saturating_add(n("cacheWriteTokens")),
-            }])
+            Ok(vec![
+                identity(),
+                AgentEvent::Usage {
+                    agent_id,
+                    fresh_tokens: n("inputTokens")
+                        .saturating_add(n("outputTokens"))
+                        .saturating_add(n("cacheWriteTokens")),
+                },
+            ])
         }
         _ => {
             crate::source::drift::unknown_event(SOURCE_NAME, ty);
@@ -221,7 +253,8 @@ mod tests {
         assert!(
             matches!(&evs[..], [AgentEvent::SessionStart { parent_id: Some(p), .. }, AgentEvent::Identity { .. }]
                 if *p == AgentId::from_parts("dsh", parent)),
-            "parentSession is the authoritative link: {evs:?}"
+            "a forwarded parentSession is the delegation link (the plugin \
+             forwards it only for `origin: subagent` headers): {evs:?}"
         );
     }
 
@@ -329,7 +362,7 @@ mod tests {
         }));
         assert!(matches!(
             &evs[..],
-            [AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
+            [AgentEvent::Identity { .. }, AgentEvent::ModelInfo { model: Some(m), effort: Some(e), .. }]
                 if m == "deepseek-v3" && e == "high"
         ));
         let evs = decode(json!({
@@ -340,10 +373,13 @@ mod tests {
         assert!(
             matches!(
                 &evs[..],
-                [AgentEvent::Usage {
-                    fresh_tokens: 127,
-                    ..
-                }]
+                [
+                    AgentEvent::Identity { .. },
+                    AgentEvent::Usage {
+                        fresh_tokens: 127,
+                        ..
+                    }
+                ]
             ),
             "cache reads are re-served context, never fresh spend: {evs:?}"
         );

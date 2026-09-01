@@ -6,6 +6,9 @@
 //! install, no pnpm, and cannot summon a second cordis instance — probed live
 //! against a stock npm dsh (0.1.1-rc.2): the loader `import()`s a bare
 //! absolute path and the `web` profile even hot-reloads the patch file.
+//! ACCEPTED residual: uninstall removes the mount ROW only — the plugin file
+//! stays under `$DSH_HOME/pixtuoid/` (`write_config_atomic` cannot delete),
+//! and unmounted it is inert bytes.
 
 use std::path::{Path, PathBuf};
 
@@ -15,21 +18,28 @@ use saphyr::{LoadableYamlNode, MappingOwned, ScalarOwned, Yaml, YamlEmitter, Yam
 use crate::install::target::MergeOutcome;
 use crate::install::verify::{SchemaParse, ShimRef};
 
-/// The mount row's `id` — dsh dedups patch rows by id, and uninstall keys on it.
+/// The mount row's `id` — uninstall and the one-row verify both key on it.
 const PLUGIN_ID: &str = "pixtuoid";
 
 const HOOK_PLACEHOLDER: &str = "\"{{HOOK_PATH_JSON}}\"";
 
 pub(crate) const PLUGIN_TEMPLATE: &str = include_str!("dsh_plugin.mjs");
 
-/// `$DSH_HOME` else `~/.dsh` — upstream `resolveDshHome` has exactly this one
-/// axis (`home-paths`: no XDG arm, no per-profile relocation of HOME itself).
+/// `$DSH_HOME` else `~/.dsh` — upstream `resolveDshHome`
+/// (`packages/util/home-paths/src/index.ts`, fetched 2026-09-01) resolves
+/// configured-path > `$DSH_HOME` > `~/.dsh` with no XDG arm and treats a
+/// blank `$DSH_HOME` as unset; it also expands a `~/` value and resolves a
+/// relative one against CWD (`resolve(expandHomePath(..))`) — we refuse both
+/// instead of mirroring, because a cwd-dependent mount row would point
+/// somewhere new each launch. No configured path reaches the mount, so the
+/// env axis is the whole surface here.
 fn dsh_home() -> Result<PathBuf> {
     if let Some(p) = crate::install::io::nonempty_env("DSH_HOME") {
         if !p.is_absolute() {
             bail!(
-                "DSH_HOME={} is relative — dsh resolves it as-is, so pixtuoid \
-                 cannot safely install there",
+                "DSH_HOME={} is not absolute — dsh would expand `~` and \
+                 resolve the rest against its own CWD, so a pixtuoid-written \
+                 mount row would drift per launch; set an absolute path",
                 p.display()
             );
         }
@@ -176,8 +186,9 @@ pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
 }
 
 /// The patch file carries the MOUNT, not the shim (that is baked inside the
-/// plugin file, which every (re)install rewrites verbatim) — so `shim` stays
-/// `Unknown` here and doctor's shim health rides the reinstall path.
+/// plugin file) — so `shim` stays `Unknown` here; a stale or missing plugin
+/// file is `verify_extra_artifacts`' whole-file compare (nothing re-installs
+/// on a pixtuoid upgrade — that check is what catches an old bake).
 pub(crate) fn verify_schema(content: &str) -> SchemaParse {
     let rows = match parse_rows(content) {
         Ok(rows) => rows,
@@ -209,14 +220,10 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                 _ => None,
             });
             match name {
-                Some(n) if Path::new(&n).is_absolute() => {
-                    if !Path::new(&n).exists() {
-                        parse.issues.push(format!(
-                            "the mount row points at {n}, which does not exist — reconnect \
-                             dsh to rewrite the plugin"
-                        ));
-                    }
-                }
+                // PURE over the content (`target.rs` schema contract): file
+                // existence/staleness is `verify_extra_artifacts`' stat +
+                // whole-file compare, never checked here.
+                Some(n) if Path::new(&n).is_absolute() => {}
                 Some(n) => parse.issues.push(format!(
                     "the mount row's plugin path {n} is not absolute — dsh's loader only \
                      imports bare absolute paths"
@@ -227,7 +234,7 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             }
         }
         n => parse.issues.push(format!(
-            "{n} pixtuoid mount rows — dsh dedups by id, but the extras are ours to remove"
+            "{n} pixtuoid mount rows — duplicates are ours; reconnect dsh to collapse them"
         )),
     }
     parse
@@ -290,25 +297,43 @@ mod tests {
     }
 
     #[test]
-    fn the_plugin_registers_no_gating_handlers_and_never_awaits() {
-        // Emit-only is the never-block invariant: a waterfall/serial listener
-        // would put us in dsh's dispatch chain.
-        for gating in [
-            "agent/pre-step",
-            "tools/pre-execute",
-            "tools/post-execute",
-            "agent/turn-stopping",
-            "approval/request",
-            "user-questions/request",
-        ] {
-            assert!(
-                !PLUGIN_TEMPLATE.contains(gating),
-                "the plugin must never subscribe the blocking point {gating:?}"
-            );
-        }
+    fn the_plugin_subscribes_only_verified_emit_channels_and_never_awaits() {
+        // Allowlist, not denylist: upstream carries ~21 non-emit (waterfall/
+        // serial/parallel) events and the set churns, so naming bad ones can
+        // only sample the invariant. The enforceable form: every `ctx.on`
+        // call site names a channel verified `@mode emit` upstream
+        // (`runtime-types.ts` for the two agent channels, `session/src/
+        // index.ts` for `session/event`; fetched 2026-09-01).
+        let subscribed: std::collections::BTreeSet<&str> = PLUGIN_TEMPLATE
+            .split(r#"ctx.on("#)
+            .skip(1)
+            .map(|p| {
+                p.trim_start_matches('"')
+                    .split('"')
+                    .next()
+                    .expect("closed quote")
+            })
+            .collect();
+        let allowed = std::collections::BTreeSet::from([
+            "agent/session-start",
+            "agent/disposed",
+            "session/event",
+        ]);
+        assert_eq!(subscribed, allowed);
         assert!(
             !PLUGIN_TEMPLATE.contains("await"),
             "an await inside a listener is a stall waiting to be awaited"
+        );
+    }
+
+    #[test]
+    fn the_plugin_forwards_parent_session_only_for_subagent_headers() {
+        // `parentSession` alone is upstream's seed-lineage field — an ordinary
+        // user branch (`ctx.sessions.fork()`) stamps it too; forwarded ungated,
+        // a branched conversation renders as a delegation child.
+        assert!(
+            PLUGIN_TEMPLATE.contains(r#"header.origin === "subagent" && header.parentSession"#),
+            "base() lost the subagent-discriminator gate on parentSession"
         );
     }
 
@@ -352,7 +377,11 @@ mod tests {
         std::env::set_var("DSH_HOME", b.path());
         let second = merge_install(&first.content, "/unused").unwrap();
         assert!(second.changed, "a stale mount path must be rewritten");
-        assert!(second.content.contains(&*b.path().to_string_lossy()));
+        // Structural, not string: saphyr quote-escapes a Windows path in the
+        // emitted YAML, so a lossy-string `contains` passes only on Unix. A
+        // re-merge under home B is a no-op exactly when the row already
+        // carries B's plugin path.
+        assert!(!merge_install(&second.content, "/unused").unwrap().changed);
         std::env::remove_var("DSH_HOME");
     }
 
@@ -363,7 +392,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_reports_the_missing_row_the_missing_file_and_the_relative_path() {
+    fn verify_reports_the_missing_row_and_the_relative_path() {
         let _env = crate::TEST_ENV_LOCK
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -376,18 +405,11 @@ mod tests {
             .iter()
             .any(|i| i.contains("no pixtuoid mount row")));
 
+        // The plugin file does not exist on disk, yet the schema reads
+        // clean: verify_schema is PURE over the content — a missing file is
+        // `verify_extra_artifacts`' finding, pinned by the shared
+        // missing-code-artifact test in `install/tests.rs`.
         let merged = merge_install("", "/unused").unwrap();
-        let missing_file = verify_schema(&merged.content);
-        assert!(
-            missing_file
-                .issues
-                .iter()
-                .any(|i| i.contains("does not exist")),
-            "{missing_file:?}"
-        );
-
-        std::fs::create_dir_all(plugin_path().unwrap().parent().unwrap()).unwrap();
-        std::fs::write(plugin_path().unwrap(), "x").unwrap();
         let ok = verify_schema(&merged.content);
         assert!(ok.issues.is_empty(), "{ok:?}");
 

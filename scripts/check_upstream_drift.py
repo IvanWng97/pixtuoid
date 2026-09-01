@@ -93,8 +93,9 @@ OMP_SESSION_ENTRIES_URL = (
 OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
 
 # The dsh plugin's surface (#928) — every event name the bundled plugin
-# subscribes, each declared as a single-quoted key in one of these three
-# upstream type files.
+# listens for, each declared as a single-quoted key in one of these four
+# upstream source files (index.ts declares the `session/event` bus name the
+# other three never spell).
 DSH_RUNTIME_TYPES_URL = (
     "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
     "packages/core/agent/src/runtime-types.ts"
@@ -106,6 +107,10 @@ DSH_SESSION_TYPES_URL = (
 DSH_APPROVAL_TYPES_URL = (
     "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
     "packages/interaction/user-approval/src/types.ts"
+)
+DSH_SESSION_INDEX_URL = (
+    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
+    "packages/core/session/src/index.ts"
 )
 
 # The bridge extension's surface (#951) — `check_omp_extension_reads` routes
@@ -299,6 +304,7 @@ ANCHORS: dict[str, Anchor] = {
     DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
     DSH_SESSION_TYPES_URL: Anchor(r"'assistant/chunk'", "`assistant/chunk`"),
     DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
+    DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
     GROK_SESSION_STORAGE_URL: Anchor(
@@ -1549,13 +1555,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             fetch_anchored(DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types", report),
             fetch_anchored(DSH_SESSION_TYPES_URL, "dsh session event types", report),
             fetch_anchored(DSH_APPROVAL_TYPES_URL, "dsh approval types", report),
+            fetch_anchored(DSH_SESSION_INDEX_URL, "dsh session bus names", report),
         ]
         if all(d is not None for d in docs):
             joined = "\n".join(d for d in docs if d is not None)
             for name in sorted(ours.dsh_plugin_events):
                 if f"'{name}'" not in joined:
                     report.add_breaking(
-                        f"dsh event `{name}` (subscribed by the installed "
+                        f"dsh event `{name}` (listened for by the installed "
                         f"dsh_plugin.mjs) is GONE from the upstream type files — "
                         f"renamed; the plugin listens to an event dsh never fires "
                         f"(that slice of the office silently stops updating)."

@@ -701,7 +701,6 @@ fn install_on_a_malformed_config_leaves_no_orphan_extra_artifacts() {
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
 
@@ -736,9 +735,6 @@ fn verify_target_is_sound_after_a_real_install_for_every_target() {
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
-    let dsh_home = tempfile::TempDir::new().unwrap();
-    let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap(); // a real, executable file
@@ -836,7 +832,6 @@ fn verify_target_hard_flags_a_missing_code_artifact_for_every_extra_artifacts_ta
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
@@ -888,7 +883,6 @@ fn verify_target_flags_a_stale_code_artifact_for_every_extra_artifacts_target() 
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
@@ -1057,7 +1051,6 @@ fn verify_target_hard_flags_a_moved_baked_shim_for_every_extra_artifacts_target(
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let mut covered = 0;
@@ -1100,7 +1093,6 @@ fn reinstall_heals_a_deleted_extra_artifact_even_on_a_config_no_op() {
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let exe = std::env::current_exe().unwrap();
@@ -1281,7 +1273,6 @@ fn every_target_that_writes_a_config_names_us_in_it() {
         .unwrap_or_else(|e| e.into_inner());
     let oc_home = tempfile::TempDir::new().unwrap();
     let _state = EnvVarOverride::set("OPENCLAW_STATE_DIR", oc_home.path());
-    // Same class: dsh's plugin file resolves from $DSH_HOME.
     let dsh_home = tempfile::TempDir::new().unwrap();
     let _dsh = EnvVarOverride::set("DSH_HOME", dsh_home.path());
     let tmpdir = tempfile::TempDir::new().unwrap();

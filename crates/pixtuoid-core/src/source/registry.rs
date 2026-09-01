@@ -525,18 +525,17 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 /// HOOK-ONLY: DeepSeek Harness persists sessions as zstd-compressed
 /// concatenated frames (`session.jsonl.zstd` — not line-readable, format v0
 /// with no migration promise), so the only plane is the pixtuoid cordis
-/// plugin (`pixtuoid/src/install/dsh_plugin.mjs`): a single zero-import
-/// `.mjs` mounted via the home-level `$DSH_HOME/cordis.patch.yml`,
-/// subscribing emit-only upstream events (structurally unable to block dsh)
-/// and claiming every payload here. One dsh process hosts many sessions (the
-/// `web` profile is a server), the opencode pid model.
+/// plugin (`pixtuoid/src/install/dsh_plugin.mjs`) mounted via the home-level
+/// `$DSH_HOME/cordis.patch.yml`, claiming every payload here (the mount and
+/// never-block stories live on the template and its tests). One dsh process
+/// hosts many sessions (the `web` profile is a server), the opencode pid
+/// model.
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // The recorded boot-lifecycle capture anchors this (0.1.1-rc.2, the npm
-    // latest — the anchor rule strips prerelease suffixes; upstream has never
-    // shipped a stable release and the in-tree edge is already 0.1.2-alpha.3,
-    // expect churn).
+    // The recorded boot-lifecycle capture's banner is 0.1.1-rc.2;
+    // `doctor::parse_version` keeps only the dotted digit run, so the
+    // prerelease suffix never reaches this pin.
     verified_version: "0.1.1",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
@@ -551,16 +550,22 @@ const DSH: SourceDescriptor = SourceDescriptor {
         }),
         caps: SourceCaps {
             // `agent/disposed` + the plugin's own effect-disposer sweep fire
-            // on clean quit AND SIGINT/SIGTERM (dsh runs disposers under a 5s
-            // grace); SIGKILL falls to `HookPidWatch` via the stamped pid.
+            // on clean quit AND signal shutdown (dsh runs disposers there
+            // too); SIGKILL and an uncaught crash (upstream installs no
+            // `uncaughtException` handler, so no disposer runs) fall to
+            // `HookPidWatch` via the stamped pid.
             has_exit_signal: true,
-            // Sessions are persistent; a `--resume` boots a NEW dsh emitting
-            // `session_start` with reason "resume" on the same id — the
+            // Sessions are persistent; a `--resume` boots a NEW dsh whose
+            // plugin emits a fresh `session_start` on the same id — the
             // SessionStart arm's ordinary re-registration, not this flag.
             resurrects_on_prompt: false,
-            // A subagent dispatch streams the parent's `tool/call` AND the
-            // local child fires its own lifecycle (parentSession-linked).
-            delegations_are_hook_silent: false,
+            // A LOCAL subagent child fires its own lifecycle, but the
+            // remote providers (`dsh-subagent-claude-code`/`-codex`/`-acp`)
+            // publish no local child session (upstream subagent.md), so a
+            // delegation CAN be fully hook-silent; `true` can only
+            // over-retain a dead slot. Moot until the decoder mints `Task`
+            // (#928, first authed capture).
+            delegations_are_hook_silent: true,
         },
         // The plugin runs in-process (a cordis plugin in the launcher's one
         // root context; no worker mode exists for plugins), so its stamped
