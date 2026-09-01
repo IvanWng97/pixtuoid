@@ -682,9 +682,14 @@ impl Reducer {
             // unknown-cwd flag must not keep `STALE_UNKNOWN_CWD_TIMEOUT` armed.
             slot.unknown_cwd = false;
         } else if !self.corr.hook_session_end_tombstoned(agent_id, now)
+            // The child ledger too (#244-w2): an Identity carries no parent, so
+            // without this an omp session batch whose parented Start the ledger
+            // just refused would re-register the ended child PARENTLESS one
+            // event later. A never-child id is never in the ledger, so the
+            // Reasonix parentless resurrect keeps registering.
+            && !self.corr.child_recently_ended(agent_id, now)
             && self.register_slot(scene, agent_id, ctx, None, now)
         {
-            // Only the #242 tombstone is consulted, NOT the child ledger.
             if let Some(slot) = scene.agents.get_mut(&agent_id) {
                 slot.unknown_cwd = false;
                 if pid.is_some() {

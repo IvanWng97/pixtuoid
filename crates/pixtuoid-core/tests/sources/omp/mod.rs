@@ -110,7 +110,8 @@ fn a_resumed_session_re_registers_after_its_earlier_end() {
 
 /// A task run under the bridge: the parent AND the in-process child each fire
 /// their own lifecycle, the child keyed by the NESTED file so both transports
-/// mint one id, parent-linked by path, both stamped with the ONE omp pid.
+/// mint one id, parent-linked by path, both payloads carrying the ONE omp
+/// `_pid` on the wire.
 #[test]
 fn a_task_round_is_two_linked_lifecycles_under_one_pid() {
     let evs = events("task-recorded");
@@ -287,13 +288,24 @@ fn a_recorded_switch_ends_the_previous_session_and_starts_the_current() {
             AgentEvent::SessionStart { agent_id, .. } if *agent_id == cur_id => "start-cur",
             AgentEvent::SessionEnd { agent_id, .. } if *agent_id == prev_id => "end-prev",
             AgentEvent::SessionEnd { agent_id, .. } if *agent_id == cur_id => "end-cur",
+            // The pid carrier behind each session arm
+            // (`decode_omp_hook_payload`'s doc owns the story).
+            AgentEvent::Identity { agent_id, .. } if *agent_id == cur_id => "identity-cur",
+            AgentEvent::Identity { agent_id, .. } if *agent_id == prev_id => "identity-prev",
             other => panic!("unexpected event in the switch round: {other:?}"),
         })
         .map(str::to_string)
         .collect();
     assert_eq!(
         kinds,
-        ["start-prev", "end-prev", "start-cur", "end-cur"],
-        "the switch decodes as End(previous) + Start(current)"
+        [
+            "start-prev",
+            "identity-prev",
+            "end-prev",
+            "start-cur",
+            "identity-cur",
+            "end-cur",
+        ],
+        "the switch decodes as End(previous) + Start(current), each session arm trailing its Identity"
     );
 }

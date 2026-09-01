@@ -749,8 +749,8 @@ const GROK: SourceDescriptor = SourceDescriptor {
 /// at `<omp_sessions_dir>/<encoded-cwd>/<ts>_<uuid>.jsonl`; the bridge
 /// extension (`pixtuoid/src/install/omp_extension.ts`, auto-discovered from the agent
 /// dir's `extensions/`) forwards what the transcript can never carry —
-/// pre-persist presence, empty-session shutdown, and the approval wait
-/// (#951). Both transports key on the sessionFile stem chain
+/// pre-persist presence, empty-session shutdown, the approval wait, and the
+/// process's own `_pid` (#951). Both transports key on the sessionFile stem chain
 /// ([`omp::omp_id_from_path`]), so they mint ONE AgentId per session — the
 /// grok same-key pattern. Under `omp --no-extensions`, or with the bridge
 /// broken or absent, the transcript path IS the old transcript-only source.
@@ -779,8 +779,9 @@ const OMP: SourceDescriptor = SourceDescriptor {
         caps: SourceCaps {
             // The `session_exit` entry is appended + flushed on every clean
             // teardown incl. SIGINT/SIGTERM (and the bridge fires
-            // `session_shutdown` even for empty sessions the entry skips);
-            // SIGKILL falls to the stale-sweep.
+            // `session_shutdown` even for empty sessions the entry skips).
+            // SIGKILL: with the bridge, `HookPidWatch` ends the stamped pid's
+            // sessions promptly; without it, the stale-sweep.
             has_exit_signal: true,
             // The header `SessionStart` decodes once per transcript life. A
             // `--resume` fires the bridge's `session_start` on the SAME id
@@ -793,15 +794,16 @@ const OMP: SourceDescriptor = SourceDescriptor {
             // AND the child persists its own parent-linked transcript.
             delegations_are_hook_silent: false,
         },
-        // omp holds a lifetime append fd on its session file, so the same
-        // `live_omp_session_ids` snapshot that vouches liveness also names the
-        // pid (`omp_pid_for_session`). The bridge extension DOES stamp `_pid`,
-        // and this channel discards it (recycle-guard rationale, #527-class);
-        // the stamp ships anyway so the wire shape is already right if a
-        // plugin-stamp channel ever lands. Known boundary: a bridge-only slot
-        // (pre-persist, or an empty session) has no transcript for the probe,
-        // so a focus click on it is a silent no-op.
-        focus: FocusChannel::TranscriptProbe,
+        // The bridge extension runs IN-PROCESS (upstream: extensions share
+        // the runtime), so its stamped `process.pid` IS omp's own —
+        // PluginStamp trust. The router stamps the kernel start marker; the
+        // click-time compare refuses a recycled pid (#527). The flip also
+        // puts omp on `HookPidWatch` (prompt exits) and makes a bridge-only,
+        // never-persisted session focusable from birth. Stamp-less shapes —
+        // `--no-extensions`, a session predating the bridge install — still
+        // focus through the append-fd probe: `resolve_pid` dispatches by
+        // source name and reads no channel.
+        focus: FocusChannel::PluginStamp,
     },
 };
 

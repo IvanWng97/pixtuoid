@@ -562,9 +562,10 @@ pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 /// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
 /// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
-/// end. Skipped when the session never produced an assistant message, and SIGKILL
-/// writes nothing — both fall to the stale-sweep, except that the bridge's
-/// `session_shutdown` ends the empty session outright.
+/// end. Skipped when the session never produced an assistant message (the
+/// bridge's `session_shutdown` ends that one outright), and SIGKILL writes
+/// nothing — with the bridge `HookPidWatch` catches it; without, the
+/// stale-sweep.
 const SESSION_EXIT: &str = "session_exit";
 
 /// The turn role carrying tool calls. Its `model` is read BARE, never the
@@ -857,6 +858,11 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// upstream `reason` (`"new" | "resume" | "fork"`) is deliberately dropped —
 /// the End+Start pair keys on `previousSessionFile` alone, identically for
 /// all three.
+///
+/// The start/switch/branch arms trail an [`AgentEvent::Identity`]: the router
+/// stamps pids onto Identity events only, and the focus stamp must arm from
+/// BIRTH to cover a bridge-only (never-persisted) session — the exit watch
+/// needs no help, `SessionStart` is already a bind target.
 pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -890,7 +896,9 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key.clone(), cwd());
 
     match ty {
-        HOOK_SESSION_START => Ok(vec![session_start()]),
+        // The trailing `identity()` is the focus-pid carrier (the declaration
+        // doc owns the story).
+        HOOK_SESSION_START => Ok(vec![session_start(), identity()]),
         // previous == current is the in-place branch REWRITE — an End+Start
         // pair there would walk the sprite out for its own rewrite.
         HOOK_SESSION_SWITCH | HOOK_SESSION_BRANCH => {
@@ -912,6 +920,7 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
                 }
             }
             evs.push(session_start());
+            evs.push(identity());
             Ok(evs)
         }
         HOOK_SESSION_SHUTDOWN => Ok(vec![AgentEvent::SessionEnd {
@@ -2432,7 +2441,7 @@ mod tests {
                 session_id,
                 cwd,
                 parent_id,
-            }] => {
+            }, AgentEvent::Identity { pid: None, .. }] => {
                 assert_eq!(*agent_id, hook_id(HOOK_ROOT));
                 assert_eq!(source, "omp");
                 assert_eq!(session_id, &hook_key(HOOK_ROOT));
@@ -2456,7 +2465,7 @@ mod tests {
                 session_id,
                 parent_id,
                 ..
-            }] => {
+            }, AgentEvent::Identity { .. }] => {
                 let key = hook_key(&child);
                 assert_eq!(*agent_id, AgentId::from_parts("omp", &key));
                 assert_eq!(session_id, &key);
@@ -2477,7 +2486,7 @@ mod tests {
                 agent_id,
                 session_id,
                 ..
-            }] => {
+            }, AgentEvent::Identity { .. }] => {
                 assert_eq!(
                     *agent_id,
                     AgentId::from_parts("omp", "01a05668-057f-7559-8fed-f28ff062e3ca")
@@ -2526,7 +2535,7 @@ mod tests {
                 as_child: false,
             }, AgentEvent::SessionStart {
                 agent_id: started, ..
-            }] => {
+            }, AgentEvent::Identity { .. }] => {
                 assert_eq!(*ended, hook_id(prev));
                 assert_eq!(*started, hook_id(HOOK_ROOT));
             }
@@ -2543,7 +2552,10 @@ mod tests {
             "sessionId": "01a05668-057f-7559-8fed-f28ff062e3ca", "cwd": "/repo",
         }));
         assert!(
-            matches!(&evs[..], [AgentEvent::SessionStart { .. }]),
+            matches!(
+                &evs[..],
+                [AgentEvent::SessionStart { .. }, AgentEvent::Identity { .. }]
+            ),
             "same-path branch must not End: {evs:?}"
         );
     }
@@ -2658,7 +2670,7 @@ mod tests {
         }))
         .unwrap();
         assert!(
-            matches!(&evs[..], [AgentEvent::SessionStart { agent_id, .. }]
+            matches!(&evs[..], [AgentEvent::SessionStart { agent_id, .. }, AgentEvent::Identity { .. }]
                 if *agent_id == hook_id(HOOK_ROOT)),
             "expected the ClaimsAll route: {evs:?}"
         );
@@ -2676,7 +2688,7 @@ mod tests {
             "sessionId": "x", "cwd": "/repo",
         }));
         match &evs[..] {
-            [AgentEvent::SessionStart { agent_id, .. }] => {
+            [AgentEvent::SessionStart { agent_id, .. }, AgentEvent::Identity { .. }] => {
                 assert_eq!(
                     *agent_id,
                     AgentId::from_parts("omp", &omp_id_from_path(Path::new(&folded)))

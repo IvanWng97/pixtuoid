@@ -1,4 +1,5 @@
-//! Liveness for HOOK-ONLY sources whose shim can supply the agent CLI's pid.
+//! Liveness for sources whose hook plane supplies the agent CLI's pid —
+//! hook-only CLIs, plus omp, whose in-process bridge stamps its own pid.
 //!
 //! A hook-only source has no tailable transcript and therefore none of the JSONL
 //! watcher's liveness ladder; its ONLY exit signal is the best-effort
