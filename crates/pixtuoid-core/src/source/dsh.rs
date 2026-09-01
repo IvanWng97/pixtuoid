@@ -37,6 +37,14 @@ const USAGE: &str = "usage";
 /// (`ApprovalOutcome`); every other outcome leaves the call unrun.
 const OUTCOME_ALLOWED: &str = "allowed-once";
 
+/// dsh's subagent dispatch tool, capture-verified (`delegation/fixtures/dsh`):
+/// the parent streams `tool_call {toolName: "subagent"}`, the child arrives as
+/// its own `parentSession`-linked session, and the parent's `tool_result`
+/// lands only after the child's `session_end`. Name-keyed like the codewhale
+/// family — the wire carries no `subagent_type`, so the NAME is the claim and
+/// a model-authored argument cannot spoof a delegation.
+const DISPATCH_TOOL: &str = "subagent";
+
 fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v str> {
     obj.get(key)
         .and_then(|v| v.as_str())
@@ -80,6 +88,15 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
             .map(|t| ellipsize(t, MAX_DECODED_FIELD_CHARS))
             .unwrap_or_default()
     };
+    let tool_detail = || {
+        if field(obj, "toolName") == Some(DISPATCH_TOOL) {
+            ToolDetail::Task
+        } else {
+            ToolDetail::Generic {
+                display: tool_display(),
+            }
+        }
+    };
 
     match ty {
         SESSION_START => Ok(vec![
@@ -108,13 +125,7 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: call_id(),
-                    // Delegation classification is deliberately absent: dsh's
-                    // dispatch tool name is unverified upstream, and a wrong
-                    // `Task` here suppresses the parent's real activity. Settled
-                    // at the first authed capture (#928 tracks it).
-                    detail: Some(ToolDetail::Generic {
-                        display: tool_display(),
-                    }),
+                    detail: Some(tool_detail()),
                 },
             ])
         }
@@ -161,9 +172,7 @@ pub fn decode_dsh_payload(v: &Value) -> anyhow::Result<Vec<AgentEvent>> {
                 AgentEvent::ActivityStart {
                     agent_id,
                     tool_use_id: call_id(),
-                    detail: Some(ToolDetail::Generic {
-                        display: tool_display(),
-                    }),
+                    detail: Some(tool_detail()),
                 }
             } else {
                 // rejected | cancelled | unavailable: the call never runs.
@@ -380,6 +389,44 @@ mod tests {
                 ]
             ),
             "cache reads are re-served context, never fresh spend: {evs:?}"
+        );
+    }
+
+    #[test]
+    fn the_subagent_dispatch_mints_task_and_ordinary_tools_stay_generic() {
+        let evs = decode(json!({
+            "type": "tool_call", "sessionId": SID,
+            "callId": "c1", "toolName": "subagent",
+        }));
+        assert!(
+            matches!(
+                &evs[..],
+                [
+                    _,
+                    AgentEvent::ActivityStart {
+                        detail: Some(ToolDetail::Task),
+                        ..
+                    }
+                ]
+            ),
+            "{evs:?}"
+        );
+        let evs = decode(json!({
+            "type": "tool_call", "sessionId": SID,
+            "callId": "c2", "toolName": "bash",
+        }));
+        assert!(
+            matches!(
+                &evs[..],
+                [
+                    _,
+                    AgentEvent::ActivityStart {
+                        detail: Some(ToolDetail::Generic { .. }),
+                        ..
+                    }
+                ]
+            ),
+            "{evs:?}"
         );
     }
 

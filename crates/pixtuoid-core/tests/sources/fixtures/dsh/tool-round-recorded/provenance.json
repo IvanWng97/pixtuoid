@@ -1,0 +1,7 @@
+{
+  "captured": "2026-09-01",
+  "cli": "dsh",
+  "command": "scripts/lib/capture-dsh-authed.sh \u2014 authed `dsh --profile headless` on the shared prompt (read/bash/read tool rounds; the headless profile ran them without approval events)",
+  "origin": "recorded",
+  "version": "0.1.1-rc.2"
+}

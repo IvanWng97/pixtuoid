@@ -275,14 +275,14 @@ fn agent_cases() -> Vec<WireCase> {
             must_reach: &[Reach::Waiting],
         },
         WireCase {
-            // Lifecycle only — the no-auth capture holds no tool round (the
-            // model call dies on MISSING_CREDENTIAL), so the pin here is
-            // registration + paint; Active waits on an authed capture (#928).
+            // The authed capture (read/bash/read rounds) pins Active on real
+            // wire; the delegation capture is two sprites and lives in the
+            // delegation suite instead.
             name: "dsh",
             source: "dsh",
-            fixture: "fixtures/dsh/boot-lifecycle-recorded/hook-payloads.jsonl",
+            fixture: "fixtures/dsh/tool-round-recorded/hook-payloads.jsonl",
             wire: Wire::Hooks,
-            must_reach: &[],
+            must_reach: &[Reach::Active],
         },
         WireCase {
             name: "kimi",

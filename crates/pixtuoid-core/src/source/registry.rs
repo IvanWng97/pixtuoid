@@ -563,8 +563,8 @@ const DSH: SourceDescriptor = SourceDescriptor {
             // remote providers (`dsh-subagent-claude-code`/`-codex`/`-acp`)
             // publish no local child session (upstream subagent.md), so a
             // delegation CAN be fully hook-silent; `true` can only
-            // over-retain a dead slot. Moot until the decoder mints `Task`
-            // (#928, first authed capture).
+            // over-retain a dead slot. Live: the decoder mints `Task` for the
+            // `subagent` dispatch (delegation capture).
             delegations_are_hook_silent: true,
         },
         // The plugin runs in-process (a cordis plugin in the launcher's one
