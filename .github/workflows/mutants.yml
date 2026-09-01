@@ -21,8 +21,8 @@ jobs:
           fetch-depth: 0 # `--in-diff` needs the merge base in history
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      # cargo-mutants' baseline build dies before testing a single mutant
-      # without the ALSA headers.
+      # cargo-mutants builds its baseline with DEFAULT features — it needs
+      # ALSA even where a reader assumes the flag-stripped release shape.
       - uses: ./.github/actions/setup-alsa
       - uses: Swatinem/rust-cache@v2
         with:

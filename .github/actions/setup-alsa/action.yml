@@ -4,10 +4,10 @@ description: 'Installs the ALSA headers the default-on audio feature needs on Li
 runs:
   using: 'composite'
   steps:
-    # rodio/cpal (the default-on `audio` feature) needs ALSA headers to BUILD on
-    # Linux (#633) — alsa-sys's build script PANICS when pkg-config can't find
-    # them. Bound flaky hosted-runner mirrors and retry the complete apt
-    # operation (the smoke job's ffmpeg envelope).
+    # alsa-sys's build script PANICS when pkg-config can't find the headers
+    # (#633), so this rides every Linux job that compiles the workspace. The
+    # retry bounds flaky hosted-runner mirrors and re-runs the complete apt
+    # operation.
     - name: Install ALSA headers
       if: runner.os == 'Linux'
       shell: bash

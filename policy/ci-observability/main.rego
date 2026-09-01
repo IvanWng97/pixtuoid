@@ -1090,7 +1090,7 @@ deny contains msg if {
 	_ := documents[ci_workflow_path]
 	ci_gate_needs != ci_group_job_keys
 	msg := sprintf(
-		"%s %s must gate exactly the non-advisory group jobs %v, not %v",
+		"%s %s must gate exactly the group jobs %v, not %v",
 		[ci_workflow_path, ci_gate_job_key, ci_group_job_keys, ci_gate_needs],
 	)
 }

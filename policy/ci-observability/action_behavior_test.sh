@@ -345,8 +345,8 @@ printf '%s\n' \
     >"$fake_bin/gh"
 chmod +x "$fake_bin/gh"
 
-# One publisher invocation over the shared fixture env; cases vary only the
-# review body and the head pair.
+# The head pair is parameterized for the one stale-review case; everything
+# else varies only the review body.
 run_publisher() {
     local review_json="$1"
     local fake_head="${2:-abc123}"

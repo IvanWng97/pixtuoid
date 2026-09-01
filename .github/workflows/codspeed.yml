@@ -28,9 +28,12 @@ on:
 
 concurrency:
   group: codspeed-${{ github.ref }}
-  # Same rule as ci.yml: never cancel an in-flight main run — that is the trend
-  # point; stacked PR pushes cancel.
+  # Same rule as ci.yml: never cancel an in-flight main run — it IS the trend
+  # point.
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
 
 jobs:
   codspeed:

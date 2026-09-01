@@ -17,6 +17,12 @@ runs:
         RESULTS: ${{ inputs.results }}
         LABEL: ${{ inputs.label }}
       run: |
+        # `required: true` on an input is advisory — a caller that omits it
+        # hands us an empty string, and an empty needs-map would pass vacuously.
+        if [[ -z "$RESULTS" || "$RESULTS" == "{}" ]]; then
+          echo "::error::${LABEL:-require-jobs}: no job results — the caller must pass results: toJSON(needs)"
+          exit 1
+        fi
         failures="$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key)=\(.value.result)"' <<< "$RESULTS")"
         if [[ -n "$failures" ]]; then
           echo "::error::${LABEL}: ${failures//$'\n'/, }"

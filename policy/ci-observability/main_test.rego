@@ -1036,7 +1036,7 @@ ci_gate_shipped_jobs := {
 
 ci_gate_membership_violations(violations) := [msg |
 	some msg in violations
-	contains(msg, "must gate exactly the non-advisory group jobs")
+	contains(msg, "must gate exactly the group jobs")
 ]
 
 ci_gate_unread_violations(violations) := [msg |
