@@ -1422,8 +1422,8 @@ mod tests {
     #[test]
     fn every_agent_decoder_caps_its_tool_display() {
         use crate::source::{
-            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp,
-            opencode, reasonix, registry,
+            antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes, kimi,
+            omp, opencode, reasonix, registry,
         };
         use serde_json::json;
         use std::collections::HashSet;
@@ -1507,6 +1507,14 @@ mod tests {
                     reasonix::decode_rx_hook_payload(&json!({
                         "event":"PreToolUse","cwd":"/r","toolName":name,"toolArgs":{"command":tgt}}))
                     .expect("reasonix decodes")
+                }),
+            ),
+            (
+                dsh::SOURCE_NAME,
+                Box::new(|| {
+                    dsh::decode_dsh_payload(&json!({
+                        "type":"tool_call","sessionId":"s1","callId":"c1","toolName":name}))
+                    .expect("dsh decodes")
                 }),
             ),
             (
@@ -1618,8 +1626,8 @@ mod tests {
     #[test]
     fn every_agent_decoder_caps_its_waiting_reason() {
         use crate::source::{
-            antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp,
-            opencode, reasonix, registry,
+            antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes, kimi,
+            omp, opencode, reasonix, registry,
         };
         use serde_json::json;
         use std::collections::HashSet;
@@ -1703,6 +1711,15 @@ mod tests {
                         &json!({"event":"Notification","cwd":"/r","message":raw}),
                     )
                     .expect("reasonix decodes")
+                }),
+            ),
+            (
+                dsh::SOURCE_NAME,
+                ReasonKind::Wire,
+                Box::new(|| {
+                    dsh::decode_dsh_payload(&json!({
+                        "type":"approval_asked","sessionId":"s1","toolName":"bash","reason":raw}))
+                    .expect("dsh decodes")
                 }),
             ),
             (

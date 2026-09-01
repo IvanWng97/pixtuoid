@@ -1685,6 +1685,7 @@ pub pixtuoid_scene::theme::SourceColors::codewhale: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::codex: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::copilot: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::cursor: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::theme::SourceColors::dsh: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::grok: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::hermes: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::kimi: pixtuoid_core::sprite::Rgb
@@ -1693,7 +1694,7 @@ pub pixtuoid_scene::theme::SourceColors::openclaw: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::opencode: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::SourceColors::reasonix: pixtuoid_core::sprite::Rgb
 impl pixtuoid_scene::theme::SourceColors
-pub fn pixtuoid_scene::theme::SourceColors::all(&self) -> [pixtuoid_core::sprite::Rgb; 13]
+pub fn pixtuoid_scene::theme::SourceColors::all(&self) -> [pixtuoid_core::sprite::Rgb; 14]
 pub fn pixtuoid_scene::theme::SourceColors::by_prefix(&self, &str) -> core::option::Option<pixtuoid_core::sprite::Rgb>
 impl core::clone::Clone for pixtuoid_scene::theme::SourceColors
 pub fn pixtuoid_scene::theme::SourceColors::clone(&self) -> pixtuoid_scene::theme::SourceColors

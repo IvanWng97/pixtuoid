@@ -92,6 +92,27 @@ OMP_SESSION_ENTRIES_URL = (
 # that unrelated survivor mask both carrier renames.
 OMP_TITLE_FIELD_CARRIERS = ("SessionTitleSlotEntry", "TitleChangeEntry")
 
+# The dsh plugin's surface (#928) — every event name the bundled plugin
+# listens for, each declared as a single-quoted key in one of these four
+# upstream source files (index.ts declares the `session/event` bus name the
+# other three never spell).
+DSH_RUNTIME_TYPES_URL = (
+    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
+    "packages/core/agent/src/runtime-types.ts"
+)
+DSH_SESSION_TYPES_URL = (
+    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
+    "packages/core/session/src/types.ts"
+)
+DSH_APPROVAL_TYPES_URL = (
+    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
+    "packages/interaction/user-approval/src/types.ts"
+)
+DSH_SESSION_INDEX_URL = (
+    "https://raw.githubusercontent.com/deepseek-ai/deepseek-harness/master/"
+    "packages/core/session/src/index.ts"
+)
+
 # The bridge extension's surface (#951) — `check_omp_extension_reads` routes
 # each name to the file that declares it.
 OMP_EXT_SHARED_EVENTS_URL = (
@@ -280,6 +301,10 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
+    DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
+    DSH_SESSION_TYPES_URL: Anchor(r"'assistant/chunk'", "`assistant/chunk`"),
+    DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
+    DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
     GROK_SESSION_STORAGE_URL: Anchor(
@@ -707,6 +732,7 @@ class OurNames:
     grok: set[str] | None = None
     grok_xai_method: set[str] | None = None
     grok_xai_tags: set[str] | None = None
+    dsh_plugin_events: set[str] | None = None
     omp: set[str] | None = None
     omp_exit_marker: set[str] | None = None
     omp_message_vocab: set[str] | None = None
@@ -782,6 +808,7 @@ SURFACE_ROWS: tuple[tuple[str, str, str, str], ...] = (
     ("omp_message_vocab", CORE_LIB_FRAGMENT, "decoded", "omp.message_vocab"),
     ("omp_title_fields", CORE_LIB_FRAGMENT, "decoded", "omp.title_fields"),
     ("omp_hook_events", CORE_LIB_FRAGMENT, "decoded", "omp.hook_events"),
+    ("dsh_plugin_events", CORE_BIN_FRAGMENT, "shipped", "dsh.plugin_events"),
     ("omp_extension_reads", CORE_BIN_FRAGMENT, "shipped", "omp.extension_reads"),
     ("omp_extension_subdir", CORE_LIB_FRAGMENT, "shipped", "omp.extension_subdir"),
     ("codex_event_msg", CORE_LIB_FRAGMENT, "decoded", "codex.event_msg"),
@@ -1522,6 +1549,24 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
             if ours.omp_title_fields is not None:
                 check_omp_title_fields(text, ours.omp_title_fields, report)
+
+    if ours.dsh_plugin_events is not None:
+        docs = [
+            fetch_anchored(DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types", report),
+            fetch_anchored(DSH_SESSION_TYPES_URL, "dsh session event types", report),
+            fetch_anchored(DSH_APPROVAL_TYPES_URL, "dsh approval types", report),
+            fetch_anchored(DSH_SESSION_INDEX_URL, "dsh session bus names", report),
+        ]
+        if all(d is not None for d in docs):
+            joined = "\n".join(d for d in docs if d is not None)
+            for name in sorted(ours.dsh_plugin_events):
+                if f"'{name}'" not in joined:
+                    report.add_breaking(
+                        f"dsh event `{name}` (listened for by the installed "
+                        f"dsh_plugin.mjs) is GONE from the upstream type files — "
+                        f"renamed; the plugin listens to an event dsh never fires "
+                        f"(that slice of the office silently stops updating)."
+                    )
 
     if ours.omp_hook_events is not None or ours.omp_extension_reads is not None:
         shared = fetch_anchored(OMP_EXT_SHARED_EVENTS_URL, "omp extension shared-events", report)

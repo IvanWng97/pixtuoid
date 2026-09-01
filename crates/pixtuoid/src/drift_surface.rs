@@ -49,6 +49,7 @@ fn surface() -> Value {
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
+    shipped.insert("dsh.plugin_events", json!(dsh_plugin_events()));
     shipped.insert("omp.extension_reads", json!(omp_extension_reads()));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
@@ -69,6 +70,30 @@ fn openclaw_default_gateway_port() -> Option<&'static str> {
     let digits = after.trim_start();
     let end = digits.find(|c: char| !c.is_ascii_digit())?;
     (end > 0).then(|| &digits[..end])
+}
+
+/// The upstream event names the bundled dsh plugin actually listens for —
+/// its `ctx.on("...")` subscriptions plus the `case "..."` labels of its
+/// session/event switch, scanned from the template itself so a hand-kept
+/// list can't claim coverage the code doesn't have. A rename upstream
+/// leaves the plugin listening to silence.
+fn dsh_plugin_events() -> Vec<String> {
+    let template = crate::install::dsh::PLUGIN_TEMPLATE;
+    let scan = |marker: &str| -> Vec<String> {
+        template
+            .match_indices(marker)
+            .filter_map(|(i, m)| {
+                template[i + m.len()..]
+                    .split_once('"')
+                    .map(|(name, _)| name.to_string())
+            })
+            .collect()
+    };
+    let mut names = scan(r#"ctx.on(""#);
+    names.extend(scan(r#"case ""#));
+    names.sort_unstable();
+    names.dedup();
+    names
 }
 
 /// The upstream extension-API names the bundled omp bridge reads.
@@ -150,9 +175,9 @@ mod tests {
     /// rule needs: a hook-registered CLI whose names the watcher never sees has
     /// no upstream watch at all, and every gate stays green because both sides
     /// omit it symmetrically. Derived from the consts themselves, so there is no
-    /// exemption list to drift (opencode and omp register through their TS
-    /// FORWARD sets and declare no `*_EVENTS` const, so both are absent by
-    /// construction, not by exception).
+    /// exemption list to drift (opencode, omp, and dsh register through their
+    /// TS/JS subscription code and declare no `*_EVENTS` const, so all are
+    /// absent by construction, not by exception).
     #[test]
     fn every_install_events_const_reaches_the_fragment() {
         // Recursive: `src/install/hook_cmd/` already exists, and a registration

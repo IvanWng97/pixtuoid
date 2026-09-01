@@ -550,11 +550,16 @@ pub static DRACULA: Theme = Theme {
             r: 0x30,
             g: 0xd0,
             b: 0xe8,
-        }, // grok cyan (brand-constant; the tightest neighbour — the source-separation floor and the site's badge-contrast sweep both gate it)
+        }, // grok cyan (brand-constant)
         kimi: Rgb {
             r: 0xc4,
             g: 0x46,
             b: 0xfe,
         }, // kimi electric violet (brand-constant)
+        dsh: Rgb {
+            r: 0x4d,
+            g: 0x6b,
+            b: 0xfe,
+        }, // deepseek blue (brand-constant; the tightest neighbour — the source-separation floor and the site's badge-contrast sweep both gate it)
     },
 };

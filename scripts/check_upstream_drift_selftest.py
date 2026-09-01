@@ -108,6 +108,10 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_EXT_TYPES_URL:
         'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
     d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
+    d.DSH_RUNTIME_TYPES_URL: "    'agent/pre-step'(payload: {}): void\n",
+    d.DSH_SESSION_TYPES_URL: "  'assistant/chunk': { delta: string }\n",
+    d.DSH_APPROVAL_TYPES_URL: "export type ApprovalRequestId = string\n",
+    d.DSH_SESSION_INDEX_URL: "  register('session/created', header)\n",
     d.OMP_EXT_DISCOVERY_URL:
         'export async function discoverExtensionModulePaths() {}\n',
     d.OMP_DIRS_URL:
@@ -1247,6 +1251,12 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("acp_terminal_statuses", str, lambda ns: dict.fromkeys(
                 (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL),
                 acp_schema(full["acp_decoded_tags"], ns))),
+            ("dsh_plugin_events", str, lambda ns: {
+                d.DSH_RUNTIME_TYPES_URL: "'agent/pre-step'\n"
+                + "\n".join(f"'{n}'" for n in ns),
+                d.DSH_SESSION_TYPES_URL: "'assistant/chunk'\n",
+                d.DSH_APPROVAL_TYPES_URL: "ApprovalRequestId\n",
+                d.DSH_SESSION_INDEX_URL: "'session/created'\n"}),
             ("copilot", str, lambda ns: {
                 d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {

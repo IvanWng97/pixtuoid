@@ -338,6 +338,7 @@ mod tests {
                 "claude-code\tcc\ttranscript\tCLAUDE_CONFIG_DIR\tclaude --version",
                 "codex\tcx\ttranscript\tCODEX_HOME\tcodex --version",
                 "antigravity\tag\ttranscript\t-\tagy --version",
+                "dsh\tds\thook\t-\tdsh --version",
                 "reasonix\trx\thook\t-\treasonix --version",
                 "codewhale\tcw\thook\t-\tcodewhale --version",
                 "opencode\toc\thook\t-\topencode --version",

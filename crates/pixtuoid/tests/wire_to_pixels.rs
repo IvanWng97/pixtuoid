@@ -275,6 +275,16 @@ fn agent_cases() -> Vec<WireCase> {
             must_reach: &[Reach::Waiting],
         },
         WireCase {
+            // Lifecycle only — the no-auth capture holds no tool round (the
+            // model call dies on MISSING_CREDENTIAL), so the pin here is
+            // registration + paint; Active waits on an authed capture (#928).
+            name: "dsh",
+            source: "dsh",
+            fixture: "fixtures/dsh/boot-lifecycle-recorded/hook-payloads.jsonl",
+            wire: Wire::Hooks,
+            must_reach: &[],
+        },
+        WireCase {
             name: "kimi",
             source: "kimi",
             // The permission fixture, because a HEADLESS kimi run cannot reach
@@ -424,6 +434,11 @@ fn hermes_approval_gate_renders_a_waiting_sprite() {
 #[test]
 fn kimi_hook_envelope_renders_a_painted_sprite() {
     assert_renders_a_sprite(&agent_case("kimi"));
+}
+
+#[test]
+fn dsh_plugin_lifecycle_renders_a_painted_sprite() {
+    assert_renders_a_sprite(&agent_case("dsh"));
 }
 
 /// Cells the gateway presence ADDS to an otherwise identical office.
