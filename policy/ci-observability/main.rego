@@ -72,11 +72,12 @@ lighthouse_workflow_path := ".github/workflows/site.yml"
 pages_workflow_path := ".github/workflows/pages.yml"
 site_package_path := "site/package.json"
 expected_dependency_audit := "npm audit --audit-level=low"
+site_node_action_path := ".github/actions/setup-site-node/action.yml"
+site_node_action_ref := "./.github/actions/setup-site-node"
 pinned_npm_version := "12.0.1"
 expected_package_manager := sprintf("npm@%s", [pinned_npm_version])
 expected_npm_engine := ">=12.0.0 <13"
 expected_npm_setup := sprintf("npm install --global npm@%s", [pinned_npm_version])
-github_workspace := "${{ github.workspace }}"
 
 expected_codecov_route(file, flag, report_type, condition) := {
 	"path": codecov_workflow_path,
@@ -279,7 +280,20 @@ dependency_audit_steps(path, job_name) := [step |
 	effective_working_directory(job, step) == "site"
 ]
 
-pinned_npm_setup_steps(path, job_name) := [step |
+# The pinned bootstrap lives in the shared composite, which must still perform
+# the exact install.
+site_node_action_installs := [step |
+	action := documents[site_node_action_path]
+	steps := object.get(object.get(action, "runs", {}), "steps", [])
+	some step in steps
+	object.get(step, "run", "") == expected_npm_setup
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
+]
+
+# Each site workflow proves it runs the bootstrap by calling the composite
+# un-conditioned.
+site_node_call_steps(path, job_name) := [step |
 	workflow := documents[path]
 	jobs := object.get(workflow, "jobs", {})
 	job := object.get(jobs, job_name, {})
@@ -287,8 +301,7 @@ pinned_npm_setup_steps(path, job_name) := [step |
 	object.get(job, "continue-on-error", false) == false
 	steps := object.get(job, "steps", [])
 	some step in steps
-	object.get(step, "run", "") == expected_npm_setup
-	object.get(step, "working-directory", "") == github_workspace
+	object.get(step, "uses", "") == site_node_action_ref
 	object.get(step, "if", null) == null
 	object.get(step, "continue-on-error", false) == false
 ]
@@ -1213,13 +1226,18 @@ deny contains msg if {
 }
 
 deny contains msg if {
-	count(pinned_npm_setup_steps(lighthouse_workflow_path, "check")) != 1
-	msg := sprintf("%s must install %s exactly once", [lighthouse_workflow_path, expected_package_manager])
+	count(site_node_action_installs) != 1
+	msg := sprintf("%s must install %s exactly once", [site_node_action_path, expected_package_manager])
 }
 
 deny contains msg if {
-	count(pinned_npm_setup_steps(pages_workflow_path, "build")) != 1
-	msg := sprintf("%s must install %s exactly once", [pages_workflow_path, expected_package_manager])
+	count(site_node_call_steps(lighthouse_workflow_path, "check")) != 1
+	msg := sprintf("%s must run %s exactly once", [lighthouse_workflow_path, site_node_action_ref])
+}
+
+deny contains msg if {
+	count(site_node_call_steps(pages_workflow_path, "build")) != 1
+	msg := sprintf("%s must run %s exactly once", [pages_workflow_path, site_node_action_ref])
 }
 
 deny contains msg if {

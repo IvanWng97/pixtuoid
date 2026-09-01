@@ -5,7 +5,7 @@ on:
   # silently lags its own source.
   push:
     branches: [main]
-    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml']
+    paths: ['site/**', 'Cargo.toml', 'docs/CONFIGURATION.md', 'docs/ARCHITECTURE.md', 'docs/CONTRIBUTING.md', 'docs/PARALLEL-DELIVERY.md', '.github/workflows/pages.yml', '.github/actions/setup-site-node/**']
   workflow_dispatch:
 
 # Least-privilege: the build job runs third-party code (npm postinstall
@@ -30,35 +30,11 @@ jobs:
           # checkout silently falls back to Cargo.toml
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-          cache-dependency-path: site/package-lock.json
-      # Node 26's bundled npm predates the complete allowScripts toolchain, so
-      # match packageManager before npm ci or install-script policy goes unenforced.
-      - name: Install pinned npm
-        working-directory: ${{ github.workspace }}
-        run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact packageManager bootstrap before the lockfile install
-      - name: Cache Playwright Chromium
-        uses: actions/cache@v6
-        with:
-          path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
-      - name: Install site dependencies
-        working-directory: site
-        run: npm ci
+      - uses: ./.github/actions/setup-site-node
+        id: site-node
       - name: Audit site dependencies
         working-directory: site
         run: npm run audit
-      # Chromium must be installed BEFORE `npm run check`: `astro check` renders
-      # /architecture's ```mermaid block via rehype-mermaid (headless Playwright),
-      # and a browserless render takes the deploy red at check:docs. Name
-      # `chromium-headless-shell` too, so a cache holding chromium-but-not-the-shell
-      # can't skip it.
-      - name: Install Chromium for the diagram
-        working-directory: site
-        run: npx playwright install --with-deps chromium chromium-headless-shell
       - name: Lint site
         working-directory: site
         run: npm run lint
@@ -72,7 +48,7 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         with:
           path: ./site
-          node-version: 26
+          node-version: ${{ steps.site-node.outputs.node-version }}
           # DON'T re-enable the action's Astro build cache: its bare
           # `astro-cache-<os>-` restore-key prefix means a deploy that once
           # rendered /architecture EMPTY caches that empty <Content /> and every
@@ -80,9 +56,9 @@ jobs:
           # ```mermaid block. Cost of `false` is a cold content-layer rebuild.
           cache: false
           # PIN npm: v6's detection otherwise falls back to pnpm, whose fresh
-          # install resolves a DIFFERENT Playwright than the Chromium installed
-          # above, so rehype-mermaid's render of /architecture fails and silently
-          # ships an EMPTY page.
+          # install resolves a DIFFERENT Playwright than the Chromium
+          # setup-site-node installed, so rehype-mermaid's render of
+          # /architecture fails and silently ships an EMPTY page.
           package-manager: npm
           # Assert every doc page rendered a body IN the action's own context,
           # before it uploads: rehype-mermaid can collapse a doc's <Content /> to

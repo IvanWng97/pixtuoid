@@ -104,7 +104,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
-          key: ${{ matrix.target }}
+          # One key for the pair: a re-run of a failed deb leg (aarch64, the one
+          # target both jobs build, same flags) restores this cache instead of
+          # repeating the cross build. A FRESH tag still pays both cold: the
+          # jobs start together, and a tag's caches are scoped to that tag.
+          shared-key: release-${{ matrix.target }}
 
       - uses: ./.github/actions/setup-just
 
@@ -175,7 +179,8 @@ jobs:
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
-          key: deb-${{ matrix.target }}
+          # Paired with the build job's shared-key — the rationale lives there.
+          shared-key: release-${{ matrix.target }}
 
       - uses: ./.github/actions/setup-just
 

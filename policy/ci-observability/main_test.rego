@@ -235,22 +235,40 @@ test_dependency_audit_script_is_pinned if {
 	sprintf("%s must keep scripts.audit at %q", [site_package_path, expected_dependency_audit]) in violations
 }
 
-test_site_workflow_installs_the_pinned_npm if {
+test_site_node_action_must_keep_the_pinned_install if {
 	fixture := {"documents": [{
-		"path": lighthouse_workflow_path,
-		"contents": {"jobs": {"check": {"steps": [{"run": "npm install --global npm@latest"}]}}},
+		"path": site_node_action_path,
+		"contents": {"runs": {"steps": [{"run": "npm install --global npm@latest"}]}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s must install %s exactly once", [lighthouse_workflow_path, expected_package_manager]) in violations
+	sprintf("%s must install %s exactly once", [site_node_action_path, expected_package_manager]) in violations
 }
 
-test_pages_workflow_installs_the_pinned_npm if {
+test_site_workflow_must_call_the_site_node_composite if {
 	fixture := {"documents": [{
-		"path": pages_workflow_path,
-		"contents": {"jobs": {"build": {"steps": [{"run": "npm install --global npm@latest"}]}}},
+		"path": lighthouse_workflow_path,
+		"contents": {"jobs": {"check": {"steps": [{"run": "npm ci"}]}}},
 	}]}
 	violations := deny with input as fixture
-	sprintf("%s must install %s exactly once", [pages_workflow_path, expected_package_manager]) in violations
+	sprintf("%s must run %s exactly once", [lighthouse_workflow_path, site_node_action_ref]) in violations
+}
+
+test_pages_workflow_must_call_the_site_node_composite if {
+	fixture := {"documents": [{
+		"path": pages_workflow_path,
+		"contents": {"jobs": {"build": {"steps": [{"run": "npm ci"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run %s exactly once", [pages_workflow_path, site_node_action_ref]) in violations
+}
+
+test_a_conditioned_site_node_call_does_not_count if {
+	fixture := {"documents": [{
+		"path": pages_workflow_path,
+		"contents": {"jobs": {"build": {"steps": [{"uses": site_node_action_ref, "if": "false"}]}}},
+	}]}
+	violations := deny with input as fixture
+	sprintf("%s must run %s exactly once", [pages_workflow_path, site_node_action_ref]) in violations
 }
 
 test_site_manifest_pins_the_npm_generation if {
