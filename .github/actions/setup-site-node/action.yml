@@ -1,0 +1,41 @@
+name: 'Setup Site Node'
+description: 'Node + pinned npm + npm ci + Playwright Chromium for the Astro site'
+
+outputs:
+  node-version:
+    description: 'The Node major the site builds with (pages.yml forwards it to withastro/action)'
+    value: ${{ steps.versions.outputs.node }}
+
+runs:
+  using: 'composite'
+  steps:
+    - id: versions
+      shell: bash
+      run: echo "node=26" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-node@v7
+      with:
+        node-version: ${{ steps.versions.outputs.node }}
+        cache: npm
+        cache-dependency-path: site/package-lock.json
+    # Node 26's bundled npm predates the complete allowScripts toolchain, so
+    # match packageManager before npm ci or install-script policy goes unenforced.
+    - name: Install pinned npm
+      shell: bash
+      run: npm install --global npm@12.0.1 # zizmor: ignore[adhoc-packages] exact packageManager bootstrap before the lockfile install
+    - name: Install site dependencies
+      shell: bash
+      working-directory: site
+      run: npm ci
+    - name: Cache Playwright Chromium
+      uses: actions/cache@v6
+      with:
+        path: ~/.cache/ms-playwright
+        key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
+    # rehype-mermaid renders the mermaid blocks with a headless Chromium, so it
+    # must be installed BEFORE `check`/`build` (check-then-install is what broke
+    # pages.yml). The shell is named explicitly so a cache holding
+    # chromium-but-not-the-shell can't skip it.
+    - name: Install Chromium for the diagrams
+      shell: bash
+      working-directory: site
+      run: npx playwright install --with-deps chromium chromium-headless-shell

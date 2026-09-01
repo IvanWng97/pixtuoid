@@ -104,7 +104,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
-          key: ${{ matrix.target }}
+          # shared-key, not key: the deb job rebuilds the same target with the
+          # same flags, and per-job derived keys made it a second cold cross
+          # build per tag.
+          shared-key: release-${{ matrix.target }}
 
       - uses: ./.github/actions/setup-just
 
@@ -175,7 +178,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
           prefix-key: v1-rust
-          key: deb-${{ matrix.target }}
+          shared-key: release-${{ matrix.target }}
 
       - uses: ./.github/actions/setup-just
 
