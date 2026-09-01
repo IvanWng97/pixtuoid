@@ -132,48 +132,95 @@ fn mount_row(plugin: &str) -> YamlOwned {
     YamlOwned::Mapping(row)
 }
 
-/// Is this row OUR mount row (an `insert` op whose single entry id is ours)?
-fn is_our_row(row: &YamlOwned) -> bool {
-    let YamlOwned::Mapping(m) = row else {
-        return false;
-    };
-    let Some(YamlOwned::Sequence(entries)) = m.get(&ystr("insert")) else {
-        return false;
-    };
-    entries.iter().any(
-        |e| matches!(e, YamlOwned::Mapping(em) if em.get(&ystr("id")) == Some(&ystr(PLUGIN_ID))),
-    )
+/// Is this patch-list entry OUR mount entry (`id: pixtuoid`)?
+///
+/// Ownership is an ENTRY, never a row: one `insert:` op may batch several
+/// plugins, so a row-granular rewrite or removal would silently eat a
+/// foreign entry a user hand-batched beside ours.
+fn is_our_entry(e: &YamlOwned) -> bool {
+    matches!(e, YamlOwned::Mapping(em) if em.get(&ystr("id")) == Some(&ystr(PLUGIN_ID)))
 }
 
-/// `changed` is a semantic diff: same plugin path → no rewrite.
+/// Every `id: pixtuoid` entry across all `insert:` rows, in document order.
+fn our_entries(rows: &[YamlOwned]) -> Vec<&MappingOwned> {
+    rows.iter()
+        .filter_map(|r| match r {
+            YamlOwned::Mapping(m) => match m.get(&ystr("insert")) {
+                Some(YamlOwned::Sequence(entries)) => Some(entries),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flatten()
+        .filter_map(|e| match e {
+            YamlOwned::Mapping(em) if em.get(&ystr("id")) == Some(&ystr(PLUGIN_ID)) => Some(em),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Strip OUR entries from every `insert:` row; a foreign entry sharing a row
+/// stays in place, and a row vanishes only when ours were all it held.
+/// Returns the surviving rows and how many entries were removed.
+fn strip_our_entries(rows: &[YamlOwned]) -> (Vec<YamlOwned>, usize) {
+    let mut removed = 0;
+    let mut kept = Vec::new();
+    for row in rows {
+        let YamlOwned::Mapping(m) = row else {
+            kept.push(row.clone());
+            continue;
+        };
+        let Some(YamlOwned::Sequence(entries)) = m.get(&ystr("insert")) else {
+            kept.push(row.clone());
+            continue;
+        };
+        let filtered: Vec<YamlOwned> = entries
+            .iter()
+            .filter(|e| !is_our_entry(e))
+            .cloned()
+            .collect();
+        removed += entries.len() - filtered.len();
+        if filtered.len() == entries.len() {
+            kept.push(row.clone());
+        } else if !filtered.is_empty() || m.len() > 1 {
+            let mut only_foreign = m.clone();
+            only_foreign.insert(ystr("insert"), YamlOwned::Sequence(filtered));
+            kept.push(YamlOwned::Mapping(only_foreign));
+        }
+    }
+    (kept, removed)
+}
+
+/// `changed` is a semantic diff: exactly one of our entries, already a row
+/// of its own at the wanted path → no rewrite. Anything else — a stale
+/// path, a batched entry, duplicates — strips every one of our entries and
+/// mounts one fresh standalone row.
 pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
     let plugin = plugin_path()?;
     let plugin = plugin.to_str().context("plugin path is not UTF-8")?;
-    let mut rows = parse_rows(content)?;
+    let rows = parse_rows(content)?;
     let wanted = mount_row(plugin);
-    if let Some(existing) = rows.iter_mut().find(|r| is_our_row(r)) {
-        if *existing == wanted {
-            return Ok(MergeOutcome {
-                content: content.to_string(),
-                changed: false,
-            });
-        }
-        *existing = wanted;
-    } else {
-        rows.push(wanted);
+    if our_entries(&rows).len() == 1 && rows.contains(&wanted) {
+        return Ok(MergeOutcome {
+            content: content.to_string(),
+            changed: false,
+        });
     }
+    let (mut kept, _) = strip_our_entries(&rows);
+    kept.push(wanted);
     Ok(MergeOutcome {
-        content: emit_rows(&rows)?,
+        content: emit_rows(&kept)?,
         changed: true,
     })
 }
 
-/// Remove only our row; every foreign patch op survives byte-preserved as data
-/// (comments do not survive saphyr — the hermes target's documented trade).
+/// Remove only our ENTRIES; every foreign patch op — one batched into the
+/// same `insert:` row included — survives as data (comments do not survive
+/// saphyr — the hermes target's documented trade).
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let rows = parse_rows(content)?;
-    let kept: Vec<YamlOwned> = rows.iter().filter(|r| !is_our_row(r)).cloned().collect();
-    if kept.len() == rows.len() {
+    let (kept, removed) = strip_our_entries(&rows);
+    if removed == 0 {
         return Ok(MergeOutcome {
             content: content.to_string(),
             changed: false,
@@ -195,7 +242,7 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
         Ok(rows) => rows,
         Err(e) => return SchemaParse::broken(e.to_string()),
     };
-    let ours: Vec<&YamlOwned> = rows.iter().filter(|r| is_our_row(r)).collect();
+    let ours = our_entries(&rows);
     let mut parse = SchemaParse {
         shim: ShimRef::Unknown,
         ..Default::default()
@@ -205,19 +252,8 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             .issues
             .push("no pixtuoid mount row — dsh never loads the plugin".to_string()),
         1 => {
-            let YamlOwned::Mapping(m) = ours[0] else {
-                unreachable!("is_our_row admits mappings only");
-            };
-            let Some(YamlOwned::Sequence(entries)) = m.get(&ystr("insert")) else {
-                unreachable!("is_our_row admits insert rows only");
-            };
-            let name = entries.iter().find_map(|e| match e {
-                YamlOwned::Mapping(em) if em.get(&ystr("id")) == Some(&ystr(PLUGIN_ID)) => {
-                    em.get(&ystr("name")).and_then(|n| match n {
-                        YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
-                        _ => None,
-                    })
-                }
+            let name = ours[0].get(&ystr("name")).and_then(|n| match n {
+                YamlOwned::Value(ScalarOwned::String(s)) => Some(s.clone()),
                 _ => None,
             });
             match name {
@@ -249,7 +285,7 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
             }
         }
         n => parse.issues.push(format!(
-            "{n} pixtuoid mount rows — duplicates are ours; reconnect dsh to collapse them"
+            "{n} pixtuoid mount entries — duplicates are ours; reconnect dsh to collapse them"
         )),
     }
     parse
@@ -414,6 +450,46 @@ mod tests {
         // re-merge under home B is a no-op exactly when the row already
         // carries B's plugin path.
         assert!(!merge_install(&second.content, "/unused").unwrap().changed);
+        std::env::remove_var("DSH_HOME");
+    }
+
+    #[test]
+    fn a_foreign_entry_batched_in_our_row_survives_connect_and_disconnect() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("DSH_HOME", home.path());
+        // A user hand-batches a foreign plugin into the same `insert:` op as
+        // an (old) pixtuoid mount — entry-granular ownership must not eat it.
+        let batched = "- insert:\n    - id: timer\n      name: '@deepseek-ai/cordis-plugin-timer'\n    - id: pixtuoid\n      name: /old/pixtuoid-dsh.mjs\n";
+        let merged = merge_install(batched, "/unused").unwrap();
+        assert!(merged.changed);
+        assert!(merged.content.contains("timer"), "{}", merged.content);
+        assert!(verify_schema(&merged.content).issues.is_empty());
+        let removed = merge_uninstall(&merged.content).unwrap();
+        assert!(removed.changed);
+        assert!(removed.content.contains("timer"), "{}", removed.content);
+        assert!(!removed.content.contains(PLUGIN_ID));
+        std::env::remove_var("DSH_HOME");
+    }
+
+    #[test]
+    fn duplicate_our_entries_collapse_on_reconnect_as_the_doctor_line_says() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("DSH_HOME", home.path());
+        let one = merge_install("", "/unused").unwrap();
+        let dup = format!("{}{}", one.content, one.content);
+        assert!(verify_schema(&dup)
+            .issues
+            .iter()
+            .any(|i| i.contains("reconnect dsh to collapse")));
+        let collapsed = merge_install(&dup, "/unused").unwrap();
+        assert!(collapsed.changed);
+        assert!(verify_schema(&collapsed.content).issues.is_empty());
         std::env::remove_var("DSH_HOME");
     }
 
