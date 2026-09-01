@@ -46,7 +46,7 @@ fn field<'v>(obj: &'v serde_json::Map<String, Value>, key: &str) -> Option<&'v s
 /// Decode one plugin payload into `AgentEvent`s (`HookCustom::ClaimsAll`).
 ///
 /// Every arm except `session_end` leads or trails an
-/// [`AgentEvent::identity`]: activity and telemetry arms lead (the
+/// `AgentEvent::identity`: activity and telemetry arms lead (the
 /// hook-family pattern — the event may target a slot registered before this
 /// daemon attached, and a chat-only `web` session may never run a tool),
 /// `session_start` trails (the focus-pid carrier, armed from birth);
