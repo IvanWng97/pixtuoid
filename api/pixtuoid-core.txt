@@ -330,6 +330,9 @@ pub fn pixtuoid_core::source::drift::missing_field(&str, &str, &str)
 pub fn pixtuoid_core::source::drift::shape_drift(&str, &str)
 pub fn pixtuoid_core::source::drift::unknown_dispatch(&str, &str)
 pub fn pixtuoid_core::source::drift::unknown_event(&str, &str)
+pub mod pixtuoid_core::source::dsh
+pub const pixtuoid_core::source::dsh::SOURCE_NAME: &str
+pub fn pixtuoid_core::source::dsh::decode_dsh_payload(&serde_json::value::Value) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::source::AgentEvent>>
 pub mod pixtuoid_core::source::grok
 pub struct pixtuoid_core::source::grok::GrokSource
 pub pixtuoid_core::source::grok::GrokSource::child_end_unclaims: core::option::Option<pixtuoid_core::source::jsonl::ChildEndUnclaims>

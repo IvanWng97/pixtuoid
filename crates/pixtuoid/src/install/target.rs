@@ -245,6 +245,26 @@ pub(crate) const KIMI: Target = Target {
     post_install_hint: None,
 };
 
+pub(crate) const DSH: Target = Target {
+    name: "dsh",
+    core_source: pixtuoid_core::source::dsh::SOURCE_NAME,
+    display_name: "DeepSeek Harness",
+    default_config_path: crate::install::dsh::default_config_path,
+    hook_command: crate::install::dsh::hook_command,
+    merge_install: crate::install::dsh::merge_install,
+    merge_uninstall: crate::install::dsh::merge_uninstall,
+    verify_schema: crate::install::dsh::verify_schema,
+    // The plugin spawns the shim under Node by embedded path — no PATH.
+    binary_strategy: BinaryStrategy::EmbedAbsolute,
+    presence_probe: Some(crate::install::dsh::detect_installed),
+    extra_artifacts: Some(crate::install::dsh::plugin_artifacts),
+    // Profiles other than `web` compose patches once at boot (`web` watches
+    // and hot-reloads both user patch files).
+    post_install_hint: Some(
+        "running dsh sessions (except the web profile) must restart to load the plugin",
+    ),
+};
+
 pub(crate) const OMP: Target = Target {
     name: "omp",
     core_source: pixtuoid_core::source::omp::SOURCE_NAME,
@@ -265,7 +285,7 @@ pub(crate) const OMP: Target = Target {
 
 pub const TARGETS: &[&Target] = &[
     &CLAUDE, &CODEX, &REASONIX, &CODEWHALE, &OPENCODE, &CURSOR, &HERMES, &OPENCLAW, &GROK, &KIMI,
-    &OMP,
+    &OMP, &DSH,
 ];
 
 // No prod caller: prod joins on the source id via `by_source`. Kept for the

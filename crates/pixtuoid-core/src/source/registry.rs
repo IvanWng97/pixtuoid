@@ -12,8 +12,8 @@ use crate::source::decoder::{
     LineDecoder, PathFilter,
 };
 use crate::source::{
-    antigravity, claude_code, codewhale, codex, copilot, cursor, grok, hermes, kimi, omp, openclaw,
-    opencode, reasonix, AgentEvent,
+    antigravity, claude_code, codewhale, codex, copilot, cursor, dsh, grok, hermes, kimi, omp,
+    openclaw, opencode, reasonix, AgentEvent,
 };
 
 /// How the shared hook decoder derives the AgentId for this source. Moot for a
@@ -306,6 +306,7 @@ pub const REGISTRY: &[SourceDescriptor] = &[
     CLAUDE_CODE,
     CODEX,
     ANTIGRAVITY,
+    DSH,
     REASONIX,
     CODEWHALE,
     OPENCODE,
@@ -518,6 +519,53 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
             delegations_are_hook_silent: true,
         },
         focus: FocusChannel::ShimStamp,
+    },
+};
+
+/// HOOK-ONLY: DeepSeek Harness persists sessions as zstd-compressed
+/// concatenated frames (`session.jsonl.zstd` — not line-readable, format v0
+/// with no migration promise), so the only plane is the pixtuoid cordis
+/// plugin (`pixtuoid/src/install/dsh_plugin.mjs`): a single zero-import
+/// `.mjs` mounted via the home-level `$DSH_HOME/cordis.patch.yml`,
+/// subscribing emit-only upstream events (structurally unable to block dsh)
+/// and claiming every payload here. One dsh process hosts many sessions (the
+/// `web` profile is a server), the opencode pid model.
+const DSH: SourceDescriptor = SourceDescriptor {
+    name: dsh::SOURCE_NAME,
+    label_prefix: "ds",
+    // The recorded boot-lifecycle capture anchors this (0.1.1-rc.2, the npm
+    // latest — the anchor rule strips prerelease suffixes; upstream has never
+    // shipped a stable release and the in-tree edge is already 0.1.2-alpha.3,
+    // expect churn).
+    verified_version: "0.1.1",
+    version_probe: Some(&["dsh", "--version"]),
+    // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
+    // under it); hook-only, so core resolves no root to relocate.
+    home_env: None,
+    kind: SourceKind::Agent {
+        transcript: None,
+        hook: Some(HookDecoding {
+            id_key: IdKey::SessionId,        // inert: custom claims all
+            tool_id_key: ToolIdKey::ToolUse, // inert: custom claims all
+            custom: Some(HookCustom::ClaimsAll(dsh::decode_dsh_payload)),
+        }),
+        caps: SourceCaps {
+            // `agent/disposed` + the plugin's own effect-disposer sweep fire
+            // on clean quit AND SIGINT/SIGTERM (dsh runs disposers under a 5s
+            // grace); SIGKILL falls to `HookPidWatch` via the stamped pid.
+            has_exit_signal: true,
+            // Sessions are persistent; a `--resume` boots a NEW dsh emitting
+            // `session_start` with reason "resume" on the same id — the
+            // SessionStart arm's ordinary re-registration, not this flag.
+            resurrects_on_prompt: false,
+            // A subagent dispatch streams the parent's `tool/call` AND the
+            // local child fires its own lifecycle (parentSession-linked).
+            delegations_are_hook_silent: false,
+        },
+        // The plugin runs in-process (a cordis plugin in the launcher's one
+        // root context; no worker mode exists for plugins), so its stamped
+        // `process.pid` is dsh's own.
+        focus: FocusChannel::PluginStamp,
     },
 };
 
@@ -915,7 +963,8 @@ mod tests {
         assert_eq!(OPENCLAW.name, openclaw::SOURCE_NAME);
         assert_eq!(GROK.name, grok::SOURCE_NAME);
         assert_eq!(KIMI.name, kimi::SOURCE_NAME);
-        assert_eq!(REGISTRY.len(), 13, "new row? add its name-pin assert above");
+        assert_eq!(DSH.name, dsh::SOURCE_NAME);
+        assert_eq!(REGISTRY.len(), 14, "new row? add its name-pin assert above");
     }
 
     #[test]

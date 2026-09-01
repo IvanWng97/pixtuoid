@@ -988,6 +988,7 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
 const TOOL_ID_KEY_UNPROVEN: &[&str] = &[
     // `inert: custom claims all` in their registry row — the shared arms never run.
     "codewhale",
+    "dsh",
     "grok",
     "hermes",
     "omp",

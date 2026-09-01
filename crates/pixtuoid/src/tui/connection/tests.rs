@@ -395,8 +395,9 @@ fn only_restart_bound_targets_declare_a_post_install_step_naming_it() {
         vec![
             pixtuoid_core::source::openclaw::SOURCE_NAME,
             pixtuoid_core::source::omp::SOURCE_NAME,
+            pixtuoid_core::source::dsh::SOURCE_NAME,
         ],
-        "only openclaw and omp need a post-install step today"
+        "only openclaw, omp and dsh need a post-install step today"
     );
 }
 

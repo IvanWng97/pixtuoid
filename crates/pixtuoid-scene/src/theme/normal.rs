@@ -556,5 +556,10 @@ pub static NORMAL: Theme = Theme {
             g: 0x46,
             b: 0xfe,
         }, // kimi electric violet (brand-constant)
+        dsh: Rgb {
+            r: 0x4d,
+            g: 0x6b,
+            b: 0xfe,
+        }, // deepseek blue (brand-constant)
     },
 };

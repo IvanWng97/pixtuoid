@@ -49,6 +49,7 @@ fn surface() -> Value {
         json!([openclaw_default_gateway_port()
             .expect("openclaw_plugin.js declares DEFAULT_GATEWAY_PORT")]),
     );
+    shipped.insert("dsh.plugin_events", json!(dsh_plugin_events()));
     shipped.insert("omp.extension_reads", json!(omp_extension_reads()));
 
     let mut root: BTreeMap<&str, Value> = BTreeMap::new();
@@ -69,6 +70,25 @@ fn openclaw_default_gateway_port() -> Option<&'static str> {
     let digits = after.trim_start();
     let end = digits.find(|c: char| !c.is_ascii_digit())?;
     (end > 0).then(|| &digits[..end])
+}
+
+/// The upstream event names the bundled dsh plugin subscribes (its `FORWARD`
+/// list) — each declared in one of three upstream type files the drift watch
+/// fetches; a rename there leaves the plugin listening to silence.
+fn dsh_plugin_events() -> Vec<String> {
+    let template = crate::install::dsh::PLUGIN_TEMPLATE;
+    let list = template
+        .split_once("const FORWARD = [")
+        .map(|(_, rest)| rest.split_once(']').map(|(body, _)| body).unwrap_or(""))
+        .unwrap_or("");
+    let mut names: Vec<String> = list
+        .split('"')
+        .skip(1)
+        .step_by(2)
+        .map(str::to_string)
+        .collect();
+    names.sort_unstable();
+    names
 }
 
 /// The upstream extension-API names the bundled omp bridge reads.

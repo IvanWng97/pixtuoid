@@ -75,8 +75,8 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
         "0.18.0" => Some(&[
             "Oh My Pi can now connect — a tiny bridge extension makes its approval prompts show as real waits, brand-new sessions walk in before their first reply, and a call seen by both the hook and the transcript counts once",
             "Approvals read true — the wait names exactly the tool call it gates, an approval returns the desk to work, a denial clears it, and parallel prompts each keep their own gate",
-            "Every omp profile gets a desk — sessions under any profile's tree are watched, including profiles created while pixtuoid runs",
-            "omp sprites know their process — a killed omp leaves promptly, and a click brings its terminal forward from the first moment",
+            "Every omp profile gets a desk, and its sprites know their process — any profile's sessions are watched (even profiles created mid-run), a killed omp leaves promptly, and a click brings its terminal forward",
+            "DeepSeek Harness joins the office — one tiny plugin streams its sessions, approval prompts and spend onto their own desks",
         ]),
         "0.17.0" => Some(&[
             "`pixtuoid doctor` is one report — sources, install health, CLI versions and decode drift, categorized and colorized, each row carrying the thing to run next",

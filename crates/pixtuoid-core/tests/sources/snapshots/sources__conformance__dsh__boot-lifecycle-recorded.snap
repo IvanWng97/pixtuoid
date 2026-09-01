@@ -1,0 +1,22 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 6320276561204388767
+    source: dsh
+    session_id: session-d597e513-a91f-42ab-8f78-627607505edb
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 6320276561204388767
+    source: dsh
+    session_id: session-d597e513-a91f-42ab-8f78-627607505edb
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ModelInfo:
+    agent_id: 6320276561204388767
+    model: deepseek-v4-flash
+    effort: high
+- SessionEnd:
+    agent_id: 6320276561204388767
+    as_child: false

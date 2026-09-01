@@ -1,0 +1,7 @@
+{
+  "captured": "2026-09-01",
+  "cli": "dsh",
+  "command": "scripts/lib/capture-dsh-headless.sh \u2014 no-auth `dsh --profile headless` (session lifecycle + model route; the model call dies on MISSING_CREDENTIAL before any billed turn)",
+  "origin": "recorded",
+  "version": "0.1.1-rc.2"
+}

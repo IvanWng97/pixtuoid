@@ -193,5 +193,20 @@
       "linux": "yes",
       "windows": "experimental"
     }
+  },
+  {
+    "id": "dsh",
+    "badge": "ds·",
+    "badge_color": "#4d6bfe",
+    "name": "DeepSeek Harness",
+    "url": "https://github.com/deepseek-ai/deepseek-harness",
+    "status": "supported",
+    "featured": false,
+    "transport": "cordis plugin (zero-import .mjs mounted via $DSH_HOME/cordis.patch.yml, session-id-keyed)",
+    "platforms": {
+      "macos": "yes",
+      "linux": "yes",
+      "windows": "experimental"
+    }
   }
 ]

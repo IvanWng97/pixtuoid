@@ -391,6 +391,7 @@ pub mod cursor;
 pub mod daemon;
 pub mod decoder;
 pub mod drift;
+pub mod dsh;
 #[cfg(feature = "native")]
 pub(crate) mod exit_watch;
 #[cfg(feature = "native")]

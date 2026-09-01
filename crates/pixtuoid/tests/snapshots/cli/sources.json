@@ -21,6 +21,13 @@
     "health": null
   },
   {
+    "id": "dsh",
+    "display_name": "DeepSeek Harness",
+    "connected": false,
+    "cli_present": false,
+    "health": null
+  },
+  {
     "id": "reasonix",
     "display_name": "Reasonix",
     "connected": false,

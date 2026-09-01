@@ -106,7 +106,7 @@ Press `s` to open the **Sources** panel and connect your agent CLI (Claude Code,
 | [Claude Code](https://code.claude.com) | macOS · Linux · Windows\* |
 | [Codex CLI](https://github.com/openai/codex) | macOS · Linux · Windows\* |
 
-_Also supported: [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [Oh My Pi](https://omp.sh), [OpenClaw](https://github.com/openclaw/openclaw), [Grok Build](https://github.com/xai-org/grok-build), [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code)._
+_Also supported: [Antigravity CLI](https://github.com/google-antigravity/antigravity-cli), [DeepSeek-Reasonix](https://github.com/esengine/DeepSeek-Reasonix), [CodeWhale](https://github.com/Hmbown/CodeWhale), [Copilot CLI](https://github.com/github/copilot-cli), [opencode](https://github.com/anomalyco/opencode), [Cursor CLI](https://cursor.com/cli), [Hermes Agent](https://hermes-agent.nousresearch.com), [Oh My Pi](https://omp.sh), [OpenClaw](https://github.com/openclaw/openclaw), [Grok Build](https://github.com/xai-org/grok-build), [Kimi Code CLI](https://github.com/MoonshotAI/kimi-code), [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)._
 
 **→ [Full tool × OS support matrix on the site](https://pixtuoid.dev/#tools)**
 

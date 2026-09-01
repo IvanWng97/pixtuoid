@@ -557,8 +557,14 @@ mod tests {
             "extensions load once at startup, so the step is a session restart — got {hint:?}"
         );
 
+        let hint = post_install_hint("dsh").expect("dsh needs a restart step");
+        assert!(
+            hint.contains("restart") && hint.contains("web"),
+            "non-web profiles compose patches once at boot; web hot-reloads — got {hint:?}"
+        );
+
         for id in pixtuoid_core::source::registry::registered_source_names() {
-            if id == "openclaw" || id == "omp" {
+            if id == "openclaw" || id == "omp" || id == "dsh" {
                 continue;
             }
             assert!(

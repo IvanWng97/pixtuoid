@@ -92,6 +92,16 @@
     ]
   },
   "shipped": {
+    "dsh.plugin_events": [
+      "agent/disposed",
+      "agent/session-start",
+      "approval/asked",
+      "approval/decided",
+      "assistant/message",
+      "request/header",
+      "tool/call",
+      "tool/result"
+    ],
     "omp.extension_reads": [
       "approved",
       "cwd",

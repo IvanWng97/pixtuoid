@@ -296,13 +296,15 @@ pub struct SourceColors {
     pub grok: Rgb,
     /// Kimi badge hue.
     pub kimi: Rgb,
+    /// DeepSeek Harness badge hue.
+    pub dsh: Rgb,
 }
 
 impl SourceColors {
     /// All badge hues in declaration order — the ONE enumeration the legibility
     /// guard and the count-pin test share, so a new source can't silently escape
     /// the per-theme distinctness check.
-    pub fn all(&self) -> [Rgb; 13] {
+    pub fn all(&self) -> [Rgb; 14] {
         [
             self.claude_code,
             self.codex,
@@ -317,6 +319,7 @@ impl SourceColors {
             self.omp,
             self.grok,
             self.kimi,
+            self.dsh,
         ]
     }
 
@@ -338,6 +341,7 @@ impl SourceColors {
             "om" => self.omp,
             "gk" => self.grok,
             "km" => self.kimi,
+            "ds" => self.dsh,
             _ => return None,
         })
     }
