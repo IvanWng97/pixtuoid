@@ -194,7 +194,8 @@ fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
 /// The batch's bind targets, at most one per agent: a payload must not
 /// corroborate its own pid. omp pairs `SessionStart` + `Identity` in its
 /// session batches (activity events are not bind targets), so the collapse is
-/// load-bearing — pinned by `a_batch_yields_one_bind_target_per_agent`.
+/// load-bearing — pinned by `a_batch_yields_one_bind_target_per_agent` and
+/// `an_omp_session_batch_pairs_start_and_identity_and_binds_once_trusted`.
 fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool> {
     evs.iter().filter_map(pid_bind_target).collect()
 }
@@ -203,8 +204,8 @@ fn bind_targets(evs: &[AgentEvent]) -> std::collections::BTreeMap<AgentId, bool>
 /// batch — the per-source decoders never see the envelope key, so this single
 /// patch point IS the whole focus-jump wiring.
 ///
-/// The gate is the registry's [`FocusChannel`] capability, shared with
-/// `focus::resolve_pid`. `TranscriptProbe` sources (CC/Codex) are skipped: the
+/// The gate is the registry's [`FocusChannel`] capability. `TranscriptProbe`
+/// sources are skipped: the
 /// shim's resolved pid is the nearest non-shell ancestor, not necessarily the CLI,
 /// and a stamped stale pid would shadow the probe's recycle guard in
 /// `resolve_pid`. The kernel start marker (#527, so the
@@ -397,8 +398,8 @@ mod tests {
 
     /// The guard `handle_conn` relies on: a batch yields at most ONE sighting per
     /// agent, so a payload can never corroborate its own pid. Pinned directly
-    /// (the handle_conn-level test would pass with the dedupe deleted); omp's
-    /// session batches exercise it for real, the live pin below.
+    /// (the handle_conn-level test would pass with the dedupe deleted); the
+    /// live pin is `an_omp_session_batch_pairs_start_and_identity_and_binds_once_trusted`.
     #[test]
     fn a_batch_yields_one_bind_target_per_agent() {
         let id = AgentId::from_parts("cursor", "sess-A");
@@ -797,8 +798,8 @@ mod tests {
     /// The #896 shape at this seam: ONE payload carrying a `_pid`, then that pid
     /// dies. A single sighting of a shim-guessed pid must end nothing. (The
     /// batch-dedupe guard itself is pinned by `a_batch_yields_one_bind_target_per_agent`
-    /// — this test would pass with the dedupe deleted, because no decoder emits
-    /// two bind-target events for one agent today.)
+    /// and exercised for real by omp's paired session batches —
+    /// `an_omp_session_batch_pairs_start_and_identity_and_binds_once_trusted`.)
     #[tokio::test]
     async fn handle_conn_a_single_sighting_dying_ends_nothing() {
         let (tx, mut rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);

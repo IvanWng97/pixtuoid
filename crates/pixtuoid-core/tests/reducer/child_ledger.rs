@@ -234,6 +234,79 @@ fn apply_hook_payload(
     }
 }
 
+/// omp's session batches trail an Identity behind the parented Start; when
+/// the child ledger refuses that Start, the parent-less Identity one event
+/// later must not re-register the ended child as an orphan (the ledger's
+/// window would otherwise be one event wide for omp).
+#[test]
+fn a_trailing_identity_cannot_revive_the_child_its_start_was_refused_for() {
+    use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;
+    use serde_json::json;
+    let mut scene = SceneState::uniform(4);
+    let mut r = Reducer::new();
+    let root_file = "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-0000000000aa.jsonl";
+    let child_file = "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-0000000000aa/Alpha.jsonl";
+    let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000);
+
+    apply_hook_payload(
+        &mut r,
+        &mut scene,
+        json!({
+            "type": "session_start", "sessionFile": root_file,
+            "sessionId": "x", "cwd": "/repo", "_pixtuoid_source": "omp",
+        }),
+        t0,
+    );
+    apply_hook_payload(
+        &mut r,
+        &mut scene,
+        json!({
+            "type": "session_start", "sessionFile": child_file,
+            "sessionId": "y", "cwd": "/repo", "_pixtuoid_source": "omp",
+        }),
+        t0 + Duration::from_secs(1),
+    );
+    let child = *scene
+        .agents
+        .keys()
+        .find(|id| {
+            scene.agents[id].session_id.contains("alpha")
+                || scene.agents[id].session_id.contains("Alpha")
+        })
+        .expect("child registered");
+    let stop = t0 + Duration::from_secs(2);
+    apply_hook_payload(
+        &mut r,
+        &mut scene,
+        json!({
+            "type": "session_shutdown", "sessionFile": child_file,
+            "sessionId": "y", "cwd": "/repo", "_pixtuoid_source": "omp",
+        }),
+        stop,
+    );
+    r.tick(
+        &mut scene,
+        stop + EXIT_GRACE_WINDOW + Duration::from_secs(1),
+    );
+    assert!(!scene.agents.contains_key(&child), "child GC'd");
+
+    // Within the ledger window, PAST the 5s tombstone: the batch's Start is
+    // refused, and the trailing Identity must be refused with it.
+    apply_hook_payload(
+        &mut r,
+        &mut scene,
+        json!({
+            "type": "session_start", "sessionFile": child_file,
+            "sessionId": "y", "cwd": "/repo", "_pixtuoid_source": "omp",
+        }),
+        stop + Duration::from_secs(30),
+    );
+    assert!(
+        !scene.agents.contains_key(&child),
+        "the parent-less trailing Identity revived the ledger-refused child"
+    );
+}
+
 #[test]
 fn late_parented_restart_of_an_ended_child_is_gated_by_the_child_ledger() {
     use pixtuoid_core::state::reducer::EXIT_GRACE_WINDOW;

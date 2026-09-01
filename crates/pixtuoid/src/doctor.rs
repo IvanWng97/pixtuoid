@@ -629,8 +629,9 @@ struct DoctorReport {
     /// `None` = probe disabled (non-standard projects root).
     cc_registry: Option<(std::path::PathBuf, bool)>,
     codex_sessions: (std::path::PathBuf, bool),
-    /// The other two `TranscriptProbe` roots. Each is source-specific — omp's is
-    /// the resolved sessions dir, grok's a registry FILE — so each needs its own
+    /// The other two probe roots (omp's probe is the stamp-less FALLBACK since
+    /// the PluginStamp flip). Each is source-specific — omp's is the resolved
+    /// sessions dir, grok's a registry FILE — so each needs its own
     /// hand-written row, pinned by `every_focusable_source_appears_in_the_focus_category`.
     omp_sessions: (std::path::PathBuf, bool),
     grok_registry: (std::path::PathBuf, bool),
@@ -734,7 +735,8 @@ fn collect_roots() -> Vec<RootStatus> {
         .collect()
 }
 
-/// The four hand-written `TranscriptProbe` roots, resolved exactly as the probe resolves
+/// The four hand-written probe roots (three `TranscriptProbe` + omp's
+/// stamp-less fallback), resolved exactly as the probe resolves
 /// them so the report cannot claim a root the probe would not use. grok's is a registry
 /// FILE, not a directory. DEFAULT resolution throughout: a `--projects-root` /
 /// `--codex-sessions-root` override changes the RUNNING app, but doctor deliberately
@@ -1182,16 +1184,16 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
     let om_prefix = prefix_of(pixtuoid_core::source::omp::SOURCE_NAME);
     if r.omp_sessions.1 {
         details.push(format!(
-            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe {} {}",
+            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe (stamp-less fallback) {} {}",
             ink.ok("\u{2713}"),
             r.omp_sessions.0.display()
         ));
     } else {
-        problem = true;
+        // Not a problem row since the PluginStamp flip: the stamped pid is the
+        // primary channel, this probe only covers stamp-less shapes.
         details.push(format!(
-            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe {} {} (focus no-ops until omp \
-             writes it)",
-            ink.bad("\u{2717} missing"),
+            "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe (stamp-less fallback) {} {}",
+            ink.warn("\u{2717} missing"),
             r.omp_sessions.0.display()
         ));
     }
@@ -1418,6 +1420,10 @@ mod tests {
         assert!(
             s.contains("opencode") && s.contains("plugin-stamped"),
             "plugin stampers listed separately: {s}"
+        );
+        assert!(
+            s.contains("om\u{b7}omp — append-fd probe (stamp-less fallback)"),
+            "omp keeps its fallback-probe row beside the stamp census: {s}"
         );
         assert!(
             s.contains("cursor") && s.contains("shim-stamped `_pid`"),

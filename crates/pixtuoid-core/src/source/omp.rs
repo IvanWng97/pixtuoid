@@ -562,9 +562,10 @@ pub(crate) const DECODED_EXIT_MARKER: &str = SESSION_EXIT;
 
 /// Appended on every clean teardown, SIGINT/SIGTERM included; its reason/kind is
 /// ignored, because every kind ("normal"|"signal"|"fatal"|"process_exit") IS an
-/// end. Skipped when the session never produced an assistant message, and SIGKILL
-/// writes nothing — both fall to the stale-sweep, except that the bridge's
-/// `session_shutdown` ends the empty session outright.
+/// end. Skipped when the session never produced an assistant message (the
+/// bridge's `session_shutdown` ends that one outright), and SIGKILL writes
+/// nothing — with the bridge `HookPidWatch` catches it; without, the
+/// stale-sweep.
 const SESSION_EXIT: &str = "session_exit";
 
 /// The turn role carrying tool calls. Its `model` is read BARE, never the
@@ -857,6 +858,11 @@ pub(crate) const DECODED_HOOK_EVENTS: &[&str] = &[
 /// upstream `reason` (`"new" | "resume" | "fork"`) is deliberately dropped —
 /// the End+Start pair keys on `previousSessionFile` alone, identically for
 /// all three.
+///
+/// The start/switch/branch arms trail an [`AgentEvent::Identity`]: the router
+/// stamps pids onto Identity events only, and the focus stamp must arm from
+/// BIRTH to cover a bridge-only (never-persisted) session — the exit watch
+/// needs no help, `SessionStart` is already a bind target.
 pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let Some(obj) = v.as_object() else {
         return Ok(vec![]);
@@ -890,10 +896,8 @@ pub fn decode_omp_hook_payload(v: &Value) -> Result<Vec<AgentEvent>> {
     let identity = || AgentEvent::identity(agent_id, SOURCE_NAME, key.clone(), cwd());
 
     match ty {
-        // The trailing `identity()` on every session arm is the pid carrier:
-        // the router stamps only Identity events, and the slot must be armed
-        // from BIRTH — before any approval — for focus and the abrupt-exit
-        // watch to cover a bridge-only (never-persisted) session.
+        // The trailing `identity()` is the focus-pid carrier (the declaration
+        // doc owns the story).
         HOOK_SESSION_START => Ok(vec![session_start(), identity()]),
         // previous == current is the in-place branch REWRITE — an End+Start
         // pair there would walk the sprite out for its own rewrite.

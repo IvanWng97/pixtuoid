@@ -113,13 +113,11 @@ pub(crate) fn resolve_pid(
     // The probe FNS stay here in the binary: the registry const table compiles to
     // wasm and cannot hold a native-only fn pointer. The name match uses the
     // registry consts, not literals — a source rename must not silently drop an
-    // arm to `_ => None`.
-    use pixtuoid_core::source::registry::FocusChannel;
-    let channel = pixtuoid_core::source::registry::descriptor_for(&slot.source)
-        .map_or(FocusChannel::Unsupported, |d| d.focus_channel());
-    if channel != FocusChannel::TranscriptProbe {
-        return None;
-    }
+    // arm to `_ => None`. Deliberately NO FocusChannel read: a channel gate
+    // ahead of the match severed omp's probe the day it became PluginStamp
+    // (its stamp-less shapes — `--no-extensions`, a session predating the
+    // bridge install — resolve only here), and an arm-less source falls to
+    // `_ => None` without one.
     match slot.source.as_ref() {
         s if s == pixtuoid_core::source::claude_code::SOURCE_NAME => paths
             .cc_projects_root
@@ -370,7 +368,9 @@ mod tests {
     fn transcript_probe_sources_all_have_a_resolve_arm() {
         // Lockstep pin: marking a new source `TranscriptProbe` in the registry
         // REQUIRES wiring a probe arm in `resolve_pid` — extend BOTH, then add
-        // its name here.
+        // its name here. omp stays listed while PluginStamp: its arm is the
+        // stamp-less fallback, reachable because `resolve_pid` reads no
+        // channel.
         use pixtuoid_core::source::registry::FocusChannel;
         let wired = [
             pixtuoid_core::source::claude_code::SOURCE_NAME,

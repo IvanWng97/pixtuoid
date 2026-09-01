@@ -50,9 +50,8 @@ export default function (pi: any) {
       if (typeof ev?.toolName === "string") payload.toolName = ev.toolName
       if (typeof ev?.reason === "string") payload.reason = ev.reason
       if (typeof ev?.approved === "boolean") payload.approved = ev.approved
-      // The omp process pid (extensions run in-process). Rust DISCARDS it
-      // today (omp's focus channel is the transcript probe), but stamping it
-      // keeps the wire shape right for a plugin-stamp channel.
+      // The omp process pid (extensions run in-process) — the PluginStamp
+      // channel: focus and the abrupt-exit watch ride it.
       payload._pid = typeof process !== "undefined" ? process.pid : undefined
       // Buffer stdin: no writable stream, no EPIPE window.
       const proc = Bun.spawn([HOOK_PATH, "--source", "omp"], {
