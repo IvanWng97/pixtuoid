@@ -271,10 +271,11 @@ jobs:
         with:
           persist-credentials: false
       - uses: dtolnay/rust-toolchain@stable
-      # `cargo publish` BUILDS each crate to verify it, and default features pull
-      # Without the headers the loop irreversibly publishes the earlier crates,
-      # then fails to compile pixtuoid — stranding the release half-published at
-      # a version that can never be reused.
+      # `cargo publish` BUILDS each crate to verify it, and default features
+      # pull rodio -> cpal -> the ALSA headers. Without them the loop
+      # irreversibly publishes the earlier crates, then fails to compile
+      # pixtuoid — stranding the release half-published at a version that can
+      # never be reused.
       - uses: ./.github/actions/setup-alsa
       - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
         with:
