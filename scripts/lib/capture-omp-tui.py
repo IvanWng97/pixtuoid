@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-rr"""Drive omp's interactive TUI under a pty for `just capture-fixture`.
+r"""Drive omp's interactive TUI under a pty for `just capture-fixture`.
 
 The recorder can only run a command; omp's approval gates and /-commands need
 keystrokes, so this driver types them on a resilient schedule. Modes:

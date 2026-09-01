@@ -363,6 +363,172 @@ async fn grok_source_run_emits_events_from_updates_jsonl() {
     handle.abort();
 }
 
+#[tokio::test]
+async fn omp_source_run_watches_profile_roots_beside_the_primary() {
+    use pixtuoid_core::source::omp::OmpSource;
+    use pixtuoid_core::AgentId;
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let primary = dir.path().join("agent").join("sessions");
+    let profile = dir
+        .path()
+        .join("profiles")
+        .join("work")
+        .join("agent")
+        .join("sessions");
+    const STEM: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000021";
+    let cwd_dir = profile.join("-dev-proj");
+    tokio::fs::create_dir_all(&primary).await.unwrap();
+    tokio::fs::create_dir_all(&cwd_dir).await.unwrap();
+    let transcript = cwd_dir.join(format!("{STEM}.jsonl"));
+
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let mut src = OmpSource::single_root(primary);
+    src.profile_sessions_roots = vec![profile];
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    write_omp_header(&transcript, "0197f0aa-0000-7000-8000-000000000021").await;
+
+    let want = AgentId::from_parts("omp", &omp_watcher_key(&transcript));
+    assert!(
+        wait_for_session_start(&mut rx, want).await,
+        "a transcript under a PROFILE root must register like a primary one"
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+async fn omp_source_rescan_hot_plugs_a_profile_created_mid_run() {
+    use pixtuoid_core::source::omp::OmpSource;
+    use pixtuoid_core::AgentId;
+
+    fast_watch();
+    let dir = TempDir::new().unwrap();
+    let primary = dir.path().join("agent").join("sessions");
+    tokio::fs::create_dir_all(&primary).await.unwrap();
+    let late_profile = dir
+        .path()
+        .join("profiles")
+        .join("late")
+        .join("agent")
+        .join("sessions");
+
+    // The rescan seam reports nothing until the test "creates" the profile.
+    let announced = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let feed = announced.clone();
+    let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
+    let mut src = OmpSource::single_root(primary);
+    src.rescan = std::sync::Arc::new(move || feed.lock().unwrap().clone());
+    src.rescan_interval = Duration::from_millis(50);
+    let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
+
+    tokio::time::sleep(Duration::from_millis(80)).await;
+    const STEM: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000022";
+    let cwd_dir = late_profile.join("-dev-proj");
+    tokio::fs::create_dir_all(&cwd_dir).await.unwrap();
+    announced.lock().unwrap().push(late_profile.clone());
+    // Give the rescan a tick to bind the new root BEFORE the transcript lands,
+    // so registration cannot ride the initial scan of an already-known root.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    let transcript = cwd_dir.join(format!("{STEM}.jsonl"));
+    write_omp_header(&transcript, "0197f0aa-0000-7000-8000-000000000022").await;
+
+    let want = AgentId::from_parts("omp", &omp_watcher_key(&transcript));
+    assert!(
+        wait_for_session_start(&mut rx, want).await,
+        "a profile announced after startup must gain a watcher without a restart"
+    );
+
+    // Re-announcing the SAME root must not disturb it: a later transcript
+    // still registers. (Watcher-count dedup itself is not observable here —
+    // one watcher already emits SessionStart twice, seed + decoded header.)
+    announced.lock().unwrap().push(late_profile.clone());
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    const STEM2: &str = "2026-07-09T08-00-00-000Z_0197f0aa-0000-7000-8000-000000000023";
+    let second = cwd_dir.join(format!("{STEM2}.jsonl"));
+    write_omp_header(&second, "0197f0aa-0000-7000-8000-000000000023").await;
+    let want2 = AgentId::from_parts("omp", &omp_watcher_key(&second));
+    assert!(
+        wait_for_session_start(&mut rx, want2).await,
+        "a re-announced root must keep registering new transcripts"
+    );
+    handle.abort();
+}
+
+#[tokio::test]
+#[cfg(unix)]
+async fn omp_source_run_reports_total_watch_failure_instead_of_swallowing_it() {
+    use pixtuoid_core::source::omp::OmpSource;
+    use std::os::unix::fs::PermissionsExt;
+
+    // Deliberately NOT fast_watch(): the forced PollWatcher tolerates a
+    // missing root (walk latches and warns), so only the native backend's
+    // watch() error can exercise the death path.
+    let dir = TempDir::new().unwrap();
+    let sealed = dir.path().join("sealed");
+    tokio::fs::create_dir(&sealed).await.unwrap();
+    let mut perms = std::fs::metadata(&sealed).unwrap().permissions();
+    perms.set_mode(0o000);
+    std::fs::set_permissions(&sealed, perms.clone()).unwrap();
+
+    let (tx, _rx) = mpsc::channel::<(Transport, AgentEvent)>(8);
+    let result = Box::new(OmpSource::single_root(sealed.join("sessions")))
+        .run(tx)
+        .await;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&sealed, perms).unwrap();
+    assert!(
+        result.is_err(),
+        "every watcher failing must propagate to the deaths surface (#157), got Ok"
+    );
+}
+
+/// The expected-id seam shared by the omp cases: the SAME fold + deriver the
+/// watcher uses, so a raw-case literal cannot pass on Unix and red only on
+/// windows-test.
+fn omp_watcher_key(p: &std::path::Path) -> String {
+    use pixtuoid_core::source::omp::omp_id_from_path;
+    omp_id_from_path(std::path::Path::new(
+        &pixtuoid_core::id::normalize_path_key(&p.to_string_lossy()),
+    ))
+}
+
+async fn write_omp_header(path: &std::path::Path, id: &str) {
+    let header = serde_json::json!({
+        "type": "session", "version": 3, "id": id,
+        "timestamp": "2026-07-09T08:00:00.000Z", "cwd": "/dev/proj"
+    });
+    let mut f = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .await
+        .unwrap();
+    f.write_all(format!("{header}\n").as_bytes()).await.unwrap();
+    f.flush().await.unwrap();
+}
+
+/// Drain until `want`'s SessionStart or a deadline; true on arrival.
+async fn wait_for_session_start(
+    rx: &mut mpsc::Receiver<(Transport, AgentEvent)>,
+    want: pixtuoid_core::AgentId,
+) -> bool {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+    while tokio::time::Instant::now() < deadline {
+        match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+            Ok(Some((_, AgentEvent::SessionStart { agent_id, .. }))) if agent_id == want => {
+                return true
+            }
+            Ok(Some(_)) => {}
+            Ok(None) => return false,
+            Err(_) => {}
+        }
+    }
+    false
+}
+
 // Layout: <sessions_root>/<encoded-cwd>/<ts>_<uuid>.jsonl with a subagent child
 // at <sessions_root>/<encoded-cwd>/<ts>_<uuid>/<taskId>.jsonl — the root keys on
 // its stem, the child on the stem CHAIN.
@@ -382,44 +548,20 @@ async fn omp_source_run_links_a_nested_subagent_to_its_root() {
     let child_transcript = child_dir.join("Alpha.jsonl");
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-    let src = OmpSource { sessions_root };
+    let src = OmpSource::single_root(sessions_root);
     let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
 
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    let header = |id: &str| {
-        serde_json::json!({
-            "type": "session", "version": 3, "id": id,
-            "timestamp": "2026-07-09T08:00:00.000Z", "cwd": "/dev/proj"
-        })
-    };
     for (path, id) in [
         (&root_transcript, "0197f0aa-0000-7000-8000-000000000001"),
         (&child_transcript, "0197f0cc-0000-7000-8000-000000000003"),
     ] {
-        let mut f = tokio::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .await
-            .unwrap();
-        f.write_all(format!("{}\n", header(id)).as_bytes())
-            .await
-            .unwrap();
-        f.flush().await.unwrap();
+        write_omp_header(path, id).await;
     }
 
-    // Expected ids must go through the SAME seam fold + deriver the watcher uses:
-    // a raw-case literal here passes on Unix and fails ONLY on windows-test,
-    // where the id-space is normalize_path_key-folded.
-    use pixtuoid_core::source::omp::omp_id_from_path;
-    let watcher_key = |p: &std::path::Path| {
-        omp_id_from_path(std::path::Path::new(
-            &pixtuoid_core::id::normalize_path_key(&p.to_string_lossy()),
-        ))
-    };
-    let root_id = AgentId::from_parts("omp", &watcher_key(&root_transcript));
-    let child_id = AgentId::from_parts("omp", &watcher_key(&child_transcript));
+    let root_id = AgentId::from_parts("omp", &omp_watcher_key(&root_transcript));
+    let child_id = AgentId::from_parts("omp", &omp_watcher_key(&child_transcript));
     let mut child_linked = false;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     while tokio::time::Instant::now() < deadline && !child_linked {
@@ -471,7 +613,7 @@ async fn omp_ended_transcript_is_gated_at_first_sight_and_a_live_one_seeds() {
         .unwrap();
 
         let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(32);
-        let src = OmpSource { sessions_root };
+        let src = OmpSource::single_root(sessions_root);
         let handle = tokio::spawn(async move { Box::new(src).run(tx).await });
 
         let deadline =
@@ -538,7 +680,11 @@ async fn omp_oversized_first_sight_uses_the_head_title_through_source_wiring() {
     .unwrap();
 
     let (tx, mut rx) = mpsc::channel::<(Transport, AgentEvent)>(64);
-    let handle = tokio::spawn(async move { Box::new(OmpSource { sessions_root }).run(tx).await });
+    let handle = tokio::spawn(async move {
+        Box::new(OmpSource::single_root(sessions_root))
+            .run(tx)
+            .await
+    });
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
     let mut rename_seen_at = None;

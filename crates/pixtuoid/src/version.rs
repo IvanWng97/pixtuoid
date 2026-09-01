@@ -76,6 +76,7 @@ pub(crate) fn release_notes(version: &str) -> Option<&'static [&'static str]> {
             "Oh My Pi can now connect — a tiny bridge extension makes its approval prompts show as real waits, brand-new sessions walk in before their first reply, and an abandoned empty session leaves promptly instead of idling for half an hour",
             "Approvals read true — the wait names exactly the tool call it gates, an approval returns the desk to work, a denial clears it, and parallel prompts each keep their own gate",
             "One call, one count — the same tool call seen by both a hook and the transcript no longer double-increments the desk tally, however far apart the two land",
+            "Every omp profile gets a desk — sessions under any profile's tree are watched, including profiles created while pixtuoid runs",
         ]),
         "0.17.0" => Some(&[
             "`pixtuoid doctor` is one report — sources, install health, CLI versions and decode drift, categorized and colorized, each row carrying the thing to run next",

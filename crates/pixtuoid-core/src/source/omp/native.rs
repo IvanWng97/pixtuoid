@@ -1,14 +1,21 @@
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::Duration;
 
 use anyhow::Result;
 
 use super::{
-    decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path, omp_sessions_dir,
-    SOURCE_NAME,
+    decode_omp_line, omp_derive_label, omp_head_title, omp_id_from_path, omp_profile_sessions_dirs,
+    omp_sessions_dir, SOURCE_NAME,
 };
 use crate::source::decoder::parsed_tail_lines;
-use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot};
+use crate::source::jsonl::{JsonlWatcher, ProbeSnapshot, DEFAULT_POLL_INTERVAL};
 use crate::source::{Source, TaggedSender};
+
+/// The profile-roots lister [`OmpSource::run`] re-invokes on its rescan tick,
+/// injectable so tests can grow the set without touching process env.
+pub type OmpProfileEnumerate = Arc<dyn Fn() -> Vec<PathBuf> + Send + Sync>;
 
 /// omp appends a `custom` entry `customType:"session_exit"` on every clean
 /// teardown, so a transcript that already ended carries that marker — the
@@ -23,19 +30,84 @@ fn omp_session_ended(tail: &[u8]) -> bool {
     })
 }
 
-/// Source that watches the omp sessions directory recursively.
+/// Source that watches the omp sessions directory recursively — the primary
+/// (env-selected) root plus every other profile's, since each profile keeps
+/// its own sessions tree and a session under any of them is a sprite.
 pub struct OmpSource {
-    /// The watched omp `sessions` root.
+    /// The watched primary omp `sessions` root.
     pub sessions_root: PathBuf,
+    /// The OTHER profiles' sessions roots, one watcher each. Filled by
+    /// [`Self::default_paths`]' enumeration.
+    pub profile_sessions_roots: Vec<PathBuf>,
+    /// Re-lists the profile roots each rescan tick (a profile created mid-run
+    /// gains a watcher without a restart).
+    #[doc(hidden)]
+    pub rescan: OmpProfileEnumerate,
+    /// How often [`Self::rescan`] runs; production stays on the watcher poll
+    /// authority, tests shrink it.
+    #[doc(hidden)]
+    pub rescan_interval: Duration,
+    /// Roots here came from the resolver (never user-supplied), so every
+    /// watcher gets the fd probe without the replay-excluding layout gate.
+    /// Only [`Self::default_paths`] sets it.
+    first_party_roots: bool,
 }
 
 impl OmpSource {
-    /// Construct pointed at the default omp `sessions` root.
+    /// Construct pointed at the default omp `sessions` root, plus every other
+    /// profile's.
     pub fn default_paths() -> Self {
         Self {
+            profile_sessions_roots: omp_profile_sessions_dirs(),
+            rescan: Arc::new(omp_profile_sessions_dirs),
+            rescan_interval: DEFAULT_POLL_INTERVAL,
             sessions_root: omp_sessions_dir(),
+            first_party_roots: true,
         }
     }
+
+    /// A source over one root with no profile set — the test/replay shape.
+    #[doc(hidden)]
+    pub fn single_root(sessions_root: PathBuf) -> Self {
+        Self {
+            sessions_root,
+            profile_sessions_roots: Vec::new(),
+            rescan: Arc::new(Vec::new),
+            rescan_interval: DEFAULT_POLL_INTERVAL,
+            first_party_roots: false,
+        }
+    }
+}
+
+/// One watcher over `root`. A first-party root (resolver-enumerated, never
+/// user-supplied) gets the fd probe unconditionally; anything else goes
+/// through [`omp_probe_root`]'s replay-excluding gate. `started` keeps every
+/// root ever spawned, so a failed one is not respawn-thrashed by the rescan.
+fn spawn_watcher(
+    set: &mut tokio::task::JoinSet<Result<()>>,
+    started: &mut HashSet<PathBuf>,
+    root: PathBuf,
+    first_party: bool,
+    tx: TaggedSender,
+) {
+    let mut watcher = JsonlWatcher::new(
+        root.clone(),
+        SOURCE_NAME.to_string(),
+        decode_omp_line,
+        omp_session_ended,
+    )
+    .with_label_deriver(omp_derive_label)
+    .with_head_label(omp_head_title);
+    let probe_root = if first_party {
+        Some(root.clone())
+    } else {
+        omp_probe_root(&root)
+    };
+    if let Some(probe_root) = probe_root {
+        watcher = watcher.with_liveness_probe(Arc::new(move || live_omp_session_ids(&probe_root)));
+    }
+    started.insert(root);
+    set.spawn(watcher.run(tx));
 }
 
 impl Source for OmpSource {
@@ -44,19 +116,68 @@ impl Source for OmpSource {
     }
 
     async fn run(self: Box<Self>, tx: TaggedSender) -> Result<()> {
-        let mut watcher = JsonlWatcher::new(
-            self.sessions_root.clone(),
-            SOURCE_NAME.to_string(),
-            decode_omp_line,
-            omp_session_ended,
-        )
-        .with_label_deriver(omp_derive_label)
-        .with_head_label(omp_head_title);
-        if let Some(root) = omp_probe_root(&self.sessions_root) {
-            watcher = watcher
-                .with_liveness_probe(std::sync::Arc::new(move || live_omp_session_ids(&root)));
+        let Self {
+            sessions_root,
+            profile_sessions_roots,
+            rescan,
+            rescan_interval,
+            first_party_roots,
+        } = *self;
+        let mut set = tokio::task::JoinSet::new();
+        let mut started = HashSet::new();
+        let mut last_error = None;
+        spawn_watcher(
+            &mut set,
+            &mut started,
+            sessions_root,
+            first_party_roots,
+            tx.clone(),
+        );
+        for root in profile_sessions_roots {
+            if !started.contains(&root) {
+                spawn_watcher(&mut set, &mut started, root, first_party_roots, tx.clone());
+            }
         }
-        watcher.run(tx).await
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(rescan_interval) => {
+                    // Off the worker: the enumeration does blocking fs reads
+                    // (the liveness probes set the precedent).
+                    let listed = tokio::task::spawn_blocking({
+                        let rescan = rescan.clone();
+                        move || rescan()
+                    })
+                    .await;
+                    for root in listed.unwrap_or_default() {
+                        if !started.contains(&root) {
+                            spawn_watcher(&mut set, &mut started, root, first_party_roots, tx.clone());
+                        }
+                    }
+                }
+                Some(finished) = set.join_next() => {
+                    // Log-and-continue per root, but REMEMBER the failure: a
+                    // source watching nothing must reach the deaths surface
+                    // the user sees (#157), not only the log.
+                    match finished {
+                        Ok(Err(e)) => {
+                            tracing::warn!(source = SOURCE_NAME, error = %e, "omp watcher exited");
+                            last_error = Some(e);
+                        }
+                        Err(join) => {
+                            tracing::warn!(source = SOURCE_NAME, error = %join, "omp watcher task died");
+                            last_error = Some(join.into());
+                        }
+                        Ok(Ok(())) => {}
+                    }
+                    if set.is_empty() {
+                        return match last_error {
+                            Some(e) => Err(e),
+                            None => Ok(()),
+                        };
+                    }
+                }
+            }
+        }
     }
 }
 
