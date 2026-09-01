@@ -1222,7 +1222,8 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             continue;
         };
         // Daemons aren't click-focusable agents; the TranscriptProbe sources
-        // got their own probe rows above.
+        // got their own probe rows above (omp appears in BOTH: its probe row
+        // is the stamp-less fallback, this census line the primary channel).
         if d.is_daemon() || d.focus_channel() == FocusChannel::TranscriptProbe {
             continue;
         }

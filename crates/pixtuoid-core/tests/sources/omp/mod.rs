@@ -306,6 +306,6 @@ fn a_recorded_switch_ends_the_previous_session_and_starts_the_current() {
             "identity-cur",
             "end-cur",
         ],
-        "the switch decodes as End(previous) + Start(current)"
+        "the switch decodes as End(previous) + Start(current), each session arm trailing its Identity"
     );
 }

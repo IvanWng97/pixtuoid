@@ -169,7 +169,11 @@ impl Drop for UndeliveredEvents {
 /// one fact ("is this source's `_pid` trustworthy") with two consumers. A
 /// `TranscriptProbe` source is excluded on its own terms: its pid comes from the
 /// CLI's own registry via `jsonl::liveness`, which drives its own exit watch, so
-/// binding here would only offer a second, weaker answer.
+/// binding here would only offer a second, weaker answer. omp carries BOTH
+/// reapers and no precedence is enforced: on an abrupt kill this watch usually
+/// ends the slot first, and the jsonl exit path's trailing rows then land on
+/// an exiting slot as no-ops — accepted, a duplicate `SessionEnd` is a
+/// documented reducer no-op.
 fn pid_bind_target(ev: &AgentEvent) -> Option<(AgentId, bool)> {
     use crate::source::registry::FocusChannel;
     let (agent_id, source) = match ev {
@@ -456,6 +460,28 @@ mod tests {
             targets.values().next(),
             Some(&false),
             "a PluginStamp pid is the CLI's own — no corroboration"
+        );
+
+        // The switch batch: End(prev) is no bind target, and the current id's
+        // Start+Identity pair still collapses to one trusted sighting.
+        let evs = crate::source::omp::decode_omp_hook_payload(&serde_json::json!({
+            "type": "session_switch",
+            "sessionFile": "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-000000000002.jsonl",
+            "previousSessionFile": "/h/.omp/agent/sessions/-repo/2026-08-30T01-00-00-000Z_01a00000-0000-7000-8000-000000000001.jsonl",
+            "sessionId": "01a00000-0000-7000-8000-000000000002",
+            "cwd": "/repo",
+        }))
+        .unwrap();
+        assert_eq!(
+            evs.len(),
+            3,
+            "End(prev) + Start(cur) + Identity(cur): {evs:?}"
+        );
+        let targets = bind_targets(&evs);
+        assert_eq!(
+            (targets.len(), targets.values().next()),
+            (1, Some(&false)),
+            "one trusted sighting for the current id, none for the ended one"
         );
     }
 
