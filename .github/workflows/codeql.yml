@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Explicit: implicit detection can omit languages in a multi-language repo.
+        # Implicit detection can drop a language in a multi-language repo.
         language: [actions, javascript-typescript, python, rust]
     steps:
       - uses: actions/checkout@v7
@@ -69,23 +69,28 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          # Rust supports only the no-build extractor; the interpreted languages
-          # in this matrix use the same mode.
+          # Rust has only the no-build extractor; the other three share the mode.
           build-mode: none
+          # `rust/cleartext-logging` reads every `*_session_id` as a credential
+          # (its `maybeAccountInfo` name heuristic); here it is an agent CLI's
+          # local key, and every alert to date was a test's failure message
+          # echoing one. `paths-ignore` cannot carve an inline `#[cfg(test)]`
+          # module out of its file, so the exclusion is per-query.
+          config: |
+            query-filters:
+              - exclude:
+                  id: rust/cleartext-logging
 
       - name: Analyze
         id: analyze
         uses: github/codeql-action/analyze@v4
         with:
           category: /language:${{ matrix.language }}
-          # Rust defers its upload until the extraction-health gate below passes: a
-          # degraded extraction yields FEWER alerts, so uploading first publishes a
-          # security tab that looks CLEANER than reality. Only Rust defers —
-          # upstream notes `never` complicates debugging.
+          # Rust uploads only after the health gate below: a degraded extraction
+          # yields FEWER alerts, so an early upload looks cleaner than reality.
           upload: ${{ matrix.language == 'rust' && 'never' || 'always' }}
 
-      # The action stays green even when extractor diagnostics affect most files,
-      # so enforce a threshold off CodeQL's own SARIF metrics.
+      # The action stays green under heavy extractor diagnostics; gate on the SARIF metrics.
       - name: Verify Rust extraction health
         if: ${{ matrix.language == 'rust' }}
         shell: bash
@@ -132,8 +137,6 @@ jobs:
             exit 1
           fi
 
-      # Only the SARIF the gate above vouched for: a failed gate skips this step, so
-      # no analysis reaches the security tab unless it was healthy enough to trust.
       - name: Upload Rust analysis
         if: ${{ matrix.language == 'rust' }}
         uses: github/codeql-action/upload-sarif@v4
