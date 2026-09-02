@@ -303,7 +303,7 @@ impl Listener {
                     // and not one warn per iteration, or a persistent errno pegs a
                     // core and rotates real diagnostics out of the log.
                     if accept_health.on_failure() {
-                        warn!("hook socket accept error (retrying with backoff): {e}");
+                        warn!(error = %e, "hook socket accept error (retrying with backoff)");
                     }
                     tokio::time::sleep(backoff.on_error()).await;
                 }

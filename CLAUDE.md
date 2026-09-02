@@ -118,7 +118,7 @@ taller-cell terminals; bundled character sprites max at 8×12 px.
 
 - No `ratatui`/`crossterm`/terminal anything in `pixtuoid-core` or `pixtuoid-scene`.
 - No direct `~/.claude/settings.json` writes — go through `install/io.rs` (`write_config_atomic` / `ConfigLock`).
-- No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`.
+- No `println!`/`eprintln!` on production paths (headless summary + CLI output excepted) — `tracing`, with a constant message and every value as a field (`error = %e`, `path = %path.display()`, `pid`): a field filters and greps, a value baked into the format string does neither. Only a relay whose payload IS the message (`warn_user`) interpolates.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).

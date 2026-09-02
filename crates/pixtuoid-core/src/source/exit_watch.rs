@@ -155,7 +155,7 @@ mod imp {
             let kq = match kqueue() {
                 Ok(kq) => kq,
                 Err(e) => {
-                    tracing::debug!("kqueue() failed: {e}; instant exit off (backstops cover)");
+                    tracing::debug!(error = %e, "kqueue() failed; instant exit off (backstops cover)");
                     return None;
                 }
             };
@@ -173,7 +173,7 @@ mod imp {
             // met; the zero timeout means this can't block.
             let registered = unsafe { kevent(&kq, &[wake_slot], eventlist, Some(Duration::ZERO)) };
             if let Err(e) = registered {
-                tracing::debug!("EVFILT_USER wake-slot registration failed: {e}; instant exit off");
+                tracing::debug!(error = %e, "EVFILT_USER wake-slot registration failed; instant exit off");
                 return None;
             }
             Some(Self { kq })
@@ -190,7 +190,7 @@ mod imp {
             // is registered at init and never deleted while the kq lives.
             if let Err(e) = unsafe { kevent(&self.kq, &[trigger], eventlist, Some(Duration::ZERO)) }
             {
-                tracing::debug!("exit-watch wake trigger failed: {e}");
+                tracing::debug!(error = %e, "exit-watch wake trigger failed");
             }
         }
     }
@@ -252,10 +252,10 @@ mod imp {
         if errno == Errno::SRCH {
             Registered::AlreadyDead
         } else if errno == Errno::PERM {
-            tracing::debug!("EVFILT_PROC EPERM for pid {pid}; dropped (backstops cover)");
+            tracing::debug!(pid, "EVFILT_PROC EPERM; dropped (backstops cover)");
             Registered::Failed
         } else {
-            tracing::debug!("EVFILT_PROC registration for pid {pid} returned {errno:?}; dropped");
+            tracing::debug!(pid, ?errno, "EVFILT_PROC registration failed; dropped");
             Registered::Failed
         }
     }
@@ -350,7 +350,7 @@ mod imp {
             let (pipe_rd, pipe_wr) = match pipe_with(PipeFlags::CLOEXEC | PipeFlags::NONBLOCK) {
                 Ok(pair) => pair,
                 Err(e) => {
-                    tracing::debug!("pipe2 failed: {e}; instant exit off (backstops cover)");
+                    tracing::debug!(error = %e, "pipe2 failed; instant exit off (backstops cover)");
                     return None;
                 }
             };
@@ -382,7 +382,7 @@ mod imp {
             Err(e) if e == Errno::SRCH => PidfdOpen::AlreadyDead,
             Err(e) if e == Errno::NOSYS => PidfdOpen::Unsupported,
             Err(e) => {
-                tracing::debug!("pidfd_open({pid}) failed: {e}; dropped (backstops cover)");
+                tracing::debug!(pid, error = %e, "pidfd_open failed; dropped (backstops cover)");
                 PidfdOpen::Failed
             }
         }

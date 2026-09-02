@@ -517,7 +517,7 @@ impl JsonlWatcher {
                     // the negative vouch for each id, so the slower rung can't
                     // re-confirm the exit we're about to emit.
                     for id in scan_state.ladder.pid_died(pid) {
-                        debug!("instant exit: pid {pid} died; emitting SessionEnd for {id}");
+                        debug!(pid, %id, "instant exit: pid died; emitting SessionEnd");
                         emit_session_exit(&id, decoders, &ctx).await;
                     }
                 }

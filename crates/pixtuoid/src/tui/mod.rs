@@ -218,7 +218,7 @@ fn reflect_onboarding_outcomes(
                 } else {
                     (connection::FailedOp::Disconnect, "disconnect")
                 };
-                tracing::warn!("onboarding: {id} failed to {verb}: {e}");
+                tracing::warn!(id = id.as_str(), verb, error = %e, "onboarding: hook change failed");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
@@ -524,7 +524,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
     if decision.should_persist {
         if let Err(e) = crate::config::save_version(config_path, current_ver) {
-            tracing::warn!("failed to persist version: {e}");
+            tracing::warn!(error = %e, "failed to persist version");
         }
     }
     decision.should_show_popup
@@ -623,7 +623,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cx.ui.commit_theme(i);
             let name = theme::ALL_THEMES[i].name;
             if let Err(e) = crate::config::save(cx.config_path, name) {
-                tracing::warn!("failed to persist theme: {e}");
+                tracing::warn!(error = %e, "failed to persist theme");
             }
         }
         KeyAction::ThemeCancel => {

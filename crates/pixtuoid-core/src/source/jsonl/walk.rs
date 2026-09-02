@@ -95,7 +95,7 @@ pub(super) async fn scan_root(
     match tokio::fs::read_dir(root).await {
         Ok(mut read) => {
             if root_health.on_success() {
-                tracing::info!("watched root {} is readable again", root.display());
+                tracing::info!(root = %root.display(), "watched root is readable again");
             }
             loop {
                 match read.next_entry().await {
@@ -164,7 +164,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
     if entry == Entry::SkipSymlink {
         // debug!, not warn!: a persistent symlink would re-warn every 250ms.
-        debug!("skipping symlinked entry {}", path.display());
+        debug!(path = %path.display(), "skipping symlinked entry");
         return;
     }
     if entry == Entry::Recurse {
@@ -176,14 +176,14 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     Err(e) => {
                         // Split from `Ok(None)` for the LOG only; the listing stops
                         // either way. `break` not `continue` — a sticky error spins.
-                        debug!("listing of {} truncated: {e}", path.display());
+                        debug!(path = %path.display(), error = %e, "listing truncated");
                         break;
                     }
                 }
             },
             // `debug!`, not `scan_root`'s latched `warn!`: subdirs are unbounded and
             // re-walked every 250ms rescan, so a warn here floods.
-            Err(e) => debug!("skipping unreadable directory {}: {e}", path.display()),
+            Err(e) => debug!(path = %path.display(), error = %e, "skipping unreadable directory"),
         }
         return;
     }
@@ -295,17 +295,17 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let mut file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(e) => {
-            warn!("open {} failed: {e}", path.display());
+            warn!(path = %path.display(), error = %e, "open failed");
             return;
         }
     };
     if let Err(e) = file.seek(SeekFrom::Start(cursor_now)).await {
-        warn!("seek {} failed: {e}", path.display());
+        warn!(path = %path.display(), error = %e, "seek failed");
         return;
     }
     let mut new_chunk = Vec::with_capacity((file_len - cursor_now) as usize);
     if let Err(e) = file.read_to_end(&mut new_chunk).await {
-        warn!("read tail of {} failed: {e}", path.display());
+        warn!(path = %path.display(), error = %e, "read tail failed");
         return;
     }
 
@@ -365,14 +365,14 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         let s = match std::str::from_utf8(line) {
             Ok(s) => s,
             Err(_) => {
-                warn!("non-utf8 line in {}", path.display());
+                warn!(path = %path.display(), "non-utf8 line");
                 continue;
             }
         };
         let v: serde_json::Value = match serde_json::from_str(s) {
             Ok(v) => v,
             Err(e) => {
-                debug!("skip non-json line in {}: {e}", path.display());
+                debug!(path = %path.display(), error = %e, "skip non-json line");
                 continue;
             }
         };
@@ -389,7 +389,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     session_ended |= ends_this_agent;
                 }
             }
-            Err(e) => warn!("decode error in {}: {e}", path.display()),
+            Err(e) => warn!(path = %path.display(), error = %e, "decode error"),
         }
     }
     if session_ended {
@@ -550,7 +550,7 @@ async fn scan_pending_tasks(path: &Path, decoders: SourceDecoders, ctx: &WatchCt
         let events = match (decoders.decode_line)(&transcript_path_str, ctx.source, v) {
             Ok(events) => events,
             Err(e) => {
-                debug!("task-scan decode error in {}: {e}", path.display());
+                debug!(path = %path.display(), error = %e, "task-scan decode error");
                 continue;
             }
         };
