@@ -61,7 +61,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
-- CI-only gates preflight can't see: semver · api-surface · doc-check · coverage/smoke · gen-check · gen-readme-check · npm-check · check-windows · insta snapshots. Details: [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#ci-gates).
+- CI-only gates preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
 - On-demand advisory (never gates): `just mutants`, `just coverage`, `just bench`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
 - Release: `just bump X.Y.Z` stops before the tag; pushing the tag IS the publish (crates.io + npm + homebrew autobump) and stays a human step. [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).

@@ -6,7 +6,7 @@ docs, demo media all flow in from outside `site/`. Parent guide: the workspace
 [`../CLAUDE.md`](../CLAUDE.md). Human detail: [`README.md`](README.md).
 
 > **You are in the Astro consumer, not the Rust producer.** Rust house rules
-> (`cargo`/`clippy`, `just preflight`, `semver`, `gen-check`) do not apply to a
+> (`cargo`/`clippy`, `just preflight`, the crate CI gates) do not apply to a
 > site-only change. The gates here are `just site-check` (+ `just site-fmt`)
 > and `just site-e2e`.
 

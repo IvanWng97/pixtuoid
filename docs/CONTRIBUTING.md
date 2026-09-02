@@ -44,7 +44,10 @@ does not mean a green PR:
   deny) plus the doctests nextest skips.
 - **coverage/smoke · gen-check · gen-readme-check · npm-check** — committed
   media, README and npm manifest freshness.
-- **check-windows** — msvc cross-lint on every PR.
+- **windows-check / windows-test** — msvc cross-lint on every PR, and the
+  full suite on a real Windows runner.
+- **wasm-check** — the wasm32 build plus committed-`site/public/wasm/`
+  freshness (`just gen-wasm-check`).
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
