@@ -132,6 +132,43 @@ fn mount_row(plugin: &str) -> YamlOwned {
     YamlOwned::Mapping(row)
 }
 
+/// A row whose `insert:` is a truthy non-list: dsh's own patch apply
+/// spreads the value into an array push
+/// (`@deepseek-ai/cordis-plugin-include` 1.0.7, vendored in dsh 0.1.1-rc.2
+/// — `vendor/include/src/index.ts:94`, read 2026-09-01), so it throws at
+/// boot — and a mapping could HOLD an entry `our_entries`/
+/// `strip_our_entries` would silently not-see. Refuse loud instead. A
+/// JS-FALSY scalar (`null`/`false`/`0`/`""`) passes: upstream's truthiness
+/// gate skips it before the spread, an override row (`- id: x` +
+/// `enabled: false`) carries a null one legitimately, and no scalar can
+/// hide an entry.
+fn malformed_insert(rows: &[YamlOwned]) -> bool {
+    fn falsy(v: &YamlOwned) -> bool {
+        matches!(
+            v,
+            YamlOwned::Value(ScalarOwned::Null)
+                | YamlOwned::Value(ScalarOwned::Boolean(false))
+                | YamlOwned::Value(ScalarOwned::Integer(0))
+        ) || matches!(v, YamlOwned::Value(ScalarOwned::String(s)) if s.is_empty())
+    }
+    rows.iter().any(|r| {
+        matches!(r, YamlOwned::Mapping(m)
+            if matches!(m.get(&ystr("insert")),
+                Some(v) if !matches!(v, YamlOwned::Sequence(_)) && !falsy(v)))
+    })
+}
+
+fn refuse_malformed(rows: &[YamlOwned]) -> Result<()> {
+    if malformed_insert(rows) {
+        bail!(
+            "cordis.patch.yml has an `insert:` that is not a list — dsh's patch \
+             apply spreads it into an array push, so neither dsh nor pixtuoid \
+             can read the entries there; fix the row by hand first"
+        );
+    }
+    Ok(())
+}
+
 /// Is this patch-list entry OUR mount entry (`id: pixtuoid`)?
 ///
 /// Ownership is an ENTRY, never a row: one `insert:` op may batch several
@@ -194,11 +231,13 @@ fn strip_our_entries(rows: &[YamlOwned]) -> (Vec<YamlOwned>, usize) {
 /// `changed` is a semantic diff: exactly one of our entries, already a row
 /// of its own at the wanted path → no rewrite. Anything else — a stale
 /// path, a batched entry, duplicates — strips every one of our entries and
-/// mounts one fresh standalone row.
+/// mounts one fresh standalone row; a non-list `insert:` is refused first
+/// ([`malformed_insert`]).
 pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
     let plugin = plugin_path()?;
     let plugin = plugin.to_str().context("plugin path is not UTF-8")?;
     let rows = parse_rows(content)?;
+    refuse_malformed(&rows)?;
     let wanted = mount_row(plugin);
     if our_entries(&rows).len() == 1 && rows.contains(&wanted) {
         return Ok(MergeOutcome {
@@ -219,6 +258,7 @@ pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutco
 /// saphyr — the hermes target's documented trade).
 pub(crate) fn merge_uninstall(content: &str) -> Result<MergeOutcome> {
     let rows = parse_rows(content)?;
+    refuse_malformed(&rows)?;
     let (kept, removed) = strip_our_entries(&rows);
     if removed == 0 {
         return Ok(MergeOutcome {
@@ -247,6 +287,18 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
         shim: ShimRef::Unknown,
         ..Default::default()
     };
+    // The one early return in an accumulate-into-issues fn: ours.len() is
+    // not trustworthy here — a mapping-shaped row can HOLD our entry, so
+    // falling through would report "no mount entry" about an entry that is
+    // in the file.
+    if malformed_insert(&rows) {
+        parse.issues.push(
+            "an `insert:` row is not a list — dsh cannot apply it and pixtuoid \
+             cannot read it; fix cordis.patch.yml by hand"
+                .to_string(),
+        );
+        return parse;
+    }
     match ours.len() {
         0 => parse
             .issues
@@ -498,6 +550,45 @@ mod tests {
     fn merge_refuses_a_non_list_config_rather_than_rewriting_it() {
         assert!(merge_install("just: a mapping\n", "/unused").is_err());
         assert!(merge_uninstall("just: a mapping\n").is_err());
+    }
+
+    #[test]
+    fn a_mapping_shaped_insert_is_refused_loud_not_silently_unseen() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let home = tempfile::tempdir().unwrap();
+        std::env::set_var("DSH_HOME", home.path());
+        // Message-anchored (the openclaw refusal-test standard): a different
+        // error passing `is_err()` for the wrong reason must not count.
+        let mapping = "- insert:\n    id: pixtuoid\n    name: /old/pixtuoid-dsh.mjs\n";
+        let err = merge_install(mapping, "/unused").unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        let err = merge_uninstall(mapping).unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        let v = verify_schema(mapping);
+        assert!(
+            v.issues.iter().any(|i| i.contains("is not a list")),
+            "{v:?}"
+        );
+        // A JS-falsy insert is upstream's own no-op (a legitimate override
+        // row carries a null one) and no scalar can hide an entry — falsy
+        // shapes pass through preserved, never refused.
+        for over in [
+            "- id: timer\n  insert:\n  enabled: false\n",
+            "- insert: false\n",
+            "- insert: 0\n",
+            "- insert: ''\n",
+        ] {
+            let ok = merge_install(over, "/unused").unwrap();
+            assert!(ok.changed, "our row still mounts beside {over:?}");
+            assert!(verify_schema(&ok.content).issues.is_empty(), "{over:?}");
+        }
+        // A TRUTHY scalar still refuses: upstream spreads it (a number
+        // throws at boot; a string spreads into per-char garbage entries).
+        let err = merge_install("- insert: 42\n", "/unused").unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        std::env::remove_var("DSH_HOME");
     }
 
     #[test]
