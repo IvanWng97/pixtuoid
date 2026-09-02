@@ -298,7 +298,7 @@ async fn headless_loop_with_signal(
                     // SIGINT disposition was never replaced, so Ctrl-C still
                     // terminates the process.
                     tracing::error!(
-                        %e,
+                        error = %e,
                         "Ctrl-C handler registration failed — headless loop \
                          continues; SIGINT falls back to the default disposition"
                     );

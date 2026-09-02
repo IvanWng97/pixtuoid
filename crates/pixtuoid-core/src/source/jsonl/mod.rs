@@ -408,8 +408,9 @@ impl JsonlWatcher {
             Err(e) => {
                 if notify_health.on_failure() {
                     warn!(
-                        "file-watch backend error ({e}); events may have been lost — \
-                         the poll backstop covers until it recovers"
+                        error = %e,
+                        "file-watch backend error; events may have been lost — the poll \
+                         backstop covers until it recovers"
                     );
                 }
             }
@@ -517,7 +518,7 @@ impl JsonlWatcher {
                     // the negative vouch for each id, so the slower rung can't
                     // re-confirm the exit we're about to emit.
                     for id in scan_state.ladder.pid_died(pid) {
-                        debug!(pid, %id, "instant exit: pid died; emitting SessionEnd");
+                        debug!(pid, session_id = ?id, "instant exit: pid died; emitting SessionEnd");
                         emit_session_exit(&id, decoders, &ctx).await;
                     }
                 }

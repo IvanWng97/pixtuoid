@@ -176,7 +176,11 @@ impl PipelineBoot {
                 while health_rx.changed().await.is_ok() {
                     let deaths = health_rx.borrow_and_update().clone();
                     for death in crate::runtime::unseen_deaths(&deaths, &mut deaths_seen) {
-                        tracing::warn!(?death, "pixtuoid floating: source exited");
+                        tracing::warn!(
+                            source = %death.source,
+                            error = %death.error,
+                            "pixtuoid floating: source exited"
+                        );
                     }
                 }
             });

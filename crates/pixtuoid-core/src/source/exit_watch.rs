@@ -78,7 +78,8 @@ impl ExitWatch {
             });
         if let Err(e) = spawned {
             tracing::debug!(
-                "exit-watch thread spawn failed: {e}; instant exit off (backstops cover)"
+                error = %e,
+                "exit-watch thread spawn failed; instant exit off (backstops cover)"
             );
             return None;
         }
@@ -236,7 +237,9 @@ mod imp {
             Ok((got, _rest)) => got,
             Err(e) => {
                 tracing::debug!(
-                    "EVFILT_PROC registration for pid {pid} failed: {e}; dropped (backstops cover)"
+                    pid,
+                    error = %e,
+                    "EVFILT_PROC registration failed; dropped (backstops cover)"
                 );
                 return Registered::Failed;
             }
@@ -255,7 +258,7 @@ mod imp {
             tracing::debug!(pid, "EVFILT_PROC EPERM; dropped (backstops cover)");
             Registered::Failed
         } else {
-            tracing::debug!(pid, ?errno, "EVFILT_PROC registration failed; dropped");
+            tracing::debug!(pid, error = %errno, "EVFILT_PROC registration failed; dropped");
             Registered::Failed
         }
     }
@@ -274,7 +277,8 @@ mod imp {
                 Err(e) if e == Errno::INTR => continue,
                 Err(e) => {
                     tracing::debug!(
-                        "exit-watch kevent wait failed: {e}; thread exiting (backstops cover)"
+                        error = %e,
+                        "exit-watch kevent wait failed; thread exiting (backstops cover)"
                     );
                     return;
                 }
@@ -428,7 +432,8 @@ mod imp {
                 Err(e) if e == Errno::INTR => continue,
                 Err(e) => {
                     tracing::debug!(
-                        "exit-watch poll failed: {e}; thread exiting (backstops cover)"
+                        error = %e,
+                        "exit-watch poll failed; thread exiting (backstops cover)"
                     );
                     return;
                 }

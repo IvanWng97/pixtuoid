@@ -213,12 +213,12 @@ fn reflect_onboarding_outcomes(
                 connected.set(id, false);
                 // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
                 // row, which `freeze_for_skip` makes the common case), and the fold below.
-                let (op, verb) = if *want {
-                    (connection::FailedOp::Connect, "connect")
+                let op = if *want {
+                    connection::FailedOp::Connect
                 } else {
-                    (connection::FailedOp::Disconnect, "disconnect")
+                    connection::FailedOp::Disconnect
                 };
-                tracing::warn!(id = id.as_str(), verb, error = %e, "onboarding: hook change failed");
+                tracing::warn!(source = %id, ?op, error = %e, "onboarding: hook change failed");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
@@ -892,7 +892,7 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
             }
             Err(e) => {
                 tracing::error!(
-                    %e,
+                    error = %e,
                     "SIGTERM handler registration failed — an external \
                      SIGTERM will not restore the terminal"
                 );
@@ -1032,7 +1032,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     Ok(()) => break,
                     Err(e) => {
                         tracing::error!(
-                            %e,
+                            error = %e,
                             "SIGINT handler registration failed — an external \
                              Ctrl-C will not restore the terminal"
                         );

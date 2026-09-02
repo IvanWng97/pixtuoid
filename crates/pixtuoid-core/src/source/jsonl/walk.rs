@@ -106,9 +106,10 @@ pub(super) async fn scan_root(
                         // hides every remaining PROJECT, and there is only one root.
                         if root_health.on_failure() {
                             warn!(
-                                "listing of watched root {} truncated ({e}); some \
-                                 sessions will not be discovered this pass",
-                                root.display()
+                                root = %root.display(),
+                                error = %e,
+                                "watched root listing truncated; some sessions will not be \
+                                 discovered this pass"
                             );
                         }
                         break;
@@ -119,9 +120,10 @@ pub(super) async fn scan_root(
         Err(e) => {
             if root_health.on_failure() {
                 warn!(
-                    "cannot read watched root {} ({e}); new sessions will not be \
-                     discovered until it is readable again",
-                    root.display()
+                    root = %root.display(),
+                    error = %e,
+                    "cannot read watched root; new sessions will not be discovered until it \
+                     is readable again"
                 );
             }
         }
@@ -163,8 +165,8 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // file production would not read (#931).
     let entry = classify(&meta, path, &|p| (decoders.path_filter)(p));
     if entry == Entry::SkipSymlink {
-        // debug!, not warn!: a persistent symlink would re-warn every 250ms.
-        debug!(path = %path.display(), "skipping symlinked entry");
+        // debug!, not warn!: a persistent symlink re-logs on every scan pass.
+        debug!(path = ?path, "symlinked entry skipped");
         return;
     }
     if entry == Entry::Recurse {
@@ -176,14 +178,14 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     Err(e) => {
                         // Split from `Ok(None)` for the LOG only; the listing stops
                         // either way. `break` not `continue` — a sticky error spins.
-                        debug!(path = %path.display(), error = %e, "listing truncated");
+                        debug!(path = ?path, error = %e, "listing truncated");
                         break;
                     }
                 }
             },
             // `debug!`, not `scan_root`'s latched `warn!`: subdirs are unbounded and
-            // re-walked every 250ms rescan, so a warn here floods.
-            Err(e) => debug!(path = %path.display(), error = %e, "skipping unreadable directory"),
+            // re-walked every scan pass, so a warn here floods.
+            Err(e) => debug!(path = ?path, error = %e, "unreadable directory skipped"),
         }
         return;
     }
@@ -217,10 +219,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     // into a ghost replay (`park_if_truncated_below_cursor`).
     if cursor_now > file_len {
         warn!(
-            "{} truncated below cursor ({} < {}), resetting cursor",
-            path.display(),
+            path = ?path,
             file_len,
-            cursor_now
+            cursor = cursor_now,
+            "file truncated below cursor, resetting cursor"
         );
         cursors.lock().await.insert(path.to_path_buf(), 0);
         return;
@@ -230,9 +232,10 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     }
     if file_len - cursor_now > MAX_PENDING_BYTES {
         warn!(
-            "{} has > {} pending bytes; skipping backlog to end",
-            path.display(),
-            MAX_PENDING_BYTES
+            path = ?path,
+            pending = file_len - cursor_now,
+            max = MAX_PENDING_BYTES,
+            "pending bytes over the cap; skipping backlog to end"
         );
         // A skipped span may bury the session-end marker, leaving the slot to the
         // slow stale-sweep. Unconditional (a KNOWN file's span can end mid-skip) and
@@ -295,17 +298,17 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
     let mut file = match tokio::fs::File::open(path).await {
         Ok(f) => f,
         Err(e) => {
-            warn!(path = %path.display(), error = %e, "open failed");
+            warn!(path = ?path, error = %e, "open failed");
             return;
         }
     };
     if let Err(e) = file.seek(SeekFrom::Start(cursor_now)).await {
-        warn!(path = %path.display(), error = %e, "seek failed");
+        warn!(path = ?path, error = %e, "seek failed");
         return;
     }
     let mut new_chunk = Vec::with_capacity((file_len - cursor_now) as usize);
     if let Err(e) = file.read_to_end(&mut new_chunk).await {
-        warn!(path = %path.display(), error = %e, "read tail failed");
+        warn!(path = ?path, error = %e, "read tail failed");
         return;
     }
 
@@ -365,14 +368,14 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
         let s = match std::str::from_utf8(line) {
             Ok(s) => s,
             Err(_) => {
-                warn!(path = %path.display(), "non-utf8 line");
+                warn!(path = ?path, "non-utf8 line skipped");
                 continue;
             }
         };
         let v: serde_json::Value = match serde_json::from_str(s) {
             Ok(v) => v,
             Err(e) => {
-                debug!(path = %path.display(), error = %e, "skip non-json line");
+                debug!(path = ?path, error = %e, "non-json line skipped");
                 continue;
             }
         };
@@ -389,7 +392,7 @@ pub(super) async fn walk_jsonl(path: &Path, decoders: SourceDecoders, ctx: &Watc
                     session_ended |= ends_this_agent;
                 }
             }
-            Err(e) => warn!(path = %path.display(), error = %e, "decode error"),
+            Err(e) => warn!(path = ?path, error = %e, "decode error"),
         }
     }
     if session_ended {
@@ -550,7 +553,7 @@ async fn scan_pending_tasks(path: &Path, decoders: SourceDecoders, ctx: &WatchCt
         let events = match (decoders.decode_line)(&transcript_path_str, ctx.source, v) {
             Ok(events) => events,
             Err(e) => {
-                debug!(path = %path.display(), error = %e, "task-scan decode error");
+                debug!(path = ?path, error = %e, "task-scan decode error");
                 continue;
             }
         };
@@ -577,8 +580,9 @@ async fn scan_pending_tasks(path: &Path, decoders: SourceDecoders, ctx: &WatchCt
     }
     for (tuid, ev) in pending {
         debug!(
-            "re-emitting in-flight Task dispatch {tuid} from the oversized tail of {}",
-            path.display()
+            ?tuid,
+            path = ?path,
+            "re-emitting in-flight Task dispatch from the oversized tail"
         );
         if ctx.tx.send((Transport::Jsonl, ev)).await.is_err() {
             return;

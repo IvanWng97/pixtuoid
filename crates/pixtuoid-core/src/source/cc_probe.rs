@@ -33,8 +33,8 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
             std::collections::HashMap::new();
         let Ok(entries) = std::fs::read_dir(sessions_dir) else {
             tracing::debug!(
-                "CC session registry {} unreadable or missing; probe pass failed",
-                sessions_dir.display()
+                path = ?sessions_dir,
+                "CC session registry unreadable or missing; probe pass failed"
             );
             return None;
         };

@@ -70,8 +70,9 @@ impl SourceManager {
                 let name = src.name().to_string();
                 tokio::spawn(async move {
                     if let Err(e) = src.run(tx).await {
-                        tracing::error!(source = %name, "source died: {e:#}");
-                        deaths.send_modify(|v| v.push(SourceDeath::new(name, format!("{e:#}"))));
+                        let chain = format!("{e:#}");
+                        tracing::error!(source = %name, error = %chain, "source died");
+                        deaths.send_modify(|v| v.push(SourceDeath::new(name, chain)));
                     }
                 })
             })

@@ -151,10 +151,10 @@ impl Drop for UndeliveredEvents {
         // One payload's ids are adjacent by construction, so no sort is needed.
         agents.dedup();
         warn!(
-            "hook connection cancelled mid-payload: {} decoded event(s) for agent(s) [{}] \
-             never reached the reducer (per-connection budget: {CONN_TIMEOUT:?})",
-            undelivered.len(),
-            agents.join(", ")
+            events = undelivered.len(),
+            agents = %agents.join(", "),
+            budget = ?CONN_TIMEOUT,
+            "hook connection cancelled mid-payload; decoded events never reached the reducer"
         );
     }
 }
@@ -732,7 +732,7 @@ mod tests {
 
         let out = logs.contents();
         assert!(
-            out.contains("1 decoded event(s)"),
+            out.contains("events=1"),
             "loss breadcrumb missing from logs: {out:?}"
         );
         assert!(
