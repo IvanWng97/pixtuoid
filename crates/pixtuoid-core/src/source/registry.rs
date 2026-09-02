@@ -105,8 +105,8 @@ pub struct SourceCaps {
     /// precondition for the short idle reaper: its only false positive (a live
     /// session idle past the window) must self-heal.
     pub resurrects_on_prompt: bool,
-    /// Are subagent delegations invisible on this source's event stream
-    /// (in-process subagents that fire no hooks)? When true, a Delegating slot's
+    /// Are subagent delegations invisible on this source's event stream (a
+    /// window in which the PARENT's own stream goes quiet)? When true, a Delegating slot's
     /// `last_event_at` freezes for the whole delegation, so the reducer gives it
     /// the Waiting-class stale window instead of sweeping mid-delegation.
     pub delegations_are_hook_silent: bool,
@@ -533,7 +533,7 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // The recorded boot-lifecycle capture's banner is 0.1.1-rc.2;
+    // Every recorded dsh capture's banner is 0.1.1-rc.2;
     // `doctor::parse_version` keeps only the dotted digit run, so the
     // prerelease suffix never reaches this pin.
     verified_version: "0.1.1",
@@ -559,12 +559,11 @@ const DSH: SourceDescriptor = SourceDescriptor {
             // plugin emits a fresh `session_start` on the same id — the
             // SessionStart arm's ordinary re-registration, not this flag.
             resurrects_on_prompt: false,
-            // A LOCAL subagent child fires its own lifecycle, but the
-            // remote providers (`dsh-subagent-claude-code`/`-codex`/`-acp`)
-            // publish no local child session (upstream subagent.md), so a
-            // delegation CAN be fully hook-silent; `true` can only
-            // over-retain a dead slot. Moot until the decoder mints `Task`
-            // (#928, first authed capture).
+            // A delegation freezes the PARENT's stream either way: the
+            // local child's events all carry its OWN session id (the
+            // delegation capture), and a remote provider
+            // (`dsh-subagent-claude-code`/`-codex`/`-acp`) publishes no
+            // local child at all. `true` can only over-retain a dead slot.
             delegations_are_hook_silent: true,
         },
         // The plugin runs in-process (a cordis plugin in the launcher's one

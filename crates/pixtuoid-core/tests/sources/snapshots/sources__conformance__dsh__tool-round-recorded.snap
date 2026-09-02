@@ -1,0 +1,108 @@
+---
+source: crates/pixtuoid-core/tests/sources/conformance.rs
+expression: events
+---
+- SessionStart:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ModelInfo:
+    agent_id: 10473440841971264979
+    model: deepseek-v4-flash
+    effort: high
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- Usage:
+    agent_id: 10473440841971264979
+    fresh_tokens: 11433
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 10473440841971264979
+    tool_use_id: call_00_kNoYXXoq81sJIH3oFu0s3507
+    detail:
+      Generic:
+        display: read
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 10473440841971264979
+    tool_use_id: call_00_kNoYXXoq81sJIH3oFu0s3507
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 10473440841971264979
+    tool_use_id: call_01_UDVdKG90g0UGmedCxMcT0741
+    detail:
+      Generic:
+        display: bash
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 10473440841971264979
+    tool_use_id: call_01_UDVdKG90g0UGmedCxMcT0741
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- Usage:
+    agent_id: 10473440841971264979
+    fresh_tokens: 282
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 10473440841971264979
+    tool_use_id: call_00_oRtxOdvlzcW7T0sNLSrz2977
+    detail:
+      Generic:
+        display: read
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 10473440841971264979
+    tool_use_id: call_00_oRtxOdvlzcW7T0sNLSrz2977
+- Identity:
+    agent_id: 10473440841971264979
+    source: dsh
+    session_id: session-52d46681-7ea9-4e1b-a036-2f2b87533df5
+    cwd: /private/tmp/pixtuoid-capture/proj
+- Usage:
+    agent_id: 10473440841971264979
+    fresh_tokens: 167
+- SessionEnd:
+    agent_id: 10473440841971264979
+    as_child: false

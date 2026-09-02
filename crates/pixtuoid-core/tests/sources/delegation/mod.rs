@@ -1,5 +1,5 @@
-//! The NAME-KEYED delegation family: sources whose subagent dispatch is a tool
-//! literally called `task`. They claim the Task detail by tool NAME and
+//! The NAME-KEYED delegation family: sources whose subagent dispatch is a
+//! tool literally called `task` — `subagent` for dsh. They claim the Task detail by tool NAME and
 //! deliberately NOT by the presence of a `subagent_type` key, so a
 //! model-authored argument on an ordinary tool cannot spoof a delegation, seed
 //! `active_tasks`, and cascade a real child out on drain.
@@ -44,6 +44,12 @@ fn omp_events() -> Vec<AgentEvent> {
     d.events
 }
 
+fn dsh_events() -> Vec<AgentEvent> {
+    let d = Drive::hooks().lines(lines("dsh", "hook-payloads.jsonl"));
+    d.assert_clean("dsh delegation hooks");
+    d.events
+}
+
 fn tasks(evs: &[AgentEvent]) -> usize {
     evs.iter()
         .filter(|e| {
@@ -64,6 +70,7 @@ fn every_name_keyed_source_mints_exactly_one_task_from_its_capture() {
         ("opencode", opencode_events()),
         ("copilot", copilot_events()),
         ("omp", omp_events()),
+        ("dsh", dsh_events()),
     ] {
         assert_eq!(
             tasks(&evs),
@@ -83,6 +90,7 @@ fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
         ("opencode", opencode_events(), true),
         ("copilot", copilot_events(), true),
         ("omp", omp_events(), false),
+        ("dsh", dsh_events(), true),
     ] {
         let ids: std::collections::BTreeSet<_> = evs.iter().map(AgentEvent::agent_id).collect();
         assert_eq!(
@@ -94,24 +102,25 @@ fn the_child_is_in_band_for_some_of_them_and_a_separate_file_for_others() {
     }
 }
 
-/// The call id sitting beside a `task` tool name in the SAME raw object.
-fn task_call_ids(raw: &[String]) -> std::collections::BTreeSet<String> {
-    fn walk(v: &serde_json::Value, out: &mut std::collections::BTreeSet<String>) {
+/// The call id sitting beside the tool named by `dispatch` in the SAME raw
+/// object.
+fn task_call_ids(raw: &[String], dispatch: &str) -> std::collections::BTreeSet<String> {
+    fn walk(v: &serde_json::Value, dispatch: &str, out: &mut std::collections::BTreeSet<String>) {
         match v {
             serde_json::Value::Object(o) => {
                 let names = ["tool", "toolName", "name"];
-                let ids = ["toolCallId", "callID", "call_id", "id"];
+                let ids = ["toolCallId", "callID", "callId", "call_id", "id"];
                 if names
                     .iter()
-                    .any(|k| o.get(*k).and_then(|n| n.as_str()) == Some("task"))
+                    .any(|k| o.get(*k).and_then(|n| n.as_str()) == Some(dispatch))
                 {
                     if let Some(id) = ids.iter().find_map(|k| o.get(*k).and_then(|i| i.as_str())) {
                         out.insert(id.to_string());
                     }
                 }
-                o.values().for_each(|c| walk(c, out));
+                o.values().for_each(|c| walk(c, dispatch, out));
             }
-            serde_json::Value::Array(a) => a.iter().for_each(|c| walk(c, out)),
+            serde_json::Value::Array(a) => a.iter().for_each(|c| walk(c, dispatch, out)),
             _ => {}
         }
     }
@@ -119,6 +128,7 @@ fn task_call_ids(raw: &[String]) -> std::collections::BTreeSet<String> {
     for l in raw {
         walk(
             &serde_json::from_str(l).expect("valid capture json"),
+            dispatch,
             &mut out,
         );
     }
@@ -129,23 +139,31 @@ fn task_call_ids(raw: &[String]) -> std::collections::BTreeSet<String> {
 fn the_task_detail_lands_on_the_call_actually_named_task() {
     // It has to BIND: counting one Task and one ordinary tool passes just as
     // well when the decoder tags the bash call and leaves the dispatch bare.
-    for (cli, evs, raw) in [
+    for (cli, evs, raw, name) in [
         (
             "opencode",
             opencode_events(),
             lines("opencode", "hook-payloads.jsonl"),
+            "task",
         ),
         (
             "copilot",
             copilot_events(),
             lines("copilot", "events.jsonl"),
+            "task",
         ),
-        ("omp", omp_events(), lines("omp", "parent.jsonl")),
+        ("omp", omp_events(), lines("omp", "parent.jsonl"), "task"),
+        (
+            "dsh",
+            dsh_events(),
+            lines("dsh", "hook-payloads.jsonl"),
+            "subagent",
+        ),
     ] {
-        let dispatch = task_call_ids(&raw);
+        let dispatch = task_call_ids(&raw, name);
         assert!(
             !dispatch.is_empty(),
-            "{cli}: the capture must name a `task` call, else this rule is untested"
+            "{cli}: the capture must name a `{name}` call, else this rule is untested"
         );
         let starts: Vec<(&Option<String>, bool)> = evs
             .iter()
@@ -166,7 +184,7 @@ fn the_task_detail_lands_on_the_call_actually_named_task() {
             let named_task = id.as_deref().is_some_and(|i| dispatch.contains(i));
             assert_eq!(
                 *is_task, named_task,
-                "{cli}: the Task detail must sit on the `task` call ({dispatch:?}) and \
+                "{cli}: the Task detail must sit on the dispatch call ({dispatch:?}) and \
                  on no other — start {id:?} claims Task={is_task}"
             );
         }

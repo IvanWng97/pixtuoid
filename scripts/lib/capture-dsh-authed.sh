@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
-# Drive a no-auth dsh headless run for `just capture-fixture` (dsh source).
+# Drive an AUTHED dsh headless turn for `just capture-fixture` (dsh source).
 #
-# The recorder needs REAL plugin wire without a DeepSeek credential: a headless
-# run creates the session, emits model/session_start through the plugin, then
-# dies on MISSING_CREDENTIAL before any billed call — session_end still fires
-# through the disposer. DSH_HOME is a fixed generic temp dir so every captured
-# path ships unredacted; the plugin is rendered from the repo template with
-# the release shim baked (the shim honors the recorder's PIXTUOID_SOCKET).
+# Unlike capture-dsh-headless.sh (the free, no-credential boot capture), this
+# run completes a real model turn — tool rounds, approvals, usage — so it is
+# BILLED. DEEPSEEK_API_KEY must be exported by the caller; it is never echoed.
+# DSH_HOME stays the fixed generic dir so every captured path ships unredacted.
 set -uo pipefail
+
+if [[ -z ${DEEPSEEK_API_KEY:-} ]]; then
+    echo "capture-dsh-authed: export DEEPSEEK_API_KEY first (a real, billed turn)" >&2
+    exit 1
+fi
 
 repo="$(cd "$(dirname "$0")/../.." && pwd)"
 export DSH_HOME=/tmp/pixtuoid-capture/dsh-home
 rm -rf "$DSH_HOME"
 mkdir -p "$DSH_HOME/pixtuoid"
 
-# A missing shim would otherwise yield a silently EMPTY (still billed)
-# capture: the plugin spawns it fire-and-forget with errors swallowed.
+# A missing shim would otherwise yield a silently EMPTY (still billed) capture:
+# the plugin spawns it fire-and-forget with errors swallowed.
 shim="$repo/target/release/pixtuoid-hook"
 if [[ ! -x $shim ]]; then
-    echo "capture-dsh-headless: missing $shim — run 'just build --release' first" >&2
+    echo "capture-dsh-authed: missing $shim — run 'just build --release' first" >&2
     exit 1
 fi
 
@@ -48,11 +51,10 @@ cat >"$DSH_HOME/cordis.patch.yml" <<EOF
       name: $plugin
 EOF
 
-# The credential failure is this run's EXPECTED exit; the lifecycle events all
-# precede it. Bounded in case a configured machine starts a real model call.
-dsh --profile headless "say hi" &
+# Bounded: a real turn with tool rounds outlives the free boot run's 45s.
+dsh --profile headless "$1" &
 pid=$!
-for _ in $(seq 1 45); do
+for _ in $(seq 1 180); do
     kill -0 "$pid" 2>/dev/null || break
     sleep 1
 done
