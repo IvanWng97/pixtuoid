@@ -9,7 +9,7 @@ this consumer sits in: [`../../docs/PARALLEL-DELIVERY.md`](../../docs/PARALLEL-D
 
 > **You are in the TS consumer, not the Rust producer.** The workspace
 > `CLAUDE.md` still loads above this file — but its Rust house rules
-> (TDD-in-Rust, `cargo`/`clippy`, `just preflight`, `semver`, `gen-check`)
+> (TDD-in-Rust, `cargo`/`clippy`, `just preflight`, the crate CI gates)
 > **do not apply here**. This is a Node project; the gates are `tsc` + `eslint`.
 > Don't run `cargo` anything for a change scoped to this directory.
 

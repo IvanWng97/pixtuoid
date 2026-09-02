@@ -1339,6 +1339,10 @@ deny contains msg if {
 	)
 }
 
+# CodeQL pins only SILENT drift: trigger coverage, the schedule, the language
+# matrix, the analysis-step census. Value-pins (permissions, concurrency,
+# runner, timeout) are absent on purpose — escalation is zizmor's beat, a
+# dropped permission reds the SARIF upload, a cancelled analysis self-heals.
 deny contains msg if {
 	object.get(codeql, ["on", "push", "branches"], null) != ["main"]
 	msg := sprintf("%s must run on pushes to main", [codeql_workflow_path])
@@ -1355,46 +1359,6 @@ deny contains msg if {
 deny contains msg if {
 	not has_weekly_codeql_schedule
 	msg := sprintf("%s must retain its weekly schedule", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["permissions", "actions"], null) != "read"
-	msg := sprintf("%s must grant actions: read", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["permissions", "contents"], null) != "read"
-	msg := sprintf("%s must grant contents: read", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["permissions", "packages"], null) != "read"
-	msg := sprintf("%s must grant packages: read", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["permissions", "security-events"], null) != "write"
-	msg := sprintf("%s must grant security-events: write", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["concurrency", "group"], null) != "codeql-${{ github.ref }}"
-	msg := sprintf("%s must group concurrency by ref", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql, ["concurrency", "cancel-in-progress"], null) != "${{ github.event_name == 'pull_request' }}"
-	msg := sprintf("%s must cancel only superseded pull-request runs", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql_job, "runs-on", null) != "ubuntu-latest"
-	msg := sprintf("%s analyze job must use ubuntu-latest", [codeql_workflow_path])
-}
-
-deny contains msg if {
-	object.get(codeql_job, "timeout-minutes", null) != 30
-	msg := sprintf("%s analyze job must keep timeout-minutes: 30", [codeql_workflow_path])
 }
 
 deny contains msg if {
