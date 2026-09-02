@@ -66,8 +66,7 @@ does not mean a green PR:
   a pass (#809). `claude.yml` refuses fork PR heads.
 - **CodeQL** stays the advanced workflow (`codeql.yml`): explicit languages,
   Rust's `none` build mode fed the MSRV toolchain, a SARIF health gate, and an
-  inline query filter dropping `rust/cleartext-logging` (its only reachable
-  sinks here are test asserts — the WHY sits on the init step).
+  inline query filter dropping `rust/cleartext-logging` (WHY on the init step).
 
 ## Releasing
 
