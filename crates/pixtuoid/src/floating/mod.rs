@@ -178,7 +178,7 @@ impl PipelineBoot {
                     for death in crate::runtime::unseen_deaths(&deaths, &mut deaths_seen) {
                         tracing::warn!(
                             source = %death.source,
-                            error = %death.error,
+                            error = ?death.error,
                             "pixtuoid floating: source exited"
                         );
                     }
