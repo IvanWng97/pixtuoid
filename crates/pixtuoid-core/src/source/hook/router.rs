@@ -99,7 +99,7 @@ impl Source for HookRouter {
             Err(e) if e.downcast_ref::<SocketBusy>().is_some() => {
                 let chain = format!("{e:#}");
                 tracing::warn!(
-                    error = %chain,
+                    error = ?chain,
                     "hook plane disabled — hook-borne signals (permission Waiting, instant \
                      lifecycle, daemon presence) belong to the owning instance; transcript \
                      sources keep running"

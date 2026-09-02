@@ -638,3 +638,46 @@ fn correlation_maps_stay_bounded_across_a_long_stream() {
         );
     }
 }
+
+/// A session id and cwd arrive from another agent's process, so the reducer's
+/// warn lines carry them as `?` fields — a `%` field would write their bytes raw.
+#[test]
+fn desks_full_warn_escapes_the_wire_session_id_and_cwd() {
+    use crate::source::{AgentEvent, Transport};
+    use crate::test_capture::capture_logs;
+    use crate::{AgentId, Reducer, SceneState};
+    use std::time::SystemTime;
+    let mut scene = SceneState::uniform(1);
+    let mut r = Reducer::new();
+    let start = |sid: &str, cwd: &str| AgentEvent::SessionStart {
+        agent_id: AgentId::from_parts("claude-code", sid),
+        source: "claude-code".into(),
+        session_id: sid.into(),
+        cwd: cwd.into(),
+        parent_id: None,
+    };
+    for i in 0..scene.total_capacity() {
+        r.apply(
+            &mut scene,
+            start(&format!("s{i}"), "/p"),
+            SystemTime::UNIX_EPOCH,
+            Transport::Hook,
+        );
+    }
+    let hostile = "\u{1b}]0;pwned\u{7}\u{202e}";
+    let out = capture_logs(|| {
+        r.apply(
+            &mut scene,
+            start(hostile, hostile),
+            SystemTime::UNIX_EPOCH,
+            Transport::Hook,
+        );
+    });
+    assert!(out.contains("dropped SessionStart"), "got {out:?}");
+    for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+        assert!(
+            !out.contains(raw),
+            "{raw:?} must not reach the log raw: {out:?}"
+        );
+    }
+}

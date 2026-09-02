@@ -95,7 +95,7 @@ pub(super) async fn scan_root(
     match tokio::fs::read_dir(root).await {
         Ok(mut read) => {
             if root_health.on_success() {
-                tracing::info!(root = %root.display(), "watched root is readable again");
+                tracing::info!(root = ?root, "watched root is readable again");
             }
             loop {
                 match read.next_entry().await {
@@ -106,7 +106,7 @@ pub(super) async fn scan_root(
                         // hides every remaining PROJECT, and there is only one root.
                         if root_health.on_failure() {
                             warn!(
-                                root = %root.display(),
+                                root = ?root,
                                 error = %e,
                                 "watched root listing truncated; some sessions will not be \
                                  discovered this pass"
@@ -120,7 +120,7 @@ pub(super) async fn scan_root(
         Err(e) => {
             if root_health.on_failure() {
                 warn!(
-                    root = %root.display(),
+                    root = ?root,
                     error = %e,
                     "cannot read watched root; new sessions will not be discovered until it \
                      is readable again"

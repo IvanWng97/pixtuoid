@@ -778,7 +778,7 @@ impl Reducer {
         if self.corr.hook_session_end_tombstoned(agent_id, now) {
             tracing::warn!(
                 ?agent_id,
-                %session_id,
+                ?session_id,
                 proposed_parent = ?parent_id,
                 "skipped child SessionStart — its hook SessionEnd already passed \
                  (a late or reordered start, #242)"
@@ -790,7 +790,7 @@ impl Reducer {
         if self.corr.child_recently_ended(agent_id, now) {
             tracing::warn!(
                 ?agent_id,
-                %session_id,
+                ?session_id,
                 proposed_parent = ?parent_id,
                 "skipped child SessionStart — the child already ended \
                  (child ledger, #244)"
@@ -836,8 +836,8 @@ impl Reducer {
                 tracing::warn!(
                     ?agent_id,
                     proposed_parent = ?p,
-                    session_id = %ctx.session_id,
-                    cwd = %ctx.cwd.display(),
+                    session_id = ?ctx.session_id,
+                    cwd = ?ctx.cwd,
                     "refused parent_id link — it would close a parent cycle; degrading to parentless"
                 );
             }
@@ -962,8 +962,8 @@ impl Reducer {
         let Some(desk_index) = scene.next_free_desk() else {
             tracing::warn!(
                 ?agent_id,
-                cwd = %cwd.display(),
-                session_id = %session_id,
+                cwd = ?cwd,
+                session_id = ?session_id,
                 total_capacity = scene.total_capacity(),
                 "dropped SessionStart — all desks occupied; bump --max-desks"
             );

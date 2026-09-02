@@ -106,7 +106,7 @@ pub fn live_cc_session_ids(sessions_dir: &Path) -> Option<ProbeSnapshot> {
                     static DUPLICATE_ID_WARNED: std::sync::Once = std::sync::Once::new();
                     DUPLICATE_ID_WARNED.call_once(|| {
                         tracing::warn!(
-                            session_id = %reg.session_id,
+                            session_id = ?reg.session_id,
                             pids = ?(slot.get().pid, reg.pid),
                             "two live CC registry entries claim the same sessionId — \
                              keeping a deterministic winner"

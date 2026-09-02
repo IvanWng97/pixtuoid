@@ -84,7 +84,7 @@ impl ProbeSnapshot {
         // macOS), so an under-root compare against a raw root misses everything.
         let Ok(canonical) = root.canonicalize() else {
             debug!(
-                root = %root.display(),
+                root = ?root,
                 "fd probe: root not canonicalizable; nothing alive there"
             );
             return Some(Self::default());
