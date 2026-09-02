@@ -619,13 +619,24 @@ rust_health_summary_is_quantified(run) if {
 	contains(run, "Clean files")
 }
 
+# Both jobs are trigger-guarded on purpose: an unguarded `stale-generations`
+# runs on pull_request_target, handing a fork PR author a main-ref cache
+# deletion. The step counts and the empty `uses` keep either job from growing
+# an action that could execute PR content under that same grant.
 cache_cleanup_is_inert if {
 	workflow := documents[cache_cleanup_workflow_path]
-	workflow.permissions == {"actions": "write"}
-	workflow.on == {"pull_request_target": {"types": ["closed"]}}
+	workflow.permissions == {}
+
+	# Exact `types: [closed]`: any wider and the closed-pr job's `if` (event
+	# NAME only) would delete caches out from under still-open PRs. The push
+	# trigger's shape is deliberately unpinned — the prune script hardcodes
+	# its ref, so trigger drift there changes nothing this rule protects.
+	object.get(workflow, ["on", "pull_request_target"], null) == {"types": ["closed"]}
 	jobs := object.get(workflow, "jobs", {})
-	count(jobs) == 1
+	count(jobs) == 2
 	job := jobs["closed-pr"]
+	object.get(job, "permissions", null) == {"actions": "write"}
+	object.get(job, "if", "") == "github.event_name == 'pull_request_target'"
 	count(object.get(job, "steps", [])) == 1
 	step := job.steps[0]
 	object.get(step, "uses", "") == ""
@@ -633,6 +644,11 @@ cache_cleanup_is_inert if {
 	object.get(env, "PR_REF", "") == "refs/pull/${{ github.event.pull_request.number }}/merge"
 	run := object.get(step, "run", "")
 	contains(run, "gh cache delete --all --ref \"$PR_REF\" --succeed-on-no-caches")
+	prune := jobs["stale-generations"]
+	object.get(prune, "permissions", null) == {"actions": "write"}
+	object.get(prune, "if", "") == "github.event_name == 'push'"
+	count(object.get(prune, "steps", [])) == 1
+	object.get(prune.steps[0], "uses", "") == ""
 }
 
 has_weekly_codeql_schedule if {
@@ -938,7 +954,7 @@ deny contains msg if {
 deny contains msg if {
 	_ := documents[cache_cleanup_workflow_path]
 	not cache_cleanup_is_inert
-	msg := sprintf("%s pull_request_target job must remain cache-only and checkout-free", [cache_cleanup_workflow_path])
+	msg := sprintf("%s must keep both jobs inert: workflow-level permissions empty, each job trigger-guarded with its own actions:write, one step, no action", [cache_cleanup_workflow_path])
 }
 
 deny contains msg if {

@@ -1,24 +1,36 @@
 name: cache cleanup
 
-# PR caches can evict useful main caches once the repository hits its size limit.
-# Runs in the base context so fork PRs clean up too — never checkout or execute
-# pull-request content here.
+# Two prunes under one grant shape: closed-PR caches (run in the base
+# context, so fork PRs clean up too) and superseded main-ref rust
+# generations. Never checkout or execute pull-request content here.
 on:
   pull_request_target: # zizmor: ignore[dangerous-triggers] no checkout or PR-code execution; policy pins the cache-only job
     types: [closed]
+  # A lockfile bump strands the previous rust cache generation on the main
+  # ref; deleting it deterministically beats the LRU lottery at the 10 GB
+  # ceiling. Toolchain bumps are out of scope in both directions: they don't
+  # touch Cargo.lock, and the rustc hash is inside the family key, so a bump
+  # forks a NEW family rather than superseding the old one.
+  push:
+    branches: [main]
+    paths: [Cargo.lock]
 
-permissions:
-  actions: write
+# Per-job grants: with more than one job, a workflow-level write is
+# zizmor's excessive-permissions class.
+permissions: {}
 
 concurrency:
-  group: cache-cleanup-${{ github.event.pull_request.number }}
+  group: cache-cleanup-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: false
 
 jobs:
   closed-pr:
     name: closed PR
+    if: github.event_name == 'pull_request_target'
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      actions: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
@@ -28,3 +40,45 @@ jobs:
         run: |
           gh cache delete --all --ref "$PR_REF" --succeed-on-no-caches
           echo "Cache cleanup completed for \`$PR_REF\` (no caches is a successful no-op)." >> "$GITHUB_STEP_SUMMARY"
+
+  stale-generations:
+    name: stale rust generations
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - name: Delete superseded main-ref rust caches
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Stripping the last segment reproduces rust-cache's own restoreKey
+          # boundary (key = prefix-sharedkey-OS-arch-envhash-LOCKHASH), so a
+          # family is (job, OS, toolchain) and only lockfile generations
+          # compete inside it. A key with a non-hex tail becomes its own
+          # one-element family and is never deleted — the failure direction
+          # is under-prune, never over-prune. Keep each family's newest
+          # entry; this run races the build creating its successor, so the
+          # superseded generation survives until the NEXT bump — the
+          # invariant is at most two generations per family, not one.
+          # An assignment propagates a pipeline failure under pipefail (a
+          # process substitution would swallow it); --limit 300 is an order
+          # of magnitude past what the 10 GB ceiling can hold.
+          ids=$(
+            gh cache list --ref refs/heads/main --limit 300 --json id,key,createdAt \
+              | jq -r '[.[] | select(.key | startswith("v1-rust-"))]
+                  | group_by(.key | sub("-[0-9a-f]+$"; ""))
+                  | map(sort_by(.createdAt) | .[:-1][])
+                  | .[].id'
+          )
+          pruned=0
+          for id in $ids; do
+            # LRU can evict between list and delete — a benign race.
+            gh cache delete "$id" || echo "::warning::cache $id already gone"
+            pruned=$((pruned + 1))
+          done
+          echo "Pruned $pruned stale rust cache generation(s) on refs/heads/main." >> "$GITHUB_STEP_SUMMARY"
