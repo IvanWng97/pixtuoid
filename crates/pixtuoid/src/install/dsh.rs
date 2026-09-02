@@ -132,23 +132,29 @@ fn mount_row(plugin: &str) -> YamlOwned {
     YamlOwned::Mapping(row)
 }
 
-/// A row whose `insert:` is not a list: dsh's own patch apply
-/// (`cordis-plugin-include`'s `applyEntryPatches`, 0.1.1-rc.2 installed lib)
-/// spreads the value into an array push, so a mapping here throws at boot —
-/// and every function below would otherwise silently not-see an entry inside
-/// it. Refuse loud instead.
+/// A row whose `insert:` is a truthy non-list: dsh's own patch apply
+/// spreads the value into an array push
+/// (`@deepseek-ai/cordis-plugin-include` 1.0.7, vendored in dsh 0.1.1-rc.2
+/// — `vendor/include/src/index.ts:94`, read 2026-09-01), so it throws at
+/// boot — and a mapping could HOLD an entry `our_entries`/
+/// `strip_our_entries` would silently not-see. Refuse loud instead. A NULL
+/// `insert:` passes: upstream's truthiness gate skips it, an override row
+/// (`- id: x` + `enabled: false`) carries one legitimately, and a null can
+/// hide nothing.
 fn malformed_insert(rows: &[YamlOwned]) -> bool {
     rows.iter().any(|r| {
         matches!(r, YamlOwned::Mapping(m)
-            if matches!(m.get(&ystr("insert")), Some(v) if !matches!(v, YamlOwned::Sequence(_))))
+            if matches!(m.get(&ystr("insert")),
+                Some(v) if !matches!(v, YamlOwned::Sequence(_) | YamlOwned::Value(ScalarOwned::Null))))
     })
 }
 
 fn refuse_malformed(rows: &[YamlOwned]) -> Result<()> {
     if malformed_insert(rows) {
         bail!(
-            "cordis.patch.yml has an `insert:` that is not a list — dsh itself \
-             throws on that shape at boot; fix the row by hand before connecting"
+            "cordis.patch.yml has an `insert:` that is not a list — dsh's patch \
+             apply spreads it into an array push, so neither dsh nor pixtuoid \
+             can read the entries there; fix the row by hand first"
         );
     }
     Ok(())
@@ -216,7 +222,8 @@ fn strip_our_entries(rows: &[YamlOwned]) -> (Vec<YamlOwned>, usize) {
 /// `changed` is a semantic diff: exactly one of our entries, already a row
 /// of its own at the wanted path → no rewrite. Anything else — a stale
 /// path, a batched entry, duplicates — strips every one of our entries and
-/// mounts one fresh standalone row.
+/// mounts one fresh standalone row; a non-list `insert:` is refused first
+/// ([`malformed_insert`]).
 pub(crate) fn merge_install(content: &str, _hook_cmd: &str) -> Result<MergeOutcome> {
     let plugin = plugin_path()?;
     let plugin = plugin.to_str().context("plugin path is not UTF-8")?;
@@ -271,10 +278,14 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
         shim: ShimRef::Unknown,
         ..Default::default()
     };
+    // The one early return in an accumulate-into-issues fn: ours.len() is
+    // not trustworthy here — a mapping-shaped row can HOLD our entry, so
+    // falling through would report "no mount entry" about an entry that is
+    // in the file.
     if malformed_insert(&rows) {
         parse.issues.push(
-            "an `insert:` row is not a list — dsh throws on that shape at \
-             boot; fix cordis.patch.yml by hand"
+            "an `insert:` row is not a list — dsh cannot apply it and pixtuoid \
+             cannot read it; fix cordis.patch.yml by hand"
                 .to_string(),
         );
         return parse;
@@ -539,17 +550,26 @@ mod tests {
             .unwrap_or_else(|e| e.into_inner());
         let home = tempfile::tempdir().unwrap();
         std::env::set_var("DSH_HOME", home.path());
-        // dsh's own patch apply spreads `insert` into an array push, so this
-        // hand-written shape throws upstream at boot; every path here must
-        // say so rather than treat the row as invisible.
+        // Message-anchored (the openclaw refusal-test standard): a different
+        // error passing `is_err()` for the wrong reason must not count.
         let mapping = "- insert:\n    id: pixtuoid\n    name: /old/pixtuoid-dsh.mjs\n";
-        assert!(merge_install(mapping, "/unused").is_err());
-        assert!(merge_uninstall(mapping).is_err());
+        let err = merge_install(mapping, "/unused").unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
+        let err = merge_uninstall(mapping).unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
         let v = verify_schema(mapping);
         assert!(
             v.issues.iter().any(|i| i.contains("is not a list")),
             "{v:?}"
         );
+        // A NULL insert is upstream's own falsy no-op (a legitimate
+        // override row carries one) and can hide nothing — it passes
+        // through preserved, never refused.
+        let over = "- id: timer\n  insert:\n  enabled: false\n";
+        let ok = merge_install(over, "/unused").unwrap();
+        assert!(ok.changed, "our row still mounts beside it");
+        assert!(ok.content.contains("timer"), "{}", ok.content);
+        assert!(verify_schema(&ok.content).issues.is_empty());
         std::env::remove_var("DSH_HOME");
     }
 

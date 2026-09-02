@@ -108,9 +108,9 @@ our release never builds. Two consequences:
 
 Do not try to preempt BrewTestBot: the formula is on homebrew-core's
 autobump list, so `brew bump-formula-pr pixtuoid` refuses by policy and the
-bot opens the PR itself within ~3 hours of the tag. Watch THAT PR's CI — its
-default-features from-source build is the one configuration our release never
-builds — and intervene only if it reds.
+bot opens the PR itself within ~3 hours of the tag. Watch THAT PR's CI and
+intervene only if it reds.
+
 Publishing uses **OIDC trusted publishing** — CI carries no registry tokens;
 the per-crate/per-package Trusted Publishers must exist before the tag
 ([#216](https://github.com/IvanWng97/pixtuoid/issues/216)).
