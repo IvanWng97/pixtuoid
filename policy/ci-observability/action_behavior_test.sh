@@ -5,6 +5,7 @@ CODECOV_ACTION_FILE="${CODECOV_ACTION_FILE:-.github/actions/upload-codecov/actio
 CODEQL_WORKFLOW_FILE="${CODEQL_WORKFLOW_FILE:-.github/workflows/codeql.yml}"
 CLAUDE_REVIEW_WORKFLOW_FILE="${CLAUDE_REVIEW_WORKFLOW_FILE:-.github/workflows/claude-readonly-review.yml}"
 CI_LINT_WORKFLOW_FILE="${CI_LINT_WORKFLOW_FILE:-.github/workflows/ci-lint.yml}"
+CACHE_CLEANUP_WORKFLOW_FILE="${CACHE_CLEANUP_WORKFLOW_FILE:-.github/workflows/cache-cleanup.yml}"
 
 fail() {
     echo "ci-observability behavior test: $*" >&2
@@ -513,3 +514,52 @@ absence_body="$(<"$absence_capture")"
 run_absence success
 [[ "$(<"$absence_capture")" == *"out of scope for the reviewer"* ]] ||
     fail "a declined review was reported as a failure"
+
+# ── cache-cleanup: the prune deletes exactly the superseded generations ──────
+# The rego rule pins only the job's shape; which ids the jq family logic
+# selects is asserted here: newest-per-family survives, a single-entry family
+# survives, a non-hex tail is its own family (under-prune direction), non-rust
+# keys are untouched, and one 404'd delete warns without aborting the rest.
+prune_script="$(workflow_step_script "$CACHE_CLEANUP_WORKFLOW_FILE" "Delete superseded main-ref rust caches")"
+prune_dir="$(mktemp -d)"
+prune_bin="$prune_dir/bin"
+mkdir -p "$prune_bin"
+prune_list="$prune_dir/cache_list.json"
+cat >"$prune_list" <<'JSON'
+[
+  {"id": 1, "key": "v1-rust-smoke-Linux-x64-aaaa-1111", "createdAt": "2026-08-01T00:00:00Z"},
+  {"id": 2, "key": "v1-rust-smoke-Linux-x64-aaaa-2222", "createdAt": "2026-09-01T00:00:00Z"},
+  {"id": 3, "key": "v1-rust-docs-Linux-x64-aaaa-2222", "createdAt": "2026-09-01T00:00:00Z"},
+  {"id": 4, "key": "v1-rust-odd-Linux-x64-tail", "createdAt": "2026-01-01T00:00:00Z"},
+  {"id": 5, "key": "playwright-Linux-abc123", "createdAt": "2026-01-01T00:00:00Z"},
+  {"id": 6, "key": "v1-rust-hack-Linux-x64-aaaa-1111", "createdAt": "2026-07-01T00:00:00Z"},
+  {"id": 7, "key": "v1-rust-hack-Linux-x64-aaaa-2222", "createdAt": "2026-08-01T00:00:00Z"},
+  {"id": 8, "key": "v1-rust-hack-Linux-x64-aaaa-3333", "createdAt": "2026-09-01T00:00:00Z"}
+]
+JSON
+# shellcheck disable=SC2016 # The generated stub reads its env when it runs.
+printf '%s\n' \
+    '#!/usr/bin/env bash' \
+    'set -euo pipefail' \
+    'if [[ "$1" == "cache" && "$2" == "list" ]]; then command cat "$CACHE_LIST_FILE"; exit 0; fi' \
+    'if [[ "$1" == "cache" && "$2" == "delete" ]]; then' \
+    '    printf "%s\n" "$3" >>"$DELETE_LOG"' \
+    '    if [[ "$3" == "6" ]]; then exit 1; fi' \
+    '    exit 0' \
+    'fi' \
+    'exit 1' \
+    >"$prune_bin/gh"
+chmod +x "$prune_bin/gh"
+prune_deletes="$prune_dir/deletes.log"
+: >"$prune_deletes"
+prune_summary="$prune_dir/summary.md"
+PATH="$prune_bin:$PATH" \
+    CACHE_LIST_FILE="$prune_list" \
+    DELETE_LOG="$prune_deletes" \
+    GITHUB_STEP_SUMMARY="$prune_summary" \
+    bash -c "$prune_script" ||
+    fail "prune aborted — a 404'd delete must warn and continue"
+[[ "$(sort -n "$prune_deletes" | tr '\n' ' ')" == "1 6 7 " ]] ||
+    fail "prune deleted the wrong ids: $(tr '\n' ' ' <"$prune_deletes")"
+[[ "$(<"$prune_summary")" == *"Pruned 3"* ]] ||
+    fail "prune summary did not report the attempted count"

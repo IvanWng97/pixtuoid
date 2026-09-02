@@ -705,20 +705,65 @@ test_zizmor_block_scalar_invocation_still_needs_the_token if {
 	zizmor_token_message("hygiene") in violations
 }
 
-test_cache_cleanup_cannot_execute_pull_request_code if {
-	fixture := {"documents": [{
-		"path": cache_cleanup_workflow_path,
-		"contents": {
-			"on": {"pull_request_target": {"types": ["closed"]}},
+cache_cleanup_message := sprintf("%s must keep both jobs inert: workflow-level permissions empty, each job trigger-guarded with its own actions:write, one step, no action", [cache_cleanup_workflow_path])
+
+cache_cleanup_valid_contents := {
+	"on": {
+		"pull_request_target": {"types": ["closed"]},
+		"push": {"branches": ["main"], "paths": ["Cargo.lock"]},
+	},
+	"permissions": {},
+	"jobs": {
+		"closed-pr": {
+			"if": "github.event_name == 'pull_request_target'",
 			"permissions": {"actions": "write"},
-			"jobs": {"closed-pr": {
-				"env": {"PR_REF": "refs/pull/${{ github.event.pull_request.number }}/merge"},
-				"steps": [{"uses": "actions/checkout@v7"}],
-			}},
+			"env": {"PR_REF": "refs/pull/${{ github.event.pull_request.number }}/merge"},
+			"steps": [{"run": "gh cache delete --all --ref \"$PR_REF\" --succeed-on-no-caches"}],
 		},
-	}]}
-	violations := deny with input as fixture
-	sprintf("%s pull_request_target job must remain cache-only and checkout-free", [cache_cleanup_workflow_path]) in violations
+		"stale-generations": {
+			"if": "github.event_name == 'push'",
+			"permissions": {"actions": "write"},
+			"steps": [{"run": "gh cache list"}],
+		},
+	},
+}
+
+cache_cleanup_fixture(overrides) := {"documents": [{
+	"path": cache_cleanup_workflow_path,
+	"contents": object.union(cache_cleanup_valid_contents, overrides),
+}]}
+
+# object.union is shallow, so a job mutation carries the whole jobs map.
+cache_cleanup_with_job(name, job) := cache_cleanup_fixture({"jobs": object.union(cache_cleanup_valid_contents.jobs, {name: job})})
+
+# The mutation tests are only pins while the base is clean: without this, a
+# new rule condition the base doesn't satisfy makes every one of them fire
+# for the wrong reason.
+test_cache_cleanup_baseline_is_inert if {
+	violations := deny with input as cache_cleanup_fixture({})
+	not cache_cleanup_message in violations
+}
+
+test_cache_cleanup_cannot_execute_pull_request_code if {
+	violations := deny with input as cache_cleanup_with_job("closed-pr", {
+		"if": "github.event_name == 'pull_request_target'",
+		"permissions": {"actions": "write"},
+		"env": {"PR_REF": "refs/pull/${{ github.event.pull_request.number }}/merge"},
+		"steps": [{
+			"uses": "actions/checkout@v7",
+			"run": "gh cache delete --all --ref \"$PR_REF\" --succeed-on-no-caches",
+		}],
+	})
+	cache_cleanup_message in violations
+}
+
+test_cache_cleanup_prune_job_cannot_grow_an_action_step if {
+	violations := deny with input as cache_cleanup_with_job("stale-generations", {
+		"if": "github.event_name == 'push'",
+		"permissions": {"actions": "write"},
+		"steps": [{"uses": "actions/checkout@v7", "run": "gh cache list"}],
+	})
+	cache_cleanup_message in violations
 }
 
 test_claude_review_trigger_must_load_from_the_trusted_base if {
