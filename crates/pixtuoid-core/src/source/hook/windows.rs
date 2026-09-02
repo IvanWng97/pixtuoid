@@ -161,7 +161,7 @@ impl Listener {
             };
             if let Err(e) = self.server.connect().await {
                 // A failed instance isn't guaranteed reusable — recreate it.
-                warn!("hook pipe connect error: {e}; recreating instance");
+                warn!(error = %e, "hook pipe connect error; recreating instance");
                 // SAFETY: same contract as the bind site — `self.sd` outlives
                 // the call and the kernel copies the descriptor during
                 // CreateNamedPipeW, so nothing borrows past it.

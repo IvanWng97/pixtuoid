@@ -151,10 +151,10 @@ impl Drop for UndeliveredEvents {
         // One payload's ids are adjacent by construction, so no sort is needed.
         agents.dedup();
         warn!(
-            "hook connection cancelled mid-payload: {} decoded event(s) for agent(s) [{}] \
-             never reached the reducer (per-connection budget: {CONN_TIMEOUT:?})",
-            undelivered.len(),
-            agents.join(", ")
+            events = undelivered.len(),
+            agents = %agents.join(", "),
+            budget = ?CONN_TIMEOUT,
+            "hook connection cancelled mid-payload; decoded events never reached the reducer"
         );
     }
 }
@@ -250,7 +250,7 @@ pub(crate) async fn handle_conn(
                 let v: serde_json::Value = match serde_json::from_str(&line) {
                     Ok(v) => v,
                     Err(e) => {
-                        warn!("malformed hook line skipped: {e}");
+                        warn!(error = %e, "malformed hook line skipped");
                         continue;
                     }
                 };
@@ -277,7 +277,7 @@ pub(crate) async fn handle_conn(
                                     });
                                 }
                             }
-                            Err(e) => warn!("daemon presence decode error: {e}"),
+                            Err(e) => warn!(error = %e, "daemon presence decode error"),
                         }
                         // A daemon produces no AgentEvents — never the agent arms.
                         continue;
@@ -306,7 +306,7 @@ pub(crate) async fn handle_conn(
                         patch_identity_pids(&mut evs, pid);
                         let mut undelivered = UndeliveredEvents::new(&evs);
                         for ev in evs {
-                            debug!("hook event: {ev:?}");
+                            debug!(?ev, "hook event");
                             if tx.send((Transport::Hook, ev)).await.is_err() {
                                 undelivered.disarm();
                                 return;
@@ -314,12 +314,12 @@ pub(crate) async fn handle_conn(
                             undelivered.delivered_one();
                         }
                     }
-                    Err(e) => warn!("hook decode error: {e}"),
+                    Err(e) => warn!(error = %e, "hook decode error"),
                 }
             }
             Ok(None) => return,
             Err(e) => {
-                warn!("hook conn read error: {e}");
+                warn!(error = %e, "hook conn read error");
                 return;
             }
         }
@@ -732,7 +732,7 @@ mod tests {
 
         let out = logs.contents();
         assert!(
-            out.contains("1 decoded event(s)"),
+            out.contains("events=1"),
             "loss breadcrumb missing from logs: {out:?}"
         );
         assert!(

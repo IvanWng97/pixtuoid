@@ -213,12 +213,12 @@ fn reflect_onboarding_outcomes(
                 connected.set(id, false);
                 // `Failed` covers all three operations: connect, disconnect (an UNCHECKED
                 // row, which `freeze_for_skip` makes the common case), and the fold below.
-                let (op, verb) = if *want {
-                    (connection::FailedOp::Connect, "connect")
+                let op = if *want {
+                    connection::FailedOp::Connect
                 } else {
-                    (connection::FailedOp::Disconnect, "disconnect")
+                    connection::FailedOp::Disconnect
                 };
-                tracing::warn!("onboarding: {id} failed to {verb}: {e}");
+                tracing::warn!(source = %id, ?op, error = %e, "onboarding: hook change failed");
                 let name =
                     crate::install::target::by_source(id).map_or(id.as_str(), |t| t.display_name);
                 // The fold: an otherwise SUCCESSFUL disconnect that left a residual, so it
@@ -524,7 +524,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
     let decision = crate::version::boot_decision(current_ver, cfg.last_seen_version.as_deref());
     if decision.should_persist {
         if let Err(e) = crate::config::save_version(config_path, current_ver) {
-            tracing::warn!("failed to persist version: {e}");
+            tracing::warn!(error = %e, "failed to persist version");
         }
     }
     decision.should_show_popup
@@ -623,7 +623,7 @@ fn apply_key_action<B: ratatui::backend::Backend<Error: Send + Sync + 'static>>(
             cx.ui.commit_theme(i);
             let name = theme::ALL_THEMES[i].name;
             if let Err(e) = crate::config::save(cx.config_path, name) {
-                tracing::warn!("failed to persist theme: {e}");
+                tracing::warn!(error = %e, "failed to persist theme");
             }
         }
         KeyAction::ThemeCancel => {
@@ -892,7 +892,7 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
             }
             Err(e) => {
                 tracing::error!(
-                    %e,
+                    error = %e,
                     "SIGTERM handler registration failed — an external \
                      SIGTERM will not restore the terminal"
                 );
@@ -1032,7 +1032,7 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
                     Ok(()) => break,
                     Err(e) => {
                         tracing::error!(
-                            %e,
+                            error = %e,
                             "SIGINT handler registration failed — an external \
                              Ctrl-C will not restore the terminal"
                         );

@@ -97,10 +97,12 @@ impl Source for HookRouter {
         let socket = match HookSocketListener::bind(self.socket_path.clone()).await {
             Ok(s) => s,
             Err(e) if e.downcast_ref::<SocketBusy>().is_some() => {
+                let chain = format!("{e:#}");
                 tracing::warn!(
-                    "{e:#}; hook plane disabled — hook-borne signals (permission \
-                     Waiting, instant lifecycle, daemon presence) belong to the \
-                     owning instance; transcript sources keep running"
+                    error = ?chain,
+                    "hook plane disabled — hook-borne signals (permission Waiting, instant \
+                     lifecycle, daemon presence) belong to the owning instance; transcript \
+                     sources keep running"
                 );
                 return Ok(());
             }

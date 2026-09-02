@@ -84,8 +84,8 @@ impl ProbeSnapshot {
         // macOS), so an under-root compare against a raw root misses everything.
         let Ok(canonical) = root.canonicalize() else {
             debug!(
-                "fd probe: root {} not canonicalizable; nothing alive there",
-                root.display()
+                root = ?root,
+                "fd probe: root not canonicalizable; nothing alive there"
             );
             return Some(Self::default());
         };
@@ -121,8 +121,10 @@ impl ProbeSnapshot {
                 // deriver — one id-space no new fd-probe source can forget.
                 let id = (id_derive)(&super::walk::id_path(&path));
                 debug!(
-                    "fd probe: pid {pid} holds {} open (id {id})",
-                    path.display()
+                    pid,
+                    path = ?path,
+                    session_id = ?id,
+                    "fd probe: pid holds a transcript open"
                 );
                 snap.bind_pid(id, pid);
             }
@@ -247,8 +249,8 @@ impl ProbeLadder {
             match self.miss_since.get(&id) {
                 Some(first_miss) if now.duration_since(*first_miss) >= self.min_span => {
                     debug!(
-                        "negative vouch confirmed for {id}: probe stopped vouching; \
-                         emitting SessionEnd"
+                        session_id = ?id,
+                        "negative vouch confirmed: probe stopped vouching; emitting SessionEnd"
                     );
                     self.forget(&id);
                     self.unbind(&id);
@@ -402,7 +404,7 @@ pub(super) async fn refresh_probe_snapshot(
             return false;
         }
         Err(join_err) => {
-            tracing::warn!(%join_err, "liveness probe task panicked; keeping the previous snapshot");
+            tracing::warn!(error = %join_err, "liveness probe task panicked; keeping the previous snapshot");
             return false;
         }
     };

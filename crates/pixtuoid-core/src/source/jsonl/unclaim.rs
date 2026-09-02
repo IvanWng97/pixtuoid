@@ -173,9 +173,9 @@ pub(super) async fn drain_child_end_unclaims(
                 }
             }
             debug!(
-                "child-end un-claim: released first-sight claim on {} — the \
-                 next append re-registers (#246)",
-                path.display()
+                path = ?path,
+                "child-end un-claim: released first-sight claim — the next append \
+                 re-registers (#246)"
             );
         }
     }

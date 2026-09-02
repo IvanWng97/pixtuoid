@@ -310,10 +310,11 @@ fn resolve_hook_binary_from(
         };
         if !p.exists() {
             // tracing, not println!: install runs under the TUI alt-screen, where a stdout
-            // write corrupts the frame. Stripped — `connect`/`setup` route to RAW stderr.
+            // write corrupts the frame. `?` escapes — `connect`/`setup` route to RAW stderr.
             tracing::warn!(
-                "{origin} {} does not exist yet; the hook will fail until it does",
-                crate::strip_control_chars(&p.display().to_string())
+                %origin,
+                path = ?p,
+                "hook binary does not exist yet; the hook will fail until it does"
             );
         }
         return Ok((p, true));

@@ -122,7 +122,7 @@ impl FloatingApp {
             pos.map(|p| p.x),
             pos.map(|p| p.y),
         ) {
-            tracing::warn!("pixtuoid floating: could not persist window geometry: {e}");
+            tracing::warn!(error = %e, "pixtuoid floating: could not persist window geometry");
         }
     }
 
@@ -279,7 +279,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Rc::new(w),
             Err(e) => {
-                tracing::error!("pixtuoid floating: failed to create window: {e}");
+                tracing::error!(error = %e, "pixtuoid floating: failed to create window");
                 event_loop.exit();
                 return;
             }
@@ -287,7 +287,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         let context = match softbuffer::Context::new(window.clone()) {
             Ok(c) => c,
             Err(e) => {
-                tracing::error!("pixtuoid floating: failed to create softbuffer context: {e}");
+                tracing::error!(error = %e, "pixtuoid floating: failed to create softbuffer context");
                 event_loop.exit();
                 return;
             }
@@ -295,7 +295,7 @@ impl ApplicationHandler<FloatingEvent> for FloatingApp {
         let surface = match softbuffer::Surface::new(&context, window.clone()) {
             Ok(s) => s,
             Err(e) => {
-                tracing::error!("pixtuoid floating: failed to create softbuffer surface: {e}");
+                tracing::error!(error = %e, "pixtuoid floating: failed to create softbuffer surface");
                 event_loop.exit();
                 return;
             }

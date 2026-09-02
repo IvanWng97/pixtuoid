@@ -101,7 +101,7 @@ pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
         let mut custom = load_pack(&dir).map_err(|e| {
             anyhow::anyhow!("failed to load sprite pack from {}: {e}", dir.display())
         })?;
-        tracing::info!(path = %dir.display(), "loaded sprite pack from --pack-dir");
+        tracing::info!(path = ?dir, "loaded sprite pack from --pack-dir");
         custom.merge_from(&base);
         warn_pack_validation_gaps(&custom, "--pack-dir");
         return Ok(custom);
@@ -109,14 +109,14 @@ pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
     if let Some(dir) = xdg_pack_dir() {
         match load_pack(&dir) {
             Ok(mut p) => {
-                tracing::info!(path = %dir.display(), "loaded user sprite pack");
+                tracing::info!(path = ?dir, "loaded user sprite pack");
                 p.merge_from(&base);
                 warn_pack_validation_gaps(&p, "xdg");
                 return Ok(p);
             }
             Err(e) => {
                 tracing::warn!(
-                    path = %dir.display(),
+                    path = ?dir,
                     error = %e,
                     "user sprite pack failed to load; falling back to embedded default"
                 );

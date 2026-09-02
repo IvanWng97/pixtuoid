@@ -154,7 +154,7 @@ impl AudioController {
         let persist = apply_audio_action(&mut self.ui, action, paused, respawn);
         if persist.muted {
             if let Err(e) = crate::config::save_audio_muted(&self.config_path, self.ui.muted) {
-                tracing::warn!("failed to persist audio mute: {e}");
+                tracing::warn!(error = %e, "failed to persist audio mute");
             }
         }
         if persist.volume_nudged {
@@ -190,7 +190,7 @@ impl AudioController {
     fn save_volume(&mut self) {
         self.volume_dirty = false;
         if let Err(e) = crate::config::save_audio_volume(&self.config_path, self.ui.volume) {
-            tracing::warn!("failed to persist audio volume: {e}");
+            tracing::warn!(error = %e, "failed to persist audio volume");
         }
     }
 
@@ -643,7 +643,7 @@ impl AudioHandle {
                         join_with_timeout(prior, SHUTDOWN_JOIN_TIMEOUT);
                     }
                 }
-                Err(e) => tracing::warn!("audio: thread spawn failed, running silent: {e}"),
+                Err(e) => tracing::warn!(error = %e, "audio: thread spawn failed, running silent"),
             }
         }
     }

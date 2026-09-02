@@ -58,3 +58,31 @@ pub(crate) fn capture_warns() -> (CaptureWriter, tracing::subscriber::DefaultGua
     let guard = tracing::subscriber::set_default(subscriber(logs.clone(), tracing::Level::WARN));
     (logs, guard)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A wire-derived value rides a `?` field: `tracing_subscriber::fmt`'s
+    /// `EscapeGuard` covers only the `message` arm, so a `%` Display field writes
+    /// ESC/BEL/bidi bytes raw into the log file and the stderr terminal.
+    #[test]
+    fn debug_fields_escape_control_and_bidi_chars() {
+        let hostile = std::path::Path::new("/tmp/\u{1b}]0;x\u{07}\u{202e}fake.jsonl");
+        let out = capture_logs(|| {
+            tracing::warn!(path = ?hostile, "debug field");
+            tracing::warn!(path = %hostile.display(), "display field");
+        });
+        let (debug_line, display_line) = out.split_once('\n').expect("two lines");
+        for raw in ['\u{1b}', '\u{07}', '\u{202e}'] {
+            assert!(
+                !debug_line.contains(raw),
+                "`?` must escape {raw:?}: {debug_line:?}"
+            );
+            assert!(
+                display_line.contains(raw),
+                "control: `%` leaks {raw:?}, else the rule is moot: {display_line:?}"
+            );
+        }
+    }
+}

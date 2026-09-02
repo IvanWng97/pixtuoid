@@ -59,7 +59,10 @@ mod imp {
         // nothing is written.
         let count = unsafe { libc::proc_listallpids(std::ptr::null_mut(), 0) };
         if count <= 0 {
-            tracing::debug!("proc_listallpids sizing failed ({count}); probe pass failed");
+            tracing::debug!(
+                ret = count,
+                "proc_listallpids sizing failed; probe pass failed"
+            );
             return None;
         }
         // Slack for processes spawned between the sizing call and the fill.
@@ -76,7 +79,10 @@ mod imp {
             )
         };
         if filled <= 0 {
-            tracing::debug!("proc_listallpids fill failed ({filled}); probe pass failed");
+            tracing::debug!(
+                ret = filled,
+                "proc_listallpids fill failed; probe pass failed"
+            );
             return None;
         }
         pids.truncate(usize::min(filled as usize, cap));

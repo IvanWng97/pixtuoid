@@ -105,7 +105,7 @@ pub(crate) fn warn_if_relative_override(var: &str, dir: PathBuf) -> PathBuf {
         // construction + install), never per event.
         tracing::warn!(
             var = %var,
-            dir = %dir.display(),
+            dir = ?dir,
             "env home override is a RELATIVE path; it resolves against each \
              process's own cwd, so pixtuoid and the CLI may disagree on where \
              this points — set an absolute path",

@@ -86,7 +86,7 @@ pub(crate) mod rodio_sink {
                     })
                 }
                 Err(e) => {
-                    tracing::warn!("audio: no output device, running silent: {e}");
+                    tracing::warn!(error = %e, "audio: no output device, running silent");
                     None
                 }
             }

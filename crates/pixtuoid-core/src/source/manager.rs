@@ -70,8 +70,9 @@ impl SourceManager {
                 let name = src.name().to_string();
                 tokio::spawn(async move {
                     if let Err(e) = src.run(tx).await {
-                        tracing::error!(source = %name, "source died: {e:#}");
-                        deaths.send_modify(|v| v.push(SourceDeath::new(name, format!("{e:#}"))));
+                        let chain = format!("{e:#}");
+                        tracing::error!(source = %name, error = ?chain, "source died");
+                        deaths.send_modify(|v| v.push(SourceDeath::new(name, chain)));
                     }
                 })
             })
@@ -123,6 +124,41 @@ mod tests {
             vec![SourceDeath::new("dying-test-source", "listener exploded")],
             "a fatal source exit must be attributed and published; a clean exit must not"
         );
+    }
+
+    /// A source's fatal error chain can embed external strings (a transcript path
+    /// under a cloned repo's directory name), so it is wire-derived: the "source
+    /// died" line must carry it as a `?` field or the escapes reach the terminal.
+    struct HostileSource;
+
+    impl Source for HostileSource {
+        fn name(&self) -> &str {
+            "hostile-test-source"
+        }
+        async fn run(self: Box<Self>, _tx: TaggedSender) -> anyhow::Result<()> {
+            anyhow::bail!("open /tmp/\u{1b}]0;pwned\u{7}\u{202e}a.jsonl failed")
+        }
+    }
+
+    #[tokio::test]
+    async fn source_died_line_escapes_the_error_chain() {
+        let (logs, _guard) = crate::test_capture::capture_warns();
+        let (tx, _rx) = tokio::sync::mpsc::channel::<(Transport, AgentEvent)>(8);
+        let (deaths_tx, _deaths_rx) = watch::channel(Vec::new());
+        for h in SourceManager::new()
+            .with_source(Box::new(HostileSource))
+            .spawn_with_health(tx, deaths_tx)
+        {
+            h.await.unwrap();
+        }
+        let out = logs.contents();
+        assert!(out.contains("source died"), "got {out:?}");
+        for raw in ['\u{1b}', '\u{7}', '\u{202e}'] {
+            assert!(
+                !out.contains(raw),
+                "{raw:?} must not reach the log raw: {out:?}"
+            );
+        }
     }
 
     #[tokio::test]
