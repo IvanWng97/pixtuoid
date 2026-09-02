@@ -137,15 +137,24 @@ fn mount_row(plugin: &str) -> YamlOwned {
 /// (`@deepseek-ai/cordis-plugin-include` 1.0.7, vendored in dsh 0.1.1-rc.2
 /// — `vendor/include/src/index.ts:94`, read 2026-09-01), so it throws at
 /// boot — and a mapping could HOLD an entry `our_entries`/
-/// `strip_our_entries` would silently not-see. Refuse loud instead. A NULL
-/// `insert:` passes: upstream's truthiness gate skips it, an override row
-/// (`- id: x` + `enabled: false`) carries one legitimately, and a null can
-/// hide nothing.
+/// `strip_our_entries` would silently not-see. Refuse loud instead. A
+/// JS-FALSY scalar (`null`/`false`/`0`/`""`) passes: upstream's truthiness
+/// gate skips it before the spread, an override row (`- id: x` +
+/// `enabled: false`) carries a null one legitimately, and no scalar can
+/// hide an entry.
 fn malformed_insert(rows: &[YamlOwned]) -> bool {
+    fn falsy(v: &YamlOwned) -> bool {
+        matches!(
+            v,
+            YamlOwned::Value(ScalarOwned::Null)
+                | YamlOwned::Value(ScalarOwned::Boolean(false))
+                | YamlOwned::Value(ScalarOwned::Integer(0))
+        ) || matches!(v, YamlOwned::Value(ScalarOwned::String(s)) if s.is_empty())
+    }
     rows.iter().any(|r| {
         matches!(r, YamlOwned::Mapping(m)
             if matches!(m.get(&ystr("insert")),
-                Some(v) if !matches!(v, YamlOwned::Sequence(_) | YamlOwned::Value(ScalarOwned::Null))))
+                Some(v) if !matches!(v, YamlOwned::Sequence(_)) && !falsy(v)))
     })
 }
 
@@ -562,14 +571,23 @@ mod tests {
             v.issues.iter().any(|i| i.contains("is not a list")),
             "{v:?}"
         );
-        // A NULL insert is upstream's own falsy no-op (a legitimate
-        // override row carries one) and can hide nothing — it passes
-        // through preserved, never refused.
-        let over = "- id: timer\n  insert:\n  enabled: false\n";
-        let ok = merge_install(over, "/unused").unwrap();
-        assert!(ok.changed, "our row still mounts beside it");
-        assert!(ok.content.contains("timer"), "{}", ok.content);
-        assert!(verify_schema(&ok.content).issues.is_empty());
+        // A JS-falsy insert is upstream's own no-op (a legitimate override
+        // row carries a null one) and no scalar can hide an entry — falsy
+        // shapes pass through preserved, never refused.
+        for over in [
+            "- id: timer\n  insert:\n  enabled: false\n",
+            "- insert: false\n",
+            "- insert: 0\n",
+            "- insert: ''\n",
+        ] {
+            let ok = merge_install(over, "/unused").unwrap();
+            assert!(ok.changed, "our row still mounts beside {over:?}");
+            assert!(verify_schema(&ok.content).issues.is_empty(), "{over:?}");
+        }
+        // A TRUTHY scalar still refuses: upstream spreads it (a number
+        // throws at boot; a string spreads into per-char garbage entries).
+        let err = merge_install("- insert: 42\n", "/unused").unwrap_err();
+        assert!(err.to_string().contains("is not a list"), "{err}");
         std::env::remove_var("DSH_HOME");
     }
 
