@@ -72,6 +72,20 @@ jobs:
           # Rust supports only the no-build extractor; the interpreted languages
           # in this matrix use the same mode.
           build-mode: none
+          # `rust/cleartext-logging` has no production sink to reach here: the
+          # workspace has no `log` crate, print macros are banned off production
+          # paths, and CodeQL ships no `tracing` model (github/codeql
+          # rust/ql/lib/codeql/rust/frameworks/, 2026-09-01), so its only sinks
+          # left are `panic!`/`assert!` messages. Every alert it has raised was a
+          # `#[cfg(test)]` assert printing a decoded event whose `*_session_id`
+          # source tripped the `session.?(id|key)` name heuristic
+          # (shared/concepts/codeql/concepts/internal/SensitiveDataHeuristics.qll).
+          # Those tests are extracted on purpose (`CARGO_ALL_TARGETS`, policy-pinned)
+          # and `paths-ignore` cannot split an inline test module from its file.
+          config: |
+            query-filters:
+              - exclude:
+                  id: rust/cleartext-logging
 
       - name: Analyze
         id: analyze
