@@ -21,14 +21,10 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.18.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.18.0" }
-# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces, SPLIT in
-# two on purpose: skrifa parses the face and emits outlines, ab_glyph_rasterizer
-# turns those outlines into per-pixel coverage. The pair was `ab_glyph`, whose
-# parsing half pulls the unmaintained ttf-parser (RUSTSEC-2026-0192, #440); its
-# rasterizing half is dependency-free and is the one kept, so the coverage the
-# committed stills were rendered with does not change. Rejected alternatives are
-# on `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees
-# this, and renders text as a DOM overlay instead.
+# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces, split in
+# two on purpose — the WHY, and the rejected whole-stack alternatives, are on
+# `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees this,
+# and renders text as a DOM overlay instead.
 skrifa = "0.46"
 ab_glyph_rasterizer = "0.1"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
@@ -53,9 +49,9 @@ serde              = { workspace = true }
 serde_json         = { workspace = true, features = ["preserve_order"] }
 toml               = { workspace = true }
 toml_edit          = { workspace = true }
-# YAML parse+emit for the Hermes install target. The maintained yaml-rust
-# successor (serde_yaml/serde_yml are both abandoned); it data-preserves a user's
-# other config keys on merge but does NOT round-trip comments.
+# YAML parse+emit for the Hermes install target — the maintained yaml-rust
+# successor, serde_yaml and serde_yml both being abandoned. It data-preserves a
+# user's other config keys on merge but does NOT round-trip comments.
 saphyr             = "0.0.12"
 anyhow             = { workspace = true }
 tracing            = { workspace = true }
@@ -68,14 +64,11 @@ open               = "5"
 # window-free): winit is the frameless always-on-top window + main-thread event
 # loop, softbuffer the CPU blit of the office RgbBuffer into it (no GPU).
 #
-# The feature list is winit's own default set with ONE substitution, so dropping
-# `default-features` must keep the other four verbatim — a missing one is a
-# Linux RUNTIME failure (no backend), not a build error. The substitution:
-# `wayland-csd-adwaita` -> `-notitle`, which is the same sctk-adwaita decoration
-# minus its optional `ab_glyph` title-text renderer. That font stack was pure
-# weight here — `window.rs` builds with `with_decorations(false)`, so the
-# titlebar it draws into never exists — and it was the second of the two paths
-# putting the unmaintained ttf-parser in the graph (RUSTSEC-2026-0192, #440).
+# This is winit's own default set with ONE substitution, so dropping
+# `default-features` must keep every other default verbatim — a missing one is a
+# Linux RUNTIME failure (no backend), not a build error. The substitution
+# `wayland-csd-adwaita` -> `-notitle` drops only that decoration's `ab_glyph`
+# title-text renderer, which `with_decorations(false)` never draws into.
 winit = { version = "0.30", default-features = false, features = [
     "rwh_06",
     "x11",
@@ -103,10 +96,10 @@ audio = ["dep:rodio"]
 # `ratatui-image` pulls icy_sixel -> quantette -> rayon unconditionally (no
 # feature of its own drops the sixel backend), so a work-stealing thread pool
 # enters a tokio binary, and on Windows a SECOND binding family (`windows 0.58`
-# beside the existing 0.62) with its proc-macro crates. 27 transitive crates in
-# total, and every one of them reaches `cargo install` and homebrew-core's
-# from-source build. Off is a build whose `doctor` reports the capability as
-# unqueryable, which is what every non-graphics terminal already gets.
+# beside the existing 0.62) with its proc-macro crates. Every one of those
+# transitive crates reaches `cargo install` and homebrew-core's from-source
+# build. Off is a build whose `doctor` reports the capability as unqueryable,
+# which is what every non-graphics terminal already gets.
 graphics = ["dep:ratatui-image"]
 
 # termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs).

@@ -10,10 +10,8 @@ all-features = true
 # behind a green run. Needs cargo-deny 0.20.2 (what cargo-deny-action@v2.1.1 pins);
 # an older cargo-deny rejects the whole file over this key.
 unused-ignored-advisory = "deny"
-# No advisory is ignored. The last one (RUSTSEC-2026-0192, ttf-parser
-# unmaintained) was retired by removing the crate instead of the warning: both
-# routes to it were cut in #440 — `aa_text` parses with skrifa now, and winit
-# takes `wayland-csd-adwaita-notitle`.
+# The last entry (RUSTSEC-2026-0192, ttf-parser) was retired in #440 by removing
+# the crate rather than the warning — both routes to it were cut.
 ignore = []
 
 [licenses]
