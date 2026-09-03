@@ -1,6 +1,6 @@
 //! The playback seam: `AudioSink` is the ONE device boundary, so everything above
 //! it is device-free and tests (or CI runners with no sound card) ride
-//! [`NullSink`].
+//! `NullSink` — `cfg(test)`-only, so it cannot be an intra-doc link.
 
 use std::sync::Arc;
 

@@ -1,6 +1,6 @@
 //! Shared anti-aliased text rasterizer (Monaspace Neon) for the binary's pixel
-//! surfaces — the floating window's name badges + wall board and the snapshot
-//! example's cell text + `--proof` panel.
+//! surfaces — the floating window's name badges + wall board, and the examples'
+//! cell text, `--proof` panel and cutaway.
 //!
 //! Kept BINARY-side on purpose: `pixtuoid-scene` also compiles to wasm for the
 //! web hero, so it stays font-dep-free — no font parser, no embedded font, no
