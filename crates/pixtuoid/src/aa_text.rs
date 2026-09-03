@@ -3,8 +3,8 @@
 //! example's cell text + `--proof` panel.
 //!
 //! Kept BINARY-side on purpose: `pixtuoid-scene` also compiles to wasm for the
-//! web hero, so it stays font-dep-free — no `ab_glyph`, no embedded font, no wasm
-//! bundle bloat.
+//! web hero, so it stays font-dep-free — no font parser, no embedded font, no
+//! wasm bundle bloat.
 //!
 //! ONE face by DESIGN. Monaspace Neon natively covers the office's FULL symbol
 //! vocabulary (`★ ◐ ⬢ ▮ ▯ ↳ ◷ ▤`), which JetBrains Mono does not — not even the
@@ -12,21 +12,78 @@
 //! render glyph MUST be Monaspace-covered, never a second face; the gate is
 //! `office_symbol_vocabulary_is_fully_covered`.
 //!
+//! TWO crates, not one: [`skrifa`] parses the face and emits outlines,
+//! [`ab_glyph_rasterizer`] turns an outline into coverage. Both halves were
+//! `ab_glyph`, whose parsing half pulls the unmaintained ttf-parser
+//! (RUSTSEC-2026-0192, #440) while its rasterizing half depends on nothing — so
+//! only the parser was replaced. Keeping the rasterizer is what makes the AA
+//! curve, and therefore every committed still, survive the swap untouched; a
+//! whole-stack move (`swash`, or `skrifa` + `zeno`) would have shifted every
+//! edge for no gain.
+//!
 //! Surface-agnostic: [`draw_text_at`] hands each lit pixel's coverage to a
 //! `put(x, y, coverage)` closure, so every caller applies its own pixel-format
 //! blend — all through [`blend_channel`], the one blend curve.
 
 use std::sync::LazyLock;
 
-use ab_glyph::{point, Font, FontRef, GlyphId, PxScale, ScaleFont};
+use ab_glyph_rasterizer::{point, Point, Rasterizer};
+use skrifa::charmap::Charmap;
+use skrifa::instance::{LocationRef, Size};
+use skrifa::metrics::GlyphMetrics;
+use skrifa::outline::{DrawSettings, OutlineGlyphCollection, OutlinePen};
+use skrifa::{FontRef, GlyphId, MetadataProvider};
 
 /// SemiBold is the weight picked by eye for these small-size pixel surfaces.
 /// License text in `fonts/OFL-Monaspace.txt`.
 const FONT_BYTES: &[u8] = include_bytes!("../fonts/MonaspaceNeon-SemiBold.otf");
 
 static FONT: LazyLock<FontRef<'static>> = LazyLock::new(|| {
-    FontRef::try_from_slice(FONT_BYTES).expect("bundled Monaspace Neon OTF must parse")
+    FontRef::new(FONT_BYTES).expect("bundled Monaspace Neon OTF must parse")
 });
+
+/// The face's derived lookup structures, built once.
+///
+/// skrifa keeps these separate from the font data so a caller can retain them,
+/// and a caller should: [`MetadataProvider::charmap`] re-runs cmap subtable
+/// SELECTION on every call, so building one per character — which is how this
+/// module first read — makes glyph lookup cost a table scan.
+///
+/// Sizing is not baked in. Metrics are held in font units and scaled by
+/// [`px_per_unit`] at the call, so one instance serves every `px` the office
+/// asks for.
+struct Face {
+    charmap: Charmap<'static>,
+    outlines: OutlineGlyphCollection<'static>,
+    metrics: GlyphMetrics<'static>,
+    /// Vertical metrics in font units: ascent, descent (negative), line gap.
+    v_metrics: (f32, f32, f32),
+}
+
+static FACE: LazyLock<Face> = LazyLock::new(|| {
+    let font: &'static FontRef<'static> = &FONT;
+    let m = font.metrics(Size::unscaled(), LocationRef::default());
+    Face {
+        charmap: font.charmap(),
+        outlines: font.outline_glyphs(),
+        metrics: font.glyph_metrics(Size::unscaled(), LocationRef::default()),
+        v_metrics: (m.ascent, m.descent, m.leading),
+    }
+});
+
+/// Pixels per font unit at `px`, where `px` spans ascent−descent — NOT the em
+/// square, which for this face is a different number (1000 units against 1155).
+///
+/// That is the contract every call site was measured against (`LABEL_FONT_PX`,
+/// `CELL_FONT_PX`, the `--proof` panel's sizes), so it is converted here rather
+/// than re-tuned at ~40 call sites. It also means metrics are read unscaled and
+/// scaled here, instead of instancing the face at a ppem: same linear map for an
+/// unhinted outline, and it keeps `gen-check`'s zero-threshold pixel diff green
+/// across the swap instead of costing a `just gen` reshoot.
+fn px_per_unit(px: f32) -> f32 {
+    let (ascent, descent, _) = FACE.v_metrics;
+    px / (ascent - descent)
+}
 
 /// Linear per-channel coverage blend of `fg` over `bg` — THE one blend curve
 /// every AA-text surface composites with, so a future curve change (e.g.
@@ -37,26 +94,109 @@ pub fn blend_channel(bg: u8, fg: u8, cov: f32) -> u8 {
     (bg as f32 + (fg as f32 - bg as f32) * a).round() as u8
 }
 
+/// The face's glyph for `ch`, falling back to `.notdef` on a cmap miss — so an
+/// uncovered char still advances by the tofu box rather than collapsing the run.
+fn glyph_id(ch: char) -> GlyphId {
+    FACE.charmap.map(ch).unwrap_or(GlyphId::NOTDEF)
+}
+
 /// Whether the face covers `ch` with a real glyph (not `.notdef`). Callers with a
 /// non-text fallback gate on this so an uncovered symbol renders as the fallback,
 /// never tofu.
 pub fn has_glyph(ch: char) -> bool {
-    FONT.glyph_id(ch) != GlyphId(0)
+    glyph_id(ch) != GlyphId::NOTDEF
 }
 
 /// Summing real advances, rather than `chars × one advance`, stays correct even
 /// for a future proportional face.
 pub fn text_width(s: &str, px: f32) -> i32 {
-    let sf = FONT.as_scaled(PxScale::from(px));
+    let k = px_per_unit(px);
     s.chars()
-        .map(|c| sf.h_advance(sf.glyph_id(c)))
+        .map(|c| FACE.metrics.advance_width(glyph_id(c)).unwrap_or(0.0) * k)
         .sum::<f32>()
         .round() as i32
 }
 
 pub fn line_height(px: f32) -> i32 {
-    let sf = FONT.as_scaled(PxScale::from(px));
-    (sf.ascent() - sf.descent() + sf.line_gap()).round() as i32
+    let (ascent, descent, leading) = FACE.v_metrics;
+    let k = px_per_unit(px);
+    // `descent` is negative below the baseline, so subtracting it adds depth.
+    ((ascent - descent + leading) * k).round() as i32
+}
+
+/// One outline segment in FONT UNITS, y-UP from the baseline.
+enum Seg {
+    Line(Point, Point),
+    Quad(Point, Point, Point),
+    Cubic(Point, Point, Point, Point),
+}
+
+/// Collects a glyph's outline and the control-point bounds of what it emitted.
+///
+/// Bounds and geometry come from ONE [`OutlineGlyph::draw`] pass because
+/// [`Rasterizer`] is sized at construction; skrifa's own `ControlBoundsPen`
+/// would mean drawing the glyph twice. Control bounds are looser than the true
+/// outline box, which costs a few all-zero coverage rows and nothing else: the
+/// absolute pixel a sample lands on is `origin + rasterizer coord`, and a larger
+/// box shifts both terms by the same integer.
+#[derive(Default)]
+struct OutlineCollector {
+    segs: Vec<Seg>,
+    /// `None` until the first point — a glyph like the space has no outline.
+    bounds: Option<(f32, f32, f32, f32)>,
+    start: Point,
+    last: Point,
+}
+
+impl OutlineCollector {
+    fn see(&mut self, p: Point) {
+        self.bounds = Some(match self.bounds {
+            None => (p.x, p.y, p.x, p.y),
+            Some((x0, y0, x1, y1)) => (x0.min(p.x), y0.min(p.y), x1.max(p.x), y1.max(p.y)),
+        });
+    }
+}
+
+impl OutlinePen for OutlineCollector {
+    fn move_to(&mut self, x: f32, y: f32) {
+        let p = point(x, y);
+        self.see(p);
+        self.start = p;
+        self.last = p;
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        let p = point(x, y);
+        self.see(p);
+        self.segs.push(Seg::Line(self.last, p));
+        self.last = p;
+    }
+
+    fn quad_to(&mut self, cx: f32, cy: f32, x: f32, y: f32) {
+        let (c, p) = (point(cx, cy), point(x, y));
+        self.see(c);
+        self.see(p);
+        self.segs.push(Seg::Quad(self.last, c, p));
+        self.last = p;
+    }
+
+    fn curve_to(&mut self, cx0: f32, cy0: f32, cx1: f32, cy1: f32, x: f32, y: f32) {
+        let (c0, c1, p) = (point(cx0, cy0), point(cx1, cy1), point(x, y));
+        self.see(c0);
+        self.see(c1);
+        self.see(p);
+        self.segs.push(Seg::Cubic(self.last, c0, c1, p));
+        self.last = p;
+    }
+
+    fn close(&mut self) {
+        // The rasterizer accumulates winding along explicit edges, so the
+        // contour's closing edge has to be one — skrifa leaves it implicit.
+        if self.last != self.start {
+            self.segs.push(Seg::Line(self.last, self.start));
+        }
+        self.last = self.start;
+    }
 }
 
 /// Rasterize `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
@@ -70,23 +210,64 @@ pub fn draw_text_at(
     px: f32,
     mut put: impl FnMut(i32, i32, f32),
 ) -> i32 {
-    let scale = PxScale::from(px);
-    let sf = FONT.as_scaled(scale);
-    let baseline_y = top_y as f32 + sf.ascent();
+    let k = px_per_unit(px);
+    let (ascent, _, _) = FACE.v_metrics;
+    let baseline_y = top_y as f32 + ascent * k;
     let mut cursor_x = x as f32;
     for ch in s.chars() {
-        let gid = sf.glyph_id(ch);
-        let glyph = gid.with_scale_and_position(scale, point(cursor_x, baseline_y));
-        if let Some(outlined) = FONT.outline_glyph(glyph) {
-            let bounds = outlined.px_bounds();
-            let (ox, oy) = (bounds.min.x.round() as i32, bounds.min.y.round() as i32);
-            outlined.draw(|gx, gy, coverage| {
-                put(ox + gx as i32, oy + gy as i32, coverage);
-            });
+        let gid = glyph_id(ch);
+        if let Some(glyph) = FACE.outlines.get(gid) {
+            let mut collector = OutlineCollector::default();
+            // A malformed charstring yields no outline; the run must still
+            // advance, so a draw error is skipped rather than propagated.
+            if glyph
+                .draw(
+                    DrawSettings::unhinted(Size::unscaled(), LocationRef::default()),
+                    &mut collector,
+                )
+                .is_ok()
+            {
+                draw_outline(&collector, k, cursor_x, baseline_y, &mut put);
+            }
         }
-        cursor_x += sf.h_advance(gid);
+        cursor_x += FACE.metrics.advance_width(gid).unwrap_or(0.0) * k;
     }
     (cursor_x - x as f32).round() as i32
+}
+
+/// Scale `collector`'s font-unit outline by `k`, flip it onto the device grid at
+/// `(pen_x, baseline_y)`, and hand every covered pixel to `put` in absolute
+/// coordinates.
+fn draw_outline(
+    collector: &OutlineCollector,
+    k: f32,
+    pen_x: f32,
+    baseline_y: f32,
+    put: &mut impl FnMut(i32, i32, f32),
+) {
+    let Some((min_x, min_y, max_x, max_y)) = collector.bounds else {
+        return;
+    };
+    // y flips here: the outline's max_y is the glyph's TOP, the smaller device row.
+    let ox = (pen_x + min_x * k).floor();
+    let oy = (baseline_y - max_y * k).floor();
+    let w = ((pen_x + max_x * k).ceil() - ox) as usize;
+    let h = ((baseline_y - min_y * k).ceil() - oy) as usize;
+    if w == 0 || h == 0 {
+        return;
+    }
+    let (off_x, off_y) = (pen_x - ox, baseline_y - oy);
+    let dev = |p: &Point| point(p.x * k + off_x, off_y - p.y * k);
+    let mut r = Rasterizer::new(w, h);
+    for seg in &collector.segs {
+        match seg {
+            Seg::Line(p0, p1) => r.draw_line(dev(p0), dev(p1)),
+            Seg::Quad(p0, p1, p2) => r.draw_quad(dev(p0), dev(p1), dev(p2)),
+            Seg::Cubic(p0, p1, p2, p3) => r.draw_cubic(dev(p0), dev(p1), dev(p2), dev(p3)),
+        }
+    }
+    let (ox, oy) = (ox as i32, oy as i32);
+    r.for_each_pixel_2d(|gx, gy, coverage| put(ox + gx as i32, oy + gy as i32, coverage));
 }
 
 #[cfg(test)]

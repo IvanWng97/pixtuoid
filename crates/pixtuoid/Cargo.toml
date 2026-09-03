@@ -21,11 +21,16 @@ path = "src/main.rs"
 [dependencies]
 pixtuoid-core  = { path = "../pixtuoid-core", version = "0.18.0" }
 pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.18.0" }
-# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces. Its
-# per-pixel coverage callback (`OutlinedGlyph::draw`) suits our callback-based
-# `aa_text::draw_text_at` better than fontdue's raw-bitmap API. Binary-only: the
-# wasm-compiled engine never sees it, and renders text as a DOM overlay instead.
-ab_glyph = "0.2"
+# AA text rasterizer (Monaspace Neon) for the binary's pixel surfaces, SPLIT in
+# two on purpose: skrifa parses the face and emits outlines, ab_glyph_rasterizer
+# turns those outlines into per-pixel coverage. The pair was `ab_glyph`, whose
+# parsing half pulls the unmaintained ttf-parser (RUSTSEC-2026-0192, #440); its
+# rasterizing half is dependency-free and is the one kept, so the coverage the
+# committed stills were rendered with does not change. Rejected alternatives are
+# on `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees
+# this, and renders text as a DOM overlay instead.
+skrifa = "0.46"
+ab_glyph_rasterizer = "0.1"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
 # Terminal graphics (kitty/iTerm2/SIXEL) for the cutaway profile — capability
