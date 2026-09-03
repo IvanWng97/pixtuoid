@@ -117,7 +117,7 @@ impl AudioController {
         Self::new_with(muted, volume, config_path, respawn)
     }
 
-    /// [`new`] with the boot-spawn injected, so a test can pin the boot decision
+    /// [`Self::new`] with the boot-spawn injected, so a test can pin the boot decision
     /// without opening an output device. `pub(crate)` for the same reason it
     /// exists: `tui`'s key-action tests need an UNMUTED controller, and an
     /// unmuted `new` boot-spawns the real device.

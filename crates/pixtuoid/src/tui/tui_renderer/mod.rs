@@ -367,7 +367,7 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         }
     }
     /// Composite two floors sliding in/out during a `FloorTransition`. `nf` is the
-    /// live floor count from [`render`].
+    /// live floor count from [`Self::render`].
     fn render_transition(
         &mut self,
         scene: &SceneState,
