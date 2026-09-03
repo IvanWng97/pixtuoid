@@ -10,16 +10,11 @@ all-features = true
 # behind a green run. Needs cargo-deny 0.20.2 (what cargo-deny-action@v2.1.1 pins);
 # an older cargo-deny rejects the whole file over this key.
 unused-ignored-advisory = "deny"
-# #440 tracks dropping this ignore, but there is no upstream release to wait for:
-# RUSTSEC-2026-0192 is `informational = "unmaintained"` with `patched = []`. It
-# clears only when ab_glyph moves off ttf-parser, or when we drop ab_glyph.
-ignore = [
-    # ttf-parser (unmaintained) enters by TWO routes — our own `ab_glyph` dep in
-    # src/aa_text.rs, and `sctk-adwaita <- winit` for the Wayland CSD titlebar —
-    # so winit moving off ab_glyph would NOT clear this row. Neither route takes
-    # attacker input: both parse a compiled-in or local system font.
-    "RUSTSEC-2026-0192",
-]
+# No advisory is ignored. The last one (RUSTSEC-2026-0192, ttf-parser
+# unmaintained) was retired by removing the crate instead of the warning: both
+# routes to it were cut in #440 — `aa_text` parses with skrifa now, and winit
+# takes `wayland-csd-adwaita-notitle`.
+ignore = []
 
 [licenses]
 allow = [

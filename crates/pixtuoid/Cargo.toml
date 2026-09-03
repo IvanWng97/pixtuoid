@@ -67,7 +67,22 @@ open               = "5"
 # The `pixtuoid floating` desktop window (binary-only — pixtuoid-core stays
 # window-free): winit is the frameless always-on-top window + main-thread event
 # loop, softbuffer the CPU blit of the office RgbBuffer into it (no GPU).
-winit              = "0.30"
+#
+# The feature list is winit's own default set with ONE substitution, so dropping
+# `default-features` must keep the other four verbatim — a missing one is a
+# Linux RUNTIME failure (no backend), not a build error. The substitution:
+# `wayland-csd-adwaita` -> `-notitle`, which is the same sctk-adwaita decoration
+# minus its optional `ab_glyph` title-text renderer. That font stack was pure
+# weight here — `window.rs` builds with `with_decorations(false)`, so the
+# titlebar it draws into never exists — and it was the second of the two paths
+# putting the unmaintained ttf-parser in the graph (RUSTSEC-2026-0192, #440).
+winit = { version = "0.30", default-features = false, features = [
+    "rwh_06",
+    "x11",
+    "wayland",
+    "wayland-dlopen",
+    "wayland-csd-adwaita-notitle",
+] }
 softbuffer         = "0.4"
 clap_complete = "4.6.5"
 clap_mangen = "0.3.0"
