@@ -216,6 +216,11 @@ pub fn draw_text_at(
 /// Scale `collector`'s font-unit outline by `k`, flip it onto the device grid at
 /// `(pen_x, baseline_y)`, and hand every covered pixel to `put` in absolute
 /// coordinates.
+///
+/// Each edge of the box rounds the SCALED offset against the pen's fraction and
+/// re-adds its integer part, never `pen + offset`: that sum drops the offset's
+/// low bits whenever it lands within an ulp of an integer, moving the box a whole
+/// device pixel on either axis. `ab_glyph`'s `px_bounds` split it the same way.
 fn draw_outline(
     collector: &OutlineCollector,
     k: f32,
@@ -226,10 +231,6 @@ fn draw_outline(
     let Some((min_x, min_y, max_x, max_y)) = collector.bounds else {
         return;
     };
-    // Round the SCALED offset against the pen's fraction and re-add its integer
-    // part, never `pen + offset` — that sum loses the offset's low bits once the
-    // pen is large, moving a whole device pixel (`ab_glyph`'s `px_bounds` does
-    // the same, for the same reason).
     let (x_trunc, x_fract) = (pen_x.trunc(), pen_x.fract());
     let (y_trunc, y_fract) = (baseline_y.trunc(), baseline_y.fract());
     // y flips here: the outline's max_y is the glyph's TOP, the smaller device row.
