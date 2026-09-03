@@ -38,9 +38,8 @@ use skrifa::{FontRef, GlyphId, MetadataProvider};
 /// License text in `fonts/OFL-Monaspace.txt`.
 const FONT_BYTES: &[u8] = include_bytes!("../fonts/MonaspaceNeon-SemiBold.otf");
 
-static FONT: LazyLock<FontRef<'static>> = LazyLock::new(|| {
-    FontRef::new(FONT_BYTES).expect("bundled Monaspace Neon OTF must parse")
-});
+static FONT: LazyLock<FontRef<'static>> =
+    LazyLock::new(|| FontRef::new(FONT_BYTES).expect("bundled Monaspace Neon OTF must parse"));
 
 /// The face's derived lookup structures, built once.
 ///
