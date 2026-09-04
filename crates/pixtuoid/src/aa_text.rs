@@ -115,8 +115,9 @@ enum Seg {
 ///
 /// Bounds and geometry come from ONE draw pass because [`Rasterizer`] is sized
 /// at construction; skrifa's `ControlBoundsPen` would draw the glyph twice.
-/// Control points can only widen the box, and a wider box is inert: a sample's
-/// absolute pixel is `origin + rasterizer coord`, so both shift by one integer.
+/// Control points can only widen the box, which costs zero-coverage `put` calls
+/// and nothing else: a sample's absolute pixel is `origin + rasterizer coord`,
+/// and widening shifts both terms by the SAME integer.
 #[derive(Default)]
 struct OutlineCollector {
     segs: Vec<Seg>,
@@ -178,8 +179,9 @@ impl OutlinePen for OutlineCollector {
 }
 
 /// Rasterize `s` in the AA face at pixel size `px`, top-left at `(x, top_y)`,
-/// calling `put(px_x, px_y, coverage)` for every lit pixel (`coverage` ∈ `[0,1]`
-/// is the AA grayscale strength). Returns the total advance width, so a caller
+/// calling `put(px_x, px_y, coverage)` for every pixel of each glyph's box —
+/// `coverage` ∈ `[0,1]` is the AA grayscale strength, and is 0 where uncovered,
+/// so callers that write unconditionally must gate on it. Returns the advance, so a caller
 /// placing a second run needn't recompute it via [`text_width`].
 pub fn draw_text_at(
     s: &str,
