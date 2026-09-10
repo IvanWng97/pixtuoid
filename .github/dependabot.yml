@@ -26,6 +26,12 @@ updates:
       - dependency-name: "x11rb"
         update-types:
           ["version-update:semver-minor", "version-update:semver-major"]
+      # winit's default set is copied verbatim into crates/pixtuoid/Cargo.toml and
+      # cargo cannot subtract one default, so a bump ADDING a default silently
+      # drops a backend — a Linux runtime failure no gate catches. Bump by hand.
+      - dependency-name: "winit"
+        update-types:
+          ["version-update:semver-minor", "version-update:semver-major"]
     cooldown:
       default-days: 7
 
