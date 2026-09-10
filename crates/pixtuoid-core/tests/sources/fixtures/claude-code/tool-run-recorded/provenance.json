@@ -1,8 +1,8 @@
 {
-  "captured": "2026-08-31",
+  "captured": "2026-09-10",
   "cli": "claude",
   "command": "claude -p {prompt} --allowedTools Read Bash",
-  "note": "Recorded with the machine\u0027s rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript\u0027s own tool_use rows are CC\u0027s. Redacted: the recorder's own skill inventory (names + description text, no credentials) to generic placeholders, and the recorder's home path to /Users/dev in hook payloads \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields.",
   "origin": "recorded",
-  "version": "2.1.251 (Claude Code)"
+  "version": "2.1.261 (Claude Code)",
+  "note": "Recorded with the machine's rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript's own tool_use rows are CC's. Redacted: the recorder's own skill inventory (names + description text, no credentials) to generic placeholders; the `instructions` attachment (the recorder's own global CLAUDE.md and RTK.md, new at 2.1.261 \u2014 both its file contents and its rendered copy) to a placeholder; and the recorder's home path to /Users/dev \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields. Redacted: the recorder's identity (email, mem0 user id) embedded by the `session_context`/`instructions` attachments and the prompt snapshot, to dev placeholders. The harness's own bot attribution address embedded in the prompt snapshot is placeholdered to noreply@example.com."
 }

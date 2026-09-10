@@ -1,67 +1,68 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - SessionStart:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
-    cwd: /private/tmp/pixtuoid-capture/proj
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
+    cwd: /Users/dev/Desktop/pixtuoid.nosync/.claude/worktrees/fixtures-latest
     parent_id: ~
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityStart:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_0OPp6mWVHrO31cMuZIhb3207
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_z5M3zgJ03hTqEpF6sAh19262
     detail:
       Generic:
-        display: "read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "read: /Users/dev/Desktop/pixtuoid.nosync/.clau…"
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityEnd:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_0OPp6mWVHrO31cMuZIhb3207
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_z5M3zgJ03hTqEpF6sAh19262
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityStart:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_ET_ZnCUOd9ADFuYjLm7Vy4F2193
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_ySdT6UskAsUaZUGjs7Yo8187
     detail:
       Generic:
-        display: "read: /private/tmp/pixtuoid-capture/proj"
+        display: "bash: ls -la"
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityEnd:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_ET_ZnCUOd9ADFuYjLm7Vy4F2193
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_ySdT6UskAsUaZUGjs7Yo8187
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityStart:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_ET_Pxtlu7WlXUZ98pK0hQVe6197
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_7spWRAdTdbSHeQxOnicB4110
     detail:
       Generic:
-        display: "read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "read: /Users/dev/Desktop/pixtuoid.nosync/.clau…"
 - Identity:
-    agent_id: 2400186707517326060
+    agent_id: 17086506634336011998
     source: opencode
-    session_id: ses_ffc90d9a6ffeiXeDhge5OJahst
+    session_id: ses_f7341576cffeJ0yWdViHzpPBWl
     cwd: ~
 - ActivityEnd:
-    agent_id: 2400186707517326060
-    tool_use_id: call_00_ET_Pxtlu7WlXUZ98pK0hQVe6197
+    agent_id: 17086506634336011998
+    tool_use_id: call_00_7spWRAdTdbSHeQxOnicB4110

@@ -388,7 +388,7 @@ pub fn daemon_sources() -> impl Iterator<Item = (&'static str, crate::source::da
 const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     name: claude_code::SOURCE_NAME,
     label_prefix: "cc",
-    verified_version: "2.1.251",
+    verified_version: "2.1.261",
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     kind: SourceKind::Agent {
@@ -424,7 +424,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
 const CODEX: SourceDescriptor = SourceDescriptor {
     name: codex::SOURCE_NAME,
     label_prefix: "cx",
-    verified_version: "0.147.0",
+    verified_version: "0.153.4",
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
     kind: SourceKind::Agent {
@@ -498,7 +498,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
 const REASONIX: SourceDescriptor = SourceDescriptor {
     name: reasonix::SOURCE_NAME,
     label_prefix: "rx",
-    verified_version: "1.25.2",
+    verified_version: "1.37.0",
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -610,7 +610,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
-    verified_version: "1.18.15",
+    verified_version: "1.18.20",
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -691,7 +691,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
-    verified_version: "2026.08.11",
+    verified_version: "2026.09.02",
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -726,7 +726,7 @@ const CURSOR: SourceDescriptor = SourceDescriptor {
 const HERMES: SourceDescriptor = SourceDescriptor {
     name: hermes::SOURCE_NAME,
     label_prefix: "hm",
-    verified_version: "0.20.1",
+    verified_version: "0.21.0",
     version_probe: Some(&["hermes", "--version"]),
     home_env: Some("HERMES_HOME"),
     kind: SourceKind::Agent {
@@ -811,7 +811,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
-    verified_version: "18.0.11",
+    verified_version: "18.1.10",
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
     kind: SourceKind::Agent {
@@ -869,7 +869,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
 const KIMI: SourceDescriptor = SourceDescriptor {
     name: kimi::SOURCE_NAME,
     label_prefix: "km",
-    verified_version: "0.36.0",
+    verified_version: "0.40.1",
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {

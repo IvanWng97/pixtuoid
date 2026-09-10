@@ -1,8 +1,9 @@
 {
-  "origin": "recorded",
+  "captured": "2026-09-10",
   "cli": "cursor-agent",
-  "version": "2026.08.11-e8db854",
-  "captured": "2026-08-15",
-  "command": "cursor-agent -p --trust '<read a missing file>'",
-  "note": "29 payloads, 25 distinct, 8 carrying the `_pixtuoid_source` stamp: cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes. The unstamped copies are what `decoder`'s cross-fire guard drops on `cursor_version`, and the stamped ones carry the whole arc — both halves are pinned here. Redacted: home path rewritten to /Users/dev; an account address rewritten to dev@. The bytes are otherwise verbatim. `captured` was 2026-08-14 (the shell recorder dated in LOCAL time while the shim stamped UTC); corrected to 2026-08-15 from the payloads' own `_shim_ts_ms`."
+  "command": "cursor-agent -p --trust --model auto {prompt}",
+  "origin": "recorded",
+  "prompt": "Read the file does-not-exist.txt in this directory and tell me exactly what happened.",
+  "version": "2026.09.02-c22c1a3",
+  "note": "Recorded with `--model auto`: cursor-agent on a free plan refuses named models. Redacted: `user_email` to dev@example.com; home path to /Users/dev; the bytes are otherwise verbatim. Cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes; the unstamped copies are what the decoder must ignore."
 }

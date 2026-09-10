@@ -1,183 +1,130 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - SessionStart:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5-fast
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
     detail:
       Generic:
         display: "Shell: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 6817933303663452000
-    tool_use_id: ~
-    detail:
-      Generic:
-        display: "Shell: ls /private/tmp/pixtuoid-capture/proj"
-- ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 6817933303663452000
-    source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 6817933303663452000
-    tool_use_id: ~
-- ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 6817933303663452000
-    source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityStart:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
     detail:
       Generic:
         display: "Grep: /private/tmp/pixtuoid-capture/proj"
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 15643239810957212793
+    tool_use_id: ~
+- ModelInfo:
+    agent_id: 15643239810957212793
+    model: default
+    effort: ~
+- Identity:
+    agent_id: 15643239810957212793
+    source: cursor
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - Identity:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
+    session_id: bada5670-653c-495d-8c88-9bb9915731eb
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 6817933303663452000
-    source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 6817933303663452000
-    tool_use_id: ~
-- ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 6817933303663452000
-    source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityStart:
-    agent_id: 6817933303663452000
-    tool_use_id: ~
-    detail:
-      Generic:
-        display: "Shell: ls"
-- ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 6817933303663452000
-    source: cursor
-    session_id: a46da57b-26eb-4188-b248-a94127226f2b
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 6817933303663452000
-    tool_use_id: ~
-- ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5
+    agent_id: 15643239810957212793
+    model: default
     effort: ~
 - SessionEnd:
-    agent_id: 6817933303663452000
+    agent_id: 15643239810957212793
     as_child: false
 - ModelInfo:
-    agent_id: 6817933303663452000
-    model: composer-2.5-fast
+    agent_id: 15643239810957212793
+    model: default
     effort: ~

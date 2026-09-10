@@ -1,102 +1,49 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - SessionStart:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
+    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5-fast
+    agent_id: 1514888796505446628
+    model: default
     effort: ~
 - Identity:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
+    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     tool_use_id: ~
     detail:
       Generic:
-        display: "Read: /private/tmp/pixtuoid-capture/proj/MISSI…"
+        display: "Read: /private/tmp/pixtuoid-capture/proj/does-…"
 - ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
+    agent_id: 1514888796505446628
+    model: default
     effort: ~
 - Identity:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityStart:
-    agent_id: 17329733625647624444
-    tool_use_id: ~
-    detail:
-      Generic:
-        display: "Grep: /private/tmp/pixtuoid-capture/proj"
-- ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 17329733625647624444
-    source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
+    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 17329733625647624444
-    source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 17329733625647624444
-    tool_use_id: ~
-- ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 17329733625647624444
-    source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityStart:
-    agent_id: 17329733625647624444
-    tool_use_id: ~
-    detail:
-      Generic:
-        display: "Grep: /private/tmp/pixtuoid-capture/proj"
-- ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
-    effort: ~
-- Identity:
-    agent_id: 17329733625647624444
-    source: cursor
-    session_id: 56cdc99c-021b-43e9-a61d-477a29d62363
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 17329733625647624444
-    tool_use_id: ~
-- ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5
+    agent_id: 1514888796505446628
+    model: default
     effort: ~
 - SessionEnd:
-    agent_id: 17329733625647624444
+    agent_id: 1514888796505446628
     as_child: false
 - ModelInfo:
-    agent_id: 17329733625647624444
-    model: composer-2.5-fast
+    agent_id: 1514888796505446628
+    model: default
     effort: ~

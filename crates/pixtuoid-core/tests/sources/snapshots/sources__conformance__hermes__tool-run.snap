@@ -1,83 +1,84 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - SessionStart:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     model: gpt-4o-mini
     effort: ~
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
     detail:
       Generic:
         display: "read_file: NOTE.txt"
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 16541491197388335030
-    tool_use_id: ~
-- Identity:
-    agent_id: 16541491197388335030
-    source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
     detail:
       Generic:
-        display: "search_files: ."
+        display: search_files
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 14947962463348497696
+    tool_use_id: ~
+- Identity:
+    agent_id: 14947962463348497696
+    source: hermes
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
     detail:
       Generic:
         display: "read_file: NOTE.txt"
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
 - Identity:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     source: hermes
-    session_id: 20260814_160213_3e22b6
+    session_id: 20260910_121431_d47f10
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 16541491197388335030
+    agent_id: 14947962463348497696
     model: gpt-4o-mini
     effort: ~
