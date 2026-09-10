@@ -302,7 +302,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
-    DSH_SESSION_TYPES_URL: Anchor(r"'assistant/chunk'", "`assistant/chunk`"),
+    DSH_SESSION_TYPES_URL: Anchor(r"export interface SessionEventMap\b", "`SessionEventMap`"),
     DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
     DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
@@ -555,6 +555,11 @@ CODEX_KNOWN_OMITTED: dict[str, str] = {
     "Started/Closed bracket the voice layer, speech segments are content no "
     "decoder reads, and `BemItemPromoted` re-presents items already decoded "
     "from `response_item` (upstream: 'sparse, model-invisible facts')",
+    "retained_context": "host-only, model-invisible guardian records "
+    "(history/src/retained_context.rs: 'Sparse, model-invisible updates. Only "
+    "the host may produce these records.'); the sole variant `verified_answer` "
+    "is authorization evidence — no lifecycle, activity, model or token signal. "
+    "Sibling of `turn_context` by suffix only",
 }
 
 
