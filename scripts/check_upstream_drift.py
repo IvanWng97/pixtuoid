@@ -569,6 +569,11 @@ GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "subagent_progress": "cumulative per-child totals (turns, tool calls); "
     "summing a running total into the delta-accumulating reducer double-counts "
     "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
+    "hook_run_started": "grok's pager spinner phase — 'the turn is blocked on "
+    "an awaited hook batch that just started' (notification.rs:571-582); its "
+    "END is `hook_execution`, which decodes to nothing except session_end, so an "
+    "ActivityStart here would strand the session Active (codex's "
+    "`local_shell_call` precedent)",
 }
 
 
