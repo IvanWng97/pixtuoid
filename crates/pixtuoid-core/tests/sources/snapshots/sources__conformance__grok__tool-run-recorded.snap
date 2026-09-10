@@ -1,38 +1,120 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
+assertion_line: 347
 expression: events
 ---
 - ModelInfo:
-    agent_id: 15426737143327791310
+    agent_id: 2367239286820090108
     model: grok-4.6
     effort: ~
 - ActivityStart:
-    agent_id: 15426737143327791310
-    tool_use_id: call-bd65c18c-2dfa-4a7f-9c22-be373608a597-0
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-0
     detail:
       Generic:
         display: read_file
-- ActivityEnd:
-    agent_id: 15426737143327791310
-    tool_use_id: call-bd65c18c-2dfa-4a7f-9c22-be373608a597-0
 - ActivityStart:
-    agent_id: 15426737143327791310
-    tool_use_id: call-795cca12-1399-40b5-b115-fba6d13e5c48-1
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-1
     detail:
       Generic:
         display: list_dir
 - ActivityEnd:
-    agent_id: 15426737143327791310
-    tool_use_id: call-795cca12-1399-40b5-b115-fba6d13e5c48-1
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-0
+- ActivityEnd:
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-1
 - ActivityStart:
-    agent_id: 15426737143327791310
-    tool_use_id: call-fe2d87a7-0725-4303-b919-436e3bb4131e-2
+    agent_id: 2367239286820090108
+    tool_use_id: call-847b07e0-fcdb-445b-9cf9-87dc53de5f64-2
     detail:
       Generic:
         display: read_file
 - ActivityEnd:
-    agent_id: 15426737143327791310
-    tool_use_id: call-fe2d87a7-0725-4303-b919-436e3bb4131e-2
+    agent_id: 2367239286820090108
+    tool_use_id: call-847b07e0-fcdb-445b-9cf9-87dc53de5f64-2
 - ActivityEnd:
-    agent_id: 15426737143327791310
+    agent_id: 2367239286820090108
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 2367239286820090108
+    as_child: false
+- SessionStart:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- SessionStart:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-0
+    detail:
+      Generic:
+        display: read_file
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-1
+    detail:
+      Generic:
+        display: list_dir
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-0
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 2367239286820090108
+    tool_use_id: call-4b53c4ac-01c8-4dd2-aa66-524267c6c701-1
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 2367239286820090108
+    tool_use_id: call-847b07e0-fcdb-445b-9cf9-87dc53de5f64-2
+    detail:
+      Generic:
+        display: read_file
+- Identity:
+    agent_id: 2367239286820090108
+    source: grok
+    session_id: 01a08c62-ddfb-7f90-9607-b73abc75a0af
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 2367239286820090108
+    tool_use_id: call-847b07e0-fcdb-445b-9cf9-87dc53de5f64-2
+- ActivityEnd:
+    agent_id: 2367239286820090108
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 2367239286820090108
+    as_child: false
+- ActivityEnd:
+    agent_id: 2367239286820090108
     tool_use_id: ~

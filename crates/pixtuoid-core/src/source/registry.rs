@@ -759,7 +759,7 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 const GROK: SourceDescriptor = SourceDescriptor {
     name: grok::SOURCE_NAME,
     label_prefix: "gk",
-    verified_version: "0.2.102",
+    verified_version: "1.0.25",
     version_probe: Some(&["grok", "--version"]),
     home_env: Some("GROK_HOME"),
     kind: SourceKind::Agent {
