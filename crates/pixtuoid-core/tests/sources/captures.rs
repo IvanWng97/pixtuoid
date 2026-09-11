@@ -457,6 +457,18 @@ fn a_recorded_capture_that_was_edited_says_so() {
         }
     }
     sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
+    // `example-` names are a redaction's own signature, and the sentinel set knew
+    // only path and address shapes — so nine fixtures had their plugin roster
+    // replaced with placeholders while this test stayed green.
+    sentinels.extend(
+        [
+            "example-skill",
+            "example-agent",
+            "example-plugin",
+            "mcp__example",
+        ]
+        .map(String::from),
+    );
     // A path sentinel must end at a real boundary: bare `contains` let a longer
     // account name that merely STARTS with a placeholder excuse itself.
     let hit = |body: &str, s: &str| {
