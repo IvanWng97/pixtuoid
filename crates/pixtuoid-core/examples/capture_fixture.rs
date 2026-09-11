@@ -474,6 +474,12 @@ mod recorder {
     /// cases of each: a CLI picks one and its next version may pick the other —
     /// `userEmail` arrived at claude-code 2.1.261 beside the `user_email` already
     /// listed, and slipped past this gate.
+    ///
+    /// A FILENAME cannot join this list. `CLAUDE.md` and `AGENTS.md` read like the
+    /// attachment that leaked, but both CLIs name them in stock prompt prose and a
+    /// captured `ls -la` prints them, so the marker refuses four sources on bytes
+    /// carrying no operator at all — and no redaction clears it. `userId` fails the
+    /// same way inside copilot's own `edit` tool example.
     const PII_MARKERS: &[&str] = &[
         "user_email",
         "userEmail",
@@ -481,17 +487,11 @@ mod recorder {
         "account_id",
         "accountId",
         "user_id",
-        "userId",
         "mcp__",
         "obsidian",
         "api_key",
         "\"token\"",
         "Bearer ",
-        // A loaded global-instructions file is the operator's whole tooling
-        // roster, embedded verbatim by the CLI and again in its rendered copy.
-        // codex 0.153.4 and claude-code 2.1.261 each began doing this.
-        "CLAUDE.md",
-        "AGENTS.md",
     ];
 
     /// Strings this machine would leak into a capture.
@@ -677,16 +677,7 @@ mod recorder {
             for (body, why) in [
                 (r#"{"userEmail":"a@b.c"}"#, "camelCase twin of user_email"),
                 (r#"{"user_id":"x"}"#, "mem0 user id"),
-                (r#"{"userId":"x"}"#, "its camelCase twin"),
                 (r#"{"accountId":"x"}"#, "camelCase twin of account_id"),
-                (
-                    r##"{"type":"text","text":"# AGENTS.md instructions"}"##,
-                    "codex 0.153.4's loaded global instructions",
-                ),
-                (
-                    r#"{"content":"contents of /Users/x/.claude/CLAUDE.md"}"#,
-                    "claude-code 2.1.261's instructions attachment",
-                ),
             ] {
                 assert!(
                     !pii_hits(body, &none).is_empty(),
