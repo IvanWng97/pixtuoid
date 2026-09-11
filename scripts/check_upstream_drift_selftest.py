@@ -381,6 +381,14 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
     )
     # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
     # is indistinguishable from an anchor that never needed a second half.
+    # `\s+`, not `\s*`: indentation is the only nesting signal a both-present
+    # anchor has, so a flush-left `interface Events` on ANOTHER module must fail.
+    a = d.ANCHORS[d.DSH_SESSION_INDEX_URL]
+    for indent, want in ((" ", True), ("\t", True), ("    ", True), ("", False)):
+        body = f"declare module '@deepseek-ai/cordis' {{\n{indent}interface Events {{\n}}\n}}\n"
+        got = bool(re.search(a.pattern, body)) and bool(re.search(a.also or "", body))
+        check(got is want, f"indent {indent!r}: anchored={got}, want {want}")
+
     for url in (d.DSH_SESSION_INDEX_URL,):
         check(
             d.ANCHORS[url].also is not None,

@@ -319,7 +319,7 @@ ANCHORS: dict[str, Anchor] = {
     DSH_SESSION_INDEX_URL: Anchor(
         r"declare module '@deepseek-ai/cordis' \{",
         "the cordis `Events` augmentation",
-        also=r"(?m)^  interface Events \{",
+        also=r"(?m)^\s+interface Events \{",
     ),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
