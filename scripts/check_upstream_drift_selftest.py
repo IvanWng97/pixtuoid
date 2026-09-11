@@ -197,6 +197,49 @@ def test_anchor_gate_fires_in_both_directions() -> None:
         d.fetch = real
 
 
+def test_a_multi_document_check_is_all_or_nothing() -> None:
+    """Where a name is declared in exactly one half, the UNION is the document: a
+    partial join would read a still-present name as VANISHED and file breaking
+    drift against a fetch failure. The count-against-a-literal spelling this
+    replaced also went False on a fully successful run once a third URL joined the
+    tuple, taking the whole check dark at exit 0."""
+    real = d.fetch
+    try:
+        urls = [(f"https://x.invalid/{i}", f"doc {i}") for i in range(3)]
+        bodies = {u: f"pub enum HookEvent {{ Pxv{i} }}\n" for i, (u, _) in enumerate(urls)}
+        anchor = d.Anchor(r"pub enum HookEvent\b", "`HookEvent`")
+        saved = {u: d.ANCHORS.get(u) for u, _ in urls}
+        try:
+            for u, _ in urls:
+                d.ANCHORS[u] = anchor
+
+            d.fetch = lambda u, _b=bodies: _b[u]
+            r = d.Report()
+            joined = d.fetch_all_anchored(urls, r)
+            check(joined is not None and all(b.strip() in joined for b in bodies.values()),
+                  f"every document present -> all of them joined, got {joined!r}")
+            check(not r.blind and not r.errors, f"a clean run files nothing, got {r.blind}")
+
+            # Exactly one short, and the whole check must abstain — never join the rest.
+            for drop, _ in urls:
+                d.fetch = lambda u, _d=drop, _b=bodies: (
+                    _UNANCHORED if u == _d else _b[u]
+                )
+                r = d.Report()
+                check(d.fetch_all_anchored(urls, r) is None,
+                      f"{drop} unanchored -> the whole check abstains")
+                check(len(r.blind) == 1 and not r.errors,
+                      f"{drop} unanchored -> one blind line, got {r.blind}")
+        finally:
+            for u, prev in saved.items():
+                if prev is None:
+                    d.ANCHORS.pop(u, None)
+                else:
+                    d.ANCHORS[u] = prev
+    finally:
+        d.fetch = real
+
+
 def test_report_is_the_only_way_to_file_a_finding() -> None:
     """`Report` owns the buckets, their wording, their order, and the exit code."""
     empty = d.Report()

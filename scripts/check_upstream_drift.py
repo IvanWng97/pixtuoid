@@ -954,12 +954,25 @@ def strip_rust_comments(body: str) -> str:
     return "".join(out)
 
 
+def fetch_all_anchored(targets: list[tuple[str, str]], report: Report) -> str | None:
+    """Every `(url, label)` joined, or `None` the moment one misses.
+
+    Where a checked name is declared in exactly one half, the UNION is the
+    document, so a single fetch failure must read as probe health and never as a
+    vanish. Counting survivors against a literal instead — `len(docs) == 2` beside
+    an inline 2-tuple — goes False on a fully successful run the day a third URL
+    joins the tuple, and the whole check then goes dark with no blind line and
+    exit 0 (the #454 shape the `exit_code` docstring names)."""
+    docs = [fetch_anchored(url, label, report) for url, label in targets]
+    return "\n".join(d for d in docs if d is not None) if all(docs) else None
+
+
 def report_stale_ledger(
     ledger_name: str,
     ledger: dict[str, str],
     upstream: set[str],
     enum_label: str,
-    report: "Report",
+    report: Report,
 ) -> None:
     """Report ledger rows naming a variant upstream no longer declares.
 
@@ -1569,13 +1582,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.omp_message_vocab is not None:
-        docs = [
-            t
-            for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)
-            if (t := fetch_anchored(u, "omp message vocabulary", report)) is not None
-        ]
-        if len(docs) == 2:
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "omp message vocabulary") for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)], report
+        )
+        if joined is not None:
             for name in sorted(ours.omp_message_vocab):
                 if f'"{name}"' not in joined:
                     report.add_breaking(
@@ -1611,14 +1621,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 check_omp_title_fields(text, ours.omp_title_fields, report)
 
     if ours.dsh_plugin_events is not None:
-        docs = [
-            fetch_anchored(DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types", report),
-            fetch_anchored(DSH_SESSION_TYPES_URL, "dsh session event types", report),
-            fetch_anchored(DSH_APPROVAL_TYPES_URL, "dsh approval types", report),
-            fetch_anchored(DSH_SESSION_INDEX_URL, "dsh session bus names", report),
-        ]
-        if all(d is not None for d in docs):
-            joined = "\n".join(d for d in docs if d is not None)
+        joined = fetch_all_anchored(
+            [
+                (DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types"),
+                (DSH_SESSION_TYPES_URL, "dsh session event types"),
+                (DSH_APPROVAL_TYPES_URL, "dsh approval types"),
+                (DSH_SESSION_INDEX_URL, "dsh session bus names"),
+            ],
+            report,
+        )
+        if joined is not None:
             for name in sorted(ours.dsh_plugin_events):
                 if f"'{name}'" not in joined:
                     report.add_breaking(
@@ -1741,13 +1753,11 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.codex_escalation is not None:
-        docs = [
-            t
-            for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)
-            if (t := fetch_anchored(u, "Codex escalation names", report)) is not None
-        ]
-        if len(docs) == 2:
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "Codex escalation names") for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)],
+            report,
+        )
+        if joined is not None:
             for name in sorted(ours.codex_escalation):
                 if not re.search(rf"\b{re.escape(name)}\b", joined):
                     report.add_breaking(
@@ -1756,15 +1766,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"so a codex session sits Active through every prompt."
                     )
 
-    # `CODEX_KNOWN_OMITTED` exempts a name from EITHER enum, so a stale-row check
-    # must see both before it can call a row dead — hence the union, and the count
-    # that proves both sweeps actually ran.
-    codex_seen: set[str] = set()
-    codex_swept = 0
-    for field, url, enum in (
+    # `CODEX_KNOWN_OMITTED` exempts a name from EITHER enum, hence the union, and
+    # only once every sweep ran (`report_stale_ledger`'s precondition).
+    codex_sibling_sweeps = (
         ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
-    ):
+    )
+    codex_seen: set[str] = set()
+    codex_swept = 0
+    for field, url, enum in codex_sibling_sweeps:
         mine = getattr(ours, field)
         if mine is None:
             continue
@@ -1785,9 +1795,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     f"we already decode, and source/codex.rs decodes it to nothing. "
                     f"Decode it, or add it to CODEX_KNOWN_OMITTED with the reason."
                 )
-    if codex_swept == 2:
+    if codex_swept == len(codex_sibling_sweeps):
         report_stale_ledger(
-            "CODEX_KNOWN_OMITTED", CODEX_KNOWN_OMITTED, codex_seen, "`ResponseItem`/`RolloutItem`", report
+            "CODEX_KNOWN_OMITTED",
+            CODEX_KNOWN_OMITTED,
+            codex_seen,
+            "`ResponseItem`/`RolloutItem`",
+            report,
         )
 
     if ours.grok_xai_method is not None:
@@ -1855,13 +1869,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.opencode is not None:
-        docs = [
-            t
-            for u in OPENCODE_EVENT_URLS
-            if (t := fetch_anchored(u, "opencode event inventory", report)) is not None
-        ]
-        if len(docs) == len(OPENCODE_EVENT_URLS):
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "opencode event inventory") for u in OPENCODE_EVENT_URLS], report
+        )
+        if joined is not None:
             for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
                 if f'"{ev}"' not in joined:
                     report.add_breaking(
