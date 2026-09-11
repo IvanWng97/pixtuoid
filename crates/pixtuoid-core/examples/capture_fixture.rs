@@ -523,8 +523,7 @@ mod recorder {
         (!v.is_empty()).then_some(v)
     }
 
-    /// Every reason `body` cannot be committed, or empty. Pure, so the marker set
-    /// is testable without a real identity to leak.
+    /// Every reason `body` cannot be committed, or empty.
     fn pii_hits(body: &str, needles: &BTreeSet<String>) -> Vec<String> {
         let mut hits: Vec<String> = needles
             .iter()
@@ -583,11 +582,10 @@ mod recorder {
 
     /// Where this scenario's bytes ALREADY live, else the conformance root.
     ///
-    /// A module keeps its own rounds (omp's bridge scenarios sit under
-    /// `omp/fixtures/`, out of conformance's reach because their hook keys fold on
-    /// Windows). Writing a re-record to the conformance root instead creates a NEW
-    /// directory that `conformance.rs` then auto-scans — and with no committed
-    /// bytes beside it the `.new` no-clobber rule cannot fire either.
+    /// A module keeps its own rounds out of conformance's reach (omp's hook keys
+    /// fold on Windows), and a re-record sent to the conformance root instead lands
+    /// as a NEW directory that `conformance.rs` auto-scans with no committed bytes
+    /// beside it for `.new` to protect.
     ///
     /// Keyed on the SOURCE, never a search across modules: scenario names repeat
     /// (`approval-recorded` is both hermes' and omp's), so a search finds one match
@@ -616,8 +614,6 @@ mod recorder {
             std::fs::write(owned.join("provenance.json"), "{}").expect("write");
 
             assert_eq!(scenario_dest(root, "omp", "bridge-run-recorded"), owned);
-            // A conformance scenario, and an unknown one, both take the default —
-            // the module tree is opt-in by having committed bytes there already.
             assert_eq!(
                 scenario_dest(root, "omp", "tool-run-recorded"),
                 root.join("fixtures/omp/tool-run-recorded")
@@ -626,15 +622,12 @@ mod recorder {
                 scenario_dest(root, "kimi", "tool-run"),
                 root.join("fixtures/kimi/tool-run")
             );
-            // A bare directory is not a scenario: provenance is what makes it one.
             std::fs::create_dir_all(root.join("kimi/fixtures/tool-run")).expect("mkdir");
             assert_eq!(
                 scenario_dest(root, "kimi", "tool-run"),
                 root.join("fixtures/kimi/tool-run")
             );
 
-            // Scenario names repeat across modules: `approval-recorded` is both
-            // hermes' and omp's, and only the SOURCE tells them apart.
             let mine = root.join("omp/fixtures/approval-recorded");
             std::fs::create_dir_all(&mine).expect("mkdir");
             std::fs::write(mine.join("provenance.json"), "{}").expect("write");
@@ -645,10 +638,7 @@ mod recorder {
             );
         }
 
-        /// Every shape that reached a committed fixture past this gate. Each row
-        /// is an incident, not a hypothetical: the camelCase twins and the two
-        /// instruction attachments are what three consecutive re-records had to
-        /// redact by hand.
+        /// Every shape that has actually reached a committed fixture past this gate.
         #[test]
         fn the_markers_cover_what_has_actually_leaked() {
             let none = BTreeSet::new();
