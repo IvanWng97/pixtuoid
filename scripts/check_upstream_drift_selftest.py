@@ -275,14 +275,17 @@ def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
         f"an unplaceable name is probe health, never a rename; got {rep.breaking}",
     )
 
-    # A carrier that will not parse must suppress its fields, not rename them.
-    rep = d.Report()
-    d.check_omp_extension_reads(shared, "", sm, {"toolCallId"}, rep)
-    check(
-        any("carrier" in b for b in rep.blind) and not rep.breaking,
-        f"an unreadable carrier is blind and suppresses its fields; "
-        f"blind={rep.blind} breaking={rep.breaking}",
-    )
+    # A carrier that will not parse must suppress its fields, not rename them —
+    # `approved` included, whose OPTIONALITY arm reads the same value and would
+    # raise on None, killing every check after this one.
+    for fields in ({"toolCallId"}, {"approved", "toolCallId"}):
+        rep = d.Report()
+        d.check_omp_extension_reads(shared, "", sm, fields, rep)
+        check(
+            any("carrier" in b for b in rep.blind) and not rep.breaking,
+            f"an unreadable carrier is blind and suppresses {sorted(fields)}; "
+            f"blind={rep.blind} breaking={rep.breaking}",
+        )
 
 
 def test_a_redirected_omp_agent_dir_is_breaking() -> None:
