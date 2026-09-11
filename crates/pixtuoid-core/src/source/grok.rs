@@ -7,9 +7,11 @@
 //!   is REWRITTEN via temp+rename on resume/compaction/rewind — never tail it.
 //! - **Hooks**: JSON envelope on stdin with **camelCase field names and
 //!   snake_case event values** (`hookEventName`, `sessionId`, `toolUseId`, …)
-//!   — alien to the shared CC-shaped arms (`hook_event_name`), hence the
-//!   claims-all custom decoder below. Hooks dispatch SEQUENTIALLY inline on
-//!   the session actor, so the shim's 200ms bound matters here.
+//!   — the only spelling pre-1.0 sent, hence the claims-all custom decoder
+//!   below; 1.0.x mirrors every key in CC's snake_case too
+//!   (`grok/tool-run-recorded`), which this decoder still does not read. Hooks
+//!   dispatch SEQUENTIALLY inline on the session actor, so the shim's 200ms
+//!   bound matters here.
 //! - **Keying**: `sessionId` is consistent across every event of a session, ==
 //!   the transcript's parent-DIR name, == a subagent's `subagentId`. Hook and
 //!   watcher keys therefore coalesce, and a child's tool hooks carry the

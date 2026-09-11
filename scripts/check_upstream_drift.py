@@ -302,7 +302,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
-    DSH_SESSION_TYPES_URL: Anchor(r"'assistant/chunk'", "`assistant/chunk`"),
+    DSH_SESSION_TYPES_URL: Anchor(r"export interface SessionEventMap\b", "`SessionEventMap`"),
     DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
     DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
@@ -555,6 +555,11 @@ CODEX_KNOWN_OMITTED: dict[str, str] = {
     "Started/Closed bracket the voice layer, speech segments are content no "
     "decoder reads, and `BemItemPromoted` re-presents items already decoded "
     "from `response_item` (upstream: 'sparse, model-invisible facts')",
+    "retained_context": "host-only, model-invisible records "
+    "(history/src/retained_context.rs: 'Sparse, model-invisible updates. Only "
+    "the host may produce these records.'); the sole variant `verified_answer` "
+    "is authorization evidence — no lifecycle, activity, model or token signal. "
+    "Sibling of `turn_context` by suffix only",
 }
 
 
@@ -564,6 +569,12 @@ GROK_XAI_KNOWN_OMITTED: dict[str, str] = {
     "subagent_progress": "cumulative per-child totals (turns, tool calls); "
     "summing a running total into the delta-accumulating reducer double-counts "
     "(codex's `token_count_emits_fresh_usage_from_last_reading` is the precedent)",
+    "hook_run_started": "never in the transcript: upstream emits it through "
+    "`send_xai_notification_transient` (session/acp_session_impl/hook_dispatch.rs), "
+    "which only forwards to the live client and never appends to updates.jsonl, "
+    "the file this decoder reads. A pager spinner phase — 'the turn is blocked on "
+    "an awaited hook batch that just started' (extensions/notification.rs) — whose "
+    "end `hook_execution` decodes to nothing but session_end",
 }
 
 
