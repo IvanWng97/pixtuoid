@@ -555,8 +555,8 @@ fn banner_version_matches_doctors_documented_cases() {
     let cases = [
         ("Built 2026.06.04 — v1.2.3", Some("1.2.3")),
         ("2026.06.04", Some("2026.06.04")),
-        ("codex-cli 0.147.0", Some("0.147.0")),
-        ("Hermes Agent v0.20.1 (2026.8.13)", Some("0.20.1")),
+        ("codex-cli 0.153.4", Some("0.153.4")),
+        ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
         ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
         ("2026.08.11-e8db854", Some("2026.08.11")),
         ("omp/18.0.11", Some("18.0.11")),

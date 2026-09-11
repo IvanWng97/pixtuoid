@@ -3,175 +3,161 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 8508
+    agent_id: 8083410480098333094
+    fresh_tokens: 19553
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 8508
+    agent_id: 8083410480098333094
+    fresh_tokens: 19553
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 8508
-- ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
-    effort: ~
-- Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 8508
+    agent_id: 8083410480098333094
+    fresh_tokens: 19553
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
     detail:
       Generic:
-        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 429
-- ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
-    effort: ~
-- Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 429
+    agent_id: 8083410480098333094
+    fresh_tokens: 407
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
     detail:
       Generic:
         display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 29471
+    agent_id: 8083410480098333094
+    fresh_tokens: 277
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
     detail:
       Generic:
-        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
 - ModelInfo:
-    agent_id: 5970872754560808625
-    model: claude-opus-4-8
+    agent_id: 8083410480098333094
+    model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 5970872754560808625
-    fresh_tokens: 282
+    agent_id: 8083410480098333094
+    fresh_tokens: 222
 - SessionStart:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
     detail:
       Generic:
-        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01KwymgQskeTi2QytMurdfTK
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
     detail:
       Generic:
         display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01J6Ecfa59XE78qNkjrQLQUS
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
     detail:
       Generic:
-        display: "Read: /private/tmp/pixtuoid-capture/proj/NOTE.…"
+        display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     source: claude-code
-    session_id: a89f58ab-2249-42c2-b557-6ef5de0f5729
+    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 5970872754560808625
-    tool_use_id: toolu_01FG9chXCcHu9CxGG1RiwmQh
+    agent_id: 8083410480098333094
+    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
 - ModelInfo:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     model: ~
     effort: xhigh
 - SessionEnd:
-    agent_id: 5970872754560808625
+    agent_id: 8083410480098333094
     as_child: false

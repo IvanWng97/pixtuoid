@@ -1,8 +1,8 @@
 {
-  "origin": "recorded",
+  "captured": "2026-09-10",
   "cli": "reasonix",
-  "version": "v1.25.2",
-  "captured": "2026-08-15",
-  "command": "reasonix -p '{prompt}'",
-  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim. `captured` was 2026-08-14 (the shell recorder dated in LOCAL time while the shim stamped UTC); corrected to 2026-08-15 from the payloads' own `_shim_ts_ms`."
+  "command": "reasonix -p {prompt}",
+  "origin": "recorded",
+  "version": "reasonix v1.37.0",
+  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
 }

@@ -1,7 +1,8 @@
 {
-  "origin": "recorded",
+  "captured": "2026-09-10",
   "cli": "opencode",
-  "version": "1.18.15",
-  "captured": "2026-08-14",
-  "command": "opencode run {prompt}"
+  "command": "opencode run {prompt}",
+  "origin": "recorded",
+  "version": "1.18.20",
+  "note": "Redacted: home path to /Users/dev; the owner column of a captured `ls -la` to dev. The bytes are otherwise verbatim."
 }

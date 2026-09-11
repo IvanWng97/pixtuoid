@@ -197,8 +197,8 @@ mod tests {
 
     #[test]
     fn every_event_carries_the_model_and_it_can_change_mid_session() {
-        // Both shapes from fixtures/cursor/tool-run: a session opens on the
-        // `-fast` composer and the tool events run on the full one.
+        // Real wire shape: a session opened on the `-fast` composer while its
+        // tool events ran on the full one.
         let start = decode_all(json!({
             "hook_event_name": "sessionStart", "session_id": "s1",
             "workspace_roots": ["/repo"], "model": "composer-2.5-fast"

@@ -10,7 +10,7 @@
 //! CLAUDE-CODE-SHAPED: snake_case
 //! `hook_event_name`/`session_id`/`cwd`/`tool_name`/`tool_input` with PascalCase
 //! event VALUES — **except the per-call id, which Kimi spells `tool_call_id`**
-//! (capture-verified against kimi-code 0.36.0; `tool_use_id` is never sent). That
+//! (capture-verified: `fixtures/kimi/tool-run` never carries `tool_use_id`). That
 //! is a registry row, `ToolIdKey::ToolCall`, and NOT a reason to re-implement the
 //! tool arms here: the name is the whole difference, and a copy of those arms
 //! would silently stop tracking whatever they learn next.
@@ -260,7 +260,7 @@ mod tests {
         );
     }
 
-    /// Captured off kimi-code 0.36.0: the per-call id rides `tool_call_id`, and
+    /// Captured off kimi-code (`fixtures/kimi/tool-run`): the per-call id rides `tool_call_id`, and
     /// kimi never sends the CC-shaped `tool_use_id`. Driven through the FULL
     /// dispatch, not this module's decoder, because that is where the registry
     /// row is read — the failure the row exists to prevent is a shared arm

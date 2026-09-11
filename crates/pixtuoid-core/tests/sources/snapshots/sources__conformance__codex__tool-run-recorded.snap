@@ -3,71 +3,147 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail: ~
 - ModelInfo:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     model: gpt-5.6-sol
     effort: max
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail:
       Generic:
         display: exec
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail: ~
 - Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 867
+    agent_id: 6848360478477610608
+    fresh_tokens: 7732
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail:
       Generic:
         display: exec
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail: ~
 - Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 7211
-- Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 7211
+    agent_id: 6848360478477610608
+    fresh_tokens: 602
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail:
       Generic:
         display: exec
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail: ~
 - Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 1089
+    agent_id: 6848360478477610608
+    fresh_tokens: 506
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail:
       Generic:
         display: exec
 - ActivityStart:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
     detail: ~
 - Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 1279
+    agent_id: 6848360478477610608
+    fresh_tokens: 460
 - Usage:
-    agent_id: 16996179452500041108
-    fresh_tokens: 1557
+    agent_id: 6848360478477610608
+    fresh_tokens: 8397
 - ActivityEnd:
-    agent_id: 16996179452500041108
+    agent_id: 6848360478477610608
     tool_use_id: ~
+- SessionStart:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- ModelInfo:
+    agent_id: 6848360478477610608
+    model: gpt-5.6-sol
+    effort: ~
+- SessionStart:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+    parent_id: ~
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-8d0de031-f241-4124-b112-01dea2cbe700
+    detail:
+      Generic:
+        display: "Bash: cat NOTE.txt"
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-8d0de031-f241-4124-b112-01dea2cbe700
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-cf8d740a-7cf6-46c0-8ca3-410b1b722da2
+    detail:
+      Generic:
+        display: "Bash: ls -la"
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-cf8d740a-7cf6-46c0-8ca3-410b1b722da2
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityStart:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-f0782aab-30e7-4da7-9928-d30707417e5e
+    detail:
+      Generic:
+        display: "Bash: cat NOTE.txt"
+- Identity:
+    agent_id: 6848360478477610608
+    source: codex
+    session_id: 01a08cbb-1b7f-7ce3-b924-1a501c380856
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 6848360478477610608
+    tool_use_id: exec-f0782aab-30e7-4da7-9928-d30707417e5e
+- ActivityEnd:
+    agent_id: 6848360478477610608
+    tool_use_id: ~
+- SessionEnd:
+    agent_id: 6848360478477610608
+    as_child: false

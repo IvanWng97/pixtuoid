@@ -1,8 +1,8 @@
 {
-  "captured": "2026-08-31",
+  "captured": "2026-09-10",
   "cli": "claude",
   "command": "claude -p {prompt} --allowedTools Read Bash",
-  "note": "Recorded with the machine\u0027s rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript\u0027s own tool_use rows are CC\u0027s. Redacted: the recorder's own skill inventory (names + description text, no credentials) to generic placeholders, and the recorder's home path to /Users/dev in hook payloads \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields.",
   "origin": "recorded",
-  "version": "2.1.251 (Claude Code)"
+  "version": "2.1.261 (Claude Code)",
+  "note": "Recorded with the machine's rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript's own tool_use rows are CC's. Redacted: the recorder's skill inventory, the `instructions` attachment (file contents and its rendered copy), the MCP server names, the git user name (new at this version), and the recorder's identity (email, mem0 user id, in `session_context`/`instructions`/the prompt snapshot) to generic placeholders; the home path to /Users/dev \u2014 a public repo and an immutable crates.io tarball are the wrong home for one machine's tooling roster, and no decoder reads those fields. The harness's own bot attribution address in the prompt snapshot is placeholdered to noreply@example.com only because `just fixture-pii` flags it."
 }

@@ -3,63 +3,63 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     source: omp
-    session_id: 2026-08-15T04-14-55-304Z_01a003a1-4348-7000-b85d-024bb7a3fd7c
+    session_id: 2026-09-10T19-18-34-717Z_01a08cc1-eddd-7457-8567-53cc7f15a94e
     cwd: /tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     model: ~
     effort: high
 - ModelInfo:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     model: deepseek-v4-flash
     effort: ~
 - Usage:
-    agent_id: 7773501557500286957
-    fresh_tokens: 23198
+    agent_id: 11003569855300287180
+    fresh_tokens: 20408
 - ActivityStart:
-    agent_id: 7773501557500286957
-    tool_use_id: call_00_QsfZzfVKdiUNj5WzOSbC4727
+    agent_id: 11003569855300287180
+    tool_use_id: call_00_lUc9bSHi01R2rDHo0erN4327
     detail:
       Generic:
         display: "read: NOTE.txt"
 - ActivityStart:
-    agent_id: 7773501557500286957
-    tool_use_id: call_01_OP61uFShEkDK0z6mXWqu9161
+    agent_id: 11003569855300287180
+    tool_use_id: call_01_wKpFNW3X9exCq9KKgOAu0155
     detail:
       Generic:
         display: "read: ."
 - ActivityEnd:
-    agent_id: 7773501557500286957
-    tool_use_id: call_01_OP61uFShEkDK0z6mXWqu9161
+    agent_id: 11003569855300287180
+    tool_use_id: call_01_wKpFNW3X9exCq9KKgOAu0155
 - ActivityEnd:
-    agent_id: 7773501557500286957
-    tool_use_id: call_00_QsfZzfVKdiUNj5WzOSbC4727
+    agent_id: 11003569855300287180
+    tool_use_id: call_00_lUc9bSHi01R2rDHo0erN4327
 - ModelInfo:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     model: deepseek-v4-flash
     effort: ~
 - Usage:
-    agent_id: 7773501557500286957
-    fresh_tokens: 383
+    agent_id: 11003569855300287180
+    fresh_tokens: 327
 - ActivityStart:
-    agent_id: 7773501557500286957
-    tool_use_id: call_00_ET_gu1iVs5ej5aDjp5dBtWK7529
+    agent_id: 11003569855300287180
+    tool_use_id: call_00_MrRiC8HriPMZgz2PDIwE2035
     detail:
       Generic:
         display: "read: NOTE.txt"
 - ActivityEnd:
-    agent_id: 7773501557500286957
-    tool_use_id: call_00_ET_gu1iVs5ej5aDjp5dBtWK7529
+    agent_id: 11003569855300287180
+    tool_use_id: call_00_MrRiC8HriPMZgz2PDIwE2035
 - ModelInfo:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     model: deepseek-v4-flash
     effort: ~
 - Usage:
-    agent_id: 7773501557500286957
-    fresh_tokens: 192
+    agent_id: 11003569855300287180
+    fresh_tokens: 241
 - SessionEnd:
-    agent_id: 7773501557500286957
+    agent_id: 11003569855300287180
     as_child: false
