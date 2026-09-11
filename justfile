@@ -1399,6 +1399,9 @@ fixture-pii-selftest:
     printf -- '--Users-carol-Desktop-proj--\n' > "$d/probe/identity-dashed.txt"
     printf 'mcp__internal_tracker\n' > "$d/probe/identity-mcp.txt"
     printf '{"user_email":"a.person@gmail.com"}\n' > "$d/probe/identity-email.txt"
+    # The one identity class with no shape of its own — reachable only under the
+    # label a CLI renders it beneath.
+    printf 'Git user: Ada Lovelace\n' > "$d/probe/identity-gituser.txt"
     printf '{"authorization":"Bearer %s"}\n' "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9x" \
         > "$d/probe/identity-bearer.txt"
     # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
@@ -1417,6 +1420,7 @@ fixture-pii-selftest:
     printf -- '--private-tmp-pixtuoid-capture-proj--\n--Users-dev-proj--\n-home-runner-work\n' \
         > "$d/quiet/identity-dashed.txt"
     printf 'dev@example.com\nbot@users.noreply.github.com\nx@localhost\n' > "$d/quiet/email.txt"
+    printf 'Git user: dev\nGit user: runner\nGit user: ubuntu\n' > "$d/quiet/identity-gituser.txt"
     printf 'Bearer short\n' > "$d/quiet/bearer.txt"
     printf 'msg_%s\n%s\n' "0123456789abcdefghij" "20260815_120000_a1b2c3" > "$d/quiet/cred.txt"
     fired() {
@@ -1428,7 +1432,7 @@ fixture-pii-selftest:
     # The credential config does NOT own the identity class — its default global
     # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
-                ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+                ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
         got=$(fired "$cfg" "$d/probe")
         if [ "$got" != "$want" ]; then

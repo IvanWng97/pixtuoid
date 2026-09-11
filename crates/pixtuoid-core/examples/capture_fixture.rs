@@ -521,7 +521,14 @@ mod recorder {
             .args(["config", "--get", key])
             .output()
             .ok()?;
-        let v = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        parse_git_config(&out.stdout)
+    }
+
+    /// `git config` answers with a trailing newline, and an unset key answers with
+    /// nothing — an untrimmed value never matches the bytes a CLI embedded, and an
+    /// empty one would make every capture match the needle.
+    fn parse_git_config(stdout: &[u8]) -> Option<String> {
+        let v = String::from_utf8_lossy(stdout).trim().to_string();
         (!v.is_empty()).then_some(v)
     }
 
@@ -589,25 +596,33 @@ mod recorder {
     /// `omp/fixtures/`, out of conformance's reach because their hook keys fold on
     /// Windows). Writing a re-record to the conformance root instead creates a NEW
     /// directory that `conformance.rs` then auto-scans — and with no committed
-    /// bytes beside it the `.new` no-clobber rule cannot fire either, so nothing
-    /// warns. Keyed on a committed `provenance.json`, which is what makes a
-    /// directory a scenario rather than a coincidence.
+    /// bytes beside it the `.new` no-clobber rule cannot fire either.
+    ///
+    /// SEARCHED, not built from the source id: the module directory need not be
+    /// the registered name (`claude/` owns `claude-code`), and a table mapping the
+    /// two would be a second copy of the layout `captures.rs` already reads. An
+    /// ambiguous scenario name takes the default rather than a guess.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
-        let owned = sources.join(source).join("fixtures").join(scenario);
-        if owned.join("provenance.json").is_file() {
-            return owned;
+        let default = sources.join("fixtures").join(source).join(scenario);
+        let Ok(entries) = std::fs::read_dir(sources) else {
+            return default;
+        };
+        let mut owned: Vec<PathBuf> = entries
+            .filter_map(Result::ok)
+            .map(|e| e.path().join("fixtures").join(scenario))
+            .filter(|d| d.join("provenance.json").is_file())
+            .collect();
+        owned.sort();
+        if owned.len() == 1 {
+            return owned.remove(0);
         }
-        sources.join("fixtures").join(source).join(scenario)
+        default
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
 
-        /// Every shape that reached a committed fixture past this gate. Each row
-        /// is an incident, not a hypothetical: the camelCase twins and the two
-        /// instruction attachments are what three consecutive re-records had to
-        /// redact by hand.
         #[test]
         fn a_module_owned_scenario_is_re_recorded_where_it_lives() {
             let d = tempfile::tempdir().expect("tempdir");
@@ -633,8 +648,29 @@ mod recorder {
                 scenario_dest(root, "kimi", "tool-run"),
                 root.join("fixtures/kimi/tool-run")
             );
+
+            // The module directory need not be the registered name — `claude/`
+            // owns `claude-code`, so building the path from the source id misses.
+            let cc = root.join("claude/fixtures/subagent-recorded");
+            std::fs::create_dir_all(&cc).expect("mkdir");
+            std::fs::write(cc.join("provenance.json"), "{}").expect("write");
+            assert_eq!(scenario_dest(root, "claude-code", "subagent-recorded"), cc);
+
+            // Two modules claiming one scenario name is ambiguous, so it takes the
+            // default rather than picking whichever sorts first.
+            let dup = root.join("dsh/fixtures/subagent-recorded");
+            std::fs::create_dir_all(&dup).expect("mkdir");
+            std::fs::write(dup.join("provenance.json"), "{}").expect("write");
+            assert_eq!(
+                scenario_dest(root, "claude-code", "subagent-recorded"),
+                root.join("fixtures/claude-code/subagent-recorded")
+            );
         }
 
+        /// Every shape that reached a committed fixture past this gate. Each row
+        /// is an incident, not a hypothetical: the camelCase twins and the two
+        /// instruction attachments are what three consecutive re-records had to
+        /// redact by hand.
         #[test]
         fn the_markers_cover_what_has_actually_leaked() {
             let none = BTreeSet::new();
@@ -666,6 +702,20 @@ mod recorder {
         /// Injected rather than read from the machine: on a CI runner `git config
         /// user.name` is unset, so a test asserting the real one passes VACUOUSLY
         /// exactly where it is most needed.
+        #[test]
+        fn a_git_config_answer_is_trimmed_and_an_unset_key_is_none() {
+            assert_eq!(
+                parse_git_config(b"Ada Lovelace\n").as_deref(),
+                Some("Ada Lovelace")
+            );
+            assert_eq!(
+                parse_git_config(b"  ada@example.org  ").as_deref(),
+                Some("ada@example.org")
+            );
+            assert_eq!(parse_git_config(b""), None);
+            assert_eq!(parse_git_config(b"\n"), None);
+        }
+
         #[test]
         fn the_git_identity_joins_the_needles() {
             let needles = identity_needles(|k| match k {
