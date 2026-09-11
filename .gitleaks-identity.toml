@@ -110,9 +110,8 @@ description = "The committer's real name, rendered into a captured session conte
 regex = '''Git user: [^\\"\n]+'''
   [[rules.allowlists]]
   regexTarget = "match"
-  # Split placeholders from infrastructure accounts exactly as the path rules do
-  # — `captures.rs` reads the PLACEHOLDER line positionally to build its redaction
-  # sentinels, and one merged alternation makes the rules disagree.
+  # Two regexes, not one alternation: `captures.rs` reads the PLACEHOLDER line
+  # positionally to build its redaction sentinels, and asserts the rules agree.
   regexes = [
     '''^(?i)Git user: (?:dev|me|user)$''',
     '''^(?i)Git user: (?:runner|ubuntu|vscode|linuxbrew|Shared)$''',

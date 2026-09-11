@@ -470,16 +470,9 @@ mod recorder {
     /// but matches VALUE shapes, not this list — as gitleaks rules these KEYS fire
     /// on the tree's own `dev@example.com` redactions. A key with no value shape
     /// (`obsidian`, `account_id`) is refused only at capture time.
-    /// Key spellings that carry the operator rather than the wire format. Both
-    /// cases of each: a CLI picks one and its next version may pick the other —
-    /// `userEmail` arrived at claude-code 2.1.261 beside the `user_email` already
-    /// listed, and slipped past this gate.
-    ///
-    /// A FILENAME cannot join this list. `CLAUDE.md` and `AGENTS.md` read like the
-    /// attachment that leaked, but both CLIs name them in stock prompt prose and a
-    /// captured `ls -la` prints them, so the marker refuses four sources on bytes
-    /// carrying no operator at all — and no redaction clears it. `userId` fails the
-    /// same way inside copilot's own `edit` tool example.
+    /// Both cases of each spelling, because a CLI picks one and its next version
+    /// may pick the other: `userEmail` arrived at claude-code 2.1.261 beside the
+    /// `user_email` already here, and slipped past.
     const PII_MARKERS: &[&str] = &[
         "user_email",
         "userEmail",
@@ -494,11 +487,9 @@ mod recorder {
         "Bearer ",
     ];
 
-    /// Strings this machine would leak into a capture.
-    ///
-    /// The git identity is here because a CLI that renders `git status` into its
-    /// context embeds the committer's real name, which no marker can match and no
-    /// secret scanner reports — `Git user: <name>` reached a committed fixture.
+    /// Strings this machine would leak into a capture, the git identity included:
+    /// a CLI that renders `git status` embeds the committer's real name, which no
+    /// marker can match (`.gitleaks-identity.toml` carries the committed-tree half).
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
@@ -702,10 +693,6 @@ mod recorder {
             assert!(!identity_needles(|_| None).contains("Ada Lovelace"));
         }
 
-        /// The class no marker can express: the operator's own NAME, which a CLI
-        /// embeds when it renders `git status` into the session context. Neither
-        /// the markers nor gitleaks' credential rules can see it, so the needle
-        /// has to come from the machine.
         #[test]
         fn a_rendered_git_identity_is_a_needle_not_a_marker() {
             let needles = BTreeSet::from(["Ada Lovelace".to_string()]);

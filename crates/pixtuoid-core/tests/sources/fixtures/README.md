@@ -66,15 +66,11 @@ A composed fixture kept for a reason says so in its note: `opencode/session-run`
 is retained because an auto-approving run emits no permission event for `Waiting`
 to ride.
 
-**A module's own scenarios re-record in place.** The recorder SEARCHES for a
-committed `provenance.json` at `<module>/fixtures/<scenario>/` (omp's bridge
-rounds) and writes there; otherwise it writes to the conformance root. It
-searches rather than building the path from the source id because the module
-directory need not be the registered name — `claude/` owns `claude-code`. Two
-modules claiming one scenario name is ambiguous, and takes the default. Before that
-was derived, a module-owned re-record landed in the conformance root as a NEW
-directory — which `conformance.rs` auto-scans, and where the `.new` no-clobber
-rule cannot fire because nothing was there to clobber.
+**A module's own scenarios re-record in place.** The recorder writes to
+`<source>/fixtures/<scenario>/` when a committed `provenance.json` is already
+there (omp's bridge rounds), else to the conformance root — where a new
+directory would be auto-scanned by `conformance.rs` with no committed bytes
+beside it for the `.new` no-clobber rule to protect.
 
 **Re-recording an existing scenario needs a hand.** The recorder never
 overwrites committed bytes — it writes `<name>.new` beside them, so a re-record
