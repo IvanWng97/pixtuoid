@@ -598,25 +598,18 @@ mod recorder {
     /// directory that `conformance.rs` then auto-scans — and with no committed
     /// bytes beside it the `.new` no-clobber rule cannot fire either.
     ///
-    /// SEARCHED, not built from the source id: the module directory need not be
-    /// the registered name (`claude/` owns `claude-code`), and a table mapping the
-    /// two would be a second copy of the layout `captures.rs` already reads. An
-    /// ambiguous scenario name takes the default rather than a guess.
+    /// Keyed on the SOURCE, never a search across modules: scenario names repeat
+    /// (`approval-recorded` is both hermes' and omp's), so a search finds one match
+    /// for the wrong module and the ambiguity guard never fires — a billed hermes
+    /// capture would land as `.new` files inside omp's directory. `claude/` owning
+    /// `claude-code` is the one name mismatch, and it holds no scenario
+    /// subdirectory, so it cannot reach here.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
-        let default = sources.join("fixtures").join(source).join(scenario);
-        let Ok(entries) = std::fs::read_dir(sources) else {
-            return default;
-        };
-        let mut owned: Vec<PathBuf> = entries
-            .filter_map(Result::ok)
-            .map(|e| e.path().join("fixtures").join(scenario))
-            .filter(|d| d.join("provenance.json").is_file())
-            .collect();
-        owned.sort();
-        if owned.len() == 1 {
-            return owned.remove(0);
+        let owned = sources.join(source).join("fixtures").join(scenario);
+        if owned.join("provenance.json").is_file() {
+            return owned;
         }
-        default
+        sources.join("fixtures").join(source).join(scenario)
     }
 
     #[cfg(test)]
@@ -649,21 +642,15 @@ mod recorder {
                 root.join("fixtures/kimi/tool-run")
             );
 
-            // The module directory need not be the registered name — `claude/`
-            // owns `claude-code`, so building the path from the source id misses.
-            let cc = root.join("claude/fixtures/subagent-recorded");
-            std::fs::create_dir_all(&cc).expect("mkdir");
-            std::fs::write(cc.join("provenance.json"), "{}").expect("write");
-            assert_eq!(scenario_dest(root, "claude-code", "subagent-recorded"), cc);
-
-            // Two modules claiming one scenario name is ambiguous, so it takes the
-            // default rather than picking whichever sorts first.
-            let dup = root.join("dsh/fixtures/subagent-recorded");
-            std::fs::create_dir_all(&dup).expect("mkdir");
-            std::fs::write(dup.join("provenance.json"), "{}").expect("write");
+            // Scenario names repeat across modules: `approval-recorded` is both
+            // hermes' and omp's, and only the SOURCE tells them apart.
+            let mine = root.join("omp/fixtures/approval-recorded");
+            std::fs::create_dir_all(&mine).expect("mkdir");
+            std::fs::write(mine.join("provenance.json"), "{}").expect("write");
+            assert_eq!(scenario_dest(root, "omp", "approval-recorded"), mine);
             assert_eq!(
-                scenario_dest(root, "claude-code", "subagent-recorded"),
-                root.join("fixtures/claude-code/subagent-recorded")
+                scenario_dest(root, "hermes", "approval-recorded"),
+                root.join("fixtures/hermes/approval-recorded")
             );
         }
 
@@ -686,13 +673,6 @@ mod recorder {
             }
         }
 
-        /// The class no marker can express: the operator's own NAME, which a CLI
-        /// embeds when it renders `git status` into the session context. Neither
-        /// the markers nor gitleaks' credential rules can see it, so the needle
-        /// has to come from the machine.
-        /// Injected rather than read from the machine: on a CI runner `git config
-        /// user.name` is unset, so a test asserting the real one passes VACUOUSLY
-        /// exactly where it is most needed.
         #[test]
         fn a_git_config_answer_is_trimmed_and_an_unset_key_is_none() {
             assert_eq!(
@@ -707,6 +687,9 @@ mod recorder {
             assert_eq!(parse_git_config(b"\n"), None);
         }
 
+        /// Injected rather than read from the machine: on a CI runner `git config
+        /// user.name` is unset, so a test asserting the real one passes VACUOUSLY
+        /// exactly where it is most needed.
         #[test]
         fn the_git_identity_joins_the_needles() {
             let needles = identity_needles(|k| match k {
@@ -719,6 +702,10 @@ mod recorder {
             assert!(!identity_needles(|_| None).contains("Ada Lovelace"));
         }
 
+        /// The class no marker can express: the operator's own NAME, which a CLI
+        /// embeds when it renders `git status` into the session context. Neither
+        /// the markers nor gitleaks' credential rules can see it, so the needle
+        /// has to come from the machine.
         #[test]
         fn a_rendered_git_identity_is_a_needle_not_a_marker() {
             let needles = BTreeSet::from(["Ada Lovelace".to_string()]);
