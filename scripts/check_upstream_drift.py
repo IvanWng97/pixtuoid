@@ -341,13 +341,13 @@ ANCHORS: dict[str, Anchor] = {
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
     # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
-    OMP_AI_TYPES_URL: Anchor(r"toolCall", "the message block types"),
+    OMP_AI_TYPES_URL: Anchor(r"(?m)^export type Message\s*=", "the `Message` union"),
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
     OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
-    OMP_SESSION_MANAGER_URL: Anchor(r"getSessionFile", "`getSessionFile`"),
+    OMP_SESSION_MANAGER_URL: Anchor(r"(?m)^export class SessionManager\b", "`SessionManager`"),
     OMP_EXT_DISCOVERY_URL: Anchor(
         r"discoverExtensionModulePaths", "`discoverExtensionModulePaths`"
     ),
@@ -1733,7 +1733,21 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
             upstream = upstream_codex_enum_types(text, "SessionUpdate")
-            if upstream is not None:
+            if upstream is None:
+                # The codex loops survive the same silent `continue` only because
+                # their vanish check files blind for the same enum first; grok's
+                # reads the document with a different parser, so nothing else
+                # notices. xAI already moved `HookEventName` behind a macro —
+                # `upstream_grok_hooks` carries a `hook_events!` arm for it — and
+                # the same move here returns the macro DEFINITION's body.
+                report.add_blind(
+                    "grok's xAI `SessionUpdate` variants",
+                    GROK_NOTIFICATION_URL,
+                    "The appearance sweep and the ledger staleness check were both "
+                    "SKIPPED — most likely the enum moved behind a declarative "
+                    "macro, as `HookEventName` already did.",
+                )
+            else:
                 families = {n.split("_", 1)[0] for n in ours.grok_xai_tags if "_" in n}
                 report_stale_ledger(
                     "GROK_XAI_KNOWN_OMITTED",

@@ -102,12 +102,15 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
-    d.OMP_AI_TYPES_URL: 'export type Block = { type: "toolCall" };\n',
+    d.OMP_AI_TYPES_URL:
+        'export type Message = UserMessage | AssistantMessage;\n'
+        'export interface ToolCall { type: "toolCall" }\n',
     d.OMP_EXT_SHARED_EVENTS_URL:
         'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
     d.OMP_EXT_TYPES_URL:
         'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
-    d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
+    d.OMP_SESSION_MANAGER_URL:
+        'export class SessionManager {\n\tgetSessionFile(): string | undefined {}\n}\n',
     d.DSH_RUNTIME_TYPES_URL:
         "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
         "    'agent/pre-step'(payload: {}): void\n  }\n}\n",
@@ -195,6 +198,76 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                 )
     finally:
         d.fetch = real
+
+
+def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> None:
+    """A reader that returns None must SAY so. The anchor still matches when the
+    enum moves behind a declarative macro — xAI already did this to
+    `HookEventName`, which is why `upstream_grok_hooks` carries a `hook_events!`
+    arm — so the document passes identity while the parser reads the macro
+    DEFINITION's body. Both directions riding this reader then skip, and without a
+    blind line the run is green with the checks dead."""
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        tags = sorted(d.read_our_names(rep0).grok_xai_tags or ())
+        check(bool(tags), "the fragment supplies the xai tag set")
+        pas = lambda n: "".join(p.title() for p in n.split("_"))
+        variants = "".join(f"    {pas(n)},\n" for n in tags)
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.GROK_NOTIFICATION_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        plain = drive(f"pub enum SessionUpdate {{\n{variants}}}\n")
+        check(not any("SessionUpdate` variants" in b for b in plain.blind),
+              f"a readable enum files no probe health; got {plain.blind}")
+
+        macro = drive(
+            "macro_rules! session_updates {\n    ($($variant:ident,)*) => {\n"
+            "        pub enum SessionUpdate { $($variant,)* }\n    };\n}\n"
+            f"session_updates! {{\n{variants}}}\n"
+        )
+        check(any("SessionUpdate` variants" in b for b in macro.blind),
+              f"an unreadable enum must file probe health; got blind={macro.blind}")
+    finally:
+        d.fetch = real
+
+
+def test_no_anchor_is_a_name_the_watcher_checks() -> None:
+    """`Anchor`'s docstring bans this in prose; prose has no failure mode.
+
+    An anchor that IS one of the guarded names vanishes WITH them on the very
+    rename it exists to tell apart from a stale pin — and the blind line then
+    argues the maintainer OUT of the fix ("do NOT change a decoder on this
+    alone"). dsh's `'agent/pre-step'` was this shape, and so were omp's
+    `toolCall` and `getSessionFile`."""
+    rep = d.Report()
+    ours = d.read_our_names(rep)
+    names = {
+        n
+        for f in ours.__dataclass_fields__
+        if isinstance(v := getattr(ours, f), set)
+        for n in v
+    }
+    # A floor: an empty vocabulary would make every `re.search` below vacuous.
+    check(len(names) > 100, f"the fragments supply the swept vocabulary, got {len(names)}")
+    circular = sorted(
+        (a.owns, p, n)
+        for a in d.ANCHORS.values()
+        for p in (a.pattern, a.also)
+        if p is not None
+        for n in names
+        if re.search(p, n)
+    )
+    check(not circular, f"an anchor must not match a name it guards: {circular}")
 
 
 def test_a_multi_document_check_is_all_or_nothing() -> None:
@@ -1285,11 +1358,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 + cwd
                 + "\tsessionManager: ReadonlySessionManager;\n}\n"
             )
-            sm = "// ReadonlySessionManager picks getSessionFile / getSessionId\n" + "".join(
+            sm = "export class SessionManager {\n" + "".join(
                 f"\t{g}(): string {{\n\t}}\n"
                 for g in ("getSessionFile", "getSessionId")
                 if g in reads
-            )
+            ) + "}\n"
             return {
                 d.OMP_EXT_SHARED_EVENTS_URL: shared,
                 d.OMP_EXT_TYPES_URL: ext,
@@ -1361,8 +1434,8 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
             ("omp_message_vocab", str, lambda ns: {
                 d.OMP_AI_TYPES_URL:
-                    "export type Block = {\n"
-                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask") + "};\n",
+                    "export type Message = UserMessage | AssistantMessage;\n"
+                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask"),
                 d.OMP_ASK_URL:
                     "export class AskTool {\n"
                     + "".join(f'  name = "{n}";\n' for n in ns if n == "ask") + "}\n"}),
