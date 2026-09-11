@@ -1,6 +1,5 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 38
 expression: l.cubicle_band
 ---
 Bounds {
