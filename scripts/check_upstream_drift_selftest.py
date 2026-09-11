@@ -200,6 +200,55 @@ def test_anchor_gate_fires_in_both_directions() -> None:
         d.fetch = real
 
 
+def test_one_document_is_fetched_once_per_run() -> None:
+    """Three checks read codex's `protocol.rs`, two read hermes' `plugins.py`, and
+    a document is upstream's answer for the whole run. Without a per-run cache a
+    dead pin spent one request per reader and filed the SAME blind line once per
+    reader under a different label each time — which the workflow renders as
+    repeated bullets in the issue it opens."""
+    real = d.fetch
+    try:
+        calls: list[str] = []
+
+        def dead(u: str) -> str:
+            calls.append(u)
+            raise urllib.error.HTTPError(u, 404, "gone", {}, None)  # type: ignore[arg-type]
+
+        d.fetch = dead
+        rep = d.Report()
+        d.run_checks(d.read_our_names(rep), report=rep)
+        # A floor: a run that swept nothing would satisfy every check below.
+        check(len(calls) > 20, f"the run actually swept, got {len(calls)} fetches")
+        check(
+            not (dupes := sorted({u for u in calls if calls.count(u) > 1})),
+            f"each document is fetched once per run; repeated: {dupes}",
+        )
+        check(
+            not (twice := sorted({b for b in rep.blind if rep.blind.count(b) > 1})),
+            f"a dead pin files ONE blind line, not one per reader; repeated: {twice}",
+        )
+
+        # A SUCCESSFUL document is reused as well, not only a failed one.
+        served: list[str] = []
+
+        def live(u: str, _s: str = ANCHOR_SAMPLES[d.CODEX_PROTOCOL_URL]) -> str:
+            served.append(u)
+            if u == d.CODEX_PROTOCOL_URL:
+                return _s
+            raise urllib.error.URLError("offline: not this case's document")
+
+        d.fetch = live
+        rep = d.Report()
+        d.run_checks(d.read_our_names(rep), report=rep)
+        check(
+            served.count(d.CODEX_PROTOCOL_URL) == 1,
+            f"a document that ANSWERED is cached too, got "
+            f"{served.count(d.CODEX_PROTOCOL_URL)} fetches of protocol.rs",
+        )
+    finally:
+        d.fetch = real
+
+
 def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
     """The router's own documented promise: "A name this router does not know
     means the template grew a read without a check — flagged blind, never silently

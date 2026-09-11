@@ -372,6 +372,12 @@ class Report:
     review: list[str] = dataclasses.field(default_factory=list)
     blind: list[str] = dataclasses.field(default_factory=list)
     errors: list[str] = dataclasses.field(default_factory=list)
+    # One run's anchored fetches, keyed by URL. A document is upstream's answer
+    # for the whole run, and several checks legitimately read the same one — three
+    # read codex's protocol.rs — so without this a single dead pin spends three
+    # requests and files the SAME blind line three times under three labels, which
+    # the workflow then renders as repeated bullets in the issue it opens.
+    fetched: dict[str, str | None] = dataclasses.field(default_factory=dict)
 
     def add_breaking(self, line: str) -> None:
         self.breaking.append(line)
@@ -505,6 +511,9 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     it are SKIPPED as probe health, not drift. An undeclared URL is reported and
     never RAISED: `run_checks` routes exceptions to the transient bucket, degrading
     "someone added an unproven sweep" to a green-run warning."""
+    if url in report.fetched:
+        return report.fetched[url]
+    report.fetched[url] = None
     anchor = ANCHORS.get(url)
     if anchor is None:
         report.add_blind(
@@ -531,6 +540,7 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
             "reported as drift.",
         )
         return None
+    report.fetched[url] = text
     return text
 
 
