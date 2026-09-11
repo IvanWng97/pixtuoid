@@ -4,5 +4,5 @@
   "command": "opencode run {prompt}",
   "origin": "recorded",
   "version": "1.18.20",
-  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim. Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
+  "note": "Redacted: home path to /Users/dev; the owner column of a captured `ls -la` to dev. The bytes are otherwise verbatim."
 }

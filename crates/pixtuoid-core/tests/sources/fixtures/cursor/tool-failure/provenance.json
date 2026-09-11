@@ -5,5 +5,5 @@
   "origin": "recorded",
   "prompt": "Read the file does-not-exist.txt in this directory and tell me exactly what happened.",
   "version": "2026.09.02-c22c1a3",
-  "note": "Recorded with `--model auto`: cursor-agent on a free plan refuses named models. Redacted: `user_email` to dev@example.com; home path to /Users/dev; the bytes are otherwise verbatim. Cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes; the unstamped copies are what the decoder must ignore."
+  "note": "Recorded with `--model auto`: cursor-agent on a free plan refuses named models. Redacted: `user_email` to dev@example.com; home path to /Users/dev; the bytes are otherwise verbatim. Cursor invokes its hook command several times per event and only one copy keeps the env prefix its install writes; the unstamped copies are what `source/cursor.rs`'s cross-fire guard drops."
 }
