@@ -558,7 +558,7 @@ fn banner_version_matches_doctors_documented_cases() {
         ("codex-cli 0.153.4", Some("0.153.4")),
         ("Hermes Agent v0.21.0 (2026.8.31)", Some("0.21.0")),
         ("grok 1.0.25 (f7e67d6988e2) [stable]", Some("1.0.25")),
-        ("2026.09.02-c22c1a3", Some("2026.09.02")),
+        ("2026.08.11-e8db854", Some("2026.08.11")),
         ("omp/18.0.11", Some("18.0.11")),
         ("no version here", None),
         // The shape that caught the mirror drifting: doctor keeps a trailing-dot
