@@ -108,10 +108,18 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.OMP_EXT_TYPES_URL:
         'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
     d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
-    d.DSH_RUNTIME_TYPES_URL: "    'agent/pre-step'(payload: {}): void\n",
+    d.DSH_RUNTIME_TYPES_URL:
+        "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
+        "    'agent/pre-step'(payload: {}): void\n  }\n}\n",
     d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n  'assistant/message': { text: string }\n}\n",
-    d.DSH_APPROVAL_TYPES_URL: "export type ApprovalRequestId = string\n",
-    d.DSH_SESSION_INDEX_URL: "  register('session/created', header)\n",
+    d.DSH_APPROVAL_TYPES_URL:
+        "declare module '@deepseek-ai/dsh-session/types' {\n  interface SessionEventMap {\n"
+        "    'approval/asked': { id: ApprovalRequestId }\n  }\n}\n",
+    # The `also` shape: upstream puts `interface Context` between the module
+    # header and the `Events` the keys live in, so the sample must too.
+    d.DSH_SESSION_INDEX_URL:
+        "declare module '@deepseek-ai/cordis' {\n  interface Context {\n    session: Session\n  }\n"
+        "  interface Events {\n    'session/created'(session: Session): void\n  }\n}\n",
     d.OMP_EXT_DISCOVERY_URL:
         'export async function discoverExtensionModulePaths() {}\n',
     d.OMP_DIRS_URL:
@@ -167,6 +175,24 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                 out == sample and not r.blind and not r.errors,
                 f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
+
+            # Half an `also` anchor is NOT an anchor. Without this, `also` could
+            # regress to decorative — the sample above satisfies both halves, so
+            # only deleting one proves the second is load-bearing.
+            if anchor.also is None:
+                continue
+            for drop, half in (("pattern", anchor.pattern), ("also", anchor.also)):
+                maimed = re.sub(half, "", sample, count=1)
+                check(
+                    maimed != sample,
+                    f"{anchor.owns}: the {drop} half must occur in its own sample",
+                )
+                d.fetch = lambda _u, _s=maimed: _s
+                r = d.Report()
+                check(
+                    d.fetch_anchored(url, "T", r) is None and len(r.blind) == 1,
+                    f"{anchor.owns}: {drop} missing -> blind, got blind={r.blind}",
+                )
     finally:
         d.fetch = real
 
@@ -563,6 +589,89 @@ def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
         d.fetch = real
         d.CODEX_KNOWN_OMITTED.clear()
         d.CODEX_KNOWN_OMITTED.update(saved)
+
+
+def test_a_ledger_row_upstream_deleted_is_reported_once_every_doc_was_fetched() -> None:
+    """The direction both sibling sweeps are blind to. They compute
+    `upstream - mine - ledger`, so a row whose variant upstream DELETED simply
+    drops out of the subtrahend — it then explains a decision about a name that
+    no longer exists, and would silently exempt the name if upstream reused it.
+    `CODEX_KNOWN_OMITTED` exempts EITHER enum, so staleness is only knowable once
+    BOTH were fetched: a run that saw one must stay quiet, or a 404 reads as a
+    deletion."""
+    real = d.fetch
+    saved_codex = dict(d.CODEX_KNOWN_OMITTED)
+    saved_grok = dict(d.GROK_XAI_KNOWN_OMITTED)
+    phantom = "pxd_upstream_deleted_this"
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        response_item = sorted(ours.codex_response_item or ())
+        outers = sorted(ours.codex_outers or ())
+        tags = sorted(ours.grok_xai_tags or ())
+        check(bool(response_item and outers and tags), "the fragment supplies all three sets")
+
+        def serve(docs: dict[str, str]) -> d.Report:
+            def stub(u: str, _d: dict[str, str] = docs) -> str:
+                if u in _d:
+                    return _d[u]
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        def codex_enum(enum: str, names: list[str]) -> str:
+            rows = "".join(
+                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n' for i, n in enumerate(names)
+            )
+            return f"pub enum {enum} {{\n{rows}}}\n"
+
+        both = {
+            d.CODEX_MODELS_URL: codex_enum("ResponseItem", response_item),
+            d.CODEX_ROLLOUT_ITEM_URL: codex_enum("RolloutItem", outers),
+        }
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED[phantom] = "test"
+        loud = serve(both)
+        check(any(phantom in x for x in loud.review),
+              f"a ledger row upstream no longer declares must be reported; got {loud.review}")
+
+        half = serve({d.CODEX_MODELS_URL: both[d.CODEX_MODELS_URL]})
+        check(not any(phantom in x for x in half.review),
+              f"one enum unfetched cannot prove staleness; got {half.review}")
+
+        # EITHER enum exempts, so the check must union them. Ledger a name only the
+        # FIRST-swept enum has: a last-wins accumulator drops it and cries stale.
+        only_response = sorted(set(response_item) - set(outers))
+        check(bool(only_response), "ResponseItem has a name RolloutItem does not")
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED[only_response[0]] = "test"
+        live = serve(both)
+        check(not any(f"ledgers `{only_response[0]}`" in x for x in live.review),
+              f"a row only the FIRST enum declares stays quiet; got {live.review}")
+
+        pas = lambda n: "".join(p.title() for p in n.split("_"))
+        grok_doc = ("pub enum SessionUpdate {\n"
+                    + "".join(f"    {pas(n)},\n" for n in tags) + "}\n")
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED[phantom] = "test"
+        gl = serve({d.GROK_NOTIFICATION_URL: grok_doc})
+        check(any(phantom in x for x in gl.review),
+              f"the grok ledger gets the same sweep; got {gl.review}")
+
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED[tags[0]] = "test"
+        gq = serve({d.GROK_NOTIFICATION_URL: grok_doc})
+        check(not any(f"ledgers `{tags[0]}`" in x for x in gq.review),
+              f"a live grok row stays quiet; got {gq.review}")
+    finally:
+        d.fetch = real
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED.update(saved_codex)
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED.update(saved_grok)
 
 
 def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None:
@@ -1252,11 +1361,16 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL),
                 acp_schema(full["acp_decoded_tags"], ns))),
             ("dsh_plugin_events", str, lambda ns: {
-                d.DSH_RUNTIME_TYPES_URL: "'agent/pre-step'\n"
-                + "\n".join(f"'{n}'" for n in ns),
+                d.DSH_RUNTIME_TYPES_URL:
+                    "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
+                    + "\n".join(f"'{n}'" for n in ns),
                 d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n",
-                d.DSH_APPROVAL_TYPES_URL: "ApprovalRequestId\n",
-                d.DSH_SESSION_INDEX_URL: "'session/created'\n"}),
+                d.DSH_APPROVAL_TYPES_URL:
+                    "declare module '@deepseek-ai/dsh-session/types' {\n"
+                    "  interface SessionEventMap {\n",
+                d.DSH_SESSION_INDEX_URL:
+                    "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
+                    "  interface Events {\n"}),
             ("copilot", str, lambda ns: {
                 d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {

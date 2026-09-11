@@ -280,6 +280,14 @@ class Anchor(typing.NamedTuple):
 
     pattern: str
     owns: str
+    # A SECOND pattern that must ALSO be present, for an owning declaration whose
+    # halves a sibling member can separate: dsh's `session/index.ts` puts
+    # `interface Context` between `declare module '@deepseek-ai/cordis' {` and the
+    # `interface Events {` that owns the event keys, so no single adjacency regex
+    # spans it. Both-present is weaker than adjacency — it cannot prove the two
+    # halves nest — but each half is unique per document, and it is strictly
+    # stronger than anchoring on one of the checked names.
+    also: str | None = None
 
 
 # The three JSON Schemas are parsed STRUCTURALLY, so a text anchor would add
@@ -301,10 +309,25 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
-    DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
+    # dsh declares its event keys as cordis module augmentations, so the owner is
+    # the augmented interface, never a key inside it — an event-key anchor is a
+    # SIBLING of the names it guards and vanishes with them. That is exactly what
+    # the v2 reshape did to `assistant/chunk` (#981), aborting the check that would
+    # have reported it.
+    DSH_RUNTIME_TYPES_URL: Anchor(
+        r"declare module '@deepseek-ai/cordis' \{\s*\n\s*interface Events \{",
+        "the cordis `Events` augmentation",
+    ),
     DSH_SESSION_TYPES_URL: Anchor(r"export interface SessionEventMap\b", "`SessionEventMap`"),
-    DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
-    DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
+    DSH_APPROVAL_TYPES_URL: Anchor(
+        r"declare module '@deepseek-ai/dsh-session/types' \{\s*\n\s*interface SessionEventMap \{",
+        "the `SessionEventMap` augmentation",
+    ),
+    DSH_SESSION_INDEX_URL: Anchor(
+        r"declare module '@deepseek-ai/cordis' \{",
+        "the cordis `Events` augmentation",
+        also=r"(?m)^  interface Events \{",
+    ),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
     GROK_SESSION_STORAGE_URL: Anchor(
@@ -495,7 +518,9 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     text = try_fetch(url, label, report)
     if text is None:
         return None
-    if not re.search(anchor.pattern, text):
+    if not re.search(anchor.pattern, text) or (
+        anchor.also is not None and not re.search(anchor.also, text)
+    ):
         report.add_blind(
             f"{label}: the document no longer contains {anchor.owns}",
             url,
@@ -927,6 +952,30 @@ def strip_rust_comments(body: str) -> str:
         out.append(body[i])
         i += 1
     return "".join(out)
+
+
+def report_stale_ledger(
+    ledger_name: str,
+    ledger: dict[str, str],
+    upstream: set[str],
+    enum_label: str,
+    report: "Report",
+) -> None:
+    """Report ledger rows naming a variant upstream no longer declares.
+
+    Both sibling sweeps compute `upstream - mine - ledger`, so a row whose variant
+    upstream DELETED drops out of the subtrahend and is never mentioned again: it
+    sits there forever, carrying a WHY for a decision that no longer exists and
+    silently exempting the name if upstream ever reuses it. Only the caller knows
+    whether every document feeding `upstream` was actually fetched — call this
+    ONLY when they were, or a transient 404 reads as an upstream deletion."""
+    for name in sorted(set(ledger) - upstream):
+        report.add_review(
+            f"{ledger_name} still ledgers `{name}`, which {enum_label} no longer "
+            f"declares — upstream removed it. Delete the row: it documents a "
+            f"decision about a variant that is gone, and would silently exempt the "
+            f"name from the sibling sweep if upstream ever reused it."
+        )
 
 
 def rust_block_after(src: str, anchor_re: str) -> str | None:
@@ -1674,6 +1723,13 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
             upstream = upstream_codex_enum_types(text, "SessionUpdate")
             if upstream is not None:
                 families = {n.split("_", 1)[0] for n in ours.grok_xai_tags if "_" in n}
+                report_stale_ledger(
+                    "GROK_XAI_KNOWN_OMITTED",
+                    GROK_XAI_KNOWN_OMITTED,
+                    upstream,
+                    "grok's xAI `SessionUpdate`",
+                    report,
+                )
                 gap = upstream - ours.grok_xai_tags - set(GROK_XAI_KNOWN_OMITTED)
                 for name in sorted(gap):
                     if name.split("_", 1)[0] in families:
@@ -1700,6 +1756,11 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"so a codex session sits Active through every prompt."
                     )
 
+    # `CODEX_KNOWN_OMITTED` exempts a name from EITHER enum, so a stale-row check
+    # must see both before it can call a row dead — hence the union, and the count
+    # that proves both sweeps actually ran.
+    codex_seen: set[str] = set()
+    codex_swept = 0
     for field, url, enum in (
         ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
@@ -1713,6 +1774,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         upstream = upstream_codex_enum_types(text, enum)
         if upstream is None:
             continue
+        codex_seen |= upstream
+        codex_swept += 1
         families = sibling_families(mine)
         for name in sorted(upstream - mine - set(CODEX_KNOWN_OMITTED)):
             if name.rsplit("_", 1)[-1] in families:
@@ -1722,6 +1785,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     f"we already decode, and source/codex.rs decodes it to nothing. "
                     f"Decode it, or add it to CODEX_KNOWN_OMITTED with the reason."
                 )
+    if codex_swept == 2:
+        report_stale_ledger(
+            "CODEX_KNOWN_OMITTED", CODEX_KNOWN_OMITTED, codex_seen, "`ResponseItem`/`RolloutItem`", report
+        )
 
     if ours.grok_xai_method is not None:
         text = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
