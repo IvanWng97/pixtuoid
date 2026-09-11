@@ -1077,7 +1077,14 @@ def check_omp_extension_reads(
             "extensions/types.ts",
             "The omp approval-field checks were SKIPPED.",
         )
-    approval_bodies = "\n".join(body for body in carriers.values() if body)
+    # `None`, not `""`, when a carrier would not parse: the fields are matched
+    # against the JOIN, so one unreadable carrier makes every field it owns look
+    # renamed — and `declares`' suppression keys on None, which a join never is.
+    approval_bodies = (
+        None
+        if missing_carriers
+        else "\n".join(body for body in carriers.values() if body)
+    )
     ctx_body = typescript_interface_body(ext_types, "ExtensionContext")
     if ctx_body is None:
         report.add_blind(
@@ -1100,7 +1107,11 @@ def check_omp_extension_reads(
 
     # The presence matcher's `\??` cannot see required->optional, and `approved`
     # is the one field whose optionality carries semantics.
-    if "approved" in fields and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies):
+    if (
+        "approved" in fields
+        and approval_bodies is not None
+        and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies)
+    ):
         report.add_breaking(
             "omp's `approved` became OPTIONAL upstream — the decoder reads an "
             "absent value as a DENIAL, so every approval would drop the sprite "

@@ -200,6 +200,158 @@ def test_anchor_gate_fires_in_both_directions() -> None:
         d.fetch = real
 
 
+def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
+    """The router's own documented promise: "A name this router does not know
+    means the template grew a read without a check — flagged blind, never silently
+    green." Replacing that whole `else` arm with a bare `continue` left the suite
+    green, so the promise was prose. Its two missing-carrier arms were unreachable
+    too, which is the case where an unverifiable carrier must NOT be re-reported as
+    a rename of every field it holds."""
+    shared = "export interface SessionSwitchEvent {\n\tpreviousSessionFile: string;\n}\n"
+    ext = (
+        "export interface ToolApprovalRequestedEvent {\n\ttoolCallId: string;\n}\n"
+        "export interface ToolApprovalResolvedEvent {\n\tapproved: boolean;\n}\n"
+        "export interface ExtensionContext {\n\tcwd: string;\n}\n"
+    )
+    sm = "export class SessionManager {\n\tgetSessionFile(): string {}\n}\n"
+
+    rep = d.Report()
+    d.check_omp_extension_reads(shared, ext, sm, {"cwd", "toolCallId"}, rep)
+    check(
+        not rep.blind and not rep.breaking,
+        f"names the router can place stay silent; blind={rep.blind} breaking={rep.breaking}",
+    )
+
+    rep = d.Report()
+    d.check_omp_extension_reads(shared, ext, sm, {"pxdNewlyRead"}, rep)
+    check(
+        any("pxdNewlyRead" in b for b in rep.blind),
+        f"a read with no declaration site must go BLIND, not green; blind={rep.blind}",
+    )
+    check(
+        not rep.breaking,
+        f"an unplaceable name is probe health, never a rename; got {rep.breaking}",
+    )
+
+    # A carrier that will not parse must suppress its fields, not rename them.
+    rep = d.Report()
+    d.check_omp_extension_reads(shared, "", sm, {"toolCallId"}, rep)
+    check(
+        any("carrier" in b for b in rep.blind) and not rep.breaking,
+        f"an unreadable carrier is blind and suppresses its fields; "
+        f"blind={rep.blind} breaking={rep.breaking}",
+    )
+
+
+def test_a_redirected_omp_agent_dir_is_breaking() -> None:
+    """The arm no test fired. `omp_agent_dir()`'s no-flatten rule rests on this
+    function returning the resolver's dir verbatim, and the check's own message
+    says NO LOCAL CHECK can see the failure — so nothing would notice this arm
+    going dark either. Replacing its regex with one that always matches left the
+    suite green."""
+    real = d.fetch
+    try:
+
+        def drive(body: str) -> d.Report:
+            def stub(u: str, _b: str = body) -> str:
+                if u == d.OMP_DIRS_URL:
+                    return _b
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        verbatim = drive("export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n")
+        check(
+            not any("getAgentDir" in x for x in verbatim.breaking),
+            f"the verbatim resolver is silent; got {verbatim.breaking}",
+        )
+
+        redirected = drive(
+            "export function getAgentDir(): string {\n"
+            "\treturn process.env.XDG_DATA_HOME ?? dirs.agentDir;\n}\n"
+        )
+        check(
+            any("getAgentDir" in x for x in redirected.breaking),
+            f"a redirect must be BREAKING, not silence; breaking={redirected.breaking} "
+            f"blind={redirected.blind}",
+        )
+    finally:
+        d.fetch = real
+
+
+def test_two_declarations_are_probe_health_not_a_first_match() -> None:
+    """`sole_match`'s rule as a gate, not a docstring. Relaxing `len(found) == 1`
+    to `bool(found)` reads the FIRST declaration — so the day upstream grows a
+    `#[cfg(test)]` twin or a `macro_rules!` body above the real one, the watcher
+    compares our value against the decoy's and files BREAKING drift against a
+    perfectly healthy upstream."""
+    check(d.sole_match(r"P\s*=\s*(\d+)", "P = 7777\n") is not None, "one match -> the match")
+    check(d.sole_match(r"P\s*=\s*(\d+)", "nothing here\n") is None, "no match -> None")
+    check(d.sole_match(r"P\s*=\s*(\d+)", "P = 1\nP = 7777\n") is None,
+          "two matches -> None, never the first")
+
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        ports = sorted(d.read_our_names(rep0).openclaw_gateway_port or ())
+        check(bool(ports), "the fragment supplies the gateway port")
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.OPENCLAW_PATHS_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        sole = drive(f"export const DEFAULT_GATEWAY_PORT = {ports[0]};\n")
+        check(not sole.breaking, f"one declaration matching ours is silent; got {sole.breaking}")
+
+        twin = drive(
+            "const DEFAULT_GATEWAY_PORT = 1234; // a fixture twin, ABOVE the real one\n"
+            f"export const DEFAULT_GATEWAY_PORT = {ports[0]};\n"
+        )
+        check(
+            not twin.breaking and any("DEFAULT_GATEWAY_PORT" in b for b in twin.blind),
+            f"ambiguity must abstain, never report the decoy's port as drift; "
+            f"breaking={twin.breaking} blind={twin.blind}",
+        )
+    finally:
+        d.fetch = real
+
+
+def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
+    """Two one-line edits reopen the gate with every existing test still green.
+
+    Dropping `also=` makes the half-anchor check below SKIP rather than fail, so a
+    split owning declaration silently goes back to being half-proven. Adding a URL
+    to `UNANCHORED_BY_DESIGN` exempts it from needing an anchor at all, and the
+    census that reads that set treats membership as the answer."""
+    # The three schemas are parsed STRUCTURALLY, so a failed parse already says
+    # what a text anchor would; nothing else may join them without saying why.
+    check(
+        d.UNANCHORED_BY_DESIGN
+        == frozenset({d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL, d.COPILOT_SCHEMA_URL}),
+        f"the anchor requirement is waived only for the JSON Schemas, got "
+        f"{sorted(d.UNANCHORED_BY_DESIGN)}",
+    )
+    # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
+    # is indistinguishable from an anchor that never needed a second half.
+    for url in (d.DSH_SESSION_INDEX_URL,):
+        check(
+            d.ANCHORS[url].also is not None,
+            f"{url}: `interface Context` sits between this module header and the "
+            f"`Events` that owns the keys, so one pattern cannot span it — `also` "
+            f"is what makes the anchor whole",
+        )
+
+
 def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> None:
     """A reader that returns None must SAY so. The anchor still matches when the
     enum moves behind a declarative macro — xAI already did this to
