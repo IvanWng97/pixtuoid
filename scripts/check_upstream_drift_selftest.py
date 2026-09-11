@@ -109,7 +109,7 @@ ANCHOR_SAMPLES: dict[str, str] = {
         'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
     d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
     d.DSH_RUNTIME_TYPES_URL: "    'agent/pre-step'(payload: {}): void\n",
-    d.DSH_SESSION_TYPES_URL: "  'assistant/chunk': { delta: string }\n",
+    d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n  'assistant/message': { text: string }\n}\n",
     d.DSH_APPROVAL_TYPES_URL: "export type ApprovalRequestId = string\n",
     d.DSH_SESSION_INDEX_URL: "  register('session/created', header)\n",
     d.OMP_EXT_DISCOVERY_URL:
@@ -1254,7 +1254,7 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             ("dsh_plugin_events", str, lambda ns: {
                 d.DSH_RUNTIME_TYPES_URL: "'agent/pre-step'\n"
                 + "\n".join(f"'{n}'" for n in ns),
-                d.DSH_SESSION_TYPES_URL: "'assistant/chunk'\n",
+                d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n",
                 d.DSH_APPROVAL_TYPES_URL: "ApprovalRequestId\n",
                 d.DSH_SESSION_INDEX_URL: "'session/created'\n"}),
             ("copilot", str, lambda ns: {
