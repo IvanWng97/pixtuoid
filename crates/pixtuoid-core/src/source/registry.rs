@@ -750,16 +750,16 @@ const HERMES: SourceDescriptor = SourceDescriptor {
 };
 
 /// Grok Build (`grok`, xai-org/grok-build). TRANSCRIPT-BEARING **with** a hook
-/// target, whose envelope is camelCase-keyed `hookEventName` — alien to the
-/// shared arms, so a claims-all custom decoder rides alongside the transcript.
+/// target. The decoder reads the camelCase envelope (`hookEventName`, `toolUseId`)
+/// — the only spelling pre-1.0 sent, hence the claims-all custom decoder; 1.0.x
+/// mirrors every key in CC's snake_case as well (`grok/tool-run-recorded`).
 /// Coalescing rests on `sessionId == the transcript's parent-dir name` (upstream
 /// joins the id into `session_dir`), mirrored by `grok_id_from_path`. Transcript
-/// = `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`, append-only;
-/// its content carries NO cwd (the PATH does).
+/// = `{grok_home}/sessions/<enc-cwd>/<session-id>/updates.jsonl`, append-only.
 const GROK: SourceDescriptor = SourceDescriptor {
     name: grok::SOURCE_NAME,
     label_prefix: "gk",
-    verified_version: "0.2.102",
+    verified_version: "1.0.25",
     version_probe: Some(&["grok", "--version"]),
     home_env: Some("GROK_HOME"),
     kind: SourceKind::Agent {
