@@ -1335,7 +1335,14 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     if iface == "SessionSwitchEvent" and "previousSessionFile" in reads
                     else ""
                 )
-                shared += f"export interface {iface} {{\n{tag}{prev}}}\n"
+                # Prose ALWAYS quotes the name, whether or not the declaration
+                # survives — the only shape that distinguishes the `type: "…"`
+                # matcher from a bare `"…"` one ("bare quoted names also live in
+                # prose", the matcher's own comment).
+                shared += (
+                    f'/** Emitted as "{name}". */\n'
+                    f"export interface {iface} {{\n{tag}{prev}}}\n"
+                )
             approval_fields = {
                 "toolCallId": "string",
                 "toolName": "string",
@@ -1351,7 +1358,10 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 body = "".join(
                     f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
                 )
-                ext += f"export interface {iface} {{\n{tag}{body}}}\n"
+                ext += (
+                    f'/** Emitted as "{name}". */\n'
+                    f"export interface {iface} {{\n{tag}{body}}}\n"
+                )
             cwd = '\tcwd: string;\n' if "cwd" in reads else ""
             ext += (
                 "export interface ExtensionContext {\n"
@@ -1521,7 +1531,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             victims = pool if field == "dispatch_names" else pool[:1]
             # The vanish arm ADDS as it drops, in the name's own shape — below the
             # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
-            stem = spell(names[-1])
+            # The decoy is built from the VICTIM, so the mutated document carries the
+            # dropped name's spelling in a NON-declaration position: that is the only
+            # shape that can tell `f'"{name}"' not in text` from `name not in text`,
+            # and eight matchers exist for exactly that distinction.
+            stem = spell(victims[0])
             if stem.isdigit():
                 # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,
                 # where the reader's `(\d+)` finds them and the arm reads unchanged.
