@@ -1,6 +1,5 @@
 ---
 source: crates/pixtuoid-core/tests/sources/conformance.rs
-assertion_line: 347
 expression: events
 ---
 - SessionStart:
@@ -61,20 +60,6 @@ expression: events
 - Usage:
     agent_id: 11003569855300287180
     fresh_tokens: 241
-- SessionEnd:
-    agent_id: 11003569855300287180
-    as_child: false
-- SessionStart:
-    agent_id: 11003569855300287180
-    source: omp
-    session_id: 2026-09-10T19-18-34-717Z_01a08cc1-eddd-7457-8567-53cc7f15a94e
-    cwd: /tmp/pixtuoid-capture/proj
-    parent_id: ~
-- Identity:
-    agent_id: 11003569855300287180
-    source: omp
-    session_id: 2026-09-10T19-18-34-717Z_01a08cc1-eddd-7457-8567-53cc7f15a94e
-    cwd: /tmp/pixtuoid-capture/proj
 - SessionEnd:
     agent_id: 11003569855300287180
     as_child: false

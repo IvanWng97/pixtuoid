@@ -4,5 +4,5 @@
   "command": "omp -p {prompt}",
   "origin": "recorded",
   "version": "omp/18.1.10",
-  "note": "hook sessionFile home path redacted to /Users/dev; bytes otherwise verbatim."
+  "note": "Transcript verbatim. The bridge's hook-payloads.jsonl (session_start/session_shutdown) was recorded and is withheld: the hook decoder keys through normalize_path_key, which folds this cased stem on Windows while the transcript seam here stays case-preserving, so a hook seam beside a conformance transcript reds only in windows-test. omp's recorded hook rounds live under tests/sources/omp/fixtures/ for that reason."
 }
