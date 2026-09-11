@@ -179,9 +179,8 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                 f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
 
-            # Half an `also` anchor is NOT an anchor. Without this, `also` could
-            # regress to decorative — the sample above satisfies both halves, so
-            # only deleting one proves the second is load-bearing.
+            # The sample above satisfies both halves, so only deleting one
+            # proves the second is load-bearing rather than decorative.
             if anchor.also is None:
                 continue
             for drop, half in (("pattern", anchor.pattern), ("also", anchor.also)):
@@ -201,11 +200,8 @@ def test_anchor_gate_fires_in_both_directions() -> None:
 
 
 def test_one_document_is_fetched_once_per_run() -> None:
-    """Three checks read codex's `protocol.rs`, two read hermes' `plugins.py`, and
-    a document is upstream's answer for the whole run. Without a per-run cache a
-    dead pin spent one request per reader and filed the SAME blind line once per
-    reader under a different label each time — which the workflow renders as
-    repeated bullets in the issue it opens."""
+    """A document is upstream's answer for the whole run, and several checks read
+    the same one — three read codex's `protocol.rs`."""
     real = d.fetch
     try:
         calls: list[str] = []
@@ -250,12 +246,9 @@ def test_one_document_is_fetched_once_per_run() -> None:
 
 
 def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
-    """The router's own documented promise: "A name this router does not know
-    means the template grew a read without a check — flagged blind, never silently
-    green." Replacing that whole `else` arm with a bare `continue` left the suite
-    green, so the promise was prose. Its two missing-carrier arms were unreachable
-    too, which is the case where an unverifiable carrier must NOT be re-reported as
-    a rename of every field it holds."""
+    """The router's documented promise, as a gate: a name it cannot place goes
+    blind, and an unverifiable carrier suppresses its fields rather than renaming
+    every one of them."""
     shared = "export interface SessionSwitchEvent {\n\tpreviousSessionFile: string;\n}\n"
     ext = (
         "export interface ToolApprovalRequestedEvent {\n\ttoolCallId: string;\n}\n"
@@ -293,11 +286,9 @@ def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
 
 
 def test_a_redirected_omp_agent_dir_is_breaking() -> None:
-    """The arm no test fired. `omp_agent_dir()`'s no-flatten rule rests on this
-    function returning the resolver's dir verbatim, and the check's own message
-    says NO LOCAL CHECK can see the failure — so nothing would notice this arm
-    going dark either. Replacing its regex with one that always matches left the
-    suite green."""
+    """`omp_agent_dir()`'s no-flatten rule rests on this returning the resolver's
+    dir verbatim, and the check's own message says no local check can see the
+    failure it guards."""
     real = d.fetch
     try:
 
@@ -332,11 +323,9 @@ def test_a_redirected_omp_agent_dir_is_breaking() -> None:
 
 
 def test_two_declarations_are_probe_health_not_a_first_match() -> None:
-    """`sole_match`'s rule as a gate, not a docstring. Relaxing `len(found) == 1`
-    to `bool(found)` reads the FIRST declaration — so the day upstream grows a
-    `#[cfg(test)]` twin or a `macro_rules!` body above the real one, the watcher
-    compares our value against the decoy's and files BREAKING drift against a
-    perfectly healthy upstream."""
+    """A first-match read picks the decoy the day upstream grows a `#[cfg(test)]`
+    twin above the real declaration, and then files breaking drift against a
+    healthy upstream."""
     check(d.sole_match(r"P\s*=\s*(\d+)", "P = 7777\n") is not None, "one match -> the match")
     check(d.sole_match(r"P\s*=\s*(\d+)", "nothing here\n") is None, "no match -> None")
     check(d.sole_match(r"P\s*=\s*(\d+)", "P = 1\nP = 7777\n") is None,
@@ -376,12 +365,9 @@ def test_two_declarations_are_probe_health_not_a_first_match() -> None:
 
 
 def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
-    """Two one-line edits reopen the gate with every existing test still green.
-
-    Dropping `also=` makes the half-anchor check below SKIP rather than fail, so a
-    split owning declaration silently goes back to being half-proven. Adding a URL
-    to `UNANCHORED_BY_DESIGN` exempts it from needing an anchor at all, and the
-    census that reads that set treats membership as the answer."""
+    """Two one-line edits reopen the gate with every other test still green:
+    dropping `also=` makes the half-anchor check SKIP rather than fail, and
+    `UNANCHORED_BY_DESIGN` membership IS the exemption."""
     # The three schemas are parsed STRUCTURALLY, so a failed parse already says
     # what a text anchor would; nothing else may join them without saying why.
     check(
@@ -402,12 +388,9 @@ def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
 
 
 def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> None:
-    """A reader that returns None must SAY so. The anchor still matches when the
-    enum moves behind a declarative macro — xAI already did this to
-    `HookEventName`, which is why `upstream_grok_hooks` carries a `hook_events!`
-    arm — so the document passes identity while the parser reads the macro
-    DEFINITION's body. Both directions riding this reader then skip, and without a
-    blind line the run is green with the checks dead."""
+    """The anchor still matches when the enum moves behind a macro — xAI already
+    did this to `HookEventName` — so the document passes identity while the parser
+    reads the macro DEFINITION's body, and both directions riding it skip."""
     real = d.fetch
     try:
         rep0 = d.Report()
@@ -443,13 +426,11 @@ def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> Non
 
 
 def test_no_anchor_is_a_name_the_watcher_checks() -> None:
-    """`Anchor`'s docstring bans this in prose; prose has no failure mode.
+    """`Anchor`'s docstring bans this in prose, and prose has no failure mode.
 
-    An anchor that IS one of the guarded names vanishes WITH them on the very
-    rename it exists to tell apart from a stale pin — and the blind line then
-    argues the maintainer OUT of the fix ("do NOT change a decoder on this
-    alone"). dsh's `'agent/pre-step'` was this shape, and so were omp's
-    `toolCall` and `getSessionFile`."""
+    Such an anchor vanishes WITH the names on the very rename it exists to tell
+    apart from a stale pin, and the blind line then argues the maintainer out of
+    the fix."""
     rep = d.Report()
     ours = d.read_our_names(rep)
     names = {
@@ -472,11 +453,9 @@ def test_no_anchor_is_a_name_the_watcher_checks() -> None:
 
 
 def test_a_multi_document_check_is_all_or_nothing() -> None:
-    """Where a name is declared in exactly one half, the UNION is the document: a
-    partial join would read a still-present name as VANISHED and file breaking
-    drift against a fetch failure. The count-against-a-literal spelling this
-    replaced also went False on a fully successful run once a third URL joined the
-    tuple, taking the whole check dark at exit 0."""
+    """Where a name is declared in exactly one half, a partial join reads a
+    still-present name as VANISHED and files breaking drift against what was only
+    a fetch failure."""
     real = d.fetch
     try:
         urls = [(f"https://x.invalid/{i}", f"doc {i}") for i in range(3)]
@@ -909,13 +888,9 @@ def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
 
 
 def test_a_ledger_row_upstream_deleted_is_reported_once_every_doc_was_fetched() -> None:
-    """The direction both sibling sweeps are blind to. They compute
-    `upstream - mine - ledger`, so a row whose variant upstream DELETED simply
-    drops out of the subtrahend — it then explains a decision about a name that
-    no longer exists, and would silently exempt the name if upstream reused it.
-    `CODEX_KNOWN_OMITTED` exempts EITHER enum, so staleness is only knowable once
-    BOTH were fetched: a run that saw one must stay quiet, or a 404 reads as a
-    deletion."""
+    """The direction both sibling sweeps are blind to: `upstream - mine - ledger`
+    drops a deleted variant out of the subtrahend. `CODEX_KNOWN_OMITTED` exempts
+    EITHER enum, so staleness is knowable only once both were fetched."""
     real = d.fetch
     saved_codex = dict(d.CODEX_KNOWN_OMITTED)
     saved_grok = dict(d.GROK_XAI_KNOWN_OMITTED)

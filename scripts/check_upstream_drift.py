@@ -280,13 +280,9 @@ class Anchor(typing.NamedTuple):
 
     pattern: str
     owns: str
-    # A SECOND pattern that must ALSO be present, for an owning declaration whose
-    # halves a sibling member can separate: dsh's `session/index.ts` puts
-    # `interface Context` between `declare module '@deepseek-ai/cordis' {` and the
-    # `interface Events {` that owns the event keys, so no single adjacency regex
-    # spans it. Both-present is weaker than adjacency — it cannot prove the two
-    # halves nest — but each half is unique per document, and it is strictly
-    # stronger than anchoring on one of the checked names.
+    # A second required pattern, for an owning declaration a sibling member splits
+    # (dsh puts `interface Context` inside the module the `Events` keys live in).
+    # Both-present cannot prove the halves nest; each half is unique per document.
     also: str | None = None
 
 
@@ -310,10 +306,7 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
     # dsh declares its event keys as cordis module augmentations, so the owner is
-    # the augmented interface, never a key inside it — an event-key anchor is a
-    # SIBLING of the names it guards and vanishes with them. That is exactly what
-    # the v2 reshape did to `assistant/chunk` (#981), aborting the check that would
-    # have reported it.
+    # the augmented interface: a key would be a SIBLING of the names it guards.
     DSH_RUNTIME_TYPES_URL: Anchor(
         r"declare module '@deepseek-ai/cordis' \{\s*\n\s*interface Events \{",
         "the cordis `Events` augmentation",
@@ -372,11 +365,8 @@ class Report:
     review: list[str] = dataclasses.field(default_factory=list)
     blind: list[str] = dataclasses.field(default_factory=list)
     errors: list[str] = dataclasses.field(default_factory=list)
-    # One run's anchored fetches, keyed by URL. A document is upstream's answer
-    # for the whole run, and several checks legitimately read the same one — three
-    # read codex's protocol.rs — so without this a single dead pin spends three
-    # requests and files the SAME blind line three times under three labels, which
-    # the workflow then renders as repeated bullets in the issue it opens.
+    # One run's anchored fetches. A document is upstream's answer for the whole
+    # run, and several checks read the same one — three read codex's protocol.rs.
     fetched: dict[str, str | None] = dataclasses.field(default_factory=dict)
 
     def add_breaking(self, line: str) -> None:
@@ -967,12 +957,8 @@ def strip_rust_comments(body: str) -> str:
 def fetch_all_anchored(targets: list[tuple[str, str]], report: Report) -> str | None:
     """Every `(url, label)` joined, or `None` the moment one misses.
 
-    Where a checked name is declared in exactly one half, the UNION is the
-    document, so a single fetch failure must read as probe health and never as a
-    vanish. Counting survivors against a literal instead — `len(docs) == 2` beside
-    an inline 2-tuple — goes False on a fully successful run the day a third URL
-    joins the tuple, and the whole check then goes dark with no blind line and
-    exit 0 (the #454 shape the `exit_code` docstring names)."""
+    A checked name may be declared in exactly one half, so the UNION is the
+    document: one fetch failure is probe health, never a vanish."""
     docs = [fetch_anchored(url, label, report) for url, label in targets]
     return "\n".join(d for d in docs if d is not None) if all(docs) else None
 
@@ -984,14 +970,11 @@ def report_stale_ledger(
     enum_label: str,
     report: Report,
 ) -> None:
-    """Report ledger rows naming a variant upstream no longer declares.
+    """Ledger rows naming a variant upstream no longer declares.
 
-    Both sibling sweeps compute `upstream - mine - ledger`, so a row whose variant
-    upstream DELETED drops out of the subtrahend and is never mentioned again: it
-    sits there forever, carrying a WHY for a decision that no longer exists and
-    silently exempting the name if upstream ever reuses it. Only the caller knows
-    whether every document feeding `upstream` was actually fetched — call this
-    ONLY when they were, or a transient 404 reads as an upstream deletion."""
+    Both sibling sweeps compute `upstream - mine - ledger`, so a deleted variant
+    drops out of the subtrahend and is never mentioned again. Call this only once
+    every document feeding `upstream` was fetched, or a 404 reads as a deletion."""
     for name in sorted(set(ledger) - upstream):
         report.add_review(
             f"{ledger_name} still ledgers `{name}`, which {enum_label} no longer "
@@ -1087,9 +1070,8 @@ def check_omp_extension_reads(
             "extensions/types.ts",
             "The omp approval-field checks were SKIPPED.",
         )
-    # `None`, not `""`, when a carrier would not parse: the fields are matched
-    # against the JOIN, so one unreadable carrier makes every field it owns look
-    # renamed — and `declares`' suppression keys on None, which a join never is.
+    # `None`, not `""`: fields match against the JOIN, and `declares`' suppression
+    # keys on None, which a join never is.
     approval_bodies = (
         None
         if missing_carriers
@@ -1755,12 +1737,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         if text is not None:
             upstream = upstream_codex_enum_types(text, "SessionUpdate")
             if upstream is None:
-                # The codex loops survive the same silent `continue` only because
-                # their vanish check files blind for the same enum first; grok's
-                # reads the document with a different parser, so nothing else
-                # notices. xAI already moved `HookEventName` behind a macro —
-                # `upstream_grok_hooks` carries a `hook_events!` arm for it — and
-                # the same move here returns the macro DEFINITION's body.
+                # Unlike the codex loops, no vanish check files blind for this
+                # enum first, so a silent `continue` here is covered by nothing.
                 report.add_blind(
                     "grok's xAI `SessionUpdate` variants",
                     GROK_NOTIFICATION_URL,
