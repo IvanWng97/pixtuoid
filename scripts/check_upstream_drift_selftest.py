@@ -102,16 +102,27 @@ ANCHOR_SAMPLES: dict[str, str] = {
     d.HERMES_SHELL_HOOK_URL: '_BLOCKING_EVENTS = frozenset({"pre_tool_call"})\n',
     d.OMP_SESSION_ENTRIES_URL: 'export type SessionEntry = { type: "session" }\n',
     d.OMP_EXIT_DIAG_URL: 'const SESSION_EXIT_CUSTOM_TYPE = "session_exit";\n',
-    d.OMP_AI_TYPES_URL: 'export type Block = { type: "toolCall" };\n',
+    d.OMP_AI_TYPES_URL:
+        'export type Message = UserMessage | AssistantMessage;\n'
+        'export interface ToolCall { type: "toolCall" }\n',
     d.OMP_EXT_SHARED_EVENTS_URL:
         'export interface SessionShutdownEvent { type: "session_shutdown"; }\n',
     d.OMP_EXT_TYPES_URL:
         'export interface ToolApprovalRequestedEvent { type: "tool_approval_requested"; }\n',
-    d.OMP_SESSION_MANAGER_URL: 'getSessionFile(): string | undefined {\n',
-    d.DSH_RUNTIME_TYPES_URL: "    'agent/pre-step'(payload: {}): void\n",
+    d.OMP_SESSION_MANAGER_URL:
+        'export class SessionManager {\n\tgetSessionFile(): string | undefined {}\n}\n',
+    d.DSH_RUNTIME_TYPES_URL:
+        "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
+        "    'agent/pre-step'(payload: {}): void\n  }\n}\n",
     d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n  'assistant/message': { text: string }\n}\n",
-    d.DSH_APPROVAL_TYPES_URL: "export type ApprovalRequestId = string\n",
-    d.DSH_SESSION_INDEX_URL: "  register('session/created', header)\n",
+    d.DSH_APPROVAL_TYPES_URL:
+        "declare module '@deepseek-ai/dsh-session/types' {\n  interface SessionEventMap {\n"
+        "    'approval/asked': { id: ApprovalRequestId }\n  }\n}\n",
+    # The `also` shape: upstream puts `interface Context` between the module
+    # header and the `Events` the keys live in, so the sample must too.
+    d.DSH_SESSION_INDEX_URL:
+        "declare module '@deepseek-ai/cordis' {\n  interface Context {\n    session: Session\n  }\n"
+        "  interface Events {\n    'session/created'(session: Session): void\n  }\n}\n",
     d.OMP_EXT_DISCOVERY_URL:
         'export async function discoverExtensionModulePaths() {}\n',
     d.OMP_DIRS_URL:
@@ -167,6 +178,328 @@ def test_anchor_gate_fires_in_both_directions() -> None:
                 out == sample and not r.blind and not r.errors,
                 f"{anchor.owns}: anchor present -> body returned, got blind={r.blind}",
             )
+
+            # The sample above satisfies both halves, so only deleting one
+            # proves the second is load-bearing rather than decorative.
+            if anchor.also is None:
+                continue
+            for drop, half in (("pattern", anchor.pattern), ("also", anchor.also)):
+                maimed = re.sub(half, "", sample, count=1)
+                check(
+                    maimed != sample,
+                    f"{anchor.owns}: the {drop} half must occur in its own sample",
+                )
+                d.fetch = lambda _u, _s=maimed: _s
+                r = d.Report()
+                check(
+                    d.fetch_anchored(url, "T", r) is None and len(r.blind) == 1,
+                    f"{anchor.owns}: {drop} missing -> blind, got blind={r.blind}",
+                )
+    finally:
+        d.fetch = real
+
+
+def test_one_document_is_fetched_once_per_run() -> None:
+    """A document is upstream's answer for the whole run, and several checks read
+    the same one — three read codex's `protocol.rs`."""
+    real = d.fetch
+    try:
+        calls: list[str] = []
+
+        def dead(u: str) -> str:
+            calls.append(u)
+            raise urllib.error.HTTPError(u, 404, "gone", {}, None)  # type: ignore[arg-type]
+
+        d.fetch = dead
+        rep = d.Report()
+        d.run_checks(d.read_our_names(rep), report=rep)
+        # A floor: a run that swept nothing would satisfy every check below.
+        check(len(calls) > 20, f"the run actually swept, got {len(calls)} fetches")
+        check(
+            not (dupes := sorted({u for u in calls if calls.count(u) > 1})),
+            f"each document is fetched once per run; repeated: {dupes}",
+        )
+        check(
+            not (twice := sorted({b for b in rep.blind if rep.blind.count(b) > 1})),
+            f"a dead pin files ONE blind line, not one per reader; repeated: {twice}",
+        )
+
+        # A SUCCESSFUL document is reused as well, not only a failed one.
+        served: list[str] = []
+
+        def live(u: str, _s: str = ANCHOR_SAMPLES[d.CODEX_PROTOCOL_URL]) -> str:
+            served.append(u)
+            if u == d.CODEX_PROTOCOL_URL:
+                return _s
+            raise urllib.error.URLError("offline: not this case's document")
+
+        d.fetch = live
+        rep = d.Report()
+        d.run_checks(d.read_our_names(rep), report=rep)
+        check(
+            served.count(d.CODEX_PROTOCOL_URL) == 1,
+            f"a document that ANSWERED is cached too, got "
+            f"{served.count(d.CODEX_PROTOCOL_URL)} fetches of protocol.rs",
+        )
+    finally:
+        d.fetch = real
+
+
+def test_the_omp_extension_router_flags_a_name_it_cannot_place() -> None:
+    """The router's documented promise, as a gate: a name it cannot place goes
+    blind, and an unverifiable carrier suppresses its fields rather than renaming
+    every one of them."""
+    shared = "export interface SessionSwitchEvent {\n\tpreviousSessionFile: string;\n}\n"
+    ext = (
+        "export interface ToolApprovalRequestedEvent {\n\ttoolCallId: string;\n}\n"
+        "export interface ToolApprovalResolvedEvent {\n\tapproved: boolean;\n}\n"
+        "export interface ExtensionContext {\n\tcwd: string;\n}\n"
+    )
+    sm = "export class SessionManager {\n\tgetSessionFile(): string {}\n}\n"
+
+    rep = d.Report()
+    d.check_omp_extension_reads(shared, ext, sm, {"cwd", "toolCallId"}, rep)
+    check(
+        not rep.blind and not rep.breaking,
+        f"names the router can place stay silent; blind={rep.blind} breaking={rep.breaking}",
+    )
+
+    rep = d.Report()
+    d.check_omp_extension_reads(shared, ext, sm, {"pxdNewlyRead"}, rep)
+    check(
+        any("pxdNewlyRead" in b for b in rep.blind),
+        f"a read with no declaration site must go BLIND, not green; blind={rep.blind}",
+    )
+    check(
+        not rep.breaking,
+        f"an unplaceable name is probe health, never a rename; got {rep.breaking}",
+    )
+
+    # A carrier that will not parse must suppress its fields, not rename them —
+    # `approved` included, whose OPTIONALITY arm reads the same value and would
+    # raise on None, killing every check after this one.
+    for fields in ({"toolCallId"}, {"approved", "toolCallId"}):
+        rep = d.Report()
+        d.check_omp_extension_reads(shared, "", sm, fields, rep)
+        check(
+            any("carrier" in b for b in rep.blind) and not rep.breaking,
+            f"an unreadable carrier is blind and suppresses {sorted(fields)}; "
+            f"blind={rep.blind} breaking={rep.breaking}",
+        )
+
+
+def test_a_redirected_omp_agent_dir_is_breaking() -> None:
+    """`omp_agent_dir()`'s no-flatten rule rests on this returning the resolver's
+    dir verbatim, and the check's own message says no local check can see the
+    failure it guards."""
+    real = d.fetch
+    try:
+
+        def drive(body: str) -> d.Report:
+            def stub(u: str, _b: str = body) -> str:
+                if u == d.OMP_DIRS_URL:
+                    return _b
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        verbatim = drive("export function getAgentDir(): string {\n\treturn dirs.agentDir;\n}\n")
+        check(
+            not any("getAgentDir" in x for x in verbatim.breaking),
+            f"the verbatim resolver is silent; got {verbatim.breaking}",
+        )
+
+        redirected = drive(
+            "export function getAgentDir(): string {\n"
+            "\treturn process.env.XDG_DATA_HOME ?? dirs.agentDir;\n}\n"
+        )
+        check(
+            any("getAgentDir" in x for x in redirected.breaking),
+            f"a redirect must be BREAKING, not silence; breaking={redirected.breaking} "
+            f"blind={redirected.blind}",
+        )
+    finally:
+        d.fetch = real
+
+
+def test_two_declarations_are_probe_health_not_a_first_match() -> None:
+    """A first-match read picks the decoy the day upstream grows a `#[cfg(test)]`
+    twin above the real declaration, and then files breaking drift against a
+    healthy upstream."""
+    check(d.sole_match(r"P\s*=\s*(\d+)", "P = 7777\n") is not None, "one match -> the match")
+    check(d.sole_match(r"P\s*=\s*(\d+)", "nothing here\n") is None, "no match -> None")
+    check(d.sole_match(r"P\s*=\s*(\d+)", "P = 1\nP = 7777\n") is None,
+          "two matches -> None, never the first")
+
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        ports = sorted(d.read_our_names(rep0).openclaw_gateway_port or ())
+        check(bool(ports), "the fragment supplies the gateway port")
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.OPENCLAW_PATHS_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        sole = drive(f"export const DEFAULT_GATEWAY_PORT = {ports[0]};\n")
+        check(not sole.breaking, f"one declaration matching ours is silent; got {sole.breaking}")
+
+        twin = drive(
+            "const DEFAULT_GATEWAY_PORT = 1234; // a fixture twin, ABOVE the real one\n"
+            f"export const DEFAULT_GATEWAY_PORT = {ports[0]};\n"
+        )
+        check(
+            not twin.breaking and any("DEFAULT_GATEWAY_PORT" in b for b in twin.blind),
+            f"ambiguity must abstain, never report the decoy's port as drift; "
+            f"breaking={twin.breaking} blind={twin.blind}",
+        )
+    finally:
+        d.fetch = real
+
+
+def test_the_anchor_requirement_cannot_be_waived_quietly() -> None:
+    """Two one-line edits reopen the gate with every other test still green:
+    dropping `also=` makes the half-anchor check SKIP rather than fail, and
+    `UNANCHORED_BY_DESIGN` membership IS the exemption."""
+    # The three schemas are parsed STRUCTURALLY, so a failed parse already says
+    # what a text anchor would; nothing else may join them without saying why.
+    check(
+        d.UNANCHORED_BY_DESIGN
+        == frozenset({d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL, d.COPILOT_SCHEMA_URL}),
+        f"the anchor requirement is waived only for the JSON Schemas, got "
+        f"{sorted(d.UNANCHORED_BY_DESIGN)}",
+    )
+    # Pinned BY URL: with `also` gone the loop in the anchor test just skips, which
+    # is indistinguishable from an anchor that never needed a second half.
+    # `\s+`, not `\s*`: indentation is the only nesting signal a both-present
+    # anchor has, so a flush-left `interface Events` on ANOTHER module must fail.
+    a = d.ANCHORS[d.DSH_SESSION_INDEX_URL]
+    for indent, want in ((" ", True), ("\t", True), ("    ", True), ("", False)):
+        body = f"declare module '@deepseek-ai/cordis' {{\n{indent}interface Events {{\n}}\n}}\n"
+        got = bool(re.search(a.pattern, body)) and bool(re.search(a.also or "", body))
+        check(got is want, f"indent {indent!r}: anchored={got}, want {want}")
+
+    for url in (d.DSH_SESSION_INDEX_URL,):
+        check(
+            d.ANCHORS[url].also is not None,
+            f"{url}: `interface Context` sits between this module header and the "
+            f"`Events` that owns the keys, so one pattern cannot span it — `also` "
+            f"is what makes the anchor whole",
+        )
+
+
+def test_an_unreadable_grok_enum_files_probe_health_rather_than_nothing() -> None:
+    """The anchor still matches when the enum moves behind a macro — xAI already
+    did this to `HookEventName` — so the document passes identity while the parser
+    reads the macro DEFINITION's body, and both directions riding it skip."""
+    real = d.fetch
+    try:
+        rep0 = d.Report()
+        tags = sorted(d.read_our_names(rep0).grok_xai_tags or ())
+        check(bool(tags), "the fragment supplies the xai tag set")
+        pas = lambda n: "".join(p.title() for p in n.split("_"))
+        variants = "".join(f"    {pas(n)},\n" for n in tags)
+
+        def drive(doc: str) -> d.Report:
+            def stub(u: str, _d: str = doc) -> str:
+                if u == d.GROK_NOTIFICATION_URL:
+                    return _d
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        plain = drive(f"pub enum SessionUpdate {{\n{variants}}}\n")
+        check(not any("SessionUpdate` variants" in b for b in plain.blind),
+              f"a readable enum files no probe health; got {plain.blind}")
+
+        macro = drive(
+            "macro_rules! session_updates {\n    ($($variant:ident,)*) => {\n"
+            "        pub enum SessionUpdate { $($variant,)* }\n    };\n}\n"
+            f"session_updates! {{\n{variants}}}\n"
+        )
+        check(any("SessionUpdate` variants" in b for b in macro.blind),
+              f"an unreadable enum must file probe health; got blind={macro.blind}")
+    finally:
+        d.fetch = real
+
+
+def test_no_anchor_is_a_name_the_watcher_checks() -> None:
+    """`Anchor`'s docstring bans this in prose, and prose has no failure mode.
+
+    Such an anchor vanishes WITH the names on the very rename it exists to tell
+    apart from a stale pin, and the blind line then argues the maintainer out of
+    the fix."""
+    rep = d.Report()
+    ours = d.read_our_names(rep)
+    names = {
+        n
+        for f in ours.__dataclass_fields__
+        if isinstance(v := getattr(ours, f), set)
+        for n in v
+    }
+    # A floor: an empty vocabulary would make every `re.search` below vacuous.
+    check(len(names) > 100, f"the fragments supply the swept vocabulary, got {len(names)}")
+    circular = sorted(
+        (a.owns, p, n)
+        for a in d.ANCHORS.values()
+        for p in (a.pattern, a.also)
+        if p is not None
+        for n in names
+        if re.search(p, n)
+    )
+    check(not circular, f"an anchor must not match a name it guards: {circular}")
+
+
+def test_a_multi_document_check_is_all_or_nothing() -> None:
+    """Where a name is declared in exactly one half, a partial join reads a
+    still-present name as VANISHED and files breaking drift against what was only
+    a fetch failure."""
+    real = d.fetch
+    try:
+        urls = [(f"https://x.invalid/{i}", f"doc {i}") for i in range(3)]
+        bodies = {u: f"pub enum HookEvent {{ Pxv{i} }}\n" for i, (u, _) in enumerate(urls)}
+        anchor = d.Anchor(r"pub enum HookEvent\b", "`HookEvent`")
+        saved = {u: d.ANCHORS.get(u) for u, _ in urls}
+        try:
+            for u, _ in urls:
+                d.ANCHORS[u] = anchor
+
+            d.fetch = lambda u, _b=bodies: _b[u]
+            r = d.Report()
+            joined = d.fetch_all_anchored(urls, r)
+            check(joined is not None and all(b.strip() in joined for b in bodies.values()),
+                  f"every document present -> all of them joined, got {joined!r}")
+            check(not r.blind and not r.errors, f"a clean run files nothing, got {r.blind}")
+
+            # Exactly one short, and the whole check must abstain — never join the rest.
+            for drop, _ in urls:
+                d.fetch = lambda u, _d=drop, _b=bodies: (
+                    _UNANCHORED if u == _d else _b[u]
+                )
+                r = d.Report()
+                check(d.fetch_all_anchored(urls, r) is None,
+                      f"{drop} unanchored -> the whole check abstains")
+                check(len(r.blind) == 1 and not r.errors,
+                      f"{drop} unanchored -> one blind line, got {r.blind}")
+        finally:
+            for u, prev in saved.items():
+                if prev is None:
+                    d.ANCHORS.pop(u, None)
+                else:
+                    d.ANCHORS[u] = prev
     finally:
         d.fetch = real
 
@@ -563,6 +896,85 @@ def test_an_undecoded_sibling_is_reported_and_a_stranger_is_not() -> None:
         d.fetch = real
         d.CODEX_KNOWN_OMITTED.clear()
         d.CODEX_KNOWN_OMITTED.update(saved)
+
+
+def test_a_ledger_row_upstream_deleted_is_reported_once_every_doc_was_fetched() -> None:
+    """The direction both sibling sweeps are blind to: `upstream - mine - ledger`
+    drops a deleted variant out of the subtrahend. `CODEX_KNOWN_OMITTED` exempts
+    EITHER enum, so staleness is knowable only once both were fetched."""
+    real = d.fetch
+    saved_codex = dict(d.CODEX_KNOWN_OMITTED)
+    saved_grok = dict(d.GROK_XAI_KNOWN_OMITTED)
+    phantom = "pxd_upstream_deleted_this"
+    try:
+        rep0 = d.Report()
+        ours = d.read_our_names(rep0)
+        response_item = sorted(ours.codex_response_item or ())
+        outers = sorted(ours.codex_outers or ())
+        tags = sorted(ours.grok_xai_tags or ())
+        check(bool(response_item and outers and tags), "the fragment supplies all three sets")
+
+        def serve(docs: dict[str, str]) -> d.Report:
+            def stub(u: str, _d: dict[str, str] = docs) -> str:
+                if u in _d:
+                    return _d[u]
+                raise urllib.error.URLError("offline: not this case's document")
+
+            d.fetch = stub
+            rep = d.Report()
+            d.run_checks(d.read_our_names(rep), report=rep)
+            return rep
+
+        def codex_enum(enum: str, names: list[str]) -> str:
+            rows = "".join(
+                f'    #[serde(rename = "{n}")]\n    Pxv{i},\n' for i, n in enumerate(names)
+            )
+            return f"pub enum {enum} {{\n{rows}}}\n"
+
+        both = {
+            d.CODEX_MODELS_URL: codex_enum("ResponseItem", response_item),
+            d.CODEX_ROLLOUT_ITEM_URL: codex_enum("RolloutItem", outers),
+        }
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED[phantom] = "test"
+        loud = serve(both)
+        check(any(phantom in x for x in loud.review),
+              f"a ledger row upstream no longer declares must be reported; got {loud.review}")
+
+        half = serve({d.CODEX_MODELS_URL: both[d.CODEX_MODELS_URL]})
+        check(not any(phantom in x for x in half.review),
+              f"one enum unfetched cannot prove staleness; got {half.review}")
+
+        # EITHER enum exempts, so the check must union them. Ledger a name only the
+        # FIRST-swept enum has: a last-wins accumulator drops it and cries stale.
+        only_response = sorted(set(response_item) - set(outers))
+        check(bool(only_response), "ResponseItem has a name RolloutItem does not")
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED[only_response[0]] = "test"
+        live = serve(both)
+        check(not any(f"ledgers `{only_response[0]}`" in x for x in live.review),
+              f"a row only the FIRST enum declares stays quiet; got {live.review}")
+
+        pas = lambda n: "".join(p.title() for p in n.split("_"))
+        grok_doc = ("pub enum SessionUpdate {\n"
+                    + "".join(f"    {pas(n)},\n" for n in tags) + "}\n")
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED[phantom] = "test"
+        gl = serve({d.GROK_NOTIFICATION_URL: grok_doc})
+        check(any(phantom in x for x in gl.review),
+              f"the grok ledger gets the same sweep; got {gl.review}")
+
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED[tags[0]] = "test"
+        gq = serve({d.GROK_NOTIFICATION_URL: grok_doc})
+        check(not any(f"ledgers `{tags[0]}`" in x for x in gq.review),
+              f"a live grok row stays quiet; got {gq.review}")
+    finally:
+        d.fetch = real
+        d.CODEX_KNOWN_OMITTED.clear()
+        d.CODEX_KNOWN_OMITTED.update(saved_codex)
+        d.GROK_XAI_KNOWN_OMITTED.clear()
+        d.GROK_XAI_KNOWN_OMITTED.update(saved_grok)
 
 
 def test_the_prefix_sweeps_flag_a_family_sibling_and_ignore_a_stranger() -> None:
@@ -1110,7 +1522,14 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     if iface == "SessionSwitchEvent" and "previousSessionFile" in reads
                     else ""
                 )
-                shared += f"export interface {iface} {{\n{tag}{prev}}}\n"
+                # Prose ALWAYS quotes the name, whether or not the declaration
+                # survives — the only shape that distinguishes the `type: "…"`
+                # matcher from a bare `"…"` one ("bare quoted names also live in
+                # prose", the matcher's own comment).
+                shared += (
+                    f'/** Emitted as "{name}". */\n'
+                    f"export interface {iface} {{\n{tag}{prev}}}\n"
+                )
             approval_fields = {
                 "toolCallId": "string",
                 "toolName": "string",
@@ -1126,18 +1545,21 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 body = "".join(
                     f"\t{f}: {t};\n" for f, t in approval_fields.items() if f in reads
                 )
-                ext += f"export interface {iface} {{\n{tag}{body}}}\n"
+                ext += (
+                    f'/** Emitted as "{name}". */\n'
+                    f"export interface {iface} {{\n{tag}{body}}}\n"
+                )
             cwd = '\tcwd: string;\n' if "cwd" in reads else ""
             ext += (
                 "export interface ExtensionContext {\n"
                 + cwd
                 + "\tsessionManager: ReadonlySessionManager;\n}\n"
             )
-            sm = "// ReadonlySessionManager picks getSessionFile / getSessionId\n" + "".join(
+            sm = "export class SessionManager {\n" + "".join(
                 f"\t{g}(): string {{\n\t}}\n"
                 for g in ("getSessionFile", "getSessionId")
                 if g in reads
-            )
+            ) + "}\n"
             return {
                 d.OMP_EXT_SHARED_EVENTS_URL: shared,
                 d.OMP_EXT_TYPES_URL: ext,
@@ -1209,8 +1631,8 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                     "pub enum SessionUpdate {\n" + "".join(f"    {n},\n" for n in ns) + "}\n"}),
             ("omp_message_vocab", str, lambda ns: {
                 d.OMP_AI_TYPES_URL:
-                    "export type Block = {\n"
-                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask") + "};\n",
+                    "export type Message = UserMessage | AssistantMessage;\n"
+                    + "".join(f'  | "{n}"\n' for n in ns if n != "ask"),
                 d.OMP_ASK_URL:
                     "export class AskTool {\n"
                     + "".join(f'  name = "{n}";\n' for n in ns if n == "ask") + "}\n"}),
@@ -1252,11 +1674,16 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
                 (d.ACP_V1_SCHEMA_URL, d.ACP_V1_SCHEMA_UNSTABLE_URL),
                 acp_schema(full["acp_decoded_tags"], ns))),
             ("dsh_plugin_events", str, lambda ns: {
-                d.DSH_RUNTIME_TYPES_URL: "'agent/pre-step'\n"
-                + "\n".join(f"'{n}'" for n in ns),
+                d.DSH_RUNTIME_TYPES_URL:
+                    "declare module '@deepseek-ai/cordis' {\n  interface Events {\n"
+                    + "\n".join(f"'{n}'" for n in ns),
                 d.DSH_SESSION_TYPES_URL: "export interface SessionEventMap {\n",
-                d.DSH_APPROVAL_TYPES_URL: "ApprovalRequestId\n",
-                d.DSH_SESSION_INDEX_URL: "'session/created'\n"}),
+                d.DSH_APPROVAL_TYPES_URL:
+                    "declare module '@deepseek-ai/dsh-session/types' {\n"
+                    "  interface SessionEventMap {\n",
+                d.DSH_SESSION_INDEX_URL:
+                    "declare module '@deepseek-ai/cordis' {\n  interface Context {\n  }\n"
+                    "  interface Events {\n"}),
             ("copilot", str, lambda ns: {
                 d.COPILOT_SCHEMA_URL: copilot_schema(ns, full["copilot_fields"])}),
             ("copilot_fields", str, lambda ns: {
@@ -1291,7 +1718,11 @@ def test_every_source_check_fires_on_a_vanish_and_stays_silent_otherwise() -> No
             victims = pool if field == "dispatch_names" else pool[:1]
             # The vanish arm ADDS as it drops, in the name's own shape — below the
             # floor the check SKIPS. `_` not case is the axis (cursor's lone `stop`).
-            stem = spell(names[-1])
+            # The decoy is built from the VICTIM, so the mutated document carries the
+            # dropped name's spelling in a NON-declaration position: that is the only
+            # shape that can tell `f'"{name}"' not in text` from `name not in text`,
+            # and eight matchers exist for exactly that distinction.
+            stem = spell(victims[0])
             if stem.isdigit():
                 # A numeric VALUE row: a `Pxd` suffix leaves our digits at the front,
                 # where the reader's `(\d+)` finds them and the arm reads unchanged.

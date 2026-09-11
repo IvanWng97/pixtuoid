@@ -280,6 +280,10 @@ class Anchor(typing.NamedTuple):
 
     pattern: str
     owns: str
+    # A second required pattern, for an owning declaration a sibling member splits
+    # (dsh puts `interface Context` inside the module the `Events` keys live in).
+    # Both-present cannot prove the halves nest; each half is unique per document.
+    also: str | None = None
 
 
 # The three JSON Schemas are parsed STRUCTURALLY, so a text anchor would add
@@ -301,10 +305,22 @@ ANCHORS: dict[str, Anchor] = {
     CODEX_MODELS_URL: Anchor(r"pub enum ResponseItem\b", "`ResponseItem`"),
     CODEX_PROTOCOL_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     CODEX_ROLLOUT_ITEM_URL: Anchor(r"pub enum RolloutItem\b", "`RolloutItem`"),
-    DSH_RUNTIME_TYPES_URL: Anchor(r"'agent/pre-step'", "`agent/pre-step`"),
+    # dsh declares its event keys as cordis module augmentations, so the owner is
+    # the augmented interface: a key would be a SIBLING of the names it guards.
+    DSH_RUNTIME_TYPES_URL: Anchor(
+        r"declare module '@deepseek-ai/cordis' \{\s*\n\s*interface Events \{",
+        "the cordis `Events` augmentation",
+    ),
     DSH_SESSION_TYPES_URL: Anchor(r"export interface SessionEventMap\b", "`SessionEventMap`"),
-    DSH_APPROVAL_TYPES_URL: Anchor(r"ApprovalRequestId", "`ApprovalRequestId`"),
-    DSH_SESSION_INDEX_URL: Anchor(r"'session/created'", "`session/created`"),
+    DSH_APPROVAL_TYPES_URL: Anchor(
+        r"declare module '@deepseek-ai/dsh-session/types' \{\s*\n\s*interface SessionEventMap \{",
+        "the `SessionEventMap` augmentation",
+    ),
+    DSH_SESSION_INDEX_URL: Anchor(
+        r"declare module '@deepseek-ai/cordis' \{",
+        "the cordis `Events` augmentation",
+        also=r"(?m)^\s+interface Events \{",
+    ),
     GROK_HOOK_URL: Anchor(r"pub enum HookEventName\b", "`HookEventName`"),
     GROK_NOTIFICATION_URL: Anchor(r"pub enum SessionUpdate\b", "`SessionUpdate`"),
     GROK_SESSION_STORAGE_URL: Anchor(
@@ -318,13 +334,13 @@ ANCHORS: dict[str, Anchor] = {
     OPENCODE_EVENT_URLS[1]: Anchor(r"(?m)^export const Event = \{", "the `Event` inventory"),
     # identity-grade: co-located only — a name moved out still matches, so phantom
     # renames survive it. Not upgradeable without a parser; a docs PAGE is only this.
-    OMP_AI_TYPES_URL: Anchor(r"toolCall", "the message block types"),
+    OMP_AI_TYPES_URL: Anchor(r"(?m)^export type Message\s*=", "the `Message` union"),
     OMP_ASK_URL: Anchor(r"export class AskTool", "the `AskTool` class"),
     OMP_EXIT_DIAG_URL: Anchor(r"SESSION_EXIT_CUSTOM_TYPE", "`SESSION_EXIT_CUSTOM_TYPE`"),
     OMP_SESSION_ENTRIES_URL: Anchor(r"export type SessionEntry\b", "the session-entry union"),
     OMP_EXT_SHARED_EVENTS_URL: Anchor(r"SessionShutdownEvent", "`SessionShutdownEvent`"),
     OMP_EXT_TYPES_URL: Anchor(r"ToolApprovalRequestedEvent", "`ToolApprovalRequestedEvent`"),
-    OMP_SESSION_MANAGER_URL: Anchor(r"getSessionFile", "`getSessionFile`"),
+    OMP_SESSION_MANAGER_URL: Anchor(r"(?m)^export class SessionManager\b", "`SessionManager`"),
     OMP_EXT_DISCOVERY_URL: Anchor(
         r"discoverExtensionModulePaths", "`discoverExtensionModulePaths`"
     ),
@@ -349,6 +365,9 @@ class Report:
     review: list[str] = dataclasses.field(default_factory=list)
     blind: list[str] = dataclasses.field(default_factory=list)
     errors: list[str] = dataclasses.field(default_factory=list)
+    # One run's anchored fetches. A document is upstream's answer for the whole
+    # run, and several checks read the same one — three read codex's protocol.rs.
+    fetched: dict[str, str | None] = dataclasses.field(default_factory=dict)
 
     def add_breaking(self, line: str) -> None:
         self.breaking.append(line)
@@ -482,6 +501,9 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     it are SKIPPED as probe health, not drift. An undeclared URL is reported and
     never RAISED: `run_checks` routes exceptions to the transient bucket, degrading
     "someone added an unproven sweep" to a green-run warning."""
+    if url in report.fetched:
+        return report.fetched[url]
+    report.fetched[url] = None
     anchor = ANCHORS.get(url)
     if anchor is None:
         report.add_blind(
@@ -495,7 +517,9 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
     text = try_fetch(url, label, report)
     if text is None:
         return None
-    if not re.search(anchor.pattern, text):
+    if not re.search(anchor.pattern, text) or (
+        anchor.also is not None and not re.search(anchor.also, text)
+    ):
         report.add_blind(
             f"{label}: the document no longer contains {anchor.owns}",
             url,
@@ -506,6 +530,7 @@ def fetch_anchored(url: str, label: str, report: Report) -> str | None:
             "reported as drift.",
         )
         return None
+    report.fetched[url] = text
     return text
 
 
@@ -929,6 +954,36 @@ def strip_rust_comments(body: str) -> str:
     return "".join(out)
 
 
+def fetch_all_anchored(targets: list[tuple[str, str]], report: Report) -> str | None:
+    """Every `(url, label)` joined, or `None` the moment one misses.
+
+    A checked name may be declared in exactly one half, so the UNION is the
+    document: one fetch failure is probe health, never a vanish."""
+    docs = [fetch_anchored(url, label, report) for url, label in targets]
+    return "\n".join(d for d in docs if d is not None) if all(docs) else None
+
+
+def report_stale_ledger(
+    ledger_name: str,
+    ledger: dict[str, str],
+    upstream: set[str],
+    enum_label: str,
+    report: Report,
+) -> None:
+    """Ledger rows naming a variant upstream no longer declares.
+
+    Both sibling sweeps compute `upstream - mine - ledger`, so a deleted variant
+    drops out of the subtrahend and is never mentioned again. Call this only once
+    every document feeding `upstream` was fetched, or a 404 reads as a deletion."""
+    for name in sorted(set(ledger) - upstream):
+        report.add_review(
+            f"{ledger_name} still ledgers `{name}`, which {enum_label} no longer "
+            f"declares — upstream removed it. Delete the row: it documents a "
+            f"decision about a variant that is gone, and would silently exempt the "
+            f"name from the sibling sweep if upstream ever reused it."
+        )
+
+
 def rust_block_after(src: str, anchor_re: str) -> str | None:
     """The `{ … }` block following the first `anchor_re` match, `None` if absent.
 
@@ -1015,7 +1070,13 @@ def check_omp_extension_reads(
             "extensions/types.ts",
             "The omp approval-field checks were SKIPPED.",
         )
-    approval_bodies = "\n".join(body for body in carriers.values() if body)
+    # `None`, not `""`: fields match against the JOIN, and `declares`' suppression
+    # keys on None, which a join never is.
+    approval_bodies = (
+        None
+        if missing_carriers
+        else "\n".join(body for body in carriers.values() if body)
+    )
     ctx_body = typescript_interface_body(ext_types, "ExtensionContext")
     if ctx_body is None:
         report.add_blind(
@@ -1038,7 +1099,11 @@ def check_omp_extension_reads(
 
     # The presence matcher's `\??` cannot see required->optional, and `approved`
     # is the one field whose optionality carries semantics.
-    if "approved" in fields and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies):
+    if (
+        "approved" in fields
+        and approval_bodies is not None
+        and re.search(r"(?m)^\s*approved\?\s*:", approval_bodies)
+    ):
         report.add_breaking(
             "omp's `approved` became OPTIONAL upstream — the decoder reads an "
             "absent value as a DENIAL, so every approval would drop the sprite "
@@ -1520,13 +1585,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.omp_message_vocab is not None:
-        docs = [
-            t
-            for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)
-            if (t := fetch_anchored(u, "omp message vocabulary", report)) is not None
-        ]
-        if len(docs) == 2:
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "omp message vocabulary") for u in (OMP_AI_TYPES_URL, OMP_ASK_URL)], report
+        )
+        if joined is not None:
             for name in sorted(ours.omp_message_vocab):
                 if f'"{name}"' not in joined:
                     report.add_breaking(
@@ -1562,14 +1624,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                 check_omp_title_fields(text, ours.omp_title_fields, report)
 
     if ours.dsh_plugin_events is not None:
-        docs = [
-            fetch_anchored(DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types", report),
-            fetch_anchored(DSH_SESSION_TYPES_URL, "dsh session event types", report),
-            fetch_anchored(DSH_APPROVAL_TYPES_URL, "dsh approval types", report),
-            fetch_anchored(DSH_SESSION_INDEX_URL, "dsh session bus names", report),
-        ]
-        if all(d is not None for d in docs):
-            joined = "\n".join(d for d in docs if d is not None)
+        joined = fetch_all_anchored(
+            [
+                (DSH_RUNTIME_TYPES_URL, "dsh agent runtime-types"),
+                (DSH_SESSION_TYPES_URL, "dsh session event types"),
+                (DSH_APPROVAL_TYPES_URL, "dsh approval types"),
+                (DSH_SESSION_INDEX_URL, "dsh session bus names"),
+            ],
+            report,
+        )
+        if joined is not None:
             for name in sorted(ours.dsh_plugin_events):
                 if f"'{name}'" not in joined:
                     report.add_breaking(
@@ -1672,8 +1736,25 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         text = fetch_anchored(GROK_NOTIFICATION_URL, "grok notification source", report)
         if text is not None:
             upstream = upstream_codex_enum_types(text, "SessionUpdate")
-            if upstream is not None:
+            if upstream is None:
+                # Unlike the codex loops, no vanish check files blind for this
+                # enum first, so a silent `continue` here is covered by nothing.
+                report.add_blind(
+                    "grok's xAI `SessionUpdate` variants",
+                    GROK_NOTIFICATION_URL,
+                    "The appearance sweep and the ledger staleness check were both "
+                    "SKIPPED — most likely the enum moved behind a declarative "
+                    "macro, as `HookEventName` already did.",
+                )
+            else:
                 families = {n.split("_", 1)[0] for n in ours.grok_xai_tags if "_" in n}
+                report_stale_ledger(
+                    "GROK_XAI_KNOWN_OMITTED",
+                    GROK_XAI_KNOWN_OMITTED,
+                    upstream,
+                    "grok's xAI `SessionUpdate`",
+                    report,
+                )
                 gap = upstream - ours.grok_xai_tags - set(GROK_XAI_KNOWN_OMITTED)
                 for name in sorted(gap):
                     if name.split("_", 1)[0] in families:
@@ -1685,13 +1766,11 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.codex_escalation is not None:
-        docs = [
-            t
-            for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)
-            if (t := fetch_anchored(u, "Codex escalation names", report)) is not None
-        ]
-        if len(docs) == 2:
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "Codex escalation names") for u in (CODEX_PROTOCOL_URL, CODEX_MODELS_URL)],
+            report,
+        )
+        if joined is not None:
             for name in sorted(ours.codex_escalation):
                 if not re.search(rf"\b{re.escape(name)}\b", joined):
                     report.add_breaking(
@@ -1700,10 +1779,15 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         f"so a codex session sits Active through every prompt."
                     )
 
-    for field, url, enum in (
+    # `CODEX_KNOWN_OMITTED` exempts a name from EITHER enum, hence the union, and
+    # only once every sweep ran (`report_stale_ledger`'s precondition).
+    codex_sibling_sweeps = (
         ("codex_response_item", CODEX_MODELS_URL, "ResponseItem"),
         ("codex_outers", CODEX_ROLLOUT_ITEM_URL, "RolloutItem"),
-    ):
+    )
+    codex_seen: set[str] = set()
+    codex_swept = 0
+    for field, url, enum in codex_sibling_sweeps:
         mine = getattr(ours, field)
         if mine is None:
             continue
@@ -1713,6 +1797,8 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
         upstream = upstream_codex_enum_types(text, enum)
         if upstream is None:
             continue
+        codex_seen |= upstream
+        codex_swept += 1
         families = sibling_families(mine)
         for name in sorted(upstream - mine - set(CODEX_KNOWN_OMITTED)):
             if name.rsplit("_", 1)[-1] in families:
@@ -1722,6 +1808,14 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                     f"we already decode, and source/codex.rs decodes it to nothing. "
                     f"Decode it, or add it to CODEX_KNOWN_OMITTED with the reason."
                 )
+    if codex_swept == len(codex_sibling_sweeps):
+        report_stale_ledger(
+            "CODEX_KNOWN_OMITTED",
+            CODEX_KNOWN_OMITTED,
+            codex_seen,
+            "`ResponseItem`/`RolloutItem`",
+            report,
+        )
 
     if ours.grok_xai_method is not None:
         text = fetch_anchored(GROK_SESSION_STORAGE_URL, "grok session storage", report)
@@ -1788,13 +1882,10 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
                         )
 
     if ours.opencode is not None:
-        docs = [
-            t
-            for u in OPENCODE_EVENT_URLS
-            if (t := fetch_anchored(u, "opencode event inventory", report)) is not None
-        ]
-        if len(docs) == len(OPENCODE_EVENT_URLS):
-            joined = "\n".join(docs)
+        joined = fetch_all_anchored(
+            [(u, "opencode event inventory") for u in OPENCODE_EVENT_URLS], report
+        )
+        if joined is not None:
             for ev in sorted(ours.opencode - OPENCODE_TOLERATED):
                 if f'"{ev}"' not in joined:
                     report.add_breaking(
