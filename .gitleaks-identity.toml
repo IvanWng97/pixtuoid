@@ -130,21 +130,30 @@ regex = '''Git user: [^\\"\n]+'''
 [[rules]]
 id = "pixtuoid-inventory-skill-md"
 description = "A skills roster, not one documented SKILL.md"
-regex = '''(?:SKILL\.md[^\n]*){15}'''
+regex = '''(?:SKILL\.md[^\n]*){12}'''
 
 [[rules]]
 id = "pixtuoid-inventory-named-elements"
 description = "A copilot <available_skills> roster, not one documented skill"
-regex = '''(?:<name>[^\n]*){15}'''
+regex = '''(?:<name>[^\n]*){12}'''
 
 [[rules]]
 id = "pixtuoid-inventory-bulleted"
 description = "A skill/agent listing, not a few documented entries"
-regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){15}'''
+regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){12}'''
 
 # The same listing JSON-encoded as an ARRAY (`agent_listing_delta.addedLines`): rows
 # separated by `","`, which the escaped-newline anchor above cannot see.
 [[rules]]
 id = "pixtuoid-inventory-array"
 description = "A listing encoded as a JSON array of entries"
-regex = '''(?:","- [A-Za-z0-9:._-]+: [A-Z][^\n]*){15}'''
+regex = '''(?:"- [A-Za-z0-9:._-]+: [A-Z][^\n]*){12}'''
+
+# The roster with its prose stripped: `skill_listing.names` and
+# `agent_listing_delta.addedTypes` are bare arrays of namespaced ids. Restoring only
+# those two fields into an otherwise-redacted capture left both configs reporting
+# clean — and a field with no prose is the one a reviewer's eye skips.
+[[rules]]
+id = "pixtuoid-inventory-bare-ids"
+description = "An array of namespaced plugin ids, not a few documented names"
+regex = '''(?:"[A-Za-z0-9._-]+:[A-Za-z0-9._-]+"\s*,\s*){12}'''

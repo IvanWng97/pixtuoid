@@ -1414,11 +1414,14 @@ fixture-pii-selftest:
         > "$d/probe/identity-inv-bulleted.txt"
     { printf '{"addedLines":["- p-0:a-0: %s"' "$pad"; for i in $(seq 1 20); do printf -- ',"- plugin-%s:agent-%s: %s"' "$i" "$i" "$pad"; done; printf ']}\n'; } \
         > "$d/probe/identity-inv-array.txt"
+    { printf '{"names":['; for i in $(seq 1 20); do printf '"plugin-%s:skill-%s",' "$i" "$i"; done; printf '""]}\n'; } \
+        > "$d/probe/identity-inv-bare-ids.txt"
     # Three of each, which is what a redaction leaves behind.
     { for i in 1 2 3; do printf -- '- example-skill-%s: A placeholder. (file: r1/example-skill-%s/SKILL.md)' "$i" "$i"; done; printf '\\n'
       for i in 1 2 3; do printf '<skill><name>example-skill-%s</name></skill>' "$i"; done; printf '\n'
       printf 'one line:'; for i in 1 2 3; do printf -- '\\n- example-plugin-%s:example-agent: A placeholder.' "$i"; done; printf '\n'
       printf '{"addedLines":['; for i in 1 2 3; do printf -- '"- example-plugin-%s:example-agent: A placeholder.",' "$i"; done; printf '""]}\n'
+      printf '{"names":['; for i in 1 2 3; do printf '"example-plugin-%s:example-skill",' "$i"; done; printf '""]}\n'
     } > "$d/quiet/identity-inv.txt"
     printf '{"authorization":"Bearer %s"}\n' "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9x" \
         > "$d/probe/identity-bearer.txt"
@@ -1450,7 +1453,7 @@ fixture-pii-selftest:
     # The credential config does NOT own the identity class — its default global
     # allowlist waives filesystem-shaped strings, which is why the pair is split.
     for spec in ".gitleaks.toml=cred-aws.txt,cred-disguised.txt" \
-                ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-inv-array.txt,identity-inv-bulleted.txt,identity-inv-named.txt,identity-inv-skillmd.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
+                ".gitleaks-identity.toml=identity-bearer.txt,identity-dashed.txt,identity-email.txt,identity-gituser.txt,identity-home.txt,identity-inv-array.txt,identity-inv-bare-ids.txt,identity-inv-bulleted.txt,identity-inv-named.txt,identity-inv-skillmd.txt,identity-mcp.txt,identity-prefix.txt,identity-users.txt,identity-win.txt"; do
         cfg=${spec%%=*}; want=${spec#*=}
         got=$(fired "$cfg" "$d/probe")
         if [ "$got" != "$want" ]; then
