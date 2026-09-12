@@ -808,7 +808,8 @@ mod recorder {
     /// the count in its provenance. A composed capture carries no operator data
     /// by construction, and the README demo reads its bytes past the decoders.
     /// A pass that blanks nothing leaves a record that already carries a count
-    /// alone, so re-running never erases history.
+    /// alone, so re-running never erases history: `blanked` counts the original
+    /// recording, not what a fresh capture would differ by today.
     fn strip_corpus(root: &Path) -> std::io::Result<()> {
         for pixtuoid_core::harness::Capture { dir, source } in
             pixtuoid_core::harness::captures(root)

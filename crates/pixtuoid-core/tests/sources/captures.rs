@@ -341,10 +341,17 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
     }
 }
 
+/// Every capture exempt from the strip, by its layout path. Pinned as an exact
+/// set so an exemption is a reviewed diff here, never a quiet key in a record:
+/// an exempt capture is the one path inventory data the gitleaks backstop
+/// cannot see has back into the tree.
+const EXEMPT_FROM_STRIP: &[&str] = &["cursor/fixtures"];
+
 /// The strip is disclosed by `deidentified`; a note that still calls the bytes
 /// verbatim contradicts it, and an exemption without its reason is a silent hole.
 #[test]
 fn a_stripped_record_does_not_call_its_bytes_verbatim_and_an_exemption_says_why() {
+    let mut exempt = BTreeSet::new();
     for c in every_capture() {
         let prov = c.provenance_path;
         let v: serde_json::Value =
@@ -364,8 +371,20 @@ fn a_stripped_record_does_not_call_its_bytes_verbatim_and_an_exemption_says_why(
                 "{}: exempt from the strip without saying why",
                 prov.display()
             );
+            exempt.insert(
+                c.dir
+                    .strip_prefix(sources_root())
+                    .expect("under root")
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
         }
     }
+    let pinned: BTreeSet<String> = EXEMPT_FROM_STRIP.iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        exempt, pinned,
+        "the exempt set changed — review it here, not only in a record"
+    );
 }
 
 /// A `recorded` fixture whose bytes were EDITED must say so: nothing in them
