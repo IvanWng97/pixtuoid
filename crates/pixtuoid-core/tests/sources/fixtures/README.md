@@ -39,7 +39,12 @@ without it a reader cannot tell an edited capture from an untouched one, which i
 the distinction the whole mechanism exists to make. A field blanked today stays
 blank in that fixture: a decoder later extended to read it meets the neutral value
 there and its golden encodes "absent" — re-record the scenario when a decoder
-grows a read.
+grows a read. The other direction is cheap: `just restrip-fixtures` runs the same
+strip over the committed corpus, offline and unbilled, so a field a decoder
+STOPPED reading is one pass from gone. A capture that exists to pin a wire
+premise the decoder drops on purpose — a test reads it off the raw bytes, which
+no probe can see — declares `"deidentified": {"method": "none", "why": …}` and
+both paths leave it alone; the gate refuses the exemption without its reason.
 
 The table above is not the schema — [`provenance.schema.json`](provenance.schema.json)
 is, and both readers (this table and

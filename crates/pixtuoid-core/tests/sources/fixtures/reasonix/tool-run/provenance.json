@@ -4,5 +4,9 @@
   "command": "reasonix -p {prompt}",
   "origin": "recorded",
   "version": "reasonix v1.37.0",
-  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
+  "note": "Redacted: the owner column of a captured `ls -la`.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 15
+  }
 }

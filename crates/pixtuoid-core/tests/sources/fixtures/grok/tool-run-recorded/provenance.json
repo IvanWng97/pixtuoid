@@ -4,5 +4,9 @@
   "command": "grok -p {prompt}",
   "origin": "recorded",
   "version": "grok 1.0.25 (f7e67d6988e2) [stable]",
-  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim."
+  "note": "Home path redacted to /Users/dev.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 199
+  }
 }

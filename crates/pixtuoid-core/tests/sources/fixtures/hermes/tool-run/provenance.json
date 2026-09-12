@@ -4,5 +4,9 @@
   "command": "hermes --accept-hooks -z {prompt}",
   "origin": "recorded",
   "version": "Hermes Agent v0.21.0 (2026.8.31)",
-  "note": "Home path redacted to /Users/dev; the bytes are otherwise verbatim."
+  "note": "Home path redacted to /Users/dev.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 21
+  }
 }
