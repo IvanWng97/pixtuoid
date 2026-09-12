@@ -899,9 +899,13 @@ mod recorder {
             );
         }
 
+        /// The three capture shapes `captures.rs` walks, walked the same way: a
+        /// conformance scenario, a module's own scenario subtree, and a module's
+        /// flat `fixtures/` with the provenance at its root.
         #[test]
         fn every_committed_scenario_decodes_the_same_once_stripped() {
             let root = sources_root();
+            let name = |p: &Path| p.file_name().expect("name").to_string_lossy().into_owned();
             let dirs = |p: PathBuf| {
                 std::fs::read_dir(p)
                     .into_iter()
@@ -912,26 +916,35 @@ mod recorder {
             };
             let mut targets: Vec<(String, PathBuf)> = Vec::new();
             for source in dirs(root.join("fixtures")) {
-                let name = source
-                    .file_name()
-                    .expect("name")
-                    .to_string_lossy()
-                    .into_owned();
-                targets.extend(dirs(source.clone()).map(|s| (name.clone(), s)));
+                targets.extend(dirs(source.clone()).map(|s| (name(&source), s)));
             }
             for module in dirs(root.clone()) {
-                let name = module
-                    .file_name()
-                    .expect("name")
-                    .to_string_lossy()
-                    .into_owned();
-                if registry::descriptor_for(&name).is_some() {
-                    targets.extend(dirs(module.join("fixtures")).map(|s| (name.clone(), s)));
+                let module_name = name(&module);
+                if module_name == "decode" || module_name == "fixtures" {
+                    continue;
+                }
+                let fixtures = module.join("fixtures");
+                if fixtures.join("provenance.json").is_file() {
+                    targets.push((module_name, fixtures));
+                } else {
+                    for sub in dirs(fixtures) {
+                        let source = if registry::descriptor_for(&module_name).is_some() {
+                            module_name.clone()
+                        } else {
+                            name(&sub)
+                        };
+                        targets.push((source, sub));
+                    }
                 }
             }
 
             let mut walked = BTreeSet::new();
             for (source, scenario) in targets {
+                let label = scenario
+                    .strip_prefix(&root)
+                    .expect("under root")
+                    .to_string_lossy()
+                    .replace('\\', "/");
                 let jsonl: Vec<PathBuf> = std::fs::read_dir(&scenario)
                     .expect("scenario")
                     .flatten()
@@ -950,19 +963,24 @@ mod recorder {
                         to
                     })
                     .collect();
-                let label = format!(
-                    "{source}/{}",
-                    scenario.file_name().expect("name").to_string_lossy()
-                );
+                for f in &files {
+                    assert!(
+                        drive_for(&source, f).is_some(),
+                        "{label}: {} cannot be routed as {source}, so the walk would skip it",
+                        f.display()
+                    );
+                }
                 let before = scenario_events(&source, &files);
                 strip_unread(&source, &files).expect("strip");
                 assert_eq!(scenario_events(&source, &files), before, "{label}");
                 walked.insert(label);
             }
             for sentinel in [
-                "codex/tool-run-recorded",
-                "claude-code/tool-run-recorded",
-                "omp/bridge-run-recorded",
+                "fixtures/codex/tool-run-recorded",
+                "fixtures/claude-code/tool-run-recorded",
+                "omp/fixtures/bridge-run-recorded",
+                "cursor/fixtures",
+                "delegation/fixtures/copilot",
             ] {
                 assert!(
                     walked.contains(sentinel),
