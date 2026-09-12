@@ -422,20 +422,13 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
 /// so a redaction sentinel with a silent `note` is the one state the mechanism
 /// cannot tolerate. Sentinels, not a `/Users/dev` grep: the sweep that keyed on
 /// that alone missed kimi's, whose redaction is a captured `ls -la`'s owner column.
-/// The operator's installed plugin roster is an INVENTORY, and cardinality is what
-/// separates one from prose: a stock prompt mentions `SKILL.md` once, a roster lists
-/// eighty. No keyword can express that — every marker aimed at this class fired on
-/// the CLIs' own bytes instead (`AGENTS.md` in codex's system prompt, `userId` in
-/// copilot's edit-tool example) — and neither can gitleaks, because RE2 refuses
-/// `{16}` over the ~250-character window a real entry needs.
-///
-/// The bound comes from both sides: the redacted tree's worst line carries 10, and
-/// the smallest of the three leaks carried 34.
+/// Cardinality is what separates the operator's installed roster from prose: a stock
+/// prompt mentions `SKILL.md` once, a roster lists eighty. No keyword can, because
+/// every one of them names something the CLIs say themselves.
 #[test]
 fn no_capture_carries_a_plugin_inventory() {
     const MAX_SIBLING_ENTRIES: usize = 16;
 
-    /// One carrier spelling: what to call it, and how to count its entries on a line.
     type Carrier = (&'static str, fn(&str) -> usize);
 
     let carriers: [Carrier; 3] = [
