@@ -566,11 +566,11 @@ mod recorder {
             let Some((raw, mut lines)) = parsed_lines(file)? else {
                 continue;
             };
-            let base = events_of(&drive, &lines);
+            let base = events_of(source, &drive, &lines);
             let stamped = is_hook_envelope(file);
             let mut out = String::new();
             for i in 0..lines.len() {
-                let here = probe(&drive, &mut lines, &base, i, "", stamped);
+                let here = probe(source, &drive, &mut lines, &base, i, "", stamped);
                 blanked += here;
                 if here == 0 {
                     out.push_str(&raw[i]);
@@ -628,13 +628,23 @@ mod recorder {
         Vec<String>,
         Vec<String>,
         Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
+        Vec<Option<PathBuf>>,
     );
 
-    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides the
-    /// registry's `presence_decoder` — so it joins the signature, or a daemon capture
-    /// strips to nothing.
-    fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
+    /// Everything the registry reads from a line, not only the line decoder: a
+    /// daemon's envelopes decode to no `AgentEvent` by design (presence rides
+    /// `presence_decoder`), and the watcher registers a transcript through
+    /// `cwd_extractor`, which the harness never calls — it seeds a fixed cwd.
+    fn events_of(
+        source: &str,
+        drive: &pixtuoid_core::harness::Drive,
+        lines: &[serde_json::Value],
+    ) -> Decoded {
         let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
+        let cwds = lines
+            .iter()
+            .map(registry::cwd_extractor_for(source))
+            .collect();
         let presence = lines
             .iter()
             .map(|line| {
@@ -650,12 +660,14 @@ mod recorder {
             failures(&d.decode_errors),
             failures(&d.panics),
             presence,
+            cwds,
         )
     }
 
     /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
     /// `_shim_ts_ms` is read by no decoder, only by `captures.rs`, which dates a capture by it.
     fn probe(
+        source: &str,
         drive: &pixtuoid_core::harness::Drive,
         lines: &mut [serde_json::Value],
         base: &Decoded,
@@ -682,7 +694,7 @@ mod recorder {
             return 0;
         };
         let kept = std::mem::replace(slot, neutral);
-        if events_of(drive, lines) == *base {
+        if events_of(source, drive, lines) == *base {
             return 1;
         }
         let children: Vec<String> = match &kept {
@@ -699,7 +711,7 @@ mod recorder {
         }
         children
             .iter()
-            .map(|child| probe(drive, lines, base, i, child, stamped))
+            .map(|child| probe(source, drive, lines, base, i, child, stamped))
             .sum()
     }
 
@@ -846,7 +858,7 @@ mod recorder {
                 .iter()
                 .filter_map(|f| {
                     let (_, lines) = parsed_lines(f).ok()??;
-                    Some(events_of(&drive_for(source, f)?, &lines))
+                    Some(events_of(source, &drive_for(source, f)?, &lines))
                 })
                 .collect()
         }
