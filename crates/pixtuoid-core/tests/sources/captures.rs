@@ -422,67 +422,6 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
 /// so a redaction sentinel with a silent `note` is the one state the mechanism
 /// cannot tolerate. Sentinels, not a `/Users/dev` grep: the sweep that keyed on
 /// that alone missed kimi's, whose redaction is a captured `ls -la`'s owner column.
-/// Cardinality is what separates the operator's installed roster from prose: a stock
-/// prompt mentions `SKILL.md` once, a roster lists eighty. No keyword can, because
-/// every one of them names something the CLIs say themselves.
-#[test]
-fn no_capture_carries_a_plugin_inventory() {
-    const MAX_SIBLING_ENTRIES: usize = 16;
-
-    type Carrier = (&'static str, fn(&str) -> usize);
-
-    let carriers: [Carrier; 3] = [
-        ("copilot <skill> elements", |l| l.matches("<name>").count()),
-        ("SKILL.md roster rows", |l| l.matches("SKILL.md").count()),
-        // A roster row names an entry AND describes it; a prose bullet does not
-        // carry an identifier on the left of the colon.
-        ("name: description rows", |l| {
-            l.split("\\n- ")
-                .skip(1)
-                .filter(|e| {
-                    e.split_once(": ").is_some_and(|(name, desc)| {
-                        !name.is_empty()
-                            && name.len() <= 60
-                            && name.chars().all(|c| {
-                                c.is_ascii_alphanumeric() || matches!(c, ':' | '.' | '_' | '-')
-                            })
-                            && desc.chars().next().is_some_and(char::is_uppercase)
-                    })
-                })
-                .count()
-        }),
-    ];
-
-    let mut loud = Vec::new();
-    for c in every_capture() {
-        for f in c.wire_files() {
-            let Ok(body) = std::fs::read_to_string(&f) else {
-                continue;
-            };
-            for line in body.lines() {
-                for (what, count) in carriers {
-                    let n = count(line);
-                    if n > MAX_SIBLING_ENTRIES {
-                        loud.push(format!(
-                            "{}: {n} {what}",
-                            f.strip_prefix(sources_root()).unwrap_or(&f).display()
-                        ));
-                    }
-                }
-            }
-        }
-    }
-    loud.sort();
-    loud.dedup();
-    assert!(
-        loud.is_empty(),
-        "a capture LISTS an inventory rather than documenting one entry — that is the \
-         operator's installed roster, which reached committed bytes three times before \
-         anything could see it. Placeholder the entries and collapse the count:\n  {}",
-        loud.join("\n  ")
-    );
-}
-
 #[test]
 fn a_recorded_capture_that_was_edited_says_so() {
     // Placeholders READ from the scanner's own allowlist, never copied: a hand-copy

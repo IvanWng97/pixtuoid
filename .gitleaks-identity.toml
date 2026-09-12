@@ -116,3 +116,31 @@ regex = '''Git user: [^\\"\n]+'''
     '''^(?i)Git user: (?:dev|me|user)$''',
     '''^(?i)Git user: (?:runner|ubuntu|vscode|linuxbrew|Shared)$''',
   ]
+
+# An INVENTORY — the one identity class no keyword can express. The operator's
+# installed plugin roster reached committed bytes three times (#988, #989, #993) and
+# every keyword aimed at it fired on the CLIs' OWN stock bytes instead: `AGENTS.md`
+# on codex's system prompt, `userId` on copilot's edit-tool example, `CLAUDE.md` on a
+# captured `ls -la`. A roster differs from prose by CARDINALITY, not vocabulary — a
+# stock prompt mentions `SKILL.md` once, a roster lists eighty — so there is one rule
+# per carrier spelling.
+#
+# `[^\n]*`, never `[\s\S]{0,N}`: Go caps the PRODUCT of nested counted repeats at
+# 1000, so a bounded window large enough for a real 250-char entry refuses to
+# compile and gitleaks PANICS rather than reporting the bad rule. `*` is not a
+# counted repeat, so the product collapses to the repetition alone. A `{1,60}` bound
+# on the name field is enough to bring the panic back.
+[[rules]]
+id = "pixtuoid-inventory-skill-md"
+description = "A skills roster, not one documented SKILL.md"
+regex = '''(?:SKILL\.md[^\n]*){17}'''
+
+[[rules]]
+id = "pixtuoid-inventory-named-elements"
+description = "A copilot <available_skills> roster, not one documented skill"
+regex = '''(?:<name>[^\n]*){17}'''
+
+[[rules]]
+id = "pixtuoid-inventory-bulleted"
+description = "A skill/agent listing, not a few documented entries"
+regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){17}'''
