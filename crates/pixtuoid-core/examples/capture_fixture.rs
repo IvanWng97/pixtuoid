@@ -556,6 +556,25 @@ mod recorder {
     /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
     /// code at 0 on a run that had already written into the repo tree, so the
     /// capturer had to notice a line scrolling past — and twice did not.
+    fn strip_unread(_source: &str, _files: &[PathBuf]) -> std::io::Result<usize> {
+        Ok(0)
+    }
+
+    fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Vec<pixtuoid_core::AgentEvent>> {
+        files
+            .iter()
+            .filter_map(|f| {
+                let drive = if f.file_name()?.to_str()?.starts_with("hook-payloads") {
+                    pixtuoid_core::harness::Drive::hooks()
+                } else {
+                    pixtuoid_core::harness::Drive::transcript(source, &f.to_string_lossy())?
+                };
+                let text = std::fs::read_to_string(f).ok()?;
+                Some(drive.lines(text.lines()).events)
+            })
+            .collect()
+    }
+
     fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
         let found = scan_for_pii(files);
         if found.is_empty() {
@@ -635,6 +654,46 @@ mod recorder {
             assert_eq!(
                 scenario_dest(root, "hermes", "approval-recorded"),
                 root.join("fixtures/hermes/approval-recorded")
+            );
+        }
+
+        /// The whole de-identification claim on real bytes: a subtree no decoder
+        /// reads is blanked — the roster and every carrier nobody has named yet —
+        /// and what the decoders DO read decodes to the same events afterwards.
+        #[test]
+        fn stripping_blanks_what_no_decoder_reads_and_changes_no_event() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            let files: Vec<PathBuf> = [
+                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
+                "hook-payloads.jsonl",
+            ]
+            .iter()
+            .map(|name| {
+                let to = d.path().join(name);
+                std::fs::copy(src.join(name), &to).expect("copy");
+                to
+            })
+            .collect();
+
+            let before = scenario_events("codex", &files);
+            let blanked = strip_unread("codex", &files).expect("strip");
+            assert!(blanked > 0, "the codex rollout carries unread subtrees");
+            assert_eq!(scenario_events("codex", &files), before);
+
+            let transcript = std::fs::read_to_string(&files[0]).expect("read");
+            assert!(
+                !transcript.contains("example-skill"),
+                "the roster rides a field no decoder reads, so it leaves"
+            );
+            assert!(
+                transcript.contains("gpt-5.6-sol"),
+                "the model is read, so it stays"
+            );
+            let hooks = std::fs::read_to_string(&files[1]).expect("read");
+            assert!(
+                hooks.contains("01a08cbb-1b7f-7ce3-b924-1a501c380856"),
+                "the hook's session_id keys coalescing, so it stays"
             );
         }
 
