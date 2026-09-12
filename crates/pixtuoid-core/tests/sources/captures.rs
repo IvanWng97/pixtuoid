@@ -13,8 +13,7 @@ use pixtuoid_core::source::registry;
 /// single-owner tree's dir name IS its source.
 const MODULE_TO_SOURCE: &[(&str, &str)] = &[("claude", "claude-code")];
 
-/// A committed capture: the bytes, the record of where they came from, and the
-/// source the LAYOUT says owns them.
+/// A committed capture, whose owning source comes from the LAYOUT.
 pub(crate) struct Capture {
     pub(crate) dir: PathBuf,
     /// Resolved from the layout, never from the provenance — a record that lies
@@ -53,8 +52,6 @@ impl Capture {
         p.is_file().then_some(p)
     }
 
-    /// Every committed byte of this capture, for the rules that read content
-    /// rather than metadata.
     pub(crate) fn wire_files(&self) -> Vec<PathBuf> {
         let mut out = self.transcripts();
         out.extend(self.hook_payloads());
@@ -228,8 +225,7 @@ pub(crate) fn every_capture() -> Vec<Capture> {
 }
 
 /// The completeness pin that makes the single walk load-bearing: a capture the
-/// walk cannot see is one every rule silently skips, which is the failure the
-/// walk exists to make impossible.
+/// walk cannot see is one every rule silently skips.
 #[test]
 fn the_walk_sees_every_provenance_on_disk() {
     fn count(dir: &Path, n: &mut usize) {
@@ -304,7 +300,7 @@ fn the_walk_sees_every_provenance_on_disk() {
     );
 }
 
-/// Every capture's layout resolves to a REGISTERED source. A dir name that
+/// A dir name that
 /// matches no source is a typo that would otherwise route the capture's rules
 /// to a descriptor lookup that silently returns `None`.
 #[test]
@@ -961,8 +957,7 @@ fn date_prefix(name: &str) -> Option<String> {
 }
 
 /// `utc_date` and `is_iso_date` are hand-rolled (this crate has no chrono), so
-/// they get the cases that break naive versions: a leap day, the day after, a
-/// non-leap Feb 29, and the epoch itself.
+/// they get the cases that break a naive one.
 #[test]
 fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
     assert_eq!(utc_date(0), "1970-01-01");
@@ -972,7 +967,6 @@ fn the_date_helpers_handle_the_cases_that_break_naive_ones() {
     assert_eq!(utc_date(-86_400_001), "1969-12-30");
     assert!(!is_iso_date("+026-08-15"), "a signed year is not ISO");
     assert_eq!(utc_date(1_786_854_010_213), "2026-08-16");
-    // 2024-02-29T00:00:00Z — a real leap day, and the day after it.
     assert_eq!(utc_date(1_709_164_800_000), "2024-02-29");
     assert_eq!(utc_date(1_709_251_200_000), "2024-03-01");
     assert!(is_iso_date("2024-02-29"), "a real leap day");

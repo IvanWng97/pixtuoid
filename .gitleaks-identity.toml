@@ -116,3 +116,44 @@ regex = '''Git user: [^\\"\n]+'''
     '''^(?i)Git user: (?:dev|me|user)$''',
     '''^(?i)Git user: (?:runner|ubuntu|vscode|linuxbrew|Shared)$''',
   ]
+
+# The operator's installed plugin roster differs from prose by CARDINALITY, not by
+# vocabulary — a stock prompt mentions `SKILL.md` once, a roster lists eighty — so
+# every keyword aimed at this class fired on the CLIs' own bytes instead. One rule
+# per carrier spelling, and a carrier missed is a carrier unguarded.
+#
+# `[^\n]*`, never `[\s\S]{0,N}`: Go caps the PRODUCT of nested counted repeats at
+# 1000, so a bounded window large enough for a real 250-char entry refuses to
+# compile and gitleaks PANICS rather than reporting the bad rule. `*` is not a
+# counted repeat, so the product collapses to the repetition alone. A `{1,60}` bound
+# on the name field is enough to bring the panic back.
+[[rules]]
+id = "pixtuoid-inventory-skill-md"
+description = "A skills roster, not one documented SKILL.md"
+regex = '''(?:SKILL\.md[^\n]*){12}'''
+
+[[rules]]
+id = "pixtuoid-inventory-named-elements"
+description = "A copilot <available_skills> roster, not one documented skill"
+regex = '''(?:<name>[^\n]*){12}'''
+
+[[rules]]
+id = "pixtuoid-inventory-bulleted"
+description = "A skill/agent listing, not a few documented entries"
+regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){12}'''
+
+# The same listing JSON-encoded as an ARRAY (`agent_listing_delta.addedLines`): rows
+# separated by `","`, which the escaped-newline anchor above cannot see.
+[[rules]]
+id = "pixtuoid-inventory-array"
+description = "A listing encoded as a JSON array of entries"
+regex = '''(?:"- [A-Za-z0-9:._-]+: [A-Z][^\n]*){12}'''
+
+# The roster with its prose stripped: `skill_listing.names` and
+# `agent_listing_delta.addedTypes` are bare arrays of namespaced ids. Restoring only
+# those two fields into an otherwise-redacted capture left both configs reporting
+# clean — and a field with no prose is the one a reviewer's eye skips.
+[[rules]]
+id = "pixtuoid-inventory-bare-ids"
+description = "An array of namespaced plugin ids, not a few documented names"
+regex = '''(?:"[A-Za-z0-9._-]+:[A-Za-z0-9._-]+"\s*,\s*){12}'''
