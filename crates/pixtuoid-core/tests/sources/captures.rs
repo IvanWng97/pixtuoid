@@ -417,6 +417,33 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
     }
 }
 
+/// The strip is disclosed by `deidentified`; a note that still calls the bytes
+/// verbatim contradicts it, and an exemption without its reason is a silent hole.
+#[test]
+fn a_stripped_record_does_not_call_its_bytes_verbatim_and_an_exemption_says_why() {
+    for dir in capture_dirs() {
+        let prov = dir.join("provenance.json");
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&prov).expect("read")).expect("json");
+        let blanked = v["deidentified"]["blanked"].as_u64().unwrap_or(0);
+        let note = v["note"].as_str().unwrap_or("");
+        assert!(
+            blanked == 0 || !note.to_ascii_lowercase().contains("verbatim"),
+            "{}: {blanked} subtrees were blanked, and the note still says verbatim: {note:?}",
+            prov.display()
+        );
+        if v["deidentified"]["method"] == "none" {
+            assert!(
+                v["deidentified"]["why"]
+                    .as_str()
+                    .is_some_and(|w| !w.trim().is_empty()),
+                "{}: exempt from the strip without saying why",
+                prov.display()
+            );
+        }
+    }
+}
+
 /// A `recorded` fixture whose bytes were EDITED must say so: nothing in them
 /// separates a capture from a composition — the whole reason provenance exists —
 /// so a redaction sentinel with a silent `note` is the one state the mechanism

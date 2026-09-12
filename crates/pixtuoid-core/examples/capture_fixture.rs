@@ -925,6 +925,26 @@ mod recorder {
                 .expect("an object with a key")
         }
 
+        /// Plant a key no decoder reads on the first non-empty line, so the test
+        /// holds whether or not the committed corpus has already been stripped.
+        fn plant_unread(file: &Path, key: &str, value: &str) {
+            let text = std::fs::read_to_string(file).expect("read");
+            let mut planted = false;
+            let out: Vec<String> = text
+                .lines()
+                .map(|l| {
+                    let mut v: serde_json::Value = serde_json::from_str(l).expect("json");
+                    if !planted && v.as_object().is_some_and(|o| !o.is_empty()) {
+                        v[key] = serde_json::Value::String(value.into());
+                        planted = true;
+                    }
+                    serde_json::to_string(&v).expect("json")
+                })
+                .collect();
+            assert!(planted, "no non-empty line to plant on");
+            std::fs::write(file, out.join("\n") + "\n").expect("write");
+        }
+
         fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
             let d = tempfile::tempdir().expect("tempdir");
             let to = d.path().join(name);
@@ -1073,10 +1093,11 @@ mod recorder {
             })
             .collect();
 
+            plant_unread(&files[0], "installed_skills", "example-skill-1");
             let before = scenario_events("codex", &files);
             let wire = std::fs::read_to_string(&files[0]).expect("read");
             let blanked = strip_unread("codex", &files).expect("strip");
-            assert!(blanked > 0, "the codex rollout carries unread subtrees");
+            assert!(blanked > 0, "the planted key is unread");
             assert_eq!(scenario_events("codex", &files), before);
 
             let transcript = std::fs::read_to_string(&files[0]).expect("read");
@@ -1092,7 +1113,7 @@ mod recorder {
             );
             assert!(
                 !transcript.contains("example-skill"),
-                "the roster rides a field no decoder reads, so it leaves"
+                "a roster rides a field no decoder reads, so it leaves"
             );
             assert!(
                 transcript.contains("gpt-5.6-sol"),
@@ -1242,11 +1263,17 @@ mod recorder {
                 out.sort();
                 out
             };
+            plant_unread(
+                &scenario
+                    .join("rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl"),
+                "installed_skills",
+                "example-skill-1",
+            );
             let wire = snapshot(&scenario);
 
             strip_corpus(d.path()).expect("strip corpus");
             let once = snapshot(&scenario);
-            assert_ne!(once, wire, "the rollout carries unread subtrees");
+            assert_ne!(once, wire, "the planted key is unread");
             let prov: serde_json::Value = serde_json::from_str(
                 &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
             )
