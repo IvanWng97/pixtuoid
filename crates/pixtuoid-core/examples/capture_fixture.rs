@@ -922,6 +922,23 @@ mod recorder {
         }
 
         #[test]
+        fn a_cwd_whose_fallback_differs_by_a_trailing_slash_survives_the_strip() {
+            let (_d, hooks) = stripped_copy("grok", "gate-both-ways", "hook-payloads.jsonl");
+            let rendered = |p: &Path| -> Vec<String> {
+                pixtuoid_core::harness::Drive::hooks()
+                    .lines(std::fs::read_to_string(p).expect("read").lines())
+                    .events
+                    .iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect()
+            };
+            let before = rendered(&hooks);
+            assert!(before.iter().any(|e| e.contains("pixtuoid-capture/proj\"")));
+            strip_unread("grok", std::slice::from_ref(&hooks)).expect("strip");
+            assert_eq!(rendered(&hooks), before);
+        }
+
+        #[test]
         fn the_first_sight_cwd_survives_the_strip() {
             let (_d, rollout) = stripped_copy(
                 "codex",
