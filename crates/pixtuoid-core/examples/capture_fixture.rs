@@ -267,9 +267,8 @@ mod recorder {
     fn prepare_workspace() -> std::io::Result<PathBuf> {
         let ws = PathBuf::from(WORKSPACE);
         let base = ws.parent().expect("WORKSPACE has a parent");
-        // A fixed name in shared temp is pre-plantable, so a foreign owner is
-        // REFUSED rather than removed: under /tmp's sticky bit the remove would fail
-        // and the capture would land inside their directory.
+        // A fixed name in shared temp is pre-plantable; a foreign owner is refused, not
+        // removed — under the sticky bit the remove fails and the capture lands in theirs.
         if base.exists() && !owned_by_us(base) {
             eprintln!(
                 "{} exists and is not yours — remove it or run as its owner",
@@ -341,9 +340,8 @@ mod recorder {
         c.args(&cmd[1..])
             .current_dir(ws)
             .env("PIXTUOID_SOCKET", sock);
-        // The driver and the per-CLI cycle scripts write their transcripts beside the
-        // socket, in this run's private sandbox — a fixed shared-temp name is
-        // symlink-followable and two concurrent captures would interleave into it.
+        // Transcripts go beside the socket in this run's private sandbox: a fixed
+        // shared-temp name is symlink-followable and two concurrent captures interleave.
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
@@ -392,9 +390,8 @@ mod recorder {
             "command": raw.join(" "),
             "deidentified": { "method": "decoder-allowlist", "blanked": blanked },
         });
-        // `command` is the UN-expanded argv, so a scenario driven by an override
-        // records a `{prompt}` placeholder and nothing else says what ran. Only
-        // written when set, so the already-committed records stay schema-clean.
+        // `command` is the UN-expanded argv, so an override-driven scenario records a
+        // `{prompt}` placeholder; written only when set, so committed records stay schema-clean.
         if let Some(map) = prov.as_object_mut() {
             for (key, value) in overrides {
                 if let Some(v) = value {
@@ -404,10 +401,8 @@ mod recorder {
         }
         let out = no_clobber(dest.join("provenance.json"));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
-        // Keyed on the PROBE's outcome, not on the name looking like a script: a
-        // pty driver is `python3`, passes the name test, and its "unknown" then
-        // disarms `a_recorded_capture_anchors_its_sources_verified_version` for
-        // that whole source. Loud, because the record it just wrote is unusable.
+        // Keyed on the probe's outcome, not the name: a pty driver is `python3` and
+        // passes a name test. Loud, because the record just written is unusable.
         if version.trim() == "unknown" {
             eprintln!(
                 "WARNING: {} records version \"unknown\" — `{cli} --version` did not \
@@ -464,19 +459,14 @@ mod recorder {
         (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     }
 
-    /// PII is not always a key you can drop — kimi's arrived as the owner column
-    /// inside a captured `ls -la`, and a CLI's ACCOUNT identity is a different
-    /// namespace from the host's (`user_email` slipped past a `$HOME|$USER` grep).
-    /// Identity/inventory keys whose VALUES are the capturer's, not the wire's.
-    /// `user_email` alone was the first cut and it saw none of the MCP-server and
-    /// skill roster that shipped in nine fixtures — a different namespace, same
-    /// class. `just fixture-pii` re-scans the committed tree for the same class
-    /// but matches VALUE shapes, not this list — as gitleaks rules these KEYS fire
-    /// on the tree's own `dev@example.com` redactions. A key with no value shape
-    /// (`obsidian`, `account_id`) is refused only at capture time.
-    /// Both cases of each spelling, because a CLI picks one and its next version
-    /// may pick the other: `userEmail` arrived at claude-code 2.1.261 beside the
-    /// `user_email` already here, and slipped past.
+    /// Identity and inventory keys whose VALUES are the capturer's, not the wire's,
+    /// refused on the stripped bytes — so they guard the fields a decoder reads.
+    /// Not a `$HOME|$USER` grep: a CLI's ACCOUNT identity is a different namespace
+    /// from the host's. `just fixture-pii` matches VALUE shapes instead (as gitleaks
+    /// rules these keys would fire on the tree's own `dev@example.com`), so a key
+    /// with no value shape (`obsidian`, `account_id`) is refused only here. Both
+    /// cases of each spelling: a CLI's next version may pick the other, as
+    /// `userEmail` did beside `user_email`.
     const PII_MARKERS: &[&str] = &[
         "user_email",
         "userEmail",
@@ -557,13 +547,12 @@ mod recorder {
         found
     }
 
-    /// Blank every subtree of the recorded bytes that no decoder reads, so an
-    /// operator's roster, instructions, and paths leave without anyone naming
-    /// them. The allowlist is DERIVED — a subtree is blanked when blanking it
-    /// leaves the file's decoded events identical — because a hand-kept list
-    /// drifts from the decoder in the one direction nothing catches: a field the
-    /// decoder stopped reading stays in the bytes. Probed top-down so an unread
-    /// container collapses whole, taking its element count with it.
+    /// Blank every subtree no decoder reads, so an operator's roster, instructions
+    /// and paths leave without anyone naming them. DERIVED, never listed — a subtree
+    /// is blanked when blanking it leaves the decoded events identical — because a
+    /// hand-kept list drifts in the one direction nothing catches: a field the
+    /// decoder stopped reading stays in the bytes. Top-down, so an unread container
+    /// collapses whole, element count included.
     fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<usize> {
         let mut blanked = 0;
         for file in files {
@@ -628,9 +617,9 @@ mod recorder {
         Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
     );
 
-    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides
-    /// the registry's `presence_decoder` — so it is part of the signature, or a
-    /// daemon capture would strip down to nothing that decodes.
+    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides the
+    /// registry's `presence_decoder` — so it joins the signature, or a daemon capture
+    /// strips to nothing.
     fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
         let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
         let presence = lines
@@ -651,9 +640,8 @@ mod recorder {
         )
     }
 
-    /// A hook envelope's top-level `_` keys are the shim's own stamps, kept by
-    /// namespace: no decoder reads them, but `captures.rs` dates a capture by
-    /// `_shim_ts_ms`, and the probe cannot see that test.
+    /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
+    /// no decoder reads them, but `captures.rs` dates a capture by `_shim_ts_ms`.
     fn probe(
         drive: &pixtuoid_core::harness::Drive,
         lines: &mut [serde_json::Value],
@@ -729,19 +717,15 @@ mod recorder {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
-    /// Where this scenario's bytes ALREADY live, else the conformance root.
-    ///
-    /// A module keeps its own rounds out of conformance's reach (omp's hook keys
-    /// fold on Windows), and a re-record sent to the conformance root instead lands
-    /// as a NEW directory that `conformance.rs` auto-scans with no committed bytes
-    /// beside it for `.new` to protect.
-    ///
+    /// Where this scenario's bytes ALREADY live, else the conformance root: a module
+    /// keeps its own rounds out of conformance's reach (omp's hook keys fold on
+    /// Windows), and a re-record sent to the root instead lands as a NEW directory
+    /// `conformance.rs` auto-scans, with no committed bytes for `.new` to protect.
     /// Keyed on the SOURCE, never a search across modules: scenario names repeat
-    /// (`approval-recorded` is both hermes' and omp's), so a search finds one match
-    /// for the wrong module and the ambiguity guard never fires — a billed hermes
-    /// capture would land as `.new` files inside omp's directory. `claude/` owning
-    /// `claude-code` is the one name mismatch, and it holds no scenario
-    /// subdirectory, so it cannot reach here.
+    /// (`approval-recorded` is hermes' and omp's), so a search finds the wrong
+    /// module's single match and a billed capture lands as `.new` files inside it.
+    /// `claude/` owning `claude-code` is the one name mismatch, and it holds no
+    /// scenario subdirectory, so it cannot reach here.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
         let owned = sources.join(source).join("fixtures").join(scenario);
         if owned.join("provenance.json").is_file() {
@@ -1105,13 +1089,12 @@ mod recorder {
             );
         }
 
+        /// A link PLANTED by another user cannot be created in a unit test, so this
+        /// pins the discriminator instead: a link WE own pointing at a root-owned dir
+        /// reads as ours — `fs::metadata` would stat the target and read as root's,
+        /// which is how a planted link would have slipped past the refusal.
         #[test]
         fn ownership_is_judged_on_the_link_itself_not_on_what_it_points_at() {
-            // The squat this refuses is a link PLANTED by another user, which a
-            // unit test cannot create — so pin the discriminator instead: a link
-            // WE own pointing at a root-owned dir must read as ours. Under
-            // `fs::metadata` it would stat the target and read as root's, which
-            // is how a planted link would have slipped past the refusal.
             let d = tempfile::tempdir().expect("tempdir");
             let link = d.path().join("to-root-owned");
             std::os::unix::fs::symlink("/usr", &link).expect("symlink");
@@ -1123,9 +1106,8 @@ mod recorder {
 
         #[test]
         fn provenance_records_an_override_only_when_it_was_actually_set() {
-            // Both directions: the already-committed records predate these
-            // fields and must stay schema-clean, so an unset override writes
-            // nothing at all.
+            // Both directions: committed records predate these fields and must stay
+            // schema-clean, so an unset override writes nothing at all.
             let read = |d: &Path| -> serde_json::Value {
                 serde_json::from_str(
                     &std::fs::read_to_string(d.join("provenance.json")).expect("read"),
