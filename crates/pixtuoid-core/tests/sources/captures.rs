@@ -168,7 +168,7 @@ fn the_walk_sees_every_provenance_on_disk() {
     }
     let mut on_disk = 0;
     count(&sources_root(), &mut on_disk);
-    // Derived DIFFERENTLY on purpose: `capture_dirs()` from the LAYOUT, the
+    // Derived DIFFERENTLY on purpose: `every_capture()` from the LAYOUT, the
     // counter above from the FILES — one predicate counted twice is a tautology.
     let walked = every_capture().len();
     assert_eq!(
