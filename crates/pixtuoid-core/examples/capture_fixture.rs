@@ -1154,6 +1154,10 @@ mod recorder {
                         to
                     })
                     .collect();
+                assert!(
+                    registry::descriptor_for(&source).is_some(),
+                    "{label}: {source:?} is not a registered source, so every rule keyed on it misses"
+                );
                 for f in &files {
                     assert!(
                         drive_for(&source, f).is_some(),
