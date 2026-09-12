@@ -559,17 +559,20 @@ mod recorder {
             let Some(drive) = drive_for(source, file) else {
                 continue;
             };
-            let Some(mut lines) = parsed_lines(file)? else {
+            let Some((raw, mut lines)) = parsed_lines(file)? else {
                 continue;
             };
             let base = events_of(&drive, &lines);
             let stamped = is_hook_envelope(file);
-            for i in 0..lines.len() {
-                blanked += probe(&drive, &mut lines, &base, i, "", stamped);
-            }
             let mut out = String::new();
-            for line in &lines {
-                out.push_str(&serde_json::to_string(line)?);
+            for i in 0..lines.len() {
+                let here = probe(&drive, &mut lines, &base, i, "", stamped);
+                blanked += here;
+                if here == 0 {
+                    out.push_str(&raw[i]);
+                } else {
+                    out.push_str(&serde_json::to_string(&lines[i])?);
+                }
                 out.push('\n');
             }
             let mut tmp = tempfile::NamedTempFile::new_in(file.parent().unwrap_or(Path::new(".")))?;
@@ -595,19 +598,25 @@ mod recorder {
 
     /// `None` when a line is not JSON: the file is left as recorded rather than
     /// half-rewritten, and `refuse_on_pii` still reads it.
-    fn parsed_lines(file: &Path) -> std::io::Result<Option<Vec<serde_json::Value>>> {
+    type Parsed = (Vec<String>, Vec<serde_json::Value>);
+
+    fn parsed_lines(file: &Path) -> std::io::Result<Option<Parsed>> {
         let text = std::fs::read_to_string(file)?;
+        let mut raw = Vec::new();
         let mut lines = Vec::new();
         for line in text.lines().filter(|l| !l.trim().is_empty()) {
             match serde_json::from_str(line) {
-                Ok(v) => lines.push(v),
+                Ok(v) => {
+                    raw.push(line.to_string());
+                    lines.push(v);
+                }
                 Err(e) => {
                     eprintln!("not stripping {}: a line is not JSON: {e}", file.display());
                     return Ok(None);
                 }
             }
         }
-        Ok(Some(lines))
+        Ok(Some((raw, lines)))
     }
 
     type Decoded = (
@@ -742,19 +751,17 @@ mod recorder {
             files
                 .iter()
                 .filter_map(|f| {
-                    let lines = parsed_lines(f).ok()??;
+                    let (_, lines) = parsed_lines(f).ok()??;
                     Some(events_of(&drive_for(source, f)?, &lines))
                 })
                 .collect()
         }
 
-        fn first_key(jsonl: &str) -> String {
-            jsonl
-                .lines()
-                .next()
-                .and_then(|l| l.trim_start_matches('{').split('"').nth(1))
+        fn first_key(line: &str) -> &str {
+            line.trim_start_matches('{')
+                .split('"')
+                .nth(1)
                 .expect("an object with a key")
-                .to_string()
         }
 
         fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
@@ -800,6 +807,7 @@ mod recorder {
                 parsed_lines(p)
                     .expect("read")
                     .expect("json")
+                    .1
                     .iter()
                     .map(|l| l["_shim_ts_ms"].clone())
                     .collect()
@@ -860,15 +868,20 @@ mod recorder {
             .collect();
 
             let before = scenario_events("codex", &files);
-            let wire_first_key = first_key(&std::fs::read_to_string(&files[0]).expect("read"));
+            let wire = std::fs::read_to_string(&files[0]).expect("read");
             let blanked = strip_unread("codex", &files).expect("strip");
             assert!(blanked > 0, "the codex rollout carries unread subtrees");
             assert_eq!(scenario_events("codex", &files), before);
 
             let transcript = std::fs::read_to_string(&files[0]).expect("read");
+            let rewritten = wire
+                .lines()
+                .zip(transcript.lines())
+                .find(|(w, t)| w != t && *t != "{}")
+                .expect("a line rewritten but not collapsed");
             assert_eq!(
-                first_key(&transcript),
-                wire_first_key,
+                first_key(rewritten.1),
+                first_key(rewritten.0),
                 "a rewritten line keeps the wire's key order"
             );
             assert!(
