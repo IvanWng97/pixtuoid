@@ -24,7 +24,7 @@ redacted cwd and an invented one look alike. `origin` is one of:
 
 | origin | required | means |
 | --- | --- | --- |
-| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes; the recorder writes this file itself |
+| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes, stripped of every subtree no decoder reads; the recorder writes this file itself |
 | `composed` | `note` | hand-written, and the note says how you can tell |
 | `unknown` | `note` | predates the rule; nobody recorded where it came from |
 
@@ -36,7 +36,10 @@ the same events. The allowlist is derived by probing the decoders, never listed,
 so it cannot drift from them. `/Users/dev` remains the convention for a home
 path a decoder DOES read, and a capture redacted by hand says so in its `note`:
 without it a reader cannot tell an edited capture from an untouched one, which is
-the distinction the whole mechanism exists to make.
+the distinction the whole mechanism exists to make. A field blanked today stays
+blank in that fixture: a decoder later extended to read it meets the neutral value
+there and its golden encodes "absent" — re-record the scenario when a decoder
+grows a read.
 
 The table above is not the schema — [`provenance.schema.json`](provenance.schema.json)
 is, and both readers (this table and
@@ -91,19 +94,20 @@ and `just capture-fixture` exits 2 there. Windows wire evidence therefore cannot
 be re-recorded on demand — which is why `copilot/tool-run`, the one fixture
 carrying a real Windows `cwd`, stays `unknown` rather than being replaced.
 
-Only ONE edit to a capture is allowed: redact PII. Anything else and it stops
-being evidence. PII is not always a field you can drop — cursor's arrives as a `user_email`
-key, kimi's as the owner column inside a captured `ls -la` `tool_output`, and
-codex's as a `world_state` inventory of every skill installed on the host — so
-read a capture before committing it rather than trusting a key-name filter.
+Only ONE edit is allowed after the recorder's own strip: redact PII the strip
+left behind. Anything else and the capture stops being evidence. PII has
+arrived as cursor's `user_email` key, as the owner column inside a captured
+`ls -la` `tool_output` (kimi), and as codex's `world_state` inventory of every
+skill on the host; the strip takes whatever rides a field no decoder reads, and
+what it leaves sits inside a field one does — a `cwd`, a tool's command string —
+so read a capture before committing it rather than trusting a key-name filter.
 The recorder's `scan_for_pii` sees `$HOME`/`$USER`/`$LOGNAME` AND the
 `PII_MARKERS` identity keys, and `just fixture-pii` re-scans the committed tree
 with gitleaks — but none of them reaches a value it cannot name, which is why a
 capture still gets read. No size heuristic can stand in for that read either:
 legitimate copilot lines run to 39 KB, wider than the `world_state` dump that had
-to go. A line the decoder IGNORES is
-the cheap case — drop it and re-run the golden; byte-identical means the
-redaction cost no evidence.
+to go. Redacting a READ field is the expensive case — re-run the golden;
+byte-identical means the redaction cost no evidence.
 
 **Capture only what pixtuoid's OWN hook registration receives.** A machine can
 carry other tools' hooks on the same events — a debug tee, another integration —

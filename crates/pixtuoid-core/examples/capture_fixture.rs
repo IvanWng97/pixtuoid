@@ -44,9 +44,8 @@ mod recorder {
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
     /// The workspace path is FIXED and generic on purpose: every payload embeds its
-    /// own cwd and transcript_path, so capturing somewhere already generic is what
-    /// lets the bytes ship unedited. A random sandbox would bake a per-run path into
-    /// them.
+    /// own cwd, the decoders read it, so the strip keeps it — capturing somewhere
+    /// already generic is what keeps a per-run path out of the bytes.
     const WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
 
     /// A hook can still be in flight when the CLI's own process exits, so the wait
@@ -558,16 +557,13 @@ mod recorder {
         found
     }
 
-    /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
-    /// code at 0 on a run that had already written into the repo tree, so the
-    /// capturer had to notice a line scrolling past — and twice did not.
     /// Blank every subtree of the recorded bytes that no decoder reads, so an
     /// operator's roster, instructions, and paths leave without anyone naming
     /// them. The allowlist is DERIVED — a subtree is blanked when blanking it
     /// leaves the file's decoded events identical — because a hand-kept list
     /// drifts from the decoder in the one direction nothing catches: a field the
     /// decoder stopped reading stays in the bytes. Probed top-down so an unread
-    /// container collapses whole; 67 blanked entries would still say "67".
+    /// container collapses whole, taking its element count with it.
     fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<usize> {
         let mut blanked = 0;
         for file in files {
@@ -578,21 +574,30 @@ mod recorder {
                 continue;
             };
             let base = events_of(&drive, &lines);
+            let stamped = is_hook_envelope(file);
             for i in 0..lines.len() {
-                blanked += probe(&drive, &mut lines, &base, i, "");
+                blanked += probe(&drive, &mut lines, &base, i, "", stamped);
             }
             let mut out = String::new();
             for line in &lines {
                 out.push_str(&serde_json::to_string(line)?);
                 out.push('\n');
             }
-            std::fs::write(file, out)?;
+            let mut tmp = tempfile::NamedTempFile::new_in(file.parent().unwrap_or(Path::new(".")))?;
+            tmp.write_all(out.as_bytes())?;
+            tmp.persist(file).map_err(|e| e.error)?;
         }
         Ok(blanked)
     }
 
+    fn is_hook_envelope(file: &Path) -> bool {
+        file.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("hook-payloads"))
+    }
+
     fn drive_for(source: &str, file: &Path) -> Option<pixtuoid_core::harness::Drive> {
-        if file.file_name()?.to_str()?.starts_with("hook-payloads") {
+        if is_hook_envelope(file) {
             Some(pixtuoid_core::harness::Drive::hooks())
         } else {
             pixtuoid_core::harness::Drive::transcript(source, &file.to_string_lossy())
@@ -616,19 +621,46 @@ mod recorder {
         Ok(Some(lines))
     }
 
-    type Decoded = (Vec<pixtuoid_core::AgentEvent>, usize, usize);
+    type Decoded = (
+        Vec<pixtuoid_core::AgentEvent>,
+        Vec<String>,
+        Vec<String>,
+        Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
+    );
 
+    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides
+    /// the registry's `presence_decoder` — so it is part of the signature, or a
+    /// daemon capture would strip down to nothing that decodes.
     fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
         let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
-        (d.events, d.decode_errors.len(), d.panics.len())
+        let presence = lines
+            .iter()
+            .map(|line| {
+                let src = line.get("_pixtuoid_source")?.as_str()?;
+                registry::presence_decoder_for(src)?(line).ok()
+            })
+            .collect();
+        let failures = |f: &[pixtuoid_core::harness::LineFailure]| {
+            f.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>()
+        };
+        (
+            d.events,
+            failures(&d.decode_errors),
+            failures(&d.panics),
+            presence,
+        )
     }
 
+    /// A hook envelope's top-level `_` keys are the shim's own stamps, kept by
+    /// namespace: no decoder reads them, but `captures.rs` dates a capture by
+    /// `_shim_ts_ms`, and the probe cannot see that test.
     fn probe(
         drive: &pixtuoid_core::harness::Drive,
         lines: &mut [serde_json::Value],
         base: &Decoded,
         i: usize,
         at: &str,
+        stamped: bool,
     ) -> usize {
         use serde_json::Value;
         let Some(node) = lines[i].pointer(at) else {
@@ -656,6 +688,7 @@ mod recorder {
             Value::Array(a) => (0..a.len()).map(|k| format!("{at}/{k}")).collect(),
             Value::Object(m) => m
                 .keys()
+                .filter(|k| !(stamped && at.is_empty() && k.starts_with('_')))
                 .map(|k| format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")))
                 .collect(),
             _ => Vec::new(),
@@ -665,10 +698,13 @@ mod recorder {
         }
         children
             .iter()
-            .map(|child| probe(drive, lines, base, i, child))
+            .map(|child| probe(drive, lines, base, i, child, stamped))
             .sum()
     }
 
+    /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
+    /// code at 0 on a run that had already written into the repo tree, so the
+    /// capturer had to notice a line scrolling past — and twice did not.
     fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
         let found = scan_for_pii(files);
         if found.is_empty() {
@@ -718,14 +754,66 @@ mod recorder {
     mod tests {
         use super::*;
 
-        fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Vec<pixtuoid_core::AgentEvent>> {
+        fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Decoded> {
             files
                 .iter()
                 .filter_map(|f| {
-                    let text = std::fs::read_to_string(f).ok()?;
-                    Some(drive_for(source, f)?.lines(text.lines()).events)
+                    let lines = parsed_lines(f).ok()??;
+                    Some(events_of(&drive_for(source, f)?, &lines))
                 })
                 .collect()
+        }
+
+        fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+            let d = tempfile::tempdir().expect("tempdir");
+            let to = d.path().join(name);
+            std::fs::copy(
+                sources_root()
+                    .join("fixtures")
+                    .join(source)
+                    .join(scenario)
+                    .join(name),
+                &to,
+            )
+            .expect("copy");
+            (d, to)
+        }
+
+        #[test]
+        fn a_daemon_capture_keeps_what_its_presence_decoder_reads() {
+            let (_d, hooks) = stripped_copy(
+                "openclaw",
+                "gateway-lifecycle-recorded",
+                "hook-payloads.jsonl",
+            );
+            let files = vec![hooks.clone()];
+            let before = scenario_events("openclaw", &files);
+            strip_unread("openclaw", &files).expect("strip");
+            assert_eq!(scenario_events("openclaw", &files), before);
+            let first = std::fs::read_to_string(&hooks).expect("read");
+            let first = first.lines().next().expect("a line");
+            assert!(
+                first.contains("gateway_start") && first.contains("19099"),
+                "{first}"
+            );
+        }
+
+        #[test]
+        fn the_shim_stamps_survive_the_strip() {
+            let (_d, hooks) =
+                stripped_copy("claude-code", "tool-run-recorded", "hook-payloads.jsonl");
+            let stamps = |p: &Path| -> Vec<serde_json::Value> {
+                parsed_lines(p)
+                    .expect("read")
+                    .expect("json")
+                    .iter()
+                    .map(|l| l["_shim_ts_ms"].clone())
+                    .collect()
+            };
+            let before = stamps(&hooks);
+            assert!(before.iter().all(|v| v.as_i64().is_some_and(|ms| ms > 0)));
+            strip_unread("claude-code", std::slice::from_ref(&hooks)).expect("strip");
+            assert_eq!(stamps(&hooks), before);
         }
 
         #[test]
