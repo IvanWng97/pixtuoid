@@ -123,12 +123,15 @@ mod recorder {
             std::process::exit(1);
         }
 
-        let blanked = strip_unread(&source, &wrote)?;
+        let deidentified = match exemption(&dest.join("provenance.json")) {
+            Some(why) => Deidentified::Exempt(why),
+            None => Deidentified::Stripped(strip_unread(&source, &wrote)?),
+        };
         write_provenance(
             &dest,
             &cmd,
             &args[2..],
-            blanked,
+            &deidentified,
             &[
                 ("prompt", nonempty_env("CAPTURE_PROMPT")),
                 ("seed", nonempty_env("CAPTURE_SEED")),
@@ -137,7 +140,10 @@ mod recorder {
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
-        println!("blanked {blanked} subtrees no decoder reads");
+        match &deidentified {
+            Deidentified::Stripped(n) => println!("blanked {n} subtrees no decoder reads"),
+            Deidentified::Exempt(why) => println!("not stripped, as the record declares: {why}"),
+        }
         refuse_on_pii(&wrote)?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
@@ -371,7 +377,7 @@ mod recorder {
         dest: &Path,
         cmd: &[String],
         raw: &[String],
-        blanked: usize,
+        deidentified: &Deidentified,
         overrides: &[(&str, Option<String>)],
     ) -> std::io::Result<()> {
         let cli = Path::new(&cmd[0])
@@ -392,7 +398,7 @@ mod recorder {
             "version": version.trim(),
             "captured": today(),
             "command": raw.join(" "),
-            "deidentified": { "method": "decoder-allowlist", "blanked": blanked },
+            "deidentified": deidentified.record(),
         });
         // `command` is the UN-expanded argv, so an override-driven scenario records a
         // `{prompt}` placeholder; written only when set, so committed records stay schema-clean.
@@ -549,6 +555,37 @@ mod recorder {
             }
         }
         found
+    }
+
+    /// What the provenance says happened to the bytes after recording. `Exempt`
+    /// is declared by hand, in the committed record, for a capture whose purpose
+    /// is to pin a wire premise the decoder drops on purpose — a test that reads
+    /// raw bytes is invisible to the probe, so the record has to say so.
+    enum Deidentified {
+        Stripped(usize),
+        Exempt(String),
+    }
+
+    impl Deidentified {
+        fn record(&self) -> serde_json::Value {
+            match self {
+                Self::Stripped(n) => {
+                    serde_json::json!({ "method": "decoder-allowlist", "blanked": n })
+                }
+                Self::Exempt(why) => serde_json::json!({ "method": "none", "why": why }),
+            }
+        }
+    }
+
+    fn exemption(prov: &Path) -> Option<String> {
+        let record: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(prov).ok()?).ok()?;
+        (record["deidentified"]["method"] == "none").then(|| {
+            record["deidentified"]["why"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
     }
 
     /// Blank every subtree no decoder reads, so an operator's roster, instructions
@@ -822,7 +859,7 @@ mod recorder {
             let prov = dir.join("provenance.json");
             let mut record: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
-            if record["origin"] != "recorded" {
+            if record["origin"] != "recorded" || record["deidentified"]["method"] == "none" {
                 continue;
             }
             let files = jsonl_in(&dir);
@@ -1403,7 +1440,14 @@ mod recorder {
             let argv = ["true".to_string()];
 
             let bare = tempfile::tempdir().expect("tempdir");
-            write_provenance(bare.path(), &argv, &argv, 0, &[("prompt", None)]).expect("write");
+            write_provenance(
+                bare.path(),
+                &argv,
+                &argv,
+                &Deidentified::Stripped(0),
+                &[("prompt", None)],
+            )
+            .expect("write");
             assert!(read(bare.path()).get("prompt").is_none());
 
             let set = tempfile::tempdir().expect("tempdir");
@@ -1411,7 +1455,7 @@ mod recorder {
                 set.path(),
                 &argv,
                 &argv,
-                0,
+                &Deidentified::Stripped(0),
                 &[("prompt", Some("read NOTE.txt".into()))],
             )
             .expect("write");
