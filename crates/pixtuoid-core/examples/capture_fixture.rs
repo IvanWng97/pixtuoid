@@ -1152,6 +1152,42 @@ mod recorder {
         }
 
         #[test]
+        fn strip_corpus_honors_an_exemption_the_provenance_declares() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/codex/tool-run-recorded");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let prov = scenario.join("provenance.json");
+            let mut record: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&prov).expect("read")).expect("json");
+            record["deidentified"] = serde_json::json!({
+                "method": "none",
+                "why": "pins a wire premise the decoder drops on purpose"
+            });
+            std::fs::write(&prov, serde_json::to_string_pretty(&record).expect("json"))
+                .expect("write");
+            let bytes = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            let before = bytes(&scenario);
+            strip_corpus(d.path()).expect("strip corpus");
+            assert_eq!(
+                bytes(&scenario),
+                before,
+                "an exempt capture keeps its bytes and its record"
+            );
+        }
+
+        #[test]
         fn strip_corpus_records_its_count_in_the_provenance_and_is_idempotent() {
             let d = tempfile::tempdir().expect("tempdir");
             let scenario = d.path().join("fixtures/codex/tool-run-recorded");
