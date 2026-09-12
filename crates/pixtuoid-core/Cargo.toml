@@ -16,11 +16,12 @@ categories.workspace   = true
 # but not `cargo test` on an extracted crate. They stay FLAT so they can be
 # excluded at all: a grouped binary's submodule cannot be excluded on its own.
 exclude                = [
-    # The recorded fixture corpus is a test-only input to the grouped `sources`
-    # binary (`tests/sources/main.rs`), which its `/`-in-path already keeps out of
-    # the tarball; the DATA it reads was still shipping. It carries captured wire
-    # bytes, so an immutable crates.io copy is the wrong home for it — the corpus
-    # lives in the public repo, not the published crate.
+    # The recorded fixture corpus is captured wire bytes — an operator's plugin
+    # roster, instructions, home paths — and a crates.io tarball is immutable
+    # where the repo copy can still be redacted. The grouped `sources` binary
+    # that reads it goes with it. `tests/watcher/sources.rs` still ships and
+    # reads one scenario, so the extracted crate's `cargo test` fails there —
+    # as it already does at `tests/render/format.rs`'s outside-crate reads.
     "tests/sources",
     "tests/pinned_by_claims.rs",
     "tests/socket_path_parity.rs",
