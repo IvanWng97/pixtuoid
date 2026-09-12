@@ -4,7 +4,7 @@
   "version": "unknown",
   "captured": "2026-08-15",
   "command": "copilot (interactive TUI, driven under a pty), prompted to delegate with its `task` tool",
-  "note": "First real bytes through copilot's Task path — claimed by NAME (`task`), deliberately not by a `subagent_type` key, so a model-authored arg cannot spoof an ordinary tool into a delegation and drain active_tasks. Flat here, unlike the conformance tree: copilot keys on the transcript's PARENT DIR, and this module hands the decoder that logical path explicitly rather than reproducing the directory. Redacted: home path rewritten to /Users/dev; the owner column of a captured `ls -la`. The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`).",
+  "note": "First real bytes through copilot's Task path — claimed by NAME (`task`), deliberately not by a `subagent_type` key, so a model-authored arg cannot spoof an ordinary tool into a delegation and drain active_tasks. Flat here, unlike the conformance tree: copilot keys on the transcript's PARENT DIR, and this module hands the decoder that logical path explicitly rather than reproducing the directory. The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`).",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 381

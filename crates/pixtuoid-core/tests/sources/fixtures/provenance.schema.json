@@ -4,7 +4,7 @@
     "recorded": {
       "required": ["cli", "version", "captured", "command"],
       "optional": ["prompt", "seed", "deidentified"],
-      "means": "real wire bytes, stripped of every subtree no decoder reads; the recorder writes this file itself"
+      "means": "real wire bytes, stripped of every subtree no decoder reads — unless `deidentified.method` is `none`, a reviewed per-capture exemption with its reason for a test that reads raw bytes the decoder drops; the recorder writes this file itself"
     },
     "composed": {
       "required": ["note"],

@@ -4,7 +4,7 @@
   "command": "grok -p {prompt}",
   "origin": "recorded",
   "version": "grok 1.0.25 (f7e67d6988e2) [stable]",
-  "note": "Home path redacted to /Users/dev.",
+  "note": "The recorder's own roster and paths rode fields no decoder reads and are stripped (see `deidentified`).",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 199

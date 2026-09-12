@@ -24,7 +24,7 @@ redacted cwd and an invented one look alike. `origin` is one of:
 
 | origin | required | means |
 | --- | --- | --- |
-| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes, stripped of every subtree no decoder reads; the recorder writes this file itself |
+| `recorded` | `cli`, `version`, `captured`, `command` | real wire bytes, stripped of every subtree no decoder reads — unless `deidentified.method` is `none`, a reviewed per-capture exemption with its reason for a test that reads raw bytes the decoder drops; the recorder writes this file itself |
 | `composed` | `note` | hand-written, and the note says how you can tell |
 | `unknown` | `note` | predates the rule; nobody recorded where it came from |
 
