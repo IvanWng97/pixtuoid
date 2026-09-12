@@ -641,7 +641,7 @@ mod recorder {
     }
 
     /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
-    /// no decoder reads them, but `captures.rs` dates a capture by `_shim_ts_ms`.
+    /// `_shim_ts_ms` is read by no decoder, only by `captures.rs`, which dates a capture by it.
     fn probe(
         drive: &pixtuoid_core::harness::Drive,
         lines: &mut [serde_json::Value],
