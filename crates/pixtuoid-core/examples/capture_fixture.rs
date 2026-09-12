@@ -787,7 +787,36 @@ mod recorder {
         files
     }
 
-    fn strip_corpus(_root: &Path) -> std::io::Result<()> {
+    /// Strip every committed capture in place — local and unbilled — and record
+    /// the count in its provenance. A pass that blanks nothing leaves a record
+    /// that already carries a count alone, so re-running never erases history.
+    fn strip_corpus(root: &Path) -> std::io::Result<()> {
+        for (source, dir) in capture_targets(root) {
+            let files = jsonl_in(&dir);
+            if files.is_empty() {
+                continue;
+            }
+            let blanked = strip_unread(&source, &files)?;
+            let prov = dir.join("provenance.json");
+            let mut record: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
+            if let Some(obj) = record.as_object_mut() {
+                if blanked > 0 || !obj.contains_key("deidentified") {
+                    obj.insert(
+                        "deidentified".into(),
+                        serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
+                    );
+                    std::fs::write(
+                        &prov,
+                        format!("{}\n", serde_json::to_string_pretty(&record)?),
+                    )?;
+                }
+            }
+            println!(
+                "{}: blanked {blanked}",
+                dir.strip_prefix(root).unwrap_or(&dir).display()
+            );
+        }
         Ok(())
     }
 

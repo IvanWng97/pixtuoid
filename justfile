@@ -575,6 +575,11 @@ capture-fixture source scenario *cmd:
     cargo run --release -q -p pixtuoid-core --example capture_fixture -- \
         {{ source }} {{ scenario }} {{ cmd }}
 
+[group('rust')]
+[doc('Strip every committed fixture of what no decoder reads, in place (local, unbilled)')]
+restrip-fixtures:
+    cargo run --release -q -p pixtuoid-core --example capture_fixture -- --strip-corpus
+
 # The corpus census, every transcript-bearing source in one pass — the drift half
 # of the pair: fixtures catch a decode regression, real bytes catch the wire
 # changing under us. Roster and roots both come from the registry.
