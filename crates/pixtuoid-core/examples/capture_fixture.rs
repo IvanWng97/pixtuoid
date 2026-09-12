@@ -781,51 +781,6 @@ mod recorder {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
-    /// Every committed capture as (source, dir) — the three shapes `captures.rs`
-    /// walks: a conformance scenario, a module's own scenario subtree, and a
-    /// module's flat `fixtures/` with the provenance at its root.
-    fn capture_targets(root: &Path) -> Vec<(String, PathBuf)> {
-        let name = |p: &Path| {
-            p.file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .into_owned()
-        };
-        let dirs = |p: PathBuf| {
-            std::fs::read_dir(p)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|e| e.path())
-                .filter(|p| p.is_dir())
-        };
-        let mut targets: Vec<(String, PathBuf)> = Vec::new();
-        for source in dirs(root.join("fixtures")) {
-            targets.extend(dirs(source.clone()).map(|s| (name(&source), s)));
-        }
-        for module in dirs(root.to_path_buf()) {
-            let module_name = name(&module);
-            if module_name == "decode" || module_name == "fixtures" {
-                continue;
-            }
-            let fixtures = module.join("fixtures");
-            if fixtures.join("provenance.json").is_file() {
-                targets.push((module_name, fixtures));
-            } else {
-                for sub in dirs(fixtures) {
-                    let source = if registry::descriptor_for(&module_name).is_some() {
-                        module_name.clone()
-                    } else {
-                        name(&sub)
-                    };
-                    targets.push((source, sub));
-                }
-            }
-        }
-        targets.sort();
-        targets
-    }
-
     /// Recursive: copilot and grok keep a scenario's transcript under its session
     /// directory, beside the hook payloads at the top.
     fn jsonl_in(dir: &Path) -> Vec<PathBuf> {
@@ -855,7 +810,9 @@ mod recorder {
     /// A pass that blanks nothing leaves a record that already carries a count
     /// alone, so re-running never erases history.
     fn strip_corpus(root: &Path) -> std::io::Result<()> {
-        for (source, dir) in capture_targets(root) {
+        for pixtuoid_core::harness::Capture { dir, source } in
+            pixtuoid_core::harness::captures(root)
+        {
             let prov = dir.join("provenance.json");
             let mut record: serde_json::Value =
                 serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
@@ -1130,7 +1087,11 @@ mod recorder {
         fn every_committed_scenario_decodes_the_same_once_stripped() {
             let root = sources_root();
             let mut walked = BTreeSet::new();
-            for (source, scenario) in capture_targets(&root) {
+            for pixtuoid_core::harness::Capture {
+                dir: scenario,
+                source,
+            } in pixtuoid_core::harness::captures(&root)
+            {
                 let label = scenario
                     .strip_prefix(&root)
                     .expect("under root")
