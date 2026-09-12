@@ -45,7 +45,7 @@ tests/
 ├── render/main.rs       blit + format (+ sprite fixtures)
 └── socket_path_parity.rs · supported_sources_manifest.rs ·
     proof_fixture_disjointness.rs · pinned_by_claims.rs
-                         FLAT + publish-excluded (see Cargo.toml's `exclude`)
+                         FLAT + publish-excluded (see Cargo.toml's `exclude`; `sources/` is excluded whole)
 ```
 
 Data scopes to the binary that reads it — a module-owned fixture lives with
