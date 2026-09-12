@@ -422,6 +422,8 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
 /// so a redaction sentinel with a silent `note` is the one state the mechanism
 /// cannot tolerate. Sentinels, not a `/Users/dev` grep: the sweep that keyed on
 /// that alone missed kimi's, whose redaction is a captured `ls -la`'s owner column.
+/// HAND edits only: the recorder's own strip plants no sentinel and discloses
+/// itself through `deidentified` in the provenance, not through `note`.
 #[test]
 fn a_recorded_capture_that_was_edited_says_so() {
     // Placeholders READ from the scanner's own allowlist, never copied: a hand-copy
