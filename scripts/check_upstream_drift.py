@@ -1432,15 +1432,16 @@ def run_checks(ours: OurNames, *, report: Report) -> None:
     if ours.dispatch_names is not None:
         tools = fetch_anchored(CC_TOOLS_URL, "CC tools-reference", report)
         if tools is not None:
-            # At least one name we'd detect by-name must still be the documented
-            # dispatch tool. (Losing a legacy name like `Task` is fine.)
+            # At least one name we detect by-name must still be documented. The
+            # set is a singleton since `Task` was renamed AND deleted, so this is
+            # now "the name is still there", not a tolerance for legacy spellings.
             present = [n for n in ours.dispatch_names if re.search(rf"`{re.escape(n)}`", tools)]
             if not present:
                 report.add_breaking(
                     f"None of our known dispatch tool names {sorted(ours.dispatch_names)} "
                     f"appear in CC tools-reference — the subagent tool was likely "
                     f"renamed again. Update make_tool_detail's known names. (Semantic "
-                    f"subagent_type detection still works, but the name fallback is "
+                    f"subagent_type detection still works, but by-name detection is "
                     f"stale.)"
                 )
 

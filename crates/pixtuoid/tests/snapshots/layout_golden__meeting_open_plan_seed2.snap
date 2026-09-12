@@ -1,6 +1,5 @@
 ---
 source: crates/pixtuoid/tests/layout_golden.rs
-assertion_line: 87
 expression: l.meeting_room
 ---
 Some(
