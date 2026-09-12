@@ -748,6 +748,15 @@ mod recorder {
                 .collect()
         }
 
+        fn first_key(jsonl: &str) -> String {
+            jsonl
+                .lines()
+                .next()
+                .and_then(|l| l.trim_start_matches('{').split('"').nth(1))
+                .expect("an object with a key")
+                .to_string()
+        }
+
         fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
             let d = tempfile::tempdir().expect("tempdir");
             let to = d.path().join(name);
@@ -772,13 +781,14 @@ mod recorder {
             );
             let files = vec![hooks.clone()];
             let before = scenario_events("openclaw", &files);
+            let wire = std::fs::read_to_string(&hooks).expect("read");
             strip_unread("openclaw", &files).expect("strip");
             assert_eq!(scenario_events("openclaw", &files), before);
-            let first = std::fs::read_to_string(&hooks).expect("read");
-            let first = first.lines().next().expect("a line");
-            assert!(
-                first.contains("gateway_start") && first.contains("19099"),
-                "{first}"
+            let stripped = std::fs::read_to_string(&hooks).expect("read");
+            assert_eq!(
+                stripped.lines().next(),
+                wire.lines().next(),
+                "every field of `gateway_start` is read or a shim stamp, so the line is untouched"
             );
         }
 
@@ -850,11 +860,17 @@ mod recorder {
             .collect();
 
             let before = scenario_events("codex", &files);
+            let wire_first_key = first_key(&std::fs::read_to_string(&files[0]).expect("read"));
             let blanked = strip_unread("codex", &files).expect("strip");
             assert!(blanked > 0, "the codex rollout carries unread subtrees");
             assert_eq!(scenario_events("codex", &files), before);
 
             let transcript = std::fs::read_to_string(&files[0]).expect("read");
+            assert_eq!(
+                first_key(&transcript),
+                wire_first_key,
+                "a rewritten line keeps the wire's key order"
+            );
             assert!(
                 !transcript.contains("example-skill"),
                 "the roster rides a field no decoder reads, so it leaves"
