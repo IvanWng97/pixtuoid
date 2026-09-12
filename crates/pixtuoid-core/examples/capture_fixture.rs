@@ -624,17 +624,19 @@ mod recorder {
     }
 
     type Decoded = (
-        Vec<pixtuoid_core::AgentEvent>,
+        Vec<String>,
         Vec<String>,
         Vec<String>,
         Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
-        Vec<Option<PathBuf>>,
+        Vec<String>,
     );
 
     /// Everything the registry reads from a line, not only the line decoder: a
     /// daemon's envelopes decode to no `AgentEvent` by design (presence rides
     /// `presence_decoder`), and the watcher registers a transcript through
     /// `cwd_extractor`, which the harness never calls — it seeds a fixed cwd.
+    /// Compared as rendered, the way a golden is: `PathBuf` equality drops a
+    /// trailing slash, and grok's `workspaceRoot` fallback differs by exactly that.
     fn events_of(
         source: &str,
         drive: &pixtuoid_core::harness::Drive,
@@ -643,7 +645,7 @@ mod recorder {
         let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
         let cwds = lines
             .iter()
-            .map(registry::cwd_extractor_for(source))
+            .map(|l| format!("{:?}", registry::cwd_extractor_for(source)(l)))
             .collect();
         let presence = lines
             .iter()
@@ -656,7 +658,7 @@ mod recorder {
             f.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>()
         };
         (
-            d.events,
+            d.events.iter().map(|e| format!("{e:?}")).collect(),
             failures(&d.decode_errors),
             failures(&d.panics),
             presence,
