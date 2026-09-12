@@ -120,10 +120,12 @@ mod recorder {
             std::process::exit(1);
         }
 
+        let blanked = strip_unread(&source, &wrote)?;
         write_provenance(
             &dest,
             &cmd,
             &args[2..],
+            blanked,
             &[
                 ("prompt", nonempty_env("CAPTURE_PROMPT")),
                 ("seed", nonempty_env("CAPTURE_SEED")),
@@ -132,6 +134,7 @@ mod recorder {
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
+        println!("blanked {blanked} subtrees no decoder reads");
         refuse_on_pii(&wrote)?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
@@ -355,7 +358,7 @@ mod recorder {
         let out = no_clobber(dest.join("hook-payloads.jsonl"));
         let mut f = std::fs::File::create(&out)?;
         for p in payloads {
-            // The shim already stamped `_pixtuoid_source`; nothing here edits the bytes.
+            // The shim already stamped `_pixtuoid_source`.
             let v: serde_json::Value = serde_json::from_str(p.trim())
                 .unwrap_or_else(|e| panic!("a captured payload is not JSON: {e}: {p:?}"));
             writeln!(f, "{}", serde_json::to_string(&v)?)?;
@@ -367,6 +370,7 @@ mod recorder {
         dest: &Path,
         cmd: &[String],
         raw: &[String],
+        blanked: usize,
         overrides: &[(&str, Option<String>)],
     ) -> std::io::Result<()> {
         let cli = Path::new(&cmd[0])
@@ -387,6 +391,7 @@ mod recorder {
             "version": version.trim(),
             "captured": today(),
             "command": raw.join(" "),
+            "deidentified": { "method": "decoder-allowlist", "blanked": blanked },
         });
         // `command` is the UN-expanded argv, so a scenario driven by an override
         // records a `{prompt}` placeholder and nothing else says what ran. Only
@@ -556,23 +561,112 @@ mod recorder {
     /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
     /// code at 0 on a run that had already written into the repo tree, so the
     /// capturer had to notice a line scrolling past — and twice did not.
-    fn strip_unread(_source: &str, _files: &[PathBuf]) -> std::io::Result<usize> {
-        Ok(0)
+    /// Blank every subtree of the recorded bytes that no decoder reads, so an
+    /// operator's roster, instructions, and paths leave without anyone naming
+    /// them. The allowlist is DERIVED — a subtree is blanked when blanking it
+    /// leaves the file's decoded events identical — because a hand-kept list
+    /// drifts from the decoder in the one direction nothing catches: a field the
+    /// decoder stopped reading stays in the bytes. Probed top-down so an unread
+    /// container collapses whole; 67 blanked entries would still say "67".
+    fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<usize> {
+        let mut blanked = 0;
+        for file in files {
+            let Some(drive) = drive_for(source, file) else {
+                continue;
+            };
+            let Some(mut lines) = parsed_lines(file)? else {
+                continue;
+            };
+            let base = events_of(&drive, &lines);
+            for i in 0..lines.len() {
+                blanked += probe(&drive, &mut lines, &base, i, "");
+            }
+            let mut out = String::new();
+            for line in &lines {
+                out.push_str(&serde_json::to_string(line)?);
+                out.push('\n');
+            }
+            std::fs::write(file, out)?;
+        }
+        Ok(blanked)
     }
 
-    fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Vec<pixtuoid_core::AgentEvent>> {
-        files
+    fn drive_for(source: &str, file: &Path) -> Option<pixtuoid_core::harness::Drive> {
+        if file.file_name()?.to_str()?.starts_with("hook-payloads") {
+            Some(pixtuoid_core::harness::Drive::hooks())
+        } else {
+            pixtuoid_core::harness::Drive::transcript(source, &file.to_string_lossy())
+        }
+    }
+
+    /// `None` when a line is not JSON: the file is left as recorded rather than
+    /// half-rewritten, and `refuse_on_pii` still reads it.
+    fn parsed_lines(file: &Path) -> std::io::Result<Option<Vec<serde_json::Value>>> {
+        let text = std::fs::read_to_string(file)?;
+        let mut lines = Vec::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str(line) {
+                Ok(v) => lines.push(v),
+                Err(e) => {
+                    eprintln!("not stripping {}: a line is not JSON: {e}", file.display());
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(lines))
+    }
+
+    type Decoded = (Vec<pixtuoid_core::AgentEvent>, usize, usize);
+
+    fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
+        let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
+        (d.events, d.decode_errors.len(), d.panics.len())
+    }
+
+    fn probe(
+        drive: &pixtuoid_core::harness::Drive,
+        lines: &mut [serde_json::Value],
+        base: &Decoded,
+        i: usize,
+        at: &str,
+    ) -> usize {
+        use serde_json::Value;
+        let Some(node) = lines[i].pointer(at) else {
+            return 0;
+        };
+        let neutral = match node {
+            Value::Null => return 0,
+            Value::Bool(_) => Value::Bool(false),
+            Value::Number(_) => Value::from(0),
+            Value::String(_) => Value::String(String::new()),
+            Value::Array(_) => Value::Array(Vec::new()),
+            Value::Object(_) => Value::Object(serde_json::Map::new()),
+        };
+        if *node == neutral {
+            return 0;
+        }
+        let Some(slot) = lines[i].pointer_mut(at) else {
+            return 0;
+        };
+        let kept = std::mem::replace(slot, neutral);
+        if events_of(drive, lines) == *base {
+            return 1;
+        }
+        let children: Vec<String> = match &kept {
+            Value::Array(a) => (0..a.len()).map(|k| format!("{at}/{k}")).collect(),
+            Value::Object(m) => m
+                .keys()
+                .map(|k| format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if let Some(slot) = lines[i].pointer_mut(at) {
+            *slot = kept;
+        }
+        children
             .iter()
-            .filter_map(|f| {
-                let drive = if f.file_name()?.to_str()?.starts_with("hook-payloads") {
-                    pixtuoid_core::harness::Drive::hooks()
-                } else {
-                    pixtuoid_core::harness::Drive::transcript(source, &f.to_string_lossy())?
-                };
-                let text = std::fs::read_to_string(f).ok()?;
-                Some(drive.lines(text.lines()).events)
-            })
-            .collect()
+            .map(|child| probe(drive, lines, base, i, child))
+            .sum()
     }
 
     fn refuse_on_pii(files: &[PathBuf]) -> std::io::Result<()> {
@@ -624,6 +718,16 @@ mod recorder {
     mod tests {
         use super::*;
 
+        fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Vec<pixtuoid_core::AgentEvent>> {
+            files
+                .iter()
+                .filter_map(|f| {
+                    let text = std::fs::read_to_string(f).ok()?;
+                    Some(drive_for(source, f)?.lines(text.lines()).events)
+                })
+                .collect()
+        }
+
         #[test]
         fn a_module_owned_scenario_is_re_recorded_where_it_lives() {
             let d = tempfile::tempdir().expect("tempdir");
@@ -657,9 +761,6 @@ mod recorder {
             );
         }
 
-        /// The whole de-identification claim on real bytes: a subtree no decoder
-        /// reads is blanked — the roster and every carrier nobody has named yet —
-        /// and what the decoders DO read decodes to the same events afterwards.
         #[test]
         fn stripping_blanks_what_no_decoder_reads_and_changes_no_event() {
             let d = tempfile::tempdir().expect("tempdir");
@@ -695,6 +796,78 @@ mod recorder {
                 hooks.contains("01a08cbb-1b7f-7ce3-b924-1a501c380856"),
                 "the hook's session_id keys coalescing, so it stays"
             );
+        }
+
+        #[test]
+        fn every_committed_scenario_decodes_the_same_once_stripped() {
+            let root = sources_root();
+            let dirs = |p: PathBuf| {
+                std::fs::read_dir(p)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+            };
+            let mut targets: Vec<(String, PathBuf)> = Vec::new();
+            for source in dirs(root.join("fixtures")) {
+                let name = source
+                    .file_name()
+                    .expect("name")
+                    .to_string_lossy()
+                    .into_owned();
+                targets.extend(dirs(source.clone()).map(|s| (name.clone(), s)));
+            }
+            for module in dirs(root.clone()) {
+                let name = module
+                    .file_name()
+                    .expect("name")
+                    .to_string_lossy()
+                    .into_owned();
+                if registry::descriptor_for(&name).is_some() {
+                    targets.extend(dirs(module.join("fixtures")).map(|s| (name.clone(), s)));
+                }
+            }
+
+            let mut walked = BTreeSet::new();
+            for (source, scenario) in targets {
+                let jsonl: Vec<PathBuf> = std::fs::read_dir(&scenario)
+                    .expect("scenario")
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+                    .collect();
+                if jsonl.is_empty() {
+                    continue;
+                }
+                let d = tempfile::tempdir().expect("tempdir");
+                let files: Vec<PathBuf> = jsonl
+                    .iter()
+                    .map(|from| {
+                        let to = d.path().join(from.file_name().expect("name"));
+                        std::fs::copy(from, &to).expect("copy");
+                        to
+                    })
+                    .collect();
+                let label = format!(
+                    "{source}/{}",
+                    scenario.file_name().expect("name").to_string_lossy()
+                );
+                let before = scenario_events(&source, &files);
+                strip_unread(&source, &files).expect("strip");
+                assert_eq!(scenario_events(&source, &files), before, "{label}");
+                walked.insert(label);
+            }
+            for sentinel in [
+                "codex/tool-run-recorded",
+                "claude-code/tool-run-recorded",
+                "omp/bridge-run-recorded",
+            ] {
+                assert!(
+                    walked.contains(sentinel),
+                    "walk missed {sentinel}: {walked:?}"
+                );
+            }
         }
 
         /// Every shape that has actually reached a committed fixture past this gate.
@@ -874,7 +1047,7 @@ mod recorder {
             let argv = ["true".to_string()];
 
             let bare = tempfile::tempdir().expect("tempdir");
-            write_provenance(bare.path(), &argv, &argv, &[("prompt", None)]).expect("write");
+            write_provenance(bare.path(), &argv, &argv, 0, &[("prompt", None)]).expect("write");
             assert!(read(bare.path()).get("prompt").is_none());
 
             let set = tempfile::tempdir().expect("tempdir");
@@ -882,6 +1055,7 @@ mod recorder {
                 set.path(),
                 &argv,
                 &argv,
+                0,
                 &[("prompt", Some("read NOTE.txt".into()))],
             )
             .expect("write");

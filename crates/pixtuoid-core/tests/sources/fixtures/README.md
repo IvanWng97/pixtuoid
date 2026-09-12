@@ -28,10 +28,15 @@ redacted cwd and an invented one look alike. `origin` is one of:
 | `composed` | `note` | hand-written, and the note says how you can tell |
 | `unknown` | `note` | predates the rule; nobody recorded where it came from |
 
-**A redacted capture says so in its `note`.** The convention is `/Users/dev` for
-the home path; the bytes are otherwise verbatim. Without the note a reader cannot
-tell an edited capture from an untouched one, which is the distinction the whole
-mechanism exists to make.
+**The recorder blanks what no decoder reads before the bytes land**, and
+`deidentified` in the provenance says how many subtrees went. A plugin roster, a
+global-instruction attachment, a stray home path all ride fields the decoders
+never touch, so they leave without anyone naming them, and what stays decodes to
+the same events. The allowlist is derived by probing the decoders, never listed,
+so it cannot drift from them. `/Users/dev` remains the convention for a home
+path a decoder DOES read, and a capture redacted by hand says so in its `note`:
+without it a reader cannot tell an edited capture from an untouched one, which is
+the distinction the whole mechanism exists to make.
 
 The table above is not the schema — [`provenance.schema.json`](provenance.schema.json)
 is, and both readers (this table and
