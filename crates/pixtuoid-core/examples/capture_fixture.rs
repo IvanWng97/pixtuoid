@@ -56,9 +56,13 @@ mod recorder {
 
     pub(crate) fn main() -> std::io::Result<()> {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.first().map(String::as_str) == Some("--strip-corpus") {
+            return strip_corpus(&sources_root());
+        }
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)"
+                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)\n       \
+                 capture_fixture --strip-corpus   (strip every committed capture in place)"
             );
             std::process::exit(2);
         }
@@ -726,6 +730,67 @@ mod recorder {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
+    /// Every committed capture as (source, dir) — the three shapes `captures.rs`
+    /// walks: a conformance scenario, a module's own scenario subtree, and a
+    /// module's flat `fixtures/` with the provenance at its root.
+    fn capture_targets(root: &Path) -> Vec<(String, PathBuf)> {
+        let name = |p: &Path| {
+            p.file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let dirs = |p: PathBuf| {
+            std::fs::read_dir(p)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_dir())
+        };
+        let mut targets: Vec<(String, PathBuf)> = Vec::new();
+        for source in dirs(root.join("fixtures")) {
+            targets.extend(dirs(source.clone()).map(|s| (name(&source), s)));
+        }
+        for module in dirs(root.to_path_buf()) {
+            let module_name = name(&module);
+            if module_name == "decode" || module_name == "fixtures" {
+                continue;
+            }
+            let fixtures = module.join("fixtures");
+            if fixtures.join("provenance.json").is_file() {
+                targets.push((module_name, fixtures));
+            } else {
+                for sub in dirs(fixtures) {
+                    let source = if registry::descriptor_for(&module_name).is_some() {
+                        module_name.clone()
+                    } else {
+                        name(&sub)
+                    };
+                    targets.push((source, sub));
+                }
+            }
+        }
+        targets.sort();
+        targets
+    }
+
+    fn jsonl_in(dir: &Path) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+            .collect();
+        files.sort();
+        files
+    }
+
+    fn strip_corpus(_root: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
+
     /// Where this scenario's bytes ALREADY live, else the conformance root: a module
     /// keeps its own rounds out of conformance's reach (omp's hook keys fold on
     /// Windows), and a re-record sent to the root instead lands as a NEW directory
@@ -899,58 +964,17 @@ mod recorder {
             );
         }
 
-        /// The three capture shapes `captures.rs` walks, walked the same way: a
-        /// conformance scenario, a module's own scenario subtree, and a module's
-        /// flat `fixtures/` with the provenance at its root.
         #[test]
         fn every_committed_scenario_decodes_the_same_once_stripped() {
             let root = sources_root();
-            let name = |p: &Path| p.file_name().expect("name").to_string_lossy().into_owned();
-            let dirs = |p: PathBuf| {
-                std::fs::read_dir(p)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| p.is_dir())
-            };
-            let mut targets: Vec<(String, PathBuf)> = Vec::new();
-            for source in dirs(root.join("fixtures")) {
-                targets.extend(dirs(source.clone()).map(|s| (name(&source), s)));
-            }
-            for module in dirs(root.clone()) {
-                let module_name = name(&module);
-                if module_name == "decode" || module_name == "fixtures" {
-                    continue;
-                }
-                let fixtures = module.join("fixtures");
-                if fixtures.join("provenance.json").is_file() {
-                    targets.push((module_name, fixtures));
-                } else {
-                    for sub in dirs(fixtures) {
-                        let source = if registry::descriptor_for(&module_name).is_some() {
-                            module_name.clone()
-                        } else {
-                            name(&sub)
-                        };
-                        targets.push((source, sub));
-                    }
-                }
-            }
-
             let mut walked = BTreeSet::new();
-            for (source, scenario) in targets {
+            for (source, scenario) in capture_targets(&root) {
                 let label = scenario
                     .strip_prefix(&root)
                     .expect("under root")
                     .to_string_lossy()
                     .replace('\\', "/");
-                let jsonl: Vec<PathBuf> = std::fs::read_dir(&scenario)
-                    .expect("scenario")
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
-                    .collect();
+                let jsonl = jsonl_in(&scenario);
                 if jsonl.is_empty() {
                     continue;
                 }
@@ -987,6 +1011,47 @@ mod recorder {
                     "walk missed {sentinel}: {walked:?}"
                 );
             }
+        }
+
+        #[test]
+        fn strip_corpus_records_its_count_in_the_provenance_and_is_idempotent() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/codex/tool-run-recorded");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let snapshot = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            let wire = snapshot(&scenario);
+
+            strip_corpus(d.path()).expect("strip corpus");
+            let once = snapshot(&scenario);
+            assert_ne!(once, wire, "the rollout carries unread subtrees");
+            let prov: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
+            )
+            .expect("json");
+            assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
+            assert!(prov["deidentified"]["blanked"]
+                .as_u64()
+                .is_some_and(|n| n > 0));
+            assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
+
+            strip_corpus(d.path()).expect("strip corpus again");
+            assert_eq!(
+                snapshot(&scenario),
+                once,
+                "a second pass finds nothing and rewrites nothing"
+            );
         }
 
         /// Every shape that has actually reached a committed fixture past this gate.
