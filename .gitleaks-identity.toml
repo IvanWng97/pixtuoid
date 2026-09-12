@@ -125,6 +125,11 @@ regex = '''Git user: [^\\"\n]+'''
 # stock prompt mentions `SKILL.md` once, a roster lists eighty — so there is one rule
 # per carrier spelling.
 #
+# 15, not 17: swept against both sides, {12}-{15} catch all nine leaked files with
+# zero false positives on the redacted tree (whose worst line carries 11), and {16}
+# upward catch only eight — the per-FILE smallest leak was 15 agent types, while the
+# 34 this was first bounded on was a per-SOURCE figure.
+#
 # `[^\n]*`, never `[\s\S]{0,N}`: Go caps the PRODUCT of nested counted repeats at
 # 1000, so a bounded window large enough for a real 250-char entry refuses to
 # compile and gitleaks PANICS rather than reporting the bad rule. `*` is not a
@@ -133,14 +138,23 @@ regex = '''Git user: [^\\"\n]+'''
 [[rules]]
 id = "pixtuoid-inventory-skill-md"
 description = "A skills roster, not one documented SKILL.md"
-regex = '''(?:SKILL\.md[^\n]*){17}'''
+regex = '''(?:SKILL\.md[^\n]*){15}'''
 
 [[rules]]
 id = "pixtuoid-inventory-named-elements"
 description = "A copilot <available_skills> roster, not one documented skill"
-regex = '''(?:<name>[^\n]*){17}'''
+regex = '''(?:<name>[^\n]*){15}'''
 
 [[rules]]
 id = "pixtuoid-inventory-bulleted"
 description = "A skill/agent listing, not a few documented entries"
-regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){17}'''
+regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){15}'''
+
+# The same listing JSON-encoded as an ARRAY of `"- name: description"` strings
+# (`agent_listing_delta.addedLines`), where the rows are separated by `","` and the
+# escaped-newline anchor above never fires. This carrier held 30 agent types and
+# 11KB of descriptions past every other rule.
+[[rules]]
+id = "pixtuoid-inventory-array"
+description = "A listing encoded as a JSON array of entries"
+regex = '''(?:","- [A-Za-z0-9:._-]+: [A-Z][^\n]*){15}'''
