@@ -787,14 +787,25 @@ mod recorder {
         targets
     }
 
+    /// Recursive: copilot and grok keep a scenario's transcript under its session
+    /// directory, beside the hook payloads at the top.
     fn jsonl_in(dir: &Path) -> Vec<PathBuf> {
-        let mut files: Vec<PathBuf> = std::fs::read_dir(dir)
-            .into_iter()
-            .flatten()
-            .flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
-            .collect();
+        let mut files = Vec::new();
+        let mut pending = vec![dir.to_path_buf()];
+        while let Some(d) = pending.pop() {
+            for p in std::fs::read_dir(d)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+            {
+                if p.is_dir() {
+                    pending.push(p);
+                } else if p.extension().is_some_and(|x| x == "jsonl") {
+                    files.push(p);
+                }
+            }
+        }
         files.sort();
         files
     }
@@ -1044,6 +1055,10 @@ mod recorder {
                     .to_string_lossy()
                     .replace('\\', "/");
                 let jsonl = jsonl_in(&scenario);
+                assert!(
+                    !jsonl.is_empty() || !scenario.join("provenance.json").is_file(),
+                    "{label}: a provenance with no bytes under it"
+                );
                 if jsonl.is_empty() {
                     continue;
                 }
@@ -1051,7 +1066,8 @@ mod recorder {
                 let files: Vec<PathBuf> = jsonl
                     .iter()
                     .map(|from| {
-                        let to = d.path().join(from.file_name().expect("name"));
+                        let to = d.path().join(from.strip_prefix(&scenario).expect("under"));
+                        std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
                         std::fs::copy(from, &to).expect("copy");
                         to
                     })
@@ -1074,12 +1090,41 @@ mod recorder {
                 "omp/fixtures/bridge-run-recorded",
                 "cursor/fixtures",
                 "delegation/fixtures/copilot",
+                "fixtures/copilot/tool-run-recorded",
+                "fixtures/grok/tool-run-recorded",
             ] {
                 assert!(
                     walked.contains(sentinel),
                     "walk missed {sentinel}: {walked:?}"
                 );
             }
+        }
+
+        #[test]
+        fn strip_corpus_leaves_a_composed_capture_alone() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/claude-code/proof-session");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/claude-code/proof-session");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let bytes = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            let before = bytes(&scenario);
+            strip_corpus(d.path()).expect("strip corpus");
+            assert_eq!(
+                bytes(&scenario),
+                before,
+                "composed bytes carry no operator data"
+            );
         }
 
         #[test]
