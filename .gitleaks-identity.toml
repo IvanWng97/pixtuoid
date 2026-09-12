@@ -97,3 +97,22 @@ regex = '''-(?:Users|home)-[A-Za-z0-9._]+'''
     '''^(?i)-(?:Users|home)-(?:dev|me|user)$''',
     '''^(?i)-(?:Users|home)-(?:runner|ubuntu|vscode|linuxbrew|Shared)$''',
   ]
+
+[[rules]]
+id = "pixtuoid-rendered-git-identity"
+description = "The committer's real name, rendered into a captured session context"
+# A person's NAME is the one identity class with no shape to match: not a
+# credential, not a path, not an email. It is reachable only where a CLI renders
+# it under a fixed label — claude-code puts `git config user.name` into
+# `session_context.gitStatus`, in the content AND its rendered twin, and that
+# reached a committed fixture. Anchored on the label, so this stays a rule about
+# one known carrier rather than a guess at what a name looks like.
+regex = '''Git user: [^\\"\n]+'''
+  [[rules.allowlists]]
+  regexTarget = "match"
+  # Two regexes, not one alternation: `captures.rs` reads the PLACEHOLDER line
+  # positionally to build its redaction sentinels, and asserts the rules agree.
+  regexes = [
+    '''^(?i)Git user: (?:dev|me|user)$''',
+    '''^(?i)Git user: (?:runner|ubuntu|vscode|linuxbrew|Shared)$''',
+  ]

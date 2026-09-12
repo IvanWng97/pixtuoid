@@ -78,7 +78,7 @@ mod recorder {
             std::process::exit(2);
         }
 
-        let dest = fixtures_root().join(&source).join(&scenario);
+        let dest = scenario_dest(&sources_root(), &source, &scenario);
         let root = resolved_source_root(&source);
 
         let workspace = prepare_workspace()?;
@@ -470,10 +470,16 @@ mod recorder {
     /// but matches VALUE shapes, not this list — as gitleaks rules these KEYS fire
     /// on the tree's own `dev@example.com` redactions. A key with no value shape
     /// (`obsidian`, `account_id`) is refused only at capture time.
+    /// Both cases of each spelling, because a CLI picks one and its next version
+    /// may pick the other: `userEmail` arrived at claude-code 2.1.261 beside the
+    /// `user_email` already here, and slipped past.
     const PII_MARKERS: &[&str] = &[
         "user_email",
+        "userEmail",
         "\"email\"",
         "account_id",
+        "accountId",
+        "user_id",
         "mcp__",
         "obsidian",
         "api_key",
@@ -481,8 +487,10 @@ mod recorder {
         "Bearer ",
     ];
 
-    fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
-        let mut found = Vec::new();
+    /// Strings this machine would leak into a capture, the git identity included:
+    /// a CLI that renders `git status` embeds the committer's real name, which no
+    /// marker can match (`.gitleaks-identity.toml` carries the committed-tree half).
+    fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
             if let Ok(v) = std::env::var(var) {
@@ -491,21 +499,53 @@ mod recorder {
                 }
             }
         }
+        for key in ["user.name", "user.email"] {
+            if let Some(v) = git(key).filter(|v| !v.is_empty()) {
+                needles.insert(v);
+            }
+        }
+        needles
+    }
+
+    fn git_config(key: &str) -> Option<String> {
+        let out = std::process::Command::new("git")
+            .args(["config", "--get", key])
+            .output()
+            .ok()?;
+        parse_git_config(&out.stdout)
+    }
+
+    /// `git config` answers with a trailing newline, and an unset key answers with
+    /// nothing — an untrimmed value never matches the bytes a CLI embedded, and an
+    /// empty one would make every capture match the needle.
+    fn parse_git_config(stdout: &[u8]) -> Option<String> {
+        let v = String::from_utf8_lossy(stdout).trim().to_string();
+        (!v.is_empty()).then_some(v)
+    }
+
+    /// Every reason `body` cannot be committed, or empty.
+    fn pii_hits(body: &str, needles: &BTreeSet<String>) -> Vec<String> {
+        let mut hits: Vec<String> = needles
+            .iter()
+            .filter(|n| body.contains(n.as_str()))
+            .map(String::to_string)
+            .collect();
+        for marker in PII_MARKERS {
+            if body.contains(marker) {
+                hits.push(format!("a {marker} field"));
+            }
+        }
+        hits
+    }
+
+    fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
+        let needles = identity_needles(git_config);
+        let mut found = Vec::new();
         for f in files {
             let Ok(body) = std::fs::read_to_string(f) else {
                 continue;
             };
-            let hits: Vec<&str> = needles
-                .iter()
-                .filter(|n| body.contains(n.as_str()))
-                .map(String::as_str)
-                .collect();
-            let mut hits: Vec<String> = hits.into_iter().map(str::to_string).collect();
-            for marker in PII_MARKERS {
-                if body.contains(marker) {
-                    hits.push(format!("a {marker} field"));
-                }
-            }
+            let hits = pii_hits(&body, &needles);
             if !hits.is_empty() {
                 found.push(format!("{}: {}", f.display(), hits.join(", ")));
             }
@@ -536,13 +576,127 @@ mod recorder {
             .unwrap_or(0)
     }
 
-    fn fixtures_root() -> PathBuf {
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources/fixtures")
+    fn sources_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
+    }
+
+    /// Where this scenario's bytes ALREADY live, else the conformance root.
+    ///
+    /// A module keeps its own rounds out of conformance's reach (omp's hook keys
+    /// fold on Windows), and a re-record sent to the conformance root instead lands
+    /// as a NEW directory that `conformance.rs` auto-scans with no committed bytes
+    /// beside it for `.new` to protect.
+    ///
+    /// Keyed on the SOURCE, never a search across modules: scenario names repeat
+    /// (`approval-recorded` is both hermes' and omp's), so a search finds one match
+    /// for the wrong module and the ambiguity guard never fires — a billed hermes
+    /// capture would land as `.new` files inside omp's directory. `claude/` owning
+    /// `claude-code` is the one name mismatch, and it holds no scenario
+    /// subdirectory, so it cannot reach here.
+    fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
+        let owned = sources.join(source).join("fixtures").join(scenario);
+        if owned.join("provenance.json").is_file() {
+            return owned;
+        }
+        sources.join("fixtures").join(source).join(scenario)
     }
 
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        #[test]
+        fn a_module_owned_scenario_is_re_recorded_where_it_lives() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let root = d.path();
+            let owned = root.join("omp/fixtures/bridge-run-recorded");
+            std::fs::create_dir_all(&owned).expect("mkdir");
+            std::fs::write(owned.join("provenance.json"), "{}").expect("write");
+
+            assert_eq!(scenario_dest(root, "omp", "bridge-run-recorded"), owned);
+            assert_eq!(
+                scenario_dest(root, "omp", "tool-run-recorded"),
+                root.join("fixtures/omp/tool-run-recorded")
+            );
+            assert_eq!(
+                scenario_dest(root, "kimi", "tool-run"),
+                root.join("fixtures/kimi/tool-run")
+            );
+            std::fs::create_dir_all(root.join("kimi/fixtures/tool-run")).expect("mkdir");
+            assert_eq!(
+                scenario_dest(root, "kimi", "tool-run"),
+                root.join("fixtures/kimi/tool-run")
+            );
+
+            let mine = root.join("omp/fixtures/approval-recorded");
+            std::fs::create_dir_all(&mine).expect("mkdir");
+            std::fs::write(mine.join("provenance.json"), "{}").expect("write");
+            assert_eq!(scenario_dest(root, "omp", "approval-recorded"), mine);
+            assert_eq!(
+                scenario_dest(root, "hermes", "approval-recorded"),
+                root.join("fixtures/hermes/approval-recorded")
+            );
+        }
+
+        /// Every shape that has actually reached a committed fixture past this gate.
+        #[test]
+        fn the_markers_cover_what_has_actually_leaked() {
+            let none = BTreeSet::new();
+            for (body, why) in [
+                (r#"{"userEmail":"a@b.c"}"#, "camelCase twin of user_email"),
+                (r#"{"user_id":"x"}"#, "mem0 user id"),
+                (r#"{"accountId":"x"}"#, "camelCase twin of account_id"),
+            ] {
+                assert!(
+                    !pii_hits(body, &none).is_empty(),
+                    "{why}: the gate must refuse {body}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_git_config_answer_is_trimmed_and_an_unset_key_is_none() {
+            assert_eq!(
+                parse_git_config(b"Ada Lovelace\n").as_deref(),
+                Some("Ada Lovelace")
+            );
+            assert_eq!(
+                parse_git_config(b"  ada@example.org  ").as_deref(),
+                Some("ada@example.org")
+            );
+            assert_eq!(parse_git_config(b""), None);
+            assert_eq!(parse_git_config(b"\n"), None);
+        }
+
+        /// Injected rather than read from the machine: on a CI runner `git config
+        /// user.name` is unset, so a test asserting the real one passes VACUOUSLY
+        /// exactly where it is most needed.
+        #[test]
+        fn the_git_identity_joins_the_needles() {
+            let needles = identity_needles(|k| match k {
+                "user.name" => Some("Ada Lovelace".to_string()),
+                "user.email" => Some("ada@example.org".to_string()),
+                _ => None,
+            });
+            assert!(needles.contains("Ada Lovelace"), "{needles:?}");
+            assert!(needles.contains("ada@example.org"), "{needles:?}");
+            assert!(!identity_needles(|_| None).contains("Ada Lovelace"));
+        }
+
+        #[test]
+        fn a_rendered_git_identity_is_a_needle_not_a_marker() {
+            let needles = BTreeSet::from(["Ada Lovelace".to_string()]);
+            let body = r#"{"gitStatus":"Current branch: main\nGit user: Ada Lovelace"}"#;
+            assert_eq!(pii_hits(body, &needles), vec!["Ada Lovelace".to_string()]);
+            assert!(pii_hits(body, &BTreeSet::new()).is_empty());
+        }
+
+        #[test]
+        fn a_capture_carrying_nothing_of_the_operator_passes() {
+            let needles = BTreeSet::from(["Ada Lovelace".to_string(), "/Users/ada".to_string()]);
+            let body = r#"{"cwd":"/tmp/pixtuoid-capture/proj","tool_use_id":"t1"}"#;
+            assert!(pii_hits(body, &needles).is_empty(), "{body}");
+        }
 
         #[test]
         fn the_env_scrub_names_the_agent_namespace_and_nothing_else() {
