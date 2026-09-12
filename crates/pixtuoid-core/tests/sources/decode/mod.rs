@@ -639,7 +639,7 @@ fn cc_jsonl_subagent_line_with_attribution_emits_rename() {
         "type": "assistant",
         "sessionId": "sess",
         "cwd": "/repo",
-        "attributionAgent": "feature-dev:code-explorer",
+        "attributionAgent": "example-plugin:example-agent",
         "message": {
             "role": "assistant",
             "content": [
@@ -652,7 +652,7 @@ fn cc_jsonl_subagent_line_with_attribution_emits_rename() {
     let has_rename = events.iter().any(|e| {
         matches!(
             e,
-            AgentEvent::Rename { label, .. } if label == "code-explorer"
+            AgentEvent::Rename { label, .. } if label == "example-agent"
         )
     });
     assert!(has_rename, "expected Rename event, got {events:?}");
