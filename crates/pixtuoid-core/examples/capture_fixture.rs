@@ -894,6 +894,34 @@ mod recorder {
         }
 
         #[test]
+        fn the_first_sight_cwd_survives_the_strip() {
+            let (_d, rollout) = stripped_copy(
+                "codex",
+                "tool-run-recorded",
+                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
+            );
+            let cwds = |p: &Path| -> Vec<Option<PathBuf>> {
+                let extract = registry::cwd_extractor_for("codex");
+                parsed_lines(p)
+                    .expect("read")
+                    .expect("json")
+                    .1
+                    .iter()
+                    .map(extract)
+                    .collect()
+            };
+            let before = cwds(&rollout);
+            assert!(
+                before
+                    .iter()
+                    .any(|c| c.as_ref().is_some_and(|p| !p.as_os_str().is_empty())),
+                "the rollout carries the cwd first-sight registers"
+            );
+            strip_unread("codex", std::slice::from_ref(&rollout)).expect("strip");
+            assert_eq!(cwds(&rollout), before);
+        }
+
+        #[test]
         fn the_shim_stamps_survive_the_strip() {
             let (_d, hooks) =
                 stripped_copy("claude-code", "tool-run-recorded", "hook-payloads.jsonl");
