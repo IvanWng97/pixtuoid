@@ -117,18 +117,10 @@ regex = '''Git user: [^\\"\n]+'''
     '''^(?i)Git user: (?:runner|ubuntu|vscode|linuxbrew|Shared)$''',
   ]
 
-# An INVENTORY — the one identity class no keyword can express. The operator's
-# installed plugin roster reached committed bytes three times (#988, #989, #993) and
-# every keyword aimed at it fired on the CLIs' OWN stock bytes instead: `AGENTS.md`
-# on codex's system prompt, `userId` on copilot's edit-tool example, `CLAUDE.md` on a
-# captured `ls -la`. A roster differs from prose by CARDINALITY, not vocabulary — a
-# stock prompt mentions `SKILL.md` once, a roster lists eighty — so there is one rule
-# per carrier spelling.
-#
-# 15, not 17: swept against both sides, {12}-{15} catch all nine leaked files with
-# zero false positives on the redacted tree (whose worst line carries 11), and {16}
-# upward catch only eight — the per-FILE smallest leak was 15 agent types, while the
-# 34 this was first bounded on was a per-SOURCE figure.
+# The operator's installed plugin roster differs from prose by CARDINALITY, not by
+# vocabulary — a stock prompt mentions `SKILL.md` once, a roster lists eighty — so
+# every keyword aimed at this class fired on the CLIs' own bytes instead. One rule
+# per carrier spelling, and a carrier missed is a carrier unguarded.
 #
 # `[^\n]*`, never `[\s\S]{0,N}`: Go caps the PRODUCT of nested counted repeats at
 # 1000, so a bounded window large enough for a real 250-char entry refuses to
@@ -150,10 +142,8 @@ id = "pixtuoid-inventory-bulleted"
 description = "A skill/agent listing, not a few documented entries"
 regex = '''(?:\\n- [A-Za-z0-9:._-]+: [A-Z][^\n]*){15}'''
 
-# The same listing JSON-encoded as an ARRAY of `"- name: description"` strings
-# (`agent_listing_delta.addedLines`), where the rows are separated by `","` and the
-# escaped-newline anchor above never fires. This carrier held 30 agent types and
-# 11KB of descriptions past every other rule.
+# The same listing JSON-encoded as an ARRAY (`agent_listing_delta.addedLines`): rows
+# separated by `","`, which the escaped-newline anchor above cannot see.
 [[rules]]
 id = "pixtuoid-inventory-array"
 description = "A listing encoded as a JSON array of entries"
