@@ -16,6 +16,12 @@ categories.workspace   = true
 # but not `cargo test` on an extracted crate. They stay FLAT so they can be
 # excluded at all: a grouped binary's submodule cannot be excluded on its own.
 exclude                = [
+    # Recorded wire bytes — an operator's roster, instructions, session content —
+    # that a crates.io tarball would freeze where the repo copy can still be
+    # redacted; the grouped `sources` binary shares the dir and goes with them.
+    # A tarball-contents choice, not a green-test one: the extracted crate's
+    # `cargo test` is red regardless (`tests/watcher/sources.rs`, `tests/render/format.rs`).
+    "tests/sources",
     "tests/pinned_by_claims.rs",
     "tests/socket_path_parity.rs",
     "tests/supported_sources_manifest.rs",
