@@ -59,7 +59,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
 - Look-changing PR → `just gen`, commit `docs/images/` + `site/public/demos/`; a scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
 - Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
-- Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
+- Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
 - CI-only gates preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
 - On-demand advisory (never gates): `just mutants`, `just coverage`, `just bench`, CodSpeed.

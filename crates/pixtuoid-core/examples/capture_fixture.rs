@@ -44,9 +44,8 @@ mod recorder {
         "Read NOTE.txt, then list this directory, then read NOTE.txt again.";
 
     /// The workspace path is FIXED and generic on purpose: every payload embeds its
-    /// own cwd and transcript_path, so capturing somewhere already generic is what
-    /// lets the bytes ship unedited. A random sandbox would bake a per-run path into
-    /// them.
+    /// own cwd, the decoders read it, so the strip keeps it — capturing somewhere
+    /// already generic is what keeps a per-run path out of the bytes.
     const WORKSPACE: &str = "/tmp/pixtuoid-capture/proj";
 
     /// A hook can still be in flight when the CLI's own process exits, so the wait
@@ -120,10 +119,12 @@ mod recorder {
             std::process::exit(1);
         }
 
+        let blanked = strip_unread(&source, &wrote)?;
         write_provenance(
             &dest,
             &cmd,
             &args[2..],
+            blanked,
             &[
                 ("prompt", nonempty_env("CAPTURE_PROMPT")),
                 ("seed", nonempty_env("CAPTURE_SEED")),
@@ -132,6 +133,7 @@ mod recorder {
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
+        println!("blanked {blanked} subtrees no decoder reads");
         refuse_on_pii(&wrote)?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
@@ -265,9 +267,8 @@ mod recorder {
     fn prepare_workspace() -> std::io::Result<PathBuf> {
         let ws = PathBuf::from(WORKSPACE);
         let base = ws.parent().expect("WORKSPACE has a parent");
-        // A fixed name in shared temp is pre-plantable, so a foreign owner is
-        // REFUSED rather than removed: under /tmp's sticky bit the remove would fail
-        // and the capture would land inside their directory.
+        // A fixed name in shared temp is pre-plantable; a foreign owner is refused, not
+        // removed — under the sticky bit the remove fails and the capture lands in theirs.
         if base.exists() && !owned_by_us(base) {
             eprintln!(
                 "{} exists and is not yours — remove it or run as its owner",
@@ -339,9 +340,8 @@ mod recorder {
         c.args(&cmd[1..])
             .current_dir(ws)
             .env("PIXTUOID_SOCKET", sock);
-        // The driver and the per-CLI cycle scripts write their transcripts beside the
-        // socket, in this run's private sandbox — a fixed shared-temp name is
-        // symlink-followable and two concurrent captures would interleave into it.
+        // Transcripts go beside the socket in this run's private sandbox: a fixed
+        // shared-temp name is symlink-followable and two concurrent captures interleave.
         if let Some(dir) = sock.parent() {
             c.env("TUIDRIVE_LOG", dir.join("tuidrive.log"));
         }
@@ -355,7 +355,7 @@ mod recorder {
         let out = no_clobber(dest.join("hook-payloads.jsonl"));
         let mut f = std::fs::File::create(&out)?;
         for p in payloads {
-            // The shim already stamped `_pixtuoid_source`; nothing here edits the bytes.
+            // The shim already stamped `_pixtuoid_source`.
             let v: serde_json::Value = serde_json::from_str(p.trim())
                 .unwrap_or_else(|e| panic!("a captured payload is not JSON: {e}: {p:?}"));
             writeln!(f, "{}", serde_json::to_string(&v)?)?;
@@ -367,6 +367,7 @@ mod recorder {
         dest: &Path,
         cmd: &[String],
         raw: &[String],
+        blanked: usize,
         overrides: &[(&str, Option<String>)],
     ) -> std::io::Result<()> {
         let cli = Path::new(&cmd[0])
@@ -387,10 +388,10 @@ mod recorder {
             "version": version.trim(),
             "captured": today(),
             "command": raw.join(" "),
+            "deidentified": { "method": "decoder-allowlist", "blanked": blanked },
         });
-        // `command` is the UN-expanded argv, so a scenario driven by an override
-        // records a `{prompt}` placeholder and nothing else says what ran. Only
-        // written when set, so the already-committed records stay schema-clean.
+        // `command` is the UN-expanded argv, so an override-driven scenario records a
+        // `{prompt}` placeholder; written only when set, so committed records stay schema-clean.
         if let Some(map) = prov.as_object_mut() {
             for (key, value) in overrides {
                 if let Some(v) = value {
@@ -400,10 +401,8 @@ mod recorder {
         }
         let out = no_clobber(dest.join("provenance.json"));
         std::fs::write(&out, format!("{}\n", serde_json::to_string_pretty(&prov)?))?;
-        // Keyed on the PROBE's outcome, not on the name looking like a script: a
-        // pty driver is `python3`, passes the name test, and its "unknown" then
-        // disarms `a_recorded_capture_anchors_its_sources_verified_version` for
-        // that whole source. Loud, because the record it just wrote is unusable.
+        // Keyed on the probe's outcome, not the name: a pty driver is `python3` and
+        // passes a name test. Loud, because the record just written is unusable.
         if version.trim() == "unknown" {
             eprintln!(
                 "WARNING: {} records version \"unknown\" — `{cli} --version` did not \
@@ -460,19 +459,14 @@ mod recorder {
         (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     }
 
-    /// PII is not always a key you can drop — kimi's arrived as the owner column
-    /// inside a captured `ls -la`, and a CLI's ACCOUNT identity is a different
-    /// namespace from the host's (`user_email` slipped past a `$HOME|$USER` grep).
-    /// Identity/inventory keys whose VALUES are the capturer's, not the wire's.
-    /// `user_email` alone was the first cut and it saw none of the MCP-server and
-    /// skill roster that shipped in nine fixtures — a different namespace, same
-    /// class. `just fixture-pii` re-scans the committed tree for the same class
-    /// but matches VALUE shapes, not this list — as gitleaks rules these KEYS fire
-    /// on the tree's own `dev@example.com` redactions. A key with no value shape
-    /// (`obsidian`, `account_id`) is refused only at capture time.
-    /// Both cases of each spelling, because a CLI picks one and its next version
-    /// may pick the other: `userEmail` arrived at claude-code 2.1.261 beside the
-    /// `user_email` already here, and slipped past.
+    /// Identity and inventory keys whose VALUES are the capturer's, not the wire's,
+    /// refused on the stripped bytes — so they guard the fields a decoder reads.
+    /// Not a `$HOME|$USER` grep: a CLI's ACCOUNT identity is a different namespace
+    /// from the host's. `just fixture-pii` matches VALUE shapes instead (as gitleaks
+    /// rules these keys would fire on the tree's own `dev@example.com`), so a key
+    /// with no value shape (`obsidian`, `account_id`) is refused only here. Both
+    /// cases of each spelling: a CLI's next version may pick the other, as
+    /// `userEmail` did beside `user_email`.
     const PII_MARKERS: &[&str] = &[
         "user_email",
         "userEmail",
@@ -553,6 +547,149 @@ mod recorder {
         found
     }
 
+    /// Blank every subtree no decoder reads, so an operator's roster, instructions
+    /// and paths leave without anyone naming them. DERIVED, never listed — a subtree
+    /// is blanked when blanking it leaves the decoded events identical — because a
+    /// hand-kept list drifts in the one direction nothing catches: a field the
+    /// decoder stopped reading stays in the bytes. Top-down, so an unread container
+    /// collapses whole, element count included.
+    fn strip_unread(source: &str, files: &[PathBuf]) -> std::io::Result<usize> {
+        let mut blanked = 0;
+        for file in files {
+            let Some(drive) = drive_for(source, file) else {
+                continue;
+            };
+            let Some(mut lines) = parsed_lines(file)? else {
+                continue;
+            };
+            let base = events_of(&drive, &lines);
+            let stamped = is_hook_envelope(file);
+            for i in 0..lines.len() {
+                blanked += probe(&drive, &mut lines, &base, i, "", stamped);
+            }
+            let mut out = String::new();
+            for line in &lines {
+                out.push_str(&serde_json::to_string(line)?);
+                out.push('\n');
+            }
+            let mut tmp = tempfile::NamedTempFile::new_in(file.parent().unwrap_or(Path::new(".")))?;
+            tmp.write_all(out.as_bytes())?;
+            tmp.persist(file).map_err(|e| e.error)?;
+        }
+        Ok(blanked)
+    }
+
+    fn is_hook_envelope(file: &Path) -> bool {
+        file.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.starts_with("hook-payloads"))
+    }
+
+    fn drive_for(source: &str, file: &Path) -> Option<pixtuoid_core::harness::Drive> {
+        if is_hook_envelope(file) {
+            Some(pixtuoid_core::harness::Drive::hooks())
+        } else {
+            pixtuoid_core::harness::Drive::transcript(source, &file.to_string_lossy())
+        }
+    }
+
+    /// `None` when a line is not JSON: the file is left as recorded rather than
+    /// half-rewritten, and `refuse_on_pii` still reads it.
+    fn parsed_lines(file: &Path) -> std::io::Result<Option<Vec<serde_json::Value>>> {
+        let text = std::fs::read_to_string(file)?;
+        let mut lines = Vec::new();
+        for line in text.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str(line) {
+                Ok(v) => lines.push(v),
+                Err(e) => {
+                    eprintln!("not stripping {}: a line is not JSON: {e}", file.display());
+                    return Ok(None);
+                }
+            }
+        }
+        Ok(Some(lines))
+    }
+
+    type Decoded = (
+        Vec<pixtuoid_core::AgentEvent>,
+        Vec<String>,
+        Vec<String>,
+        Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
+    );
+
+    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides the
+    /// registry's `presence_decoder` — so it joins the signature, or a daemon capture
+    /// strips to nothing.
+    fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
+        let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
+        let presence = lines
+            .iter()
+            .map(|line| {
+                let src = line.get("_pixtuoid_source")?.as_str()?;
+                registry::presence_decoder_for(src)?(line).ok()
+            })
+            .collect();
+        let failures = |f: &[pixtuoid_core::harness::LineFailure]| {
+            f.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>()
+        };
+        (
+            d.events,
+            failures(&d.decode_errors),
+            failures(&d.panics),
+            presence,
+        )
+    }
+
+    /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
+    /// `_shim_ts_ms` is read by no decoder, only by `captures.rs`, which dates a capture by it.
+    fn probe(
+        drive: &pixtuoid_core::harness::Drive,
+        lines: &mut [serde_json::Value],
+        base: &Decoded,
+        i: usize,
+        at: &str,
+        stamped: bool,
+    ) -> usize {
+        use serde_json::Value;
+        let Some(node) = lines[i].pointer(at) else {
+            return 0;
+        };
+        let neutral = match node {
+            Value::Null => return 0,
+            Value::Bool(_) => Value::Bool(false),
+            Value::Number(_) => Value::from(0),
+            Value::String(_) => Value::String(String::new()),
+            Value::Array(_) => Value::Array(Vec::new()),
+            Value::Object(_) => Value::Object(serde_json::Map::new()),
+        };
+        if *node == neutral {
+            return 0;
+        }
+        let Some(slot) = lines[i].pointer_mut(at) else {
+            return 0;
+        };
+        let kept = std::mem::replace(slot, neutral);
+        if events_of(drive, lines) == *base {
+            return 1;
+        }
+        let children: Vec<String> = match &kept {
+            Value::Array(a) => (0..a.len()).map(|k| format!("{at}/{k}")).collect(),
+            Value::Object(m) => m
+                .keys()
+                .filter(|k| !(stamped && at.is_empty() && k.starts_with('_')))
+                .map(|k| format!("{at}/{}", k.replace('~', "~0").replace('/', "~1")))
+                .collect(),
+            _ => Vec::new(),
+        };
+        if let Some(slot) = lines[i].pointer_mut(at) {
+            *slot = kept;
+        }
+        children
+            .iter()
+            .map(|child| probe(drive, lines, base, i, child, stamped))
+            .sum()
+    }
+
     /// A REFUSAL, not a warning. The old form printed to stderr and left the exit
     /// code at 0 on a run that had already written into the repo tree, so the
     /// capturer had to notice a line scrolling past — and twice did not.
@@ -580,19 +717,15 @@ mod recorder {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
-    /// Where this scenario's bytes ALREADY live, else the conformance root.
-    ///
-    /// A module keeps its own rounds out of conformance's reach (omp's hook keys
-    /// fold on Windows), and a re-record sent to the conformance root instead lands
-    /// as a NEW directory that `conformance.rs` auto-scans with no committed bytes
-    /// beside it for `.new` to protect.
-    ///
+    /// Where this scenario's bytes ALREADY live, else the conformance root: a module
+    /// keeps its own rounds out of conformance's reach (omp's hook keys fold on
+    /// Windows), and a re-record sent to the root instead lands as a NEW directory
+    /// `conformance.rs` auto-scans, with no committed bytes for `.new` to protect.
     /// Keyed on the SOURCE, never a search across modules: scenario names repeat
-    /// (`approval-recorded` is both hermes' and omp's), so a search finds one match
-    /// for the wrong module and the ambiguity guard never fires — a billed hermes
-    /// capture would land as `.new` files inside omp's directory. `claude/` owning
-    /// `claude-code` is the one name mismatch, and it holds no scenario
-    /// subdirectory, so it cannot reach here.
+    /// (`approval-recorded` is hermes' and omp's), so a search finds the wrong
+    /// module's single match and a billed capture lands as `.new` files inside it.
+    /// `claude/` owning `claude-code` is the one name mismatch, and it holds no
+    /// scenario subdirectory, so it cannot reach here.
     fn scenario_dest(sources: &Path, source: &str, scenario: &str) -> PathBuf {
         let owned = sources.join(source).join("fixtures").join(scenario);
         if owned.join("provenance.json").is_file() {
@@ -604,6 +737,68 @@ mod recorder {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        fn scenario_events(source: &str, files: &[PathBuf]) -> Vec<Decoded> {
+            files
+                .iter()
+                .filter_map(|f| {
+                    let lines = parsed_lines(f).ok()??;
+                    Some(events_of(&drive_for(source, f)?, &lines))
+                })
+                .collect()
+        }
+
+        fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+            let d = tempfile::tempdir().expect("tempdir");
+            let to = d.path().join(name);
+            std::fs::copy(
+                sources_root()
+                    .join("fixtures")
+                    .join(source)
+                    .join(scenario)
+                    .join(name),
+                &to,
+            )
+            .expect("copy");
+            (d, to)
+        }
+
+        #[test]
+        fn a_daemon_capture_keeps_what_its_presence_decoder_reads() {
+            let (_d, hooks) = stripped_copy(
+                "openclaw",
+                "gateway-lifecycle-recorded",
+                "hook-payloads.jsonl",
+            );
+            let files = vec![hooks.clone()];
+            let before = scenario_events("openclaw", &files);
+            strip_unread("openclaw", &files).expect("strip");
+            assert_eq!(scenario_events("openclaw", &files), before);
+            let first = std::fs::read_to_string(&hooks).expect("read");
+            let first = first.lines().next().expect("a line");
+            assert!(
+                first.contains("gateway_start") && first.contains("19099"),
+                "{first}"
+            );
+        }
+
+        #[test]
+        fn the_shim_stamps_survive_the_strip() {
+            let (_d, hooks) =
+                stripped_copy("claude-code", "tool-run-recorded", "hook-payloads.jsonl");
+            let stamps = |p: &Path| -> Vec<serde_json::Value> {
+                parsed_lines(p)
+                    .expect("read")
+                    .expect("json")
+                    .iter()
+                    .map(|l| l["_shim_ts_ms"].clone())
+                    .collect()
+            };
+            let before = stamps(&hooks);
+            assert!(before.iter().all(|v| v.as_i64().is_some_and(|ms| ms > 0)));
+            strip_unread("claude-code", std::slice::from_ref(&hooks)).expect("strip");
+            assert_eq!(stamps(&hooks), before);
+        }
 
         #[test]
         fn a_module_owned_scenario_is_re_recorded_where_it_lives() {
@@ -636,6 +831,115 @@ mod recorder {
                 scenario_dest(root, "hermes", "approval-recorded"),
                 root.join("fixtures/hermes/approval-recorded")
             );
+        }
+
+        #[test]
+        fn stripping_blanks_what_no_decoder_reads_and_changes_no_event() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            let files: Vec<PathBuf> = [
+                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
+                "hook-payloads.jsonl",
+            ]
+            .iter()
+            .map(|name| {
+                let to = d.path().join(name);
+                std::fs::copy(src.join(name), &to).expect("copy");
+                to
+            })
+            .collect();
+
+            let before = scenario_events("codex", &files);
+            let blanked = strip_unread("codex", &files).expect("strip");
+            assert!(blanked > 0, "the codex rollout carries unread subtrees");
+            assert_eq!(scenario_events("codex", &files), before);
+
+            let transcript = std::fs::read_to_string(&files[0]).expect("read");
+            assert!(
+                !transcript.contains("example-skill"),
+                "the roster rides a field no decoder reads, so it leaves"
+            );
+            assert!(
+                transcript.contains("gpt-5.6-sol"),
+                "the model is read, so it stays"
+            );
+            let hooks = std::fs::read_to_string(&files[1]).expect("read");
+            assert!(
+                hooks.contains("01a08cbb-1b7f-7ce3-b924-1a501c380856"),
+                "the hook's session_id keys coalescing, so it stays"
+            );
+        }
+
+        #[test]
+        fn every_committed_scenario_decodes_the_same_once_stripped() {
+            let root = sources_root();
+            let dirs = |p: PathBuf| {
+                std::fs::read_dir(p)
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.is_dir())
+            };
+            let mut targets: Vec<(String, PathBuf)> = Vec::new();
+            for source in dirs(root.join("fixtures")) {
+                let name = source
+                    .file_name()
+                    .expect("name")
+                    .to_string_lossy()
+                    .into_owned();
+                targets.extend(dirs(source.clone()).map(|s| (name.clone(), s)));
+            }
+            for module in dirs(root.clone()) {
+                let name = module
+                    .file_name()
+                    .expect("name")
+                    .to_string_lossy()
+                    .into_owned();
+                if registry::descriptor_for(&name).is_some() {
+                    targets.extend(dirs(module.join("fixtures")).map(|s| (name.clone(), s)));
+                }
+            }
+
+            let mut walked = BTreeSet::new();
+            for (source, scenario) in targets {
+                let jsonl: Vec<PathBuf> = std::fs::read_dir(&scenario)
+                    .expect("scenario")
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
+                    .collect();
+                if jsonl.is_empty() {
+                    continue;
+                }
+                let d = tempfile::tempdir().expect("tempdir");
+                let files: Vec<PathBuf> = jsonl
+                    .iter()
+                    .map(|from| {
+                        let to = d.path().join(from.file_name().expect("name"));
+                        std::fs::copy(from, &to).expect("copy");
+                        to
+                    })
+                    .collect();
+                let label = format!(
+                    "{source}/{}",
+                    scenario.file_name().expect("name").to_string_lossy()
+                );
+                let before = scenario_events(&source, &files);
+                strip_unread(&source, &files).expect("strip");
+                assert_eq!(scenario_events(&source, &files), before, "{label}");
+                walked.insert(label);
+            }
+            for sentinel in [
+                "codex/tool-run-recorded",
+                "claude-code/tool-run-recorded",
+                "omp/bridge-run-recorded",
+            ] {
+                assert!(
+                    walked.contains(sentinel),
+                    "walk missed {sentinel}: {walked:?}"
+                );
+            }
         }
 
         /// Every shape that has actually reached a committed fixture past this gate.
@@ -785,13 +1089,12 @@ mod recorder {
             );
         }
 
+        /// A link PLANTED by another user cannot be created in a unit test, so this
+        /// pins the discriminator instead: a link WE own pointing at a root-owned dir
+        /// reads as ours — `fs::metadata` would stat the target and read as root's,
+        /// which is how a planted link would have slipped past the refusal.
         #[test]
         fn ownership_is_judged_on_the_link_itself_not_on_what_it_points_at() {
-            // The squat this refuses is a link PLANTED by another user, which a
-            // unit test cannot create — so pin the discriminator instead: a link
-            // WE own pointing at a root-owned dir must read as ours. Under
-            // `fs::metadata` it would stat the target and read as root's, which
-            // is how a planted link would have slipped past the refusal.
             let d = tempfile::tempdir().expect("tempdir");
             let link = d.path().join("to-root-owned");
             std::os::unix::fs::symlink("/usr", &link).expect("symlink");
@@ -803,9 +1106,8 @@ mod recorder {
 
         #[test]
         fn provenance_records_an_override_only_when_it_was_actually_set() {
-            // Both directions: the already-committed records predate these
-            // fields and must stay schema-clean, so an unset override writes
-            // nothing at all.
+            // Both directions: committed records predate these fields and must stay
+            // schema-clean, so an unset override writes nothing at all.
             let read = |d: &Path| -> serde_json::Value {
                 serde_json::from_str(
                     &std::fs::read_to_string(d.join("provenance.json")).expect("read"),
@@ -815,7 +1117,7 @@ mod recorder {
             let argv = ["true".to_string()];
 
             let bare = tempfile::tempdir().expect("tempdir");
-            write_provenance(bare.path(), &argv, &argv, &[("prompt", None)]).expect("write");
+            write_provenance(bare.path(), &argv, &argv, 0, &[("prompt", None)]).expect("write");
             assert!(read(bare.path()).get("prompt").is_none());
 
             let set = tempfile::tempdir().expect("tempdir");
@@ -823,6 +1125,7 @@ mod recorder {
                 set.path(),
                 &argv,
                 &argv,
+                0,
                 &[("prompt", Some("read NOTE.txt".into()))],
             )
             .expect("write");
