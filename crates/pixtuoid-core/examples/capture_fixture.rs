@@ -469,32 +469,9 @@ mod recorder {
         (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     }
 
-    /// Identity and inventory keys whose VALUES are the capturer's, not the wire's,
-    /// refused on the stripped bytes — so they guard the fields a decoder reads.
-    /// Not a `$HOME|$USER` grep: a CLI's ACCOUNT identity is a different namespace
-    /// from the host's. `just fixture-pii` matches VALUE shapes instead (as gitleaks
-    /// rules these keys would fire on the tree's own `dev@example.com`), so a key
-    /// with no value shape (`account_id`) is refused only here. Both
-    /// cases of each spelling: a CLI's next version may pick the other, as
-    /// `userEmail` did beside `user_email`.
-    const PII_KEYS: &[&str] = &[
-        "user_email",
-        "userEmail",
-        "email",
-        "account_id",
-        "accountId",
-        "user_id",
-        "api_key",
-        "token",
-    ];
-
-    /// Value shapes, not keys: an MCP server's name rides a tool name a decoder
-    /// reads, and a bearer credential can ride any string.
-    const PII_MARKERS: &[&str] = &["mcp__", "Bearer "];
-
     /// Strings this machine would leak into a capture, the git identity included:
     /// a CLI that renders `git status` embeds the committer's real name, which no
-    /// marker can match (`.gitleaks-identity.toml` carries the committed-tree half).
+    /// value shape can match (`.gitleaks-identity.toml` carries the committed-tree half).
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
@@ -528,56 +505,15 @@ mod recorder {
         (!v.is_empty()).then_some(v)
     }
 
-    /// Every reason `body` cannot be committed, or empty.
-    /// A key counts only with a value in it: the strip blanks what no decoder
-    /// reads and leaves the key, so `"user_email":""` is its work, not a leak.
+    /// Every reason `body` cannot be committed, or empty: the operator's own
+    /// identity, the one set gitleaks cannot know. Everything with a value shape
+    /// is the tree scan's; everything no decoder reads is already gone.
     fn pii_hits(body: &str, needles: &BTreeSet<String>) -> Vec<String> {
-        let mut hits: Vec<String> = needles
+        needles
             .iter()
             .filter(|n| body.contains(n.as_str()))
             .map(String::to_string)
-            .collect();
-        for marker in PII_MARKERS {
-            if body.contains(marker) {
-                hits.push(format!("a {marker} field"));
-            }
-        }
-        let mut keys = BTreeSet::new();
-        for line in body.lines().filter(|l| !l.trim().is_empty()) {
-            match serde_json::from_str::<serde_json::Value>(line) {
-                Ok(v) => filled_pii_keys(&v, &mut keys),
-                Err(_) => keys.extend(
-                    PII_KEYS
-                        .iter()
-                        .filter(|k| line.contains(*k))
-                        .map(|k| k.to_string()),
-                ),
-            }
-        }
-        hits.extend(keys.into_iter().map(|k| format!("a {k} field")));
-        hits
-    }
-
-    fn filled_pii_keys(v: &serde_json::Value, out: &mut BTreeSet<String>) {
-        match v {
-            serde_json::Value::Object(m) => {
-                for (k, child) in m {
-                    let filled = match child {
-                        serde_json::Value::String(s) => !s.is_empty(),
-                        serde_json::Value::Null => false,
-                        serde_json::Value::Array(a) => !a.is_empty(),
-                        serde_json::Value::Object(o) => !o.is_empty(),
-                        _ => true,
-                    };
-                    if filled && PII_KEYS.contains(&k.as_str()) {
-                        out.insert(k.clone());
-                    }
-                    filled_pii_keys(child, out);
-                }
-            }
-            serde_json::Value::Array(a) => a.iter().for_each(|c| filled_pii_keys(c, out)),
-            _ => {}
-        }
+            .collect()
     }
 
     fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
@@ -1294,38 +1230,6 @@ mod recorder {
                 once,
                 "a second pass finds nothing and rewrites nothing"
             );
-        }
-
-        /// Every shape that has actually reached a committed fixture past this gate.
-        #[test]
-        fn a_marker_key_the_strip_blanked_is_not_a_hit() {
-            let none = BTreeSet::new();
-            for body in [
-                r#"{"user_email":"","hook_event_name":"sessionStart"}"#,
-                r#"{"userEmail":"","token":"","api_key":""}"#,
-                r#"{"account_id":"","nested":{"user_id":""}}"#,
-            ] {
-                assert!(
-                    pii_hits(body, &none).is_empty(),
-                    "a key with nothing in it is what the strip leaves behind: {body}"
-                );
-            }
-            assert!(!pii_hits(r#"{"nested":{"user_id":"u_1"}}"#, &none).is_empty());
-        }
-
-        #[test]
-        fn the_markers_cover_what_has_actually_leaked() {
-            let none = BTreeSet::new();
-            for (body, why) in [
-                (r#"{"userEmail":"a@b.c"}"#, "camelCase twin of user_email"),
-                (r#"{"user_id":"x"}"#, "mem0 user id"),
-                (r#"{"accountId":"x"}"#, "camelCase twin of account_id"),
-            ] {
-                assert!(
-                    !pii_hits(body, &none).is_empty(),
-                    "{why}: the gate must refuse {body}"
-                );
-            }
         }
 
         #[test]

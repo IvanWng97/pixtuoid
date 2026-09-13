@@ -19,7 +19,7 @@
 
 [[rules]]
 id = "pixtuoid-recorder-identity"
-description = "The recorder's own machine identity: a real MCP server/tool name"
+description = "The recorder's own machine identity: an MCP server/tool name"
 regex = '''mcp__[A-Za-z0-9_-]+'''
 
 [[rules]]
