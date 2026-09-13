@@ -26,12 +26,8 @@ export default defineConfig({
     // old bytes. Readiness stays Playwright's URL poll because Astro's
     // /_astro/status health endpoint is DEV-SERVER-ONLY; `astro preview` 404s it.
     command: 'node node_modules/astro/bin/astro.mjs preview --port 4321',
-    // Astro backgrounds the preview when it detects an agentic environment
-    // (`isRunByAgent`), and a webServer that daemonizes reads to Playwright as
-    // one that "exited early" — so the suite passes on CI and fails for anyone
-    // running it from an agent session. Setting the variable at all is what
-    // disables that detection; the value says which way we want it, so it
-    // survives Astro ever parsing it as the boolean it is named for.
+    // Astro backgrounds `preview` under an agentic environment, and a server
+    // that daemonizes reads to Playwright as one that exited early.
     env: { ASTRO_PREVIEW_BACKGROUND: 'false' },
     url: 'http://localhost:4321/',
     reuseExistingServer: false,
