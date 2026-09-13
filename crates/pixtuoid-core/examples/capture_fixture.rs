@@ -612,7 +612,9 @@ mod recorder {
     }
 
     /// `None` when a line is not JSON: the file is left as recorded rather than
-    /// half-rewritten, and `refuse_on_pii` still reads it.
+    /// half-rewritten. `refuse_on_pii` still reads it for the operator's own
+    /// identity, and the committed-tree gate refuses to skip such a line at all
+    /// (`no_identity_key_holds_a_value_outside_a_pinned_exemption`).
     type Parsed = (Vec<String>, Vec<serde_json::Value>);
 
     fn parsed_lines(file: &Path) -> std::io::Result<Option<Parsed>> {
@@ -1261,12 +1263,14 @@ mod recorder {
             assert!(!identity_needles(|_| None).contains("Ada Lovelace"));
         }
 
+        /// A name has no shape to match, so it is refused where the recorder knows
+        /// it — this machine's own git identity — and nowhere else. The tree half is
+        /// `.gitleaks-identity.toml`'s label-anchored rule.
         #[test]
-        fn a_rendered_git_identity_is_a_needle_not_a_marker() {
+        fn the_operators_own_git_identity_is_refused_wherever_it_is_rendered() {
             let needles = BTreeSet::from(["Ada Lovelace".to_string()]);
             let body = r#"{"gitStatus":"Current branch: main\nGit user: Ada Lovelace"}"#;
             assert_eq!(pii_hits(body, &needles), vec!["Ada Lovelace".to_string()]);
-            assert!(pii_hits(body, &BTreeSet::new()).is_empty());
         }
 
         #[test]
