@@ -469,31 +469,9 @@ mod recorder {
         (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
     }
 
-    /// Identity and inventory keys whose VALUES are the capturer's, not the wire's,
-    /// refused on the stripped bytes — so they guard the fields a decoder reads.
-    /// Not a `$HOME|$USER` grep: a CLI's ACCOUNT identity is a different namespace
-    /// from the host's. `just fixture-pii` matches VALUE shapes instead (as gitleaks
-    /// rules these keys would fire on the tree's own `dev@example.com`), so a key
-    /// with no value shape (`obsidian`, `account_id`) is refused only here. Both
-    /// cases of each spelling: a CLI's next version may pick the other, as
-    /// `userEmail` did beside `user_email`.
-    const PII_MARKERS: &[&str] = &[
-        "user_email",
-        "userEmail",
-        "\"email\"",
-        "account_id",
-        "accountId",
-        "user_id",
-        "mcp__",
-        "obsidian",
-        "api_key",
-        "\"token\"",
-        "Bearer ",
-    ];
-
     /// Strings this machine would leak into a capture, the git identity included:
     /// a CLI that renders `git status` embeds the committer's real name, which no
-    /// marker can match (`.gitleaks-identity.toml` carries the committed-tree half).
+    /// value shape can match (`.gitleaks-identity.toml` carries the committed-tree half).
     fn identity_needles(git: impl Fn(&str) -> Option<String>) -> BTreeSet<String> {
         let mut needles: BTreeSet<String> = BTreeSet::new();
         for var in ["HOME", "USER", "LOGNAME"] {
@@ -527,19 +505,15 @@ mod recorder {
         (!v.is_empty()).then_some(v)
     }
 
-    /// Every reason `body` cannot be committed, or empty.
+    /// Every reason `body` cannot be committed, or empty: the operator's own
+    /// identity, the one set gitleaks cannot know. Everything with a value shape
+    /// is the tree scan's; everything no decoder reads is already gone.
     fn pii_hits(body: &str, needles: &BTreeSet<String>) -> Vec<String> {
-        let mut hits: Vec<String> = needles
+        needles
             .iter()
             .filter(|n| body.contains(n.as_str()))
             .map(String::to_string)
-            .collect();
-        for marker in PII_MARKERS {
-            if body.contains(marker) {
-                hits.push(format!("a {marker} field"));
-            }
-        }
-        hits
+            .collect()
     }
 
     fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {
@@ -638,7 +612,9 @@ mod recorder {
     }
 
     /// `None` when a line is not JSON: the file is left as recorded rather than
-    /// half-rewritten, and `refuse_on_pii` still reads it.
+    /// half-rewritten. `refuse_on_pii` still reads it for the operator's own
+    /// identity, and the committed-tree gate refuses to skip such a line at all
+    /// (`no_identity_key_holds_a_value_outside_a_pinned_exemption`).
     type Parsed = (Vec<String>, Vec<serde_json::Value>);
 
     fn parsed_lines(file: &Path) -> std::io::Result<Option<Parsed>> {
@@ -1258,22 +1234,6 @@ mod recorder {
             );
         }
 
-        /// Every shape that has actually reached a committed fixture past this gate.
-        #[test]
-        fn the_markers_cover_what_has_actually_leaked() {
-            let none = BTreeSet::new();
-            for (body, why) in [
-                (r#"{"userEmail":"a@b.c"}"#, "camelCase twin of user_email"),
-                (r#"{"user_id":"x"}"#, "mem0 user id"),
-                (r#"{"accountId":"x"}"#, "camelCase twin of account_id"),
-            ] {
-                assert!(
-                    !pii_hits(body, &none).is_empty(),
-                    "{why}: the gate must refuse {body}"
-                );
-            }
-        }
-
         #[test]
         fn a_git_config_answer_is_trimmed_and_an_unset_key_is_none() {
             assert_eq!(
@@ -1303,12 +1263,14 @@ mod recorder {
             assert!(!identity_needles(|_| None).contains("Ada Lovelace"));
         }
 
+        /// A name has no shape to match, so it is refused where the recorder knows
+        /// it — this machine's own git identity — and nowhere else. The tree half is
+        /// `.gitleaks-identity.toml`'s label-anchored rule.
         #[test]
-        fn a_rendered_git_identity_is_a_needle_not_a_marker() {
+        fn the_operators_own_git_identity_is_refused_wherever_it_is_rendered() {
             let needles = BTreeSet::from(["Ada Lovelace".to_string()]);
             let body = r#"{"gitStatus":"Current branch: main\nGit user: Ada Lovelace"}"#;
             assert_eq!(pii_hits(body, &needles), vec!["Ada Lovelace".to_string()]);
-            assert!(pii_hits(body, &BTreeSet::new()).is_empty());
         }
 
         #[test]

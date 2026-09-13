@@ -19,10 +19,12 @@
 
 [[rules]]
 id = "pixtuoid-recorder-identity"
-description = "The recorder's own machine identity: a real MCP server/tool name"
+description = "The recorder's own machine identity: an MCP server/tool name"
 regex = '''mcp__[A-Za-z0-9_-]+'''
   [[rules.allowlists]]
   regexTarget = "match"
+  # `captures.rs` carries `mcp__example` as a redaction SENTINEL, and this scan
+  # reads that file — the two are one mechanism, so neither can go alone.
   regexes = ['''mcp__example[A-Za-z0-9_-]*''']
 
 [[rules]]

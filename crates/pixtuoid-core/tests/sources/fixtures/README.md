@@ -106,10 +106,15 @@ arrived as cursor's `user_email` key, as the owner column inside a captured
 skill on the host; the strip takes whatever rides a field no decoder reads, and
 what it leaves sits inside a field one does — a `cwd`, a tool's command string —
 so read a capture before committing it rather than trusting a key-name filter.
-The recorder's `scan_for_pii` sees `$HOME`/`$USER`/`$LOGNAME` AND the
-`PII_MARKERS` identity keys, and `just fixture-pii` re-scans the committed tree
-with gitleaks — but none of them reaches a value it cannot name, which is why a
-capture still gets read. No size heuristic can stand in for that read either:
+The recorder's `scan_for_pii` refuses the operator's OWN identity — `$HOME`/
+`$USER`/`$LOGNAME` and the git name, the one set gitleaks cannot know — and
+`just fixture-pii` re-scans the committed tree by value shape; neither reaches a
+value it cannot name, which is why a capture still gets read. One invariant sits
+over both, in `just test`: outside a capture pinned in `EXEMPT_FROM_STRIP`, no
+identity key (`user_email`, `account_id`, `token`, …) may hold a value — the
+strip guarantees it, and this asserts it on the bytes. Editing a fixture to put
+one back reds that test; an exempt capture is where a human read is the only
+check, which is why the exempt set is pinned as an exact list. No size heuristic can stand in for that read either:
 legitimate copilot lines run to 39 KB, wider than the `world_state` dump that had
 to go. Redacting a READ field is the expensive case — re-run the golden;
 byte-identical means the redaction cost no evidence.

@@ -347,6 +347,102 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
 /// cannot see has back into the tree.
 const EXEMPT_FROM_STRIP: &[&str] = &["cursor/fixtures"];
 
+/// Keys whose VALUE is an operator's account rather than the wire's content. Not
+/// a guess at what a vendor might name one — the strip already removes every field
+/// no decoder reads, so this is a tripwire on the names that have actually reached
+/// a fixture, asserting the invariant the strip provides.
+const IDENTITY_KEYS: &[&str] = &[
+    "account_id",
+    "accountId",
+    "api_key",
+    "email",
+    "token",
+    "user_email",
+    "userEmail",
+    "user_id",
+];
+
+/// Collect every `IDENTITY_KEYS` entry holding something, at any depth.
+fn filled_identity_keys(v: &serde_json::Value, out: &mut BTreeSet<String>) {
+    match v {
+        serde_json::Value::Object(m) => {
+            for (k, child) in m {
+                let empty = matches!(child, serde_json::Value::Null)
+                    || *child == serde_json::json!("")
+                    || *child == serde_json::json!(0)
+                    || *child == serde_json::json!(false)
+                    || *child == serde_json::json!([])
+                    || *child == serde_json::json!({});
+                if !empty && IDENTITY_KEYS.contains(&k.as_str()) {
+                    out.insert(k.clone());
+                }
+                filled_identity_keys(child, out);
+            }
+        }
+        serde_json::Value::Array(a) => a.iter().for_each(|c| filled_identity_keys(c, out)),
+        _ => {}
+    }
+}
+
+/// Outside the pinned exemptions, no identity key holds a value — the invariant
+/// the strip provides, asserted on the bytes rather than trusted. It fires on the
+/// three ways one could come back: an exempt capture nobody reviewed, a hand edit,
+/// and a decoder that starts reading such a field so the strip keeps it.
+#[test]
+fn no_identity_key_holds_a_value_outside_a_pinned_exemption() {
+    let mut probe = BTreeSet::new();
+    filled_identity_keys(
+        &serde_json::json!({"a": {"user_id": "u_1"}, "b": [{"token": ""}]}),
+        &mut probe,
+    );
+    assert_eq!(
+        probe.iter().map(String::as_str).collect::<Vec<_>>(),
+        ["user_id"],
+        "the walker must see a filled key at depth and ignore a blanked one"
+    );
+
+    for c in every_capture() {
+        let label = c
+            .dir
+            .strip_prefix(sources_root())
+            .expect("under root")
+            .to_string_lossy()
+            .replace('\\', "/");
+        if EXEMPT_FROM_STRIP.contains(&label.as_str()) {
+            continue;
+        }
+        for wire in c.wire_files() {
+            let body = std::fs::read_to_string(&wire).expect("read");
+            let mut found = BTreeSet::new();
+            for (i, line) in body
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| !l.trim().is_empty())
+            {
+                // A line that will not parse is the input `strip_unread` declines a
+                // whole file for, so skipping it here would leave those bytes both
+                // unstripped and unchecked. Loud instead: fix the line, or declare
+                // the capture exempt and say why.
+                let v: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|e| {
+                    panic!(
+                        "{}:{}: not JSON ({e}), so the strip skipped this whole file",
+                        wire.display(),
+                        i + 1
+                    )
+                });
+                filled_identity_keys(&v, &mut found);
+            }
+            assert!(
+                found.is_empty(),
+                "{}: {found:?} hold values. The strip blanks what no decoder reads, so \
+                 either a decoder now reads one — re-record and redact by hand — or these \
+                 bytes never went through it",
+                wire.display()
+            );
+        }
+    }
+}
+
 /// The strip is disclosed by `deidentified`; a note that still calls the bytes
 /// verbatim contradicts it, and an exemption without its reason is a silent hole.
 #[test]
@@ -429,9 +525,11 @@ fn a_recorded_capture_that_was_edited_says_so() {
         }
     }
     sentinels.extend([" dev  wheel", " dev  staff", "[redacted", "dev@"].map(String::from));
-    // `example-` names are a redaction's own signature, and the sentinel set knew
-    // only path and address shapes — so nine fixtures had their plugin roster
-    // replaced with placeholders while this test stayed green.
+    // A hand-placed placeholder is a redaction's own signature, and the path and
+    // address shapes above cannot see one: nine fixtures had their plugin roster
+    // replaced this way while this test stayed green. The recorder's strip removes
+    // a roster now, so these are dormant rather than dead — a hand edit can still
+    // write them, and that edit is what must disclose itself.
     sentinels.extend(
         [
             "example-skill",
