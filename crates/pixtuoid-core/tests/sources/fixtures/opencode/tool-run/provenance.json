@@ -4,5 +4,9 @@
   "command": "opencode run {prompt}",
   "origin": "recorded",
   "version": "1.18.20",
-  "note": "Redacted: home path to /Users/dev; the owner column of a captured `ls -la` to dev. The bytes are otherwise verbatim."
+  "note": "Redacted: home path to /Users/dev.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 58
+  }
 }

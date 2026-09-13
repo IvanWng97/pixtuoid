@@ -56,9 +56,13 @@ mod recorder {
 
     pub(crate) fn main() -> std::io::Result<()> {
         let args: Vec<String> = std::env::args().skip(1).collect();
+        if args.first().map(String::as_str) == Some("--strip-corpus") {
+            return strip_corpus(&sources_root());
+        }
         if args.len() < 3 {
             eprintln!(
-                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)"
+                "usage: capture_fixture <source-id> <scenario> <cmd...>   ('{{prompt}}' expands)\n       \
+                 capture_fixture --strip-corpus   (strip every committed capture in place)"
             );
             std::process::exit(2);
         }
@@ -119,12 +123,15 @@ mod recorder {
             std::process::exit(1);
         }
 
-        let blanked = strip_unread(&source, &wrote)?;
+        let deidentified = match exemption(&dest.join("provenance.json")) {
+            Some(why) => Deidentified::Exempt(why),
+            None => Deidentified::Stripped(strip_unread(&source, &wrote)?),
+        };
         write_provenance(
             &dest,
             &cmd,
             &args[2..],
-            blanked,
+            &deidentified,
             &[
                 ("prompt", nonempty_env("CAPTURE_PROMPT")),
                 ("seed", nonempty_env("CAPTURE_SEED")),
@@ -133,7 +140,10 @@ mod recorder {
         for p in &wrote {
             println!("wrote {} ({} lines)", p.display(), count_lines(p));
         }
-        println!("blanked {blanked} subtrees no decoder reads");
+        match &deidentified {
+            Deidentified::Stripped(n) => println!("blanked {n} subtrees no decoder reads"),
+            Deidentified::Exempt(why) => println!("not stripped, as the record declares: {why}"),
+        }
         refuse_on_pii(&wrote)?;
         if !status.success() {
             eprintln!("WARNING: the CLI exited {status} — this capture may be truncated");
@@ -367,7 +377,7 @@ mod recorder {
         dest: &Path,
         cmd: &[String],
         raw: &[String],
-        blanked: usize,
+        deidentified: &Deidentified,
         overrides: &[(&str, Option<String>)],
     ) -> std::io::Result<()> {
         let cli = Path::new(&cmd[0])
@@ -388,7 +398,7 @@ mod recorder {
             "version": version.trim(),
             "captured": today(),
             "command": raw.join(" "),
-            "deidentified": { "method": "decoder-allowlist", "blanked": blanked },
+            "deidentified": deidentified.record(),
         });
         // `command` is the UN-expanded argv, so an override-driven scenario records a
         // `{prompt}` placeholder; written only when set, so committed records stay schema-clean.
@@ -547,6 +557,37 @@ mod recorder {
         found
     }
 
+    /// What the provenance says happened to the bytes after recording. `Exempt`
+    /// is declared by hand, in the committed record, for a capture whose purpose
+    /// is to pin a wire premise the decoder drops on purpose — a test that reads
+    /// raw bytes is invisible to the probe, so the record has to say so.
+    enum Deidentified {
+        Stripped(usize),
+        Exempt(String),
+    }
+
+    impl Deidentified {
+        fn record(&self) -> serde_json::Value {
+            match self {
+                Self::Stripped(n) => {
+                    serde_json::json!({ "method": "decoder-allowlist", "blanked": n })
+                }
+                Self::Exempt(why) => serde_json::json!({ "method": "none", "why": why }),
+            }
+        }
+    }
+
+    fn exemption(prov: &Path) -> Option<String> {
+        let record: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(prov).ok()?).ok()?;
+        (record["deidentified"]["method"] == "none").then(|| {
+            record["deidentified"]["why"]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+        })
+    }
+
     /// Blank every subtree no decoder reads, so an operator's roster, instructions
     /// and paths leave without anyone naming them. DERIVED, never listed — a subtree
     /// is blanked when blanking it leaves the decoded events identical — because a
@@ -562,11 +603,11 @@ mod recorder {
             let Some((raw, mut lines)) = parsed_lines(file)? else {
                 continue;
             };
-            let base = events_of(&drive, &lines);
+            let base = events_of(source, &drive, &lines);
             let stamped = is_hook_envelope(file);
             let mut out = String::new();
             for i in 0..lines.len() {
-                let here = probe(&drive, &mut lines, &base, i, "", stamped);
+                let here = probe(source, &drive, &mut lines, &base, i, "", stamped);
                 blanked += here;
                 if here == 0 {
                     out.push_str(&raw[i]);
@@ -620,17 +661,29 @@ mod recorder {
     }
 
     type Decoded = (
-        Vec<pixtuoid_core::AgentEvent>,
+        Vec<String>,
         Vec<String>,
         Vec<String>,
         Vec<Option<pixtuoid_core::source::daemon::DecodedPresence>>,
+        Vec<String>,
     );
 
-    /// A daemon's envelopes decode to no `AgentEvent` by design — presence rides the
-    /// registry's `presence_decoder` — so it joins the signature, or a daemon capture
-    /// strips to nothing.
-    fn events_of(drive: &pixtuoid_core::harness::Drive, lines: &[serde_json::Value]) -> Decoded {
+    /// Everything the registry reads from a line, not only the line decoder: a
+    /// daemon's envelopes decode to no `AgentEvent` by design (presence rides
+    /// `presence_decoder`), and the watcher registers a transcript through
+    /// `cwd_extractor`, which the harness never calls — it seeds a fixed cwd.
+    /// Compared as rendered, the way a golden is: `PathBuf` equality drops a
+    /// trailing slash, and grok's `workspaceRoot` fallback differs by exactly that.
+    fn events_of(
+        source: &str,
+        drive: &pixtuoid_core::harness::Drive,
+        lines: &[serde_json::Value],
+    ) -> Decoded {
         let d = drive.lines(lines.iter().map(serde_json::Value::to_string));
+        let cwds = lines
+            .iter()
+            .map(|l| format!("{:?}", registry::cwd_extractor_for(source)(l)))
+            .collect();
         let presence = lines
             .iter()
             .map(|line| {
@@ -642,16 +695,18 @@ mod recorder {
             f.iter().map(|x| format!("{x:?}")).collect::<Vec<_>>()
         };
         (
-            d.events,
+            d.events.iter().map(|e| format!("{e:?}")).collect(),
             failures(&d.decode_errors),
             failures(&d.panics),
             presence,
+            cwds,
         )
     }
 
     /// A hook envelope's top-level `_` keys are the shim's stamps, kept by namespace:
     /// `_shim_ts_ms` is read by no decoder, only by `captures.rs`, which dates a capture by it.
     fn probe(
+        source: &str,
         drive: &pixtuoid_core::harness::Drive,
         lines: &mut [serde_json::Value],
         base: &Decoded,
@@ -678,7 +733,7 @@ mod recorder {
             return 0;
         };
         let kept = std::mem::replace(slot, neutral);
-        if events_of(drive, lines) == *base {
+        if events_of(source, drive, lines) == *base {
             return 1;
         }
         let children: Vec<String> = match &kept {
@@ -695,7 +750,7 @@ mod recorder {
         }
         children
             .iter()
-            .map(|child| probe(drive, lines, base, i, child, stamped))
+            .map(|child| probe(source, drive, lines, base, i, child, stamped))
             .sum()
     }
 
@@ -726,6 +781,70 @@ mod recorder {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/sources")
     }
 
+    /// Recursive: copilot and grok keep a scenario's transcript under its session
+    /// directory, beside the hook payloads at the top.
+    fn jsonl_in(dir: &Path) -> Vec<PathBuf> {
+        let mut files = Vec::new();
+        let mut pending = vec![dir.to_path_buf()];
+        while let Some(d) = pending.pop() {
+            for p in std::fs::read_dir(d)
+                .into_iter()
+                .flatten()
+                .flatten()
+                .map(|e| e.path())
+            {
+                if p.is_dir() {
+                    pending.push(p);
+                } else if p.extension().is_some_and(|x| x == "jsonl") {
+                    files.push(p);
+                }
+            }
+        }
+        files.sort();
+        files
+    }
+
+    /// Strip every RECORDED capture in place — local and unbilled — and record
+    /// the count in its provenance. A composed capture carries no operator data
+    /// by construction, and the README demo reads its bytes past the decoders.
+    /// A pass that blanks nothing leaves a record that already carries a count
+    /// alone, so re-running never erases history: `blanked` counts the original
+    /// recording, not what a fresh capture would differ by today.
+    fn strip_corpus(root: &Path) -> std::io::Result<()> {
+        for pixtuoid_core::harness::Capture { dir, source } in
+            pixtuoid_core::harness::captures(root)
+        {
+            let prov = dir.join("provenance.json");
+            let mut record: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&prov)?)?;
+            if record["origin"] != "recorded" || record["deidentified"]["method"] == "none" {
+                continue;
+            }
+            let files = jsonl_in(&dir);
+            if files.is_empty() {
+                continue;
+            }
+            let blanked = strip_unread(&source, &files)?;
+            if let Some(obj) = record.as_object_mut() {
+                if blanked > 0 || !obj.contains_key("deidentified") {
+                    obj.insert(
+                        "deidentified".into(),
+                        serde_json::json!({ "method": "decoder-allowlist", "blanked": blanked }),
+                    );
+                    std::fs::write(
+                        &prov,
+                        format!("{}\n", serde_json::to_string_pretty(&record)?),
+                    )?;
+                }
+            }
+            println!(
+                "{}: blanked {blanked}",
+                dir.strip_prefix(root).unwrap_or(&dir).display()
+            );
+        }
+        Ok(())
+    }
+
     /// Where this scenario's bytes ALREADY live, else the conformance root: a module
     /// keeps its own rounds out of conformance's reach (omp's hook keys fold on
     /// Windows), and a re-record sent to the root instead lands as a NEW directory
@@ -752,7 +871,7 @@ mod recorder {
                 .iter()
                 .filter_map(|f| {
                     let (_, lines) = parsed_lines(f).ok()??;
-                    Some(events_of(&drive_for(source, f)?, &lines))
+                    Some(events_of(source, &drive_for(source, f)?, &lines))
                 })
                 .collect()
         }
@@ -762,6 +881,26 @@ mod recorder {
                 .split('"')
                 .nth(1)
                 .expect("an object with a key")
+        }
+
+        /// Plant a key no decoder reads on the first non-empty line, so the test
+        /// holds whether or not the committed corpus has already been stripped.
+        fn plant_unread(file: &Path, key: &str, value: &str) {
+            let text = std::fs::read_to_string(file).expect("read");
+            let mut planted = false;
+            let out: Vec<String> = text
+                .lines()
+                .map(|l| {
+                    let mut v: serde_json::Value = serde_json::from_str(l).expect("json");
+                    if !planted && v.as_object().is_some_and(|o| !o.is_empty()) {
+                        v[key] = serde_json::Value::String(value.into());
+                        planted = true;
+                    }
+                    serde_json::to_string(&v).expect("json")
+                })
+                .collect();
+            assert!(planted, "no non-empty line to plant on");
+            std::fs::write(file, out.join("\n") + "\n").expect("write");
         }
 
         fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
@@ -797,6 +936,51 @@ mod recorder {
                 wire.lines().next(),
                 "every field of `gateway_start` is read or a shim stamp, so the line is untouched"
             );
+        }
+
+        #[test]
+        fn a_cwd_whose_fallback_differs_by_a_trailing_slash_survives_the_strip() {
+            let (_d, hooks) = stripped_copy("grok", "gate-both-ways", "hook-payloads.jsonl");
+            let rendered = |p: &Path| -> Vec<String> {
+                pixtuoid_core::harness::Drive::hooks()
+                    .lines(std::fs::read_to_string(p).expect("read").lines())
+                    .events
+                    .iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect()
+            };
+            let before = rendered(&hooks);
+            assert!(before.iter().any(|e| e.contains("pixtuoid-capture/proj\"")));
+            strip_unread("grok", std::slice::from_ref(&hooks)).expect("strip");
+            assert_eq!(rendered(&hooks), before);
+        }
+
+        #[test]
+        fn the_first_sight_cwd_survives_the_strip() {
+            let (_d, rollout) = stripped_copy(
+                "codex",
+                "tool-run-recorded",
+                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
+            );
+            let cwds = |p: &Path| -> Vec<Option<PathBuf>> {
+                let extract = registry::cwd_extractor_for("codex");
+                parsed_lines(p)
+                    .expect("read")
+                    .expect("json")
+                    .1
+                    .iter()
+                    .map(extract)
+                    .collect()
+            };
+            let before = cwds(&rollout);
+            assert!(
+                before
+                    .iter()
+                    .any(|c| c.as_ref().is_some_and(|p| !p.as_os_str().is_empty())),
+                "the rollout carries the cwd first-sight registers"
+            );
+            strip_unread("codex", std::slice::from_ref(&rollout)).expect("strip");
+            assert_eq!(cwds(&rollout), before);
         }
 
         #[test]
@@ -867,10 +1051,11 @@ mod recorder {
             })
             .collect();
 
+            plant_unread(&files[0], "installed_skills", "example-skill-1");
             let before = scenario_events("codex", &files);
             let wire = std::fs::read_to_string(&files[0]).expect("read");
             let blanked = strip_unread("codex", &files).expect("strip");
-            assert!(blanked > 0, "the codex rollout carries unread subtrees");
+            assert!(blanked > 0, "the planted key is unread");
             assert_eq!(scenario_events("codex", &files), before);
 
             let transcript = std::fs::read_to_string(&files[0]).expect("read");
@@ -886,7 +1071,7 @@ mod recorder {
             );
             assert!(
                 !transcript.contains("example-skill"),
-                "the roster rides a field no decoder reads, so it leaves"
+                "a roster rides a field no decoder reads, so it leaves"
             );
             assert!(
                 transcript.contains("gpt-5.6-sol"),
@@ -899,58 +1084,25 @@ mod recorder {
             );
         }
 
-        /// The three capture shapes `captures.rs` walks, walked the same way: a
-        /// conformance scenario, a module's own scenario subtree, and a module's
-        /// flat `fixtures/` with the provenance at its root.
         #[test]
         fn every_committed_scenario_decodes_the_same_once_stripped() {
             let root = sources_root();
-            let name = |p: &Path| p.file_name().expect("name").to_string_lossy().into_owned();
-            let dirs = |p: PathBuf| {
-                std::fs::read_dir(p)
-                    .into_iter()
-                    .flatten()
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| p.is_dir())
-            };
-            let mut targets: Vec<(String, PathBuf)> = Vec::new();
-            for source in dirs(root.join("fixtures")) {
-                targets.extend(dirs(source.clone()).map(|s| (name(&source), s)));
-            }
-            for module in dirs(root.clone()) {
-                let module_name = name(&module);
-                if module_name == "decode" || module_name == "fixtures" {
-                    continue;
-                }
-                let fixtures = module.join("fixtures");
-                if fixtures.join("provenance.json").is_file() {
-                    targets.push((module_name, fixtures));
-                } else {
-                    for sub in dirs(fixtures) {
-                        let source = if registry::descriptor_for(&module_name).is_some() {
-                            module_name.clone()
-                        } else {
-                            name(&sub)
-                        };
-                        targets.push((source, sub));
-                    }
-                }
-            }
-
             let mut walked = BTreeSet::new();
-            for (source, scenario) in targets {
+            for pixtuoid_core::harness::Capture {
+                dir: scenario,
+                source,
+            } in pixtuoid_core::harness::captures(&root)
+            {
                 let label = scenario
                     .strip_prefix(&root)
                     .expect("under root")
                     .to_string_lossy()
                     .replace('\\', "/");
-                let jsonl: Vec<PathBuf> = std::fs::read_dir(&scenario)
-                    .expect("scenario")
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|x| x == "jsonl"))
-                    .collect();
+                let jsonl = jsonl_in(&scenario);
+                assert!(
+                    !jsonl.is_empty() || !scenario.join("provenance.json").is_file(),
+                    "{label}: a provenance with no bytes under it"
+                );
                 if jsonl.is_empty() {
                     continue;
                 }
@@ -958,11 +1110,16 @@ mod recorder {
                 let files: Vec<PathBuf> = jsonl
                     .iter()
                     .map(|from| {
-                        let to = d.path().join(from.file_name().expect("name"));
+                        let to = d.path().join(from.strip_prefix(&scenario).expect("under"));
+                        std::fs::create_dir_all(to.parent().expect("parent")).expect("mkdir");
                         std::fs::copy(from, &to).expect("copy");
                         to
                     })
                     .collect();
+                assert!(
+                    registry::descriptor_for(&source).is_some(),
+                    "{label}: {source:?} is not a registered source, so every rule keyed on it misses"
+                );
                 for f in &files {
                     assert!(
                         drive_for(&source, f).is_some(),
@@ -981,12 +1138,124 @@ mod recorder {
                 "omp/fixtures/bridge-run-recorded",
                 "cursor/fixtures",
                 "delegation/fixtures/copilot",
+                "fixtures/copilot/tool-run-recorded",
+                "fixtures/grok/tool-run-recorded",
             ] {
                 assert!(
                     walked.contains(sentinel),
                     "walk missed {sentinel}: {walked:?}"
                 );
             }
+        }
+
+        #[test]
+        fn strip_corpus_leaves_a_composed_capture_alone() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/claude-code/proof-session");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/claude-code/proof-session");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let bytes = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            let before = bytes(&scenario);
+            strip_corpus(d.path()).expect("strip corpus");
+            assert_eq!(
+                bytes(&scenario),
+                before,
+                "composed bytes carry no operator data"
+            );
+        }
+
+        #[test]
+        fn strip_corpus_honors_an_exemption_the_provenance_declares() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/codex/tool-run-recorded");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let prov = scenario.join("provenance.json");
+            let mut record: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&prov).expect("read")).expect("json");
+            record["deidentified"] = serde_json::json!({
+                "method": "none",
+                "why": "pins a wire premise the decoder drops on purpose"
+            });
+            std::fs::write(&prov, serde_json::to_string_pretty(&record).expect("json"))
+                .expect("write");
+            let bytes = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            let before = bytes(&scenario);
+            strip_corpus(d.path()).expect("strip corpus");
+            assert_eq!(
+                bytes(&scenario),
+                before,
+                "an exempt capture keeps its bytes and its record"
+            );
+        }
+
+        #[test]
+        fn strip_corpus_records_its_count_in_the_provenance_and_is_idempotent() {
+            let d = tempfile::tempdir().expect("tempdir");
+            let scenario = d.path().join("fixtures/codex/tool-run-recorded");
+            std::fs::create_dir_all(&scenario).expect("mkdir");
+            let src = sources_root().join("fixtures/codex/tool-run-recorded");
+            for from in std::fs::read_dir(&src).expect("read").flatten() {
+                std::fs::copy(from.path(), scenario.join(from.file_name())).expect("copy");
+            }
+            let snapshot = |dir: &Path| -> Vec<(PathBuf, Vec<u8>)> {
+                let mut out: Vec<_> = std::fs::read_dir(dir)
+                    .expect("read")
+                    .flatten()
+                    .map(|e| (e.path(), std::fs::read(e.path()).expect("bytes")))
+                    .collect();
+                out.sort();
+                out
+            };
+            plant_unread(
+                &scenario
+                    .join("rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl"),
+                "installed_skills",
+                "example-skill-1",
+            );
+            let wire = snapshot(&scenario);
+
+            strip_corpus(d.path()).expect("strip corpus");
+            let once = snapshot(&scenario);
+            assert_ne!(once, wire, "the planted key is unread");
+            let prov: serde_json::Value = serde_json::from_str(
+                &std::fs::read_to_string(scenario.join("provenance.json")).expect("read"),
+            )
+            .expect("json");
+            assert_eq!(prov["deidentified"]["method"], "decoder-allowlist");
+            assert!(prov["deidentified"]["blanked"]
+                .as_u64()
+                .is_some_and(|n| n > 0));
+            assert_eq!(prov["origin"], "recorded", "the rest of the record is kept");
+
+            strip_corpus(d.path()).expect("strip corpus again");
+            assert_eq!(
+                snapshot(&scenario),
+                once,
+                "a second pass finds nothing and rewrites nothing"
+            );
         }
 
         /// Every shape that has actually reached a committed fixture past this gate.
@@ -1164,7 +1433,14 @@ mod recorder {
             let argv = ["true".to_string()];
 
             let bare = tempfile::tempdir().expect("tempdir");
-            write_provenance(bare.path(), &argv, &argv, 0, &[("prompt", None)]).expect("write");
+            write_provenance(
+                bare.path(),
+                &argv,
+                &argv,
+                &Deidentified::Stripped(0),
+                &[("prompt", None)],
+            )
+            .expect("write");
             assert!(read(bare.path()).get("prompt").is_none());
 
             let set = tempfile::tempdir().expect("tempdir");
@@ -1172,7 +1448,7 @@ mod recorder {
                 set.path(),
                 &argv,
                 &argv,
-                0,
+                &Deidentified::Stripped(0),
                 &[("prompt", Some("read NOTE.txt".into()))],
             )
             .expect("write");

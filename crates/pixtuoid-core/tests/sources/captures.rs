@@ -1,4 +1,5 @@
-//! THE enumeration of committed captures, and the rules every capture obeys.
+//! The rules every committed capture obeys, over THE enumeration —
+//! `pixtuoid_core::harness::captures`, shared with the recorder's re-strip.
 //! Several walks of this tree with different populations used to exist, so each
 //! rule landed on whichever subset its author picked — the "fix landed on half
 //! the population" class that recurred across four review rounds. So: ONE walk,
@@ -8,10 +9,6 @@ use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 use pixtuoid_core::source::registry;
-
-/// Module dirs whose name is NOT the registered source id. Every other
-/// single-owner tree's dir name IS its source.
-const MODULE_TO_SOURCE: &[(&str, &str)] = &[("claude", "claude-code")];
 
 /// A committed capture: the bytes, the record of where they came from, and the
 /// source the LAYOUT says owns them.
@@ -108,74 +105,6 @@ pub(crate) fn fixtures_root() -> PathBuf {
     sources_root().join("fixtures")
 }
 
-/// The registered source a capture dir belongs to, from the LAYOUT alone.
-/// Three shapes exist: `fixtures/<source>/<scenario>/`, `<module>/fixtures/`,
-/// and `<module>/fixtures/<sub>/` — where the third's owner is the MODULE
-/// when it is itself a registered source (`omp/fixtures/<scenario>/`, a
-/// source-owned multi-scenario tree), else the SUB (`delegation/fixtures/omp/`,
-/// a cross-source rule family keyed per source).
-fn source_of(dir: &Path) -> Option<String> {
-    let rel = dir.strip_prefix(sources_root()).ok()?;
-    let parts: Vec<&str> = rel.iter().filter_map(|s| s.to_str()).collect();
-    let raw = match parts.as_slice() {
-        ["fixtures", source, _scenario] => *source,
-        [module, "fixtures", sub] => {
-            if registry::descriptor_for(module).is_some() {
-                *module
-            } else {
-                *sub
-            }
-        }
-        [module, "fixtures"] => *module,
-        _ => return None,
-    };
-    let mapped = MODULE_TO_SOURCE
-        .iter()
-        .find(|(from, _)| *from == raw)
-        .map_or(raw, |(_, to)| *to);
-    Some(mapped.to_string())
-}
-
-/// Every dir the LAYOUT says is a capture — before asking whether it declares
-/// anything, which is what makes `provenance.json` mandatory: a walk over the
-/// FILES could not see a capture that declares nothing, so deleting a provenance
-/// made the suite greener. A `<module>/fixtures/` tree declares EITHER at its
-/// root OR once per sub-dir (`codex/fixtures` vs `delegation/fixtures/*`).
-fn capture_dirs() -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    for source_dir in sorted_dirs(&fixtures_root()) {
-        out.extend(sorted_dirs(&source_dir));
-    }
-    for module in sorted_dirs(&sources_root()) {
-        let name = module
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
-        let fixtures = module.join("fixtures");
-        // `decode/` holds hand-built decoder INPUTS, not captures — composed on
-        // purpose; `fixtures/` is the conformance subtree, already covered above.
-        if name == "decode" || name == "fixtures" || !fixtures.is_dir() {
-            continue;
-        }
-        if fixtures.join("provenance.json").is_file() {
-            out.push(fixtures);
-        } else {
-            let subs = sorted_dirs(&fixtures);
-            assert!(
-                !subs.is_empty(),
-                "{}: a capture tree must declare its origin — add provenance.json \
-                 here, or one per sub-tree. With no root declaration every sub-tree \
-                 must carry one, and there must BE sub-trees, or deleting the root \
-                 provenance vanishes the whole capture from the population",
-                fixtures.display()
-            );
-            out.extend(subs);
-        }
-    }
-    out.sort();
-    out
-}
-
 pub(crate) fn read_dir_or_panic(dir: &Path) -> Vec<std::fs::DirEntry> {
     std::fs::read_dir(dir)
         .unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display()))
@@ -197,7 +126,9 @@ pub(crate) fn sorted_dirs(dir: &Path) -> Vec<PathBuf> {
 /// Sorted, so failures name captures in a stable order.
 pub(crate) fn every_capture() -> Vec<Capture> {
     let mut out = Vec::new();
-    for dir in capture_dirs() {
+    for pixtuoid_core::harness::Capture { dir, source } in
+        pixtuoid_core::harness::captures(&sources_root())
+    {
         let prov = dir.join("provenance.json");
         assert!(
             prov.is_file(),
@@ -210,13 +141,6 @@ pub(crate) fn every_capture() -> Vec<Capture> {
             .unwrap_or_else(|e| panic!("read {}: {e}", prov.display()));
         let provenance: serde_json::Value = serde_json::from_str(&body)
             .unwrap_or_else(|e| panic!("{}: not valid JSON: {e}", prov.display()));
-        let source = source_of(&dir).unwrap_or_else(|| {
-            panic!(
-                "{}: no layout rule names this capture's source — it is in NO \
-                 population, so every provenance rule skips it",
-                dir.display()
-            )
-        });
         out.push(Capture {
             dir,
             source,
@@ -244,7 +168,7 @@ fn the_walk_sees_every_provenance_on_disk() {
     }
     let mut on_disk = 0;
     count(&sources_root(), &mut on_disk);
-    // Derived DIFFERENTLY on purpose: `capture_dirs()` from the LAYOUT, the
+    // Derived DIFFERENTLY on purpose: `every_capture()` from the LAYOUT, the
     // counter above from the FILES — one predicate counted twice is a tautology.
     let walked = every_capture().len();
     assert_eq!(
@@ -415,6 +339,52 @@ fn a_recorded_captures_cli_is_its_trees_binary() {
             probe[0]
         );
     }
+}
+
+/// Every capture exempt from the strip, by its layout path. Pinned as an exact
+/// set so an exemption is a reviewed diff here, never a quiet key in a record:
+/// an exempt capture is the one path inventory data the gitleaks backstop
+/// cannot see has back into the tree.
+const EXEMPT_FROM_STRIP: &[&str] = &["cursor/fixtures"];
+
+/// The strip is disclosed by `deidentified`; a note that still calls the bytes
+/// verbatim contradicts it, and an exemption without its reason is a silent hole.
+#[test]
+fn a_stripped_record_does_not_call_its_bytes_verbatim_and_an_exemption_says_why() {
+    let mut exempt = BTreeSet::new();
+    for c in every_capture() {
+        let prov = c.provenance_path;
+        let v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&prov).expect("read")).expect("json");
+        let blanked = v["deidentified"]["blanked"].as_u64().unwrap_or(0);
+        let note = v["note"].as_str().unwrap_or("");
+        assert!(
+            blanked == 0 || !note.to_ascii_lowercase().contains("verbatim"),
+            "{}: {blanked} subtrees were blanked, and the note still says verbatim: {note:?}",
+            prov.display()
+        );
+        if v["deidentified"]["method"] == "none" {
+            assert!(
+                v["deidentified"]["why"]
+                    .as_str()
+                    .is_some_and(|w| !w.trim().is_empty()),
+                "{}: exempt from the strip without saying why",
+                prov.display()
+            );
+            exempt.insert(
+                c.dir
+                    .strip_prefix(sources_root())
+                    .expect("under root")
+                    .to_string_lossy()
+                    .replace('\\', "/"),
+            );
+        }
+    }
+    let pinned: BTreeSet<String> = EXEMPT_FROM_STRIP.iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        exempt, pinned,
+        "the exempt set changed — review it here, not only in a record"
+    );
 }
 
 /// A `recorded` fixture whose bytes were EDITED must say so: nothing in them

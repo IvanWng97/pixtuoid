@@ -4,5 +4,9 @@
   "command": "kimi -p {prompt}",
   "origin": "recorded",
   "version": "0.40.1",
-  "note": "Redacted: the owner column of a captured `ls -la`. The bytes are otherwise verbatim."
+  "note": "The recorder's own roster and paths rode fields no decoder reads and are stripped (see `deidentified`).",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 22
+  }
 }

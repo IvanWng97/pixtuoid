@@ -4,5 +4,9 @@
   "version": "unknown",
   "captured": "unknown",
   "command": "see the module header",
-  "note": "Captured from a real CodeWhale subagent run (spawn/complete), sanitized. Predates the socket recorder, hence no shim stamps. Redacted: home path rewritten to /Users/dev. The bytes are otherwise verbatim."
+  "note": "Captured from a real CodeWhale subagent run (spawn/complete), sanitized. Predates the socket recorder, hence no shim stamps. Redacted: home path rewritten to /Users/dev.",
+  "deidentified": {
+    "method": "decoder-allowlist",
+    "blanked": 8
+  }
 }

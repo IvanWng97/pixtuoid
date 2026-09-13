@@ -1,3 +1,3 @@
 {"event": "session_start", "cwd": "/Users/dev/cwproj", "_pixtuoid_source": "codewhale"}
-{"event": "subagent_spawn", "agent_id": "agent_12345678", "session_id": "sess_12345678", "workspace": "/Users/dev/cwproj", "mode": "agent", "model": "deepseek-chat", "prompt_preview": "investigate the build setup", "prompt_truncated": false, "_pixtuoid_source": "codewhale"}
-{"event": "subagent_complete", "agent_id": "agent_12345678", "session_id": "sess_12345678", "workspace": "/Users/dev/cwproj", "status": "completed", "result_preview": "done", "result_truncated": false, "_pixtuoid_source": "codewhale"}
+{"event":"subagent_spawn","agent_id":"agent_12345678","session_id":"","workspace":"/Users/dev/cwproj","mode":"","model":"","prompt_preview":"","prompt_truncated":false,"_pixtuoid_source":"codewhale"}
+{"event":"subagent_complete","agent_id":"agent_12345678","session_id":"","workspace":"","status":"","result_preview":"","result_truncated":false,"_pixtuoid_source":"codewhale"}
