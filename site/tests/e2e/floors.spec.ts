@@ -266,9 +266,7 @@ test('scroll budget: the page fits its roster-aware viewport-height budget at 14
   // only its tools-table row, the hero's code strip being O(1). That holds only
   // while the strip's codes fit ONE line at 1440 (~20 sources); past that it
   // wraps a step PER_SOURCE doesn't model, so re-measure BASE there.
-  // 8.0, not the 7.95 that fit CI's renderer exactly: macOS measured 9.0078
-  // against that bound, and a budget this tight reds on a font stack rather
-  // than on the layout bloat it exists to catch.
+  // Not 7.95: that fit CI's renderer exactly, so another font stack reds it.
   const SCROLL_BUDGET_BASE_VH = 8.0;
   const SCROLL_BUDGET_PER_SOURCE_VH = 0.075;
   const supported = sourcesData.filter((s) => s.status === 'supported').length;
