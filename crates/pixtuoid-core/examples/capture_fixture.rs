@@ -1260,6 +1260,22 @@ mod recorder {
 
         /// Every shape that has actually reached a committed fixture past this gate.
         #[test]
+        fn a_marker_key_the_strip_blanked_is_not_a_hit() {
+            let none = BTreeSet::new();
+            for body in [
+                r#"{"user_email":"","hook_event_name":"sessionStart"}"#,
+                r#"{"userEmail":"","token":"","api_key":""}"#,
+                r#"{"account_id":"","nested":{"user_id":""}}"#,
+            ] {
+                assert!(
+                    pii_hits(body, &none).is_empty(),
+                    "a key with nothing in it is what the strip leaves behind: {body}"
+                );
+            }
+            assert!(!pii_hits(r#"{"nested":{"user_id":"u_1"}}"#, &none).is_empty());
+        }
+
+        #[test]
         fn the_markers_cover_what_has_actually_leaked() {
             let none = BTreeSet::new();
             for (body, why) in [
