@@ -474,22 +474,23 @@ mod recorder {
     /// Not a `$HOME|$USER` grep: a CLI's ACCOUNT identity is a different namespace
     /// from the host's. `just fixture-pii` matches VALUE shapes instead (as gitleaks
     /// rules these keys would fire on the tree's own `dev@example.com`), so a key
-    /// with no value shape (`obsidian`, `account_id`) is refused only here. Both
+    /// with no value shape (`account_id`) is refused only here. Both
     /// cases of each spelling: a CLI's next version may pick the other, as
     /// `userEmail` did beside `user_email`.
-    const PII_MARKERS: &[&str] = &[
+    const PII_KEYS: &[&str] = &[
         "user_email",
         "userEmail",
-        "\"email\"",
+        "email",
         "account_id",
         "accountId",
         "user_id",
-        "mcp__",
-        "obsidian",
         "api_key",
-        "\"token\"",
-        "Bearer ",
+        "token",
     ];
+
+    /// Value shapes, not keys: an MCP server's name rides a tool name a decoder
+    /// reads, and a bearer credential can ride any string.
+    const PII_MARKERS: &[&str] = &["mcp__", "Bearer "];
 
     /// Strings this machine would leak into a capture, the git identity included:
     /// a CLI that renders `git status` embeds the committer's real name, which no
@@ -528,6 +529,8 @@ mod recorder {
     }
 
     /// Every reason `body` cannot be committed, or empty.
+    /// A key counts only with a value in it: the strip blanks what no decoder
+    /// reads and leaves the key, so `"user_email":""` is its work, not a leak.
     fn pii_hits(body: &str, needles: &BTreeSet<String>) -> Vec<String> {
         let mut hits: Vec<String> = needles
             .iter()
@@ -539,7 +542,42 @@ mod recorder {
                 hits.push(format!("a {marker} field"));
             }
         }
+        let mut keys = BTreeSet::new();
+        for line in body.lines().filter(|l| !l.trim().is_empty()) {
+            match serde_json::from_str::<serde_json::Value>(line) {
+                Ok(v) => filled_pii_keys(&v, &mut keys),
+                Err(_) => keys.extend(
+                    PII_KEYS
+                        .iter()
+                        .filter(|k| line.contains(*k))
+                        .map(|k| k.to_string()),
+                ),
+            }
+        }
+        hits.extend(keys.into_iter().map(|k| format!("a {k} field")));
         hits
+    }
+
+    fn filled_pii_keys(v: &serde_json::Value, out: &mut BTreeSet<String>) {
+        match v {
+            serde_json::Value::Object(m) => {
+                for (k, child) in m {
+                    let filled = match child {
+                        serde_json::Value::String(s) => !s.is_empty(),
+                        serde_json::Value::Null => false,
+                        serde_json::Value::Array(a) => !a.is_empty(),
+                        serde_json::Value::Object(o) => !o.is_empty(),
+                        _ => true,
+                    };
+                    if filled && PII_KEYS.contains(&k.as_str()) {
+                        out.insert(k.clone());
+                    }
+                    filled_pii_keys(child, out);
+                }
+            }
+            serde_json::Value::Array(a) => a.iter().for_each(|c| filled_pii_keys(c, out)),
+            _ => {}
+        }
     }
 
     fn scan_for_pii(files: &[PathBuf]) -> Vec<String> {

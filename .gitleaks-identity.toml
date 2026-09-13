@@ -21,9 +21,6 @@
 id = "pixtuoid-recorder-identity"
 description = "The recorder's own machine identity: a real MCP server/tool name"
 regex = '''mcp__[A-Za-z0-9_-]+'''
-  [[rules.allowlists]]
-  regexTarget = "match"
-  regexes = ['''mcp__example[A-Za-z0-9_-]*''']
 
 [[rules]]
 id = "pixtuoid-recorder-email"
