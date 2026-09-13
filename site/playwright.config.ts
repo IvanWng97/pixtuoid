@@ -26,6 +26,9 @@ export default defineConfig({
     // old bytes. Readiness stays Playwright's URL poll because Astro's
     // /_astro/status health endpoint is DEV-SERVER-ONLY; `astro preview` 404s it.
     command: 'node node_modules/astro/bin/astro.mjs preview --port 4321',
+    // Astro backgrounds `preview` under an agentic environment, and a server
+    // that daemonizes reads to Playwright as one that exited early.
+    env: { ASTRO_PREVIEW_BACKGROUND: 'false' },
     url: 'http://localhost:4321/',
     reuseExistingServer: false,
     timeout: 30_000,
