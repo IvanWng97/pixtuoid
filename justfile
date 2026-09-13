@@ -1420,7 +1420,7 @@ fixture-pii-selftest:
     # allowlist. Any shape-based waiver admits a secret wearing that shape; what
     # actually stops this class is the recorder refusing at capture time.
     printf '{"api_key":"msg_%s"}\n' "Kd8sQm2zXv6bTn4wRj9c" > "$d/quiet/cred-residual.txt"
-    printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nC:\\Users\\Me\n/Users/dev.\n' \
+    printf '/Users/dev/x\n/home/runner/work\n/home/ubuntu\n/home/linuxbrew\n/Users/Shared\nmcp__exampleThing\nC:\\Users\\Me\n/Users/dev.\n' \
         > "$d/quiet/identity.txt"
     printf -- '--private-tmp-pixtuoid-capture-proj--\n--Users-dev-proj--\n-home-runner-work\n' \
         > "$d/quiet/identity-dashed.txt"
