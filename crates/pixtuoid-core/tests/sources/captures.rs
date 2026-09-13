@@ -414,10 +414,23 @@ fn no_identity_key_holds_a_value_outside_a_pinned_exemption() {
         for wire in c.wire_files() {
             let body = std::fs::read_to_string(&wire).expect("read");
             let mut found = BTreeSet::new();
-            for line in body.lines().filter(|l| !l.trim().is_empty()) {
-                if let Ok(v) = serde_json::from_str::<serde_json::Value>(line) {
-                    filled_identity_keys(&v, &mut found);
-                }
+            for (i, line) in body
+                .lines()
+                .enumerate()
+                .filter(|(_, l)| !l.trim().is_empty())
+            {
+                // A line that will not parse is the input `strip_unread` declines a
+                // whole file for, so skipping it here would leave those bytes both
+                // unstripped and unchecked. Loud instead: fix the line, or declare
+                // the capture exempt and say why.
+                let v: serde_json::Value = serde_json::from_str(line).unwrap_or_else(|e| {
+                    panic!(
+                        "{}:{}: not JSON ({e}), so the strip skipped this whole file",
+                        wire.display(),
+                        i + 1
+                    )
+                });
+                filled_identity_keys(&v, &mut found);
             }
             assert!(
                 found.is_empty(),
