@@ -25,7 +25,7 @@ pixtuoid-scene = { path = "../pixtuoid-scene", version = "0.18.0" }
 # two on purpose — the WHY, and the rejected whole-stack alternatives, are on
 # `aa_text`'s module doc. Binary-only: the wasm-compiled engine never sees this,
 # and renders text as a DOM overlay instead.
-skrifa = "0.46"
+skrifa = "0.47"
 ab_glyph_rasterizer = "0.1"
 tokio              = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync", "time", "net", "fs", "io-util"] }
 ratatui            = { workspace = true }
