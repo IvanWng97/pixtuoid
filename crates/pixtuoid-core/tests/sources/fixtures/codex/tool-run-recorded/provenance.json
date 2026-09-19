@@ -1,12 +1,11 @@
 {
-  "captured": "2026-09-10",
-  "cli": "codex",
-  "command": "codex exec {prompt}",
   "origin": "recorded",
-  "version": "codex-cli 0.153.4",
-  "note": "Redacted: the `world_state` line (the installed skill roster with paths plus the host timezone); `world_state` is in codex's ignored set, so dropping it costs no evidence. The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`).",
+  "cli": "codex",
+  "version": "codex-cli 0.155.1",
+  "captured": "2026-09-19",
+  "command": "codex exec {prompt}",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 208
+    "blanked": 212
   }
 }

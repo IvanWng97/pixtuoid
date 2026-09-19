@@ -38,9 +38,9 @@ fn events(scenario: &str) -> Vec<AgentEvent> {
 }
 
 /// The issue's empty-session criterion: a session that shuts down before any
-/// assistant message persists only a header — never a `session_exit` — so
-/// the bridge's `session_shutdown` is the only end signal, and it must
-/// remove the slot on the exit grace, not the stale sweep.
+/// assistant message writes no `session_exit` (at the recorded version, no
+/// transcript at all), so the bridge's `session_shutdown` is the only end
+/// signal, and it must remove the slot on the exit grace, not the stale sweep.
 #[test]
 fn an_empty_session_round_registers_then_leaves_on_the_exit_grace() {
     let evs = events("empty-session-recorded");

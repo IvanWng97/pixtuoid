@@ -138,6 +138,9 @@ pub struct SourceDescriptor {
     /// The CLI version this build's decoder + fixtures were last verified
     /// against. `"unknown"`, NOT `""`, where we have no fixed anchor —
     /// `pixtuoid doctor` only flags SKEW when this parses to a version.
+    /// Pinned to the highest recorded capture's `version` banner by
+    /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
+    /// re-record bumps it.
     pub verified_version: &'static str,
     /// argv to probe the installed CLI version. `None` = no stable CLI binary;
     /// `doctor` runs it best-effort and degrades to "version: unknown".
@@ -388,7 +391,7 @@ pub fn daemon_sources() -> impl Iterator<Item = (&'static str, crate::source::da
 const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
     name: claude_code::SOURCE_NAME,
     label_prefix: "cc",
-    verified_version: "2.1.261",
+    verified_version: "2.1.278",
     version_probe: Some(&["claude", "--version"]),
     home_env: Some("CLAUDE_CONFIG_DIR"),
     kind: SourceKind::Agent {
@@ -424,7 +427,7 @@ const CLAUDE_CODE: SourceDescriptor = SourceDescriptor {
 const CODEX: SourceDescriptor = SourceDescriptor {
     name: codex::SOURCE_NAME,
     label_prefix: "cx",
-    verified_version: "0.153.4",
+    verified_version: "0.155.1",
     version_probe: Some(&["codex", "--version"]),
     home_env: Some("CODEX_HOME"),
     kind: SourceKind::Agent {
@@ -498,7 +501,7 @@ const ANTIGRAVITY: SourceDescriptor = SourceDescriptor {
 const REASONIX: SourceDescriptor = SourceDescriptor {
     name: reasonix::SOURCE_NAME,
     label_prefix: "rx",
-    verified_version: "1.37.0",
+    verified_version: "1.38.7",
     version_probe: Some(&["reasonix", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -533,10 +536,9 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // Every recorded dsh capture's banner is 0.1.1-rc.2;
-    // `doctor::parse_version` keeps only the dotted digit run, so the
-    // prerelease suffix never reaches this pin.
-    verified_version: "0.1.1",
+    // dsh's banner carries a prerelease suffix (`-rc.N`); `doctor::parse_version`
+    // keeps only the dotted digit run, so the suffix never reaches this pin.
+    verified_version: "0.1.5",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live
     // under it); hook-only, so core resolves no root to relocate.
@@ -610,7 +612,7 @@ const CODEWHALE: SourceDescriptor = SourceDescriptor {
 const OPENCODE: SourceDescriptor = SourceDescriptor {
     name: opencode::SOURCE_NAME,
     label_prefix: "oc",
-    verified_version: "1.18.20",
+    verified_version: "1.18.30",
     version_probe: Some(&["opencode", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -691,7 +693,7 @@ const COPILOT: SourceDescriptor = SourceDescriptor {
 const CURSOR: SourceDescriptor = SourceDescriptor {
     name: cursor::SOURCE_NAME,
     label_prefix: "cu",
-    verified_version: "2026.09.02",
+    verified_version: "2026.09.18",
     version_probe: Some(&["cursor-agent", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {
@@ -811,7 +813,7 @@ const GROK: SourceDescriptor = SourceDescriptor {
 const OMP: SourceDescriptor = SourceDescriptor {
     name: omp::SOURCE_NAME,
     label_prefix: "om",
-    verified_version: "18.1.10",
+    verified_version: "18.2.6",
     version_probe: Some(&["omp", "--version"]),
     home_env: Some("PI_CODING_AGENT_DIR"),
     kind: SourceKind::Agent {
@@ -869,7 +871,7 @@ const OMP: SourceDescriptor = SourceDescriptor {
 const KIMI: SourceDescriptor = SourceDescriptor {
     name: kimi::SOURCE_NAME,
     label_prefix: "km",
-    verified_version: "0.40.1",
+    verified_version: "2.0.1",
     version_probe: Some(&["kimi", "--version"]),
     home_env: None,
     kind: SourceKind::Agent {

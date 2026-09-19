@@ -3,72 +3,72 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     model: openrouter/openrouter/auto
     effort: ~
 - Identity:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-9677f116f691d14b
+    agent_id: 2255756860839287734
+    tool_use_id: call_cdec53610bc745eda763a5d8
     detail:
       Generic:
         display: Read
 - Identity:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
-    cwd: /private/tmp/pixtuoid-capture/proj
-- ActivityEnd:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-9677f116f691d14b
-- Identity:
-    agent_id: 4324595985250122601
-    source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-aedba5dad32ed604
+    agent_id: 2255756860839287734
+    tool_use_id: call_8f13502552724bd5b8009846
     detail:
       Generic:
-        display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
+        display: "Bash: ls -la"
 - Identity:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-aedba5dad32ed604
+    agent_id: 2255756860839287734
+    tool_use_id: call_cdec53610bc745eda763a5d8
 - Identity:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
+    cwd: /private/tmp/pixtuoid-capture/proj
+- ActivityEnd:
+    agent_id: 2255756860839287734
+    tool_use_id: call_8f13502552724bd5b8009846
+- Identity:
+    agent_id: 2255756860839287734
+    source: kimi
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-a6623153260806e8
+    agent_id: 2255756860839287734
+    tool_use_id: call_111fb8702c464cd2adb56bc9
     detail:
       Generic:
         display: Read
 - Identity:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     source: kimi
-    session_id: session_b31f6567-ffd0-47f4-8499-cf3c67367d9d
+    session_id: session_9d73b6b5-d936-485e-af02-9ed56e2005d9
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 4324595985250122601
-    tool_use_id: chatcmpl-tool-a6623153260806e8
+    agent_id: 2255756860839287734
+    tool_use_id: call_111fb8702c464cd2adb56bc9
 - ActivityEnd:
-    agent_id: 4324595985250122601
+    agent_id: 2255756860839287734
     tool_use_id: ~

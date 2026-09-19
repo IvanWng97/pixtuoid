@@ -206,7 +206,7 @@ fn agent_cases() -> Vec<WireCase> {
         WireCase {
             name: "omp",
             source: "omp",
-            fixture: "fixtures/omp/tool-run-recorded/2026-09-10T19-18-34-717Z_01a08cc1-eddd-7457-8567-53cc7f15a94e.jsonl",
+            fixture: "fixtures/omp/tool-run-recorded/2026-09-19T18-16-13-370Z_01a0bae2-133a-769f-851a-927926fbca45.jsonl",
             wire: Wire::Transcript { seeded: false },
             must_reach: &[Reach::Active],
         },

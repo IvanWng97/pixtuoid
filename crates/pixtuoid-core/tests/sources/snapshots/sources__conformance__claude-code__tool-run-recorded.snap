@@ -3,161 +3,161 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 19553
+    agent_id: 2218045403008670456
+    fresh_tokens: 23814
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 19553
+    agent_id: 2218045403008670456
+    fresh_tokens: 23814
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 19553
+    agent_id: 2218045403008670456
+    fresh_tokens: 23814
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01Qw1MscwKEFmLgWd9bwvW4x
     detail:
       Generic:
         display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01Qw1MscwKEFmLgWd9bwvW4x
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 407
+    agent_id: 2218045403008670456
+    fresh_tokens: 488
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01MtBup9bnruUVnRYDM9DHTJ
     detail:
       Generic:
         display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01MtBup9bnruUVnRYDM9DHTJ
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 277
+    agent_id: 2218045403008670456
+    fresh_tokens: 281
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_011U5tMoYhbq8tBTr6tEAMvK
     detail:
       Generic:
         display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_011U5tMoYhbq8tBTr6tEAMvK
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: claude-fable-5-1
     effort: ~
 - Usage:
-    agent_id: 8083410480098333094
-    fresh_tokens: 222
+    agent_id: 2218045403008670456
+    fresh_tokens: 264
 - SessionStart:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01Qw1MscwKEFmLgWd9bwvW4x
     detail:
       Generic:
         display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01AYDa8ERj5b72Vynz9rczci
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01Qw1MscwKEFmLgWd9bwvW4x
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01MtBup9bnruUVnRYDM9DHTJ
     detail:
       Generic:
         display: "Bash: ls -la /private/tmp/pixtuoid-capture/pro…"
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_01LZginsH5F2KmjK1naf9JuS
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_01MtBup9bnruUVnRYDM9DHTJ
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_011U5tMoYhbq8tBTr6tEAMvK
     detail:
       Generic:
         display: "Bash: cat /private/tmp/pixtuoid-capture/proj/N…"
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - Identity:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     source: claude-code
-    session_id: fecd2d06-6069-4dc4-a17f-406b97ce1976
+    session_id: f7beb54a-8115-40cd-8967-fb67ed8c112a
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 8083410480098333094
-    tool_use_id: toolu_017CEYVtaNQL5STPgZDMG8AW
+    agent_id: 2218045403008670456
+    tool_use_id: toolu_011U5tMoYhbq8tBTr6tEAMvK
 - ModelInfo:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     model: ~
     effort: xhigh
 - SessionEnd:
-    agent_id: 8083410480098333094
+    agent_id: 2218045403008670456
     as_child: false

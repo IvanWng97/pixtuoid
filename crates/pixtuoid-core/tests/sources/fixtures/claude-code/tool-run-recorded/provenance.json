@@ -1,12 +1,11 @@
 {
-  "captured": "2026-09-10",
-  "cli": "claude",
-  "command": "claude -p {prompt} --allowedTools Read Bash",
   "origin": "recorded",
-  "version": "2.1.261 (Claude Code)",
-  "note": "Recorded with the machine's rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript's own tool_use rows are CC's. The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`).",
+  "cli": "claude",
+  "version": "2.1.278 (Claude Code)",
+  "captured": "2026-09-19",
+  "command": "claude -p {prompt} --allowedTools Read Bash",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 494
+    "blanked": 543
   }
 }

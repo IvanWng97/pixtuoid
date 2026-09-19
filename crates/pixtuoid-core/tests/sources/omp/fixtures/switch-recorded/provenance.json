@@ -1,12 +1,12 @@
 {
-  "captured": "2026-08-31",
-  "cli": "omp",
-  "command": "omp (interactive TUI, driven by scripts/lib/capture-omp-tui.py switch — /new then /exit)",
-  "note": "hook sessionFile home path redacted to /Users/dev. omp (interactive TUI, driven by scripts/lib/capture-omp-tui.py switch — /new then /exit, no prompt): the in-TUI switch fires with the NEW session current and the previous file named",
   "origin": "recorded",
-  "version": "omp/18.0.11",
+  "cli": "omp",
+  "version": "omp/18.2.6",
+  "captured": "2026-09-19",
+  "command": "omp (interactive TUI, driven by scripts/lib/capture-omp-tui.py switch — /new then /exit)",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 4
-  }
+  },
+  "note": "hook sessionFile home path redacted to /Users/dev. The in-TUI switch fires with the NEW session current and the previous file named. The header omp writes for the /new session (a launch session persists nothing before a prompt; see empty-session-recorded) is withheld: every id in it is blanked and nothing reads it."
 }

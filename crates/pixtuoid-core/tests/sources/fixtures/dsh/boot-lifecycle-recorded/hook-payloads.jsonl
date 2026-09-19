@@ -1,3 +1,3 @@
-{"_pid":31604,"_pixtuoid_source":"dsh","_shim_ts_ms":1788245032517,"cwd":"/private/tmp/pixtuoid-capture/proj","reason":"","sessionId":"session-d597e513-a91f-42ab-8f78-627607505edb","transcriptPath":"","type":"session_start"}
-{"_pid":31604,"_pixtuoid_source":"dsh","_shim_ts_ms":1788245032517,"cwd":"/private/tmp/pixtuoid-capture/proj","model":"deepseek-v4-flash","provider":"","reasoningEffort":"high","sessionId":"session-d597e513-a91f-42ab-8f78-627607505edb","type":"model"}
-{"_pid":31604,"_pixtuoid_source":"dsh","_shim_ts_ms":1788245032562,"cwd":"/private/tmp/pixtuoid-capture/proj","sessionId":"session-d597e513-a91f-42ab-8f78-627607505edb","type":"session_end"}
+{"type":"session_start","sessionId":"session-802fea39-6767-4690-a027-34de82f285d5","cwd":"/private/tmp/pixtuoid-capture/proj","_pid":16573,"_shim_ts_ms":1789841549222,"_pixtuoid_source":"dsh"}
+{"type":"model","sessionId":"session-802fea39-6767-4690-a027-34de82f285d5","cwd":"/private/tmp/pixtuoid-capture/proj","model":"deepseek-flash","reasoningEffort":"high","_pid":16573,"_shim_ts_ms":1789841549303,"_pixtuoid_source":"dsh"}
+{"type":"session_end","sessionId":"session-802fea39-6767-4690-a027-34de82f285d5","cwd":"/private/tmp/pixtuoid-capture/proj","_pid":16573,"_shim_ts_ms":1789841549359,"_pixtuoid_source":"dsh"}
