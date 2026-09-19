@@ -1,12 +1,12 @@
 {
-  "captured": "2026-09-10",
-  "cli": "cursor-agent",
-  "command": "cursor-agent -p --trust --model auto {prompt}",
   "origin": "recorded",
-  "version": "2026.09.02-c22c1a3",
-  "note": "Recorded with `--model auto`: cursor-agent on a free plan refuses named models.",
+  "cli": "cursor-agent",
+  "version": "2026.09.18-9a7762b",
+  "captured": "2026-09-19",
+  "command": "cursor-agent -p --trust --model auto {prompt}",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 448
-  }
+    "blanked": 444
+  },
+  "note": "Recorded with `--model auto`: cursor-agent on a free plan refuses named models."
 }

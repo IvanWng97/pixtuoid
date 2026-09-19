@@ -1,12 +1,12 @@
 {
-  "captured": "2026-09-10",
-  "cli": "reasonix",
-  "command": "reasonix -p {prompt}",
   "origin": "recorded",
-  "version": "reasonix v1.37.0",
-  "note": "The recorder's own roster and paths rode fields no decoder reads and are stripped (see `deidentified`).",
+  "cli": "reasonix",
+  "version": "reasonix v1.38.7",
+  "captured": "2026-09-19",
+  "command": "reasonix -p {prompt}",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 15
-  }
+  },
+  "note": "The recorder's own roster and paths rode fields no decoder reads and are stripped (see `deidentified`)."
 }

@@ -879,19 +879,35 @@ mod recorder {
             std::fs::write(file, out.join("\n") + "\n").expect("write");
         }
 
-        fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+        /// The scenario's one transcript, found rather than named: a re-record
+        /// gives it a new filename, and three tests once pinned the old one.
+        fn transcript_in(scenario: &Path) -> PathBuf {
+            std::fs::read_dir(scenario)
+                .expect("read")
+                .flatten()
+                .map(|e| e.path())
+                .find(|p| {
+                    p.extension().is_some_and(|x| x == "jsonl")
+                        && p.file_name().is_some_and(|n| n != "hook-payloads.jsonl")
+                })
+                .expect("the scenario ships one transcript")
+        }
+
+        fn stripped_copy_of(src: &Path) -> (tempfile::TempDir, PathBuf) {
             let d = tempfile::tempdir().expect("tempdir");
-            let to = d.path().join(name);
-            std::fs::copy(
-                sources_root()
+            let to = d.path().join(src.file_name().expect("file name"));
+            std::fs::copy(src, &to).expect("copy");
+            (d, to)
+        }
+
+        fn stripped_copy(source: &str, scenario: &str, name: &str) -> (tempfile::TempDir, PathBuf) {
+            stripped_copy_of(
+                &sources_root()
                     .join("fixtures")
                     .join(source)
                     .join(scenario)
                     .join(name),
-                &to,
             )
-            .expect("copy");
-            (d, to)
         }
 
         #[test]
@@ -933,11 +949,9 @@ mod recorder {
 
         #[test]
         fn the_first_sight_cwd_survives_the_strip() {
-            let (_d, rollout) = stripped_copy(
-                "codex",
-                "tool-run-recorded",
-                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
-            );
+            let (_d, rollout) = stripped_copy_of(&transcript_in(
+                &sources_root().join("fixtures/codex/tool-run-recorded"),
+            ));
             let cwds = |p: &Path| -> Vec<Option<PathBuf>> {
                 let extract = registry::cwd_extractor_for("codex");
                 parsed_lines(p)
@@ -1015,21 +1029,19 @@ mod recorder {
         fn stripping_blanks_what_no_decoder_reads_and_changes_no_event() {
             let d = tempfile::tempdir().expect("tempdir");
             let src = sources_root().join("fixtures/codex/tool-run-recorded");
-            let files: Vec<PathBuf> = [
-                "rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl",
-                "hook-payloads.jsonl",
-            ]
-            .iter()
-            .map(|name| {
-                let to = d.path().join(name);
-                std::fs::copy(src.join(name), &to).expect("copy");
-                to
-            })
-            .collect();
+            let files: Vec<PathBuf> = [transcript_in(&src), src.join("hook-payloads.jsonl")]
+                .iter()
+                .map(|from| {
+                    let to = d.path().join(from.file_name().expect("file name"));
+                    std::fs::copy(from, &to).expect("copy");
+                    to
+                })
+                .collect();
 
             plant_unread(&files[0], "installed_skills", "example-skill-1");
             let before = scenario_events("codex", &files);
             let wire = std::fs::read_to_string(&files[0]).expect("read");
+            let session_id = first_hook_field(&files[1], "session_id");
             let blanked = strip_unread("codex", &files).expect("strip");
             assert!(blanked > 0, "the planted key is unread");
             assert_eq!(scenario_events("codex", &files), before);
@@ -1055,9 +1067,20 @@ mod recorder {
             );
             let hooks = std::fs::read_to_string(&files[1]).expect("read");
             assert!(
-                hooks.contains("01a08cbb-1b7f-7ce3-b924-1a501c380856"),
+                hooks.contains(&session_id),
                 "the hook's session_id keys coalescing, so it stays"
             );
+        }
+
+        /// A string field off the first hook payload, read BEFORE the strip so the
+        /// assertion follows the capture rather than pinning one recording's id.
+        fn first_hook_field(hooks: &Path, key: &str) -> String {
+            let line = std::fs::read_to_string(hooks).expect("read");
+            let line = line.lines().next().expect("a hook line");
+            serde_json::from_str::<serde_json::Value>(line).expect("json")[key]
+                .as_str()
+                .unwrap_or_else(|| panic!("{key} on the first hook payload"))
+                .to_string()
         }
 
         #[test]
@@ -1206,8 +1229,7 @@ mod recorder {
                 out
             };
             plant_unread(
-                &scenario
-                    .join("rollout-2026-09-10T12-11-07-01a08cbb-1b7f-7ce3-b924-1a501c380856.jsonl"),
+                &transcript_in(&scenario),
                 "installed_skills",
                 "example-skill-1",
             );
