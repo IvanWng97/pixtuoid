@@ -7,6 +7,5 @@
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 212
-  },
-  "note": "The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`); `world_state` (the installed skill roster with paths plus the host timezone) is among them, so this capture needed no hand redaction."
+  }
 }

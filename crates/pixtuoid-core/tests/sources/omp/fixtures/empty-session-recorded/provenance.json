@@ -8,5 +8,5 @@
     "method": "decoder-allowlist",
     "blanked": 2
   },
-  "note": "hook sessionFile home path redacted to /Users/dev. interactive TUI under a pty, /exit before any prompt: at 18.2.6 omp persists NOTHING for the session (18.0.11 wrote a header, the /exit keystrokes counting as a composer draft) and never a session_exit, so the bridge shutdown is the only end signal."
+  "note": "hook sessionFile home path redacted to /Users/dev. interactive TUI under a pty, /exit before any prompt: omp persists no transcript for a launch session that never took a prompt, and never a session_exit, so the bridge shutdown is the only end signal."
 }

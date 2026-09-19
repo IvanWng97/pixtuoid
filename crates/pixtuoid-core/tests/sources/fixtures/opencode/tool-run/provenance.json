@@ -8,5 +8,5 @@
     "method": "decoder-allowlist",
     "blanked": 61
   },
-  "note": "Recorded with `--dir`: at 1.18.30 `opencode run` resolved its project from the launching checkout rather than the recorder's sandbox cwd (the turn read the wrong tree and the cwd carried the recorder's home), so the sandbox path is pinned explicitly."
+  "note": "Recorded with `--dir`: at this version `opencode run` resolved its project from the launching checkout rather than the recorder's sandbox cwd (the turn read the wrong tree and the cwd carried the recorder's home), so the sandbox path is pinned explicitly."
 }

@@ -138,6 +138,9 @@ pub struct SourceDescriptor {
     /// The CLI version this build's decoder + fixtures were last verified
     /// against. `"unknown"`, NOT `""`, where we have no fixed anchor —
     /// `pixtuoid doctor` only flags SKEW when this parses to a version.
+    /// Pinned to the highest recorded capture's `version` banner by
+    /// `a_recorded_capture_anchors_its_sources_verified_version`, so a
+    /// re-record bumps it.
     pub verified_version: &'static str,
     /// argv to probe the installed CLI version. `None` = no stable CLI binary;
     /// `doctor` runs it best-effort and degrades to "version: unknown".
@@ -533,9 +536,8 @@ const REASONIX: SourceDescriptor = SourceDescriptor {
 const DSH: SourceDescriptor = SourceDescriptor {
     name: dsh::SOURCE_NAME,
     label_prefix: "ds",
-    // Every recorded dsh capture's banner is 0.1.1-rc.2;
-    // `doctor::parse_version` keeps only the dotted digit run, so the
-    // prerelease suffix never reaches this pin.
+    // dsh's banner carries a prerelease suffix (`-rc.N`); `doctor::parse_version`
+    // keeps only the dotted digit run, so the suffix never reaches this pin.
     verified_version: "0.1.5",
     version_probe: Some(&["dsh", "--version"]),
     // `DSH_HOME` is honored INSTALLER-side (the plugin file + patch row live

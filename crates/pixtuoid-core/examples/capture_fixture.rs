@@ -880,17 +880,24 @@ mod recorder {
         }
 
         /// The scenario's one transcript, found rather than named: a re-record
-        /// gives it a new filename, and three tests once pinned the old one.
-        fn transcript_in(scenario: &Path) -> PathBuf {
-            std::fs::read_dir(scenario)
-                .expect("read")
-                .flatten()
-                .map(|e| e.path())
-                .find(|p| {
-                    p.extension().is_some_and(|x| x == "jsonl")
-                        && p.file_name().is_some_and(|n| n != "hook-payloads.jsonl")
-                })
-                .expect("the scenario ships one transcript")
+        /// gives it a new filename. The registry's admit rule and the recorder's
+        /// own hook-envelope test decide what is a transcript, and a stale second
+        /// one beside a promoted `.new` fails here instead of being picked by
+        /// directory order.
+        fn transcript_in(source: &str, scenario: &Path) -> PathBuf {
+            let mut found: Vec<PathBuf> =
+                pixtuoid_core::harness::transcripts_under(source, scenario)
+                    .into_iter()
+                    .filter(|p| !is_hook_envelope(p))
+                    .collect();
+            assert_eq!(
+                found.len(),
+                1,
+                "{}: one transcript per scenario, found {:?}",
+                scenario.display(),
+                found
+            );
+            found.remove(0)
         }
 
         fn stripped_copy_of(src: &Path) -> (tempfile::TempDir, PathBuf) {
@@ -950,6 +957,7 @@ mod recorder {
         #[test]
         fn the_first_sight_cwd_survives_the_strip() {
             let (_d, rollout) = stripped_copy_of(&transcript_in(
+                "codex",
                 &sources_root().join("fixtures/codex/tool-run-recorded"),
             ));
             let cwds = |p: &Path| -> Vec<Option<PathBuf>> {
@@ -1029,14 +1037,17 @@ mod recorder {
         fn stripping_blanks_what_no_decoder_reads_and_changes_no_event() {
             let d = tempfile::tempdir().expect("tempdir");
             let src = sources_root().join("fixtures/codex/tool-run-recorded");
-            let files: Vec<PathBuf> = [transcript_in(&src), src.join("hook-payloads.jsonl")]
-                .iter()
-                .map(|from| {
-                    let to = d.path().join(from.file_name().expect("file name"));
-                    std::fs::copy(from, &to).expect("copy");
-                    to
-                })
-                .collect();
+            let files: Vec<PathBuf> = [
+                transcript_in("codex", &src),
+                src.join("hook-payloads.jsonl"),
+            ]
+            .iter()
+            .map(|from| {
+                let to = d.path().join(from.file_name().expect("file name"));
+                std::fs::copy(from, &to).expect("copy");
+                to
+            })
+            .collect();
 
             plant_unread(&files[0], "installed_skills", "example-skill-1");
             let before = scenario_events("codex", &files);
@@ -1072,15 +1083,22 @@ mod recorder {
             );
         }
 
-        /// A string field off the first hook payload, read BEFORE the strip so the
-        /// assertion follows the capture rather than pinning one recording's id.
+        /// A string field off the first hook payload, so an assertion follows the
+        /// capture rather than pinning one recording's id. Refuses a blank: read
+        /// after the strip, `contains("")` would pass on exactly the wrongly
+        /// stripped shape.
         fn first_hook_field(hooks: &Path, key: &str) -> String {
             let line = std::fs::read_to_string(hooks).expect("read");
             let line = line.lines().next().expect("a hook line");
-            serde_json::from_str::<serde_json::Value>(line).expect("json")[key]
+            let value = serde_json::from_str::<serde_json::Value>(line).expect("json")[key]
                 .as_str()
                 .unwrap_or_else(|| panic!("{key} on the first hook payload"))
-                .to_string()
+                .to_string();
+            assert!(
+                !value.is_empty(),
+                "{key} on the first hook payload is blank"
+            );
+            value
         }
 
         #[test]
@@ -1229,7 +1247,7 @@ mod recorder {
                 out
             };
             plant_unread(
-                &transcript_in(&scenario),
+                &transcript_in("codex", &scenario),
                 "installed_skills",
                 "example-skill-1",
             );

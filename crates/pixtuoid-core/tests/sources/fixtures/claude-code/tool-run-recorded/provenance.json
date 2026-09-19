@@ -7,6 +7,5 @@
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 543
-  },
-  "note": "Recorded with the machine's rtk command-rewriting hook active: PostToolUse tool_input and hook stdout carry rtk-rewritten commands; the transcript's own tool_use rows are CC's. The recorder's own roster and instruction attachments rode fields no decoder reads and are stripped (see `deidentified`)."
+  }
 }
