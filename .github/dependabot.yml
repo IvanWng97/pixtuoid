@@ -77,10 +77,11 @@ updates:
       # typescript-eslint, so `npm ci` ERESOLVEs.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
-      # The direct mermaid dep pins what rehype-mermaid renders with
-      # (rehype-mermaid → mermaid-isomorphic → mermaid `^11`). A major past that
-      # range installs a SECOND mermaid the site never renders with. Lift when
-      # mermaid-isomorphic itself moves.
+      # mermaid-isomorphic (what rehype-mermaid renders with; site/knip.jsonc owns
+      # why the direct pin exists) declares mermaid `^11`. A major past that range
+      # installs a SECOND mermaid the site never renders with. Lift when
+      # mermaid-isomorphic itself moves — site/config/npm-policy.test.mjs reds
+      # the moment the two majors part.
       - dependency-name: "mermaid"
         update-types: ["version-update:semver-major"]
     cooldown:
