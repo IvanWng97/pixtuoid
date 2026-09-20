@@ -21,6 +21,9 @@ release_workflow_path := ".github/workflows/release.yml"
 release_plz_workflow_path := ".github/workflows/release-plz.yml"
 release_plz_action_path := "release-plz/action"
 release_plz_config_path := "release-plz.toml"
+builds_workflow_path := ".github/workflows/ci-builds.yml"
+semver_guard_job := "semver"
+semver_guard_var := "RELEASE_PR"
 cliff_config_path := "cliff.toml"
 release_plz_token_env := "GITHUB_TOKEN"
 automatic_token := "${{ secrets.GITHUB_TOKEN }}"
@@ -421,6 +424,12 @@ release_plz_token_is_a_secret(token) if {
 	startswith(token, secret_prefix)
 	token != automatic_token
 }
+
+semver_release_pr_guard := object.get(
+	documents[builds_workflow_path],
+	["jobs", semver_guard_job, "env", semver_guard_var],
+	"",
+)
 
 release_pr_name_is_skipped(pr_name) if {
 	some pattern in cliff_skipped_patterns
@@ -1434,6 +1443,19 @@ deny contains msg if {
 	msg := sprintf(
 		"%s [workspace] %s must be %v — %s",
 		[release_plz_config_path, key, pin.expected, pin.why],
+	)
+}
+
+# The third cross-file pair. `pr_branch_prefix` is what release-plz names the
+# release PR's branch, and ci-builds.yml keys the ONLY run of the bump gate on
+# that same literal — so a prefix changed on one side alone silently leaves
+# every release PR ungated, the failure that job's own comment describes.
+deny contains msg if {
+	prefix := object.get(documents[release_plz_config_path], ["workspace", "pr_branch_prefix"], "")
+	not contains(semver_release_pr_guard, sprintf("'%s'", [prefix]))
+	msg := sprintf(
+		"%s job %q must key %s on %s's pr_branch_prefix %q — found %q; the prefix decides which PRs run the bump gate, and release-plz's own default is not a declaration either side can read",
+		[builds_workflow_path, semver_guard_job, semver_guard_var, release_plz_config_path, prefix, semver_release_pr_guard],
 	)
 }
 

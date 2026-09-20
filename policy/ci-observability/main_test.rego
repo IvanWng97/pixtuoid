@@ -692,6 +692,31 @@ test_release_plz_kill_switches_cannot_be_flipped_silently if {
 	}
 }
 
+# Either side edited alone leaves every release PR without its bump gate, and
+# nothing else in the repository reads both.
+test_release_plz_branch_prefix_must_match_the_semver_guard if {
+	fixture := {"documents": [
+		{"path": release_plz_config_path, "contents": {"workspace": {"pr_branch_prefix": "rel-"}}},
+		{"path": builds_workflow_path, "contents": {"jobs": {"semver": {"env": {"RELEASE_PR": "${{ startsWith(github.head_ref, 'release-plz-') }}"}}}}},
+	]}
+	violations := deny with input as fixture
+	sprintf(
+		"%s job %q must key %s on %s's pr_branch_prefix %q — found %q; the prefix decides which PRs run the bump gate, and release-plz's own default is not a declaration either side can read",
+		[builds_workflow_path, semver_guard_job, semver_guard_var, release_plz_config_path, "rel-", "${{ startsWith(github.head_ref, 'release-plz-') }}"],
+	) in violations
+}
+
+test_release_plz_branch_prefix_matching_the_guard_is_silent if {
+	fixture := {"documents": [
+		{"path": release_plz_config_path, "contents": {"workspace": {"pr_branch_prefix": "release-plz-"}}},
+		{"path": builds_workflow_path, "contents": {"jobs": {"semver": {"env": {"RELEASE_PR": "${{ startsWith(github.head_ref, 'release-plz-') }}"}}}}},
+	]}
+	violations := deny with input as fixture
+	every msg in violations {
+		not contains(msg, semver_guard_var)
+	}
+}
+
 test_release_plz_pr_name_must_be_skipped_by_cliff if {
 	config := object.union(valid_release_plz_config, {"workspace": object.union(valid_release_plz_config.workspace, {"pr_name": "release v{{ version }}"})})
 	violations := deny with input as release_plz_fixture(config)
