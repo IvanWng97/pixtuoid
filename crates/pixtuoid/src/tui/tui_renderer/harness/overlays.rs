@@ -78,19 +78,12 @@ fn version_popup_interrupt_continues_from_edge() {
 }
 
 /// 80 columns is the classic default and `min_terminal_size().1` is the tightest HEIGHT
-/// that lays out the office at all — so it is also the tightest the popup must fit whole
-/// on. Not the tightest width: the panel saturates at `VERSION_POPUP_W`, narrower windows
-/// by design.
-///
-/// Asserts on the LAST bullet's tail: windowing drops trailing rows, so the tail
-/// is the first thing to disappear and the `⋮` marker the first to appear.
+/// that lays out the office at all — so it is also the tightest the popup must render
+/// whole on: title and link both reach the frame. Not the tightest width: the panel
+/// saturates at `VERSION_POPUP_W`, narrower wraps by design.
 #[test]
-fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
-    if crate::version::release_notes_are_uncurated() {
-        return;
-    }
+fn the_version_popup_renders_whole_on_a_classic_terminal() {
     let version = env!("CARGO_PKG_VERSION");
-    let notes = crate::version::release_notes(version).expect("the shipped version has notes");
     let rows = crate::tui::renderer::min_terminal_size().1;
     let mut r = build(80, rows, vec![]);
     r.set_version_popup(true, t0());
@@ -100,22 +93,41 @@ fn the_shipped_release_notes_render_whole_on_a_classic_terminal() {
     let text = frame_text(r.frame_buffer());
 
     assert!(
-        !text.contains('\u{22ee}'),
-        "v{version}'s notes are windowed at 80x{rows} — the reader loses the tail behind \
-         `⋮ N more`:\n{text}"
+        text.contains(&format!("v{version}")),
+        "the title names the version:\n{text}"
     );
-    // `frame_text` joins per terminal ROW, so match the last WORD — a phrase would
-    // straddle a wrap and read as missing.
-    let last_word = notes
-        .last()
-        .expect("a non-empty arm")
-        .split_whitespace()
-        .last()
-        .expect("a non-empty note");
     assert!(
-        text.contains(last_word),
-        "the last bullet must reach the frame in full — {last_word:?} is missing:\n{text}"
+        text.contains("Release notes"),
+        "the link is the CTA and must reach the frame in full:\n{text}"
     );
+}
+
+/// The body row is the destination a mouse-less terminal copies, and a
+/// `Paragraph` clips a too-wide line silently — so the tail is what disappears,
+/// on the composed frame no string-equality test can see. Swept from the
+/// narrowest office the terminal lays out upward.
+#[test]
+fn the_popup_body_reaches_the_frame_at_every_office_width() {
+    let version = env!("CARGO_PKG_VERSION");
+    let (min_cols, rows) = crate::tui::renderer::min_terminal_size();
+    for cols in [min_cols, min_cols + 8, 80, 120] {
+        let mut r = build(cols, rows, vec![]);
+        r.set_version_popup(true, t0());
+        let now = t0() + Duration::from_millis(250);
+        r.render(&scene_with(vec![], 16), &pack(), now).unwrap();
+        let text = frame_text(r.frame_buffer());
+        assert!(
+            text.contains("github.com/IvanWng97/pixtuoid"),
+            "the body row's address is clipped at {cols} cols:\n{text}"
+        );
+        // At the popup's own measure the whole URL must land, version included.
+        if cols >= 80 {
+            assert!(
+                text.contains(&format!("releases/tag/v{version}")),
+                "the URL's tail is clipped at {cols} cols:\n{text}"
+            );
+        }
+    }
 }
 
 #[test]

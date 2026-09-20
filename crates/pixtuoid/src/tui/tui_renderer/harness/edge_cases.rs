@@ -154,7 +154,7 @@ fn no_layout_frame_paints_the_popup_at_its_clickable_scale() {
         "the hit-box scale must equal the scale the painter used"
     );
     assert!(
-        frame_text(r.frame_buffer()).contains("What's new"),
+        frame_text(r.frame_buffer()).contains("Updated to"),
         "the popup must actually paint on the footer-only frame"
     );
 }
@@ -214,53 +214,6 @@ fn modal_overlays_still_paint_when_the_office_cannot_lay_out() {
         text.contains("Sources"),
         "the Sources panel must paint on the footer-only frame; frame was:\n{text}"
     );
-}
-
-#[test]
-fn a_full_height_modal_never_covers_the_footer_row() {
-    let scene = scene_with(vec![idle("/fh/0.jsonl", 0, t0())], 16);
-    let (cols, rows) = crate::tui::renderer::min_terminal_size();
-    let mut r = build(cols, rows, vec![]);
-    r.set_version_popup(true, t0());
-    let t = t0() + Duration::from_millis(400); // fully scaled in
-    r.render(&scene, &pack(), t).expect("render");
-    let text = frame_text(r.frame_buffer());
-    let last_row = text.lines().last().unwrap_or_default().to_string();
-    assert!(
-        text.contains("Enter to close"),
-        "the popup must be on screen for this to test anything; frame was:\n{text}"
-    );
-    // The premise, not just the conclusion: "full-height" holds only while the notes
-    // overflow the clamped viewport, and `just bump` rewrites them wholesale.
-    assert!(
-        text.contains("more \u{2014} see the link"),
-        "the notes must OVERFLOW at {cols}x{rows} for this to be a full-height modal; \
-         frame was:\n{text}"
-    );
-    assert!(
-        last_row.contains("[q]uit"),
-        "the footer must survive a full-height modal, got last row {last_row:?};\
-         \nframe was:\n{text}"
-    );
-
-    // Compare CELLS, not a substring: surviving glyphs are not a READABLE footer,
-    // and the shadow's bottom band dims `fg` only.
-    let mut plain = build(cols, rows, vec![]);
-    plain.render(&scene, &pack(), t).expect("render");
-    let (lit, dimmed) = (plain.frame_buffer(), r.frame_buffer());
-    let footer_y = lit.area.height - crate::tui::renderer::FOOTER_ROWS;
-    for x in 0..lit.area.width {
-        let (a, b) = (
-            lit.cell((x, footer_y)).expect("footer cell"),
-            dimmed.cell((x, footer_y)).expect("footer cell"),
-        );
-        assert_eq!(
-            (a.symbol(), a.fg, a.bg),
-            (b.symbol(), b.fg, b.bg),
-            "the modal (or its drop shadow) repainted footer cell x={x}; \
-             frame was:\n{text}"
-        );
-    }
 }
 
 #[test]

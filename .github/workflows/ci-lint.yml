@@ -159,17 +159,6 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just msrv
 
-  notes-curated:
-    name: release notes curated
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/setup-just
-      - run: just notes-curated
-
   npm-gen:
     name: npm package generator
     runs-on: ubuntu-latest
@@ -242,7 +231,7 @@ jobs:
     # This explicit manifest prevents a nested job deletion or rename from
     # silently shrinking the single protected ci-gate.
     if: ${{ always() }}
-    needs: [fmt, clippy, deny, machete, hygiene, msrv, notes-curated, npm-gen, readme, api-surface, docs]
+    needs: [fmt, clippy, deny, machete, hygiene, msrv, npm-gen, readme, api-surface, docs]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

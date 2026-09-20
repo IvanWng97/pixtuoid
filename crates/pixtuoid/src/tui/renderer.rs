@@ -528,16 +528,7 @@ pub(super) fn paint_overlays(
         );
     }
     if popup_scale > 0.0 {
-        if let Some(notes) = crate::version::release_notes(env!("CARGO_PKG_VERSION")) {
-            paint_version_popup(
-                f,
-                env!("CARGO_PKG_VERSION"),
-                notes,
-                bounds,
-                theme,
-                popup_scale,
-            );
-        }
+        paint_version_popup(f, env!("CARGO_PKG_VERSION"), bounds, theme, popup_scale);
     }
     if help_open {
         paint_help_overlay(f, bounds, theme);
