@@ -118,7 +118,7 @@ mod tests {
                 assert_eq!(
                     dep_version,
                     env!("CARGO_PKG_VERSION"),
-                    "{who}: path-dep version ({dep_version}) != crate version ({}) — run `just bump` (see #110)",
+                    "{who}: path-dep version ({dep_version}) != crate version ({}) — release-plz rewrites every path-dep requirement in the release PR (see #110)",
                     env!("CARGO_PKG_VERSION")
                 );
                 checked += 1;

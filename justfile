@@ -8,7 +8,7 @@
 #   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate committed artifacts (README sections + docs images + site demos)
-#   release  — cut a new version (bump) + the distribution gates (npm-check)
+#   release  — the release-PR gates (npm-check, semver)
 #   meta     — tooling setup + the full pre-push / full-stack gates
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
@@ -155,8 +155,9 @@ actionlint-composites:
 zizmor:
     zizmor --strict-collection .
 
-# Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2
-# parsing, jq owns SARIF fixtures, and Conftest/OPA owns policy evaluation.
+# Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2 and
+# TOML parsing, jq owns SARIF fixtures and joins the two document arrays, and
+# Conftest/OPA owns policy evaluation.
 [group('rust')]
 [doc('Check repository CI contracts with Conftest/OPA policy-as-code')]
 ci-observability:
@@ -170,10 +171,22 @@ ci-observability:
     [[ -s .github/dependabot.yml ]] || { echo "error: .github/dependabot.yml is missing or empty" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
     files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
+    # The two release contracts that span files: release-plz.toml's tag name vs
+    # release.yml's trigger, and its PR title vs cliff.toml's skip parser.
+    toml_files=(release-plz.toml cliff.toml)
+    for f in "${toml_files[@]}"; do
+        [[ -s $f ]] || { echo "error: $f is missing or empty" >&2; exit 1; }
+    done
     combined="$(mktemp)"
+    yaml_documents="$(mktemp)"
+    toml_documents="$(mktemp)"
     policy_test_results="$(mktemp)"
-    trap 'rm -f "$combined" "$policy_test_results"' EXIT
-    yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$combined"
+    trap 'rm -f "$combined" "$yaml_documents" "$toml_documents" "$policy_test_results"' EXIT
+    yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$yaml_documents"
+    # yq fixes the input format per invocation from the FIRST file's extension,
+    # so the TOML documents ride a second call and jq joins the two arrays.
+    yq eval-all -p toml -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${toml_files[@]}" >"$toml_documents"
+    jq -s '{documents: (map(.documents) | add)}' "$yaml_documents" "$toml_documents" >"$combined"
     conftest fmt --check policy/ci-observability
     # conftest embeds OPA but exposes neither `check` nor coverage, so the OPA
     # binary owns both. `--strict` catches compile-level slop conftest accepts
@@ -405,18 +418,19 @@ msrv:
     # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
-# SemVer-check the published libraries against their crates.io baselines. CI-only
-# in practice: needs network to fetch the baseline crates. Scoped to pixtuoid-core
-# (the headless lib) + pixtuoid-scene (the published engine crate); the binary
-# crates' libs aren't public API.
+# SemVer-check the published libraries against their crates.io baselines. CI
+# runs it on release PRs only — ci-builds.yml's `semver` job carries the WHY.
+# Needs network for the baseline crates. Scoped to pixtuoid-core (the headless
+# lib) + pixtuoid-scene (the published engine crate); the binary crates' libs
+# aren't public API.
 [group('rust')]
-[doc('SemVer-check pixtuoid-core + pixtuoid-scene against their crates.io baselines (CI-only)')]
+[doc('SemVer-check pixtuoid-core + pixtuoid-scene against their crates.io baselines (release PRs)')]
 semver:
     cargo semver-checks $(printf -- '--package %s ' {{PUBLISHED_CRATES}})
 
 # Public-API surface snapshot for the PUBLISHED libraries. COMPLEMENTS
-# `just semver`: the semver gate answers "major/minor bump?", this shows *what*
-# changed as a reviewable golden diff. Goldens live in `api/<crate>.txt` —
+# `just semver`: that gate answers "is the release bump enough?" on the release
+# PR, this shows *what* changed as a reviewable golden diff at review time. Goldens live in `api/<crate>.txt` —
 # `cargo public-api -s` output (`-s` omits blanket-impl noise like
 # `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
 # adding/removing a derive IS a public-API change). cargo-public-api takes one
@@ -712,7 +726,7 @@ build *args:
 # packaging-build/action.yml keeps its own just-free parse of the same line —
 # that composite deliberately never installs just (see ci-builds.yml).
 [group('rust')]
-[doc("Print the workspace version — release.yml's tag check and `just bump` read it")]
+[doc("Print the workspace version — release.yml's tag check and release-plz.yml's tag assertion read it")]
 workspace-version:
     @grep -m1 '^version' Cargo.toml | cut -d'"' -f2
 
@@ -1027,77 +1041,6 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
 
 # ── release ───────────────────────────────────────────────────────
 
-# Cut a release: bump to a new version on a release branch.
-#
-# Rewrites EVERY version number in one shot — the workspace version, the
-# inter-crate pixtuoid→pixtuoid-core path-dep requirement, and Cargo.lock (via
-# `cargo set-version`) — then runs `just preflight` and commits on
-# `release/vX.Y.Z`. It STOPS before the tag: pushing the tag is what triggers
-# the irreversible publish (crates.io + npm, and a homebrew-core autobump), so
-# that stays a human step.
-# Needs cargo-edit (`just setup-tools`).
-# Honors SKIP_PREFLIGHT=1 for iteration.
-[group('release')]
-[doc('Cut a release: bump every version number on a release branch (no tag/push)')]
-bump version:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    ver="{{ version }}"
-
-    # 1. shape — a plain release version, no leading v / pre-release suffix
-    [[ "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-        echo "error: '$ver' is not a release version (expected X.Y.Z)" >&2; exit 1; }
-
-    # 2. clean tracked tree (untracked is fine) — a bump must not sweep up edits
-    if ! git diff --quiet || ! git diff --cached --quiet; then
-        echo "error: uncommitted changes — commit or stash before bumping" >&2; exit 1; fi
-
-    cur="$(just workspace-version)"
-
-    # 3. must be strictly newer than the current version
-    if [[ "$ver" == "$cur" || "$(printf '%s\n%s\n' "$cur" "$ver" | sort -V | tail -1)" != "$ver" ]]; then
-        echo "error: $ver is not newer than the current $cur" >&2; exit 1; fi
-
-    branch="release/v$ver"
-    if git rev-parse --verify --quiet "$branch" >/dev/null; then
-        echo "error: branch $branch already exists" >&2; exit 1; fi
-
-    # releases come from main; forking release/v$ver off anything else is usually wrong
-    cur_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
-    if [ "$cur_branch" != "main" ]; then
-        echo "warning: on '$cur_branch', not main — release/v$ver will fork from here" >&2; fi
-
-    echo "▸ bump $cur → $ver"
-
-    # restore everything if anything below fails before the commit lands, so a
-    # failed bump (e.g. red preflight) never strands a half-bumped tree or an
-    # orphan release branch. `restore --staged --worktree` also clears the index —
-    # a plain `checkout --` would leave the bump *staged* if the commit step failed.
-    committed=0
-    cleanup() {
-        if [ "$committed" = 1 ]; then return 0; fi
-        git restore --staged --worktree Cargo.toml Cargo.lock crates/*/Cargo.toml 2>/dev/null || true
-        if [ "$(git symbolic-ref --short -q HEAD 2>/dev/null || true)" = "$branch" ]; then
-            git switch -q "$cur_branch" 2>/dev/null || true
-            git branch -qD "$branch" 2>/dev/null || true
-        fi
-    }
-    trap cleanup EXIT
-
-    # 4. all version numbers + Cargo.lock in one command (incl. the path-dep)
-    cargo set-version --workspace "$ver"
-
-    # 5. green gate before committing (skippable for iteration)
-    if [[ "${SKIP_PREFLIGHT:-}" != "1" ]]; then just preflight; fi
-
-    # 6. land it on a release branch — no tag, no push (the irreversible step)
-    git switch -c "$branch"
-    git add Cargo.toml Cargo.lock crates/*/Cargo.toml
-    git commit -q -m "chore(release): v$ver"
-    committed=1
-
-    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    2. open a PR, review, merge to main\n    3. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
-
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
 #   - npm/generate.test.mjs — the ONLY validation of npm/generate.mjs. release.yml
@@ -1137,6 +1080,8 @@ setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     # cargo-public-api rides API_PUBLIC_API — the tool-exact story lives there.
+    # cargo-edit: `cargo set-version --workspace` corrects a release PR's version
+    # by hand when its `semver` job reds (docs/CONTRIBUTING.md#releasing).
     tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"

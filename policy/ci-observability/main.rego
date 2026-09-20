@@ -18,6 +18,25 @@ post_test_condition := "${{ !cancelled() }}"
 report_presence_step_name := "Require a generated report"
 upload_warning_step_name := "Surface advisory upload failure"
 release_workflow_path := ".github/workflows/release.yml"
+release_plz_workflow_path := ".github/workflows/release-plz.yml"
+release_plz_action_path := "release-plz/action"
+release_plz_config_path := "release-plz.toml"
+cliff_config_path := "cliff.toml"
+release_plz_token_env := "GITHUB_TOKEN"
+automatic_token := "${{ secrets.GITHUB_TOKEN }}"
+secret_prefix := "${{ secrets."
+
+# The five release-plz settings this repository cannot let drift, each with the
+# reason that is true for IT — a shared message would assert of four keys what
+# holds for one.
+release_plz_kill_switches := {
+	"publish": {"expected": false, "why": "release.yml publishes over OIDC trusted publishing; release-plz publishing too would race an irreversible upload"},
+	"git_release_enable": {"expected": false, "why": "release.yml creates the GitHub release with the git-cliff body, and release-plz would get there first with an empty one (changelog_update is off)"},
+	"git_tag_enable": {"expected": false, "why": "the workspace default is what makes the exactly-one-tagging-package rule below a complete census"},
+	"release_always": {"expected": false, "why": "true tags every main push whose version is untagged, so a version bumped outside a release PR publishes with no human decision"},
+	"semver_check": {"expected": false, "why": "true runs cargo-semver-checks inside the step that carries the release PAT, so every dependency's build script runs with a write credential in its environment"},
+}
+
 release_concurrency_group := "pixtuoid-release"
 actionlint_config_path := ".github/actionlint.yaml"
 actionlint_claude_wif_ignore := "input \"anthropic_(federation_rule_id|organization_id|service_account_id)\" is not defined in action \"anthropics/claude-code-action@v1\""
@@ -312,27 +331,29 @@ site_node_call_steps(path, job_name) := [step |
 runs_zizmor(step) if trim_space(object.get(step, "run", "")) == zizmor_recipe
 
 # GitHub layers a step's environment workflow < job < step and "uses the most
-# specific variable" (workflow-syntax reference, `env`), so the token is equally
+# specific variable" (workflow-syntax reference, `env`), so a variable is equally
 # live wherever it is declared and hoisting it to the job is a valid refactor.
 # The nearest DECLARATION wins even when its value is empty, which is why these
 # arms are mutually exclusive rather than an any-of: a step-level `GH_TOKEN: ""`
 # shadows the job's token and puts zizmor back offline.
-effective_gh_token(_, _, step) := token if {
-	token := object.get(step, ["env", github_token_env], null)
-	token != null
+effective_env(_, _, step, name) := value if {
+	value := object.get(step, ["env", name], null)
+	value != null
 }
 
-effective_gh_token(_, job, step) := token if {
-	object.get(step, ["env", github_token_env], null) == null
-	token := object.get(job, ["env", github_token_env], null)
-	token != null
+effective_env(_, job, step, name) := value if {
+	object.get(step, ["env", name], null) == null
+	value := object.get(job, ["env", name], null)
+	value != null
 }
 
-effective_gh_token(workflow, job, step) := token if {
-	object.get(step, ["env", github_token_env], null) == null
-	object.get(job, ["env", github_token_env], null) == null
-	token := object.get(workflow, ["env", github_token_env], "")
+effective_env(workflow, job, step, name) := value if {
+	object.get(step, ["env", name], null) == null
+	object.get(job, ["env", name], null) == null
+	value := object.get(workflow, ["env", name], "")
 }
+
+effective_gh_token(workflow, job, step) := effective_env(workflow, job, step, github_token_env)
 
 # One entry per LIVE `just zizmor` invocation, carrying the token GitHub would
 # actually place in that step's environment. A conditional or continue-on-error
@@ -347,6 +368,71 @@ zizmor_invocations(path) := [{"job": job_name, "token": effective_gh_token(workf
 	object.get(step, "if", null) == null
 	object.get(step, "continue-on-error", false) == false
 ]
+
+# Matched on the action PATH, not the pinned ref: this policy must survive the
+# SHA bump that keeps the pin current, and the ref itself is zizmor's beat.
+uses_release_plz(step) if {
+	uses := object.get(step, "uses", "")
+	is_string(uses)
+	split_action(uses)[0] == release_plz_action_path
+}
+
+# Liveness as `zizmor_invocations` defines it, over EVERY document rather than
+# one path: a SECOND workflow calling this action is the drift a path-keyed rule
+# cannot see. The JOB's `if:` is not a softener here — both jobs carry their
+# event guard there — but the step's is, so an `if: false` on the step cannot
+# retire the two rules below by emptying this list.
+release_plz_invocations := [{"path": path, "job": job_name, "command": object.get(step, ["with", "command"], ""), "token": effective_env(workflow, job, step, release_plz_token_env)} |
+	some path, workflow in documents
+	some job_name, job in object.get(workflow, "jobs", {})
+	object.get(job, "continue-on-error", false) == false
+	some step in object.get(job, "steps", [])
+	uses_release_plz(step)
+	object.get(step, "if", null) == null
+	object.get(step, "continue-on-error", false) == false
+]
+
+release_plz_commands contains command if {
+	some invocation in release_plz_invocations
+	command := invocation.command
+}
+
+release_plz_packages := object.get(documents[release_plz_config_path], "package", [])
+
+release_plz_tagging_packages := [pkg |
+	some pkg in release_plz_packages
+	object.get(pkg, "git_tag_enable", false) == true
+]
+
+release_tag_globs contains tag_glob if {
+	some tag_glob in object.get(documents[release_workflow_path], ["on", "push", "tags"], [])
+}
+
+release_tag_prefix := trim_suffix(tag_glob, "*") if {
+	count(release_tag_globs) == 1
+	some tag_glob in release_tag_globs
+}
+
+release_plz_tagging_package := release_plz_tagging_packages[0] if {
+	count(release_plz_tagging_packages) == 1
+}
+
+release_plz_token_is_a_secret(token) if {
+	startswith(token, secret_prefix)
+	token != automatic_token
+}
+
+release_pr_name_is_skipped(pr_name) if {
+	some pattern in cliff_skipped_patterns
+	regex.match(pattern, pr_name)
+}
+
+# git-cliff drops a commit whose subject matches a `skip` parser.
+cliff_skipped_patterns contains pattern if {
+	some parser in object.get(documents[cliff_config_path], ["git", "commit_parsers"], [])
+	object.get(parser, "skip", false) == true
+	pattern := object.get(parser, "message", "")
+}
 
 codecov_uploads := [entry |
 	some entry in uses_entries
@@ -1282,6 +1368,84 @@ deny contains msg if {
 	concurrency := object.get(document.contents, "concurrency", {})
 	object.get(concurrency, "queue", null) != null
 	msg := sprintf("%s must not use the release-only queue compatibility field", [document.path])
+}
+
+# Two halves again (the zizmor precedent). The existence half counts live steps:
+# a third is a second workflow opening release PRs or tagging, and zero leaves
+# the rules below keyed on a step that no longer exists, passing vacuously.
+deny contains msg if {
+	count(release_plz_invocations) != 2
+	msg := sprintf(
+		"%s must invoke %s in exactly two live steps that nothing softens — one `release-pr`, one `release` — found %d across the repository",
+		[release_plz_workflow_path, release_plz_action_path, count(release_plz_invocations)],
+	)
+}
+
+# The action runs BOTH commands when `command:` is absent (its action.yml
+# branches on an empty input), so a step that loses the input keeps the count at
+# two while opening a release PR on every push to main. The census is what the
+# count alone cannot see.
+deny contains msg if {
+	release_plz_commands != {"release-pr", "release"}
+	msg := sprintf(
+		"%s must pass `command:` on every %s step — one `release-pr`, one `release`, found %v; the action runs BOTH commands when the input is absent",
+		[release_plz_workflow_path, release_plz_action_path, release_plz_commands],
+	)
+}
+
+# The value half. GitHub never starts a workflow run off an event its own
+# automatic token produced, so a tag created with it leaves release.yml silent
+# while this job stays green. Pinned as "some repository secret", never the
+# secret's NAME, which the workflow and the repository settings already carry.
+deny contains msg if {
+	some invocation in release_plz_invocations
+	not release_plz_token_is_a_secret(invocation.token)
+	msg := sprintf(
+		"%s job %q must give %s a %s from a repository secret, not %q — a tag created with the automatic token triggers no workflow, so release.yml would never fire and the job would still be green",
+		[invocation.path, invocation.job, release_plz_action_path, release_plz_token_env, invocation.token],
+	)
+}
+
+# Exactly one package tags: release-plz's multi-package default gives every
+# crate its own `{{ package }}-v…` tag, which release.yml's glob matches for
+# none of them. A complete census only because the workspace default is off.
+deny contains msg if {
+	count(release_plz_tagging_packages) != 1
+	msg := sprintf(
+		"%s must enable git_tag_enable on exactly ONE package — found %d; every other package inherits the workspace default so that one tag is the release",
+		[release_plz_config_path, count(release_plz_tagging_packages)],
+	)
+}
+
+# The pair-pin across two files: the tag release-plz CREATES and the tag glob
+# release.yml TRIGGERS on. Either side edited alone is a release that builds
+# and publishes nothing, and homebrew-core's autobump never sees a tarball.
+deny contains msg if {
+	not startswith(object.get(release_plz_tagging_package, "git_tag_name", ""), release_tag_prefix)
+	msg := sprintf(
+		"%s git_tag_name %q must start with %q — %s triggers on that glob, and homebrew-core autobumps from the tag it produces",
+		[release_plz_config_path, object.get(release_plz_tagging_package, "git_tag_name", ""), release_tag_prefix, release_workflow_path],
+	)
+}
+
+deny contains msg if {
+	some key, pin in release_plz_kill_switches
+	object.get(documents[release_plz_config_path], ["workspace", key], "missing") != pin.expected
+	msg := sprintf(
+		"%s [workspace] %s must be %v — %s",
+		[release_plz_config_path, key, pin.expected, pin.why],
+	)
+}
+
+# The release PR's title becomes the squash-merge subject, and git-cliff renders
+# the release body from those subjects: unskipped, every release announces its
+# own version bump as a change.
+deny contains msg if {
+	not release_pr_name_is_skipped(object.get(documents[release_plz_config_path], ["workspace", "pr_name"], ""))
+	msg := sprintf(
+		"%s pr_name %q must match a skip parser in %s — the release PR's title is the squash commit subject git-cliff would otherwise list in the release body",
+		[release_plz_config_path, object.get(documents[release_plz_config_path], ["workspace", "pr_name"], ""), cliff_config_path],
+	)
 }
 
 deny contains msg if {

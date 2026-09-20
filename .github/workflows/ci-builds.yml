@@ -84,13 +84,24 @@ jobs:
     name: semver-checks
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Between releases main carries unreleased changes at the shipped version,
+    # where a breaking change to core/scene reds by design; the question this
+    # gate answers — is release-plz's bump enough? — exists only on a release
+    # PR. The prefix is declared at release-plz.toml `pr_branch_prefix`.
+    # Guarded per STEP: require-jobs reds a skipped job.
+    env:
+      RELEASE_PR: ${{ startsWith(github.head_ref, 'release-plz-') }}
     steps:
-      - uses: actions/checkout@v7
+      - if: env.RELEASE_PR == 'true'
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - uses: ./.github/actions/setup-cargo-just
-      - uses: taiki-e/install-action@cargo-semver-checks
-      - run: just semver
+      - if: env.RELEASE_PR == 'true'
+        uses: ./.github/actions/setup-cargo-just
+      - if: env.RELEASE_PR == 'true'
+        uses: taiki-e/install-action@cargo-semver-checks
+      - if: env.RELEASE_PR == 'true'
+        run: just semver
 
   required:
     name: required-build-jobs

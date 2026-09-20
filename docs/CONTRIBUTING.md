@@ -36,8 +36,9 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 `just preflight` is the local gate; these run only in CI, so a green preflight
 does not mean a green PR:
 
-- **semver** — a breaking change to `pixtuoid-core`/`pixtuoid-scene` without a
-  minor bump fails (the binary's lib target is not a semver surface).
+- **semver** — on release PRs only (`release-plz-*` head, WHY on the job): a
+  breaking change to `pixtuoid-core`/`pixtuoid-scene` that the chosen bump
+  doesn't cover fails (the binary's lib target is not a semver surface).
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
@@ -77,27 +78,47 @@ does not mean a green PR:
 
 Pre-1.0: **patch (`0.y.Z`)** = bug fixes and polish only — no new public API,
 nothing breaks. **minor (`0.Y.z`)** = everything else: new user-facing features
-AND any breaking change to the published crates' API. `cargo semver-checks`
-machine-enforces only the "nothing breaks on a patch" half; "features also bump
-minor" is convention, upheld in review. When a breaking change reddens
-`semver`, bump the minor **in the same PR** — never weaken the lint.
+AND any breaking change to the published crates' API. Both halves are machine-
+applied on the release PR, not per-PR: release-plz derives the level from the
+commit log (`features_always_increment_minor` in `release-plz.toml` is the
+"features also bump minor" half), and the `semver-checks` job on that PR is the
+"nothing breaks on a patch" half. A red `semver-checks` means raise the bump on
+the release branch — never weaken the lint.
 
 ### Cutting the release
 
-```bash
-just setup-tools    # once per clone
-just bump 0.5.1     # rewrites EVERY version number (workspace + path-deps + lockfile),
-                    # runs preflight → branch release/v0.5.1
-# then `just gen` (the HUD bakes CARGO_PKG_VERSION, so a bump drifts every
-# committed still) and commit docs/images + site/public/demos — else smoke's
-# gen-check reds the PR. The in-app upgrade popup links to the GitHub
-# release, whose body git-cliff renders from the commit log (cliff.toml).
-# PR → review → merge, then:
-git tag v0.5.1 && git push origin v0.5.1   # fires release.yml → build + crates.io + npm
-```
+[release-plz](https://release-plz.dev) owns every version number and the tag;
+`release.yml` still owns every publish. Four steps, all human-initiated:
 
-`just bump` **stops before the tag** — pushing the tag is the *irreversible*
-publish, so a human owns it. The tag also publishes **outside** this repo:
+1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
+   `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
+   version, every path-dep requirement and `Cargo.lock` rewritten. The bump
+   level comes from the conventional-commit log — nobody picks it. The PR body
+   lists the versions, not a changelog (`changelog_update = false`).
+2. **Regenerate the committed art on that branch**: `just gen`, then commit
+   `docs/images` + `site/public/demos`. The office HUD bakes
+   `CARGO_PKG_VERSION`, so a bump drifts every still and smoke's `gen-check`
+   reds the PR otherwise.
+3. **Review it like any PR.** `semver-checks` runs on release PRs only, and it
+   is the gate on the chosen bump: if it reds, the bump is too small — raise it
+   on the branch with `cargo set-version --workspace X.Y.Z` (cargo-edit) and
+   push.
+4. **Merge it** (squash). That merge is the *irreversible* step: the `tag` job
+   creates `vX.Y.Z`, which fires `release.yml` → build + crates.io + npm +
+   the GitHub release + a homebrew-core autobump.
+
+Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
+this repository with Contents and Pull requests read/write; `release-plz.yml`'s
+header says why it cannot be the automatic token. **The secret has to exist
+before `release-plz.yml` reaches main, not before the first dispatch**: the
+`tag` job runs on every push, and the action refuses an empty token.
+
+A release PR that release-plz closes and re-opens (it does that when the branch
+carries non-bot commits) leaves your `just gen` commit behind: `git cherry-pick`
+it onto the new branch.
+
+Merging the release PR is what publishes, so a human owns it. The tag also
+publishes **outside** this repo:
 homebrew-core's formula is `autobump: true` and builds from the tag tarball,
 instantly, with DEFAULT features on macOS *and* Linux — the one configuration
 our release never builds. Two consequences:

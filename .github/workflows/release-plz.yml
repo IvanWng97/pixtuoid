@@ -1,0 +1,109 @@
+name: release-plz
+
+# Two jobs, two triggers. `release-pr` is dispatched BY HAND, never on push:
+# release-plz refreshes an open release PR on every main push, and a PR that
+# carries non-bot commits is closed and re-opened fresh, so the regenerated
+# stills a human committed would be orphaned by the next dependabot merge, and
+# every refresh re-runs the full CI matrix. `tag` runs on every push to main and
+# tags only a merged release PR (release-plz.toml `release_always`).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+# Both jobs write through the GitHub API with RELEASE_PLZ_TOKEN, a fine-grained
+# PAT (this repository; Contents + Pull requests read/write): GitHub never
+# starts a workflow off GITHUB_TOKEN, so a tag created with the workflow's own
+# token would leave release.yml silent — the job token itself needs no write.
+# The action's git-config step fails loudly on an empty token.
+permissions: {}
+
+jobs:
+  release-pr:
+    name: release PR
+    # A dispatch from any other ref would open a release PR computed from that
+    # tree; a fork has no secret.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The bump is computed from every commit since the crates.io baseline.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          # Nothing compiles here (release-plz.toml `semver_check`).
+          enable-cache: 'false'
+      # SHA-pinned, unlike this repo's floating majors: the step sees the PAT
+      # (release-plz's security.md), and the SHA also pins the release-plz
+      # binary the action installs. Dependabot's minor/patch ignore never
+      # surfaces a `v0.6`; move it by hand.
+      - id: release-plz
+        uses: release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3 # v0.5.139
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      # A dispatch that opens nothing is a green no-op inside release-plz, and
+      # the human who pressed the button is owed an answer either way.
+      - name: A release PR must have been opened
+        env:
+          PR: ${{ steps.release-plz.outputs.pr }}
+          PRS_CREATED: ${{ steps.release-plz.outputs.prs_created }}
+        run: |
+          set -euo pipefail
+          if [ "$PRS_CREATED" != "true" ]; then
+            echo "::error::release-plz opened no release PR — its log above says why"
+            exit 1
+          fi
+          echo "::notice::release PR: $(jq -r .html_url <<<"$PR")"
+
+  tag:
+    name: tag a merged release PR
+    if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # release-plz walks the merged PR's commits to pick the one to tag,
+          # and decides "already released" from LOCAL tags — a shallow fetch
+          # carries none, so every release would look unreleased.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-cargo-just
+        with:
+          # Nothing compiles here either — the action only reads cargo metadata.
+          enable-cache: 'false'
+      - uses: release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3 # v0.5.139
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      # release-plz tags only a commit whose PR came from a `release-plz-*`
+      # branch, and exits GREEN when it declines — so a version bump merged
+      # from any other branch, or a miss in its commit->PR lookup, would leave
+      # main at a version release.yml never sees, with nothing red.
+      #
+      # At rest main always sits at a released version, so "the workspace
+      # version is tagged" holds on every push and needs no diff against the
+      # previous commit (which a multi-commit push would get wrong anyway).
+      - name: The workspace version must be tagged
+        run: |
+          set -euo pipefail
+          version="$(just workspace-version)"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "v$version is tagged"
+          else
+            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). If this push merged one, re-run this job; otherwise publish by hand: git tag v$version $GITHUB_SHA && git push origin v$version"
+            exit 1
+          fi
