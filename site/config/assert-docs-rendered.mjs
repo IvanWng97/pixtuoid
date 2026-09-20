@@ -1,8 +1,8 @@
 // Assert every rendered doc page has a body and that /architecture kept its
-// mermaid <svg>. Catches the silent empty-render class: a headless-Chromium /
-// Playwright version mismatch collapses a doc's <Content /> to an EMPTY <article>
-// WITHOUT failing `astro build`. GENERIC on purpose — it globs every page carrying
-// the Docs layout's `<article class="prose">`, so no per-page string can drift.
+// inline diagram <svg>. Born for the silent empty-render class — a render step
+// collapsed a doc's <Content /> to an EMPTY <article> WITHOUT failing `astro
+// build` (#680) — and GENERIC on purpose: it globs every page carrying the Docs
+// layout's `<article class="prose">`, so no per-page string can drift.
 //
 // Usage: node config/assert-docs-rendered.mjs [distDir=dist]
 import { readFileSync, readdirSync, existsSync } from 'node:fs';

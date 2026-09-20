@@ -4,10 +4,10 @@ import { readFileSync, existsSync, writeFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { posix, join } from 'node:path';
 import sitemap from '@astrojs/sitemap';
-import rehypeMermaid from 'rehype-mermaid';
 import { unified } from '@astrojs/markdown-remark';
 import { rewriteCspMeta } from './config/csp-hashes.mjs';
 import rehypeCallouts from './config/rehype-callouts.mjs';
+import rehypeBeautifulMermaid from './config/rehype-beautiful-mermaid.mjs';
 import { fetchStarCount } from './config/gh-stars.mjs';
 import { latestReleaseTag, resolveDisplayedVersion } from './config/released-version.mjs';
 
@@ -201,24 +201,18 @@ export default defineConfig({
   compressHTML: true,
   markdown: {
     // excludeLangs keeps ```mermaid a RAW code node — the highlighter would
-    // otherwise make it a <pre> before rehype-mermaid can make it an SVG. Prism
+    // otherwise make it a <pre> before the diagram plugin can make it an SVG. Prism
     // emits classes, not Shiki's inline style attributes, so it needs no CSP
     // style hash.
     syntaxHighlight: { type: 'prism', excludeLangs: ['mermaid'] },
     // Astro 7 deprecated the legacy `markdown.rehypePlugins` key (a hard error
     // without @astrojs/markdown-remark): opt back into the remark/rehype
-    // pipeline explicitly — rehype-mermaid needs it.
+    // pipeline explicitly — the diagram plugin needs it.
     processor: unified({
       rehypePlugins: [
-        // inline-svg: rendered at build time, so zero client JS and CSP-safe.
-        [
-          rehypeMermaid,
-          {
-            strategy: 'inline-svg',
-            mermaidConfig: { theme: 'neutral', flowchart: { htmlLabels: true } },
-          },
-        ],
-        rehypeRepoLinks, // after mermaid so it walks the final tree
+        // inline <svg> at build time, in-process: zero client JS, no browser.
+        rehypeBeautifulMermaid,
+        rehypeRepoLinks, // after the diagram so it walks the final tree
         rehypeCallouts, // last: promotes doc blockquotes to terminal-window chrome
       ],
     }),

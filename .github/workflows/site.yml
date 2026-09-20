@@ -43,6 +43,16 @@ jobs:
       # the empty-render guard runs in the PR gate, not only `verify`/deploy, so a
       # collapsed doc render is caught pre-merge (#680).
       - run: npm run check:docs
+      # Only e2e and lighthouse need a browser — the diagram renders in-process —
+      # so Chromium lands here, not in the shared composite pages.yml also runs.
+      # The shell is named explicitly so a cache holding chromium-but-not-the-shell
+      # can't skip it.
+      - name: Cache Playwright Chromium
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
+      - run: npx playwright install --with-deps chromium chromium-headless-shell
       - run: npm run e2e
       - run: npm run lighthouse
       # LAST: it resolves advisories live, so at step one someone else's publish
