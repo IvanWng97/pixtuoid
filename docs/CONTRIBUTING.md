@@ -97,17 +97,22 @@ weaken the lint.
    `docs/images` + `site/public/demos`. The office HUD bakes
    `CARGO_PKG_VERSION`, so a bump drifts every still and smoke's `gen-check`
    reds the PR otherwise.
-3. **Review it like any PR**, and bring the branch up to date with `main` before
-   merging: the tag lands on the squash commit, not on the tree that was tested,
-   and branch protection here is not `strict`. If the semver verdict says the
-   bump is too small, raise it with `cargo set-version --workspace X.Y.Z`
-   (cargo-edit) and push.
-4. **Merge it** (squash). That merge is the *irreversible* step: the `tag` job
+3. **Review it like any PR.** GitHub will make you update the branch if `main`
+   moved — `main` requires branches to be up to date, because the tag lands on
+   the squash commit and release-plz publishes to crates.io from it before
+   `ci-gate` finishes. If the semver verdict says the bump is too small, raise
+   it with `cargo set-version --workspace X.Y.Z` (cargo-edit) and push.
+4. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
    publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
    GitHub release carrying the changelog; the tag then fires `release.yml`,
    which builds the six targets and the debs, attaches them, publishes the
    draft, and publishes the npm packages. The tag also starts a homebrew-core
    autobump.
+
+The crates.io upload happens in the `release` job, which runs on the merge push
+with no `needs` — `ci.yml` is still running at that moment. What makes that safe
+is the branch-protection setting above: a release PR cannot merge unless its
+tree is `main`'s tree, and that tree is the one its own CI already passed.
 
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
 job: a detected break RAISES the bump rather than failing, so the version in the
