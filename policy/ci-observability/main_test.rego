@@ -673,9 +673,7 @@ test_release_plz_must_tag_from_exactly_one_package if {
 # The multi-package default `{{ package }}-v{{ version }}` is the shape that
 # silently stops matching release.yml's glob.
 test_release_plz_tag_name_must_match_the_release_trigger if {
-	config := object.union(valid_release_plz_config, {"package": [
-		{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "pixtuoid-v{{ version }}"},
-	]})
+	config := object.union(valid_release_plz_config, {"package": [{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "pixtuoid-v{{ version }}"}]})
 	violations := deny with input as release_plz_fixture(config)
 	sprintf(
 		"%s git_tag_name %q must start with %q — %s triggers on that glob, and homebrew-core autobumps from the tag it produces",
