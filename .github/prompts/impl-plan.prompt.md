@@ -75,8 +75,7 @@ Every section gets an answer; "n/a" counts only with a reason.
    the `beautify-decoration` loop. Verification steps are blocking plan
    items, not checkboxes — PR #61 shipped five walk regressions behind an
    unchecked "live run" checkbox. Name the CI-ONLY gates the change can red
-   (semver, api-surface, doc-check, gen-check, wasm-check, windows-test,
-   snapshots): `just preflight` is blind to all of them, so "preflight green"
+   (api-surface, doc-check, gen-check, wasm-check, windows-test, snapshots): `just preflight` is blind to all of them, so "preflight green"
    is a claim about a SUBSET and must say so — the ghost-gate arc reported
    all-green with api-surface and doc-check both red. And reproduce the
    REPORTED scenario, including its ordering (item 3b), not a convenient one:
