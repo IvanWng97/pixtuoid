@@ -4,8 +4,12 @@ name: release-plz
 # release-plz refreshes an open release PR on every main push, and a PR that
 # carries non-bot commits is closed and re-opened fresh, so the regenerated
 # stills a human committed would be orphaned by the next dependabot merge, and
-# every refresh re-runs the full CI matrix. `tag` runs on every push to main and
-# tags only a merged release PR (release-plz.toml `release_always`).
+# every refresh re-runs the full CI matrix. `release` runs on every push to main
+# and acts only on a merged release PR (release-plz.toml `release_always`).
+#
+# RENAMING THIS FILE BREAKS PUBLISHING: each crate's crates.io Trusted Publisher
+# record is keyed on the workflow filename, so the OIDC claim stops matching
+# until every record is updated.
 on:
   workflow_dispatch:
   push:
@@ -74,8 +78,8 @@ jobs:
           fi
           echo "::notice::release PR: $(jq -r .html_url <<<"$PR")"
 
-  tag:
-    name: tag a merged release PR
+  release:
+    name: publish and tag a merged release PR
     if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
     runs-on: ubuntu-latest
     timeout-minutes: 30

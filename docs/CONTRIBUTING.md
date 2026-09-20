@@ -36,10 +36,6 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 `just preflight` is the local gate; these run only in CI, so a green preflight
 does not mean a green PR:
 
-- **semver** — not a CI job: release-plz runs `cargo-semver-checks` on the
-  release PR and writes the verdict into its body. Between releases main sits at
-  the shipped version, where a baseline check reds by design, so the question
-  only exists there.
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
@@ -112,6 +108,10 @@ weaken the lint.
    which builds the six targets and the debs, attaches them, publishes the
    draft, and publishes the npm packages. The tag also starts a homebrew-core
    autobump.
+
+`cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
+job: a detected break RAISES the bump rather than failing, so the version in the
+PR is already the corrected one. `just semver` reproduces the verdict locally.
 
 Each crate's crates.io **Trusted Publisher** record names `release-plz.yml`.
 Renaming that workflow file, or publishing from another one, is rejected until

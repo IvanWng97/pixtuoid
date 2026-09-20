@@ -419,6 +419,16 @@ msrv:
     # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
+# Reproduce release-plz's semver verdict LOCALLY. Not a gate and not in CI:
+# release-plz runs cargo-semver-checks itself on the release PR and RAISES the
+# bump when it finds a break, so this exists only so a human can see the same
+# answer before dispatching. Needs network for the baseline crates, and
+# cargo-semver-checks on PATH (`cargo binstall cargo-semver-checks`).
+[group('rust')]
+[doc("Reproduce release-plz's semver verdict for the published crates (local, not a gate)")]
+semver:
+    cargo semver-checks $(printf -- '--package %s ' {{PUBLISHED_CRATES}})
+
 # Public-API surface snapshot for the PUBLISHED libraries. COMPLEMENTS
 # release-plz's own semver check: that answers "is the release bump enough?" on
 # the release PR, this shows *what* changed as a reviewable golden diff at
