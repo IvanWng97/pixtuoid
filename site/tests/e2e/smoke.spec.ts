@@ -1676,7 +1676,9 @@ test('plate and chip text clears WCAG AA in every theme (day + night + dracula)'
   }
 });
 
-test('the architecture diagram: every SVG text clears WCAG AA in every theme', async ({ page }) => {
+test('the architecture diagram: every SVG text clears WCAG AA and every box has a 3:1 boundary, in every theme', async ({
+  page,
+}) => {
   // The diagram's ink is SVG `fill`, which axe / Lighthouse color-contrast never
   // read, and its plate is the last <rect> before the <text> in its own <g>
   // (node fill, subgraph header, edge-label backing) — never a CSS background.
@@ -1689,6 +1691,28 @@ test('the architecture diagram: every SVG text clears WCAG AA in every theme', a
     }, theme);
     await page.goto('./architecture/');
     await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const boxes = await page.evaluate(() =>
+      Array.from(
+        document.querySelectorAll('.prose svg[role="img"] :is(.node, .subgraph) > rect:first-child')
+      ).map((rect) => ({
+        label: rect.parentElement?.getAttribute('data-label') ?? '',
+        fill: getComputedStyle(rect).fill,
+        stroke: getComputedStyle(rect).stroke,
+      }))
+    );
+    expect(boxes.length, `${theme}: no diagram boxes to sweep`).toBeGreaterThan(0);
+    for (const { label, fill, stroke } of boxes) {
+      // A box a reader must parse needs a 3:1 boundary (WCAG 1.4.11); the
+      // page's 12% --border hairline measured 1.27:1 before `.prose svg`
+      // routed the library's --border hook to --fg-muted.
+      const interior = parseRgb(fill).slice(0, 3) as [number, number, number];
+      const [r, g, b, a] = parseRgb(stroke);
+      const ratio = contrastRatio(compositeOver([r, g, b, a], interior), interior);
+      expect(
+        ratio,
+        `${theme} diagram box "${label}": stroke vs fill floor is 3:1; measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(3);
+    }
     const samples = await page.evaluate(() => {
       const svg = document.querySelector('.prose svg[role="img"]');
       if (!svg) return [];
