@@ -534,7 +534,7 @@ test_codecov_job_declaring_its_own_scope_is_accepted if {
 }
 
 release_plz_step(command, token) := {
-	"uses": "release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3",
+	"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5",
 	"with": {"command": command},
 	"env": {"GITHUB_TOKEN": token},
 }
@@ -603,7 +603,7 @@ test_release_plz_cannot_be_retired_by_softening_a_step_or_its_job if {
 # The class the count rule cannot see: no `command:` runs BOTH, so this step
 # opens a release PR on every push while the census still reads two.
 test_release_plz_step_without_a_command_is_denied if {
-	commandless := {"uses": "release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3", "env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}}
+	commandless := {"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5", "env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}}
 	jobs := {
 		"release-pr": {"steps": [release_plz_step("release-pr", "${{ secrets.RELEASE_PLZ_TOKEN }}")]},
 		"tag": {"steps": [commandless]},
@@ -645,7 +645,7 @@ test_release_plz_repository_secret_is_silent if {
 # Hoisting the token to the job is a valid refactor; a step-level blank shadows
 # it and must NOT read as "a token exists somewhere".
 test_release_plz_token_layering_follows_the_nearest_declaration if {
-	bare := {"uses": "release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3", "with": {"command": "release"}}
+	bare := {"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5", "with": {"command": "release"}}
 	inherited := {
 		"release-pr": {"env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "steps": [bare]},
 		"tag": {"env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "steps": [bare]},

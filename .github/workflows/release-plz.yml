@@ -46,7 +46,7 @@ jobs:
       # binary the action installs. Dependabot's minor/patch ignore never
       # surfaces a `v0.6`; move it by hand.
       - id: release-plz
-        uses: release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3 # v0.5.139
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
         with:
           command: release-pr
         env:
@@ -84,7 +84,7 @@ jobs:
         with:
           # Nothing compiles here either — the action only reads cargo metadata.
           enable-cache: 'false'
-      - uses: release-plz/action@51e32d708d306b2c2e98540245b276439f3137c3 # v0.5.139
+      - uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
         with:
           command: release
         env:
