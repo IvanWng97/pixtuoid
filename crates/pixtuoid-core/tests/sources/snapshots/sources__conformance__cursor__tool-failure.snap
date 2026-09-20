@@ -3,46 +3,46 @@ source: crates/pixtuoid-core/tests/sources/conformance.rs
 expression: events
 ---
 - SessionStart:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     source: cursor
-    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
+    session_id: 033a748e-f18a-4217-a911-69f46ec0c489
     cwd: /private/tmp/pixtuoid-capture/proj
     parent_id: ~
 - ModelInfo:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     model: default
     effort: ~
 - Identity:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     source: cursor
-    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
+    session_id: 033a748e-f18a-4217-a911-69f46ec0c489
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityStart:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     tool_use_id: ~
     detail:
       Generic:
         display: "Read: /private/tmp/pixtuoid-capture/proj/does-…"
 - ModelInfo:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     model: default
     effort: ~
 - Identity:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     source: cursor
-    session_id: 1291cf46-88c1-429b-8269-c0faddb378c9
+    session_id: 033a748e-f18a-4217-a911-69f46ec0c489
     cwd: /private/tmp/pixtuoid-capture/proj
 - ActivityEnd:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     tool_use_id: ~
 - ModelInfo:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     model: default
     effort: ~
 - SessionEnd:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     as_child: false
 - ModelInfo:
-    agent_id: 1514888796505446628
+    agent_id: 1262623490786732012
     model: default
     effort: ~

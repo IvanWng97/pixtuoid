@@ -1,10 +1,9 @@
 {
-  "captured": "2026-09-10",
-  "cli": "kimi",
-  "command": "kimi -p {prompt}",
   "origin": "recorded",
-  "version": "0.40.1",
-  "note": "The recorder's own roster and paths rode fields no decoder reads and are stripped (see `deidentified`).",
+  "cli": "kimi",
+  "version": "2.0.1",
+  "captured": "2026-09-19",
+  "command": "kimi -p {prompt}",
   "deidentified": {
     "method": "decoder-allowlist",
     "blanked": 22

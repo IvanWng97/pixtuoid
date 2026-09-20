@@ -1,12 +1,12 @@
 {
-  "captured": "2026-09-10",
-  "cli": "opencode",
-  "command": "opencode run {prompt}",
   "origin": "recorded",
-  "version": "1.18.20",
-  "note": "Redacted: home path to /Users/dev.",
+  "cli": "opencode",
+  "version": "1.18.30",
+  "captured": "2026-09-19",
+  "command": "opencode run --dir /tmp/pixtuoid-capture/proj {prompt}",
   "deidentified": {
     "method": "decoder-allowlist",
-    "blanked": 58
-  }
+    "blanked": 61
+  },
+  "note": "Recorded with `--dir`: at this version `opencode run` resolved its project from the launching checkout rather than the recorder's sandbox cwd (the turn read the wrong tree and the cwd carried the recorder's home), so the sandbox path is pinned explicitly."
 }
