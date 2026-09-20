@@ -201,7 +201,8 @@ export default defineConfig({
   compressHTML: true,
   markdown: {
     // excludeLangs keeps ```mermaid a RAW code node — the highlighter would
-    // otherwise make it a <pre> before the diagram plugin can make it an SVG. Prism
+    // otherwise split the source into token spans the diagram plugin cannot read
+    // back. Prism
     // emits classes, not Shiki's inline style attributes, so it needs no CSP
     // style hash.
     syntaxHighlight: { type: 'prism', excludeLangs: ['mermaid'] },
@@ -221,8 +222,9 @@ export default defineConfig({
   // script-src carries NO 'unsafe-inline' — cspInlineHashes() above supplies the
   // is:inline hashes instead; 'wasm-unsafe-eval' permits WebAssembly.instantiate
   // for the live-office hero (wasm compilation ONLY, not JS eval). style-src
-  // KEEPS 'unsafe-inline': Shiki spans, the mermaid SVG and a few style={} attrs
-  // are inline STYLE ATTRIBUTES, which hashes cannot express. NOTE: security.csp
+  // KEEPS 'unsafe-inline': Shiki spans and a few style={} attrs are inline STYLE
+  // ATTRIBUTES, which hashes cannot express; the diagram's <style> element rides
+  // the same 'unsafe-inline'. NOTE: security.csp
   // is build/preview-only by design — `astro dev` serves no CSP.
   security: {
     csp: {

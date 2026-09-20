@@ -55,8 +55,9 @@ jobs:
           # later deploy serves it back as a cache HIT, never re-rendering the
           # ```mermaid block. Cost of `false` is a cold content-layer rebuild.
           cache: false
-          # PIN npm: v6's detection otherwise falls back to pnpm, which ignores
-          # package-lock.json and ships a tree site.yml never tested.
+          # PIN npm: bypass the action's lockfile sniff. #680 deployed an EMPTY
+          # /architecture when the sniff picked another manager and installed a
+          # tree package-lock.json never pinned.
           package-manager: npm
           # Assert every doc page rendered a body IN the action's own context,
           # before it uploads: a doc's <Content /> can collapse to an empty

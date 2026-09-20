@@ -1,5 +1,5 @@
 name: 'Setup Site Node'
-description: 'Node + pinned npm + npm ci + Playwright Chromium for the Astro site'
+description: 'Node + pinned npm + npm ci for the Astro site'
 
 inputs:
   node-version:

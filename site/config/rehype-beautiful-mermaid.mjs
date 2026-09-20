@@ -1,7 +1,9 @@
 // ```mermaid → inline <svg> at build time, with no browser: beautiful-mermaid
-// lays the graph out in-process, so the site build needs neither Chromium nor a
-// Playwright-version match to render /architecture. The SVG's colors are the
-// page's own --bg/--fg tokens, so one render follows every theme.
+// lays the graph out in-process, so the site build needs no browser to render
+// /architecture. The SVG's colors ride the page's tokens — --bg/--fg by
+// inheritance, the library's --surface/--border/--muted hooks by name
+// (global.css's `.prose svg` owns that pairing) — so one render follows every
+// theme.
 import { renderMermaidSVG } from 'beautiful-mermaid';
 import { fromHtml } from 'hast-util-from-html';
 
@@ -11,14 +13,17 @@ import { fromHtml } from 'hast-util-from-html';
 const ACC_DIRECTIVE = /^\s*acc(Title|Descr)\s*:\s*(.*?)\s*$/;
 
 // The library's stylesheet opens with an @import of Google Fonts: the site's CSP
-// (style-src/font-src 'self') blocks it, the e2e console watchdog reds on the
-// block, and the text falls to the same system-ui either way.
+// (style-src 'self') blocks it — smoke.spec.ts's office-less first-visit console
+// watchdog reds on the block — and the text falls to the same system-ui either way.
+// The stack stays the library's own: node boxes are sized from Inter's glyph
+// widths, so binding --font-body (a serif) can overflow them.
 const FONT_IMPORT = /@import\s+url\([^)]*\)[^;]*;\s*/g;
 
-// The root re-declares --bg/--fg; bound to the page's tokens of the same name
-// that is a self-referencing custom property, which is invalid and collapses
-// every color-mix() to black. Dropped, the library's var(--bg)/var(--fg)
-// references inherit the page's values directly.
+// The root carries literal --bg/--fg (the library's defaults). Passing the page's
+// var(--bg)/var(--fg) as bg/fg instead would emit `--bg:var(--bg)`, a
+// self-referencing custom property, invalid at computed-value time, so every
+// color-mix() falls to black. Dropping the declarations lets the library's
+// var(--bg)/var(--fg) references inherit the page's values directly.
 const ROOT_TOKENS = /--(bg|fg)\s*:[^;]*;?/g;
 
 function splitAccessibility(source) {

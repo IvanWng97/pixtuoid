@@ -1676,6 +1676,53 @@ test('plate and chip text clears WCAG AA in every theme (day + night + dracula)'
   }
 });
 
+test('the architecture diagram: every SVG text clears WCAG AA in every theme', async ({ page }) => {
+  // The diagram's ink is SVG `fill`, which axe / Lighthouse color-contrast never
+  // read, and its plate is the last <rect> before the <text> in its own <g>
+  // (node fill, subgraph header, edge-label backing) — never a CSS background.
+  // Every shape in the committed diagram is a rectangle; a <path> shape
+  // (diamond, stadium) would fall back to the frame and grade vacuously.
+  for (const theme of ['day', 'night', 'dracula'] as const) {
+    await page.addInitScript((t) => {
+      sessionStorage.setItem('pix-booted', '1');
+      localStorage.setItem('pix-theme', t);
+    }, theme);
+    await page.goto('./architecture/');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+    const samples = await page.evaluate(() => {
+      const svg = document.querySelector('.prose svg[role="img"]');
+      if (!svg) return [];
+      const frame = getComputedStyle(svg).backgroundColor;
+      return Array.from(svg.querySelectorAll('text')).map((text) => {
+        let plate: Element | null = null;
+        for (const sib of Array.from(text.parentElement?.children ?? [])) {
+          if (sib === text) break;
+          if (sib.tagName === 'rect') plate = sib;
+        }
+        return {
+          label: text.textContent?.trim() ?? '',
+          ink: getComputedStyle(text).fill,
+          plate: plate ? getComputedStyle(plate).fill : frame,
+          frame,
+        };
+      });
+    });
+    expect(samples.length, `${theme}: no diagram text to sweep`).toBeGreaterThan(0);
+    for (const { label, ink, plate, frame } of samples) {
+      const ground = compositeOver(
+        parseRgb(plate),
+        parseRgb(frame).slice(0, 3) as [number, number, number]
+      );
+      const [r, g, b, a] = parseRgb(ink);
+      const ratio = contrastRatio(compositeOver([r, g, b, a], ground), ground);
+      expect(
+        ratio,
+        `${theme} diagram "${label}": WCAG AA floor is 4.5:1; measured ${ratio.toFixed(2)}:1`
+      ).toBeGreaterThanOrEqual(4.5);
+    }
+  }
+});
+
 test('hero badge row: one chip per registered source, matching the tools-table row count', async ({
   page,
 }) => {
