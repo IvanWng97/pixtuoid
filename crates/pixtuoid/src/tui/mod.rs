@@ -572,8 +572,7 @@ fn star_clicked(col: u16, row: u16, term: (u16, u16)) -> bool {
 /// popup is clickable mid-animation.
 fn version_popup_url_clicked(col: u16, row: u16, scale: f32, term: (u16, u16)) -> bool {
     let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-    let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
-    widgets::version_popup_url_rect(notes, bounds, scale)
+    widgets::version_popup_url_rect(bounds, scale)
         .is_some_and(|rect| rect.contains(ratatui::layout::Position { x: col, y: row }))
 }
 
@@ -820,7 +819,7 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
                 version_popup_url_clicked(m.column, m.row, renderer.last_popup_scale(), t)
             })
         {
-            let _ = open::that(widgets::VERSION_POPUP_URL);
+            let _ = open::that(widgets::release_url(env!("CARGO_PKG_VERSION")));
         }
         return;
     }
@@ -1496,9 +1495,8 @@ mod dispatch_tests {
         assert_eq!(dispatch_key(KeyCode::Up, NONE, c, nav()), KeyAction::None);
     }
 
-    /// The popup is DISMISS-ONLY, which is why `widgets::version_popup` marks its
-    /// overflowing notes band with a non-scrolling marker instead of the shared
-    /// `⋮ N more ▾`. Binding a scroll key here would make that marker wrong.
+    /// The popup is DISMISS-ONLY: a fixed body and a link, nothing to scroll.
+    /// A scroll key bound here would promise rows that do not exist.
     #[test]
     fn the_version_popup_binds_no_scroll_key() {
         let c = ModalState {
@@ -2311,11 +2309,10 @@ mod apply_key_action_tests {
         use crate::tui::widgets::version_popup_url_rect;
         let term = (120u16, 44u16);
         let bounds = ratatui::layout::Rect::new(0, 0, term.0, term.1);
-        let notes = crate::version::release_notes(env!("CARGO_PKG_VERSION")).unwrap_or(&[]);
-        let Some(rect) = version_popup_url_rect(notes, bounds, 1.0) else {
-            // The shipped notes must produce a link rect at full scale; if this
-            // ever changes the assertions below would pass vacuously.
-            panic!("the shipped release notes must yield a URL rect at scale 1.0");
+        let Some(rect) = version_popup_url_rect(bounds, 1.0) else {
+            // The popup must produce a link rect at full scale; if this ever
+            // changes the assertions below would pass vacuously.
+            panic!("the version popup must yield a URL rect at scale 1.0");
         };
 
         assert!(

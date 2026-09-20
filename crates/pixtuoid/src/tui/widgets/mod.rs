@@ -24,7 +24,7 @@ pub(super) use tooltip::{
     paint_coffee_tooltip, paint_furniture_tooltip, paint_mascot_tooltip, paint_pet_tooltip,
 };
 pub(crate) use tooltip::{paint_hover_tooltip, paint_label_widgets};
-pub(super) use version_popup::{paint_version_popup, version_popup_url_rect, VERSION_POPUP_URL};
+pub(super) use version_popup::{paint_version_popup, release_url, version_popup_url_rect};
 pub(super) use wall_board::{paint_wall_display, star_hit_rect};
 pub(super) use welcome::paint_welcome;
 // `pub`: the snapshot example reuses the real formatter so its --source-warning

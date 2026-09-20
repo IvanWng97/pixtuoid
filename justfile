@@ -8,7 +8,7 @@
 #   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate committed artifacts (README sections + docs images + site demos)
-#   release  — cut a new version (bump) + the distribution gates (npm-check / notes)
+#   release  — cut a new version (bump) + the distribution gates (npm-check)
 #   meta     — tooling setup + the full pre-push / full-stack gates
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
@@ -1031,14 +1031,14 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
 #
 # Rewrites EVERY version number in one shot — the workspace version, the
 # inter-crate pixtuoid→pixtuoid-core path-dep requirement, and Cargo.lock (via
-# `cargo set-version`) — then drafts the in-app `release_notes()` arm from the
-# commit log, runs `just preflight`, and commits on `release/vX.Y.Z`. It STOPS
-# before the tag: pushing the tag is what triggers the irreversible publish
-# (crates.io + npm, and a homebrew-core autobump), so that stays a human step.
+# `cargo set-version`) — then runs `just preflight` and commits on
+# `release/vX.Y.Z`. It STOPS before the tag: pushing the tag is what triggers
+# the irreversible publish (crates.io + npm, and a homebrew-core autobump), so
+# that stays a human step.
 # Needs cargo-edit (`just setup-tools`).
 # Honors SKIP_PREFLIGHT=1 for iteration.
 [group('release')]
-[doc('Cut a release: bump every version number + draft notes on a release branch (no tag/push)')]
+[doc('Cut a release: bump every version number on a release branch (no tag/push)')]
 bump version:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1062,20 +1062,6 @@ bump version:
     if git rev-parse --verify --quiet "$branch" >/dev/null; then
         echo "error: branch $branch already exists" >&2; exit 1; fi
 
-    # a duplicate release_notes arm is an unreachable_patterns error under
-    # clippy -D warnings — catch it here with a clear message, not a compile error
-    if grep -q "\"$ver\" =>" crates/pixtuoid/src/version.rs; then
-        echo "error: version.rs already has a release_notes arm for $ver" >&2; exit 1; fi
-
-    # the release-notes injection (step 5) is an awk match on this marker; if it's
-    # ever removed the awk silently no-ops, leaving version.rs without the new arm
-    # (surfacing only later as a cryptic preflight test failure). Fail loud here —
-    # the one un-guarded step in an otherwise heavily-guarded recipe.
-    if ! grep -q '\[bump-inject-here\]' crates/pixtuoid/src/version.rs; then
-        echo "error: version.rs is missing the [bump-inject-here] marker — release-notes injection would silently no-op" >&2; exit 1; fi
-    if ! grep -q '\[bump-version-list-here\]' crates/pixtuoid/src/version.rs; then
-        echo "error: version.rs is missing the [bump-version-list-here] marker — the SHIPPED_VERSIONS injection would silently no-op" >&2; exit 1; fi
-
     # releases come from main; forking release/v$ver off anything else is usually wrong
     cur_branch="$(git symbolic-ref --short -q HEAD || echo detached)"
     if [ "$cur_branch" != "main" ]; then
@@ -1090,7 +1076,7 @@ bump version:
     committed=0
     cleanup() {
         if [ "$committed" = 1 ]; then return 0; fi
-        git restore --staged --worktree Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs 2>/dev/null || true
+        git restore --staged --worktree Cargo.toml Cargo.lock crates/*/Cargo.toml 2>/dev/null || true
         if [ "$(git symbolic-ref --short -q HEAD 2>/dev/null || true)" = "$branch" ]; then
             git switch -q "$cur_branch" 2>/dev/null || true
             git branch -qD "$branch" 2>/dev/null || true
@@ -1101,38 +1087,16 @@ bump version:
     # 4. all version numbers + Cargo.lock in one command (incl. the path-dep)
     cargo set-version --workspace "$ver"
 
-    # 5. draft the in-app release notes from the log since the last tag.
-    #    git-cliff owns the GitHub-release changelog; this is the curated in-app
-    #    popup — drafted here, trimmed to ~6 highlights by a human before merge.
-    last_tag="$(git describe --tags --abbrev=0 2>/dev/null || true)"
-    range="${last_tag:+$last_tag..}HEAD"
-    notes="$(mktemp)"
-    {
-        echo "        \"$ver\" => Some(&["
-        echo "            // TODO: curate into ~6 user-facing highlights (drafted from \`git log ${range}\`)"
-        git log --no-merges --pretty=format:'%s' "$range" \
-            | sed -E 's/^[a-z]+(\([^)]*\))?!?: //' \
-            | sed 's/\\/\\\\/g; s/"/\\"/g; s/^/            "/; s/$/",/'
-        printf '\n        ]),\n'
-    } > "$notes"
-    awk -v f="$notes" -v ver="$ver" '
-        /\[bump-inject-here\]/ { print; while ((getline l < f) > 0) print l; next }
-        /\[bump-version-list-here\]/ { print; printf "        \"%s\",\n", ver; next }
-        { print }
-    ' crates/pixtuoid/src/version.rs > "$notes.rs" && mv "$notes.rs" crates/pixtuoid/src/version.rs
-    rm -f "$notes"
-    cargo fmt -p pixtuoid
-
-    # 6. green gate before committing (skippable for iteration)
+    # 5. green gate before committing (skippable for iteration)
     if [[ "${SKIP_PREFLIGHT:-}" != "1" ]]; then just preflight; fi
 
-    # 7. land it on a release branch — no tag, no push (the irreversible step)
+    # 6. land it on a release branch — no tag, no push (the irreversible step)
     git switch -c "$branch"
-    git add Cargo.toml Cargo.lock crates/*/Cargo.toml crates/pixtuoid/src/version.rs
+    git add Cargo.toml Cargo.lock crates/*/Cargo.toml
     git commit -q -m "chore(release): v$ver"
     committed=1
 
-    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. curate the drafted bullets in crates/pixtuoid/src/version.rs (release_notes\n       arm) down to ~6 highlights, then: git commit --amend -a\n    2. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    3. open a PR, review, merge to main\n    4. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
+    printf '\n\033[32m✓ v%s committed on %s\033[0m\n\n  next:\n    1. regenerate committed artifacts — the office HUD bakes CARGO_PKG_VERSION, so a\n       bump drifts every still: just gen, then commit docs/images + site/public/demos\n       (else CI smoke gen-check reds the PR)\n    2. open a PR, review, merge to main\n    3. AFTER merge, tag to publish — IRREVERSIBLE (crates.io + npm, and the tag\n       tarball auto-bumps homebrew-core; see docs/CONTRIBUTING.md#releasing):\n         git tag v%s && git push origin v%s\n' "$ver" "$branch" "$ver" "$ver"
 
 # The repo's NODE-side gate (no cargo): the npm package generator AND the bundled
 # OpenClaw plugin contract.
@@ -1149,20 +1113,6 @@ bump version:
 [doc('Node gates: the npm package generator + the OpenClaw plugin contract (CI + release; not in preflight)')]
 npm-check:
     node --test npm/generate.test.mjs scripts/openclaw-plugin.test.mjs
-
-# Fail if the current release_notes() arm still has the uncurated TODO marker.
-# A release-PR guard (#116) — deliberately NOT in preflight, since `just bump`
-# leaves the marker for the human to curate after the bump commit.
-[group('release')]
-[doc('Fail if release_notes() still has the uncurated TODO marker (release-PR guard)')]
-notes-curated:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if grep -q 'TODO: curate' crates/pixtuoid/src/version.rs; then
-        echo "error: release_notes() still has the 'TODO: curate' marker — curate the drafted bullets before merge" >&2
-        exit 1
-    fi
-    echo "release notes curated ✓"
 
 # ── meta ──────────────────────────────────────────────────────────
 

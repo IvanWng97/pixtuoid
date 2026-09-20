@@ -87,10 +87,11 @@ minor" is convention, upheld in review. When a breaking change reddens
 ```bash
 just setup-tools    # once per clone
 just bump 0.5.1     # rewrites EVERY version number (workspace + path-deps + lockfile),
-                    # drafts release_notes(), runs preflight → branch release/v0.5.1
-# curate the notes to ~6 highlights, then `just gen` (the HUD bakes
-# CARGO_PKG_VERSION, so a bump drifts every committed still) and commit
-# docs/images + site/public/demos — else smoke's gen-check reds the PR.
+                    # runs preflight → branch release/v0.5.1
+# then `just gen` (the HUD bakes CARGO_PKG_VERSION, so a bump drifts every
+# committed still) and commit docs/images + site/public/demos — else smoke's
+# gen-check reds the PR. The in-app upgrade popup links to the GitHub
+# release, whose body git-cliff renders from the commit log (cliff.toml).
 # PR → review → merge, then:
 git tag v0.5.1 && git push origin v0.5.1   # fires release.yml → build + crates.io + npm
 ```
