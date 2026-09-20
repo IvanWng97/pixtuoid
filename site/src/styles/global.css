@@ -1036,52 +1036,25 @@ code {
   overflow-wrap: normal;
   white-space: nowrap;
 }
-/* architecture diagram (```mermaid → build-time inline SVG): frame it in a fixed
-   light "terminal screen" so the day-palette SVG stays legible on night/dracula,
-   and make it responsive (the SVG keeps its viewBox aspect). */
+/* architecture diagram (build-time inline SVG; its colors ride the page's
+   --bg/--fg, see config/rehype-beautiful-mermaid.mjs): frame it on the page
+   ground and keep it responsive (the SVG keeps its viewBox aspect). The
+   library's override hooks read the cascade, so node fill is the page's own
+   --surface (the site's card idiom) while node stroke and secondary text take
+   --fg-muted: the library's 60% text mix misses AA on the day palette, and the
+   page's 12% --border hairline is no 3:1 boundary for a box a reader must
+   parse (smoke.spec.ts's diagram sweep grades every <text>). */
 .prose svg {
+  --muted: var(--fg-muted);
+  --border: var(--fg-muted);
   display: block;
   width: 100%;
   max-width: 820px;
   height: auto;
   margin: 1.8rem auto;
   padding: clamp(0.8rem, 2vw, 1.4rem);
-  background: #fbfaf6;
+  background: var(--bg);
   border: 1px solid var(--border-strong);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow);
-}
-/* mermaid renders labels as HTML inside <foreignObject> (htmlLabels), so the
-   page's `.prose p{color:var(--fg)}` / `.prose a{color:coral}` / `.prose code
-   {background:surface-2}` cascade leaks in and makes the labels invisible on the
-   light frame in night/dracula. The frame is always light, so pin every label to
-   dark ink on a light backing — readable on all themes. (Scope fill: to text
-   elements only; arrowheads/edges are <path> and keep mermaid's stroke colors.) */
-.prose svg .nodeLabel,
-.prose svg .nodeLabel p,
-.prose svg .edgeLabel,
-.prose svg .edgeLabel p,
-.prose svg .cluster-label,
-.prose svg .cluster-label p,
-.prose svg span,
-.prose svg p,
-.prose svg text,
-.prose svg tspan {
-  color: #241c14 !important;
-  fill: #241c14 !important;
-}
-.prose svg .edgeLabel,
-.prose svg .edgeLabel p,
-.prose svg .edgeLabel rect,
-.prose svg .labelBkg,
-.prose svg foreignObject code {
-  background: #fbfaf6 !important;
-  fill: #fbfaf6 !important;
-  border-color: transparent !important;
-}
-/* mermaid bakes edge @keyframes into the SVG — keep them inert for reduced motion */
-@media (prefers-reduced-motion: reduce) {
-  .prose svg [class*='edge'] {
-    animation: none !important;
-  }
 }

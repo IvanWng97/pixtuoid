@@ -1,5 +1,5 @@
 name: 'Setup Site Node'
-description: 'Node + pinned npm + npm ci + Playwright Chromium for the Astro site'
+description: 'Node + pinned npm + npm ci for the Astro site'
 
 inputs:
   node-version:
@@ -29,16 +29,3 @@ runs:
       shell: bash
       working-directory: site
       run: npm ci
-    - name: Cache Playwright Chromium
-      uses: actions/cache@v6
-      with:
-        path: ~/.cache/ms-playwright
-        key: playwright-${{ runner.os }}-${{ hashFiles('site/package-lock.json') }}
-    # rehype-mermaid renders the mermaid blocks with a headless Chromium, so
-    # the install must stay INSIDE this composite, ahead of every caller's
-    # `check`/`build`. The shell is named explicitly so a cache holding
-    # chromium-but-not-the-shell can't skip it.
-    - name: Install Chromium for the diagrams
-      shell: bash
-      working-directory: site
-      run: npx playwright install --with-deps chromium chromium-headless-shell

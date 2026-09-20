@@ -30,10 +30,11 @@ build, and every one sits in the `site.yml` / `pages.yml` path filters:
   edit), both workflow path filters, `lighthouserc.json`, and the smoke
   viewport table.
 
-**Mermaid renders at build AND during `astro check`** — which is why CI
-installs Chromium BEFORE `npm run check`. The silent-empty-render class it
-opens is gated by `config/assert-docs-rendered.mjs` (`check:docs`), whose
-header owns the mechanism; `pages.yml`'s two pins carry their own.
+**The architecture diagram renders at build**, in process
+(`config/rehype-beautiful-mermaid.mjs` — no browser); Playwright's Chromium is
+installed only for `site.yml`'s e2e step. The empty-render class is
+gated by `config/assert-docs-rendered.mjs` (`check:docs`), whose header owns
+the mechanism; `pages.yml`'s pins carry their own.
 
 **Docs shell**: the doc routes (the `DOCS` manifest in `consts.ts` is the
 roster) mount the Statusline doc variant (no PR feed fetch); `Docs.astro`'s
