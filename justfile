@@ -8,7 +8,7 @@
 #   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate committed artifacts (README sections + docs images + site demos)
-#   release  — the release-PR gates (npm-check, semver)
+#   release  — the release-PR gate (npm-check)
 #   meta     — tooling setup + the full pre-push / full-stack gates
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
@@ -19,10 +19,11 @@ set windows-shell := ["bash", "-cu"]
 # just evaluates these globally regardless of position; kept at the top (the
 # idiom) so the file's config lives in one place.
 
-# The published semver surface: the ONLY two crates whose public API is a
-# contract (the binary lib target is not). Single-sourced here so the three
-# gates over it — semver / api-surface / api-surface-check — can't drift; a
-# newly-published crate is added in ONE place.
+# The published API surface: the ONLY two crates whose public API is a contract
+# (the binary lib target is not). Single-sourced here so both gates over it —
+# api-surface / api-surface-check — can't drift; a newly-published crate is
+# added in ONE place. release-plz runs cargo-semver-checks over the same two, by
+# reading which crates are published rather than this list.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
 # Standalone shell FILES share one authority so formatting and lint coverage
@@ -171,9 +172,9 @@ ci-observability:
     [[ -s .github/dependabot.yml ]] || { echo "error: .github/dependabot.yml is missing or empty" >&2; exit 1; }
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
     files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
-    # The two release contracts that span files: release-plz.toml's tag name vs
-    # release.yml's trigger, and its PR title vs cliff.toml's skip parser.
-    toml_files=(release-plz.toml cliff.toml)
+    # The release contract that spans files: release-plz.toml's tag name vs
+    # release.yml's trigger.
+    toml_files=(release-plz.toml)
     for f in "${toml_files[@]}"; do
         [[ -s $f ]] || { echo "error: $f is missing or empty" >&2; exit 1; }
     done
@@ -418,19 +419,10 @@ msrv:
     # gate links them fresh. (RUSTFLAGS env overrides target.*.rustflags wholesale.)
     RUSTFLAGS="" rustup run "$msrv" cargo check --workspace
 
-# SemVer-check the published libraries against their crates.io baselines. CI
-# runs it on release PRs only — ci-builds.yml's `semver` job carries the WHY.
-# Needs network for the baseline crates. Scoped to pixtuoid-core (the headless
-# lib) + pixtuoid-scene (the published engine crate); the binary crates' libs
-# aren't public API.
-[group('rust')]
-[doc('SemVer-check pixtuoid-core + pixtuoid-scene against their crates.io baselines (release PRs)')]
-semver:
-    cargo semver-checks $(printf -- '--package %s ' {{PUBLISHED_CRATES}})
-
 # Public-API surface snapshot for the PUBLISHED libraries. COMPLEMENTS
-# `just semver`: that gate answers "is the release bump enough?" on the release
-# PR, this shows *what* changed as a reviewable golden diff at review time. Goldens live in `api/<crate>.txt` —
+# release-plz's own semver check: that answers "is the release bump enough?" on
+# the release PR, this shows *what* changed as a reviewable golden diff at
+# review time. Goldens live in `api/<crate>.txt` —
 # `cargo public-api -s` output (`-s` omits blanket-impl noise like
 # `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
 # adding/removing a derive IS a public-API change). cargo-public-api takes one
@@ -1081,8 +1073,8 @@ setup-tools:
     set -euo pipefail
     # cargo-public-api rides API_PUBLIC_API — the tool-exact story lives there.
     # cargo-edit: `cargo set-version --workspace` corrects a release PR's version
-    # by hand when its `semver` job reds (docs/CONTRIBUTING.md#releasing).
-    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-semver-checks cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
+    # by hand when release-plz's semver check reds (docs/CONTRIBUTING.md#releasing).
+    tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
     else

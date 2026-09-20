@@ -557,7 +557,6 @@ release_plz_token_message(path, job, token) := sprintf(
 release_plz_fixture(config) := {"documents": [
 	{"path": release_plz_config_path, "contents": config},
 	{"path": release_workflow_path, "contents": {"on": {"push": {"tags": ["v*"]}}}},
-	{"path": cliff_config_path, "contents": {"git": {"commit_parsers": [{"message": "^chore\\(release\\)", "skip": true}]}}},
 ]}
 
 valid_release_plz_config := {
@@ -566,10 +565,16 @@ valid_release_plz_config := {
 		"git_release_enable": false,
 		"git_tag_enable": false,
 		"release_always": false,
-		"semver_check": false,
 		"pr_name": "chore(release): v{{ version }}",
 	},
-	"package": [{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "v{{ version }}"}],
+	"changelog": {"commit_parsers": [{"message": "^chore\\(release\\)", "skip": true}]},
+	"package": [{
+		"name": "pixtuoid",
+		"git_tag_enable": true,
+		"git_tag_name": "v{{ version }}",
+		"git_release_enable": true,
+		"git_release_draft": true,
+	}],
 }
 
 test_release_plz_cannot_be_retired_by_dropping_an_invocation if {
@@ -660,7 +665,7 @@ test_release_plz_token_layering_follows_the_nearest_declaration if {
 
 test_release_plz_must_tag_from_exactly_one_package if {
 	config := object.union(valid_release_plz_config, {"package": [
-		{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "v{{ version }}"},
+		{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "v{{ version }}", "git_release_enable": true, "git_release_draft": true},
 		{"name": "pixtuoid-core", "git_tag_enable": true, "git_tag_name": "v{{ version }}"},
 	]})
 	violations := deny with input as release_plz_fixture(config)
@@ -692,37 +697,28 @@ test_release_plz_kill_switches_cannot_be_flipped_silently if {
 	}
 }
 
-# Either side edited alone leaves every release PR without its bump gate, and
-# nothing else in the repository reads both.
-test_release_plz_branch_prefix_must_match_the_semver_guard if {
-	fixture := {"documents": [
-		{"path": release_plz_config_path, "contents": {"workspace": {"pr_branch_prefix": "rel-"}}},
-		{"path": builds_workflow_path, "contents": {"jobs": {"semver": {"env": {"RELEASE_PR": "${{ startsWith(github.head_ref, 'release-plz-') }}"}}}}},
-	]}
-	violations := deny with input as fixture
+# A release created published names a version whose binaries release.yml has not
+# attached yet, and nothing else in the repository can see that.
+test_release_plz_release_must_be_drafted if {
+	config := object.union(valid_release_plz_config, {"package": [{
+		"name": "pixtuoid",
+		"git_tag_enable": true,
+		"git_tag_name": "v{{ version }}",
+		"git_release_enable": true,
+	}]})
+	violations := deny with input as release_plz_fixture(config)
 	sprintf(
-		"%s job %q must key %s on %s's pr_branch_prefix %q — found %q; the prefix decides which PRs run the bump gate, and release-plz's own default is not a declaration either side can read",
-		[builds_workflow_path, semver_guard_job, semver_guard_var, release_plz_config_path, "rel-", "${{ startsWith(github.head_ref, 'release-plz-') }}"],
+		"%s must give exactly ONE package git_release_enable with git_release_draft — found %d; a release born published names a version whose binaries release.yml has not attached yet",
+		[release_plz_config_path, 0],
 	) in violations
-}
-
-test_release_plz_branch_prefix_matching_the_guard_is_silent if {
-	fixture := {"documents": [
-		{"path": release_plz_config_path, "contents": {"workspace": {"pr_branch_prefix": "release-plz-"}}},
-		{"path": builds_workflow_path, "contents": {"jobs": {"semver": {"env": {"RELEASE_PR": "${{ startsWith(github.head_ref, 'release-plz-') }}"}}}}},
-	]}
-	violations := deny with input as fixture
-	every msg in violations {
-		not contains(msg, semver_guard_var)
-	}
 }
 
 test_release_plz_pr_name_must_be_skipped_by_cliff if {
 	config := object.union(valid_release_plz_config, {"workspace": object.union(valid_release_plz_config.workspace, {"pr_name": "release v{{ version }}"})})
 	violations := deny with input as release_plz_fixture(config)
 	sprintf(
-		"%s pr_name %q must match a skip parser in %s — the release PR's title is the squash commit subject git-cliff would otherwise list in the release body",
-		[release_plz_config_path, "release v{{ version }}", cliff_config_path],
+		"%s pr_name %q must match one of its own [changelog] skip parsers — the release PR's title is the squash commit subject the changelog would otherwise list",
+		[release_plz_config_path, "release v{{ version }}"],
 	) in violations
 }
 

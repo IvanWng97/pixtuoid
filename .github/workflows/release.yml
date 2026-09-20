@@ -209,7 +209,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
-      contents: write # creates the GitHub release
+      contents: write # fills the draft release release-plz created
       id-token: write # provenance attestation (OIDC)
       attestations: write
     steps:
@@ -229,19 +229,14 @@ jobs:
           cd artifacts
           sha256sum -- *.tar.gz *.deb *.zip > sha256sums.txt
 
-      - name: Generate changelog
-        id: changelog
-        uses: orhun/git-cliff-action@v4
-        with:
-          config: cliff.toml
-          args: --latest --strip header
-
-      - name: Create GitHub Release
+      # release-plz created this release as a DRAFT carrying the changelog, so
+      # the version is never visible without its binaries. Passing neither
+      # `body` nor `prerelease` keeps what release-plz wrote (the action retains
+      # the existing release's info for every key it isn't given), and omitting
+      # `draft` is what publishes it once the assets are attached.
+      - name: Fill and publish the draft release
         uses: softprops/action-gh-release@v3 # zizmor: ignore[superfluous-actions] mature release action avoids hand-rolled gh release behavior
         with:
-          # Mark v*-rc/-beta/-alpha tags as pre-releases so they don't surface as "latest".
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          body: ${{ steps.changelog.outputs.content }}
           files: |
             artifacts/*.tar.gz
             artifacts/*.deb

@@ -36,9 +36,10 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 `just preflight` is the local gate; these run only in CI, so a green preflight
 does not mean a green PR:
 
-- **semver** — on release PRs only (`release-plz-*` head, WHY on the job): a
-  breaking change to `pixtuoid-core`/`pixtuoid-scene` that the chosen bump
-  doesn't cover fails (the binary's lib target is not a semver surface).
+- **semver** — not a CI job: release-plz runs `cargo-semver-checks` on the
+  release PR and writes the verdict into its body. Between releases main sits at
+  the shipped version, where a baseline check reds by design, so the question
+  only exists there.
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
@@ -92,20 +93,23 @@ the release branch — never weaken the lint.
 
 1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
    `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
-   version, every path-dep requirement and `Cargo.lock` rewritten. The bump
-   level comes from the conventional-commit log — nobody picks it. The PR body
-   lists the versions, not a changelog (`changelog_update = false`).
+   version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
+   rewritten. The bump level comes from the conventional-commit log — nobody
+   picks it — and the PR body carries the `cargo-semver-checks` verdict.
 2. **Regenerate the committed art on that branch**: `just gen`, then commit
    `docs/images` + `site/public/demos`. The office HUD bakes
    `CARGO_PKG_VERSION`, so a bump drifts every still and smoke's `gen-check`
    reds the PR otherwise.
-3. **Review it like any PR.** `semver-checks` runs on release PRs only, and it
-   is the gate on the chosen bump: if it reds, the bump is too small — raise it
-   on the branch with `cargo set-version --workspace X.Y.Z` (cargo-edit) and
-   push.
+3. **Review it like any PR**, and bring the branch up to date with `main` before
+   merging: the tag lands on the squash commit, not on the tree that was tested,
+   and branch protection here is not `strict`. If the semver verdict says the
+   bump is too small, raise it with `cargo set-version --workspace X.Y.Z`
+   (cargo-edit) and push.
 4. **Merge it** (squash). That merge is the *irreversible* step: the `tag` job
-   creates `vX.Y.Z`, which fires `release.yml` → build + crates.io + npm +
-   the GitHub release + a homebrew-core autobump.
+   creates `vX.Y.Z` and a DRAFT GitHub release carrying the changelog, and the
+   tag fires `release.yml` → build + crates.io + npm, which attaches the
+   binaries and publishes the draft. The tag also starts a homebrew-core
+   autobump.
 
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s

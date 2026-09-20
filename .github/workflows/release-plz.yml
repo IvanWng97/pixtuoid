@@ -37,10 +37,10 @@ jobs:
           # The bump is computed from every commit since the crates.io baseline.
           fetch-depth: 0
           persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      # cargo-semver-checks builds the baseline and the current tree, and the
+      # default `audio` feature reaches alsa-sys — hence the ALSA step above.
       - uses: ./.github/actions/setup-cargo-just
-        with:
-          # Nothing compiles here (release-plz.toml `semver_check`).
-          enable-cache: 'false'
       # SHA-pinned, unlike this repo's floating majors: the step sees the PAT
       # (release-plz's security.md), and the SHA also pins the release-plz
       # binary the action installs. Dependabot's minor/patch ignore never

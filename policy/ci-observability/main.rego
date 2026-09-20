@@ -21,23 +21,18 @@ release_workflow_path := ".github/workflows/release.yml"
 release_plz_workflow_path := ".github/workflows/release-plz.yml"
 release_plz_action_path := "release-plz/action"
 release_plz_config_path := "release-plz.toml"
-builds_workflow_path := ".github/workflows/ci-builds.yml"
-semver_guard_job := "semver"
-semver_guard_var := "RELEASE_PR"
-cliff_config_path := "cliff.toml"
 release_plz_token_env := "GITHUB_TOKEN"
 automatic_token := "${{ secrets.GITHUB_TOKEN }}"
 secret_prefix := "${{ secrets."
 
-# The five release-plz settings this repository cannot let drift, each with the
-# reason that is true for IT — a shared message would assert of four keys what
-# holds for one.
+# The release-plz settings this repository cannot let drift, each with the reason
+# that is true for IT — a shared message would assert of every key what holds for
+# one.
 release_plz_kill_switches := {
-	"publish": {"expected": false, "why": "release.yml publishes over OIDC trusted publishing; release-plz publishing too would race an irreversible upload"},
-	"git_release_enable": {"expected": false, "why": "release.yml creates the GitHub release with the git-cliff body, and release-plz would get there first with an empty one (changelog_update is off)"},
+	"publish": {"expected": false, "why": "every crate's crates.io Trusted Publisher names release.yml, so release-plz presenting the OIDC claim would be rejected — add a release-plz.yml publisher to all four crates before flipping this"},
 	"git_tag_enable": {"expected": false, "why": "the workspace default is what makes the exactly-one-tagging-package rule below a complete census"},
+	"git_release_enable": {"expected": false, "why": "the same census, for the release: one package creates it, and release.yml fills that one draft"},
 	"release_always": {"expected": false, "why": "true tags every main push whose version is untagged, so a version bumped outside a release PR publishes with no human decision"},
-	"semver_check": {"expected": false, "why": "true runs cargo-semver-checks inside the step that carries the release PAT, so every dependency's build script runs with a write credential in its environment"},
 }
 
 release_concurrency_group := "pixtuoid-release"
@@ -407,6 +402,14 @@ release_plz_tagging_packages := [pkg |
 	object.get(pkg, "git_tag_enable", false) == true
 ]
 
+# A release that is born published shows a version whose binaries do not exist
+# yet; release.yml publishes the draft once it has attached them.
+release_plz_draft_releases := [pkg |
+	some pkg in release_plz_packages
+	object.get(pkg, "git_release_enable", false) == true
+	object.get(pkg, "git_release_draft", false) == true
+]
+
 release_tag_globs contains tag_glob if {
 	some tag_glob in object.get(documents[release_workflow_path], ["on", "push", "tags"], [])
 }
@@ -425,20 +428,14 @@ release_plz_token_is_a_secret(token) if {
 	token != automatic_token
 }
 
-semver_release_pr_guard := object.get(
-	documents[builds_workflow_path],
-	["jobs", semver_guard_job, "env", semver_guard_var],
-	"",
-)
-
 release_pr_name_is_skipped(pr_name) if {
 	some pattern in cliff_skipped_patterns
 	regex.match(pattern, pr_name)
 }
 
-# git-cliff drops a commit whose subject matches a `skip` parser.
+# release-plz drops a commit whose subject matches a `skip` parser.
 cliff_skipped_patterns contains pattern if {
-	some parser in object.get(documents[cliff_config_path], ["git", "commit_parsers"], [])
+	some parser in object.get(documents[release_plz_config_path], ["changelog", "commit_parsers"], [])
 	object.get(parser, "skip", false) == true
 	pattern := object.get(parser, "message", "")
 }
@@ -1446,16 +1443,11 @@ deny contains msg if {
 	)
 }
 
-# The third cross-file pair. `pr_branch_prefix` is what release-plz names the
-# release PR's branch, and ci-builds.yml keys the ONLY run of the bump gate on
-# that same literal — so a prefix changed on one side alone silently leaves
-# every release PR ungated, the failure that job's own comment describes.
 deny contains msg if {
-	prefix := object.get(documents[release_plz_config_path], ["workspace", "pr_branch_prefix"], "")
-	not contains(semver_release_pr_guard, sprintf("'%s'", [prefix]))
+	count(release_plz_draft_releases) != 1
 	msg := sprintf(
-		"%s job %q must key %s on %s's pr_branch_prefix %q — found %q; the prefix decides which PRs run the bump gate, and release-plz's own default is not a declaration either side can read",
-		[builds_workflow_path, semver_guard_job, semver_guard_var, release_plz_config_path, prefix, semver_release_pr_guard],
+		"%s must give exactly ONE package git_release_enable with git_release_draft — found %d; a release born published names a version whose binaries release.yml has not attached yet",
+		[release_plz_config_path, count(release_plz_draft_releases)],
 	)
 }
 
@@ -1465,8 +1457,8 @@ deny contains msg if {
 deny contains msg if {
 	not release_pr_name_is_skipped(object.get(documents[release_plz_config_path], ["workspace", "pr_name"], ""))
 	msg := sprintf(
-		"%s pr_name %q must match a skip parser in %s — the release PR's title is the squash commit subject git-cliff would otherwise list in the release body",
-		[release_plz_config_path, object.get(documents[release_plz_config_path], ["workspace", "pr_name"], ""), cliff_config_path],
+		"%s pr_name %q must match one of its own [changelog] skip parsers — the release PR's title is the squash commit subject the changelog would otherwise list",
+		[release_plz_config_path, object.get(documents[release_plz_config_path], ["workspace", "pr_name"], "")],
 	)
 }
 
