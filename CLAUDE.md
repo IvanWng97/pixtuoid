@@ -64,7 +64,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - CI-only gates preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
 - On-demand advisory (never gates): `just mutants`, `just coverage`, `just bench`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
-- Release: `just bump X.Y.Z` stops before the tag; pushing the tag IS the publish (crates.io + npm + homebrew autobump) and stays a human step. [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
+- Release: dispatch `release-plz.yml` → `just gen` on its PR → merge; that merge IS the publish (the `release` job does crates.io + the tag + a draft release; the tag fires release.yml: binaries + npm + homebrew autobump) and stays a human step. [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
 ## Workflow
 

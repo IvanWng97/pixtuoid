@@ -533,6 +533,202 @@ test_codecov_job_declaring_its_own_scope_is_accepted if {
 	not codecov_scope_message("snapshots") in violations
 }
 
+release_plz_step(command, token) := {
+	"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5",
+	"with": {"command": command},
+	"env": {"GITHUB_TOKEN": token},
+}
+
+release_plz_workflow(jobs) := {"path": release_plz_workflow_path, "contents": {"jobs": jobs}}
+
+# The two live invocations the existence half expects, so a test of any OTHER
+# rule never trips it by accident.
+release_plz_jobs(token) := {
+	"release-pr": {"steps": [release_plz_step("release-pr", token)]},
+	"tag": {"steps": [release_plz_step("release", token)]},
+}
+
+release_plz_token_message(path, job, token) := sprintf(
+	"%s job %q must give %s a %s from a repository secret, not %q — a tag created with the automatic token triggers no workflow, so release.yml would never fire and the job would still be green",
+	[path, job, release_plz_action_path, release_plz_token_env, token],
+)
+
+# Both pair-pins read a second file, so the config fixtures carry both sides.
+release_plz_fixture(config) := {"documents": [
+	{"path": release_plz_config_path, "contents": config},
+	{"path": release_workflow_path, "contents": {"on": {"push": {"tags": ["v*"]}}}},
+]}
+
+valid_release_plz_config := {
+	"workspace": {
+		"publish": false,
+		"git_release_enable": false,
+		"git_tag_enable": false,
+		"release_always": false,
+		"pr_name": "chore(release): v{{ version }}",
+	},
+	"changelog": {"commit_parsers": [{"message": "^chore\\(release\\)", "skip": true}]},
+	"package": [{
+		"name": "pixtuoid",
+		"git_tag_enable": true,
+		"git_tag_name": "v{{ version }}",
+		"git_release_enable": true,
+		"git_release_draft": true,
+	}],
+}
+
+test_release_plz_cannot_be_retired_by_dropping_an_invocation if {
+	fixture := {"documents": [release_plz_workflow({"tag": {"steps": [release_plz_step("release", "${{ secrets.RELEASE_PLZ_TOKEN }}")]}})]}
+	violations := deny with input as fixture
+	sprintf(
+		"%s must invoke %s in exactly two live steps that nothing softens — one `release-pr`, one `release` — found %d across the repository",
+		[release_plz_workflow_path, release_plz_action_path, 1],
+	) in violations
+}
+
+# continue-on-error reaches green without releasing anything, on the step or on
+# its job. (A job-level `if:` is not a softener here: it is where both real jobs
+# declare which event they answer.)
+test_release_plz_cannot_be_retired_by_softening_a_step_or_its_job if {
+	tokened := release_plz_step("release", "${{ secrets.RELEASE_PLZ_TOKEN }}")
+	softened := [
+		{"release-pr": {"steps": [object.union(tokened, {"continue-on-error": true})]}, "tag": {"steps": [tokened]}},
+		{"release-pr": {"continue-on-error": true, "steps": [tokened]}, "tag": {"steps": [tokened]}},
+	]
+	every jobs in softened {
+		violations := deny with input as {"documents": [release_plz_workflow(jobs)]}
+		sprintf(
+			"%s must invoke %s in exactly two live steps that nothing softens — one `release-pr`, one `release` — found %d across the repository",
+			[release_plz_workflow_path, release_plz_action_path, 1],
+		) in violations
+	}
+}
+
+# The silent class: a tag created with the automatic token fires nothing.
+# The class the count rule cannot see: no `command:` runs BOTH, so this step
+# opens a release PR on every push while the census still reads two.
+test_release_plz_step_without_a_command_is_denied if {
+	commandless := {"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5", "env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}}
+	jobs := {
+		"release-pr": {"steps": [release_plz_step("release-pr", "${{ secrets.RELEASE_PLZ_TOKEN }}")]},
+		"tag": {"steps": [commandless]},
+	}
+	violations := deny with input as {"documents": [release_plz_workflow(jobs)]}
+	sprintf(
+		"%s must pass `command:` on every %s step — one `release-pr`, one `release`, found %v; the action runs BOTH commands when the input is absent",
+		[release_plz_workflow_path, release_plz_action_path, {"", "release-pr"}],
+	) in violations
+}
+
+# The step's own `if:` is the one softener the job-level event guards make easy
+# to confuse with a legitimate one — it still reaches green without releasing.
+test_release_plz_step_guarded_by_an_if_is_denied if {
+	guarded := object.union(release_plz_step("release", "${{ secrets.RELEASE_PLZ_TOKEN }}"), {"if": "false"})
+	jobs := {
+		"release-pr": {"steps": [release_plz_step("release-pr", "${{ secrets.RELEASE_PLZ_TOKEN }}")]},
+		"tag": {"steps": [guarded]},
+	}
+	violations := deny with input as {"documents": [release_plz_workflow(jobs)]}
+	sprintf(
+		"%s must invoke %s in exactly two live steps that nothing softens — one `release-pr`, one `release` — found %d across the repository",
+		[release_plz_workflow_path, release_plz_action_path, 1],
+	) in violations
+}
+
+test_release_plz_automatic_token_is_denied if {
+	fixture := {"documents": [release_plz_workflow(release_plz_jobs("${{ secrets.GITHUB_TOKEN }}"))]}
+	violations := deny with input as fixture
+	release_plz_token_message(release_plz_workflow_path, "tag", "${{ secrets.GITHUB_TOKEN }}") in violations
+}
+
+test_release_plz_repository_secret_is_silent if {
+	fixture := {"documents": [release_plz_workflow(release_plz_jobs("${{ secrets.RELEASE_PLZ_TOKEN }}"))]}
+	violations := deny with input as fixture
+	not release_plz_token_message(release_plz_workflow_path, "tag", "${{ secrets.RELEASE_PLZ_TOKEN }}") in violations
+}
+
+# Hoisting the token to the job is a valid refactor; a step-level blank shadows
+# it and must NOT read as "a token exists somewhere".
+test_release_plz_token_layering_follows_the_nearest_declaration if {
+	bare := {"uses": "release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5", "with": {"command": "release"}}
+	inherited := {
+		"release-pr": {"env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "steps": [bare]},
+		"tag": {"env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "steps": [bare]},
+	}
+	inherited_violations := deny with input as {"documents": [release_plz_workflow(inherited)]}
+	not release_plz_token_message(release_plz_workflow_path, "tag", "${{ secrets.RELEASE_PLZ_TOKEN }}") in inherited_violations
+
+	shadowed := object.union(inherited, {"tag": {"env": {"GITHUB_TOKEN": "${{ secrets.RELEASE_PLZ_TOKEN }}"}, "steps": [release_plz_step("release", "")]}})
+	shadowed_violations := deny with input as {"documents": [release_plz_workflow(shadowed)]}
+	release_plz_token_message(release_plz_workflow_path, "tag", "") in shadowed_violations
+}
+
+test_release_plz_must_tag_from_exactly_one_package if {
+	config := object.union(valid_release_plz_config, {"package": [
+		{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "v{{ version }}", "git_release_enable": true, "git_release_draft": true},
+		{"name": "pixtuoid-core", "git_tag_enable": true, "git_tag_name": "v{{ version }}"},
+	]})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s must enable git_tag_enable on exactly ONE package — found %d; every other package inherits the workspace default so that one tag is the release",
+		[release_plz_config_path, 2],
+	) in violations
+}
+
+# The multi-package default `{{ package }}-v{{ version }}` is the shape that
+# silently stops matching release.yml's glob.
+test_release_plz_tag_name_must_match_the_release_trigger if {
+	config := object.union(valid_release_plz_config, {"package": [{"name": "pixtuoid", "git_tag_enable": true, "git_tag_name": "pixtuoid-v{{ version }}"}]})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s git_tag_name %q must start with %q — %s triggers on that glob, and homebrew-core autobumps from the tag it produces",
+		[release_plz_config_path, "pixtuoid-v{{ version }}", "v", release_workflow_path],
+	) in violations
+}
+
+test_release_plz_kill_switches_cannot_be_flipped_silently if {
+	every key, pin in release_plz_kill_switches {
+		config := object.union(valid_release_plz_config, {"workspace": object.union(valid_release_plz_config.workspace, {key: true})})
+		violations := deny with input as release_plz_fixture(config)
+		sprintf(
+			"%s [workspace] %s must be %v — %s",
+			[release_plz_config_path, key, pin.expected, pin.why],
+		) in violations
+	}
+}
+
+# A release created published names a version whose binaries release.yml has not
+# attached yet, and nothing else in the repository can see that.
+test_release_plz_release_must_be_drafted if {
+	config := object.union(valid_release_plz_config, {"package": [{
+		"name": "pixtuoid",
+		"git_tag_enable": true,
+		"git_tag_name": "v{{ version }}",
+		"git_release_enable": true,
+	}]})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s must give exactly ONE package git_release_enable with git_release_draft — found %d; a release born published names a version whose binaries release.yml has not attached yet",
+		[release_plz_config_path, 0],
+	) in violations
+}
+
+test_release_plz_pr_name_must_be_skipped_by_the_changelog if {
+	config := object.union(valid_release_plz_config, {"workspace": object.union(valid_release_plz_config.workspace, {"pr_name": "release v{{ version }}"})})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s pr_name %q must match one of its own [changelog] skip parsers — the release PR's title is the squash commit subject the changelog would otherwise list",
+		[release_plz_config_path, "release v{{ version }}"],
+	) in violations
+}
+
+test_release_plz_valid_config_fixture_is_silent if {
+	violations := deny with input as release_plz_fixture(valid_release_plz_config)
+	every msg in violations {
+		not contains(msg, release_plz_config_path)
+	}
+}
+
 test_release_concurrency_must_serialize_different_tags if {
 	fixture := {"documents": [{
 		"path": release_workflow_path,

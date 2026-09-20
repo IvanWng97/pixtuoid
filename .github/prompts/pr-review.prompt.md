@@ -89,7 +89,7 @@ Read CLAUDE.md first; read the actual code, not just the diff.
    a plan-stage miss — flag it>
 2. The repo-specific traps + the out-of-diff sweeps (the prompt file above).
 3. Run the applicable gates yourself; report the EXIT CODE you observed,
-   never through a pipe. NAME any CI-only gate this diff can red (semver,
+   never through a pipe. NAME any CI-only gate this diff can red (api-surface,
    gen-check, wasm-check, windows-test, insta orphans); `--lib` builds
    neither bin modules nor examples.
 [the five hard requirements] Your final message is the report.

@@ -1,0 +1,125 @@
+name: release-plz
+
+# Two jobs, two triggers. `release-pr` is dispatched BY HAND, never on push:
+# release-plz refreshes an open release PR on every main push, and a PR that
+# carries non-bot commits is closed and re-opened fresh, so the regenerated
+# stills a human committed would be orphaned by the next dependabot merge, and
+# every refresh re-runs the full CI matrix. `release` runs on every push to main
+# and acts only on a merged release PR (release-plz.toml `release_always`).
+#
+# RENAMING THIS FILE BREAKS PUBLISHING: each crate's crates.io Trusted Publisher
+# record is keyed on the workflow filename, so the OIDC claim stops matching
+# until every record is updated.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+# Both jobs write through the GitHub API with RELEASE_PLZ_TOKEN, a fine-grained
+# PAT (this repository; Contents + Pull requests read/write): GitHub never
+# starts a workflow off GITHUB_TOKEN, so a tag created with the workflow's own
+# token would leave release.yml silent — the job token itself needs no write.
+# The action's git-config step fails loudly on an empty token.
+#
+# ACCEPTED RISK, stated because the pin that used to state it is gone: both
+# jobs now COMPILE inside the step that holds this token — `cargo-semver-checks`
+# on the release PR, `cargo publish` on the tag — so every dependency build
+# script runs with a repository-scoped write credential in its environment.
+# `release-plz.toml` turned both on deliberately. The mechanism that bounds it
+# is a GitHub App installation token (~1 h, `actions/create-github-app-token`),
+# which release-plz documents and its own repository uses; switching is a
+# step-level change here plus two secrets.
+permissions: {}
+
+jobs:
+  release-pr:
+    name: release PR
+    # A dispatch from any other ref would open a release PR computed from that
+    # tree; a fork has no secret.
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    concurrency:
+      group: release-plz-pr
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # The bump is computed from every commit since the crates.io baseline.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      # cargo-semver-checks builds the baseline and the current tree, and the
+      # default `audio` feature reaches alsa-sys — hence the ALSA step above.
+      - uses: ./.github/actions/setup-cargo-just
+      # SHA-pinned, unlike this repo's floating majors: the step sees the PAT
+      # (release-plz's security.md), and the SHA also pins the release-plz
+      # binary the action installs. Dependabot's minor/patch ignore never
+      # surfaces a `v0.6`; move it by hand.
+      - id: release-plz
+        uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      # A dispatch that opens nothing is a green no-op inside release-plz, and
+      # the human who pressed the button is owed an answer either way.
+      - name: A release PR must have been opened
+        env:
+          PR: ${{ steps.release-plz.outputs.pr }}
+          PRS_CREATED: ${{ steps.release-plz.outputs.prs_created }}
+        run: |
+          set -euo pipefail
+          if [ "$PRS_CREATED" != "true" ]; then
+            echo "::error::release-plz opened no release PR — its log above says why"
+            exit 1
+          fi
+          echo "::notice::release PR: $(jq -r .html_url <<<"$PR")"
+
+  release:
+    name: publish and tag a merged release PR
+    if: github.event_name == 'push' && github.repository == 'IvanWng97/pixtuoid'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      # crates.io trusted publishing: release-plz exchanges this claim for a
+      # short-lived token, so no CARGO_REGISTRY_TOKEN exists to leak.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # release-plz walks the merged PR's commits to pick the one to tag,
+          # and decides "already released" from LOCAL tags — a shallow fetch
+          # carries none, so every release would look unreleased.
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: ./.github/actions/setup-alsa
+      # `cargo publish` BUILDS each crate to verify it, and the default `audio`
+      # feature reaches alsa-sys — hence the ALSA step above.
+      - uses: ./.github/actions/setup-cargo-just
+      - uses: release-plz/action@b8d6b54b02889ff2ae2bb82e8b57c3a8fc1683a5 # v0.5.139
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      # release-plz tags only a commit whose PR came from a `release-plz-*`
+      # branch, and exits GREEN when it declines — so a version bump merged
+      # from any other branch, or a miss in its commit->PR lookup, would leave
+      # main at a version release.yml never sees, with nothing red.
+      #
+      # At rest main always sits at a released version, so "the workspace
+      # version is tagged" holds on every push and needs no diff against the
+      # previous commit (which a multi-commit push would get wrong anyway).
+      - name: The workspace version must be tagged
+        run: |
+          set -euo pipefail
+          version="$(just workspace-version)"
+          if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
+            echo "v$version is tagged"
+          else
+            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). Re-running this job is the fix that keeps the changelog: a hand-pushed tag (git tag v$version $GITHUB_SHA && git push origin v$version) still builds and publishes, but its GitHub release has no body, because the changelog lives in the draft release-plz would have created"
+            exit 1
+          fi
