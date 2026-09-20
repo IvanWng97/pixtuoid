@@ -251,65 +251,6 @@ jobs:
             artifacts/*.deb
             artifacts/*.zip
 
-  publish:
-    name: publish to crates.io
-    # Gate on the FULL build matrix, not just `check`: a crates.io publish is
-    # irreversible, so it must not fire for a tag whose binaries/debs don't build.
-    needs: [check, build, deb]
-    # Never publish a pre-release to crates.io — tester tags build artifacts only.
-    if: ${{ !contains(github.ref_name, '-') }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      # crates.io Trusted Publishing (#216): the auth step below exchanges this
-      # claim for a short-lived token — it is the only credential, no standing
-      # CARGO_REGISTRY_TOKEN secret.
-      id-token: write
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          persist-credentials: false
-      - uses: dtolnay/rust-toolchain@stable
-      # `cargo publish` BUILDS each crate to verify it, and default features
-      # pull rodio -> cpal -> the ALSA headers. Without them the loop
-      # irreversibly publishes the earlier crates, then fails to compile
-      # pixtuoid — stranding the release half-published at a version that can
-      # never be reused.
-      - uses: ./.github/actions/setup-alsa
-      - uses: Swatinem/rust-cache@v2 # zizmor: ignore[cache-poisoning] PR caches are merge-ref scoped; stable tags are ancestry-gated to main
-        with:
-          prefix-key: v1-rust
-      - name: Authenticate to crates.io (OIDC trusted publishing)
-        id: auth
-        uses: rust-lang/crates-io-auth-action@v1
-      - name: Publish crates (in dependency order)
-        env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
-        run: |
-          set -euo pipefail
-          # Idempotent: swallow "already on crates.io" so a partially-published tag
-          # can be re-run. Retry ONLY the index-propagation race (#111) — every
-          # other failure (auth, validation, network) fails the job, never hidden.
-          publish_one() {
-            local crate="$1" attempt out
-            for attempt in 1 2 3; do
-              if out=$(cargo publish -p "$crate" 2>&1); then
-                printf '%s\n' "$out"; echo "::notice::$crate published"; return 0
-              elif grep -qiE 'already (exists|uploaded)|crate version .* is already' <<<"$out"; then
-                printf '%s\n' "$out"; echo "::warning::$crate already on crates.io, skipping"; return 0
-              elif grep -qiE 'no matching package|not found in registry|failed to select a version' <<<"$out"; then
-                printf '%s\n' "$out"; echo "::warning::$crate: dependency not yet on the index — retry $attempt/3 after 20s"; sleep 20
-              else
-                printf '%s\n' "$out"; echo "::error::$crate publish failed"; return 1
-              fi
-            done
-            printf '%s\n' "$out"; echo "::error::$crate failed after 3 attempts — index-propagation race, or an unsatisfiable dependency requirement"; return 1
-          }
-          for crate in pixtuoid-core pixtuoid-scene pixtuoid-hook pixtuoid; do
-            publish_one "$crate"
-          done
-
   npm:
     name: publish to npm
     # Same full-matrix gate as the crates.io `publish` job — an npm publish is also

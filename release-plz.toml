@@ -3,12 +3,13 @@
 # publishes it. Each key names the authority it defers to; the ones whose drift
 # would retire the tag silently are pinned in policy/ci-observability.
 [workspace]
-# crates.io + npm + provenance are release.yml's OIDC jobs. NOT a judgement about
-# ordering — crates.io's Trusted Publisher records are bound to the workflow that
-# presents the OIDC claim, and all four crates' records name release.yml. Flipping
-# this means adding a release-plz.yml publisher to each crate on crates.io FIRST,
-# or the first release fails after the tag already exists.
-publish = false
+# crates.io over OIDC trusted publishing — no standing registry token, which is
+# why the `tag` job grants id-token. Each crate carries a Trusted Publisher
+# record naming THIS workflow file; renaming release-plz.yml breaks publishing
+# until the records are updated, because the record is keyed on the filename.
+# npm stays in release.yml: it ships the built binaries, which release-plz does
+# not produce.
+publish = true
 # One CHANGELOG.md for the whole workspace (verified against a real run: four
 # crates, one file).
 changelog_path = "./CHANGELOG.md"

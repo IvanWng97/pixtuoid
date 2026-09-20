@@ -106,10 +106,15 @@ the release branch — never weaken the lint.
    bump is too small, raise it with `cargo set-version --workspace X.Y.Z`
    (cargo-edit) and push.
 4. **Merge it** (squash). That merge is the *irreversible* step: the `tag` job
-   creates `vX.Y.Z` and a DRAFT GitHub release carrying the changelog, and the
-   tag fires `release.yml` → build + crates.io + npm, which attaches the
-   binaries and publishes the draft. The tag also starts a homebrew-core
+   publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
+   GitHub release carrying the changelog; the tag then fires `release.yml`,
+   which builds the six targets and the debs, attaches them, publishes the
+   draft, and publishes the npm packages. The tag also starts a homebrew-core
    autobump.
+
+Each crate's crates.io **Trusted Publisher** record names `release-plz.yml`.
+Renaming that workflow file, or publishing from another one, is rejected until
+the records are updated — the record is keyed on the filename.
 
 Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s

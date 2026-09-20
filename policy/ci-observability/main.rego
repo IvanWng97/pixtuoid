@@ -29,7 +29,6 @@ secret_prefix := "${{ secrets."
 # that is true for IT — a shared message would assert of every key what holds for
 # one.
 release_plz_kill_switches := {
-	"publish": {"expected": false, "why": "every crate's crates.io Trusted Publisher names release.yml, so release-plz presenting the OIDC claim would be rejected — add a release-plz.yml publisher to all four crates before flipping this"},
 	"git_tag_enable": {"expected": false, "why": "the workspace default is what makes the exactly-one-tagging-package rule below a complete census"},
 	"git_release_enable": {"expected": false, "why": "the same census, for the release: one package creates it, and release.yml fills that one draft"},
 	"release_always": {"expected": false, "why": "true tags every main push whose version is untagged, so a version bumped outside a release PR publishes with no human decision"},
