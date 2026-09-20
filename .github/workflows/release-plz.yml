@@ -16,6 +16,15 @@ on:
 # starts a workflow off GITHUB_TOKEN, so a tag created with the workflow's own
 # token would leave release.yml silent — the job token itself needs no write.
 # The action's git-config step fails loudly on an empty token.
+#
+# ACCEPTED RISK, stated because the pin that used to state it is gone: both
+# jobs now COMPILE inside the step that holds this token — `cargo-semver-checks`
+# on the release PR, `cargo publish` on the tag — so every dependency build
+# script runs with a repository-scoped write credential in its environment.
+# `release-plz.toml` turned both on deliberately. The mechanism that bounds it
+# is a GitHub App installation token (~1 h, `actions/create-github-app-token`),
+# which release-plz documents and its own repository uses; switching is a
+# step-level change here plus two secrets.
 permissions: {}
 
 jobs:
@@ -107,6 +116,6 @@ jobs:
           if git ls-remote --exit-code --tags origin "refs/tags/v$version" >/dev/null; then
             echo "v$version is tagged"
           else
-            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). If this push merged one, re-run this job; otherwise publish by hand: git tag v$version $GITHUB_SHA && git push origin v$version"
+            echo "::error::main@${GITHUB_SHA::7} is at v$version but no tag v$version exists, so release.yml has not run for it. release-plz tags only a merged release-plz-* branch (release-plz.toml release_always). Re-running this job is the fix that keeps the changelog: a hand-pushed tag (git tag v$version $GITHUB_SHA && git push origin v$version) still builds and publishes, but its GitHub release has no body, because the changelog lives in the draft release-plz would have created"
             exit 1
           fi

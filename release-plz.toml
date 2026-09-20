@@ -18,10 +18,10 @@ features_always_increment_minor = true
 # One tag and one release per version, both enabled on `pixtuoid` alone below.
 git_tag_enable = false
 git_release_enable = false
-# Declared at WORKSPACE level even though only `pixtuoid` tags: every package's
-# changelog entry builds its compare link from this, and the per-package default
-# (`pixtuoid-core-v0.18.0`) names a tag that does not exist. Verified against a
-# real run — the link is `compare/v0.18.0...v0.19.0`.
+# The ONE tag name: `release.yml` triggers on `v*` and policy pins the pair.
+# Declared at WORKSPACE level even though only `pixtuoid` tags, because every
+# package's changelog entry builds its compare link from it and the per-package
+# default (`pixtuoid-core-v0.18.0`) names a tag that does not exist.
 git_tag_name = "v{{ version }}"
 # The `tag` job runs on every push to main; only a merged PR whose head branch
 # carries `pr_branch_prefix` (the release PR, or a hand-made branch for a
@@ -56,8 +56,6 @@ commit_parsers = [
 [[package]]
 name = "pixtuoid"
 git_tag_enable = true
-# release.yml triggers on `v*`; policy/ci-observability pins this to that glob.
-git_tag_name = "v{{ version }}"
 # Created as a DRAFT so the version is never visible without its binaries:
 # release.yml attaches the assets and `softprops/action-gh-release` publishes the
 # draft on the way out. A draft fires no `release: published` event, which is why

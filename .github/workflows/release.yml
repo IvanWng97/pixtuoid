@@ -237,6 +237,12 @@ jobs:
       - name: Fill and publish the draft release
         uses: softprops/action-gh-release@v3 # zizmor: ignore[superfluous-actions] mature release action avoids hand-rolled gh release behavior
         with:
+          # Passed rather than inherited because the hand-tag recovery path
+          # (release-plz.yml's own error message) leaves NO draft to inherit
+          # from, and the action then creates the release with this field unset
+          # — an `-rc.N` tag would land as the latest stable release. On the
+          # normal path it restates what `git_release_type = "auto"` chose.
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: |
             artifacts/*.tar.gz
             artifacts/*.deb
@@ -253,8 +259,9 @@ jobs:
 
   npm:
     name: publish to npm
-    # Same full-matrix gate as the crates.io `publish` job — an npm publish is also
-    # irreversible (no unpublish after 72h), so one gate for every such publisher.
+    # The full build matrix gates this one: an npm publish is irreversible (no
+    # unpublish after 72h) and its packages ARE those binaries, so a target that
+    # fails to build must not reach the registry as a missing optional dep.
     needs: [check, build, deb]
     # Never publish a pre-release to npm — tester tags build artifacts only.
     if: ${{ !contains(github.ref_name, '-') }}

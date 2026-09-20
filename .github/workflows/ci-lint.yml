@@ -190,8 +190,9 @@ jobs:
       - uses: ./.github/actions/setup-just
       - run: just gen-readme-check
 
-  # cargo-public-api complements semver: one classifies compatibility, while
-  # this golden shows the exact public surface change.
+  # cargo-public-api complements release-plz's semver check: that one classifies
+  # compatibility on the release PR, this golden shows the exact public surface
+  # change at review time.
   api-surface:
     name: api-surface
     runs-on: ubuntu-latest

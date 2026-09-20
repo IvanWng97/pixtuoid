@@ -422,18 +422,25 @@ release_plz_tagging_package := release_plz_tagging_packages[0] if {
 	count(release_plz_tagging_packages) == 1
 }
 
+# release-plz resolves a package's tag name to its own override, else the
+# workspace default — so the pin has to read the same order, or moving the key
+# between the two levels would retire it.
+effective_tag_name := object.get(release_plz_tagging_package, "git_tag_name", workspace_tag_name)
+
+workspace_tag_name := object.get(documents[release_plz_config_path], ["workspace", "git_tag_name"], "")
+
 release_plz_token_is_a_secret(token) if {
 	startswith(token, secret_prefix)
 	token != automatic_token
 }
 
 release_pr_name_is_skipped(pr_name) if {
-	some pattern in cliff_skipped_patterns
+	some pattern in changelog_skipped_patterns
 	regex.match(pattern, pr_name)
 }
 
 # release-plz drops a commit whose subject matches a `skip` parser.
-cliff_skipped_patterns contains pattern if {
+changelog_skipped_patterns contains pattern if {
 	some parser in object.get(documents[release_plz_config_path], ["changelog", "commit_parsers"], [])
 	object.get(parser, "skip", false) == true
 	pattern := object.get(parser, "message", "")
@@ -1426,10 +1433,10 @@ deny contains msg if {
 # release.yml TRIGGERS on. Either side edited alone is a release that builds
 # and publishes nothing, and homebrew-core's autobump never sees a tarball.
 deny contains msg if {
-	not startswith(object.get(release_plz_tagging_package, "git_tag_name", ""), release_tag_prefix)
+	not startswith(effective_tag_name, release_tag_prefix)
 	msg := sprintf(
 		"%s git_tag_name %q must start with %q — %s triggers on that glob, and homebrew-core autobumps from the tag it produces",
-		[release_plz_config_path, object.get(release_plz_tagging_package, "git_tag_name", ""), release_tag_prefix, release_workflow_path],
+		[release_plz_config_path, effective_tag_name, release_tag_prefix, release_workflow_path],
 	)
 }
 
@@ -1450,8 +1457,8 @@ deny contains msg if {
 	)
 }
 
-# The release PR's title becomes the squash-merge subject, and git-cliff renders
-# the release body from those subjects: unskipped, every release announces its
+# The release PR's title becomes the squash-merge subject, and release-plz renders
+# the changelog from those subjects: unskipped, every release announces its
 # own version bump as a change.
 deny contains msg if {
 	not release_pr_name_is_skipped(object.get(documents[release_plz_config_path], ["workspace", "pr_name"], ""))

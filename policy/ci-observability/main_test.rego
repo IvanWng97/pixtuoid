@@ -713,7 +713,7 @@ test_release_plz_release_must_be_drafted if {
 	) in violations
 }
 
-test_release_plz_pr_name_must_be_skipped_by_cliff if {
+test_release_plz_pr_name_must_be_skipped_by_the_changelog if {
 	config := object.union(valid_release_plz_config, {"workspace": object.union(valid_release_plz_config.workspace, {"pr_name": "release v{{ version }}"})})
 	violations := deny with input as release_plz_fixture(config)
 	sprintf(

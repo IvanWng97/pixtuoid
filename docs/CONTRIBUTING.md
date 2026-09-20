@@ -82,9 +82,10 @@ nothing breaks. **minor (`0.Y.z`)** = everything else: new user-facing features
 AND any breaking change to the published crates' API. Both halves are machine-
 applied on the release PR, not per-PR: release-plz derives the level from the
 commit log (`features_always_increment_minor` in `release-plz.toml` is the
-"features also bump minor" half), and the `semver-checks` job on that PR is the
-"nothing breaks on a patch" half. A red `semver-checks` means raise the bump on
-the release branch — never weaken the lint.
+"features also bump minor" half), and release-plz's own `cargo-semver-checks`
+run is the "nothing breaks on a patch" half, reported in the release PR's body.
+A breaking-change verdict means raise the bump on the release branch — never
+weaken the lint.
 
 ### Cutting the release
 

@@ -1052,8 +1052,7 @@ npm-check:
 # ── meta ──────────────────────────────────────────────────────────
 
 # Full pre-push gate: the Rust checks worth running locally before a push.
-# (semver, coverage, and the gen/smoke gates are CI-only — network baseline /
-# heavy builds / venv+ffmpeg.)
+# (coverage and the gen/smoke gates are CI-only — heavy builds / venv+ffmpeg.)
 [group('meta')]
 [doc('Full pre-push gate: lint → clippy → hack → test')]
 preflight: lint clippy hack test
