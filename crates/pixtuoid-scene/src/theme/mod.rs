@@ -229,10 +229,16 @@ pub struct UiColors {
     pub tooltip_text: Rgb,
     /// Tooltip dimmed/secondary text.
     pub tooltip_dim: Rgb,
-    /// Neon wall-board brand text (and the theme-picker swatch).
+    /// The neon sign's hue — brand text, tube and wall halo — and the theme-picker
+    /// swatch.
     pub neon_brand: Rgb,
     /// Neon wall-board ★ star-CTA accent.
     pub neon_star: Rgb,
+    /// The neon sign's hue while an agent waits on the user. The hue change IS the
+    /// signal, so it must read as a different light from [`Self::neon_brand`]
+    /// (`the_neon_alert_hue_is_a_different_light_in_every_theme`) — which a
+    /// theme's `label_waiting` is not always.
+    pub neon_alert: Rgb,
 }
 
 /// Corridor appliance colors (vending machine, printer, coat rack) — each
@@ -535,6 +541,20 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_neon_alert_hue_is_a_different_light_in_every_theme() {
+        /// Below this the sign's alert and brand light read as one color at a glance.
+        const MIN_NEON_ALERT_DIST: u32 = 100;
+        for t in ALL_THEMES {
+            let d = manhattan(t.ui.neon_alert, t.ui.neon_brand);
+            assert!(
+                d >= MIN_NEON_ALERT_DIST,
+                "{}: neon_alert is {d} from neon_brand (< {MIN_NEON_ALERT_DIST})",
+                t.name
+            );
         }
     }
 

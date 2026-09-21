@@ -376,6 +376,11 @@ pub static CYBERPUNK: Theme = Theme {
             g: 255,
             b: 200,
         },
+        neon_alert: Rgb {
+            r: 255,
+            g: 230,
+            b: 0,
+        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

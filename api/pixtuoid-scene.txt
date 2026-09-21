@@ -1771,6 +1771,7 @@ pub pixtuoid_scene::theme::UiColors::label_active: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_exiting: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_idle: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::label_waiting: pixtuoid_core::sprite::Rgb
+pub pixtuoid_scene::theme::UiColors::neon_alert: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::neon_brand: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::neon_star: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::UiColors::tooltip_bg: pixtuoid_core::sprite::Rgb

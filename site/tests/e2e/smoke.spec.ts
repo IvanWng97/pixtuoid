@@ -592,13 +592,11 @@ test('the neon board keeps one monospace column per char, through a flap roll', 
   const errors = watchErrors(page);
   await gotoLive(page);
   await expect(page.locator('#office-overlay.is-on')).toBeAttached({ timeout: 10_000 });
-  // The engine BAKES the row's separators as spaces and re-cuts its tone segments
-  // every tick of a roll, so the check is only real on a multi-segment row.
+  // Only a multi-segment row exercises `.ov-brow`'s `pre` (WHY on the rule).
   const mood = page.locator('#office-overlay .ov-board .ov-brow').nth(1);
-  await expect
-    .poll(() => mood.locator('span').count(), { timeout: 15_000 })
-    .toBeGreaterThan(1);
-  // One flap half, so the window always crosses a roll.
+  await expect.poll(() => mood.locator('span').count(), { timeout: 15_000 }).toBeGreaterThan(1);
+  // scene `board.rs` FLAP_HALF_MS — one half always crosses a roll; the
+  // "crossed a roll" assert below reds if the half grows.
   const samples = await mood.evaluate(async (row) => {
     const HALF_MS = 4_000;
     const probe = document.createElement('span');
@@ -625,6 +623,19 @@ test('the neon board keeps one monospace column per char, through a flap roll', 
     expect(Math.abs(s.width - s.text.length * s.ch), `"${s.text}"`).toBeLessThan(s.ch / 2);
     expect(Math.abs(s.left - samples[0].left), `"${s.text}"`).toBeLessThan(1);
   }
+  // The context row bakes its separators the same way; one settled read covers it.
+  const ctx = await page
+    .locator('#office-overlay .ov-board .ov-brow')
+    .nth(2)
+    .evaluate((row) => {
+      const spans = Array.from(row.children) as HTMLElement[];
+      const left = spans[0].getBoundingClientRect().left;
+      const right = spans[spans.length - 1].getBoundingClientRect().right;
+      return { text: spans.map((c) => c.textContent).join(''), width: right - left };
+    });
+  expect(Math.abs(ctx.width - ctx.text.length * samples[0].ch), `"${ctx.text}"`).toBeLessThan(
+    samples[0].ch / 2
+  );
   expect(errors()).toEqual([]);
 });
 

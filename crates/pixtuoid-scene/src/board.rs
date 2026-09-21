@@ -125,7 +125,7 @@ pub enum BoardTone {
     Waiting,
     /// An idle count — `label_idle`.
     Idle,
-    /// Muted context/separator text — `tooltip_dim`.
+    /// Muted context/separator text, and a flap mid-roll — `tooltip_dim`.
     Dim,
 }
 
@@ -213,7 +213,7 @@ pub fn gateway_tone(state: DaemonState) -> BoardTone {
 /// line and the sign's light all read, so the words and the glow can't disagree.
 /// Exiting agents never count: a walkout isn't the mood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum OfficeMood {
+pub(crate) enum OfficeMood {
     /// `waiting` agents are blocked on the user — outranks everything.
     Alert {
         /// How many agents wait.
@@ -232,7 +232,7 @@ pub enum OfficeMood {
 
 impl OfficeMood {
     /// Classify `counts`.
-    pub fn of(counts: StateCounts) -> Self {
+    pub(crate) fn of(counts: StateCounts) -> Self {
         if counts.waiting > 0 {
             Self::Alert {
                 waiting: counts.waiting,
@@ -250,11 +250,13 @@ impl OfficeMood {
 }
 
 /// The board's "mood pulse" tally — one tone-tagged segment per non-zero
-/// present state. Exiting agents are absent by design: a walkout isn't the mood.
+/// present state. Exiting agents: see [`OfficeMood`].
 ///
 /// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
 /// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
-/// equals the terminal display width — no `unicode-width` dep in `scene`.
+/// equals the terminal display width — no `unicode-width` dep in `scene` (pinned
+/// where the width authority lives: the TUI's
+/// `every_l2_face_is_one_terminal_column_per_char`).
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
@@ -331,9 +333,10 @@ fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegmen
 
 /// L2 alternates in equal halves — tally, persona, tally, … — each HOLDING and
 /// then rolling into the next so the roll ends exactly on the hand-over. An even
-/// half is the tally, and a whole hour is an even count of halves, so the stills
-/// gen-media renders on the hour open on a settled tally.
+/// half is the tally, so a frame on gen-media's hour grid opens on it
+/// (`no_committed_frame_catches_l2_mid_roll`).
 const FLAP_HALF_MS: u64 = 4_000;
+const _: () = assert!(crate::anim::HOUR_MS.is_multiple_of(2 * FLAP_HALF_MS));
 /// A column's flap lands this long into a roll, plus [`FLAP_SETTLE_STEP_MS`] per
 /// column to its left — so a roll settles left to right.
 const FLAP_SETTLE_BASE_MS: u64 = 140;
@@ -415,18 +418,18 @@ fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
     } else {
         (persona, tally)
     };
-    let (from, to) = (flap_cells(&showing), flap_cells(&next));
-    let roll_ms = flap_roll_ms(from.len().max(to.len()));
+    let cols = |segs: &[BoardSegment]| segs.iter().map(|s| s.text.chars().count()).sum();
+    let roll_ms = flap_roll_ms(usize::max(cols(&showing), cols(&next)));
     match (now_ms % FLAP_HALF_MS + roll_ms).checked_sub(FLAP_HALF_MS) {
-        Some(since_ms) => flap_roll(&from, &to, since_ms),
+        Some(since_ms) => flap_roll(&flap_cells(&showing), &flap_cells(&next), since_ms),
         None => showing,
     }
 }
 
 /// Assemble the whole board model. `floor` is `(current, total_floors)` — a
 /// single-floor office passes `None`; `gateway` is the [`gateway_rollup`], where
-/// `None` suppresses the chip; `now` drives L2's flap. The context separators (`"  "`) are baked into each
-/// following segment so painters just concatenate.
+/// `None` suppresses the chip; `now` drives L2's flap. The context separators
+/// (`"  "`) are baked into each following segment so painters just concatenate.
 pub fn build_board(
     counts: StateCounts,
     uptime_secs: u64,
@@ -459,7 +462,7 @@ pub fn build_board(
 }
 
 #[cfg(test)]
-pub(crate) mod tests {
+mod tests {
     use super::*;
 
     fn mood_text(counts: StateCounts) -> String {
@@ -494,18 +497,18 @@ pub(crate) mod tests {
         flap_roll_ms(tally.max(persona))
     }
 
-    /// Where gen-media captures a committed frame, in ms past a whole UTC hour: a
-    /// still's own hour, a clip's `poster` second, a wasm still's
-    /// `t0_ms + advance_ms`. Read from the manifest, so a new poster time is
-    /// covered the day it is added.
-    pub(crate) fn committed_frame_offsets_ms() -> Vec<u64> {
-        const HOUR_MS: u64 = 3_600_000;
+    /// The capture instants `scripts/media.json` NAMES, in ms past the hour grid
+    /// gen-media's clocks sit on: a still's own hour, a clip's `poster` second, a
+    /// wasm still's `t0_ms + advance_ms`. Read from the manifest so a new poster
+    /// time is covered the day it lands; `None` on a crates.io-packaged run, which
+    /// ships no `scripts/`.
+    fn committed_frame_offsets_ms() -> Option<Vec<u64>> {
         const MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/media.json");
-        let raw = std::fs::read_to_string(MANIFEST).expect("scripts/media.json reads");
+        let raw = std::fs::read_to_string(MANIFEST).ok()?;
         let jobs: serde_json::Value = serde_json::from_str(&raw).expect("media.json is JSON");
         let mut offsets = vec![0];
         for job in jobs.as_array().expect("media.json is an array") {
-            let base = job["t0_ms"].as_u64().unwrap_or(0) % HOUR_MS;
+            let base = job["t0_ms"].as_u64().unwrap_or(0) % crate::anim::HOUR_MS;
             if let Some(poster_secs) = job["poster"].as_f64() {
                 offsets.push(base + (poster_secs * 1000.0) as u64);
             }
@@ -517,7 +520,7 @@ pub(crate) mod tests {
             offsets.len() > 1,
             "the manifest still names poster/advance times"
         );
-        offsets
+        Some(offsets)
     }
 
     #[test]
@@ -728,12 +731,14 @@ pub(crate) mod tests {
         }
     }
 
-    /// A committed frame must never catch L2 mid-roll: at every instant gen-media
-    /// captures one, even the widest roll has not begun.
     #[test]
     fn no_committed_frame_catches_l2_mid_roll() {
+        let Some(offsets) = committed_frame_offsets_ms() else {
+            eprintln!("skipping: scripts/media.json not present (packaged build)");
+            return;
+        };
         let widest_roll = flap_roll_ms(crate::pixel_painter::NEON_PANEL_INNER_W as usize);
-        for offset in committed_frame_offsets_ms() {
+        for offset in offsets {
             let into_half = offset % FLAP_HALF_MS;
             assert!(
                 into_half + widest_roll < FLAP_HALF_MS,
@@ -743,7 +748,7 @@ pub(crate) mod tests {
         assert_eq!(
             board_mood_at(counts(4, 2, 6), 0),
             board_mood_segments(counts(4, 2, 6)),
-            "and a whole-hour still shows the tally"
+            "and a frame ON the hour grid shows the tally"
         );
     }
 

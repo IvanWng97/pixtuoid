@@ -398,6 +398,11 @@ pub static NORMAL: Theme = Theme {
             g: 100,
             b: 200,
         },
+        neon_alert: Rgb {
+            r: 220,
+            g: 200,
+            b: 50,
+        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

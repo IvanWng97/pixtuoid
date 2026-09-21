@@ -1,5 +1,5 @@
 //! Lighting effects — ceiling pools, lamp halos, shadows, corridor runner
-//! texture, neon sign panel, and wall clock.
+//! texture, the neon sign (panel, per-frame look, halo), and wall clock.
 
 use std::time::SystemTime;
 
@@ -31,10 +31,9 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub ry_norm: f32,
 }
 
-/// The ONE loop every distance-falloff light shares: blend `color` over the
-/// caller-clipped `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel
-/// alone. A light owns only its falloff SHAPE, so the pools, the lamp halos and
-/// the neon glow cannot drift in how they clip or composite.
+/// The composite the pools, the lamp halos and the neon glow share: blend `color`
+/// over the caller-clipped `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves
+/// the pixel alone. A light owns its falloff SHAPE and its clip, never the blend.
 fn blend_falloff(
     buf: &mut RgbBuffer,
     xs: std::ops::Range<u16>,
@@ -180,14 +179,14 @@ const NEON_DAYLIGHT_FLOOR: f32 = 0.5;
 
 /// A 0..1 sine breath with trough `floor`. The ms reduce by INTEGER modulo
 /// before any float cast — at wall-clock magnitude an f32 of the raw ms cannot
-/// tell two frames apart, which froze the old pulse.
+/// tell two frames apart (`neon_breath_advances_at_wall_clock_scale_and_stays_in_band`).
 fn neon_breath(elapsed_ms: u64, period_ms: u64, floor: f32) -> f32 {
     let phase = (elapsed_ms % period_ms) as f32 / period_ms as f32;
     floor + (1.0 - floor) * ((std::f32::consts::TAU * phase).sin() * 0.5 + 0.5)
 }
 
 /// Map the sim's theme-free `levels` to this frame's colors. `darkness` is the
-/// time-of-day term: the halo owns the wall at night and fades by day.
+/// time-of-day term ([`NEON_DAYLIGHT_FLOOR`]).
 pub(in crate::pixel_painter) fn neon_look(
     levels: crate::floor::NeonLevels,
     now: SystemTime,
@@ -196,7 +195,7 @@ pub(in crate::pixel_painter) fn neon_look(
 ) -> NeonLook {
     let ms = epoch_ms(now);
     let power = levels.power;
-    let hue = blend_rgb(theme.ui.neon_brand, theme.ui.label_waiting, levels.alert);
+    let hue = blend_rgb(theme.ui.neon_brand, theme.ui.neon_alert, levels.alert);
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
     let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
@@ -399,8 +398,8 @@ mod tests {
     use crate::pixel_painter::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
     use std::time::Duration;
 
-    /// A WALL-CLOCK-scale epoch, not a small test one: that is where an f32 cast
-    /// of the raw ms froze the old pulse.
+    /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo
+    /// exists for.
     const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
 
     fn at_ms(ms: u64) -> SystemTime {
@@ -466,12 +465,12 @@ mod tests {
         );
         assert_eq!(
             look(NeonLevels::ALERT, WALL_CLOCK_MS, 1.0).halo,
-            theme.ui.label_waiting
+            theme.ui.neon_alert
         );
     }
 
     #[test]
-    fn neon_halo_halves_in_full_daylight_and_a_calm_sign_glows_less_than_a_busy_one() {
+    fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_one() {
         let night = look(NeonLevels::BUSY, WALL_CLOCK_MS, 1.0).halo_strength;
         let day = look(NeonLevels::BUSY, WALL_CLOCK_MS, 0.0).halo_strength;
         assert!(
@@ -532,6 +531,75 @@ mod tests {
             &dark,
         );
         assert!((0..40).all(|y| (0..60).all(|x| buf.get(x, y) == WALL)));
+    }
+
+    /// The two lights that pre-date [`blend_falloff`], re-derived the way they were
+    /// written before it: the shared loop must not move one of their pixels.
+    #[test]
+    fn the_shared_falloff_loop_matches_the_loops_it_replaced() {
+        let fill = Rgb {
+            r: 40,
+            g: 70,
+            b: 110,
+        };
+        let tint = Rgb {
+            r: 250,
+            g: 200,
+            b: 90,
+        };
+        let (w, h) = (40u16, 30u16);
+
+        let g = || RadialFalloff {
+            min_x: 3,
+            max_x: 37,
+            min_y: 2,
+            max_y: 28,
+            cx: 19.5,
+            cy: 14.5,
+            rx_norm: 16.5,
+            ry_norm: 12.5,
+        };
+        let mut got = RgbBuffer::filled(w, h, fill);
+        paint_radial_falloff(&mut got, g(), 0.63, tint);
+        let mut want = RgbBuffer::filled(w, h, fill);
+        let e = g();
+        for y in e.min_y..e.max_y {
+            for x in e.min_x..e.max_x {
+                let nx = (x as f32 - e.cx) / e.rx_norm;
+                let ny = (y as f32 - e.cy) / e.ry_norm;
+                let r2 = nx * nx + ny * ny;
+                if r2 > 1.0 {
+                    continue;
+                }
+                let cur = want.get(x, y);
+                want.put(x, y, blend_rgb(cur, tint, (1.0 - r2) * 0.63));
+            }
+        }
+        assert!(got.as_slice() == want.as_slice(), "radial falloff moved");
+
+        // Off-centre and clipped by two edges, like a lamp in a corner.
+        let (cx, cy, radius) = (36u16, 4u16, 11u16);
+        let mut got = RgbBuffer::filled(w, h, fill);
+        paint_warm_halo(&mut got, cx, cy, radius, 0.47, tint);
+        let mut want = RgbBuffer::filled(w, h, fill);
+        let r2max = (radius as f32) * (radius as f32);
+        for y in cy.saturating_sub(radius)..(cy + radius).min(h) {
+            for x in cx.saturating_sub(radius)..(cx + radius).min(w) {
+                let dx = x as f32 - cx as f32;
+                let dy = y as f32 - cy as f32;
+                let r2 = dx * dx + dy * dy;
+                if r2 > r2max {
+                    continue;
+                }
+                let cur = want.get(x, y);
+                want.put(
+                    x,
+                    y,
+                    blend_rgb(cur, tint, (1.0 - (r2 / r2max).sqrt()) * 0.47),
+                );
+            }
+        }
+        assert!(got.as_slice() == want.as_slice(), "warm halo moved");
     }
 
     #[test]
@@ -603,8 +671,8 @@ mod tests {
         assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
     }
 
-    // `RgbBuffer::put` has no internal bounds guard, so an off-edge panel must hit
-    // the painter's own `continue`.
+    // Off-edge must clip, not panic: the panel through `put_checked`, the glow
+    // through its clamped ranges.
     #[test]
     fn neon_panel_off_edge_does_not_panic() {
         let theme = &crate::theme::NORMAL;

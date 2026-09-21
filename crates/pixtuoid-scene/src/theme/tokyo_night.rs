@@ -398,6 +398,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 118,
             b: 142,
         },
+        neon_alert: Rgb {
+            r: 224,
+            g: 175,
+            b: 104,
+        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

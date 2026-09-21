@@ -201,7 +201,7 @@ mod tests {
             l2.contains("\u{25b2}1 wait")
                 && l2.contains("\u{25cf}2 work")
                 && l2.contains("\u{25cb}1 idle"),
-            "mood pulse: {l2:?}"
+            "mood pulse (UNIX_EPOCH opens on the tally): {l2:?}"
         );
         assert!(l3.contains("\u{2191}<1m"), "uptime: {l3:?}");
         assert!(l3.contains("\u{2b22}gw ok"), "gateway chip: {l3:?}");
@@ -211,9 +211,8 @@ mod tests {
         );
     }
 
-    /// `scene` sizes L2 by `chars().count()` (it has no `unicode-width`); the
-    /// terminal lays it out by display width. Every face L2 can show — tally,
-    /// persona, each drum glyph mid-roll — has to agree, or a roll shoves the row.
+    /// Every face L2 can show — tally, persona, each drum glyph mid-roll — or a
+    /// roll shoves the row (the claim is `board_mood_segments`'s).
     #[test]
     fn every_l2_face_is_one_terminal_column_per_char() {
         use std::time::Duration;

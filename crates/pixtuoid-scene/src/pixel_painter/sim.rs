@@ -133,11 +133,9 @@ pub(crate) fn sim_step(
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
     let indoor_scale = stores.light.tick(scene.agents.is_empty(), now);
-    // The SAME tally the three painters build the board text from, so the sign's
-    // hue and its words cannot disagree.
     let neon = stores.neon.tick(
         crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
-        indoor_scale,
+        stores.light.dimmed(),
         now,
     );
 

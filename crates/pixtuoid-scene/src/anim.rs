@@ -1,4 +1,5 @@
-//! Stateless easing curves for animations.
+//! Stateless easing curves for animations, and the wall-clock ms helpers every
+//! layer shares.
 //!
 //! Wall-clock `SystemTime`, not `Instant`: matches the rest of the animation
 //! state (FloorTransition, LightingState, PoseHistory) — serializable, no
@@ -41,6 +42,9 @@ pub(crate) fn elapsed_ms(now: SystemTime, since: SystemTime) -> u64 {
         .unwrap_or(Duration::ZERO)
         .as_millis() as u64
 }
+
+/// One hour in ms — the grid gen-media's fixed clocks sit on (`--now-hour`).
+pub(crate) const HOUR_MS: u64 = 3_600_000;
 
 /// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
 /// It lives HERE, below both the model and the render layer, so a model module

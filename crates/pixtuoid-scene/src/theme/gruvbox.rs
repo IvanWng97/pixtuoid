@@ -401,6 +401,11 @@ pub static GRUVBOX: Theme = Theme {
             g: 128,
             b: 25,
         },
+        neon_alert: Rgb {
+            r: 251,
+            g: 73,
+            b: 52,
+        },
     },
     appliance: ApplianceColors {
         vending_body: Rgb {

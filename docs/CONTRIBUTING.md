@@ -126,8 +126,8 @@ before `release-plz.yml` reaches main, not before the first dispatch**: the
 
 A release PR that release-plz closes and re-opens (it does that when the branch
 carries non-bot commits) leaves a commit you pushed to it — a raised bump —
-behind: `git cherry-pick` it onto the new branch. Nothing rendered carries the
-version, so a release PR needs no `just gen`.
+behind: `git cherry-pick` it onto the new branch. No committed frame carries the
+version (`BOARD_BRAND`), so a release PR needs no `just gen`.
 
 Merging the release PR is what publishes, so a human owns it. The tag also
 publishes **outside** this repo:

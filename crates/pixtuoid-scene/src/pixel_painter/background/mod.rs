@@ -30,7 +30,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut, WHITE};
+use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut, BLACK, WHITE};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`. The
 /// ambient/sky clock-decode funnel; `paint_clock`'s analog hands keep their own
@@ -235,7 +235,7 @@ fn veil_lum(sky: &sky::SkyState) -> f32 {
 
 /// A veil colour at the frame's daylight — hue preserved, luminance tracked.
 fn veil_lit(color: Rgb, lum: f32) -> Rgb {
-    blend_rgb(Rgb { r: 0, g: 0, b: 0 }, color, lum)
+    blend_rgb(BLACK, color, lum)
 }
 
 /// One PAINTED floor-to-ceiling window: its left edge, its centre column, and

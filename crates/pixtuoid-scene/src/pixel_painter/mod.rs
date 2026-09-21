@@ -582,8 +582,6 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         );
     }
 
-    // The panel's text overlay is a separate ratatui widget pass, not painted
-    // here.
     let neon = background::neon_look(frame.neon, ctx.now, look.darkness, ctx.theme);
     paint_neon_panel(
         ctx.buf,

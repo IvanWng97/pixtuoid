@@ -430,9 +430,7 @@ pub(super) fn degraded_pixel(c: Rgb) -> Rgb {
     };
     let tinted = blend_rgb(desat, sick, 0.45);
     blend_rgb(
-        tinted,
-        Rgb { r: 0, g: 0, b: 0 },
-        0.18, // dim: the mascot looks drained
+        tinted, BLACK, 0.18, // dim: the mascot looks drained
     )
 }
 
