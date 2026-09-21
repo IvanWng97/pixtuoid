@@ -31,6 +31,27 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub ry_norm: f32,
 }
 
+/// The ONE loop every distance-falloff light shares: blend `color` over the
+/// caller-clipped `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves the pixel
+/// alone. A light owns only its falloff SHAPE, so the pools, the lamp halos and
+/// the neon glow cannot drift in how they clip or composite.
+fn blend_falloff(
+    buf: &mut RgbBuffer,
+    xs: std::ops::Range<u16>,
+    ys: std::ops::Range<u16>,
+    color: Rgb,
+    t: impl Fn(u16, u16) -> Option<f32>,
+) {
+    for y in ys {
+        for x in xs.clone() {
+            if let Some(t) = t(x, y) {
+                let cur = buf.get(x, y);
+                buf.put(x, y, blend_rgb(cur, color, t));
+            }
+        }
+    }
+}
+
 /// Blend `color` over the region with a quadratic radial falloff from the centre
 /// (full `strength`) to the ellipse edge (`r² > 1` skipped), so it reads as a
 /// soft round patch rather than a stamped oval.
@@ -40,19 +61,12 @@ pub(in crate::pixel_painter) fn paint_radial_falloff(
     strength: f32,
     color: Rgb,
 ) {
-    for y in g.min_y..g.max_y {
-        for x in g.min_x..g.max_x {
-            let nx = (x as f32 - g.cx) / g.rx_norm;
-            let ny = (y as f32 - g.cy) / g.ry_norm;
-            let r2 = nx * nx + ny * ny;
-            if r2 > 1.0 {
-                continue;
-            }
-            let t = (1.0 - r2) * strength;
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, color, t));
-        }
-    }
+    blend_falloff(buf, g.min_x..g.max_x, g.min_y..g.max_y, color, |x, y| {
+        let nx = (x as f32 - g.cx) / g.rx_norm;
+        let ny = (y as f32 - g.cy) / g.ry_norm;
+        let r2 = nx * nx + ny * ny;
+        (r2 <= 1.0).then(|| (1.0 - r2) * strength)
+    });
 }
 
 /// Blend `color` over an integer-centred ellipse — the ceiling pool + shadow.
@@ -123,22 +137,15 @@ pub(in crate::pixel_painter) fn paint_warm_halo(
     if strength <= 0.0 {
         return;
     }
-    let (min_x, max_x) = (cx.saturating_sub(radius), (cx + radius).min(buf.width()));
-    let (min_y, max_y) = (cy.saturating_sub(radius), (cy + radius).min(buf.height()));
+    let xs = cx.saturating_sub(radius)..(cx + radius).min(buf.width());
+    let ys = cy.saturating_sub(radius)..(cy + radius).min(buf.height());
     let r2max = (radius as f32) * (radius as f32);
-    for y in min_y..max_y {
-        for x in min_x..max_x {
-            let dx = x as f32 - cx as f32;
-            let dy = y as f32 - cy as f32;
-            let r2 = dx * dx + dy * dy;
-            if r2 > r2max {
-                continue;
-            }
-            let t = (1.0 - (r2 / r2max).sqrt()) * strength;
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, warm, t));
-        }
-    }
+    blend_falloff(buf, xs, ys, warm, |x, y| {
+        let dx = x as f32 - cx as f32;
+        let dy = y as f32 - cy as f32;
+        let r2 = dx * dx + dy * dy;
+        (r2 <= r2max).then(|| (1.0 - (r2 / r2max).sqrt()) * strength)
+    });
 }
 
 /// Neon border breathing brightness (0.7..1.0) for the given wall-clock ms.
