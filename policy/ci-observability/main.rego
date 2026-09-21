@@ -21,6 +21,8 @@ release_workflow_path := ".github/workflows/release.yml"
 release_plz_workflow_path := ".github/workflows/release-plz.yml"
 release_plz_action_path := "release-plz/action"
 release_plz_config_path := "release-plz.toml"
+
+cargo_manifest_path := "Cargo.toml"
 release_plz_token_env := "GITHUB_TOKEN"
 automatic_token := "${{ secrets.GITHUB_TOKEN }}"
 secret_prefix := "${{ secrets."
@@ -32,6 +34,7 @@ release_plz_kill_switches := {
 	"git_tag_enable": {"expected": false, "why": "the workspace default is what makes the exactly-one-tagging-package rule below a complete census"},
 	"git_release_enable": {"expected": false, "why": "the same census, for the release: one package creates it, and release.yml fills that one draft"},
 	"release_always": {"expected": false, "why": "true tags every main push whose version is untagged, so a version bumped outside a release PR publishes with no human decision"},
+	"changelog_update": {"expected": false, "why": "one package writes the one changelog; with every package writing to a shared path the FIRST crate's commits became the whole release's notes"},
 }
 
 release_concurrency_group := "pixtuoid-release"
@@ -408,6 +411,13 @@ release_plz_draft_releases := [pkg |
 	object.get(pkg, "git_release_enable", false) == true
 	object.get(pkg, "git_release_draft", false) == true
 ]
+
+# A member's package name IS its directory name in this workspace (`crates/<name>`).
+workspace_member_names contains name if {
+	some member in object.get(documents[cargo_manifest_path], ["workspace", "members"], [])
+	parts := split(member, "/")
+	name := parts[count(parts) - 1]
+}
 
 release_tag_globs contains tag_glob if {
 	some tag_glob in object.get(documents[release_workflow_path], ["on", "push", "tags"], [])
@@ -1454,6 +1464,32 @@ deny contains msg if {
 	msg := sprintf(
 		"%s must give exactly ONE package git_release_enable with git_release_draft — found %d; a release born published names a version whose binaries release.yml has not attached yet",
 		[release_plz_config_path, count(release_plz_draft_releases)],
+	)
+}
+
+# The release notes are the draft release's body, and the version popup links
+# users to them. release-plz lists only commits touching the packages a
+# changelog NAMES, so the package that carries the release writes the one
+# changelog and names every other member — a crate left out is silent.
+deny contains msg if {
+	count(release_plz_draft_releases) == 1
+	pkg := release_plz_draft_releases[0]
+	object.get(pkg, "changelog_update", false) != true
+	msg := sprintf(
+		"%s package %q must set changelog_update — the workspace default is off, so nothing else writes the release notes",
+		[release_plz_config_path, pkg.name],
+	)
+}
+
+deny contains msg if {
+	count(release_plz_draft_releases) == 1
+	pkg := release_plz_draft_releases[0]
+	included := {name | some name in object.get(pkg, "changelog_include", [])}
+	missing := (workspace_member_names - {pkg.name}) - included
+	count(missing) > 0
+	msg := sprintf(
+		"%s package %q changelog_include must name every other workspace member — missing %v; a crate left out vanishes from the release notes",
+		[release_plz_config_path, pkg.name, sort(missing)],
 	)
 }
 

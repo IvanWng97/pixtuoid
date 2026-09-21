@@ -10,9 +10,11 @@
 # npm stays in release.yml: it ships the built binaries, which release-plz does
 # not produce.
 publish = true
-# One CHANGELOG.md for the whole workspace (verified against a real run: four
-# crates, one file).
-changelog_path = "./CHANGELOG.md"
+# One CHANGELOG.md for the whole workspace, written by `pixtuoid` alone below.
+# NOT a shared `changelog_path` here: every package then writes the same
+# `## [X.Y.Z]` heading to one file, the first one wins, and that crate's commits
+# become the whole release's notes.
+changelog_update = false
 # CONTRIBUTING.md#versioning: pre-1.0, a feature bumps the minor.
 features_always_increment_minor = true
 # One tag and one release per version, both enabled on `pixtuoid` alone below.
@@ -55,6 +57,13 @@ commit_parsers = [
 
 [[package]]
 name = "pixtuoid"
+# release-plz's own recipe for one changelog (its release-plz.toml): the released
+# package owns the file and names the rest, because a changelog lists only
+# commits touching the packages it names. Policy pins the list to Cargo.toml's
+# members. A commit touching NO member (site/, ci) stays out by design.
+changelog_update = true
+changelog_path = "./CHANGELOG.md"
+changelog_include = ["pixtuoid-core", "pixtuoid-scene", "pixtuoid-hook", "pixtuoid-web"]
 git_tag_enable = true
 # Created as a DRAFT so the version is never visible without its binaries:
 # release.yml attaches the assets and `softprops/action-gh-release` publishes the
