@@ -905,7 +905,7 @@ impl NeonState {
             .any(|&(start, end)| (start..end).contains(&t))
     }
 
-    /// The frame gap above which a flash can't be drawn faithfully: the shortest
+    /// The frame gap from which a flash can't be drawn faithfully: the shortest
     /// flash. A painter sampling slower than that — a still, the floating
     /// window's ambient cadence — would hold one flash for its whole frame or
     /// miss it, so it gets the steady starved tube instead.

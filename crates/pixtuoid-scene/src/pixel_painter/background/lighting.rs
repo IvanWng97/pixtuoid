@@ -199,11 +199,15 @@ pub(in crate::pixel_painter) fn neon_look(
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
     let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
+    // A tube only throws light ABOVE its starved level — one darker than the wall
+    // it hangs on has none to give.
+    let starved = crate::floor::NeonLevels::EMPTY.power;
+    let throw = ((power - starved) / (1.0 - starved)).max(0.0);
     NeonLook {
         tube: blend_rgb(BLACK, blend_rgb(hue, WHITE, NEON_TUBE_WHITEN), power),
         interior: blend_rgb(theme.office.neon_panel_bg, hue, NEON_INTERIOR_TINT * power),
         halo: hue,
-        halo_strength: power * (brand + (alert - brand) * levels.alert) * daylight,
+        halo_strength: throw * (brand + (alert - brand) * levels.alert) * daylight,
     }
 }
 
@@ -479,6 +483,17 @@ mod tests {
         );
         let calm = look(NeonLevels::CALM, WALL_CLOCK_MS, 1.0).halo_strength;
         assert!(calm > 0.0 && calm < night, "{calm} vs {night}");
+    }
+
+    #[test]
+    fn a_starved_tube_throws_no_halo_and_a_flash_does() {
+        assert_eq!(
+            look(NeonLevels::EMPTY, WALL_CLOCK_MS, 1.0).halo_strength,
+            0.0
+        );
+        assert!(look(NeonLevels::FLASH, WALL_CLOCK_MS, 1.0).halo_strength > 0.0);
+        let (buf, _) = lit_wall(NeonLevels::EMPTY);
+        assert_eq!(buf.get(PANEL_AT - 1, PANEL_AT + NEON_PANEL_H / 2), WALL);
     }
 
     /// A terminal text cell shows only its BOTTOM pixel (ratatui keeps the old bg

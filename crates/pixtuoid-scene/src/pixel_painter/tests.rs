@@ -2228,6 +2228,38 @@ fn sim_rig() -> (SceneState, Layout, pixtuoid_core::AgentId, SystemTime, Pack) {
     (scene, layout, id, now0, pack)
 }
 
+/// `sim_step` must hand the sign the room's VERDICT, not its smoothed level: once
+/// a floor has dimmed and been repopulated the level never reads a bit-exact 1.0
+/// again, so a level-based join starves the sign the moment the tally goes empty.
+#[test]
+fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
+    use std::time::Duration;
+    let (populated, layout, _, now0, pack) = sim_rig();
+    let empty = SceneState::uniform(16);
+    let coffee = std::collections::HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let frame = Duration::from_millis(33);
+    let mut now = now0;
+    let mut run = |scene: &SceneState, ms: u64| {
+        let mut last = None;
+        for _ in 0..ms / frame.as_millis() as u64 {
+            now += frame;
+            last = Some(sim_step(&mut owned.stores(), scene, &layout, &pack, &coffee, 0, now).neon);
+        }
+        last.expect("at least one frame")
+    };
+    let debounce = crate::floor::LightingState::EMPTY_DEBOUNCE_MS;
+    assert_eq!(run(&empty, debounce * 3), crate::floor::NeonLevels::EMPTY);
+    run(&populated, 60_000);
+    // A gap between transcripts: the tally is empty, the room's debounce is not up.
+    let gap = run(&empty, debounce / 2);
+    assert_eq!(
+        gap,
+        crate::floor::NeonLevels::CALM,
+        "a lit room keeps its sign"
+    );
+}
+
 // One AtWaypoint agent ⇒ one blocked rect, so the bbox width IS char_w.
 fn reserved_bbox_width(overlay: &OccupancyOverlay, w: u16, h: u16) -> Option<u16> {
     let (mut lo, mut hi) = (None, None);

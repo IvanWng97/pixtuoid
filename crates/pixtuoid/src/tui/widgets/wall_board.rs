@@ -211,8 +211,8 @@ mod tests {
         );
     }
 
-    /// Every face L2 can show — tally, persona, each drum glyph mid-roll — or a
-    /// roll shoves the row (the claim is `board_mood_segments`'s).
+    /// Every face L2 can show — tally, persona, each drum glyph mid-roll — must be
+    /// one column per char, or a roll shoves the row (`board_mood_segments`'s claim).
     #[test]
     fn every_l2_face_is_one_terminal_column_per_char() {
         use std::time::Duration;

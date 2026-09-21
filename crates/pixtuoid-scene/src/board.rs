@@ -2,7 +2,7 @@
 //! office's "lit sign": brand + ★ CTA (L1), the mood pulse (L2: the tally and a
 //! plain-English line, swapped by a split-flap roll), and the office-context row
 //! (L3: uptime · floor · gateway chip), rendered by the TUI, the floating window,
-//! and the wasm hero. It also owns [`OfficeMood`], which the sign's light reads.
+//! and the wasm hero. It also owns `OfficeMood`, which the sign's light reads.
 //!
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
 //! backend-agnostic `BoardTone` and `tone_rgb` is the ONE tone→theme-role map all
@@ -250,7 +250,7 @@ impl OfficeMood {
 }
 
 /// The board's "mood pulse" tally — one tone-tagged segment per non-zero
-/// present state. Exiting agents: see [`OfficeMood`].
+/// present state. Exiting agents are absent by design: a walkout isn't the mood.
 ///
 /// The vocabulary is all single-column (the geometric glyphs `▲●○` are East-Asian
 /// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
