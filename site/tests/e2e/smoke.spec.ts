@@ -791,8 +791,10 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await page.evaluate(() =>
     document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
   );
-  expect(await proofVid.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
+  // The poster first: it auto-waits for the observers, so the source count below
+  // is read AFTER they had their chance to hydrate.
   await expect(proofVid).toHaveAttribute('poster', /proof-poster/);
+  expect(await proofVid.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
   await expect.poll(() => proofVid.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
   expect(errors()).toEqual([]);
   await context.close();
@@ -2387,8 +2389,7 @@ test('proof split: replay clip plays in view and obeys the page pause', async ({
   expect(errors()).toEqual([]);
 });
 
-// Both posters are below the fold, and a browser fetches a <video poster> even
-// on a [hidden] element — so eager markup costs every visitor BOTH variants.
+// Pins ProofSplit's deferred-poster markup; the WHY is on the component.
 for (const variant of [
   { name: 'wide', viewport: { width: 1280, height: 800 }, mobile: false },
   { name: 'narrow', viewport: { width: 390, height: 820 }, mobile: true },
@@ -2416,7 +2417,10 @@ for (const variant of [
     );
     const active = variant.mobile ? 'proof-tall-poster.png' : 'proof-poster.png';
     await expect.poll(() => posters).toContain(active);
-    await page.waitForLoadState('networkidle');
+    // The CAUSE, not a race with the network: the hidden variant was never promoted.
+    const idle = page.locator(variant.mobile ? '.proof__video--wide' : '.proof__video--tall');
+    await expect(idle).toHaveAttribute('data-poster', /poster\.png/);
+    await expect(idle).not.toHaveAttribute('poster');
     expect(new Set(posters), 'never the hidden variant').toEqual(new Set([active]));
     await context.close();
   });

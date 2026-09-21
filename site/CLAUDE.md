@@ -67,6 +67,8 @@ CSP; regressions surface in `just site-e2e`'s console watchdog.
 the status endpoint + daemon subcommands are dev-server only (`astro preview`
 has neither — verified vs 7.0.5), and dev/preview share port 4321 — stop the
 daemon before `just site-e2e` (its webServer fails loud on a squatted port).
+`npm run lighthouse` needs 4321 AND `collect.previewPort` free: its preview
+moves there so the gzip proxy can take the audited port.
 
 ## Gates
 

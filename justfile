@@ -955,15 +955,15 @@ gen-wasm: gen-wasm-tools wasm-build
 # formatting machinery, an accidental debug build) fails loudly. The cap is on
 # the GZIPPED size, because the wire cost is what the poster is hiding — gating
 # the raw proxy instead is what blocked the density-variant sprite art (#871).
-# Raw is REPORTED, not gated HERE — site/lighthouserc.json gates it on the runner
-# twice (`error`-level; site.yml fires on site/**, where the wasm lives): as
-# parse/compile cost via total-blocking-time and user-timings:pixtuoid-revealed,
-# and as WIRE cost via `interactive`/`largest-contentful-paint` — under simulated
-# throttling those are byte budgets, the runner prices the wasm gzipped like
-# GitHub Pages does (`startPagesLikeProxy`), and they are sized to admit a wasm AT
-# this cap — so a byte-count proxy here would be the weaker instrument. Meanwhile
-# the cap is deliberately LOOSE — sized for the density-art phase rather than
-# today's payload, so its headroom is art budget and NOT regression
+# Raw is REPORTED, never gated as wire: the runner prices the wasm gzipped, as
+# GitHub Pages ships it (`startPagesLikeProxy`), so site/lighthouserc.json sees raw
+# growth only as parse/compile cost (total-blocking-time and
+# user-timings:pixtuoid-revealed, `error`-level; site.yml fires on site/**, where
+# the wasm lives). WIRE cost is gated twice on purpose — here, naming the wasm,
+# and there via `interactive`/`largest-contentful-paint`, byte budgets under
+# simulated throttling sized to admit a wasm AT this cap. Meanwhile the cap is
+# deliberately LOOSE — sized for the density-art phase rather than today's
+# payload, so its headroom is art budget and NOT regression
 # sensitivity; the recipe prints the gap so you can see how much. RETIRE that
 # slack once the art phase lands: re-run the recipe and set the cap to the new
 # figure plus a margin. Pair (#424): the
