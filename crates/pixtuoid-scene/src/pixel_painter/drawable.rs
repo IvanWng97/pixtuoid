@@ -12,7 +12,7 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::background::paint_warm_halo;
-use super::palette::blend_rgb;
+use super::palette::{blend_rgb, BLACK, WHITE};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -608,12 +608,6 @@ pub(super) fn paint_desk_lamp(
         return;
     }
     let warm = theme.lighting.desk_lamp;
-    const WHITE: Rgb = Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
     // The fixture tracks the light it CASTS: fixed tones show a lamp fully lit at a strength whose pool rounds to nothing.
     const OFF: f32 = 0.80;
     let unlit = blend_rgb(warm, BLACK, OFF);

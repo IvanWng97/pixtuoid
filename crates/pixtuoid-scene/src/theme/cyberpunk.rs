@@ -70,11 +70,6 @@ pub static CYBERPUNK: Theme = Theme {
             b: 38,
         },
         neon_panel_bg: Rgb { r: 8, g: 6, b: 16 },
-        neon_frame_base: Rgb {
-            r: 80,
-            g: 20,
-            b: 60,
-        },
         building_dark: Rgb {
             r: 12,
             g: 10,
@@ -380,6 +375,11 @@ pub static CYBERPUNK: Theme = Theme {
             r: 0,
             g: 255,
             b: 200,
+        },
+        neon_alert: Rgb {
+            r: 255,
+            g: 230,
+            b: 0,
         },
     },
     appliance: ApplianceColors {

@@ -1,6 +1,7 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
 //! rendering context ([`FloorCtx`]), the shared headless frame seam
-//! ([`render_floor`]), and the per-office [`CoffeeState`] bookkeeping.
+//! ([`render_floor`]), the per-floor fade states ([`LightingState`], the neon
+//! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
@@ -116,6 +117,8 @@ pub struct FloorCtx {
     pub(crate) base_fill: crate::pixel_painter::BaseFillCache,
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
+    /// This floor's neon-sign fade state.
+    pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
@@ -144,6 +147,7 @@ impl FloorCtx {
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
             light: LightingState::new(),
+            neon: NeonState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
@@ -621,6 +625,7 @@ impl FloorSession {
             crate::board::scene_uptime_secs(scene, now),
             floor,
             crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            now,
         )
     }
 
@@ -685,6 +690,7 @@ impl FloorSession {
                 history: &mut self.floor.ctx.history,
                 motion: &mut self.floor.ctx.motion,
                 light: &mut self.floor.ctx.light,
+                neon: &mut self.floor.ctx.neon,
                 chitchat: &mut self.office.chitchat,
             },
             scene,
@@ -718,6 +724,7 @@ pub struct LightingState {
     level: f32,
     empty_since: Option<SystemTime>,
     last_update: Option<SystemTime>,
+    dimmed: bool,
 }
 
 impl Default for LightingState {
@@ -739,7 +746,15 @@ impl LightingState {
             level: 1.0,
             empty_since: None,
             last_update: None,
+            dimmed: false,
         }
+    }
+
+    /// Whether the empty-debounce has run out — the floor's VERDICT that it is
+    /// really empty. Read this, never `level() < 1.0`: an f32 ease that once left
+    /// 1.0 stalls a few ulps short of it forever.
+    pub(crate) fn dimmed(&self) -> bool {
+        self.dimmed
     }
 
     /// Current smoothed lit level in `[MIN_LEVEL, 1.0]`.
@@ -747,11 +762,13 @@ impl LightingState {
         self.level
     }
 
-    /// Force the lit level straight to `MIN_LEVEL`, bypassing the debounce +
-    /// ease — static snapshots want the steady-state empty look, not frame-0 of
-    /// the fade.
+    /// Force the steady-state empty look, bypassing the debounce + ease — static
+    /// snapshots want it, not frame-0 of the fade. The debounce is back-dated too,
+    /// so the next tick still JUDGES the floor empty instead of re-arming it.
     pub fn snap_to_empty(&mut self) {
         self.level = Self::MIN_LEVEL;
+        self.empty_since = Some(SystemTime::UNIX_EPOCH);
+        self.dimmed = true;
     }
 
     /// Advance the fade one frame. Returns the new lit level in
@@ -769,6 +786,7 @@ impl LightingState {
             self.empty_since = None;
             1.0
         };
+        self.dimmed = target < 1.0;
 
         let dt_ms = self
             .last_update
@@ -780,6 +798,178 @@ impl LightingState {
         let alpha = 1.0 - (-(dt_ms as f32) / Self::FADE_TAU_MS as f32).exp();
         self.level += (target - self.level) * alpha.clamp(0.0, 1.0);
         self.level
+    }
+}
+
+/// The neon sign's light for one frame — theme-free, like
+/// [`crate::pixel_painter::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
+/// the sign is, paint maps that to colors.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct NeonLevels {
+    /// 0 = the brand hue, 1 = the "someone needs you" hue.
+    pub(crate) alert: f32,
+    /// How hard the tube is driven, 0..=1.
+    pub(crate) power: f32,
+}
+
+impl NeonLevels {
+    /// Someone waits on the user.
+    pub(crate) const ALERT: Self = Self {
+        alert: 1.0,
+        power: 1.0,
+    };
+    /// Agents work, nobody waits.
+    pub(crate) const BUSY: Self = Self {
+        alert: 0.0,
+        power: 1.0,
+    };
+    /// Everyone present is idle.
+    pub(crate) const CALM: Self = Self {
+        alert: 0.0,
+        power: 0.62,
+    };
+    /// Nobody home: the tube barely holds, and stutters ([`NeonState::tick`]).
+    pub(crate) const EMPTY: Self = Self {
+        alert: 0.0,
+        power: 0.16,
+    };
+    /// A stutter's flash: the starved tube catching for an instant.
+    pub(crate) const FLASH: Self = Self {
+        alert: 0.0,
+        power: 0.9,
+    };
+
+    fn lerp(self, to: Self, t: f32) -> Self {
+        Self {
+            alert: self.alert + (to.alert - self.alert) * t,
+            power: self.power + (to.power - self.power) * t,
+        }
+    }
+}
+
+/// Per-floor neon-sign fade state: a mood change eases the light over
+/// [`NeonState::FADE_MS`] instead of snapping the hue. A sign with no recent light
+/// to ease FROM — its first tick, or one nobody has drawn for longer than a fade
+/// (a still's warm-up step, a floor switched back to) — snaps to the mood's own.
+#[derive(Default)]
+pub(crate) struct NeonState {
+    fade: Option<NeonFade>,
+    last_tick: Option<SystemTime>,
+}
+
+struct NeonFade {
+    from: NeonLevels,
+    to: NeonLevels,
+    started_at: SystemTime,
+}
+
+impl NeonFade {
+    fn at(&self, now: SystemTime) -> NeonLevels {
+        let t = crate::anim::eased_progress(
+            self.started_at,
+            NeonState::FADE_MS,
+            crate::anim::Easing::EaseInOutCubic,
+            now,
+        );
+        // `to` EXACTLY at the end: `tick`'s stutter gate compares by equality.
+        if t >= 1.0 {
+            self.to
+        } else {
+            self.from.lerp(self.to, t)
+        }
+    }
+}
+
+impl NeonState {
+    /// How long a mood change takes to cross over (ms).
+    pub(crate) const FADE_MS: u32 = 1_600;
+    /// A starved tube's stutter cycle (ms).
+    const STUTTER_MS: u64 = 5_000;
+    /// The flash windows inside one cycle, `[start, end)` ms.
+    const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
+        (1_900, 1_980),
+        (2_060, 2_130),
+        (2_280, 2_400),
+        (4_100, 4_170),
+    ];
+
+    /// A sign that has not been lit yet.
+    pub(crate) fn new() -> Self {
+        Self::default()
+    }
+
+    fn stutter_flash(now: SystemTime) -> bool {
+        let t = crate::anim::epoch_ms(now) % Self::STUTTER_MS;
+        Self::STUTTER_FLASHES_MS
+            .iter()
+            .any(|&(start, end)| (start..end).contains(&t))
+    }
+
+    /// The frame gap from which a flash can't be drawn faithfully: the shortest
+    /// flash. A painter sampling slower than that — a still, the floating
+    /// window's ambient cadence — would hold one flash for its whole frame or
+    /// miss it, so it gets the steady starved tube instead.
+    fn shortest_flash_ms() -> u64 {
+        Self::STUTTER_FLASHES_MS
+            .iter()
+            .map(|&(start, end)| end - start)
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Advance to `mood` at `now`; returns this frame's light. A count change
+    /// inside one mood is not a change, and a reversal mid-fade restarts from the
+    /// light it interrupted.
+    ///
+    /// `room_dimmed` is [`LightingState::dimmed`]: the sign only starves once the
+    /// ROOM is judged empty, so that debounce is the one "is the office really
+    /// empty" clock — a gap between transcripts, or the last agent still walking
+    /// out of a lit room, can't drop the sign.
+    pub(crate) fn tick(
+        &mut self,
+        mood: crate::board::OfficeMood,
+        room_dimmed: bool,
+        now: SystemTime,
+    ) -> NeonLevels {
+        use crate::board::OfficeMood;
+        let to = match mood {
+            OfficeMood::Alert { .. } => NeonLevels::ALERT,
+            OfficeMood::Busy { .. } => NeonLevels::BUSY,
+            OfficeMood::Empty if room_dimmed => NeonLevels::EMPTY,
+            OfficeMood::Calm | OfficeMood::Empty => NeonLevels::CALM,
+        };
+        let gap_ms = self
+            .last_tick
+            .map(|last| crate::anim::elapsed_ms(now, last));
+        self.last_tick = Some(now);
+        let recent = gap_ms.is_some_and(|gap| gap <= u64::from(Self::FADE_MS));
+        let current = match &self.fade {
+            Some(fade) if recent && fade.to == to => fade.at(now),
+            Some(fade) if recent => {
+                let current = fade.at(now);
+                self.fade = Some(NeonFade {
+                    from: current,
+                    to,
+                    started_at: now,
+                });
+                current
+            }
+            _ => {
+                self.fade = Some(NeonFade {
+                    from: to,
+                    to,
+                    started_at: now,
+                });
+                to
+            }
+        };
+        // Only a tube that has LANDED on starved stutters, not one coasting down.
+        let drawable = gap_ms.is_some_and(|gap| gap < Self::shortest_flash_ms());
+        if current == NeonLevels::EMPTY && drawable && Self::stutter_flash(now) {
+            NeonLevels::FLASH
+        } else {
+            current
+        }
     }
 }
 

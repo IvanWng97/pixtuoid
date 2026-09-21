@@ -815,7 +815,13 @@ mod tests {
             exiting: 0,
             total: 4,
         };
-        let board = pixtuoid_scene::board::build_board(counts, 90, None, None);
+        let board = pixtuoid_scene::board::build_board(
+            counts,
+            90,
+            None,
+            None,
+            std::time::SystemTime::UNIX_EPOCH,
+        );
         let scale = 8i32;
         let (w, h) = (320usize, 96usize);
         let mut sb = vec![0u32; w * h];

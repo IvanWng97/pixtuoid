@@ -14,8 +14,9 @@ use celestial::{
     GLOW_ALPHA, GLOW_PX, MOON_SHADOW, STAR_ALPHA_MAX, STAR_COLOR, STAR_MIN, STAR_SKY_BAND_FRAC,
 };
 pub(super) use lighting::{
-    paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
-    paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo, Ellipse, RadialFalloff,
+    neon_look, paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
+    paint_neon_glow, paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo,
+    Ellipse, RadialFalloff,
 };
 pub(super) use sky::{
     beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
@@ -29,7 +30,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut};
+use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut, BLACK, WHITE};
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`. The
 /// ambient/sky clock-decode funnel; `paint_clock`'s analog hands keep their own
@@ -117,17 +118,7 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weathe
         return;
     }
     let alpha = 0.20 * level;
-    let lut = RgbLut::tabulate(|c| {
-        blend_rgb(
-            c,
-            Rgb {
-                r: 255,
-                g: 255,
-                b: 255,
-            },
-            alpha,
-        )
-    });
+    let lut = RgbLut::tabulate(|c| blend_rgb(c, WHITE, alpha));
     for px in buf.as_mut_slice() {
         *px = lut.apply(*px);
     }
@@ -244,7 +235,7 @@ fn veil_lum(sky: &sky::SkyState) -> f32 {
 
 /// A veil colour at the frame's daylight — hue preserved, luminance tracked.
 fn veil_lit(color: Rgb, lum: f32) -> Rgb {
-    blend_rgb(Rgb { r: 0, g: 0, b: 0 }, color, lum)
+    blend_rgb(BLACK, color, lum)
 }
 
 /// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
@@ -842,19 +833,7 @@ fn paint_floor_to_ceiling_window(
             // flash level so it fires in lockstep with `paint_lightning_flash`.
             let level = lightning_flash_level(now);
             if level > 0.0 {
-                wash_glass(
-                    buf,
-                    x,
-                    y,
-                    w,
-                    h,
-                    Rgb {
-                        r: 255,
-                        g: 255,
-                        b: 255,
-                    },
-                    0.6 * level,
-                );
+                wash_glass(buf, x, y, w, h, WHITE, 0.6 * level);
             }
         }
         Weather::Snow => paint_streaks(

@@ -4,7 +4,7 @@ use crate::layout::WALKING_Y_OFF;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::epoch_ms;
-use super::palette::{blend_pixel, blend_rgb};
+use super::palette::{blend_pixel, blend_rgb, WHITE};
 use crate::layout::Point;
 use crate::theme::Theme;
 
@@ -47,13 +47,8 @@ pub(super) fn paint_screen_glow(
     const CASING_TINT: f32 = 0.35;
     let frame_lit = blend_rgb(theme.effects.monitor_frame_lit, tint, CASING_TINT);
     let glow = tint;
-    let white = Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    let glow_bright = blend_rgb(tint, white, 0.4);
-    let scanline = blend_rgb(tint, white, 0.7);
+    let glow_bright = blend_rgb(tint, WHITE, 0.4);
+    let scanline = blend_rgb(tint, WHITE, 0.7);
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };

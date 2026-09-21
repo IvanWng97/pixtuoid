@@ -75,11 +75,6 @@ pub static CATPPUCCIN: Theme = Theme {
             g: 24,
             b: 37,
         },
-        neon_frame_base: Rgb {
-            r: 137,
-            g: 180,
-            b: 250,
-        },
         building_dark: Rgb {
             r: 20,
             g: 20,
@@ -402,6 +397,11 @@ pub static CATPPUCCIN: Theme = Theme {
             r: 245,
             g: 194,
             b: 231,
+        },
+        neon_alert: Rgb {
+            r: 249,
+            g: 226,
+            b: 175,
         },
     },
     appliance: ApplianceColors {
