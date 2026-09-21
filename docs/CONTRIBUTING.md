@@ -93,11 +93,16 @@ weaken the lint.
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
    rewritten. The bump level comes from the conventional-commit log — nobody
    picks it — and the PR body carries the `cargo-semver-checks` verdict.
-2. **Review it like any PR.** GitHub will make you update the branch if `main`
-   moved — `main` requires branches to be up to date, because the tag lands on
-   the squash commit and release-plz publishes to crates.io from it before
-   `ci-gate` finishes. If the semver verdict says the bump is too small, raise
-   it with `cargo set-version --workspace X.Y.Z` (cargo-edit) and push.
+2. **Review it like any PR.** `main` requires branches to be up to date, because
+   the tag lands on the squash commit and release-plz publishes to crates.io from
+   it before `ci-gate` finishes. If `main` moved, **re-dispatch — never "Update
+   branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
+   the merge commit "Update branch" adds counts as a human's, so the next
+   dispatch closes this PR and opens a new number. If the semver verdict says the
+   bump is too small, raise it with `cargo set-version --workspace X.Y.Z`
+   (cargo-edit) and push. A user-facing change that touched no packaged file
+   (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
+   to `CHANGELOG.md` by hand as the last commit before merging.
 3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
    publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
    GitHub release carrying the changelog; the tag then fires `release.yml`,

@@ -553,10 +553,21 @@ release_plz_token_message(path, job, token) := sprintf(
 	[path, job, release_plz_action_path, release_plz_token_env, token],
 )
 
-# Both pair-pins read a second file, so the config fixtures carry both sides.
+# The pair-pins read other files — release.yml's trigger, the workspace's members
+# and each member's manifest — so the config fixtures carry every side. The web
+# crate is the unpublished member the changelog census must NOT demand.
 release_plz_fixture(config) := {"documents": [
 	{"path": release_plz_config_path, "contents": config},
 	{"path": release_workflow_path, "contents": {"on": {"push": {"tags": ["v*"]}}}},
+	{"path": cargo_manifest_path, "contents": {"workspace": {"members": ["crates/pixtuoid-core", "crates/pixtuoid", "crates/pixtuoid-web"]}}},
+	{"path": "crates/pixtuoid-core/Cargo.toml", "contents": {"package": {"name": "pixtuoid-core"}}},
+	{"path": "crates/pixtuoid/Cargo.toml", "contents": {"package": {"name": "pixtuoid"}}},
+	{"path": "crates/pixtuoid-web/Cargo.toml", "contents": {"package": {"name": "pixtuoid-web", "publish": false}}},
+]}
+
+release_plz_fixture_without(config, path) := {"documents": [doc |
+	some doc in release_plz_fixture(config).documents
+	doc.path != path
 ]}
 
 valid_release_plz_config := {
@@ -565,6 +576,7 @@ valid_release_plz_config := {
 		"git_release_enable": false,
 		"git_tag_enable": false,
 		"release_always": false,
+		"changelog_update": false,
 		"pr_name": "chore(release): v{{ version }}",
 	},
 	"changelog": {"commit_parsers": [{"message": "^chore\\(release\\)", "skip": true}]},
@@ -574,6 +586,8 @@ valid_release_plz_config := {
 		"git_tag_name": "v{{ version }}",
 		"git_release_enable": true,
 		"git_release_draft": true,
+		"changelog_update": true,
+		"changelog_include": ["pixtuoid-core"],
 	}],
 }
 
@@ -710,6 +724,44 @@ test_release_plz_release_must_be_drafted if {
 	sprintf(
 		"%s must give exactly ONE package git_release_enable with git_release_draft — found %d; a release born published names a version whose binaries release.yml has not attached yet",
 		[release_plz_config_path, 0],
+	) in violations
+}
+
+test_release_plz_release_package_must_write_the_changelog if {
+	pkg := object.remove(valid_release_plz_config.package[0], ["changelog_update"])
+	config := object.union(valid_release_plz_config, {"package": [pkg]})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s package %q must set changelog_update — the workspace default is off, so nothing else writes the release notes",
+		[release_plz_config_path, "pixtuoid"],
+	) in violations
+}
+
+test_release_plz_changelog_must_include_every_other_published_member if {
+	pkg := object.union(valid_release_plz_config.package[0], {"changelog_include": []})
+	config := object.union(valid_release_plz_config, {"package": [pkg]})
+	violations := deny with input as release_plz_fixture(config)
+	sprintf(
+		"%s package %q changelog_include must name every other PUBLISHED workspace member — missing %v; a crate left out vanishes from the release notes",
+		[release_plz_config_path, "pixtuoid", ["pixtuoid-core"]],
+	) in violations
+}
+
+# Both halves of the census fail CLOSED: a root manifest or a member manifest the
+# recipe stops feeding must not leave the rule above passing on an empty set.
+test_release_plz_changelog_census_needs_the_workspace_manifest if {
+	violations := deny with input as release_plz_fixture_without(valid_release_plz_config, cargo_manifest_path)
+	sprintf(
+		"%s package %q is not a published member of %s [workspace].members — without that census the changelog_include rule passes vacuously",
+		[release_plz_config_path, "pixtuoid", cargo_manifest_path],
+	) in violations
+}
+
+test_release_plz_changelog_census_needs_every_member_manifest if {
+	violations := deny with input as release_plz_fixture_without(valid_release_plz_config, "crates/pixtuoid-core/Cargo.toml")
+	sprintf(
+		"the policy input lacks %v — `just ci-observability` must feed every workspace member's manifest, or that crate drops out of the changelog census",
+		[["crates/pixtuoid-core/Cargo.toml"]],
 	) in violations
 }
 
