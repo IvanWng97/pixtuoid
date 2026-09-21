@@ -169,9 +169,8 @@ const NEON_INTERIOR_TINT: f32 = 0.07;
 /// Halo strength at the tube, full power, for the brand and the alert hue.
 const NEON_HALO_BRAND: f32 = 0.44;
 const NEON_HALO_ALERT: f32 = 0.58;
-/// The slow brand breath: period and trough (the alert breath is faster and
-/// deeper). Both periods divide an hour, so a still rendered on a whole hour
-/// always catches the same phase.
+/// The slow brand breath: period and trough. The alert breath is faster and
+/// deeper — urgency without a strobe.
 const NEON_BREATH_MS: u64 = 6_000;
 const NEON_BREATH_FLOOR: f32 = 0.85;
 const NEON_ALERT_BREATH_MS: u64 = 3_000;

@@ -305,7 +305,8 @@ const PERSONA_CALM: &[&str] = &["quiet... too quiet", "coffee break?"];
 /// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
 /// tally: a line too wide for the panel (the tally abbreviates, this can't), and
 /// an EMPTY office — its tally already reads in plain English, and the floating
-/// window paints an empty office at 1 fps, which would freeze a roll mid-scramble.
+/// window drops an empty office to its ambient cadence (`IDLE_AMBIENT_FPS` in the
+/// binary's `floating::cadence`), which would hold a roll mid-scramble on screen.
 fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegment>> {
     let (glyph, pool, n, tone) = match mood {
         OfficeMood::Alert { waiting: 1 } => {
