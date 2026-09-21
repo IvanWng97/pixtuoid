@@ -10,8 +10,10 @@
 
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { createGzip } from 'node:zlib';
 
 export function median(values) {
   const sorted = [...values].sort((a, b) => a - b);
@@ -113,6 +115,53 @@ function startServer(command, readyPattern, timeoutMs) {
   });
 }
 
+// `astro preview` (vite) compresses text MIME types only, so it serves the wasm —
+// most of the home page's bytes — RAW, while GitHub Pages serves it gzip (and
+// answers a br-only client with the raw bytes; fetched 2026-09-20). Under
+// simulated throttling a budget is a byte budget, so without this the audit
+// prices the wasm at more than twice what a visitor downloads. Everything else
+// passes through untouched: the proxy closes that ONE gap, it is not a server.
+export function startPagesLikeProxy({ upstreamPort, port }) {
+  const server = http.createServer((req, res) => {
+    const upstream = http.request(
+      {
+        host: 'localhost',
+        port: upstreamPort,
+        method: req.method,
+        path: req.url,
+        headers: req.headers,
+      },
+      (up) => {
+        const headers = { ...up.headers };
+        const gzip =
+          /^application\/wasm\b/.test(headers['content-type'] ?? '') &&
+          !headers['content-encoding'] &&
+          /\bgzip\b/.test(req.headers['accept-encoding'] ?? '');
+        if (!gzip) {
+          res.writeHead(up.statusCode, headers);
+          up.pipe(res);
+          return;
+        }
+        delete headers['content-length'];
+        headers['content-encoding'] = 'gzip';
+        headers.vary = 'Accept-Encoding';
+        res.writeHead(up.statusCode, headers);
+        up.pipe(createGzip({ level: 9 })).pipe(res);
+      }
+    );
+    upstream.on('error', () => {
+      res.writeHead(502);
+      res.end();
+    });
+    req.pipe(upstream);
+  });
+  return new Promise((resolve, reject) => {
+    server.once('error', reject);
+    // `localhost`, like the preview it fronts: Chrome may try ::1 first.
+    server.listen(port, 'localhost', () => resolve(server));
+  });
+}
+
 // astro preview is a process TREE under a shell — kill the group, not the
 // shell, or CI keeps an orphan listener.
 function stop(child) {
@@ -138,10 +187,15 @@ async function main() {
     cfg.collect.startServerReadyTimeout
   );
   // Launch inside the try: a ChromeNotInstalledError must still tear the
-  // detached preview down, or it squats port 4321 for the next local run.
+  // detached preview down, or it squats its port for the next local run.
   let chrome;
+  let proxy;
   const failures = [];
   try {
+    proxy = await startPagesLikeProxy({
+      upstreamPort: cfg.collect.previewPort,
+      port: Number(new URL(cfg.collect.url[0]).port),
+    });
     chrome = await chromeLauncher.launch({ chromeFlags: ['--headless'] });
     for (const url of cfg.collect.url) {
       const lhrs = [];
@@ -162,6 +216,7 @@ async function main() {
     }
   } finally {
     chrome?.kill();
+    proxy?.close();
     stop(server);
   }
 

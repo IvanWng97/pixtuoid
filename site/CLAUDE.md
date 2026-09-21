@@ -86,7 +86,11 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   greens a binary audit that failed one run). Collect URLs pin `?theme=day`
   (otherwise the wall clock picks the palette — half of CI runs would audit
   each). **The theme matrix is `smoke.spec.ts`** (day/night/dracula), not a
-  doubled collect list.
+  doubled collect list. The audit runs THROUGH `startPagesLikeProxy`: `astro
+  preview` serves the wasm raw while GitHub Pages gzips it, and under simulated
+  throttling `interactive`/LCP are BYTE budgets — so they price the wasm at
+  what a visitor downloads, and are sized to admit a wasm at `just
+  gen-wasm-check`'s gzip cap, no more.
 - **Fonts**: Fontsource WOFF2 with `font-display: optional` + preloads — do
   not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
   budget; `font-layout.spec.ts` reproduces it deliberately).

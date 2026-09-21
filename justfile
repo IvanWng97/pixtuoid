@@ -958,10 +958,10 @@ gen-wasm: gen-wasm-tools wasm-build
 # Raw is REPORTED, not gated HERE — site/lighthouserc.json gates it on the runner
 # twice (`error`-level; site.yml fires on site/**, where the wasm lives): as
 # parse/compile cost via total-blocking-time and user-timings:pixtuoid-revealed,
-# and as WIRE cost via `interactive`/`largest-contentful-paint`, because
-# `astro preview` compresses text MIME types only and serves application/wasm
-# raw while GitHub Pages gzips it — a growing wasm reds THAT budget long before
-# this cap, so a byte-count proxy here would be the weaker instrument. Meanwhile
+# and as WIRE cost via `interactive`/`largest-contentful-paint` — under simulated
+# throttling those are byte budgets, the runner prices the wasm gzipped like
+# GitHub Pages does (`startPagesLikeProxy`), and they are sized to admit a wasm AT
+# this cap — so a byte-count proxy here would be the weaker instrument. Meanwhile
 # the cap is deliberately LOOSE — sized for the density-art phase rather than
 # today's payload, so its headroom is art budget and NOT regression
 # sensitivity; the recipe prints the gap so you can see how much. RETIRE that
