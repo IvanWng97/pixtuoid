@@ -916,7 +916,7 @@ wasm-build:
 
 # The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
-# minutes-long release compile. wasm-bindgen-cli must match the crate's pinned
+# minutes-long `wasm-build` compile. wasm-bindgen-cli must match the crate's pinned
 # wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
 # the blob ~10-20%. (ci-builds.yml's wasm-check calls `wasm-build` directly — it only
 # compiles, so it needs neither of these.)
@@ -955,13 +955,15 @@ gen-wasm: gen-wasm-tools wasm-build
 # formatting machinery, an accidental debug build) fails loudly. The cap is on
 # the GZIPPED size, because the wire cost is what the poster is hiding — gating
 # the raw proxy instead is what blocked the density-variant sprite art (#871).
-# Raw is REPORTED, not gated — it is parse/compile cost, which the site's own
-# Lighthouse budget measures DIRECTLY on the runner (total-blocking-time and
-# user-timings:pixtuoid-revealed are `error`-level in site/lighthouserc.json,
-# and site.yml fires on site/** which is where the wasm lives), so a byte-count
-# proxy for it would be the weaker instrument. Meanwhile the cap is deliberately
-# LOOSE — sized for the density-art phase
-# rather than today's payload, so its headroom is art budget and NOT regression
+# Raw is REPORTED, not gated HERE — site/lighthouserc.json gates it on the runner
+# twice (`error`-level; site.yml fires on site/**, where the wasm lives): as
+# parse/compile cost via total-blocking-time and user-timings:pixtuoid-revealed,
+# and as WIRE cost via `interactive`/`largest-contentful-paint`, because
+# `astro preview` compresses text MIME types only and serves application/wasm
+# raw while GitHub Pages gzips it — a growing wasm reds THAT budget long before
+# this cap, so a byte-count proxy here would be the weaker instrument. Meanwhile
+# the cap is deliberately LOOSE — sized for the density-art phase rather than
+# today's payload, so its headroom is art budget and NOT regression
 # sensitivity; the recipe prints the gap so you can see how much. RETIRE that
 # slack once the art phase lands: re-run the recipe and set the cap to the new
 # figure plus a margin. Pair (#424): the
@@ -980,7 +982,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # (.github/prompts/pr-review.prompt.md, "a scene change stales the wasm"), not
 # this recipe. Input-hash stamping was considered and rejected: most commits
 # under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
-# links, so the gate would demand a ~1 MB binary regen on changes that provably
+# links, so the gate would demand a binary regen on changes that provably
 # cannot alter it.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]

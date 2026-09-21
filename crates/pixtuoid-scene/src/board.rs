@@ -292,7 +292,6 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
 }
 
 /// One persona line: fixed text, or the mood's agent count followed by text.
-#[derive(Clone, Copy)]
 enum Persona {
     Says(&'static str),
     Counts(&'static str),
@@ -305,8 +304,8 @@ const PERSONA_ALERT_ONE: &[Persona] = &[
     Persona::Says("psst. your turn."),
 ];
 const PERSONA_ALERT_MANY: &[Persona] = &[
-    Persona::Counts(" agents need you!"),
-    Persona::Counts(" waiting on you..."),
+    Persona::Counts("agents need you!"),
+    Persona::Counts("waiting on you..."),
 ];
 const PERSONA_BUSY_ONE: &[Persona] = &[
     Persona::Says("heads down, shipping"),
@@ -314,7 +313,7 @@ const PERSONA_BUSY_ONE: &[Persona] = &[
 ];
 const PERSONA_BUSY_MANY: &[Persona] = &[
     Persona::Says("heads down, shipping"),
-    Persona::Counts(" brains at work"),
+    Persona::Counts("brains at work"),
     Persona::Says("do not disturb :)"),
 ];
 const PERSONA_CALM: &[Persona] = &[
@@ -346,7 +345,7 @@ fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegmen
     };
     let text = match pool[(pick % pool.len() as u64) as usize] {
         Persona::Says(line) => format!("{glyph} {line}"),
-        Persona::Counts(rest) => format!("{glyph} {n}{rest}"),
+        Persona::Counts(rest) => format!("{glyph} {n} {rest}"),
     };
     (text.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize)
         .then(|| vec![BoardSegment::new(text, tone)])
@@ -737,6 +736,14 @@ mod tests {
                 assert_eq!(board_mood_at(c, ms), tally, "{ms}ms");
             }
         }
+    }
+
+    #[test]
+    fn a_counted_persona_line_reads_glyph_count_text() {
+        let line = board_persona_segments(OfficeMood::Alert { waiting: 3 }, 0).expect("fits");
+        assert_eq!(text_of(&line), "\u{25b2} 3 agents need you!");
+        let line = board_persona_segments(OfficeMood::Busy { active: 12 }, 1).expect("fits");
+        assert_eq!(text_of(&line), "\u{25cf} 12 brains at work");
     }
 
     #[test]

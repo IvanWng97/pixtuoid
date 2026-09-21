@@ -44,8 +44,9 @@ panic         = "abort"
 
 # The browser engine (`just wasm-build`). `release` is tuned for the native
 # binary's speed; the wasm is a DOWNLOAD every visitor pays for before the hero
-# goes live, and its frame step is a rounding error against a frame budget — so
-# it trades the other way. `z` over `s` was measured, not assumed.
+# goes live, its frame step is a rounding error against a frame budget and its
+# synth runs in a worker — so it trades the other way. `z` vs `s` is empirical,
+# not principled: `just gen-wasm-check` prints the size to re-judge it by.
 [profile.wasm-release]
 inherits  = "release"
 opt-level = "z"
