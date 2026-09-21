@@ -455,6 +455,16 @@ pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
         .clamp(0.0, 255.0) as u8
 }
 
+/// The blend anchors: a lit fixture is its tint pushed toward [`WHITE`], an unlit
+/// one toward [`BLACK`] — one pair, so the lamps, the screens and the neon tube
+/// cannot disagree on what "white" is.
+pub(super) const WHITE: Rgb = Rgb {
+    r: 255,
+    g: 255,
+    b: 255,
+};
+pub(super) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
+
 /// [`blend`] on each channel of an `Rgb` triple, with one shared `t`.
 pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     Rgb {

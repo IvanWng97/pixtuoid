@@ -12,7 +12,7 @@ use crate::pixel_painter::background::{
     beam_strength, paint_radial_falloff, sun_on_wall, window_spill_columns, RadialFalloff,
     TimeOfDayLook, WallSide,
 };
-use crate::pixel_painter::palette::{blend_pixel, blend_rgb};
+use crate::pixel_painter::palette::{blend_pixel, blend_rgb, WHITE};
 use crate::pixel_painter::PaintCtx;
 use crate::theme::Theme;
 
@@ -250,12 +250,7 @@ pub(super) fn paint_sun_spot(
     let warm = theme.lighting.sun_spill;
     // Blend warm toward white as the sun climbs (warmth → 0 at noon).
     let cool = 1.0 - spot.warmth;
-    let white = Rgb {
-        r: 255,
-        g: 255,
-        b: 255,
-    };
-    let color = blend_rgb(warm, white, cool * 0.6);
+    let color = blend_rgb(warm, WHITE, cool * 0.6);
 
     // A visible sun rectangle, not a 4px speck: keep a generous floor size so
     // the radial falloff doesn't collapse the spot to nothing on the dark wall.

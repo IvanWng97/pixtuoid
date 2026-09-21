@@ -116,6 +116,8 @@ pub struct FloorCtx {
     pub(crate) base_fill: crate::pixel_painter::BaseFillCache,
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
+    /// This floor's neon-sign fade state.
+    pub neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
@@ -144,6 +146,7 @@ impl FloorCtx {
             cache: FrameCache::new(),
             base_fill: crate::pixel_painter::BaseFillCache::new(),
             light: LightingState::new(),
+            neon: NeonState::new(),
             motion: HashMap::new(),
             door_anim_max_ms: 0,
             layout_memo: None,
@@ -686,6 +689,7 @@ impl FloorSession {
                 history: &mut self.floor.ctx.history,
                 motion: &mut self.floor.ctx.motion,
                 light: &mut self.floor.ctx.light,
+                neon: &mut self.floor.ctx.neon,
                 chitchat: &mut self.office.chitchat,
             },
             scene,
@@ -781,6 +785,160 @@ impl LightingState {
         let alpha = 1.0 - (-(dt_ms as f32) / Self::FADE_TAU_MS as f32).exp();
         self.level += (target - self.level) * alpha.clamp(0.0, 1.0);
         self.level
+    }
+}
+
+/// The neon sign's light for one frame — theme-free, like
+/// [`crate::pixel_painter::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
+/// the sign is, paint maps that to colors.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct NeonLevels {
+    /// 0 = the brand hue, 1 = the "someone needs you" hue.
+    pub alert: f32,
+    /// How hard the tube is driven, 0..=1.
+    pub power: f32,
+}
+
+impl NeonLevels {
+    /// Someone waits on the user.
+    pub const ALERT: Self = Self {
+        alert: 1.0,
+        power: 1.0,
+    };
+    /// Agents work, nobody waits.
+    pub const BUSY: Self = Self {
+        alert: 0.0,
+        power: 1.0,
+    };
+    /// Everyone present is idle.
+    pub const CALM: Self = Self {
+        alert: 0.0,
+        power: 0.62,
+    };
+    /// Nobody home: the tube barely holds (and stutters — see [`NeonState::tick`]).
+    pub const EMPTY: Self = Self {
+        alert: 0.0,
+        power: 0.16,
+    };
+    /// A stutter's flash: the starved tube catching for an instant.
+    pub const FLASH: Self = Self {
+        alert: 0.0,
+        power: 0.9,
+    };
+
+    fn lerp(self, to: Self, t: f32) -> Self {
+        Self {
+            alert: self.alert + (to.alert - self.alert) * t,
+            power: self.power + (to.power - self.power) * t,
+        }
+    }
+}
+
+/// Per-floor neon-sign fade state: a mood change eases the light over
+/// [`NeonState::FADE_MS`] instead of snapping the hue. The FIRST tick snaps, so a
+/// still — and a floor's first live frame — shows the mood's own light, never
+/// frame 0 of a fade.
+#[derive(Default)]
+pub struct NeonState {
+    fade: Option<NeonFade>,
+}
+
+struct NeonFade {
+    from: NeonLevels,
+    to: NeonLevels,
+    started_at: SystemTime,
+}
+
+impl NeonFade {
+    fn at(&self, now: SystemTime) -> NeonLevels {
+        let t = crate::anim::eased_progress(
+            self.started_at,
+            NeonState::FADE_MS,
+            crate::anim::Easing::EaseInOutCubic,
+            now,
+        );
+        // The endpoints are returned EXACTLY so a settled sign is bit-stable.
+        if t >= 1.0 {
+            self.to
+        } else {
+            self.from.lerp(self.to, t)
+        }
+    }
+}
+
+impl NeonState {
+    /// How long a mood change takes to cross over (ms).
+    pub const FADE_MS: u32 = 1_600;
+    /// A starved tube's stutter: the flash windows inside one cycle (ms). The cycle
+    /// divides an hour and no window touches its start, so a still rendered on a
+    /// whole hour never catches a flash.
+    const STUTTER_MS: u64 = 5_000;
+    const STUTTER_FLASHES_MS: [(u64, u64); 4] = [
+        (1_900, 1_980),
+        (2_060, 2_130),
+        (2_280, 2_400),
+        (4_100, 4_170),
+    ];
+
+    /// A sign that has not been lit yet.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    fn stutter_flash(now: SystemTime) -> bool {
+        let t = crate::anim::epoch_ms(now) % Self::STUTTER_MS;
+        Self::STUTTER_FLASHES_MS
+            .iter()
+            .any(|&(start, end)| (start..end).contains(&t))
+    }
+
+    /// Advance to `mood` at `now`; returns this frame's light. A count change
+    /// inside one mood is not a change, and a reversal mid-fade restarts from the
+    /// light it interrupted.
+    ///
+    /// `room_level` is [`LightingState::tick`]'s: the sign only starves once the
+    /// ROOM has begun to dim, so that debounce is the one "is the office really
+    /// empty" clock — a gap between transcripts, or the last agent still walking
+    /// out of a lit room, can't drop the sign.
+    pub fn tick(
+        &mut self,
+        mood: crate::board::OfficeMood,
+        room_level: f32,
+        now: SystemTime,
+    ) -> NeonLevels {
+        use crate::board::OfficeMood;
+        let to = match mood {
+            OfficeMood::Alert { .. } => NeonLevels::ALERT,
+            OfficeMood::Busy { .. } => NeonLevels::BUSY,
+            OfficeMood::Empty if room_level < 1.0 => NeonLevels::EMPTY,
+            OfficeMood::Calm | OfficeMood::Empty => NeonLevels::CALM,
+        };
+        let current = match &self.fade {
+            Some(fade) if fade.to == to => fade.at(now),
+            Some(fade) => {
+                let current = fade.at(now);
+                self.fade = Some(NeonFade {
+                    from: current,
+                    to,
+                    started_at: now,
+                });
+                current
+            }
+            None => {
+                self.fade = Some(NeonFade {
+                    from: to,
+                    to,
+                    started_at: now,
+                });
+                to
+            }
+        };
+        // Only a tube that has LANDED on starved stutters, not one coasting down.
+        if current == NeonLevels::EMPTY && Self::stutter_flash(now) {
+            NeonLevels::FLASH
+        } else {
+            current
+        }
     }
 }
 

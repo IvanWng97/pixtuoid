@@ -342,6 +342,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             history: &mut ctx.store.history,
             motion: &mut ctx.store.motion,
             light: &mut ctx.store.light,
+            neon: &mut ctx.store.neon,
             chitchat: &mut *ctx.chitchat_state,
         },
         ctx.scene,
@@ -583,14 +584,14 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
 
     // The panel's text overlay is a separate ratatui widget pass, not painted
     // here.
+    let neon = background::neon_look(frame.neon, ctx.now, look.darkness, ctx.theme);
     paint_neon_panel(
         ctx.buf,
         NEON_PANEL_X,
         NEON_PANEL_Y,
         NEON_PANEL_W,
         NEON_PANEL_H,
-        ctx.now,
-        ctx.theme,
+        &neon,
     );
 
     // After the wall (so its hands sit on top) but before wall decor (the
@@ -704,6 +705,17 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // The floor's day/night wash, over the foreground: the overlays above run
     // before any drawable exists, so nothing painted carries a time-of-day term.
     wash_since(ctx.buf, &pre_foreground, look.object_wash);
+
+    // After the wash: the sign is an emitter, so its light isn't dimmed with the
+    // room it falls on.
+    background::paint_neon_glow(
+        ctx.buf,
+        NEON_PANEL_X,
+        NEON_PANEL_Y,
+        NEON_PANEL_W,
+        NEON_PANEL_H,
+        &neon,
+    );
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.

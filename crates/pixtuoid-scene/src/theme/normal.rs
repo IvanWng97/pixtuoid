@@ -74,11 +74,6 @@ pub static NORMAL: Theme = Theme {
             g: 14,
             b: 22,
         },
-        neon_frame_base: Rgb {
-            r: 20,
-            g: 60,
-            b: 80,
-        },
         building_dark: Rgb {
             r: 20,
             g: 22,

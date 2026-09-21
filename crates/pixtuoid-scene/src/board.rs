@@ -2,7 +2,7 @@
 //! office's "lit sign": brand + ★ CTA (L1), the mood pulse (L2: the tally and a
 //! plain-English line, swapped by a split-flap roll), and the office-context row
 //! (L3: uptime · floor · gateway chip), rendered by the TUI, the floating window,
-//! and the wasm hero. It also owns [`BoardMood`], which the sign's light reads.
+//! and the wasm hero. It also owns [`OfficeMood`], which the sign's light reads.
 //!
 //! `scene` has no terminal/window deps (invariant #1), so the model carries a
 //! backend-agnostic `BoardTone` and `tone_rgb` is the ONE tone→theme-role map all
@@ -213,7 +213,7 @@ pub fn gateway_tone(state: DaemonState) -> BoardTone {
 /// line and the sign's light all read, so the words and the glow can't disagree.
 /// Exiting agents never count: a walkout isn't the mood.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum BoardMood {
+pub enum OfficeMood {
     /// `waiting` agents are blocked on the user — outranks everything.
     Alert {
         /// How many agents wait.
@@ -230,7 +230,7 @@ pub enum BoardMood {
     Empty,
 }
 
-impl BoardMood {
+impl OfficeMood {
     /// Classify `counts`.
     pub fn of(counts: StateCounts) -> Self {
         if counts.waiting > 0 {
@@ -256,7 +256,7 @@ impl BoardMood {
 /// *ambiguous* = 1 col in a non-CJK terminal, the rest ASCII), so `chars().count()`
 /// equals the terminal display width — no `unicode-width` dep in `scene`.
 pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
-    if BoardMood::of(counts) == BoardMood::Empty {
+    if OfficeMood::of(counts) == OfficeMood::Empty {
         return vec![BoardSegment::new(
             "\u{2014} office empty \u{2014}",
             BoardTone::Dim,
@@ -300,50 +300,39 @@ const PERSONA_BUSY_MANY: &[&str] = &[
     "do not disturb :)",
 ];
 const PERSONA_CALM: &[&str] = &["quiet... too quiet", "coffee break?"];
-const PERSONA_EMPTY: &[&str] = &["lights on, nobody home", "hello? anyone?"];
 
 /// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
-/// vocabulary as the tally (see [`board_mood_segments`]).
-fn board_persona_segments(mood: BoardMood, pick: u64) -> Vec<BoardSegment> {
+/// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
+/// tally: a line too wide for the panel (the tally abbreviates, this can't), and
+/// an EMPTY office — its tally already reads in plain English, and the floating
+/// window paints an empty office at 1 fps, which would freeze a roll mid-scramble.
+fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegment>> {
     let (glyph, pool, n, tone) = match mood {
-        BoardMood::Alert { waiting: 1 } => (
-            Some(GLYPH_WAITING),
-            PERSONA_ALERT_ONE,
-            1,
-            BoardTone::Waiting,
-        ),
-        BoardMood::Alert { waiting } => (
-            Some(GLYPH_WAITING),
+        OfficeMood::Alert { waiting: 1 } => {
+            (GLYPH_WAITING, PERSONA_ALERT_ONE, 1, BoardTone::Waiting)
+        }
+        OfficeMood::Alert { waiting } => (
+            GLYPH_WAITING,
             PERSONA_ALERT_MANY,
             waiting,
             BoardTone::Waiting,
         ),
-        BoardMood::Busy { active: 1 } => {
-            (Some(GLYPH_ACTIVE), PERSONA_BUSY_ONE, 1, BoardTone::Active)
-        }
-        BoardMood::Busy { active } => (
-            Some(GLYPH_ACTIVE),
-            PERSONA_BUSY_MANY,
-            active,
-            BoardTone::Active,
-        ),
-        BoardMood::Calm => (Some(GLYPH_IDLE), PERSONA_CALM, 0, BoardTone::Idle),
-        BoardMood::Empty => (None, PERSONA_EMPTY, 0, BoardTone::Dim),
+        OfficeMood::Busy { active: 1 } => (GLYPH_ACTIVE, PERSONA_BUSY_ONE, 1, BoardTone::Active),
+        OfficeMood::Busy { active } => (GLYPH_ACTIVE, PERSONA_BUSY_MANY, active, BoardTone::Active),
+        OfficeMood::Calm => (GLYPH_IDLE, PERSONA_CALM, 0, BoardTone::Idle),
+        OfficeMood::Empty => return None,
     };
     let line = pool[(pick % pool.len() as u64) as usize].replace("{n}", &n.to_string());
-    let text = match glyph {
-        Some(glyph) => format!("{glyph} {line}"),
-        None => line,
-    };
-    vec![BoardSegment::new(text, tone)]
+    let text = format!("{glyph} {line}");
+    (text.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize)
+        .then(|| vec![BoardSegment::new(text, tone)])
 }
 
-/// One L2 cycle: the tally holds, rolls to the persona, the persona holds, rolls
-/// back. A cycle OPENS on the settled tally, and the cycle divides an hour — the
-/// committed stills render on a whole hour, so none can catch L2 mid-roll.
-const FLAP_CYCLE_MS: u64 = 8_000;
-/// The tally's share of a cycle — the roll to the persona ENDS here.
-const FLAP_TALLY_MS: u64 = 4_200;
+/// L2 alternates in equal halves — tally, persona, tally, … — each HOLDING and
+/// then rolling into the next so the roll ends exactly on the hand-over. An even
+/// half is the tally, and a whole hour is an even count of halves, so the stills
+/// gen-media renders on the hour open on a settled tally.
+const FLAP_HALF_MS: u64 = 4_000;
 /// A column's flap lands this long into a roll, plus [`FLAP_SETTLE_STEP_MS`] per
 /// column to its left — so a roll settles left to right.
 const FLAP_SETTLE_BASE_MS: u64 = 140;
@@ -377,7 +366,6 @@ fn flap_roll(
     from: &[(char, BoardTone)],
     to: &[(char, BoardTone)],
     since_ms: u64,
-    cycle: u64,
 ) -> Vec<BoardSegment> {
     const BLANK: (char, BoardTone) = (' ', BoardTone::Dim);
     let drum_len = FLAP_DRUM.len() as u64;
@@ -395,10 +383,7 @@ fn flap_roll(
             let home = FLAP_DRUM
                 .iter()
                 .position(|&b| b as char == new.0.to_ascii_uppercase())
-                .map_or_else(
-                    || pixtuoid_core::id::splitmix64(col as u64 ^ cycle.rotate_left(32)) % drum_len,
-                    |i| i as u64,
-                );
+                .map_or(col as u64 % drum_len, |i| i as u64);
             let flips_left = (settle - since_ms).div_ceil(FLAP_TICK_MS);
             let idx = (home + drum_len - flips_left % drum_len) % drum_len;
             (FLAP_DRUM[idx as usize] as char, BoardTone::Dim)
@@ -417,26 +402,22 @@ fn flap_roll(
     segs
 }
 
-/// L2 at `now_ms`: the tally and the persona line take turns, each HOLDING and
-/// then rolling into the other so the roll ends exactly on the hand-over. A
-/// persona too wide for the panel is skipped — the tally abbreviates, it can't.
+/// L2 at `now_ms` — see [`FLAP_HALF_MS`] for the timeline.
 fn board_mood_at(counts: StateCounts, now_ms: u64) -> Vec<BoardSegment> {
     let tally = board_mood_segments(counts);
-    let cycle = now_ms / FLAP_CYCLE_MS;
-    let persona = board_persona_segments(BoardMood::of(counts), cycle);
-    let (from, to) = (flap_cells(&tally), flap_cells(&persona));
-    if to.len() > crate::pixel_painter::NEON_PANEL_INNER_W as usize {
+    let half = now_ms / FLAP_HALF_MS;
+    let Some(persona) = board_persona_segments(OfficeMood::of(counts), half / 2) else {
         return tally;
-    }
-    let t = now_ms % FLAP_CYCLE_MS;
-    let roll_ms = flap_roll_ms(from.len().max(to.len()));
-    let (showing, from, to, hand_over) = if t < FLAP_TALLY_MS {
-        (tally, from, to, FLAP_TALLY_MS)
-    } else {
-        (persona, to, from, FLAP_CYCLE_MS)
     };
-    match (t + roll_ms).checked_sub(hand_over) {
-        Some(since_ms) => flap_roll(&from, &to, since_ms, cycle),
+    let (showing, next) = if half.is_multiple_of(2) {
+        (tally, persona)
+    } else {
+        (persona, tally)
+    };
+    let (from, to) = (flap_cells(&showing), flap_cells(&next));
+    let roll_ms = flap_roll_ms(from.len().max(to.len()));
+    match (now_ms % FLAP_HALF_MS + roll_ms).checked_sub(FLAP_HALF_MS) {
+        Some(since_ms) => flap_roll(&from, &to, since_ms),
         None => showing,
     }
 }
@@ -477,7 +458,7 @@ pub fn build_board(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     fn mood_text(counts: StateCounts) -> String {
@@ -501,13 +482,41 @@ mod tests {
         segs.iter().map(|s| s.text.as_str()).collect()
     }
 
+    fn persona_of(c: StateCounts) -> Vec<BoardSegment> {
+        board_persona_segments(OfficeMood::of(c), 0).expect("this office has a persona line")
+    }
+
     /// How long the roll between `c`'s tally and its first persona line takes.
     fn roll_ms(c: StateCounts) -> u64 {
         let tally = text_of(&board_mood_segments(c)).chars().count();
-        let persona = text_of(&board_persona_segments(BoardMood::of(c), 0))
-            .chars()
-            .count();
+        let persona = text_of(&persona_of(c)).chars().count();
         flap_roll_ms(tally.max(persona))
+    }
+
+    /// Where gen-media captures a committed frame, in ms past a whole UTC hour: a
+    /// still's own hour, a clip's `poster` second, a wasm still's
+    /// `t0_ms + advance_ms`. Read from the manifest, so a new poster time is
+    /// covered the day it is added.
+    pub(crate) fn committed_frame_offsets_ms() -> Vec<u64> {
+        const HOUR_MS: u64 = 3_600_000;
+        const MANIFEST: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../scripts/media.json");
+        let raw = std::fs::read_to_string(MANIFEST).expect("scripts/media.json reads");
+        let jobs: serde_json::Value = serde_json::from_str(&raw).expect("media.json is JSON");
+        let mut offsets = vec![0];
+        for job in jobs.as_array().expect("media.json is an array") {
+            let base = job["t0_ms"].as_u64().unwrap_or(0) % HOUR_MS;
+            if let Some(poster_secs) = job["poster"].as_f64() {
+                offsets.push(base + (poster_secs * 1000.0) as u64);
+            }
+            if let Some(advance_ms) = job["advance_ms"].as_u64() {
+                offsets.push(base + advance_ms);
+            }
+        }
+        assert!(
+            offsets.len() > 1,
+            "the manifest still names poster/advance times"
+        );
+        offsets
     }
 
     #[test]
@@ -521,23 +530,23 @@ mod tests {
     #[test]
     fn mood_is_alert_over_busy_over_calm_over_empty() {
         assert_eq!(
-            BoardMood::of(counts(3, 2, 5)),
-            BoardMood::Alert { waiting: 2 }
+            OfficeMood::of(counts(3, 2, 5)),
+            OfficeMood::Alert { waiting: 2 }
         );
         assert_eq!(
-            BoardMood::of(counts(3, 0, 5)),
-            BoardMood::Busy { active: 3 }
+            OfficeMood::of(counts(3, 0, 5)),
+            OfficeMood::Busy { active: 3 }
         );
-        assert_eq!(BoardMood::of(counts(0, 0, 5)), BoardMood::Calm);
-        assert_eq!(BoardMood::of(counts(0, 0, 0)), BoardMood::Empty);
+        assert_eq!(OfficeMood::of(counts(0, 0, 5)), OfficeMood::Calm);
+        assert_eq!(OfficeMood::of(counts(0, 0, 0)), OfficeMood::Empty);
         let walkout_only = StateCounts {
             exiting: 2,
             total: 2,
             ..StateCounts::default()
         };
         assert_eq!(
-            BoardMood::of(walkout_only),
-            BoardMood::Empty,
+            OfficeMood::of(walkout_only),
+            OfficeMood::Empty,
             "a walkout isn't the mood"
         );
     }
@@ -546,30 +555,52 @@ mod tests {
     fn l2_holds_the_tally_then_the_persona_and_rolls_only_between_them() {
         let c = counts(4, 2, 6);
         let tally = board_mood_segments(c);
-        let persona = board_persona_segments(BoardMood::of(c), 0);
+        let persona = persona_of(c);
         assert_ne!(tally, persona);
         let at = |ms| board_mood_at(c, ms);
-        let to_persona = FLAP_TALLY_MS - roll_ms(c);
-        let to_tally = FLAP_CYCLE_MS - roll_ms(c);
-        assert_eq!(at(0), tally, "a cycle OPENS on the settled tally");
-        assert_eq!(at(to_persona - 1), tally, "held until the roll");
-        assert_ne!(at(to_persona + FLAP_TICK_MS), tally, "rolling");
-        assert_ne!(at(FLAP_TALLY_MS - 1), persona, "last column still rolling");
-        assert_eq!(at(FLAP_TALLY_MS), persona, "the roll ENDS on the boundary");
-        assert_eq!(at(to_tally - 1), persona, "held until the roll");
+        let roll_starts = FLAP_HALF_MS - roll_ms(c);
+        assert_eq!(at(0), tally, "an even half OPENS on the settled tally");
+        assert_eq!(at(roll_starts - 1), tally, "held until the roll");
+        assert_ne!(at(roll_starts + FLAP_TICK_MS), tally, "rolling");
+        assert_ne!(at(FLAP_HALF_MS - 1), persona, "last column still rolling");
+        assert_eq!(at(FLAP_HALF_MS), persona, "the roll ENDS on the hand-over");
+        assert_eq!(
+            at(FLAP_HALF_MS + roll_starts - 1),
+            persona,
+            "held until the roll"
+        );
         assert_ne!(
-            at(FLAP_CYCLE_MS - 1),
+            at(2 * FLAP_HALF_MS - 1),
             tally,
             "last column still rolling back"
         );
-        assert_eq!(at(FLAP_CYCLE_MS), tally, "and the next cycle opens settled");
+        assert_eq!(
+            at(2 * FLAP_HALF_MS),
+            tally,
+            "and the next pair opens settled"
+        );
+    }
+
+    #[test]
+    fn the_persona_pool_rotates_once_per_pair_of_halves() {
+        let c = counts(4, 0, 6);
+        let shown = |pair: u64| board_mood_at(c, (2 * pair + 1) * FLAP_HALF_MS);
+        assert_eq!(
+            shown(0),
+            board_persona_segments(OfficeMood::of(c), 0).unwrap()
+        );
+        assert_eq!(
+            shown(1),
+            board_persona_segments(OfficeMood::of(c), 1).unwrap()
+        );
+        assert_ne!(shown(0), shown(1));
     }
 
     #[test]
     fn a_roll_settles_left_to_right_in_dim_and_never_outgrows_the_panel() {
         let c = counts(4, 2, 6);
-        let persona = text_of(&board_persona_segments(BoardMood::of(c), 0));
-        let mid = FLAP_TALLY_MS - roll_ms(c) / 2;
+        let persona = text_of(&persona_of(c));
+        let mid = FLAP_HALF_MS - roll_ms(c) / 2;
         let cells: Vec<(char, BoardTone)> = board_mood_at(c, mid)
             .iter()
             .flat_map(|s| s.text.chars().map(move |ch| (ch, s.tone)))
@@ -589,7 +620,7 @@ mod tests {
             FLAP_DRUM.contains(&(first_rolling.0 as u8)),
             "a rolling flap shows a drum glyph: {first_rolling:?}"
         );
-        for ms in (0..FLAP_CYCLE_MS).step_by(FLAP_TICK_MS as usize / 2) {
+        for ms in (0..2 * FLAP_HALF_MS).step_by(FLAP_TICK_MS as usize / 2) {
             let w = text_of(&board_mood_at(c, ms)).chars().count();
             assert!(
                 w <= crate::pixel_painter::NEON_PANEL_INNER_W as usize,
@@ -601,13 +632,13 @@ mod tests {
     #[test]
     fn the_last_flip_before_a_letter_lands_is_its_drum_predecessor() {
         let c = counts(0, 0, 3);
-        let persona = text_of(&board_persona_segments(BoardMood::Calm, 0));
+        let persona = text_of(&persona_of(c));
         let (col, target) = persona
             .chars()
             .enumerate()
             .find(|(_, ch)| ch.is_ascii_alphabetic())
             .expect("a persona line has a letter");
-        let just_before = FLAP_TALLY_MS - roll_ms(c) + flap_settle_ms(col) - 1;
+        let just_before = FLAP_HALF_MS - roll_ms(c) + flap_settle_ms(col) - 1;
         let shown = text_of(&board_mood_at(c, just_before))
             .chars()
             .nth(col)
@@ -624,7 +655,7 @@ mod tests {
     fn a_column_blank_on_both_sides_stays_blank_through_the_roll() {
         let c = counts(4, 2, 6);
         let tally = text_of(&board_mood_segments(c));
-        let persona = text_of(&board_persona_segments(BoardMood::of(c), 0));
+        let persona = text_of(&persona_of(c));
         let cell = |text: &str, col: usize| text.chars().nth(col).unwrap_or(' ');
         let cols = tally.chars().count().max(persona.chars().count());
         // Not the last column: a roll's trailing blanks are trimmed, which would
@@ -632,25 +663,24 @@ mod tests {
         let col = (0..cols - 1)
             .find(|&col| cell(&tally, col) == ' ' && cell(&persona, col) == ' ')
             .expect("the fixture pair shares an interior blank column");
-        let while_it_would_roll = FLAP_TALLY_MS - roll_ms(c) + flap_settle_ms(col) / 2;
+        let while_it_would_roll = FLAP_HALF_MS - roll_ms(c) + flap_settle_ms(col) / 2;
         let rolling = text_of(&board_mood_at(c, while_it_would_roll));
         assert_eq!(rolling.chars().nth(col), Some(' '));
     }
 
     #[test]
-    fn every_persona_line_fits_the_panel_and_an_absurd_office_falls_back_to_the_tally() {
-        let moods = |n: usize| {
-            [
-                BoardMood::Alert { waiting: n },
-                BoardMood::Busy { active: n },
-                BoardMood::Calm,
-                BoardMood::Empty,
-            ]
-        };
-        for n in [1usize, 2, 999] {
-            for mood in moods(n) {
+    fn a_persona_line_fits_the_panel_or_is_withheld() {
+        for n in [1usize, 2, 999, usize::MAX] {
+            for mood in [
+                OfficeMood::Alert { waiting: n },
+                OfficeMood::Busy { active: n },
+                OfficeMood::Calm,
+            ] {
                 for pick in 0..8 {
-                    let line = text_of(&board_persona_segments(mood, pick));
+                    let Some(line) = board_persona_segments(mood, pick) else {
+                        continue;
+                    };
+                    let line = text_of(&line);
                     assert!(
                         line.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize,
                         "{mood:?}/{pick}: {line:?}"
@@ -658,14 +688,29 @@ mod tests {
                 }
             }
         }
+        assert!(board_persona_segments(OfficeMood::Busy { active: 999 }, 1).is_some());
+        let absurd = OfficeMood::Alert {
+            waiting: usize::MAX,
+        };
+        assert_eq!(
+            board_persona_segments(absurd, 0),
+            None,
+            "withheld, not clipped"
+        );
+    }
+
+    #[test]
+    fn an_office_without_a_persona_never_leaves_the_tally() {
         let absurd = StateCounts {
             waiting: usize::MAX,
             total: usize::MAX,
             ..StateCounts::default()
         };
-        let tally = board_mood_segments(absurd);
-        for ms in (0..FLAP_CYCLE_MS).step_by(FLAP_TICK_MS as usize) {
-            assert_eq!(board_mood_at(absurd, ms), tally, "no persona, no roll");
+        for c in [StateCounts::default(), absurd] {
+            let tally = board_mood_segments(c);
+            for ms in (0..2 * FLAP_HALF_MS).step_by(FLAP_TICK_MS as usize) {
+                assert_eq!(board_mood_at(c, ms), tally, "{ms}ms");
+            }
         }
     }
 
@@ -673,28 +718,32 @@ mod tests {
     fn one_agent_is_never_pluralised() {
         for pick in 0..8 {
             for mood in [
-                BoardMood::Alert { waiting: 1 },
-                BoardMood::Busy { active: 1 },
+                OfficeMood::Alert { waiting: 1 },
+                OfficeMood::Busy { active: 1 },
             ] {
-                let line = text_of(&board_persona_segments(mood, pick));
+                let line = text_of(&board_persona_segments(mood, pick).expect("fits"));
                 assert!(!line.contains("1 "), "{mood:?}/{pick}: {line:?}");
             }
         }
     }
 
-    /// gen-media renders every committed still at a whole UTC hour, so this is
-    /// what keeps a still from ever catching L2 mid-roll.
+    /// A committed frame must never catch L2 mid-roll: at every instant gen-media
+    /// captures one, even the widest roll has not begun.
     #[test]
-    fn every_whole_hour_shows_the_settled_tally() {
-        const HOUR_MS: u64 = 3_600_000;
-        let c = counts(4, 2, 6);
-        for hour in 0..24 {
-            assert_eq!(
-                board_mood_at(c, hour * HOUR_MS),
-                board_mood_segments(c),
-                "hour {hour}"
+    fn no_committed_frame_catches_l2_mid_roll() {
+        let widest_roll = flap_roll_ms(crate::pixel_painter::NEON_PANEL_INNER_W as usize);
+        for offset in committed_frame_offsets_ms() {
+            let into_half = offset % FLAP_HALF_MS;
+            assert!(
+                into_half + widest_roll < FLAP_HALF_MS,
+                "a frame at +{offset}ms lands {into_half}ms into a half — inside the roll"
             );
         }
+        assert_eq!(
+            board_mood_at(counts(4, 2, 6), 0),
+            board_mood_segments(counts(4, 2, 6)),
+            "and a whole-hour still shows the tally"
+        );
     }
 
     #[test]

@@ -86,8 +86,6 @@ pub struct OfficeColors {
     pub runner_edge: Rgb,
     /// Neon wall-board panel background.
     pub neon_panel_bg: Rgb,
-    /// Neon wall-board pulsing-border base color.
-    pub neon_frame_base: Rgb,
     /// City-skyline building, shaded side.
     pub building_dark: Rgb,
     /// City-skyline building, lit side.

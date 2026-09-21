@@ -1070,3 +1070,183 @@ fn the_foreground_layer_is_lit_by_the_clock() {
         clustered.first()
     );
 }
+
+fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::OfficeMood {
+    crate::board::OfficeMood::of(crate::board::StateCounts {
+        active,
+        waiting,
+        idle,
+        exiting: 0,
+        total: active + waiting + idle,
+    })
+}
+
+const ROOM_LIT: f32 = 1.0;
+const ROOM_DIMMING: f32 = 0.99;
+
+/// A still, and a live first frame, must show the mood's own light — never
+/// frame 0 of a fade up from nothing.
+#[test]
+fn neon_first_tick_snaps_to_the_mood() {
+    for (mood, room, want) in [
+        (neon_mood(2, 1, 0), ROOM_LIT, NeonLevels::ALERT),
+        (neon_mood(2, 0, 3), ROOM_LIT, NeonLevels::BUSY),
+        (neon_mood(0, 0, 3), ROOM_LIT, NeonLevels::CALM),
+        (neon_mood(0, 0, 0), ROOM_DIMMING, NeonLevels::EMPTY),
+    ] {
+        assert_eq!(NeonState::new().tick(mood, room, t0()), want, "{mood:?}");
+    }
+}
+
+/// The room's own empty-debounce is the one "really empty" clock: until it has
+/// started to dim, an empty tally is a gap or a walkout, and the sign holds.
+#[test]
+fn neon_starves_only_once_the_room_has_begun_to_dim() {
+    let empty = neon_mood(0, 0, 0);
+    assert_eq!(
+        NeonState::new().tick(empty, ROOM_LIT, t0()),
+        NeonLevels::CALM
+    );
+    assert_eq!(
+        NeonState::new().tick(empty, ROOM_DIMMING, t0()),
+        NeonLevels::EMPTY
+    );
+    assert_eq!(
+        NeonState::new().tick(empty, LightingState::MIN_LEVEL, t0()),
+        NeonLevels::EMPTY,
+        "the `--empty` still's snapped room"
+    );
+}
+
+#[test]
+fn neon_eases_into_a_new_mood_and_lands_on_it() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0());
+    let fade = Duration::from_millis(NeonState::FADE_MS as u64);
+    let changed = t0() + Duration::from_secs(5);
+    let alert = neon_mood(2, 1, 0);
+    let first = neon.tick(alert, ROOM_LIT, changed);
+    assert_eq!(
+        first,
+        NeonLevels::BUSY,
+        "the change frame still shows the old mood"
+    );
+    let mid = neon.tick(alert, ROOM_LIT, changed + fade / 2);
+    assert!(
+        mid.alert > NeonLevels::BUSY.alert && mid.alert < NeonLevels::ALERT.alert,
+        "mid-fade alert is between the moods: {mid:?}"
+    );
+    // Not `fade - 1ms`: an ease-out's last millisecond rounds to the target in f32.
+    let late = neon.tick(alert, ROOM_LIT, changed + fade * 3 / 4);
+    assert_ne!(
+        late,
+        NeonLevels::ALERT,
+        "still crossing over late in the fade"
+    );
+    assert_eq!(
+        neon.tick(alert, ROOM_LIT, changed + fade),
+        NeonLevels::ALERT
+    );
+}
+
+/// A count change inside one mood (2 waiting → 3) is not a mood change.
+#[test]
+fn neon_ignores_a_count_change_within_a_mood() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, t0());
+    let later = t0() + Duration::from_millis(10);
+    assert_eq!(
+        neon.tick(neon_mood(0, 3, 0), ROOM_LIT, later),
+        NeonLevels::ALERT
+    );
+}
+
+/// A mood that flips back mid-fade restarts from where the light IS, so it never
+/// jumps.
+#[test]
+fn neon_reversing_mid_fade_starts_from_the_current_light() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0());
+    let half = Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0());
+    let mid = neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0() + half);
+    let reversed = neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + half);
+    assert_eq!(
+        reversed, mid,
+        "the reversal frame holds the light it interrupted"
+    );
+}
+
+#[test]
+fn neon_holds_on_a_backward_clock() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0());
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + Duration::from_secs(5));
+    let earlier = t0() + Duration::from_secs(1);
+    assert_eq!(
+        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, earlier),
+        NeonLevels::BUSY
+    );
+}
+
+/// The instant `offset` ms into the stutter cycle that contains `t0()`.
+fn in_stutter_cycle(offset: u64) -> SystemTime {
+    let base = crate::anim::epoch_ms(t0());
+    SystemTime::UNIX_EPOCH + Duration::from_millis(base - base % NeonState::STUTTER_MS + offset)
+}
+
+#[test]
+fn neon_a_starved_tube_flashes_inside_its_windows_and_only_there() {
+    let empty = neon_mood(0, 0, 0);
+    for (start, end) in NeonState::STUTTER_FLASHES_MS {
+        let mut neon = NeonState::new();
+        assert_eq!(
+            neon.tick(empty, ROOM_DIMMING, in_stutter_cycle(start - 1)),
+            NeonLevels::EMPTY
+        );
+        assert_eq!(
+            neon.tick(empty, ROOM_DIMMING, in_stutter_cycle(start)),
+            NeonLevels::FLASH
+        );
+        assert_eq!(
+            neon.tick(empty, ROOM_DIMMING, in_stutter_cycle(end - 1)),
+            NeonLevels::FLASH
+        );
+        assert_eq!(
+            neon.tick(empty, ROOM_DIMMING, in_stutter_cycle(end)),
+            NeonLevels::EMPTY
+        );
+    }
+}
+
+#[test]
+fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
+    let flash_at = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
+    assert_eq!(
+        NeonState::new().tick(neon_mood(0, 0, 3), ROOM_LIT, flash_at),
+        NeonLevels::CALM
+    );
+    let mut coasting = NeonState::new();
+    let before = flash_at - Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    coasting.tick(neon_mood(2, 0, 0), ROOM_LIT, before);
+    coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMING, before);
+    let mid_fade = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMING, flash_at);
+    assert_ne!(mid_fade, NeonLevels::FLASH);
+    assert!(mid_fade.power > NeonLevels::EMPTY.power, "{mid_fade:?}");
+}
+
+/// A committed frame must never catch the empty sign mid-flash — checked at every
+/// instant gen-media captures one.
+#[test]
+fn neon_no_committed_frame_catches_a_stutter_flash() {
+    const HOUR_MS: u64 = 3_600_000;
+    let hour = crate::anim::epoch_ms(t0()) / HOUR_MS * HOUR_MS;
+    for offset in crate::board::tests::committed_frame_offsets_ms() {
+        let at = SystemTime::UNIX_EPOCH + Duration::from_millis(hour + offset);
+        assert_eq!(
+            NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMING, at),
+            NeonLevels::EMPTY,
+            "+{offset}ms"
+        );
+    }
+}

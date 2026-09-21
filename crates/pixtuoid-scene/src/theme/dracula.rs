@@ -74,11 +74,6 @@ pub static DRACULA: Theme = Theme {
             g: 31,
             b: 40,
         },
-        neon_frame_base: Rgb {
-            r: 98,
-            g: 114,
-            b: 164,
-        },
         building_dark: Rgb {
             r: 25,
             g: 26,

@@ -2184,6 +2184,7 @@ struct OwnedSimStores {
     history: pose::PoseHistory,
     motion: std::collections::HashMap<pixtuoid_core::AgentId, crate::motion::MotionState>,
     light: LightingState,
+    neon: crate::floor::NeonState,
     chitchat: std::collections::HashMap<crate::chitchat::VenueKey, crate::chitchat::ActiveChitchat>,
 }
 
@@ -2195,6 +2196,7 @@ impl OwnedSimStores {
             history: pose::PoseHistory::new(),
             motion: std::collections::HashMap::new(),
             light: LightingState::new(),
+            neon: crate::floor::NeonState::new(),
             chitchat: std::collections::HashMap::new(),
         }
     }
@@ -2206,6 +2208,7 @@ impl OwnedSimStores {
             history: &mut self.history,
             motion: &mut self.motion,
             light: &mut self.light,
+            neon: &mut self.neon,
             chitchat: &mut self.chitchat,
         }
     }
