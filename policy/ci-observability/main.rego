@@ -34,7 +34,7 @@ release_plz_kill_switches := {
 	"git_tag_enable": {"expected": false, "why": "the workspace default is what makes the exactly-one-tagging-package rule below a complete census"},
 	"git_release_enable": {"expected": false, "why": "the same census, for the release: one package creates it, and release.yml fills that one draft"},
 	"release_always": {"expected": false, "why": "true tags every main push whose version is untagged, so a version bumped outside a release PR publishes with no human decision"},
-	"changelog_update": {"expected": false, "why": "one package writes the one changelog; with every package writing to a shared path the FIRST crate's commits became the whole release's notes"},
+	"changelog_update": {"expected": false, "why": "one package writes the one changelog; on, every other crate grows its own CHANGELOG.md in the release PR — and pointed at one shared path, the first writer's commits become the whole release's notes"},
 }
 
 release_concurrency_group := "pixtuoid-release"
@@ -412,11 +412,23 @@ release_plz_draft_releases := [pkg |
 	object.get(pkg, "git_release_draft", false) == true
 ]
 
-# A member's package name IS its directory name in this workspace (`crates/<name>`).
-workspace_member_names contains name if {
-	some member in object.get(documents[cargo_manifest_path], ["workspace", "members"], [])
-	parts := split(member, "/")
-	name := parts[count(parts) - 1]
+workspace_members := object.get(documents[cargo_manifest_path], ["workspace", "members"], [])
+
+member_manifest_path(member) := sprintf("%s/%s", [member, cargo_manifest_path])
+
+# Only a PUBLISHED member has commits a changelog can carry: release-plz drops a
+# `publish = false` crate from an update entirely, so naming one is inert.
+workspace_published_packages contains name if {
+	some member in workspace_members
+	manifest := documents[member_manifest_path(member)]
+	object.get(manifest, ["package", "publish"], true) != false
+	name := manifest.package.name
+}
+
+workspace_members_without_manifest contains path if {
+	some member in workspace_members
+	path := member_manifest_path(member)
+	not documents[path]
 }
 
 release_tag_globs contains tag_glob if {
@@ -1468,9 +1480,11 @@ deny contains msg if {
 }
 
 # The release notes are the draft release's body, and the version popup links
-# users to them. release-plz lists only commits touching the packages a
-# changelog NAMES, so the package that carries the release writes the one
-# changelog and names every other member — a crate left out is silent.
+# users to them. release-plz lists only commits touching the PUBLISHED packages a
+# changelog names, so the package that carries the release writes the one
+# changelog and names every other one — a crate left out is silent. The last two
+# rules are the census's existence half: without them a manifest the recipe
+# stopped feeding leaves the set difference empty, and the rule green.
 deny contains msg if {
 	count(release_plz_draft_releases) == 1
 	pkg := release_plz_draft_releases[0]
@@ -1485,11 +1499,29 @@ deny contains msg if {
 	count(release_plz_draft_releases) == 1
 	pkg := release_plz_draft_releases[0]
 	included := {name | some name in object.get(pkg, "changelog_include", [])}
-	missing := (workspace_member_names - {pkg.name}) - included
+	missing := (workspace_published_packages - {pkg.name}) - included
 	count(missing) > 0
 	msg := sprintf(
-		"%s package %q changelog_include must name every other workspace member — missing %v; a crate left out vanishes from the release notes",
+		"%s package %q changelog_include must name every other PUBLISHED workspace member — missing %v; a crate left out vanishes from the release notes",
 		[release_plz_config_path, pkg.name, sort(missing)],
+	)
+}
+
+deny contains msg if {
+	count(release_plz_draft_releases) == 1
+	pkg := release_plz_draft_releases[0]
+	not pkg.name in workspace_published_packages
+	msg := sprintf(
+		"%s package %q is not a published member of %s [workspace].members — without that census the changelog_include rule passes vacuously",
+		[release_plz_config_path, pkg.name, cargo_manifest_path],
+	)
+}
+
+deny contains msg if {
+	count(workspace_members_without_manifest) > 0
+	msg := sprintf(
+		"the policy input lacks %v — `just ci-observability` must feed every workspace member's manifest, or that crate drops out of the changelog census",
+		[sort(workspace_members_without_manifest)],
 	)
 }
 

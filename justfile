@@ -173,8 +173,9 @@ ci-observability:
     [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
     files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
     # The release contracts that span files: release-plz.toml's tag name vs
-    # release.yml's trigger, and its changelog census vs Cargo.toml's members.
-    toml_files=(release-plz.toml Cargo.toml)
+    # release.yml's trigger, and its changelog census vs the workspace's members
+    # (the root manifest lists them; each member's own says its name and `publish`).
+    toml_files=(release-plz.toml Cargo.toml crates/*/Cargo.toml)
     for f in "${toml_files[@]}"; do
         [[ -s $f ]] || { echo "error: $f is missing or empty" >&2; exit 1; }
     done
