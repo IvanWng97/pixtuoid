@@ -67,6 +67,8 @@ CSP; regressions surface in `just site-e2e`'s console watchdog.
 the status endpoint + daemon subcommands are dev-server only (`astro preview`
 has neither — verified vs 7.0.5), and dev/preview share port 4321 — stop the
 daemon before `just site-e2e` (its webServer fails loud on a squatted port).
+`npm run lighthouse` needs 4321 AND `collect.previewPort` free: its preview
+moves there so the gzip proxy can take the audited port.
 
 ## Gates
 
@@ -86,7 +88,11 @@ watchdog) that tsc/knip/build are blind to. CI: `site.yml` / `pages.yml`.
   greens a binary audit that failed one run). Collect URLs pin `?theme=day`
   (otherwise the wall clock picks the palette — half of CI runs would audit
   each). **The theme matrix is `smoke.spec.ts`** (day/night/dracula), not a
-  doubled collect list.
+  doubled collect list. The audit runs THROUGH `startPagesLikeProxy`: `astro
+  preview` serves the wasm raw while GitHub Pages gzips it, and under simulated
+  throttling `interactive`/LCP are BYTE budgets — so they price the wasm at
+  what a visitor downloads, and are sized to admit a wasm at `just
+  gen-wasm-check`'s gzip cap, no more.
 - **Fonts**: Fontsource WOFF2 with `font-display: optional` + preloads — do
   not switch to the default `swap` (Ubuntu cold visits reflow past the CLS
   budget; `font-layout.spec.ts` reproduces it deliberately).

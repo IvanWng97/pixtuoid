@@ -904,7 +904,7 @@ gen-icons:
 # the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
 # that cargo explicitly.
 [group('gen')]
-[doc('Compile pixtuoid-web for wasm32 (release) — shared by gen-wasm + CI wasm-check')]
+[doc('Compile pixtuoid-web for wasm32 (the size-tuned wasm-release profile) — shared by gen-wasm + CI wasm-check')]
 wasm-build:
     #!/usr/bin/env sh
     set -eu
@@ -912,11 +912,11 @@ wasm-build:
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
         || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
-    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --release
+    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release
 
 # The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
-# minutes-long release compile. wasm-bindgen-cli must match the crate's pinned
+# minutes-long `wasm-build` compile. wasm-bindgen-cli must match the crate's pinned
 # wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
 # the blob ~10-20%. (ci-builds.yml's wasm-check calls `wasm-build` directly — it only
 # compiles, so it needs neither of these.)
@@ -938,7 +938,7 @@ gen-wasm: gen-wasm-tools wasm-build
     set -eu
     mkdir -p site/public/wasm
     wasm-bindgen --target web --out-dir site/public/wasm \
-        target/wasm32-unknown-unknown/release/pixtuoid_web.wasm
+        target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
     # Stamp the wasm/glue PAIR (#424): the JS glue's ABI must match the exact
     # .wasm it was generated with, so every emitted file's sha256 lands in one
@@ -955,13 +955,15 @@ gen-wasm: gen-wasm-tools wasm-build
 # formatting machinery, an accidental debug build) fails loudly. The cap is on
 # the GZIPPED size, because the wire cost is what the poster is hiding — gating
 # the raw proxy instead is what blocked the density-variant sprite art (#871).
-# Raw is REPORTED, not gated — it is parse/compile cost, which the site's own
-# Lighthouse budget measures DIRECTLY on the runner (total-blocking-time and
-# user-timings:pixtuoid-revealed are `error`-level in site/lighthouserc.json,
-# and site.yml fires on site/** which is where the wasm lives), so a byte-count
-# proxy for it would be the weaker instrument. Meanwhile the cap is deliberately
-# LOOSE — sized for the density-art phase
-# rather than today's payload, so its headroom is art budget and NOT regression
+# Raw is REPORTED, never gated as wire: the runner prices the wasm gzipped, as
+# GitHub Pages ships it (`startPagesLikeProxy`), so site/lighthouserc.json sees raw
+# growth only as parse/compile cost (total-blocking-time and
+# user-timings:pixtuoid-revealed, `error`-level; site.yml fires on site/**, where
+# the wasm lives). WIRE cost is gated twice on purpose — here, naming the wasm,
+# and there via `interactive`/`largest-contentful-paint`, byte budgets under
+# simulated throttling sized to admit a wasm AT this cap. Meanwhile the cap is
+# deliberately LOOSE — sized for the density-art phase rather than today's
+# payload, so its headroom is art budget and NOT regression
 # sensitivity; the recipe prints the gap so you can see how much. RETIRE that
 # slack once the art phase lands: re-run the recipe and set the cap to the new
 # figure plus a margin. Pair (#424): the
@@ -980,7 +982,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # (.github/prompts/pr-review.prompt.md, "a scene change stales the wasm"), not
 # this recipe. Input-hash stamping was considered and rejected: most commits
 # under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
-# links, so the gate would demand a ~1 MB binary regen on changes that provably
+# links, so the gate would demand a binary regen on changes that provably
 # cannot alter it.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]

@@ -1,7 +1,17 @@
 import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import http from 'node:http';
 import test from 'node:test';
+import { setImmediate } from 'node:timers';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
-import { aggregate, evaluateAssertions, median } from './lighthouse-runner.mjs';
+import {
+  aggregate,
+  evaluateAssertions,
+  median,
+  resolvePorts,
+  startPagesLikeProxy,
+} from './lighthouse-runner.mjs';
 
 const lhr = ({ perf = 0.9, contrast = 1, lcp = 2000, mark = 5000 } = {}) => ({
   categories: { performance: { score: perf } },
@@ -95,4 +105,153 @@ test('an assertion with neither bound is a config error, not a skip', () => {
     () => evaluateAssertions({ x: ['error', { aggregationMethod: 'median' }] }, 'u', [lhr()]),
     /neither minScore nor maxNumericValue/
   );
+});
+
+const WASM = Buffer.alloc(64 * 1024, 'pixtuoid');
+const PNG = Buffer.from('not really a png, but never compressible by contract');
+const JS_GZ = gzipSync(Buffer.from('export const already = "gzipped by the preview server";'));
+const WASM_GZ = gzipSync(WASM);
+
+function listen(server) {
+  return new Promise((resolve) => server.listen(0, 'localhost', () => resolve(server)));
+}
+
+function fakePreview() {
+  return listen(
+    http.createServer((req, res) => {
+      if (req.url === '/wasm/engine.wasm') {
+        res.writeHead(200, { 'content-type': 'application/wasm', 'content-length': WASM.length });
+        res.end(WASM);
+      } else if (req.url === '/wasm/pre-gzipped.wasm') {
+        res.writeHead(200, { 'content-type': 'application/wasm', 'content-encoding': 'gzip' });
+        res.end(WASM_GZ);
+      } else if (req.url === '/demo.png') {
+        res.writeHead(200, { 'content-type': 'image/png', 'content-length': PNG.length });
+        res.end(PNG);
+      } else if (req.url === '/page.js') {
+        res.writeHead(200, { 'content-type': 'text/javascript', 'content-encoding': 'gzip' });
+        res.end(JS_GZ);
+      } else {
+        res.writeHead(404, { 'content-type': 'text/plain' });
+        res.end('nope');
+      }
+    })
+  );
+}
+
+// Raw http, not fetch: fetch inflates the body and we are measuring the WIRE. A
+// stall must FAIL rather than hang the suite — a stale content-length does stall.
+function wire(port, path, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const req = http.get({ host: 'localhost', port, path, headers }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () =>
+        resolve({ status: res.statusCode, headers: res.headers, body: Buffer.concat(chunks) })
+      );
+      // A response cut short closes WITHOUT 'end'; after 'end' this reject is a no-op.
+      res.on('close', () => reject(new Error(`${path}: the response was cut short`)));
+    });
+    req.setTimeout(2_000, () => req.destroy(new Error(`${path}: the response stalled`)));
+    req.on('error', reject);
+  });
+}
+
+async function withProxy(fn) {
+  const upstream = await fakePreview();
+  const proxy = await startPagesLikeProxy({ upstreamPort: upstream.address().port, port: 0 });
+  try {
+    await fn(proxy.address().port);
+  } finally {
+    proxy.closeAllConnections();
+    proxy.close();
+    upstream.closeAllConnections();
+    upstream.close();
+  }
+}
+
+test('the proxy gzips wasm the way GitHub Pages does, and only when the client accepts it', async () => {
+  await withProxy(async (port) => {
+    const gz = await wire(port, '/wasm/engine.wasm', { 'accept-encoding': 'gzip, deflate, br' });
+    assert.equal(gz.status, 200);
+    assert.equal(gz.headers['content-encoding'], 'gzip');
+    assert.equal(gz.headers['content-type'], 'application/wasm');
+    assert.equal(
+      gz.headers['content-length'],
+      undefined,
+      'a stale raw length outlives the gzip body — the client stalls'
+    );
+    assert.ok(gz.body.length < WASM.length / 10, `wire ${gz.body.length} B`);
+    assert.deepEqual(gunzipSync(gz.body), WASM);
+
+    const plain = await wire(port, '/wasm/engine.wasm');
+    assert.equal(plain.headers['content-encoding'], undefined);
+    assert.deepEqual(plain.body, WASM);
+
+    // br-only → raw: the dated fact on `startPagesLikeProxy`.
+    const brOnly = await wire(port, '/wasm/engine.wasm', { 'accept-encoding': 'br' });
+    assert.equal(brOnly.headers['content-encoding'], undefined);
+    assert.deepEqual(brOnly.body, WASM);
+  });
+});
+
+test('the proxy passes everything else through untouched', async () => {
+  await withProxy(async (port) => {
+    const png = await wire(port, '/demo.png', { 'accept-encoding': 'gzip' });
+    assert.equal(png.headers['content-encoding'], undefined);
+    assert.equal(png.headers['content-length'], String(PNG.length));
+    assert.deepEqual(png.body, PNG);
+
+    const js = await wire(port, '/page.js', { 'accept-encoding': 'gzip' });
+    assert.equal(js.headers['content-encoding'], 'gzip');
+    assert.deepEqual(js.body, JS_GZ);
+
+    const pre = await wire(port, '/wasm/pre-gzipped.wasm', { 'accept-encoding': 'gzip' });
+    assert.deepEqual(pre.body, WASM_GZ, 'an already-encoded wasm is never gzipped twice');
+
+    const missing = await wire(port, '/nope', { 'accept-encoding': 'gzip' });
+    assert.equal(missing.status, 404);
+    assert.equal(missing.body.toString(), 'nope');
+  });
+});
+
+test('an upstream that dies mid-body ends the response instead of crashing the runner', async () => {
+  const upstream = await listen(
+    http.createServer((req, res) => {
+      res.writeHead(200, { 'content-type': 'application/wasm' });
+      res.write(WASM.subarray(0, 1024));
+      setImmediate(() => res.socket.resetAndDestroy());
+    })
+  );
+  const proxy = await startPagesLikeProxy({ upstreamPort: upstream.address().port, port: 0 });
+  try {
+    // Twice per path: the second request proves the first did not take the proxy down.
+    for (const headers of [{}, {}, { 'accept-encoding': 'gzip' }, { 'accept-encoding': 'gzip' }]) {
+      // Ended, not stalled: node reports the cut as a hang-up or a short response.
+      await assert.rejects(
+        wire(proxy.address().port, '/wasm/engine.wasm', headers),
+        (e) => !/stalled/.test(e.message)
+      );
+    }
+  } finally {
+    proxy.closeAllConnections();
+    proxy.close();
+    upstream.closeAllConnections();
+    upstream.close();
+  }
+});
+
+test('the audited port and the preview port come from the config, and must differ', () => {
+  const collect = (url, previewPort) => ({ collect: { url, previewPort } });
+  assert.deepEqual(
+    resolvePorts(collect(['http://localhost:4321/', 'http://localhost:4321/x/'], 4320)),
+    { auditPort: 4321, previewPort: 4320 }
+  );
+  assert.throws(() => resolvePorts(collect(['http://localhost:4321/'], 4321)), /differ/);
+  assert.throws(() => resolvePorts(collect(['http://localhost/'], 4320)), /explicit port/);
+  assert.throws(
+    () => resolvePorts(collect(['http://localhost:4321/', 'http://localhost:9/'], 4320)),
+    /one port/
+  );
+  assert.throws(() => resolvePorts(collect(['http://localhost:4321/'], undefined)), /previewPort/);
 });

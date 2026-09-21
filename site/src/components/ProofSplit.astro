@@ -12,19 +12,33 @@ import { asset } from '../consts';
 }
 <div class="proof" id="proof" role="region" aria-label="proof: a real session drives the office">
   <div class="proof__stage hw-panel">
+    {
+      /* Both variants ship [hidden] with a data-poster: a browser fetches a
+      <video poster> even on a hidden element, so an eager `poster=` bills the
+      visitor for a section screens below the fold — a narrow one for BOTH
+      variants. width/height (the posters' own, pinned by
+      config/proof-poster-dims.test.mjs) hold the box's aspect until the poster
+      lands — without them the section grows mid-scroll and every in-page jump
+      below it lands short. */
+    }
     <video
       class="proof__video proof__video--wide px"
+      width="1720"
+      height="902"
+      hidden
       muted
       loop
       playsinline
       preload="none"
-      poster={asset('demos/proof-poster.png')}
+      data-poster={asset('demos/proof-poster.png')}
       data-webm={asset('demos/proof.webm')}
       data-mp4={asset('demos/proof.mp4')}
       aria-label="split screen: a Claude Code session types on the left; on the right the pixel office reacts — a sprite walks in, its monitor lights per tool call"
     ></video>
     <video
       class="proof__video proof__video--tall px"
+      width="960"
+      height="1334"
       hidden
       muted
       loop
@@ -34,6 +48,16 @@ import { asset } from '../consts';
       data-webm={asset('demos/proof-tall.webm')}
       data-mp4={asset('demos/proof-tall.mp4')}
       aria-label="the same replay stacked vertically: the session above, the office below"></video>
+    <noscript>
+      <img
+        class="proof__video px"
+        src={asset('demos/proof-poster.png')}
+        width="1720"
+        height="902"
+        decoding="async"
+        alt="split screen: a Claude Code session on the left; on the right the pixel office reacts to it"
+      />
+    </noscript>
   </div>
   <p class="proof__coda">
     <span class="text-scrim">
@@ -45,7 +69,8 @@ import { asset } from '../consts';
 <script is:inline>
   // A pix:paused CONSUMER, never a dispatcher — #office-pause is the one
   // control. Under reduced motion we never hydrate, so the active variant's
-  // poster must be promoted from data-poster in sync() rather than hydrate().
+  // poster must be promoted from data-poster in sync() rather than hydrate() —
+  // but only once the section is NEAR (the markup comment owns why).
   (function () {
     const root = document.getElementById('proof');
     if (!root) return;
@@ -55,6 +80,7 @@ import { asset } from '../consts';
     const narrow = window.matchMedia('(max-width: 760px)');
     let userPaused = false;
     let inView = false;
+    let near = !('IntersectionObserver' in window);
 
     function showPoster(v) {
       if (v.dataset.poster) {
@@ -80,7 +106,7 @@ import { asset } from '../consts';
     function sync() {
       wide.hidden = narrow.matches;
       tall.hidden = !narrow.matches;
-      showPoster(narrow.matches ? tall : wide);
+      if (near) showPoster(narrow.matches ? tall : wide);
       [wide, tall].forEach(function (v) {
         if (mq.matches) {
           v.pause();
@@ -96,6 +122,18 @@ import { asset } from '../consts';
       });
     }
     if ('IntersectionObserver' in window) {
+      // Two viewports of lead: enough for a scroll on a slow link. A JUMP to
+      // the section still meets the bare panel until the poster lands.
+      const nearIO = new IntersectionObserver(
+        function (entries) {
+          if (!entries[0].isIntersecting) return;
+          near = true;
+          nearIO.disconnect();
+          sync();
+        },
+        { rootMargin: '200% 0px' }
+      );
+      nearIO.observe(root);
       new IntersectionObserver(
         function (entries) {
           inView = entries[0].isIntersecting;
