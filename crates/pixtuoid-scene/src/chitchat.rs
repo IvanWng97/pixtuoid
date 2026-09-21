@@ -107,9 +107,7 @@ pub struct ActiveChitchat {
 impl ActiveChitchat {
     /// Starts a conversation at `venue` among `participants`.
     pub fn new(venue: VenueKey, participants: Vec<AgentId>, now: SystemTime) -> Self {
-        // NOT the render-layer `pixel_painter::epoch_ms` forwarder — chitchat is a
-        // model module and must not depend on the render layer.
-        let ms = crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH);
+        let ms = crate::anim::epoch_ms(now);
         let mut chat = Self {
             venue,
             participants: Vec::new(),

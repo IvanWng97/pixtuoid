@@ -26,10 +26,7 @@ use crate::layout::{
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
 
-/// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
-pub(super) fn epoch_ms(now: SystemTime) -> u64 {
-    crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH)
-}
+pub(super) use crate::anim::epoch_ms;
 
 /// Everything the pure-pixel pass observed that the caller still needs.
 pub struct PixelPassResult {

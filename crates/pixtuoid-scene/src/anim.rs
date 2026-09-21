@@ -42,6 +42,13 @@ pub(crate) fn elapsed_ms(now: SystemTime, since: SystemTime) -> u64 {
         .as_millis() as u64
 }
 
+/// Milliseconds since the Unix epoch for `now` (0 if the clock is before it).
+/// It lives HERE, below both the model and the render layer, so a model module
+/// never imports the renderer for it.
+pub(crate) fn epoch_ms(now: SystemTime) -> u64 {
+    elapsed_ms(now, SystemTime::UNIX_EPOCH)
+}
+
 /// Compute the eased progress of an animation `[0.0, 1.0]` given its
 /// `started_at` wall-clock time, total `duration_ms`, and `easing` curve.
 pub fn eased_progress(
