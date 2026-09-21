@@ -291,17 +291,36 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     }
 }
 
-/// L2's plain-English pools; `{n}` is the mood's agent count. The `_ONE` pools
-/// carry no count, so one agent is never pluralised.
-const PERSONA_ALERT_ONE: &[&str] = &["someone needs you!", "psst. your turn."];
-const PERSONA_ALERT_MANY: &[&str] = &["{n} agents need you!", "{n} waiting on you..."];
-const PERSONA_BUSY_ONE: &[&str] = &["heads down, shipping", "do not disturb :)"];
-const PERSONA_BUSY_MANY: &[&str] = &[
-    "heads down, shipping",
-    "{n} brains at work",
-    "do not disturb :)",
+/// One persona line: fixed text, or the mood's agent count followed by text.
+#[derive(Clone, Copy)]
+enum Persona {
+    Says(&'static str),
+    Counts(&'static str),
+}
+
+/// L2's plain-English pools. The `_ONE` pools carry no count, so one agent is
+/// never pluralised.
+const PERSONA_ALERT_ONE: &[Persona] = &[
+    Persona::Says("someone needs you!"),
+    Persona::Says("psst. your turn."),
 ];
-const PERSONA_CALM: &[&str] = &["quiet... too quiet", "coffee break?"];
+const PERSONA_ALERT_MANY: &[Persona] = &[
+    Persona::Counts(" agents need you!"),
+    Persona::Counts(" waiting on you..."),
+];
+const PERSONA_BUSY_ONE: &[Persona] = &[
+    Persona::Says("heads down, shipping"),
+    Persona::Says("do not disturb :)"),
+];
+const PERSONA_BUSY_MANY: &[Persona] = &[
+    Persona::Says("heads down, shipping"),
+    Persona::Counts(" brains at work"),
+    Persona::Says("do not disturb :)"),
+];
+const PERSONA_CALM: &[Persona] = &[
+    Persona::Says("quiet... too quiet"),
+    Persona::Says("coffee break?"),
+];
 
 /// L2's plain-English face for `mood`; `pick` rotates the pool. Same 1-col
 /// vocabulary as the tally (see [`board_mood_segments`]). `None` = L2 stays on the
@@ -325,8 +344,10 @@ fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegmen
         OfficeMood::Calm => (GLYPH_IDLE, PERSONA_CALM, 0, BoardTone::Idle),
         OfficeMood::Empty => return None,
     };
-    let line = pool[(pick % pool.len() as u64) as usize].replace("{n}", &n.to_string());
-    let text = format!("{glyph} {line}");
+    let text = match pool[(pick % pool.len() as u64) as usize] {
+        Persona::Says(line) => format!("{glyph} {line}"),
+        Persona::Counts(rest) => format!("{glyph} {n}{rest}"),
+    };
     (text.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize)
         .then(|| vec![BoardSegment::new(text, tone)])
 }

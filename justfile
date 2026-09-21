@@ -904,7 +904,7 @@ gen-icons:
 # the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
 # that cargo explicitly.
 [group('gen')]
-[doc('Compile pixtuoid-web for wasm32 (release) — shared by gen-wasm + CI wasm-check')]
+[doc('Compile pixtuoid-web for wasm32 (the size-tuned wasm-release profile) — shared by gen-wasm + CI wasm-check')]
 wasm-build:
     #!/usr/bin/env sh
     set -eu
@@ -912,7 +912,7 @@ wasm-build:
     rustup target list --toolchain stable --installed | grep -q wasm32-unknown-unknown \
         || { echo "needs the wasm target: rustup target add wasm32-unknown-unknown"; exit 1; }
     TB="$(dirname "$(rustup which --toolchain stable rustc)")"
-    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --release
+    PATH="$TB:$PATH" "$TB/cargo" build -p pixtuoid-web --target wasm32-unknown-unknown --profile wasm-release
 
 # The gen-only tool preflight — a SEPARATE recipe so it runs BEFORE the wasm-build
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
@@ -938,7 +938,7 @@ gen-wasm: gen-wasm-tools wasm-build
     set -eu
     mkdir -p site/public/wasm
     wasm-bindgen --target web --out-dir site/public/wasm \
-        target/wasm32-unknown-unknown/release/pixtuoid_web.wasm
+        target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
     # Stamp the wasm/glue PAIR (#424): the JS glue's ABI must match the exact
     # .wasm it was generated with, so every emitted file's sha256 lands in one
