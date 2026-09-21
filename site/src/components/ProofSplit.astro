@@ -15,10 +15,14 @@ import { asset } from '../consts';
     {
       /* Both variants ship [hidden] with a data-poster: a browser fetches a
       <video poster> even on a hidden element, so eager markup billed every
-      visitor both posters for a section screens below the fold. */
+      visitor both posters for a section screens below the fold. width/height
+      hold the box's aspect until the poster lands — without them the section
+      grows mid-scroll and every in-page jump below it lands short. */
     }
     <video
       class="proof__video proof__video--wide px"
+      width="1720"
+      height="902"
       hidden
       muted
       loop
@@ -31,6 +35,8 @@ import { asset } from '../consts';
     ></video>
     <video
       class="proof__video proof__video--tall px"
+      width="960"
+      height="1334"
       hidden
       muted
       loop
