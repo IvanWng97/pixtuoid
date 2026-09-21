@@ -586,6 +586,48 @@ test('crisp AA captions overlay the live office (name badges + neon board)', asy
   expect(errors()).toEqual([]);
 });
 
+test('the neon board keeps one monospace column per char, through a flap roll', async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  await gotoLive(page);
+  await expect(page.locator('#office-overlay.is-on')).toBeAttached({ timeout: 10_000 });
+  // The engine BAKES the row's separators as spaces and re-cuts its tone segments
+  // every tick of a roll, so the check is only real on a multi-segment row.
+  const mood = page.locator('#office-overlay .ov-board .ov-brow').nth(1);
+  await expect
+    .poll(() => mood.locator('span').count(), { timeout: 15_000 })
+    .toBeGreaterThan(1);
+  // One flap half, so the window always crosses a roll.
+  const samples = await mood.evaluate(async (row) => {
+    const HALF_MS = 4_000;
+    const probe = document.createElement('span');
+    probe.textContent = 'M'.repeat(10);
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    const out: { text: string; left: number; width: number; ch: number }[] = [];
+    const t0 = performance.now();
+    while (performance.now() - t0 < HALF_MS) {
+      await new Promise(requestAnimationFrame);
+      const spans = Array.from(row.children) as HTMLElement[];
+      if (spans.length === 0) continue;
+      row.appendChild(probe);
+      const ch = probe.getBoundingClientRect().width / 10;
+      probe.remove();
+      const left = spans[0].getBoundingClientRect().left;
+      const right = spans[spans.length - 1].getBoundingClientRect().right;
+      out.push({ text: spans.map((c) => c.textContent).join(''), left, width: right - left, ch });
+    }
+    return out;
+  });
+  expect(samples.length).toBeGreaterThan(30);
+  expect(new Set(samples.map((s) => s.text)).size, 'the window crossed a roll').toBeGreaterThan(2);
+  for (const s of samples) {
+    expect(Math.abs(s.width - s.text.length * s.ch), `"${s.text}"`).toBeLessThan(s.ch / 2);
+    expect(Math.abs(s.left - samples[0].left), `"${s.text}"`).toBeLessThan(1);
+  }
+  expect(errors()).toEqual([]);
+});
+
 test('reduced motion hides the caption overlay (still poster, no captions)', async ({
   browser,
 }) => {
