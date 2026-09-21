@@ -86,23 +86,19 @@ weaken the lint.
 ### Cutting the release
 
 [release-plz](https://release-plz.dev) owns every version number and the tag;
-`release.yml` still owns every publish. Four steps, all human-initiated:
+`release.yml` still owns every publish. Three steps, all human-initiated:
 
 1. **Dispatch** `release-plz.yml` from Actions, on `main`. It opens
    `chore(release): vX.Y.Z` from a `release-plz-*` branch, with the workspace
    version, every path-dep requirement, `Cargo.lock` and `CHANGELOG.md`
    rewritten. The bump level comes from the conventional-commit log — nobody
    picks it — and the PR body carries the `cargo-semver-checks` verdict.
-2. **Regenerate the committed art on that branch**: `just gen`, then commit
-   `docs/images` + `site/public/demos`. The office HUD bakes
-   `CARGO_PKG_VERSION`, so a bump drifts every still and smoke's `gen-check`
-   reds the PR otherwise.
-3. **Review it like any PR.** GitHub will make you update the branch if `main`
+2. **Review it like any PR.** GitHub will make you update the branch if `main`
    moved — `main` requires branches to be up to date, because the tag lands on
    the squash commit and release-plz publishes to crates.io from it before
    `ci-gate` finishes. If the semver verdict says the bump is too small, raise
    it with `cargo set-version --workspace X.Y.Z` (cargo-edit) and push.
-4. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
+3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
    publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
    GitHub release carrying the changelog; the tag then fires `release.yml`,
    which builds the six targets and the debs, attaches them, publishes the
@@ -126,11 +122,12 @@ Both jobs authenticate with `RELEASE_PLZ_TOKEN`, a fine-grained PAT scoped to
 this repository with Contents and Pull requests read/write; `release-plz.yml`'s
 header says why it cannot be the automatic token. **The secret has to exist
 before `release-plz.yml` reaches main, not before the first dispatch**: the
-`tag` job runs on every push, and the action refuses an empty token.
+`release` job runs on every push, and the action refuses an empty token.
 
 A release PR that release-plz closes and re-opens (it does that when the branch
-carries non-bot commits) leaves your `just gen` commit behind: `git cherry-pick`
-it onto the new branch.
+carries non-bot commits) leaves a commit you pushed to it — a raised bump —
+behind: `git cherry-pick` it onto the new branch. Nothing rendered carries the
+version, so a release PR needs no `just gen`.
 
 Merging the release PR is what publishes, so a human owns it. The tag also
 publishes **outside** this repo:
