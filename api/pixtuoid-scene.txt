@@ -1659,7 +1659,6 @@ pub pixtuoid_scene::theme::OfficeColors::city_lit_windows: [pixtuoid_core::sprit
 pub pixtuoid_scene::theme::OfficeColors::clock_face: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::clock_hand: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::clock_rim: pixtuoid_core::sprite::Rgb
-pub pixtuoid_scene::theme::OfficeColors::neon_frame_base: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::neon_panel_bg: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::room_wall_trim_dark: pixtuoid_core::sprite::Rgb
 pub pixtuoid_scene::theme::OfficeColors::room_wall_trim_light: pixtuoid_core::sprite::Rgb

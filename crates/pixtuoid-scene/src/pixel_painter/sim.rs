@@ -103,7 +103,7 @@ pub struct SimFrame {
     /// Smoothed indoor-lighting level from `LightingState::tick`.
     pub indoor_scale: f32,
     /// The neon sign's light from `NeonState::tick`.
-    pub neon: crate::floor::NeonLevels,
+    pub(crate) neon: crate::floor::NeonLevels,
     /// Active speech bubbles after this tick's venue update.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller

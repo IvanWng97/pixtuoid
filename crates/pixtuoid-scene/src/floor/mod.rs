@@ -117,7 +117,7 @@ pub struct FloorCtx {
     /// This floor's indoor-lighting fade state.
     pub light: LightingState,
     /// This floor's neon-sign fade state.
-    pub neon: NeonState,
+    pub(crate) neon: NeonState,
     /// Per-agent walk-timing state (physics profiles for entry/exit/wander).
     pub motion: HashMap<AgentId, MotionState>,
     /// Longest in-flight entry- or exit-walk `duration_ms + pause_ms` on this
@@ -792,36 +792,36 @@ impl LightingState {
 /// [`crate::pixel_painter::CharacterGlow`]: the sim decides HOW LIT and how ALARMED
 /// the sign is, paint maps that to colors.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NeonLevels {
+pub(crate) struct NeonLevels {
     /// 0 = the brand hue, 1 = the "someone needs you" hue.
-    pub alert: f32,
+    pub(crate) alert: f32,
     /// How hard the tube is driven, 0..=1.
-    pub power: f32,
+    pub(crate) power: f32,
 }
 
 impl NeonLevels {
     /// Someone waits on the user.
-    pub const ALERT: Self = Self {
+    pub(crate) const ALERT: Self = Self {
         alert: 1.0,
         power: 1.0,
     };
     /// Agents work, nobody waits.
-    pub const BUSY: Self = Self {
+    pub(crate) const BUSY: Self = Self {
         alert: 0.0,
         power: 1.0,
     };
     /// Everyone present is idle.
-    pub const CALM: Self = Self {
+    pub(crate) const CALM: Self = Self {
         alert: 0.0,
         power: 0.62,
     };
     /// Nobody home: the tube barely holds (and stutters — see [`NeonState::tick`]).
-    pub const EMPTY: Self = Self {
+    pub(crate) const EMPTY: Self = Self {
         alert: 0.0,
         power: 0.16,
     };
     /// A stutter's flash: the starved tube catching for an instant.
-    pub const FLASH: Self = Self {
+    pub(crate) const FLASH: Self = Self {
         alert: 0.0,
         power: 0.9,
     };
@@ -839,7 +839,7 @@ impl NeonLevels {
 /// still — and a floor's first live frame — shows the mood's own light, never
 /// frame 0 of a fade.
 #[derive(Default)]
-pub struct NeonState {
+pub(crate) struct NeonState {
     fade: Option<NeonFade>,
 }
 
@@ -868,7 +868,7 @@ impl NeonFade {
 
 impl NeonState {
     /// How long a mood change takes to cross over (ms).
-    pub const FADE_MS: u32 = 1_600;
+    pub(crate) const FADE_MS: u32 = 1_600;
     /// A starved tube's stutter: the flash windows inside one cycle (ms). The cycle
     /// divides an hour and no window touches its start, so a still rendered on a
     /// whole hour never catches a flash.
@@ -881,7 +881,7 @@ impl NeonState {
     ];
 
     /// A sign that has not been lit yet.
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
@@ -900,7 +900,7 @@ impl NeonState {
     /// ROOM has begun to dim, so that debounce is the one "is the office really
     /// empty" clock — a gap between transcripts, or the last agent still walking
     /// out of a lit room, can't drop the sign.
-    pub fn tick(
+    pub(crate) fn tick(
         &mut self,
         mood: crate::board::OfficeMood,
         room_level: f32,
