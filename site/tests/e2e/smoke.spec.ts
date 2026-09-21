@@ -788,6 +788,9 @@ test('reduced motion stays on the still poster without errors', async ({ browser
   await expect(video).toHaveAttribute('controls', '');
   await expect.poll(() => video.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
   const proofVid = page.locator('.proof__video--wide');
+  await page.evaluate(() =>
+    document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+  );
   expect(await proofVid.evaluate((v) => v.querySelectorAll('source').length)).toBe(0);
   await expect(proofVid).toHaveAttribute('poster', /proof-poster/);
   await expect.poll(() => proofVid.evaluate((v) => (v as HTMLVideoElement).paused)).toBe(true);
@@ -2382,6 +2385,55 @@ test('proof split: replay clip plays in view and obeys the page pause', async ({
   await expect.poll(paused).toBe(false);
   await expect(page.locator('.proof__coda')).toContainText('pixtuoid floating');
   expect(errors()).toEqual([]);
+});
+
+// Both posters are below the fold, and a browser fetches a <video poster> even
+// on a [hidden] element — so eager markup costs every visitor BOTH variants.
+for (const variant of [
+  { name: 'wide', viewport: { width: 1280, height: 800 }, mobile: false },
+  { name: 'narrow', viewport: { width: 390, height: 820 }, mobile: true },
+]) {
+  test(`proof split (${variant.name}): a poster is fetched only for the active variant, and only once the section nears the viewport`, async ({
+    browser,
+  }) => {
+    const context = await browser.newContext({
+      viewport: variant.viewport,
+      isMobile: variant.mobile,
+      hasTouch: variant.mobile,
+    });
+    const page = await context.newPage();
+    const posters: string[] = [];
+    page.on('request', (r) => {
+      const m = /\/demos\/(proof(?:-tall)?-poster\.png)/.exec(r.url());
+      if (m) posters.push(m[1]);
+    });
+    await page.addInitScript(() => sessionStorage.setItem('pix-booted', '1'));
+    await page.goto('./');
+    await page.waitForLoadState('networkidle');
+    expect(posters, 'nothing at load — the section is screens away').toEqual([]);
+    await page.evaluate(() =>
+      document.getElementById('proof')!.scrollIntoView({ block: 'center', behavior: 'instant' })
+    );
+    const active = variant.mobile ? 'proof-tall-poster.png' : 'proof-poster.png';
+    await expect.poll(() => posters).toContain(active);
+    await page.waitForLoadState('networkidle');
+    expect(new Set(posters), 'never the hidden variant').toEqual(new Set([active]));
+    await context.close();
+  });
+}
+
+test('proof split: without JS the poster still shows, as a plain image', async ({ browser }) => {
+  // Nothing promotes a data-poster without script, so the fallback is markup.
+  const context = await browser.newContext({ javaScriptEnabled: false });
+  const page = await context.newPage();
+  await page.goto('./');
+  const fallback = page.locator('#proof img.proof__video');
+  await expect(fallback).toHaveAttribute('src', /proof-poster/);
+  await fallback.scrollIntoViewIfNeeded();
+  await expect(fallback).toBeVisible();
+  await expect(page.locator('.proof__video--wide')).toBeHidden();
+  await expect(page.locator('.proof__video--tall')).toBeHidden();
+  await context.close();
 });
 
 test('proof split: narrow viewport swaps to the tall stack of the SAME render', async ({
