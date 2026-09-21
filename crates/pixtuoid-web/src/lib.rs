@@ -897,12 +897,9 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&json).expect("overlay_json is valid JSON");
 
         let board = &v["board"];
-        assert!(
-            board["brand"]["text"]
-                .as_str()
-                .unwrap()
-                .starts_with("pixtuoid v"),
-            "brand carries the version: {board}"
+        assert_eq!(
+            board["brand"]["text"].as_str().unwrap(),
+            pixtuoid_scene::board::BOARD_BRAND
         );
         assert_eq!(board["star"]["text"].as_str().unwrap(), "\u{2605} Star");
         assert!(board["mood"].is_array() && board["context"].is_array());

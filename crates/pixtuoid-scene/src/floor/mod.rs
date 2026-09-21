@@ -621,6 +621,7 @@ impl FloorSession {
             crate::board::scene_uptime_secs(scene, now),
             floor,
             crate::board::gateway_rollup(scene.daemons().map(|(_, _, p)| p)),
+            now,
         )
     }
 

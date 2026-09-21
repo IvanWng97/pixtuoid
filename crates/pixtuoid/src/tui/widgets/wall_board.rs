@@ -61,6 +61,7 @@ pub(crate) fn paint_wall_display(
         pixtuoid_scene::board::scene_uptime_secs(scene, now),
         floor_info.map(|fi| (fi.current, fi.total_floors)),
         gateway,
+        now,
     );
 
     // The star right-flushes to the panel edge — the SAME position
@@ -188,7 +189,10 @@ mod tests {
         let l1 = row_text(buf, cx, cy, BOARD_W);
         let l2 = row_text(buf, cx, cy + 1, BOARD_W);
         let l3 = row_text(buf, cx, cy + 2, BOARD_W);
-        assert!(l1.starts_with("pixtuoid v"), "brand leads L1: {l1:?}");
+        assert!(
+            l1.starts_with(pixtuoid_scene::board::BOARD_BRAND),
+            "brand leads L1: {l1:?}"
+        );
         assert!(
             l1.trim_end().ends_with("\u{2605} Star"),
             "star right-flushed: {l1:?}"
@@ -205,6 +209,33 @@ mod tests {
             !l3.contains('F'),
             "no floor breadcrumb when floor_info is None: {l3:?}"
         );
+    }
+
+    /// `scene` sizes L2 by `chars().count()` (it has no `unicode-width`); the
+    /// terminal lays it out by display width. Every face L2 can show — tally,
+    /// persona, each drum glyph mid-roll — has to agree, or a roll shoves the row.
+    #[test]
+    fn every_l2_face_is_one_terminal_column_per_char() {
+        use std::time::Duration;
+        const A_MINUTE_MS: u64 = 60_000;
+        const FRAME_MS: usize = 33;
+        let offices = [(0, 0, 0), (0, 0, 3), (4, 0, 6), (4, 2, 6), (1, 1, 0)];
+        for (active, waiting, idle) in offices {
+            let counts = StateCounts {
+                active,
+                waiting,
+                idle,
+                exiting: 0,
+                total: active + waiting + idle,
+            };
+            for ms in (0..A_MINUTE_MS).step_by(FRAME_MS) {
+                let now = SystemTime::UNIX_EPOCH + Duration::from_millis(ms);
+                let model = pixtuoid_scene::board::build_board(counts, 0, None, None, now);
+                let l2: String = model.mood.iter().map(|s| s.text.as_str()).collect();
+                assert_eq!(display_width(&l2), l2.chars().count(), "{l2:?} at {ms}ms");
+                assert!(display_width(&l2) <= BOARD_W as usize, "{l2:?} at {ms}ms");
+            }
+        }
     }
 
     #[test]
