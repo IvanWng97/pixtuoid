@@ -75,11 +75,6 @@ pub static GRUVBOX: Theme = Theme {
             g: 32,
             b: 33,
         },
-        neon_frame_base: Rgb {
-            r: 250,
-            g: 189,
-            b: 47,
-        },
         building_dark: Rgb {
             r: 29,
             g: 32,
@@ -405,6 +400,11 @@ pub static GRUVBOX: Theme = Theme {
             r: 254,
             g: 128,
             b: 25,
+        },
+        neon_alert: Rgb {
+            r: 251,
+            g: 73,
+            b: 52,
         },
     },
     appliance: ApplianceColors {

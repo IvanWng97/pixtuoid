@@ -74,11 +74,6 @@ pub static DRACULA: Theme = Theme {
             g: 31,
             b: 40,
         },
-        neon_frame_base: Rgb {
-            r: 98,
-            g: 114,
-            b: 164,
-        },
         building_dark: Rgb {
             r: 25,
             g: 26,
@@ -402,6 +397,11 @@ pub static DRACULA: Theme = Theme {
             r: 255,
             g: 121,
             b: 198,
+        },
+        neon_alert: Rgb {
+            r: 241,
+            g: 250,
+            b: 140,
         },
     },
     appliance: ApplianceColors {

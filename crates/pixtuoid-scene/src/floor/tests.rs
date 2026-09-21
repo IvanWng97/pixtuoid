@@ -1070,3 +1070,242 @@ fn the_foreground_layer_is_lit_by_the_clock() {
         clustered.first()
     );
 }
+
+fn neon_mood(active: usize, waiting: usize, idle: usize) -> crate::board::OfficeMood {
+    crate::board::OfficeMood::of(crate::board::StateCounts {
+        active,
+        waiting,
+        idle,
+        exiting: 0,
+        total: active + waiting + idle,
+    })
+}
+
+const ROOM_LIT: bool = false;
+const ROOM_DIMMED: bool = true;
+/// A live painter's frame tick — well under the shortest stutter flash.
+const FRAME: Duration = Duration::from_millis(33);
+
+#[test]
+fn neon_first_tick_snaps_to_the_mood() {
+    for (mood, room, want) in [
+        (neon_mood(2, 1, 0), ROOM_LIT, NeonLevels::ALERT),
+        (neon_mood(2, 0, 3), ROOM_LIT, NeonLevels::BUSY),
+        (neon_mood(0, 0, 3), ROOM_LIT, NeonLevels::CALM),
+        (neon_mood(0, 0, 0), ROOM_DIMMED, NeonLevels::EMPTY),
+        (neon_mood(0, 0, 0), ROOM_LIT, NeonLevels::CALM),
+    ] {
+        assert_eq!(NeonState::new().tick(mood, room, t0()), want, "{mood:?}");
+    }
+}
+
+/// The join is REAL: a room that once dimmed and was repopulated never eases back
+/// to a bit-exact 1.0, so the sign reads the room's VERDICT, not its level.
+#[test]
+fn neon_holds_through_a_walkout_in_a_room_that_once_dimmed() {
+    let mut light = LightingState::new();
+    let mut neon = NeonState::new();
+    let mut now = t0();
+    let mut run = |empty: bool, mood: crate::board::OfficeMood, ms: u64| {
+        let mut last = NeonLevels::CALM;
+        for _ in 0..ms / FRAME.as_millis() as u64 {
+            now += FRAME;
+            light.tick(empty, now);
+            last = neon.tick(mood, light.dimmed(), now);
+        }
+        (last, light.level())
+    };
+    let (starved, _) = run(
+        true,
+        neon_mood(0, 0, 0),
+        LightingState::EMPTY_DEBOUNCE_MS * 3,
+    );
+    assert_eq!(starved, NeonLevels::EMPTY);
+    let (_, level) = run(false, neon_mood(2, 0, 0), 60_000);
+    assert!(level < 1.0, "the premise: the f32 ease stalls short of 1.0");
+    // The last agent walks out: the tally is Empty, the room is lit and populated.
+    let (walkout, _) = run(false, neon_mood(0, 0, 0), NeonState::FADE_MS as u64 * 2);
+    assert_eq!(walkout, NeonLevels::CALM, "a lit room keeps its sign");
+}
+
+/// The `--empty` still: one tick after the snap must still judge the floor empty.
+#[test]
+fn light_snap_to_empty_survives_its_first_tick_and_reads_dimmed() {
+    let mut light = LightingState::new();
+    light.snap_to_empty();
+    assert!(light.dimmed());
+    let level = light.tick(true, t0());
+    assert_eq!(level, LightingState::MIN_LEVEL);
+    assert!(light.dimmed(), "the debounce was back-dated, not re-armed");
+    light.tick(false, t0() + FRAME);
+    assert!(!light.dimmed(), "and a populated floor clears it");
+}
+
+#[test]
+fn light_is_dimmed_exactly_once_the_debounce_runs_out() {
+    let mut light = LightingState::new();
+    let debounce = Duration::from_millis(LightingState::EMPTY_DEBOUNCE_MS);
+    light.tick(true, t0());
+    light.tick(true, t0() + debounce - Duration::from_millis(1));
+    assert!(!light.dimmed());
+    light.tick(true, t0() + debounce);
+    assert!(light.dimmed());
+}
+
+#[test]
+fn neon_eases_into_a_new_mood_and_lands_on_it() {
+    let mut neon = NeonState::new();
+    let fade = Duration::from_millis(NeonState::FADE_MS as u64);
+    let alert = neon_mood(2, 1, 0);
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0());
+    let changed = t0() + FRAME;
+    let first = neon.tick(alert, ROOM_LIT, changed);
+    assert_eq!(
+        first,
+        NeonLevels::BUSY,
+        "the change frame still shows the old mood"
+    );
+    let mid = neon.tick(alert, ROOM_LIT, changed + fade / 2);
+    assert!(
+        mid.alert > NeonLevels::BUSY.alert && mid.alert < NeonLevels::ALERT.alert,
+        "mid-fade alert is between the moods: {mid:?}"
+    );
+    // Not `fade - 1ms`: an ease-out's last millisecond rounds to the target in f32.
+    let late = neon.tick(alert, ROOM_LIT, changed + fade * 3 / 4);
+    assert_ne!(
+        late,
+        NeonLevels::ALERT,
+        "still crossing over late in the fade"
+    );
+    assert_eq!(
+        neon.tick(alert, ROOM_LIT, changed + fade),
+        NeonLevels::ALERT
+    );
+}
+
+/// A sign nobody has drawn for longer than a fade has no light to ease from — the
+/// wasm still's warm-up step, a floor switched back to.
+#[test]
+fn neon_snaps_when_its_last_light_is_older_than_a_fade() {
+    let fade = Duration::from_millis(NeonState::FADE_MS as u64);
+    let (calm, busy) = (neon_mood(0, 0, 1), neon_mood(3, 0, 0));
+    let mut fresh = NeonState::new();
+    fresh.tick(calm, ROOM_LIT, t0());
+    assert_eq!(
+        fresh.tick(busy, ROOM_LIT, t0() + fade),
+        NeonLevels::CALM,
+        "fades"
+    );
+    let mut stale = NeonState::new();
+    stale.tick(calm, ROOM_LIT, t0());
+    let later = t0() + fade + Duration::from_millis(1);
+    assert_eq!(stale.tick(busy, ROOM_LIT, later), NeonLevels::BUSY, "snaps");
+}
+
+#[test]
+fn neon_ignores_a_count_change_within_a_mood() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(0, 2, 0), ROOM_LIT, t0());
+    assert_eq!(
+        neon.tick(neon_mood(0, 3, 0), ROOM_LIT, t0() + FRAME),
+        NeonLevels::ALERT
+    );
+}
+
+#[test]
+fn neon_reversing_mid_fade_starts_from_the_current_light() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0());
+    let half = Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0());
+    let mid = neon.tick(neon_mood(0, 1, 3), ROOM_LIT, t0() + half);
+    let reversed = neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + half);
+    assert_eq!(
+        reversed, mid,
+        "the reversal frame holds the light it interrupted"
+    );
+}
+
+#[test]
+fn neon_holds_on_a_backward_clock() {
+    let mut neon = NeonState::new();
+    neon.tick(neon_mood(2, 0, 0), ROOM_LIT, t0() + Duration::from_secs(5));
+    neon.tick(neon_mood(0, 0, 3), ROOM_LIT, t0() + Duration::from_secs(5));
+    let earlier = t0() + Duration::from_secs(1);
+    assert_eq!(
+        neon.tick(neon_mood(0, 0, 3), ROOM_LIT, earlier),
+        NeonLevels::BUSY
+    );
+}
+
+/// The instant `offset` ms into the stutter cycle that contains `t0()`.
+fn in_stutter_cycle(offset: u64) -> SystemTime {
+    let base = crate::anim::epoch_ms(t0());
+    SystemTime::UNIX_EPOCH + Duration::from_millis(base - base % NeonState::STUTTER_MS + offset)
+}
+
+/// A starved sign ticked every `step` across one whole stutter cycle.
+fn starved_cycle(step: Duration) -> Vec<(u64, NeonLevels)> {
+    let mut neon = NeonState::new();
+    let empty = neon_mood(0, 0, 0);
+    (0..NeonState::STUTTER_MS)
+        .step_by(step.as_millis() as usize)
+        .map(|ms| (ms, neon.tick(empty, ROOM_DIMMED, in_stutter_cycle(ms))))
+        .collect()
+}
+
+#[test]
+fn neon_a_starved_tube_flashes_inside_its_windows_and_only_there() {
+    for (ms, levels) in starved_cycle(Duration::from_millis(10)).into_iter().skip(1) {
+        let in_window = NeonState::STUTTER_FLASHES_MS
+            .iter()
+            .any(|&(start, end)| (start..end).contains(&ms));
+        let want = if in_window {
+            NeonLevels::FLASH
+        } else {
+            NeonLevels::EMPTY
+        };
+        assert_eq!(levels, want, "{ms}ms");
+    }
+}
+
+/// A flash shorter than the frame gap can't be drawn: a still (one tick) and the
+/// floating window's ambient cadence get the steady tube, never a held flash.
+#[test]
+fn neon_a_painter_slower_than_a_flash_never_shows_one() {
+    let shortest = Duration::from_millis(NeonState::shortest_flash_ms());
+    for (ms, levels) in starved_cycle(shortest) {
+        assert_eq!(levels, NeonLevels::EMPTY, "{ms}ms at a {shortest:?} tick");
+    }
+    let just_faster = shortest - Duration::from_millis(1);
+    assert!(starved_cycle(just_faster)
+        .iter()
+        .any(|(_, levels)| *levels == NeonLevels::FLASH));
+    let in_a_flash = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
+    assert_eq!(
+        NeonState::new().tick(neon_mood(0, 0, 0), ROOM_DIMMED, in_a_flash),
+        NeonLevels::EMPTY,
+        "a still's single tick"
+    );
+}
+
+#[test]
+fn neon_never_flashes_while_lit_or_while_still_coasting_down() {
+    let flash_at = in_stutter_cycle(NeonState::STUTTER_FLASHES_MS[0].0);
+    let mut lit = NeonState::new();
+    lit.tick(neon_mood(0, 0, 3), ROOM_LIT, flash_at - FRAME);
+    assert_eq!(
+        lit.tick(neon_mood(0, 0, 3), ROOM_LIT, flash_at),
+        NeonLevels::CALM
+    );
+    let mut coasting = NeonState::new();
+    let mut now = flash_at - Duration::from_millis(NeonState::FADE_MS as u64 / 2);
+    coasting.tick(neon_mood(2, 0, 0), ROOM_LIT, now - FRAME);
+    let mut last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, now);
+    while now < flash_at {
+        now += Duration::from_millis(10);
+        last = coasting.tick(neon_mood(0, 0, 0), ROOM_DIMMED, now);
+    }
+    assert_ne!(last, NeonLevels::FLASH);
+    assert!(last.power > NeonLevels::EMPTY.power, "{last:?}");
+}

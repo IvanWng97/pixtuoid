@@ -2,9 +2,9 @@ name: release-plz
 
 # Two jobs, two triggers. `release-pr` is dispatched BY HAND, never on push:
 # release-plz refreshes an open release PR on every main push, and a PR that
-# carries non-bot commits is closed and re-opened fresh, so the regenerated
-# stills a human committed would be orphaned by the next dependabot merge, and
-# every refresh re-runs the full CI matrix. `release` runs on every push to main
+# carries non-bot commits is closed and re-opened fresh, so a bump a human
+# raised on it would be orphaned by the next dependabot merge, and every
+# refresh re-runs the full CI matrix. `release` runs on every push to main
 # and acts only on a merged release PR (release-plz.toml `release_always`).
 #
 # RENAMING THIS FILE BREAKS PUBLISHING: each crate's crates.io Trusted Publisher

@@ -12,14 +12,10 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::state::{DaemonLiveness, DaemonPresence, DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::walkable::OccupancyOverlay;
 
+use crate::anim::epoch_ms;
 use crate::layout::{Layout, Point};
 use crate::pathfind::{find_path, snap_point_to_walkable};
 use crate::pet::PetKind;
-
-/// ms since the Unix epoch — kept local so the sim side never imports the renderer.
-fn epoch_ms(now: SystemTime) -> u64 {
-    crate::anim::elapsed_ms(now, SystemTime::UNIX_EPOCH)
-}
 
 /// How close a resting spot must be to an idle agent's desk to count as "napping
 /// beside them" — sized to the desk's footprint plus a creature's width, so it

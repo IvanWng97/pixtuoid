@@ -35,6 +35,7 @@ pub(crate) struct SimStores<'a> {
     pub history: &'a mut PoseHistory,
     pub motion: &'a mut HashMap<AgentId, MotionState>,
     pub light: &'a mut LightingState,
+    pub neon: &'a mut crate::floor::NeonState,
     pub chitchat: &'a mut HashMap<VenueKey, ActiveChitchat>,
 }
 
@@ -101,6 +102,8 @@ pub struct SimFrame {
     pub characters: Vec<CharacterPlacement>,
     /// Smoothed indoor-lighting level from `LightingState::tick`.
     pub indoor_scale: f32,
+    /// The neon sign's light from `NeonState::tick`.
+    pub(crate) neon: crate::floor::NeonLevels,
     /// Active speech bubbles after this tick's venue update.
     pub chitchat_bubbles: Vec<ChitchatBubble>,
     /// Agents observed walking back with coffee this tick — the caller
@@ -130,6 +133,11 @@ pub(crate) fn sim_step(
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
     let indoor_scale = stores.light.tick(scene.agents.is_empty(), now);
+    let neon = stores.neon.tick(
+        crate::board::OfficeMood::of(crate::board::scene_stats(scene)),
+        stores.light.dimmed(),
+        now,
+    );
 
     // Per-frame occupancy from STATIONARY agent positions only, BEFORE the
     // routed pose pass (which routes Walking poses against THIS overlay).
@@ -225,6 +233,7 @@ pub(crate) fn sim_step(
         seated_agents,
         characters,
         indoor_scale,
+        neon,
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,

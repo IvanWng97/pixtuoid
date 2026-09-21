@@ -74,11 +74,6 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 18,
             b: 28,
         },
-        neon_frame_base: Rgb {
-            r: 122,
-            g: 162,
-            b: 247,
-        },
         building_dark: Rgb {
             r: 18,
             g: 18,
@@ -188,7 +183,7 @@ pub static TOKYO_NIGHT: Theme = Theme {
             g: 12,
             b: 26,
         },
-        // Amber sun (city_lit_windows[1]'s hue) / blue moon (neon_frame_base's hue).
+        // Amber sun (city_lit_windows[1]'s hue) / blue moon.
         sun_core: Rgb {
             r: 224,
             g: 175,
@@ -402,6 +397,11 @@ pub static TOKYO_NIGHT: Theme = Theme {
             r: 247,
             g: 118,
             b: 142,
+        },
+        neon_alert: Rgb {
+            r: 224,
+            g: 175,
+            b: 104,
         },
     },
     appliance: ApplianceColors {
