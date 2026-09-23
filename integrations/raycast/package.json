@@ -52,12 +52,12 @@
     }
   ],
   "dependencies": {
-    "@raycast/api": "^2.2.0",
+    "@raycast/api": "^2.4.1",
     "@raycast/utils": "^2.3.1"
   },
   "devDependencies": {
     "@raycast/eslint-config": "^2.2.0",
-    "@types/node": "^22.20.1",
+    "@types/node": "^22.20.3",
     "@types/react": "^19.0.10",
     "eslint": "^10.9.1",
     "json-schema-to-typescript": "^16.0.0",
