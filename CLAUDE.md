@@ -13,7 +13,8 @@ in nested guides, auto-loaded when you touch their tree:
 facts no single declaration can own: cross-file workflows, comment-less
 manifests, and directory-shape rules. Everything else a change needs —
 the constraint that looks like a bug, the WHY, the test that pins it — is on
-the declaration it constrains: read the item's doc comment before changing it.
+the narrowest thing it constrains: read the whole item, its doc comment and the
+comments on the lines it governs, before changing it.
 
 **A third consumer lives outside this repo**: homebrew-core's `pixtuoid`
 formula asserts exact CLI output (`test do`) and needs `pixtuoid man` /
@@ -41,7 +42,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 │                    (`just gen-wasm` → committed site/public/wasm/)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → socket/named pipe
 scripts/  gen-media.py (the ONE driver for committed art), e2e tiers (lib/), drift watch
-policy/   Conftest/OPA structural contracts for CI observability
+policy/   CI contracts no linter sees (jq over yq) + behavior tests of workflow shell
 site/     Astro landing page; integrations/raycast/  Raycast extension
 ```
 
@@ -81,7 +82,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 ## Conventions
 
 - **TDD first** — failing test → minimal impl → commit. **DRY, YAGNI** — nothing beyond the current spec.
-- **Comments: WHY only.** Only what the code can't say (workaround, constraint, invariant). Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. Fn-body comments ≤2 lines — a longer rationale isn't trimmed, it MOVES onto the declaration. The rules are semantic, none demands brevity — a comment that passes them stays at whatever length it earned. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and where rustdoc documents the item (pub in a lib; everything in the bin) the intra-doc link also turns a rename into a `doc-check` red (the magic-number rule, applied to prose).
+- **Comments: WHY only.** Only what the surrounding thing can't say (workaround, constraint, invariant). **Every comment the repo ships is in scope**, not just `//` and `#` in code: a `.md` doc's prose, a workflow or manifest comment, a justfile recipe header, a CI contract's `why` and a PR body are all held to the rules below — prose is where an assertion hides with no failure mode, so it earns its place the same way code does. Every sentence must add information the earlier ones don't — delete each after the first; if nothing is lost, cut it. First sentence is the whole answer. **A comment sits on the narrowest thing it constrains** — the declaration when it governs the whole item, the statement, struct-literal field or match arm when it governs only that one; hoisting a rationale to the declaration to shorten a body detaches it from the line it was pinned to, which is worse than the length it saved. The rules are semantic, none demands brevity and none sets a line budget — a comment that passes them stays at whatever length it earned. Measurements belong in commit messages, not comments. **Name the authority, never restate its value** — `` × [`MAX_CONCURRENT_CONNS`] slots ``, not `× 128 slots`: a restated value drifts silently while a name greps, and where rustdoc documents the item (pub in a lib; everything in the bin) the intra-doc link also turns a rename into a `doc-check` red (the magic-number rule, applied to prose).
 - **No magic numbers** — reuse the existing authority (a dep's const, our registry/theme/layout value), else ONE named `const` at the narrowest covering scope; prefer a type (enum/newtype) for a related set. Two copies of one value is a latent drift bug — if a copy must cross a boundary, pin the pair with a test. Self-evident `0`/`1`/`2`, indices, and test fixtures stay inline.
 - **Errors**: `anyhow::Result` in app code, `thiserror` in core; hook listener + JSONL watcher log-and-continue, never panic. **No `unwrap()` outside tests.**
 - **Visibility**: layer-internal stays `pub(crate)` (`unreachable_pub` is a hard gate); every `pub` item in a published crate carries a doc comment (`missing_docs`); `#[doc(hidden)] pub` = mechanism-not-contract escape hatch.
@@ -89,7 +90,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 - **Shell**: match the surrounding shell; `shellcheck` + `shfmt` (`just shfmt-fix`) any `.sh` you touch. macOS-first (BSD CLI, brew).
 - **Docs current in the same commit** as any structure/API/workflow change.
 - **External-surface claims are fetched, not remembered** — cite the `path:line` you fetched THIS session or add a `check_upstream_drift.py` row; the population is the whole upstream repo (`gh api .../git/trees/<ref>?recursive=1`), not one plausible file (#938).
-- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the declaration it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
+- **A refuted review finding produces a MECHANISM, or nothing** — a test, a compile-time constraint, or a CI gate; refuting never produces prose, because prose has no failure mode. Only an EXTERNAL fact (another CLI's wire bytes, an OS semantic) earns a comment, on the narrowest thing it constrains. **A real finding this change introduced is fixed in-scope or forces a re-scope; a pre-existing one is SURFACED to the owner in one line (four terminal states, defined once in `pr-review.prompt.md`). Agents never file issues.**
 - **Only the latest released version of each agent CLI is supported.** When upstream renames or reshapes a wire name, repoint the decoder, the plugin, and the drift-watcher anchor at the CURRENT declaration and DELETE the old one — no dual-listening beside a replacement, no legacy-format arm kept "just in case". Every superseded arm is a second copy of a wire contract that drifts silently and that the watcher then has to anchor twice (#981). Two things this does NOT govern: OUR OWN upgrade path (a `LEGACY_INSTANCE_ID` for a plugin file an older pixtuoid wrote is a compatibility arm for our artifact, not upstream's — #457), and mirroring a resolver upstream itself still branches on. Pre-dating arms exist (`opencode.rs`'s v1/v2 permission names, `codewhale.rs`'s `spawn_agent`); they are debt, not precedent.
 - **Path asserts compare `PathBuf` structurally**, never `to_string_lossy()` with a hardcoded separator — string asserts pass on Unix and fail only in `windows-test`. Resolution POLICY (HOME vs USERPROFILE, %APPDATA% vs `~/.config`) is per-CLI: mirror each CLI's own resolver (`platform::home_first_dir`).
 
@@ -104,7 +105,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 ## Ownership by crate
 
-Don't "fix" documented design — the constraint is on the declaration. Who owns
+Don't "fix" documented design — read the item's comments first. Who owns
 what: **core** owns session lifecycle/identity (registration, dedup,
 first-sight, liveness ladder, subagent parenting, feature boundaries) ·
 **scene** owns look/motion (palette recolor by RGB equality, walk timing,
@@ -123,7 +124,7 @@ taller-cell terminals; bundled character sprites max at 8×12 px.
 - Never relax the shim's always-exit-0 contract; never add `--no-verify`/hook-skipping flags.
 - No new `.md` files, READMEs, CHANGELOGs, or docs unless the owner explicitly asks — the owner reviews every doc change directly, so propose the diff rather than adding a generator or a cap. No `git push` without explicit user confirmation.
 - No stale `Closes #N` on a re-scope (fires from commit body or PR text, even conditional).
-- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the declaration's own doc comment first.
+- No merging without the two-lens review (PR #23 merged unreviewed with a path traversal). Don't blindly accept reviewer findings — verify the premise against the comments on the item it names first.
 
 ## Where to look
 

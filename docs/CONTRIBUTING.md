@@ -7,7 +7,8 @@ decoration polish, and **`Source` adapters** for agent CLIs we don't support yet
 Before you start, read [`CLAUDE.md`](../CLAUDE.md) at the repo root (and the
 nested `crates/*/CLAUDE.md` for the crate you touch). It holds the load-bearing
 architecture invariants and conventions. Many things that look like bugs are
-documented, intentional design: read the item's doc comment before changing it.
+documented, intentional design: read the whole item, its doc comment and the
+comments on the lines it governs, before changing it.
 
 ## Build & test
 
@@ -50,16 +51,15 @@ does not mean a green PR:
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
-  (the yq + Conftest/OPA policy tests under `policy/ci-observability/` pinning
-  cross-file workflow semantics actionlint can't express) and
+  (`policy/ci-observability/`: contracts for the silent, costly workflow
+  failures actionlint and zizmor can't see, and behavior tests of the
+  workflows' own shell) and
   `just fixture-pii` (gitleaks over the committed capture tree). The
   capture-tree RULES gate harder: they are Rust tests
   (`tests/sources/captures.rs`, entry `just fixture-metadata`) and ride
   `just test` on all three platforms.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
-  credential-dropping checkouts, exact inline suppressions. Dependabot's
-  `github-actions` entry lists `/.github/actions/*` beside `/` — `directory:
-  /` alone leaves a composite's pin uncovered (policy-enforced).
+  credential-dropping checkouts, exact inline suppressions.
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
   read-only model job on the trusted default branch, the PR diff as inert
   data, a separate least-privilege publisher — and a third job that comments

@@ -93,11 +93,6 @@ jobs:
           go install mvdan.cc/sh/v3/cmd/shfmt@v3.13.1
           go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
           go install github.com/mikefarah/yq/v4@v4.53.3
-          CGO_ENABLED=0 go install github.com/open-policy-agent/conftest@v0.68.2
-          # conftest embeds OPA but exposes neither `check` nor test coverage, so
-          # the OPA binary owns both.
-          go install github.com/open-policy-agent/opa@v1.18.2
-          go install github.com/open-policy-agent/regal@v0.42.0
       - name: Install the JSON Schema validator
         run: pipx install check-jsonschema==0.37.4
       # Lychee is not manifest-managed by install-action, so its documented

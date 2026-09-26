@@ -3,7 +3,7 @@ name: claude review
 on:
   # The secret-bearing path loads only from the trusted default branch, and the
   # reusable workflow never checks out or executes the PR head.
-  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; Conftest pins the read-only analyzer/publisher split
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; policy/ci-observability pins the read-only analyzer/publisher split
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]

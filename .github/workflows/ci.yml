@@ -38,13 +38,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require every CI group to pass
-        env:
-          LINT_RESULT: ${{ needs.lint.result }}
-          BUILDS_RESULT: ${{ needs.builds.result }}
-          TESTS_RESULT: ${{ needs.tests.result }}
-        run: |
-          if [[ "$LINT_RESULT" != success || "$BUILDS_RESULT" != success || "$TESTS_RESULT" != success ]]; then
-            echo "::error::CI group failed: lint=$LINT_RESULT builds=$BUILDS_RESULT tests=$TESTS_RESULT"
-            exit 1
-          fi
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      # toJSON(needs) carries every group this job needs, so a group added to
+      # `needs` is judged without also being named in a verdict script.
+      - uses: ./.github/actions/require-jobs
+        with:
+          results: ${{ toJSON(needs) }}
+          label: "CI group failed"

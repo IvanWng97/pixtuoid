@@ -66,10 +66,11 @@ Every section gets an answer; "n/a" counts only with a reason.
    (the repo is TDD-first), then the refusal paths those tests will pin —
    BOTH sides of every window/threshold, with offsets derived from the
    constant under test (pitfall 4).
-6. **Sharp edges** — read the doc comment on every declaration this design
-   touches and list the constraints they state (tests/, Raycast and site keep
-   theirs in the guide). They are the documented hazards exactly where you are
-   about to work: what looks like a bug and is deliberate.
+6. **Sharp edges** — read the comments on every item this design touches (doc
+   comments and the ones on the lines they govern) and list the constraints they
+   state (tests/, Raycast and site keep theirs in the guide). They are the
+   documented hazards exactly where you are about to work: what looks like a bug
+   and is deliberate.
 7. **Verification plan** — the gates to run, and any watch-it requirement:
    motion/pose changes render an animation and WATCH it; sprite changes run
    the `beautify-decoration` loop. Verification steps are blocking plan

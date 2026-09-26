@@ -31,7 +31,7 @@ Otherwise review the exact diff and the surrounding trusted-base code for:
 Only report verified findings with a concrete attack or invariant-breaking
 sequence. Do not report style, naming, documentation, performance, or
 speculative defense-in-depth concerns where a primary defense already holds.
-Check the doc comment on the declaration the finding names before reporting.
+Check the comments on the item the finding names before reporting.
 
 Severity:
 
