@@ -28,12 +28,6 @@ jobs:
       matrix:
         # Implicit detection can drop a language in a multi-language repo.
         language: [actions, javascript-typescript, python, rust]
-    env:
-      # CodeQL builds Rust with the toolchain its embedded rust-analyzer supports
-      # and discovers that toolchain's sysroot, rust-src and proc-macro server
-      # itself; pointing any of them at another toolchain fails every proc-macro
-      # expansion on an ABI mismatch.
-      CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS: "true"
     steps:
       - uses: actions/checkout@v7
         with:
