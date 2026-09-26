@@ -1,7 +1,8 @@
 # release-plz owns the version bump, the changelog, the release PR, the tag and
 # the DRAFT GitHub release; release.yml fills that draft with binaries and
-# publishes it. Each key names the authority it defers to; the ones whose drift
-# fails silently are pinned in policy/ci-observability.
+# publishes it. Each key names the authority it defers to; `release_always`,
+# whose drift would publish with no human decision, is pinned in
+# policy/ci-observability.
 [workspace]
 # crates.io over OIDC trusted publishing — no standing registry token, which is
 # why the `tag` job grants id-token. Each crate carries a Trusted Publisher
@@ -20,7 +21,7 @@ features_always_increment_minor = true
 # One tag and one release per version, both enabled on `pixtuoid` alone below.
 git_tag_enable = false
 git_release_enable = false
-# The ONE tag name: `release.yml` triggers on `v*` and policy pins the pair.
+# The ONE tag name, and `release.yml` triggers on `v*`: the two change together.
 # Declared at WORKSPACE level even though only `pixtuoid` tags, because every
 # package looks up its own last release by it, and the per-package default
 # (`pixtuoid-core-v0.18.0`) names a tag that does not exist.
@@ -59,7 +60,7 @@ commit_parsers = [
 name = "pixtuoid"
 # release-plz's single-changelog recipe (docs: extra/single-changelog, "One
 # package"): the released package owns the root file and names the crates whose
-# commits it carries. Policy pins the list to the workspace's PUBLISHED members:
+# commits it carries. The list is every other PUBLISHED workspace member:
 # release-plz drops a `publish = false` crate (pixtuoid-web) from an update
 # entirely, so naming it would be inert. A commit touching no packaged file —
 # site/, ci, and npm/ or release.yml packaging too — stays out: add a

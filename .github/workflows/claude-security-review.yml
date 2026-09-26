@@ -3,7 +3,7 @@ name: claude security review
 on:
   # The analysis is loaded from the trusted default branch and receives the PR
   # diff only as inert data.
-  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; Conftest pins the read-only analyzer/publisher split
+  pull_request_target: # zizmor: ignore[dangerous-triggers] trusted-base caller; policy/ci-observability pins the read-only analyzer/publisher split
     types: [opened, reopened, ready_for_review, synchronize]
   issue_comment:
     types: [created]

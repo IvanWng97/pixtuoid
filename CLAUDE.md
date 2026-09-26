@@ -41,7 +41,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 │                    (`just gen-wasm` → committed site/public/wasm/)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → socket/named pipe
 scripts/  gen-media.py (the ONE driver for committed art), e2e tiers (lib/), drift watch
-policy/   Conftest/OPA structural contracts for CI observability
+policy/   CI contracts no linter sees — jq over yq, each proven able to fire
 site/     Astro landing page; integrations/raycast/  Raycast extension
 ```
 

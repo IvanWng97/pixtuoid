@@ -50,8 +50,8 @@ does not mean a green PR:
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists
   so a skipped local preflight can't land a lint break), including `just ci-observability`
-  (the yq + Conftest/OPA policy tests under `policy/ci-observability/` pinning
-  cross-file workflow semantics actionlint can't express) and
+  (`policy/ci-observability/contracts.yml`: the silent, costly workflow failures
+  actionlint and zizmor can't see, each proven able to fire) and
   `just fixture-pii` (gitleaks over the committed capture tree). The
   capture-tree RULES gate harder: they are Rust tests
   (`tests/sources/captures.rs`, entry `just fixture-metadata`) and ride

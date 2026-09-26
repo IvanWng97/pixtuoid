@@ -143,78 +143,35 @@ actionlint-composites:
 # four audits that need the GitHub API — impostor-commit,
 # known-vulnerable-actions, ref-confusion, stale-action-refs (typosquat-uses
 # still runs, at reduced confidence). ci-lint.yml's hygiene job passes
-# GH_TOKEN, so those DO gate in CI, and a ci-observability rule pins that step
-# so the online half cannot be dropped silently. Same call as `links`
-# (--offline) and `deny` (advisories deferred to audit.yml): a check whose
-# verdict depends on the network and an upstream feed must not redden a push of
-# unchanged code. Do NOT auto-export `gh auth token` to close the gap — it puts
-# a real token on the wire on every pre-push run and makes the local gate
-# depend on gh auth + API rate limits, the exact flakiness those two siblings
-# were written to avoid.
+# GH_TOKEN, so those DO gate in CI: there the recipe refuses to run tokenless,
+# and a CI contract pins that step so it cannot be dropped or softened. Same
+# call as `links` (--offline) and `deny` (advisories deferred to audit.yml): a
+# check whose verdict depends on the network and an upstream feed must not
+# redden a push of unchanged code. Do NOT auto-export `gh auth token` to close
+# the gap — it puts a real token on the wire on every pre-push run and makes the
+# local gate depend on gh auth + API rate limits, the exact flakiness those two
+# siblings were written to avoid.
 [group('rust')]
 [doc('Audit GitHub automation security with zizmor')]
 zizmor:
+    @if [ -n "${GITHUB_ACTIONS:-}" ] && [ -z "${GH_TOKEN:-}" ]; then \
+        echo "error: zizmor would run offline in CI and skip its four online audits; give this step a GH_TOKEN" >&2; \
+        exit 1; \
+    fi
     zizmor --strict-collection .
 
-# Cross-file CI contracts that actionlint cannot express. yq owns YAML 1.2 and
-# TOML parsing, jq owns SARIF fixtures and joins the two document arrays, and
-# Conftest/OPA owns policy evaluation.
+# The CI contracts actionlint and zizmor cannot see.
+# policy/ci-observability/contracts.yml lists them with their reasons, and
+# check.sh proves each can still fire; the selftest runs first because a runner
+# that stopped reporting would switch every contract off at once.
+# action_behavior_test.sh runs the workflows' own shell against stubs, which no
+# static contract can do.
 [group('rust')]
-[doc('Check repository CI contracts with Conftest/OPA policy-as-code')]
+[doc('Check the CI contracts actionlint and zizmor cannot see')]
 ci-observability:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    files=()
-    while IFS= read -r file; do files+=("$file"); done < <(find .github/workflows .github/actions -type f \( -name '*.yml' -o -name '*.yaml' \) -print | sort)
-    ((${#files[@]})) || { echo "error: no GitHub Actions YAML files found" >&2; exit 1; }
-    [[ -s .github/actionlint.yaml ]] || { echo "error: .github/actionlint.yaml is missing or empty" >&2; exit 1; }
-    [[ -s .github/zizmor.yml ]] || { echo "error: .github/zizmor.yml is missing or empty" >&2; exit 1; }
-    [[ -s .github/dependabot.yml ]] || { echo "error: .github/dependabot.yml is missing or empty" >&2; exit 1; }
-    [[ -s site/package.json ]] || { echo "error: site/package.json is missing or empty" >&2; exit 1; }
-    files+=(.github/actionlint.yaml .github/zizmor.yml .github/dependabot.yml site/package.json)
-    # The release contracts that span files: release-plz.toml's tag name vs
-    # release.yml's trigger, and its changelog census vs the workspace's members
-    # (the root manifest lists them; each member's own says its name and `publish`).
-    toml_files=(release-plz.toml Cargo.toml crates/*/Cargo.toml)
-    for f in "${toml_files[@]}"; do
-        [[ -s $f ]] || { echo "error: $f is missing or empty" >&2; exit 1; }
-    done
-    combined="$(mktemp)"
-    yaml_documents="$(mktemp)"
-    toml_documents="$(mktemp)"
-    policy_test_results="$(mktemp)"
-    trap 'rm -f "$combined" "$yaml_documents" "$toml_documents" "$policy_test_results"' EXIT
-    yq eval-all -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${files[@]}" >"$yaml_documents"
-    # yq fixes the input format per invocation from the FIRST file's extension,
-    # so the TOML documents ride a second call and jq joins the two arrays.
-    yq eval-all -p toml -o=json '[{"path": filename, "contents": .}] | {"documents": .}' "${toml_files[@]}" >"$toml_documents"
-    jq -s '{documents: (map(.documents) | add)}' "$yaml_documents" "$toml_documents" >"$combined"
-    conftest fmt --check policy/ci-observability
-    # conftest embeds OPA but exposes neither `check` nor coverage, so the OPA
-    # binary owns both. `--strict` catches compile-level slop conftest accepts
-    # (an unused argument shipped here undetected); the coverage threshold is a
-    # RATCHET on #789 — an uncovered rule head means "the body was never true",
-    # i.e. no test makes that rule fire, which is how two vacuous rules reached
-    # main. Raise the number as rules gain tests; never lower it. Every deny head
-    # now fires in a test, so the uncovered remainder is helper lines — a COUNT
-    # here would rot on the next rule, so don't reintroduce one.
-    opa check --strict policy/ci-observability
-    opa test --coverage --threshold 97 policy/ci-observability >/dev/null
-    if ! conftest verify --policy policy/ci-observability --output json >"$policy_test_results"; then
-        yq -P '.' "$policy_test_results" >&2
-        exit 1
-    fi
-    policy_test_count="$(yq -e 'length' "$policy_test_results")"
-    ((policy_test_count > 0)) || { echo "error: Conftest discovered no Rego unit tests" >&2; exit 1; }
-    echo "$policy_test_count Rego unit tests passed"
-    conftest test --parser json --policy policy/ci-observability "$combined"
+    bash policy/ci-observability/check.sh --selftest
+    bash policy/ci-observability/check.sh
     bash policy/ci-observability/action_behavior_test.sh
-    iconv -f US-ASCII -t US-ASCII codecov.yml >/dev/null
-    # Regal is the OPA project's own Rego linter; .regal/config.yaml records
-    # every deliberate disagreement with a WHY. LAST on purpose: it judges style,
-    # and under `set -e` an earlier position would abort the recipe before the
-    # correctness checks above ever evaluated the documents.
-    regal lint policy/ci-observability
 
 # Every committed JSON Schema, held to the metaschema. These are contracts a
 # consumer reads at runtime — the review schema reaches the Claude CLI, the
@@ -310,7 +267,7 @@ lint:
     # Fail fast with an actionable message when a lint tool is missing, instead
     # of a bare `command not found` (exit 127) buried in a parallel job's log.
     missing=()
-    for t in shfmt shellcheck actionlint zizmor conftest opa regal check-jsonschema yq jq iconv cargo-machete cargo-deny lychee gitleaks; do
+    for t in shfmt shellcheck actionlint zizmor check-jsonschema yq jq cargo-machete cargo-deny lychee gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
@@ -1110,12 +1067,12 @@ setup-tools:
     # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
     # elsewhere point at the install docs rather than silently leaving `just lint`
     # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    # shfmt/actionlint/shellcheck/zizmor back workflow linting, while yq + jq +
-    # Conftest/OPA evaluate repository-specific policy.
+    # shfmt/actionlint/shellcheck/zizmor back workflow linting, while yq + jq
+    # evaluate the CI contracts.
     # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
     # recipe cannot run at all (it does not degrade to a weaker scan, because a
     # weaker scan is what it replaced).
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema gitleaks; do
+    for t in shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
             brew install "$t" || true
@@ -1126,7 +1083,7 @@ setup-tools:
     # caught here — not silently pass as a successful setup (the #283-class silent
     # no-op this recipe is meant to prevent).
     missing=()
-    for t in shfmt actionlint shellcheck zizmor yq jq conftest opa regal check-jsonschema iconv gitleaks; do
+    for t in shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null || missing+=("$t")
     done
     if (( ${#missing[@]} )); then
