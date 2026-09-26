@@ -64,7 +64,8 @@ where the rule would otherwise look arbitrary enough to get "fixed" away.
 
 ## Negative space (do NOT flag)
 
-- Behavior documented on the declaration's own doc comment — open the item.
+- Behavior documented where it is constrained — the declaration's doc comment
+  or the comment on the line it governs; open the item.
 - Absence of defense-in-depth where a primary defense exists; pure style;
   theoretical risks needing unlikely preconditions.
 - Existence/version claims about external artifacts (action tags, crate

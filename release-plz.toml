@@ -1,11 +1,9 @@
 # release-plz owns the version bump, the changelog, the release PR, the tag and
 # the DRAFT GitHub release; release.yml fills that draft with binaries and
-# publishes it. Each key names the authority it defers to; `release_always`,
-# whose drift would publish with no human decision, is pinned in
-# policy/ci-observability.
+# publishes it. Each key names the authority it defers to.
 [workspace]
 # crates.io over OIDC trusted publishing — no standing registry token, which is
-# why the `tag` job grants id-token. Each crate carries a Trusted Publisher
+# why the `release` job grants id-token. Each crate carries a Trusted Publisher
 # record naming THIS workflow file; renaming release-plz.yml breaks publishing
 # until the records are updated, because the record is keyed on the filename.
 # npm stays in release.yml: it ships the built binaries, which release-plz does
@@ -26,10 +24,11 @@ git_release_enable = false
 # package looks up its own last release by it, and the per-package default
 # (`pixtuoid-core-v0.18.0`) names a tag that does not exist.
 git_tag_name = "v{{ version }}"
-# The `tag` job runs on every push to main; only a merged PR whose head branch
+# The `release` job runs on every push to main; only a merged PR whose head branch
 # carries `pr_branch_prefix` (the release PR, or a hand-made branch for a
 # bot-less release) may tag. A hand-made branch with ONE commit squashes to
 # that commit's title, so title it like `pr_name` below or the changelog lists it.
+# The release-plz-publishes-only-release-prs CI contract pins this key.
 release_always = false
 # release-plz's own default, declared because two mechanisms key on it: the tag
 # gate above and the recovery path in CONTRIBUTING.md#releasing.

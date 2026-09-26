@@ -60,9 +60,9 @@ fmt:
     cargo fmt --all
 
 # Shell-format check (shfmt) — the `.sh` analog of `fmt-check`, gated via `lint`.
-# Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. Covers
-# scripts/, git hooks, and CI policy behavior tests. `-i 4` (4-space) matches
-# the prevailing style; no `-ci` so case bodies stay un-indented as written.
+# Pairs with the shellcheck house rule: shellcheck lints, shfmt formats. `-i 4`
+# (4-space) matches the prevailing style; no `-ci` so case bodies stay
+# un-indented as written.
 [group('rust')]
 [doc('Shell-format check over repository shell sources')]
 shfmt-check:
@@ -160,12 +160,9 @@ zizmor:
     fi
     zizmor --strict-collection .
 
-# The CI contracts actionlint and zizmor cannot see.
-# policy/ci-observability/contracts.yml lists them with their reasons, and
-# check.sh proves each can still fire; the selftest runs first because a runner
-# that stopped reporting would switch every contract off at once.
-# action_behavior_test.sh runs the workflows' own shell against stubs, which no
-# static contract can do.
+# The selftest runs first so a broken runner is reported as itself, not as
+# every contract failing. action_behavior_test.sh runs the workflows' own shell
+# against stubs, which no static contract can do.
 [group('rust')]
 [doc('Check the CI contracts actionlint and zizmor cannot see')]
 ci-observability:

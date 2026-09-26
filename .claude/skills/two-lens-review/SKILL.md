@@ -112,9 +112,10 @@ Hence:
    (PR #455's a11y lens stubbed under an APPROVE-WITH-NITS aggregate; its re-run
    caught a real AA failure). Then for every MEDIUM+ finding, **verify the
    premise yourself before coding a fix** — reviewers have incomplete design
-   context; read the doc comment on the declaration the finding names first,
-   and if a finding is deliberate design, REFUTE it with the MECHANISM that
-   makes it so — a test, a compile-time constraint, a CI gate.
+   context; read the comments on the item the finding names first (its doc
+   comment and the ones on the lines it governs), and if a finding is
+   deliberate design, REFUTE it with the MECHANISM that makes it so — a test,
+   a compile-time constraint, a CI gate.
 4. **Fold** accepted findings into ONE review-round commit; record any
    reviewer-flagged plan-misses as `plan-miss:` lines in its message.
 5. **Disposition sweep** (shared, below).

@@ -435,8 +435,9 @@ if run_publisher "$unsafe_path_review" >/dev/null 2>&1; then
     fail "Claude publisher accepted an unsafe finding path"
 fi
 
-# The rego rules pin only that these guards exist and where they sit; what they
-# actually do is asserted here.
+# claude-refuses-forks-before-the-action pins only that the fork refusal exists
+# and runs before the action; what it and the absence notice actually do is
+# asserted here.
 CLAUDE_TAG_WORKFLOW_FILE="${CLAUDE_TAG_WORKFLOW_FILE:-.github/workflows/claude.yml}"
 
 # These steps pass --jq and hit two endpoints the resolver stub above models
@@ -516,7 +517,7 @@ run_absence success
     fail "a declined review was reported as a failure"
 
 # ── cache-cleanup: the prune deletes exactly the superseded generations ──────
-# The rego rule pins only the job's shape; which ids the jq family logic
+# cache-cleanup-stays-inert pins only the job's shape; which ids the jq family logic
 # selects is asserted here: newest-per-family survives, a single-entry family
 # survives, a non-hex tail is its own family (under-prune direction), non-rust
 # keys are untouched, and one 404'd delete warns without aborting the rest.
@@ -563,3 +564,26 @@ PATH="$prune_bin:$PATH" \
     fail "prune deleted the wrong ids: $(tr '\n' ' ' <"$prune_deletes")"
 [[ "$(<"$prune_summary")" == *"Pruned 3"* ]] ||
     fail "prune summary did not report the attempted count"
+
+# ── require-jobs: the verdict ci-gate and every group's `required` job reach ──
+# Anything but success is red, and an empty needs map must not pass vacuously.
+REQUIRE_JOBS_ACTION_FILE="${REQUIRE_JOBS_ACTION_FILE:-.github/actions/require-jobs/action.yml}"
+require_script="$(yq -e -r '.runs.steps[0].run' "$REQUIRE_JOBS_ACTION_FILE")"
+
+assert_required() {
+    local results="$1"
+    local expect="$2"
+    local label="$3"
+    if RESULTS="$results" LABEL=selftest bash -eo pipefail -c "$require_script" >/dev/null 2>&1; then
+        [[ "$expect" == pass ]] || fail "require-jobs passed $label"
+    else
+        [[ "$expect" == fail ]] || fail "require-jobs failed $label"
+    fi
+}
+
+assert_required '{"a":{"result":"success"},"b":{"result":"success"}}' pass "every needed job succeeding"
+assert_required '{"a":{"result":"success"},"b":{"result":"failure"}}' fail "a failed job"
+assert_required '{"a":{"result":"success"},"b":{"result":"skipped"}}' fail "a skipped job"
+assert_required '{"a":{"result":"success"},"b":{"result":"cancelled"}}' fail "a cancelled job"
+assert_required '{}' fail "an empty needs map"
+assert_required '' fail "no results at all"

@@ -7,10 +7,10 @@
 # `jq -e`, binding `$expected` to the entry's `expected` when there is one.
 # false, null and a jq error all count as red, so a renamed job or a deleted
 # key fails its contract instead of slipping past it. Each `break` is a jq edit
-# of the same document that must turn `assert` red; every run applies them all,
-# so a clause that can no longer fire is red too.
+# of the same document that must turn `assert` red, and every run applies them
+# all; a clause is proven able to fire only while some break falsifies it alone.
 
-# ── The Claude reviewers: fork-authored PR text read under pull_request_target
+# ── The Claude reviewers: untrusted PR text read under pull_request_target
 
 - id: reviewer-triggers-run-the-base
   file:
@@ -82,8 +82,9 @@
 - id: reviewer-analyze-is-read-only
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    analyze hands fork-authored PR text to a model, so any write scope on this
-    job is a write scope a prompt injection can reach.
+    analyze hands untrusted PR text to a model, so every scope on this job
+    is one a prompt injection could reach; id-token is the only write it holds,
+    for the model's workload-identity login.
   assert: |
     .jobs.analyze.permissions == {"contents": "read", "id-token": "write", "pull-requests": "read"}
   break:
@@ -93,7 +94,7 @@
 - id: reviewer-checks-out-the-base
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    Checking out the PR head under pull_request_target runs fork-authored files
+    Checking out the PR head under pull_request_target runs untrusted files
     beside the base branch's credentials, and a persisted checkout token outlives
     the step that needed it.
   assert: |
@@ -109,12 +110,15 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with)
       |= del(.["persist-credentials"])
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["fetch-depth"])
+      = 0
     - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7"}]'
 
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    The model reads fork-authored PR text, so any tool beyond reading turns a
+    The model reads untrusted PR text, so any tool beyond reading turns a
     prompt injection into an action; `--json-schema` keeps its answer
     structured, which is what lets the publisher validate it before posting.
   assert: |
@@ -128,10 +132,13 @@
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("Read,Glob,Grep"; "Read,Glob,Grep,Bash")
+      |= sub("--allowedTools \"Read,Glob,Grep\""; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("Read,Glob,Grep"; "Read,Glob,Grep,mcp__github__add_comment")
+      += " --allowedTools Bash"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --allowedTools mcp__github__add_comment"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --json-schema [^ ]+"; "")
@@ -160,12 +167,55 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.github_token)
       = "${{ secrets.REVIEW_PAT }}"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.anthropic_federation_rule_id)
+      = "${{ secrets.FEDERATION_RULE_ID }}"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.anthropic_organization_id)
+      = "${{ secrets.ORGANIZATION_ID }}"
+    - '.jobs.analyze.steps += [(.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")))]'
+
+- id: reviewer-output-stays-private
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    show_full_output prints every Claude message, tool results included, to an
+    Actions log anyone can read — the action's own docs warn it can expose
+    secrets — and this job runs on untrusted PR text with the base branch's
+    credentials.
+  assert: |
+    [.jobs[].steps[]? | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
+    | length >= 1 and all(.[]; (.with.show_full_output // false | tostring) == "false")
+  break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.show_full_output)
+      = true
+    - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"show_full_output": true}}]'
+    - .jobs.analyze.steps |= map(select((.uses // "") | startswith("anthropics/claude-code-action@") | not))
+
+- id: review-absence-is-reported
+  file: .github/workflows/claude-readonly-review.yml
+  why: >-
+    A review that never ran leaves no verdict at HEAD, and #805–#818 merged that
+    way. report_absence says so on the PR, so it must run exactly when analyze
+    fails or declines — and without `!cancelled()` or `always()` an implicit
+    success() skips it in precisely that case.
+  assert: |
+    [.jobs[] | (.if // "") | gsub("\r?\n[ \t]*"; " ")
+     | select(contains("needs.analyze.result == 'failure'")
+              and contains("needs.analyze.outputs.reviewable == 'false'"))]
+    | length == 1
+      and (.[0] | contains("!cancelled()") or contains("always()"))
+  break:
+    - .jobs.report_absence.if |= sub("!cancelled\\(\\) && "; "")
+    - .jobs.report_absence.if |= sub(" \\|\\| needs.analyze.outputs.reviewable == 'false'"; "")
+    - .jobs.report_absence.if |= sub("needs.analyze.result == 'failure' \\|\\| "; "")
+    - .jobs.second = .jobs.report_absence
 
 - id: reviewer-publisher-only-comments
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish holds the reviewer's only write scopes; an action there runs with
-    them, and a checkout there stages fork files beside them.
+    publish can comment on the PR; an action there runs with that scope, and a
+    checkout there stages fork files beside it.
   assert: |
     .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
       and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
@@ -204,6 +254,7 @@
     - |
       .jobs.claude.if += " || (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude'))"
     - del(.jobs.claude.if)
+    - .jobs.second = .jobs.claude
 
 - id: claude-refuses-forks-before-the-action
   file: .github/workflows/claude.yml
@@ -227,6 +278,7 @@
     - .jobs.claude.steps |= (.[1:] + .[:1])
     - del(.jobs.claude.steps[0])
     - .jobs.claude.steps[0].if = "${{ always() }}"
+    - .jobs.second = .jobs.claude
 
 # ── Scopes that only look narrow
 
@@ -247,10 +299,14 @@
                        and (.steps | length == 1)
                        and (.steps[0] | has("uses") | not))
   break:
-    - '.jobs["closed-pr"].steps = [{"uses": "actions/checkout@v7"}] + .jobs["closed-pr"].steps'
-    - '.on.pull_request_target.types = ["closed", "opened"]'
-    - del(.jobs["stale-generations"].if)
     - '.permissions = {"actions": "write"}'
+    - '.on.pull_request_target.types = ["closed", "opened"]'
+    - .jobs.extra = .jobs["stale-generations"]
+    - .jobs["closed-pr"].if = "${{ always() }}"
+    - del(.jobs["stale-generations"].if)
+    - .jobs["closed-pr"].permissions.contents = "write"
+    - '.jobs["closed-pr"].steps += [{"run": "true"}]'
+    - .jobs["closed-pr"].steps[0].uses = "actions/checkout@v7"
 
 - id: oidc-only-on-the-tests-call
   file: .github/workflows/ci.yml
@@ -273,19 +329,16 @@
   file: .github/workflows/ci-tests.yml
   why: >-
     ci.yml grants this whole workflow id-token for the Codecov OIDC upload, and
-    a job that omits `permissions:` inherits that grant; every job except the
-    uploaders must declare a narrower scope of its own.
+    a job that omits `permissions:` inherits that grant; every job must declare
+    its own scope, and only a job that uploads to Codecov may keep id-token.
   assert: |
-    ["windows-test", "macos-test", "coverage", "coverage-windows", "coverage-macos"] as $uploaders
-    | [.jobs | to_entries[]
-       | select(.key | IN($uploaders[]) | not)
-       | select((.value.permissions | type) != "object"
-                or .value.permissions["id-token"] == "write")]
-    | length == 0
+    all(.jobs[]; (.permissions | type) == "object"
+                 and (.permissions["id-token"] != "write"
+                      or any(.steps[]?; .uses == "./.github/actions/upload-codecov")))
   break:
     - del(.jobs.snapshots.permissions)
     - .jobs.smoke.permissions["id-token"] = "write"
-    - .jobs.renamed = .jobs.coverage | del(.jobs.coverage)
+    - .jobs.coverage.steps |= map(select(.uses != "./.github/actions/upload-codecov"))
 
 # ── The merge gate
 
@@ -316,6 +369,10 @@
     - |
       .jobs.required.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .with.results = "{}" else . end)
+    - .jobs.required["continue-on-error"] = true
+    - |
+      .jobs.required.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
 
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
@@ -342,6 +399,10 @@
     - |
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .with.results = "${{ toJSON(needs.lint) }}" else . end)
+    - .jobs.gate["continue-on-error"] = true
+    - |
+      .jobs.gate.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
 
 # ── The scanners' own switches
 
@@ -378,19 +439,25 @@
 - id: zizmor-runs-online-in-ci
   file: .github/workflows/ci-lint.yml
   why: >-
-    Only online does zizmor run impostor-commit, known-vulnerable-actions,
-    ref-confusion and stale-action-refs, and this step is the one place it
-    runs online (the recipe refuses to run tokenless in CI); nothing may skip
-    or soften it.
+    zizmor's online-only audits (the `zizmor` recipe's header names them) run on
+    this step and nowhere else, so nothing may skip or soften it and it must
+    declare a GH_TOKEN; the recipe also refuses to run tokenless in CI, but only
+    while that check stays in the recipe. GitHub resolves env step over job over
+    workflow, and the nearest declaration wins even when it is empty.
   assert: |
-    [.jobs[] | select((has("if") or has("continue-on-error")) | not)
-     | .steps[]? | select((.run // "") | gsub("^\\s+|\\s+$"; "") == "just zizmor")
-     | select((has("if") or has("continue-on-error")) | not)]
-    | length == 1
+    (.env // {}) as $workflow_env
+    | [.jobs[] | select((has("if") or has("continue-on-error")) | not)
+       | (.env // {}) as $job_env
+       | .steps[]? | select((.run // "") | gsub("^\\s+|\\s+$"; "") == "just zizmor")
+       | select((has("if") or has("continue-on-error")) | not)
+       | (.env // {}).GH_TOKEN // $job_env.GH_TOKEN // $workflow_env.GH_TOKEN // ""]
+    | length >= 1 and all(.[]; . != "")
   break:
     - '(.jobs.hygiene.steps[] | select(.run == "just zizmor") | .["continue-on-error"]) = true'
     - .jobs.hygiene.if = "false"
     - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .run) = "just zizmor-offline"
+    - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .env.GH_TOKEN) = ""
+    - (.jobs.hygiene.steps[] | select(.run == "just zizmor")) |= del(.env)
 
 # ── Publishing
 
