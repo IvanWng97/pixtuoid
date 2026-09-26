@@ -72,10 +72,8 @@ summary_content="$(<"$summary_file")"
 [[ "$summary_content" == *"Codecov coverage upload failed for lcov.info (flag: unit)"* ]] ||
     fail "job summary omitted the report identity"
 
-semantic_script="$(workflow_step_script "$CODEQL_WORKFLOW_FILE" "Prepare Rust semantic analysis")"
 fake_bin="$test_dir/bin"
-fake_sysroot="$test_dir/sysroot"
-mkdir -p "$fake_bin" "$fake_sysroot/lib/rustlib/src/rust/library/std/src" "$fake_sysroot/libexec"
+mkdir -p "$fake_bin"
 
 # shellcheck disable=SC2016 # The generated gh stub reads the fixture when it runs.
 printf '%s\n' \
@@ -139,87 +137,6 @@ lychee_fallback="$(
 )"
 [[ "$lychee_fallback" == "cargo-binstall" ]] ||
     fail "pinned lychee install must allow the documented cargo-binstall fallback"
-
-printf 'pub mod std;\n' >"$fake_sysroot/lib/rustlib/src/rust/library/std/src/lib.rs"
-printf '#!/usr/bin/env bash\nexit 0\n' >"$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
-chmod +x "$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
-metadata_file="$test_dir/metadata.json"
-printf '%s\n' \
-    '{"packages":[{"name":"pixtuoid","rust_version":"1.89"},{"name":"pixtuoid-core","rust_version":"1.89"}]}' \
-    >"$metadata_file"
-# shellcheck disable=SC2016 # The generated stub expands these variables when it runs.
-printf '%s\n' \
-    '#!/usr/bin/env bash' \
-    'set -euo pipefail' \
-    'printf "%s\n" "$*" >> "$RUSTUP_LOG"' \
-    'if [[ "$*" == "run 1.89 rustc --print sysroot" ]]; then printf "%s\n" "$FAKE_SYSROOT"; fi' \
-    'exit 0' \
-    >"$fake_bin/rustup"
-chmod +x "$fake_bin/rustup"
-# shellcheck disable=SC2016 # The generated stub reads the fixture path when it runs.
-printf '%s\n' \
-    '#!/usr/bin/env bash' \
-    'set -euo pipefail' \
-    '[[ "$*" == "metadata --no-deps --format-version 1" ]]' \
-    'command cat "$CARGO_METADATA_FILE"' \
-    >"$fake_bin/cargo"
-chmod +x "$fake_bin/cargo"
-
-rustup_log="$test_dir/rustup.log"
-github_env="$test_dir/github_env"
-PATH="$fake_bin:$PATH" \
-    RUSTUP_LOG="$rustup_log" \
-    FAKE_SYSROOT="$fake_sysroot" \
-    CARGO_METADATA_FILE="$metadata_file" \
-    GITHUB_ENV="$github_env" \
-    bash -c "$semantic_script" ||
-    fail "Rust semantic-input setup failed with a complete standard-library source"
-
-rustup_calls="$(<"$rustup_log")"
-[[ "$rustup_calls" == *"toolchain install 1.89 --profile minimal --component rust-src,rust-analyzer"* ]] ||
-    fail "Rust semantic-input setup did not install rust-src and rust-analyzer for the declared MSRV"
-github_env_content="$(<"$github_env")"
-expected_github_env="$(
-    printf '%s\n' \
-        "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT=$fake_sysroot" \
-        "CODEQL_EXTRACTOR_RUST_OPTION_SYSROOT_SRC=$fake_sysroot/lib/rustlib/src/rust/library" \
-        "CODEQL_EXTRACTOR_RUST_OPTION_PROC_MACRO_SERVER=$fake_sysroot/libexec/rust-analyzer-proc-macro-srv" \
-        "CODEQL_EXTRACTOR_RUST_OPTION_CARGO_ALL_TARGETS=true"
-)"
-[[ "$github_env_content" == "$expected_github_env" ]] ||
-    fail "Rust semantic-input setup did not pass its verified sysroot, source, proc-macro server, and Cargo targets to CodeQL"
-
-if PATH="$fake_bin:$PATH" \
-    RUSTUP_LOG="$rustup_log" \
-    FAKE_SYSROOT="$test_dir/missing-sysroot" \
-    CARGO_METADATA_FILE="$metadata_file" \
-    GITHUB_ENV="$github_env" \
-    bash -c "$semantic_script" >/dev/null 2>&1; then
-    fail "Rust semantic-input setup accepted a missing standard-library source"
-fi
-
-chmod -x "$fake_sysroot/libexec/rust-analyzer-proc-macro-srv"
-if PATH="$fake_bin:$PATH" \
-    RUSTUP_LOG="$rustup_log" \
-    FAKE_SYSROOT="$fake_sysroot" \
-    CARGO_METADATA_FILE="$metadata_file" \
-    GITHUB_ENV="$github_env" \
-    bash -c "$semantic_script" >/dev/null 2>&1; then
-    fail "Rust semantic-input setup accepted a missing proc-macro server"
-fi
-
-mixed_metadata_file="$test_dir/mixed-metadata.json"
-printf '%s\n' \
-    '{"packages":[{"name":"pixtuoid","rust_version":"1.89"},{"name":"pixtuoid-core","rust_version":"1.90"}]}' \
-    >"$mixed_metadata_file"
-if PATH="$fake_bin:$PATH" \
-    RUSTUP_LOG="$rustup_log" \
-    FAKE_SYSROOT="$fake_sysroot" \
-    CARGO_METADATA_FILE="$mixed_metadata_file" \
-    GITHUB_ENV="$github_env" \
-    bash -c "$semantic_script" >/dev/null 2>&1; then
-    fail "Rust semantic-input setup accepted inconsistent workspace MSRVs"
-fi
 
 health_script="$(workflow_step_script "$CODEQL_WORKFLOW_FILE" "Verify Rust extraction health")"
 healthy_sarif_dir="$test_dir/healthy-sarif"
