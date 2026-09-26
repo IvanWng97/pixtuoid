@@ -136,7 +136,7 @@ quality lever is the change-specific `<...>` checklist, never the lens name.
 ## Orchestrator notes (diff scope)
 
 Dispatch lenses in parallel, in the worktree, in the background. Verify every
-MEDIUM+ finding's premise (read the declaration's doc comment) before coding a fix.
+MEDIUM+ finding's premise (read the item's comments) before coding a fix.
 ONE fold commit per round (`plan-miss:` lines for plan misses). Every finding
 reaches exactly one terminal state in the PR thread (this list is CANONICAL —
 other docs point here): FIXED · REFUTED-with-trace (cite the MECHANISM that

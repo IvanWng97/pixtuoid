@@ -13,7 +13,7 @@ if [[ ${1:-} == --selftest ]]; then
     trap 'rm -rf "$scratch"' EXIT
     printf 'answer: 42\n' >"$scratch/good.yml"
     printf 'answer: 0\n' >"$scratch/bad.yml"
-    printf 'answer: 42\n---\nanswer: 42\n' >"$scratch/two-documents.yml"
+    printf 'answer: 1\n---\nanswer: 42\n' >"$scratch/two-document-target.yml"
     doc="file: '$scratch/good.yml', why: w"
     # One run per case: a branch that reports a problem without failing the
     # run would otherwise hide behind another case that does fail it.
@@ -39,7 +39,10 @@ if [[ ${1:-} == --selftest ]]; then
     reject several-results "- {id: a, $doc, assert: '(.answer == 0), (.answer == 42)', break: '.answer = 0'}"
     reject no-contracts "[]"
     reject missing-file "- {id: a, file: '$scratch/absent.yml', why: w, assert: '.answer == 42', break: '.answer = 0'}"
-    reject two-documents "- {id: a, file: '$scratch/two-documents.yml', why: w, assert: '.answer == 42', break: '.answer = 0'}"
+    reject two-document-file "- {id: a, file: '$scratch/two-document-target.yml', why: w, assert: '.answer == 42', break: 'select(.answer == 42) | .answer = 0'}"
+    reject two-document-contracts "- {id: a, $doc, assert: '.answer == 42', break: '.answer = 0'}
+---
+- {id: b, $doc, assert: '.answer == 42', break: '.answer = 0'}"
     printf '%s\n' "- {id: a, $doc, assert: '.answer == 42', break: '.answer = 0'}" >"$scratch/sound.yml"
     if ! output=$(bash "$self" "$scratch/sound.yml" 2>&1); then
         printf 'error: check.sh selftest: rejected a sound contract\n%s\n' "$output" >&2
@@ -52,9 +55,15 @@ fi
 cd "$(git rev-parse --show-toplevel)"
 contracts_path=${1:-policy/ci-observability/contracts.yml}
 contracts=$(yq -o=json '.' "$contracts_path")
+# A second document here would reach the loop's arithmetic as two counts, which
+# bash rejects without tripping `set -e`: every contract would go unrun.
+if [[ $(jq -s 'length' <<<"$contracts") != 1 ]]; then
+    echo "error: $contracts_path must be one YAML document" >&2
+    exit 1
+fi
 
-# A malformed entry would otherwise read as proven: a missing or misspelled
-# `break` turns the document into null, which fails any assertion.
+# Shape first: an entry with no usable break, a misspelled key or a reused id
+# would otherwise pass without proving anything.
 shape=$(jq -r '
     def text: type == "string" and length > 0;
     def texts: text or (type == "array" and length > 0 and all(.[]; text));

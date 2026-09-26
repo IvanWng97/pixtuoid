@@ -215,7 +215,7 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     publish can comment on the PR; an action there runs with that scope, and a
-    checkout there stages fork files beside it.
+    checkout there stages untrusted files beside it.
   assert: |
     .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
       and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
@@ -373,6 +373,9 @@
     - |
       .jobs.required.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
+    - |
+      .jobs.required.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
 - id: ci-gate-judges-every-group
   file: .github/workflows/ci.yml
@@ -403,6 +406,9 @@
     - |
       .jobs.gate.steps |= map(
         if .uses == "./.github/actions/require-jobs" then .if = "${{ success() }}" else . end)
+    - |
+      .jobs.gate.steps |= map(
+        if .uses == "./.github/actions/require-jobs" then .["continue-on-error"] = true else . end)
 
 # ── The scanners' own switches
 
@@ -443,14 +449,15 @@
     this step and nowhere else, so nothing may skip or soften it and it must
     declare a GH_TOKEN; the recipe also refuses to run tokenless in CI, but only
     while that check stays in the recipe. GitHub resolves env step over job over
-    workflow, and the nearest declaration wins even when it is empty.
+    workflow, and the nearest declaration wins even when it is empty or null.
   assert: |
     (.env // {}) as $workflow_env
     | [.jobs[] | select((has("if") or has("continue-on-error")) | not)
        | (.env // {}) as $job_env
        | .steps[]? | select((.run // "") | gsub("^\\s+|\\s+$"; "") == "just zizmor")
        | select((has("if") or has("continue-on-error")) | not)
-       | (.env // {}).GH_TOKEN // $job_env.GH_TOKEN // $workflow_env.GH_TOKEN // ""]
+       | [(.env // {}), $job_env, $workflow_env] | map(select(has("GH_TOKEN")))
+       | .[0].GH_TOKEN // ""]
     | length >= 1 and all(.[]; . != "")
   break:
     - '(.jobs.hygiene.steps[] | select(.run == "just zizmor") | .["continue-on-error"]) = true'
@@ -458,6 +465,11 @@
     - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .run) = "just zizmor-offline"
     - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .env.GH_TOKEN) = ""
     - (.jobs.hygiene.steps[] | select(.run == "just zizmor")) |= del(.env)
+    - .jobs.hygiene["continue-on-error"] = true
+    - (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .if) = "false"
+    - |
+      .jobs.hygiene.env.GH_TOKEN = "${{ github.token }}"
+      | (.jobs.hygiene.steps[] | select(.run == "just zizmor") | .env.GH_TOKEN) = null
 
 # ── Publishing
 
