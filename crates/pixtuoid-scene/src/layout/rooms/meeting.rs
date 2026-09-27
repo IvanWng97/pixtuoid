@@ -28,11 +28,32 @@ pub struct MeetingRoom {
 /// mirrored ±: west chair at `table.x − DX` (faces East), east at `+DX`.
 pub(crate) const MEETING_CHAIR_TABLE_DX: u16 = 9;
 
+/// Columns from a coat rack's pole to a coat hook.
+pub(crate) const COAT_HOOK_DX: u16 = 1;
+
+/// A coat's width, hanging outward from its hook.
+pub(crate) const COAT_W: u16 = 2;
+
+/// Rows from a coat rack's pole top to its base: the row it y-sorts at.
+pub(crate) const COAT_RACK_BASE_DY: u16 = 7;
+
+/// The box a coat rack whose pole top is `pos` is drawn in: the one authority
+/// for its painter, its y-sort row, its hover box and the chair-clearance gate.
+pub(crate) fn coat_rack_rect_at(pos: Point) -> Bounds {
+    let reach = COAT_HOOK_DX + COAT_W - 1;
+    Bounds {
+        x: pos.x.saturating_sub(reach),
+        y: pos.y,
+        width: 2 * reach + 1,
+        height: COAT_RACK_BASE_DY + 1,
+    }
+}
+
 impl MeetingRoom {
-    /// The coat rack's spot beside the corridor door (east wall, room-centre
-    /// row) — or `None` when a fitted room is too narrow for the rack's coats
-    /// (west reach `x − 2`) to clear the east chair and its sitter.
-    pub fn coat_rack_pos(&self) -> Option<Point> {
+    /// The coat rack's pole top beside the corridor door (east wall,
+    /// room-centre row) — or `None` when a fitted room is too narrow for the
+    /// rack's coats to clear the east chair and its sitter.
+    pub(crate) fn coat_rack_pos(&self) -> Option<Point> {
         let b = self.bounds;
         if b.width <= 20 {
             return None;
@@ -47,7 +68,7 @@ impl MeetingRoom {
             let chair_east_reach = t.table.x
                 + MEETING_CHAIR_TABLE_DX
                 + furniture_def(Furniture::MeetingChair).visual.w / 2;
-            let rack_west_reach = pos.x.saturating_sub(2);
+            let rack_west_reach = coat_rack_rect_at(pos).x;
             // Drop only on true overlap: a rack and chair that sit exactly
             // adjacent keep it.
             if rack_west_reach <= chair_east_reach {
@@ -55,6 +76,11 @@ impl MeetingRoom {
             }
         }
         Some(pos)
+    }
+
+    /// The box the coat rack is drawn in (`coat_rack_rect_at` its pole top).
+    pub fn coat_rack_rect(&self) -> Option<Bounds> {
+        self.coat_rack_pos().map(coat_rack_rect_at)
     }
 
     /// Minimum room height that fits the sofa/table trio — the fit gate AND the

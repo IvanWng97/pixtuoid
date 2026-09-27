@@ -605,6 +605,15 @@ struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
+/// The densest variant of the pack `source` loads, or why that pack fails to
+/// load: `run` refuses to start on it, so doctor says so rather than showing a
+/// bare density of 1.
+fn pack_max_density(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<u16, String> {
+    pixtuoid_scene::embedded_pack::load_sprite_pack(source)
+        .map(|pack| pack.max_density_variant())
+        .map_err(|e| format!("{e:#}"))
+}
+
 /// Everything `doctor` probed, separated from rendering, so `render` is
 /// drivable off a hand-built report (no env/fs/subprocess probing in the
 /// render path).
@@ -802,10 +811,11 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
     let (truecolor_probe, detected) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
-    let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(
-        crate::config::resolve_pack_source(&cfg, None),
-    )
-    .map_or(1, |p| p.max_density_variant());
+    let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
+        .unwrap_or_else(|reason| {
+            config_warnings.push(reason);
+            1
+        });
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {
@@ -1497,6 +1507,66 @@ mod tests {
                 "{tag} is missing from the focus category:\n{s}"
             );
         }
+    }
+
+    #[test]
+    fn a_pack_that_fails_to_load_is_reported_not_hidden() {
+        use pixtuoid_scene::embedded_pack::PackSource;
+        let missing = tempfile::TempDir::new()
+            .expect("tempdir")
+            .path()
+            .join("gone");
+        let reason = pack_max_density(PackSource::Explicit(missing)).expect_err("gone");
+        assert!(reason.contains("failed to load sprite pack"), "{reason}");
+        assert!(pack_max_density(PackSource::Bundled).is_ok());
+    }
+
+    // Reads process-global env (the config path), so it holds TEST_ENV_LOCK like
+    // `run_renders_the_category_report`.
+    #[test]
+    fn a_config_pack_dir_that_fails_to_load_shows_in_the_report() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let base = tempfile::TempDir::new().expect("tempdir");
+        let config_dir = base.path().join("pixtuoid");
+        std::fs::create_dir_all(&config_dir).expect("mkdir config");
+        // A pack whose frame name carries an ESC and a bidi override, so the
+        // load error quotes pack text the report must strip.
+        let pack = base.path().join("hostile");
+        std::fs::create_dir_all(&pack).expect("mkdir pack");
+        std::fs::write(
+            pack.join("pack.toml"),
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.seated]\nframes=[\"x\\u001B[31m\\u202E.sprite\"]\nframe_ms=100\n",
+        )
+        .expect("write pack.toml");
+        std::fs::write(
+            config_dir.join("config.toml"),
+            format!("pack-dir = {:?}\n", pack.to_string_lossy()),
+        )
+        .expect("write config.toml");
+        let saved: Vec<(&str, Option<std::ffi::OsString>)> =
+            ["XDG_CONFIG_HOME", "CLICOLOR_FORCE", "NO_COLOR"]
+                .iter()
+                .map(|k| (*k, std::env::var_os(k)))
+                .collect();
+        std::env::set_var("XDG_CONFIG_HOME", base.path());
+        std::env::remove_var("CLICOLOR_FORCE");
+        std::env::remove_var("NO_COLOR");
+        let out = run(
+            std::path::Path::new("/nonexistent-pixtuoid-doctor-log"),
+            crate::GraphicsMode::Auto,
+        );
+        for (k, v) in saved {
+            match v {
+                Some(v) => std::env::set_var(k, v),
+                None => std::env::remove_var(k),
+            }
+        }
+        let out = out.expect("doctor runs");
+        assert!(out.contains("failed to load sprite pack"), "{out}");
+        assert!(!out.contains(['\u{1b}', '\u{202e}']), "{out:?}");
     }
 
     #[test]

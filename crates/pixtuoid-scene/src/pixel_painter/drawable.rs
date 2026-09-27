@@ -192,9 +192,8 @@ pub(super) enum DrawableKind<'a> {
         jamb_north: bool,
         jamb_south: bool,
     },
-    /// Meeting-room coat rack, y-sorted at its base row
-    /// ([`COAT_RACK_BASE_DY`](super::furniture::COAT_RACK_BASE_DY) below `pos`,
-    /// the pole top).
+    /// Meeting-room coat rack, y-sorted at its base row (the bottom of its
+    /// `MeetingRoom::coat_rack_rect`). `pos` is the pole top.
     CoatRack {
         pos: Point,
     },
@@ -265,14 +264,14 @@ pub(super) struct DrawableCtx<'a> {
 /// The monitor bezel standing proud of the desk back, above `desk.y`.
 const DESK_BEZEL_RAISE: u16 = 1;
 
-/// The desk art for a seat facing `facing`, or `None` for the base `desk`. Only a
-/// back-turned seat needs its own — its occupant y-sorts in FRONT and covers the screen.
-fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
+/// The desk art for a seat facing `facing`. Only a back-turned seat needs its
+/// own — its occupant y-sorts in FRONT and covers the screen.
+fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     match facing {
-        crate::layout::Facing::North => Some("desk_north"),
+        crate::layout::Facing::North => "desk_north",
         crate::layout::Facing::South
         | crate::layout::Facing::East
-        | crate::layout::Facing::West => None,
+        | crate::layout::Facing::West => "desk",
     }
 }
 
@@ -312,9 +311,8 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 .and_then(|a| a.frames().first())
                 .map_or(0, |f| f.height());
             // A taller variant keeps the BASE sprite's bottom row; its extra rows land above `desk.y`.
-            let art = desk_sprite_name(*facing)
-                .and_then(|n| pack.animation(n))
-                .or_else(|| pack.animation("desk"))
+            let art = pack
+                .animation_or_source(desk_sprite_name(*facing))
                 .and_then(|a| a.frames().first());
             // The effects address the monitor by the sprite's OWN row numbering, so this is
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.

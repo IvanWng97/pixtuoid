@@ -46,6 +46,14 @@ pub(crate) fn strip_control_chars(s: &str) -> String {
         .collect()
 }
 
+/// A fatal error's chain as `main` returning `Err` would print it, stripped line
+/// by line so the chain keeps its shape. Mechanism for `main`, not contract.
+#[doc(hidden)]
+pub fn fatal_error_text(e: &anyhow::Error) -> String {
+    let chain: Vec<String> = format!("{e:?}").lines().map(strip_control_chars).collect();
+    format!("Error: {}", chain.join("\n"))
+}
+
 /// The Unicode Bidi_Control characters. `char::is_control` covers only category
 /// Cc; these are Cf and slip through — yet they REORDER displayed text in a
 /// terminal (the "Trojan Source" class, CVE-2021-42574).
@@ -108,6 +116,22 @@ pub(crate) mod test_capture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_fatal_error_keeps_its_chain_and_loses_its_controls() {
+        let e = anyhow::anyhow!("bad key \u{1b}[31m\u{202e}")
+            .context("failed to load sprite pack from \"/p\"");
+        let text = fatal_error_text(&e);
+        assert!(
+            !text.contains('\u{1b}') && !text.contains('\u{202e}'),
+            "{text:?}"
+        );
+        assert!(
+            text.starts_with("Error: failed to load sprite pack"),
+            "{text:?}"
+        );
+        assert!(text.contains("\nCaused by:\n"), "{text:?}");
+    }
 
     #[test]
     fn strips_c0_and_c1_controls() {

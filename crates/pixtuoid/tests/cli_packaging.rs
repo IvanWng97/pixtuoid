@@ -1,7 +1,7 @@
-//! Integration coverage for the `completions` / `man` packaging dispatch in
-//! `main.rs`: the generation itself is unit-tested in `cli.rs`, so these spawn the
-//! REAL binary and assert the dispatch — that the SHELL arg reaches clap_complete
-//! and that stdout stays the clean artifact channel homebrew-core captures.
+//! Integration coverage for what only the REAL binary shows of `main.rs`: the
+//! `completions` / `man` packaging dispatch (the generation itself is unit-tested
+//! in `cli.rs`) — that the SHELL arg reaches clap_complete and that stdout stays
+//! the clean artifact channel homebrew-core captures — and the fatal-error exit.
 
 use clap::ValueEnum;
 
@@ -77,4 +77,53 @@ fn man_emits_clean_roff_to_stdout() {
         String::from_utf8_lossy(&out.stdout).contains(".TH"),
         "man output is not roff (.TH header missing)"
     );
+}
+
+/// A pack whose one frame file name carries an ESC and a bidi override, so the
+/// load error `validate-pack` exits with quotes pack text.
+fn pack_with_hostile_frame_name() -> tempfile::TempDir {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    std::fs::write(
+        tmp.path().join("pack.toml"),
+        "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+         [animations.seated]\nframes=[\"x\\u001B[31m\\u202E.sprite\"]\nframe_ms=100\n",
+    )
+    .expect("write pack.toml");
+    tmp
+}
+
+#[test]
+fn a_fatal_error_reaches_stderr_stripped_and_exits_1() {
+    let pack = pack_with_hostile_frame_name();
+    let out = run(&[
+        "validate-pack",
+        pack.path().to_str().expect("utf-8 tempdir"),
+    ]);
+    assert_eq!(out.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.starts_with("Error: "), "{stderr:?}");
+    assert!(
+        !stderr.contains('\u{1b}') && !stderr.contains('\u{202e}'),
+        "{stderr:?}"
+    );
+}
+
+#[test]
+fn a_fatal_error_into_a_broken_pipe_still_exits_1() {
+    // A pipe whose reader is gone, not a closed fd: std swallows EBADF on
+    // stderr, so only a write that fails reaches the panic this guards.
+    let (reader, writer) = std::io::pipe().expect("pipe");
+    drop(reader);
+    // A regression crashes, and the crash hook must not log into the real
+    // state dir.
+    let state = tempfile::TempDir::new().expect("tempdir");
+    let status = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
+        .args(["validate-pack", "/nonexistent-pixtuoid-pack"])
+        .env_remove("RUST_LOG")
+        .env_remove("PIXTUOID_LOG")
+        .env("XDG_STATE_HOME", state.path())
+        .stderr(writer)
+        .status()
+        .expect("run pixtuoid");
+    assert_eq!(status.code(), Some(1), "{status:?}");
 }

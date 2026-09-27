@@ -1,22 +1,23 @@
 use std::path::Path;
 
-use pixtuoid_core::sprite::format::{
-    load_pack, load_pack_from_strings, parse_sprite_file, validate_pack_animations,
-};
-use pixtuoid_core::sprite::{Palette, Rgb};
+use pixtuoid_core::sprite::format::{load_pack, load_pack_from_strings, validate_pack_animations};
+use pixtuoid_core::sprite::{Frame, Rgb};
 
-fn palette() -> Palette {
-    let mut p = Palette::new();
-    p.insert('A', Some(Rgb { r: 1, g: 2, b: 3 }));
-    p.insert('B', Some(Rgb { r: 4, g: 5, b: 6 }));
-    p.insert('.', None);
-    p
+/// `src` as the one sprite file of a pack whose palette is `A`, `B` and `.`.
+fn parse(src: &str) -> anyhow::Result<Vec<Frame>> {
+    let pack = load_pack_from_strings(
+        "[pack]\nname=\"t\"\nversion=\"1\"\n\
+         [palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\".\"=\"transparent\"\n\
+         [animations.idle]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        &[("f.sprite", src)],
+    )?;
+    Ok(pack.animation("idle").expect("idle").frames().to_vec())
 }
 
 #[test]
 fn parses_two_frame_mini_sprite() {
     let src = std::fs::read_to_string("tests/render/fixtures/mini.sprite").unwrap();
-    let frames = parse_sprite_file(&src, &palette()).unwrap();
+    let frames = parse(&src).unwrap();
 
     assert_eq!(frames.len(), 2);
     assert_eq!(frames[0].width(), 4);
@@ -29,48 +30,46 @@ fn parses_two_frame_mini_sprite() {
 
 #[test]
 fn rejects_unknown_palette_key() {
-    let palette = palette();
     let src = "@frame 0\nA . ? .";
-    let err = parse_sprite_file(src, &palette).unwrap_err();
+    let err = parse(src).unwrap_err();
     assert!(
-        err.to_string().contains("unknown palette key"),
-        "got: {err}"
+        format!("{err:#}").contains("unknown palette key"),
+        "got: {err:#}"
     );
 }
 
 #[test]
 fn rejects_inconsistent_row_widths() {
-    let palette = palette();
     let src = "@frame 0\nA . B .\nA . B";
-    let err = parse_sprite_file(src, &palette).unwrap_err();
-    assert!(err.to_string().contains("row width"), "got: {err}");
+    let err = parse(src).unwrap_err();
+    assert!(format!("{err:#}").contains("row width"), "got: {err:#}");
 }
 
 #[test]
 fn rejects_empty_source_with_no_frames() {
-    let err = parse_sprite_file("", &palette()).unwrap_err();
+    let err = parse("").unwrap_err();
     assert!(
-        err.to_string().contains("contains no frames"),
-        "empty source must bail with 'contains no frames'; got: {err}"
+        format!("{err:#}").contains("contains no frames"),
+        "empty source must bail with 'contains no frames'; got: {err:#}"
     );
 }
 
 #[test]
 fn rejects_multi_char_pixel_token() {
-    let err = parse_sprite_file("@frame 0\nAB . .", &palette()).unwrap_err();
+    let err = parse("@frame 0\nAB . .").unwrap_err();
     assert!(
-        err.to_string().contains("single character"),
-        "a multi-char pixel token must bail; got: {err}"
+        format!("{err:#}").contains("single character"),
+        "a multi-char pixel token must bail; got: {err:#}"
     );
 }
 
 #[test]
 fn rejects_frame_block_with_no_rows() {
     // Back-to-back @frame headers: the first block has zero rows.
-    let err = parse_sprite_file("@frame 0\n@frame 1\nA", &palette()).unwrap_err();
+    let err = parse("@frame 0\n@frame 1\nA").unwrap_err();
     assert!(
-        err.to_string().contains("no rows"),
-        "an empty frame block must bail with 'frame has no rows'; got: {err}"
+        format!("{err:#}").contains("no rows"),
+        "an empty frame block must bail with 'frame has no rows'; got: {err:#}"
     );
 }
 
@@ -335,7 +334,7 @@ fn frame_wider_than_u16_max_errors_instead_of_truncating() {
         src.push_str("A ");
     }
     src.push('\n');
-    let err = parse_sprite_file(&src, &palette()).unwrap_err();
+    let err = parse(&src).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("width") && msg.contains("line"),
@@ -351,7 +350,7 @@ fn frame_taller_than_u16_max_errors_instead_of_truncating() {
     for _ in 0..=u16::MAX as usize {
         src.push_str("A\n");
     }
-    let err = parse_sprite_file(&src, &palette()).unwrap_err();
+    let err = parse(&src).unwrap_err();
     let msg = format!("{err:#}");
     assert!(
         msg.contains("rows") && msg.contains("line"),

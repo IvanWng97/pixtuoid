@@ -1272,16 +1272,17 @@ fn enqueue_floor_fixtures<'a>(
             kind: DrawableKind::FishTank { pos: tank },
         });
     }
-    // Placement + the narrow-fitted-room yield live in `coat_rack_pos` — THE
-    // one authority the hover hit-test shares.
+    // Placement + the narrow-fitted-room yield live in `coat_rack_pos`, the
+    // drawn box in `coat_rack_rect_at` — the authorities the hover hit-test shares.
     for rack in ctx
         .layout
         .meeting_rooms
         .iter()
         .filter_map(|r| r.coat_rack_pos())
     {
+        let rect = crate::layout::coat_rack_rect_at(rack);
         drawables.push(Drawable {
-            anchor_y: rack.y + furniture::COAT_RACK_BASE_DY,
+            anchor_y: rect.y + rect.height - 1,
             kind: DrawableKind::CoatRack { pos: rack },
         });
     }

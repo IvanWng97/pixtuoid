@@ -316,8 +316,8 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // EVERY room, not just room 0 (#555 left room 1 bare of decor). Rack and
     // doormat come from the SAME room-aggregate authority the painter draws from.
     for room in &layout.meeting_rooms {
-        if let Some(rack) = room.coat_rack_pos() {
-            if hit(rack.x.saturating_sub(2), rack.y, 5, 8) {
+        if let Some(b) = room.coat_rack_rect() {
+            if hit(b.x, b.y, b.width, b.height) {
                 return Some("Coat Rack");
             }
         }
