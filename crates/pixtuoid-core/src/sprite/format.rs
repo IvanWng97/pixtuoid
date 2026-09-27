@@ -108,6 +108,63 @@ mod tests {
         fine.insert('q', None);
         assert!(validate_recolor_palette(&fine).is_ok());
     }
+
+    fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> Result<Pack> {
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n{palette}\n\
+             [recolor_ramps]\n{ramps}\n\
+             [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
+        );
+        load_pack_from_strings(&toml, &[("f.sprite", sprite)])
+    }
+
+    const HAIR: Rgb = Rgb {
+        r: 40,
+        g: 20,
+        b: 10,
+    };
+
+    #[test]
+    fn recolor_ramp_keys_draw_as_a_shade_of_their_base() {
+        let pack = ramp_pack(
+            "\"H\"=\"#28140a\"",
+            "\"h\" = { of = \"H\", mix = -50 }",
+            "@frame 0\nH h",
+        )
+        .expect("pack builds");
+        let frame = &pack.animation("seated").expect("anim").frames[0];
+        assert_eq!(frame.get(0, 0).copied().flatten(), Some(HAIR));
+        assert_eq!(frame.get(1, 0).copied().flatten(), Some(HAIR.mixed(-50)));
+    }
+
+    #[test]
+    fn recolor_ramp_rejects_a_malformed_declaration() {
+        for (ramps, needle) in [
+            ("\"h\" = { of = \"X\", mix = -50 }", "recolor key"),
+            ("\"H2\" = { of = \"H\", mix = -50 }", "one character"),
+            ("\"h\" = { of = \"H\", mix = 0 }", "mix"),
+            ("\"h\" = { of = \"H\", mix = 100 }", "mix"),
+            ("\"X\" = { of = \"H\", mix = -50 }", "both"),
+            ("\"h\" = { of = \"P\", mix = -50 }", "opaque"),
+            ("\"S\" = { of = \"H\", mix = -50 }", "colour of its own"),
+        ] {
+            let err = ramp_pack("\"H\"=\"#28140a\"\n\"X\"=\"#010203\"", ramps, "@frame 0\nH")
+                .expect_err(ramps);
+            assert!(format!("{err:#}").contains(needle), "{ramps}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn recolor_ramp_colliding_with_another_key_is_rejected() {
+        // #140a05 is exactly #28140a mixed -50, so recoloring would swap `X` too.
+        let err = ramp_pack(
+            "\"H\"=\"#28140a\"\n\"X\"=\"#140a05\"",
+            "\"h\" = { of = \"H\", mix = -50 }",
+            "@frame 0\nH",
+        )
+        .expect_err("collision");
+        assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
+    }
 }
 
 fn parse_row(line: &str, palette: &Palette) -> Result<Vec<Pixel>> {
@@ -158,7 +215,16 @@ fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
 struct PackToml {
     pack: PackMeta,
     palette: HashMap<String, String>,
+    #[serde(default)]
+    recolor_ramps: HashMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
+}
+
+/// One `[recolor_ramps]` entry, loaded by [`Palette::insert_ramp`].
+#[derive(Debug, Deserialize)]
+struct RampToml {
+    of: String,
+    mix: i8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -203,14 +269,13 @@ impl Pack {
     /// lands at a scale its density divides — so the scale has to be chosen
     /// knowing this. A Retina cell 17px wide makes 17 the natural scale, 17 is
     /// prime, and every variant in the pack would sit unused.
-    /// Only furniture variants count: `<base>@<N>x` parses for ANY base, so a
-    /// stray key in a user's pack.toml is a well-formed variant name for a
-    /// piece no painter asks for.
+    /// Only variants of a registered animation count: `<base>@<N>x` parses for
+    /// ANY base, so a stray key in a user's pack.toml is a well-formed variant
+    /// name for a piece no painter asks for.
     pub fn max_density_variant(&self) -> u16 {
         self.animations
             .keys()
-            .filter(|n| is_optional_furniture_animation(n))
-            .filter_map(|n| split_density_variant(n).map(|(_, d)| d))
+            .filter_map(|n| known_density_variant(n).map(|(_, d)| d))
             .max()
             .unwrap_or(1)
     }
@@ -239,7 +304,7 @@ impl Pack {
 /// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
 /// untrusted paths to escape.
 fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
-    let palette = build_palette(&parsed.palette)?;
+    let palette = build_palette(&parsed.palette, &parsed.recolor_ramps)?;
     validate_recolor_palette(&palette)?;
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
@@ -314,19 +379,32 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
 }
 
 /// The base palette keys per-agent recoloring substitutes by RGB equality
-/// (shirt/hair/skin/pants) — the single source of truth for the tui's
-/// `recolor_frame` and for `validate_recolor_palette`. They MUST map to
+/// (shirt/hair/skin/pants); with their ramp shades they make [`recolored_keys`],
+/// the list the scene's `recolor_frame` and `validate_recolor_palette` read. They MUST map to
 /// distinct RGBs: if two share a color, recolor swaps only the first and the
 /// other silently keeps the wrong color.
 pub const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
+
+/// Every key a per-agent recolor substitutes in `palette`: the [`RECOLOR_KEYS`]
+/// and the ramp shades of them. The one list the recolor pass and its load-time
+/// guard both read.
+pub fn recolored_keys(palette: &Palette) -> impl Iterator<Item = char> + '_ {
+    RECOLOR_KEYS.into_iter().chain(
+        palette
+            .ramps()
+            .filter(|(_, of, _)| RECOLOR_KEYS.contains(of))
+            .map(|(k, _, _)| k),
+    )
+}
 
 /// Fail a pack where `recolor_frame`'s by-RGB substitution would be ambiguous:
 /// it swaps EVERY opaque pixel matching a recolor base, so a NON-recolor key
 /// sharing that RGB would be recolored to the agent's color too. Transparent
 /// keys never participate.
 fn validate_recolor_palette(palette: &Palette) -> Result<()> {
+    let recolored: Vec<char> = recolored_keys(palette).collect();
     let mut recolor_rgb: HashMap<Rgb, char> = HashMap::new();
-    for key in RECOLOR_KEYS {
+    for &key in &recolored {
         if let Some(Some(rgb)) = palette.get(key) {
             if let Some(prev) = recolor_rgb.insert(rgb, key) {
                 bail!(
@@ -337,7 +415,7 @@ fn validate_recolor_palette(palette: &Palette) -> Result<()> {
         }
     }
     for (key, pixel) in palette.iter() {
-        if RECOLOR_KEYS.contains(&key) {
+        if recolored.contains(&key) {
             continue;
         }
         if let Some(rgb) = pixel {
@@ -353,16 +431,52 @@ fn validate_recolor_palette(palette: &Palette) -> Result<()> {
     Ok(())
 }
 
-fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
+fn single_char(k: &str, what: &str) -> Result<char> {
+    let mut it = k.chars();
+    let (Some(key), None) = (it.next(), it.next()) else {
+        bail!("{what} {k:?} must be exactly one character");
+    };
+    Ok(key)
+}
+
+fn build_palette(
+    map: &HashMap<String, String>,
+    ramps: &HashMap<String, RampToml>,
+) -> Result<Palette> {
     let mut palette = Palette::new();
     for (k, v) in map {
-        let mut it = k.chars();
-        let key = it.next();
-        let (Some(key), None) = (key, it.next()) else {
-            bail!("palette key {k:?} must be exactly one character");
-        };
+        let key = single_char(k, "palette key")?;
         let pixel = parse_palette_value(v).with_context(|| format!("palette key '{k}'"))?;
         palette.insert(key, pixel);
+    }
+    for (k, ramp) in ramps {
+        let key = single_char(k, "recolor ramp key")?;
+        let of = single_char(&ramp.of, "recolor ramp `of`")?;
+        if palette.get(key).is_some() {
+            bail!("'{key}' is declared in both [palette] and [recolor_ramps]");
+        }
+        // A recolor key as a ramp would make another ramp's base a ramp too, and
+        // whether that base resolved would hang on this map's iteration order.
+        if RECOLOR_KEYS.contains(&key) {
+            bail!("'{key}' is a recolor key, so it takes a colour of its own in [palette]");
+        }
+        if !RECOLOR_KEYS.contains(&of) {
+            bail!(
+                "recolor ramp '{key}' shades '{of}', which is not a recolor key {RECOLOR_KEYS:?}"
+            );
+        }
+        if !matches!(palette.get(of), Some(Some(_))) {
+            bail!("recolor ramp '{key}' shades '{of}', which has no opaque colour in [palette]");
+        }
+        // Zero is a second name for the base itself, and a mix of 100 or more is
+        // pure white or black whatever the base, so it would never follow a recolor.
+        if ramp.mix == 0 || ramp.mix.unsigned_abs() >= 100 {
+            bail!(
+                "recolor ramp '{key}' mix {} must be nonzero and within -99..=99",
+                ramp.mix
+            );
+        }
+        palette.insert_ramp(key, of, ramp.mix);
     }
     Ok(palette)
 }
@@ -389,7 +503,7 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
     "typing_back",
 ];
 
-/// Separator joining a furniture animation to the density it is drawn at:
+/// Separator joining an animation to the density it is drawn at:
 /// `desk@4x` is the `desk` piece drawn on a 4x grid, for a painter rendering
 /// at a scale where the base art would otherwise be block-upscaled.
 ///
@@ -450,10 +564,10 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
     (2..=MAX_DENSITY_VARIANT).contains(&n).then_some((base, n))
 }
 
-/// Whether `name` is a furniture animation a pack may provide — either a
-/// registry entry or one of their density variants.
+/// Whether `name` is a furniture animation or a density variant of one — the
+/// set `Pack::merge_from` inherits.
 ///
-/// Variants are legal BY DERIVATION rather than by their own registry rows, so
+/// Variants belong BY DERIVATION rather than by their own registry rows, so
 /// authoring one is a sprite file and nothing else. A second list would have
 /// to be kept in step with the first, and forgetting an entry fails QUIETLY in
 /// its least visible direction: the variant loads for the bundled pack but
@@ -462,6 +576,25 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
 pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
     let base = split_density_variant(name).map_or(name, |(base, _)| base);
     OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
+}
+
+/// `name` as a registered animation — character or furniture — if it is one.
+fn known_animation(name: &str) -> Option<&'static str> {
+    REQUIRED_CHARACTER_ANIMATIONS
+        .iter()
+        .chain(OPTIONAL_CHARACTER_ANIMATIONS)
+        .chain(OPTIONAL_FURNITURE_ANIMATIONS)
+        .find(|&&n| n == name)
+        .copied()
+}
+
+/// The registered animation a density-variant name is drawn from, and its
+/// density. Any registered animation takes variants — characters are redrawn
+/// at density like furniture — while inheritance stays furniture-only
+/// ([`is_optional_furniture_animation`]).
+pub(crate) fn known_density_variant(name: &str) -> Option<(&'static str, u16)> {
+    let (base, density) = split_density_variant(name)?;
+    known_animation(base).map(|b| (b, density))
 }
 
 /// Environment/furniture animation names a pack MAY provide; `Pack::merge_from`
@@ -525,9 +658,10 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
 pub struct DensityMismatch {
     /// The variant's animation name, e.g. `desk@4x`.
     pub name: String,
-    /// The size the name claims: the base piece's, times that density.
+    /// What the name claims for the first frame that disagrees: the matching base
+    /// frame's size, times the density.
     pub claimed: (u16, u16),
-    /// The size the variant's first frame actually is.
+    /// That variant frame's actual size.
     pub found: (u16, u16),
 }
 
@@ -548,24 +682,30 @@ pub struct ValidationReport {
     pub mismatched_density: Vec<DensityMismatch>,
     /// Each density variant whose BASE piece the pack does not ship.
     ///
-    /// The size claim is unprovable without the base, so the variant would load
-    /// and then be validated against whatever the default pack supplies — an
+    /// The size claim is unprovable without the base: a furniture variant would
+    /// be checked against whatever base the default pack supplies, and a
+    /// character one, whose base is never inherited, would never be drawn. An
     /// author who renamed `desk.sprite` to `desk@4x.sprite` instead of adding it
     /// otherwise gets a clean bill of health from the one tool whose job is to
     /// tell them.
     pub orphan_variants: Vec<String>,
+    /// `(name, base frames, variant frames)` for each density variant whose
+    /// frame count differs from its base's. A variant replaces its base frame
+    /// for frame, so a renderer skips one that cannot, and it is never drawn.
+    pub mismatched_frame_counts: Vec<(String, usize, usize)>,
 }
 
 impl ValidationReport {
     /// True when the pack is unusable — a required animation is missing, one
-    /// has too few frames, or a density variant is not the size it claims (or
-    /// has no base to claim it against). Missing OPTIONAL animations do not
-    /// count.
+    /// has too few frames, or a density variant is not the size or frame count
+    /// it claims (or has no base to claim it against). Missing OPTIONAL
+    /// animations do not count.
     pub fn has_errors(&self) -> bool {
         !self.missing_required.is_empty()
             || !self.insufficient_frames.is_empty()
             || !self.mismatched_density.is_empty()
             || !self.orphan_variants.is_empty()
+            || !self.mismatched_frame_counts.is_empty()
     }
 }
 
@@ -609,11 +749,7 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         .animation_names()
         .into_iter()
         .filter_map(|name| {
-            let (base, density) = split_density_variant(&name)?;
-            let base = OPTIONAL_FURNITURE_ANIMATIONS
-                .iter()
-                .find(|&&b| b == base)
-                .copied()?;
+            let (base, density) = known_density_variant(&name)?;
             Some((name, base, density))
         })
         .collect();
@@ -642,26 +778,41 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     // the claim is only ever tested by whichever renderer happens to look for
     // that density — i.e. silently, at paint time, on someone else's terminal.
     for (name, base, density) in &variants {
-        let Some(base_art) = pack.animation(base).and_then(|a| a.frames.first()) else {
+        let Some(base_anim) = pack.animation(base).filter(|a| !a.frames.is_empty()) else {
             // No base means no claim to check it against. Reported rather than
             // skipped: silence here is what let a renamed `desk.sprite` pass.
             report.orphan_variants.push(name.clone());
             continue;
         };
-        let Some(art) = pack.animation(name).and_then(|a| a.frames.first()) else {
+        let Some(anim) = pack.animation(name).filter(|a| !a.frames.is_empty()) else {
             // An empty variant is already `insufficient_frames`' finding.
             continue;
         };
-        // Saturating, not `*`: the density is bounded but the BASE is not — a
-        // pack may ship art of any size, and this number is only ever REPORTED.
-        // A saturated claim still differs from any real frame size, so the
-        // mismatch fires either way.
-        let claimed = (
-            base_art.width().saturating_mul(*density),
-            base_art.height().saturating_mul(*density),
-        );
-        let found = (art.width(), art.height());
-        if claimed != found {
+        if anim.frames.len() != base_anim.frames.len() {
+            report.mismatched_frame_counts.push((
+                name.clone(),
+                base_anim.frames.len(),
+                anim.frames.len(),
+            ));
+            continue;
+        }
+        let first_lie = base_anim
+            .frames
+            .iter()
+            .zip(&anim.frames)
+            .find_map(|(b, v)| {
+                // Saturating, not `*`: the density is bounded but the BASE is not —
+                // a pack may ship art of any size, and this number is only ever
+                // REPORTED. A saturated claim still differs from any real frame
+                // size, so the mismatch fires either way.
+                let claimed = (
+                    b.width().saturating_mul(*density),
+                    b.height().saturating_mul(*density),
+                );
+                let found = (v.width(), v.height());
+                (claimed != found).then_some((claimed, found))
+            });
+        if let Some((claimed, found)) = first_lie {
             report.mismatched_density.push(DensityMismatch {
                 name: name.clone(),
                 claimed,
@@ -672,7 +823,7 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
 
     let all_known: std::collections::HashSet<&str> = known_names().collect();
     for name in pack.animation_names() {
-        if !all_known.contains(name.as_str()) && !is_optional_furniture_animation(&name) {
+        if !all_known.contains(name.as_str()) && known_density_variant(&name).is_none() {
             report.unknown.push(name.clone());
         }
     }
@@ -815,8 +966,7 @@ mod validation_floor_tests {
         );
         assert_eq!(mixed.max_density_variant(), 4);
 
-        // The bundled pack is what a default run paints with, so the number a
-        // real terminal rounds against is pinned here rather than assumed.
+        // A single variant is the number to round to.
         let bundled = load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
              [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
@@ -838,7 +988,7 @@ mod validation_floor_tests {
         assert_eq!(
             stray.max_density_variant(),
             2,
-            "a variant of a non-furniture base must not inflate the pack's density"
+            "a variant of an unregistered base must not inflate the pack's density"
         );
     }
 
@@ -872,6 +1022,70 @@ mod validation_floor_tests {
             report.has_errors(),
             "a lying variant must fail validate-pack, not merely be noted"
         );
+    }
+
+    fn character_pack(variant_frames: &str) -> Pack {
+        load_pack_from_strings(
+            &format!(
+                "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+                 [animations.typing_back]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
+                 [animations.\"typing_back@2x\"]\nframes={variant_frames}\nframe_ms=100\n"
+            ),
+            &[
+                ("one.sprite", "@frame 0\nA"),
+                ("two.sprite", "@frame 0\nA A\nA A"),
+                ("wrong.sprite", "@frame 0\nA A A"),
+            ],
+        )
+        .expect("pack builds")
+    }
+
+    /// People are redrawn at density like furniture, but a character variant
+    /// is never inherited: `merge_from`'s rule that a robot pack must not fall
+    /// back to human sprites covers a variant exactly as it covers its base.
+    #[test]
+    fn a_character_animation_takes_density_variants_that_are_never_inherited() {
+        let pack = character_pack("[\"two.sprite\", \"two.sprite\"]");
+        let report = validate_pack_animations(&pack);
+        assert!(
+            !report.unknown.contains(&"typing_back@2x".to_string()),
+            "{:?}",
+            report.unknown
+        );
+        assert!(
+            report.mismatched_density.is_empty()
+                && report.mismatched_frame_counts.is_empty()
+                && report.orphan_variants.is_empty(),
+            "{report:?}"
+        );
+        assert_eq!(pack.max_density_variant(), 2);
+
+        let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        custom.merge_from(&pack);
+        assert!(custom.animation("typing_back@2x").is_none());
+    }
+
+    /// A variant replaces its base frame for frame, so every frame is a claim
+    /// and the counts must agree — a short variant would index past its end.
+    #[test]
+    fn every_frame_of_a_variant_proves_its_density_and_the_counts_match() {
+        let report =
+            validate_pack_animations(&character_pack("[\"two.sprite\", \"wrong.sprite\"]"));
+        assert_eq!(
+            report.mismatched_density,
+            vec![DensityMismatch {
+                name: "typing_back@2x".to_string(),
+                claimed: (2, 2),
+                found: (3, 1),
+            }],
+        );
+
+        let report = validate_pack_animations(&character_pack("[\"two.sprite\"]"));
+        assert_eq!(
+            report.mismatched_frame_counts,
+            vec![("typing_back@2x".to_string(), 2, 1)]
+        );
+        assert!(report.has_errors());
     }
 
     /// The density is pack-author input to arithmetic that multiplies it by a

@@ -89,6 +89,17 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
              its size claim is checked against the default pack's art, not yours"
         );
     }
+    for (name, base, got) in &report.mismatched_frame_counts {
+        tracing::warn!(
+            origin,
+            animation = %name,
+            base,
+            got,
+            "sprite pack density variant (the pack's own or one inherited from the default) \
+             has a different frame count from its base — it is skipped wherever a renderer \
+             would pick it"
+        );
+    }
     report
 }
 
@@ -361,6 +372,15 @@ mod tests {
         }
         fn enter(&self, _: &tracing::span::Id) {}
         fn exit(&self, _: &tracing::span::Id) {}
+    }
+
+    /// The bundled pack is the one no user validates: a mis-sized or short
+    /// `@Nx` variant in it silently falls back to the upscaled base.
+    #[test]
+    fn the_embedded_pack_passes_its_own_validation() {
+        let pack = load_sprite_pack(None).expect("embedded pack");
+        let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
+        assert!(!report.has_errors(), "{report:?}");
     }
 
     #[test]

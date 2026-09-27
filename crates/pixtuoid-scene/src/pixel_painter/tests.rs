@@ -677,6 +677,21 @@ fn recolor_frame_substitutes_bhs_pixels() {
     assert_eq!(out.as_slice()[4], None);
 }
 
+/// A shade of hair must follow the agent's hair, or every shaded head keeps
+/// the default outfit's brown in its shadows.
+#[test]
+fn recolor_frame_carries_a_ramp_shade_to_the_agents_colour() {
+    let mut base = base_palette();
+    base.insert_ramp('h', 'H', -50);
+    let default_shade = base.get('h').flatten().expect("ramp derives");
+    let green = Rgb { r: 0, g: 200, b: 0 };
+    let agent_pal = base.with_override('H', Some(green));
+
+    let frame = Frame::from_pixels(1, 1, vec![Some(default_shade)]);
+    let out = recolor_frame(&frame, &agent_pal, &base);
+    assert_eq!(out.as_slice()[0], Some(green.mixed(-50)));
+}
+
 #[test]
 fn recolor_frame_handles_palette_with_no_overrides() {
     let base = base_palette();

@@ -18,6 +18,29 @@ pub struct Rgb {
     pub b: u8,
 }
 
+impl Rgb {
+    /// This colour moved `pct` percent of the way toward white (`pct > 0`) or
+    /// black (`pct < 0`); `pct` is clamped to `-100..=100`.
+    pub fn mixed(self, pct: i8) -> Rgb {
+        let pct = i32::from(pct.clamp(-100, 100));
+        let channel = |c: u8| -> u8 {
+            let c = i32::from(c);
+            let out = if pct >= 0 {
+                c + ((255 - c) * pct + 50) / 100
+            } else {
+                (c * (100 + pct) + 50) / 100
+            };
+            // In 0..=255 by construction; the clamp only guards the cast.
+            out.clamp(0, 255) as u8
+        };
+        Rgb {
+            r: channel(self.r),
+            g: channel(self.g),
+            b: channel(self.b),
+        }
+    }
+}
+
 /// A single pixel: `Some(rgb)` or `None` (transparent).
 pub type Pixel = Option<Rgb>;
 
@@ -26,6 +49,8 @@ pub type Pixel = Option<Rgb>;
 #[derive(Debug, Clone, Default)]
 pub struct Palette {
     map: HashMap<char, Pixel>,
+    /// Ramp keys: `key -> (base key, mix)`; see [`Palette::insert_ramp`].
+    ramps: HashMap<char, (char, i8)>,
 }
 
 impl Palette {
@@ -39,16 +64,36 @@ impl Palette {
         self.map.insert(key, pixel);
     }
 
-    /// Look up `key`: `None` if the key is undefined, else `Some(pixel)` (the
-    /// pixel itself may be transparent).
-    pub fn get(&self, key: char) -> Option<Pixel> {
-        self.map.get(&key).copied()
+    /// Declare `key` as a shade of `of`: it has no colour of its own and reads as
+    /// `of`'s colour [`Rgb::mixed`] by `mix`, so overriding `of` (a per-agent
+    /// recolor) re-derives every shade of it with no second table.
+    pub fn insert_ramp(&mut self, key: char, of: char, mix: i8) {
+        self.ramps.insert(key, (of, mix));
     }
 
-    /// Iterate `(key, pixel)` pairs — lets callers assert that every key maps
-    /// to a DISTINCT RGB, which `recolor_frame`'s substitute-by-RGB requires.
+    /// Every ramp key as `(key, base key, mix)`.
+    pub fn ramps(&self) -> impl Iterator<Item = (char, char, i8)> + '_ {
+        self.ramps.iter().map(|(&k, &(of, mix))| (k, of, mix))
+    }
+
+    /// Look up `key`: `None` if the key is undefined, else `Some(pixel)` (the
+    /// pixel itself may be transparent). A ramp key reads through its base.
+    pub fn get(&self, key: char) -> Option<Pixel> {
+        if let Some(&p) = self.map.get(&key) {
+            return Some(p);
+        }
+        let &(of, mix) = self.ramps.get(&key)?;
+        self.map.get(&of).map(|p| p.map(|rgb| rgb.mixed(mix)))
+    }
+
+    /// Iterate `(key, pixel)` pairs, ramp keys included.
     pub fn iter(&self) -> impl Iterator<Item = (char, Pixel)> + '_ {
-        self.map.iter().map(|(&k, &p)| (k, p))
+        self.map.iter().map(|(&k, &p)| (k, p)).chain(
+            self.ramps
+                .keys()
+                .filter(|k| !self.map.contains_key(k))
+                .filter_map(|&k| self.get(k).map(|p| (k, p))),
+        )
     }
 
     /// Replace one palette key's color — used for per-agent recoloring.
@@ -197,6 +242,59 @@ impl RgbBuffer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rgb_mixed_moves_toward_white_or_black() {
+        let c = Rgb {
+            r: 100,
+            g: 50,
+            b: 0,
+        };
+        assert_eq!(
+            c.mixed(50),
+            Rgb {
+                r: 178,
+                g: 153,
+                b: 128
+            }
+        );
+        assert_eq!(c.mixed(-50), Rgb { r: 50, g: 25, b: 0 });
+        assert_eq!(
+            c.mixed(100),
+            Rgb {
+                r: 255,
+                g: 255,
+                b: 255
+            }
+        );
+        assert_eq!(c.mixed(-100), Rgb { r: 0, g: 0, b: 0 });
+    }
+
+    #[test]
+    fn palette_ramp_derives_from_its_base_and_follows_an_override() {
+        let hair = Rgb {
+            r: 40,
+            g: 20,
+            b: 10,
+        };
+        let mut p = Palette::new();
+        p.insert('H', Some(hair));
+        p.insert_ramp('h', 'H', -50);
+        assert_eq!(p.get('h'), Some(Some(hair.mixed(-50))));
+        assert!(p
+            .iter()
+            .any(|(k, px)| k == 'h' && px == Some(hair.mixed(-50))));
+        assert_eq!(p.ramps().collect::<Vec<_>>(), vec![('h', 'H', -50)]);
+
+        let blond = Rgb {
+            r: 200,
+            g: 160,
+            b: 80,
+        };
+        let agent = p.with_override('H', Some(blond));
+        assert_eq!(agent.get('h'), Some(Some(blond.mixed(-50))));
+        assert_eq!(p.get('h'), Some(Some(hair.mixed(-50))));
+    }
 
     #[test]
     fn palette_get_and_override() {

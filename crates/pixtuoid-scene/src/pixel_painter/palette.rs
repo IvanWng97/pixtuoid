@@ -2,7 +2,6 @@
 //! primitives (blend / lerp / mix_lab).
 
 use pixtuoid_core::id::normalize_path_key;
-use pixtuoid_core::sprite::format::RECOLOR_KEYS;
 use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
@@ -389,13 +388,13 @@ pub(super) fn tool_glow_tint(
 }
 
 pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) -> Frame {
-    // Keyed off `RECOLOR_KEYS` (core's single source of truth, the same set
-    // `validate_recolor_palette` guards for RGB-uniqueness) so the substitution
-    // and the load-time guard can't drift. A `None` base never equals a `Some`
-    // pixel, so an absent key naturally substitutes nothing.
-    let swaps: Vec<(Pixel, Pixel)> = RECOLOR_KEYS
-        .iter()
-        .map(|&k| (base_pal.get(k).flatten(), pal.get(k).flatten()))
+    // Keyed off `recolored_keys` — core's single list, the same one
+    // `validate_recolor_palette` guards for RGB-uniqueness. A ramp shade reads
+    // through its base on BOTH sides, so the default shade maps to the same shade
+    // of the agent's colour. A `None` base never equals a `Some` pixel, so an
+    // absent key substitutes nothing.
+    let swaps: Vec<(Pixel, Pixel)> = pixtuoid_core::sprite::format::recolored_keys(base_pal)
+        .map(|k| (base_pal.get(k).flatten(), pal.get(k).flatten()))
         .collect();
     let pixels: Vec<Pixel> = frame
         .as_slice()

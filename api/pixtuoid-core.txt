@@ -777,6 +777,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pac
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
+pub pixtuoid_core::sprite::format::ValidationReport::mismatched_frame_counts: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_variants: alloc::vec::Vec<alloc::string::String>
@@ -803,6 +804,7 @@ pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::stri
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::parse_sprite_file(&str, &pixtuoid_core::sprite::Palette) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::sprite::Frame>>
+pub fn pixtuoid_core::sprite::format::recolored_keys(&pixtuoid_core::sprite::Palette) -> impl core::iter::traits::iterator::Iterator<Item = char> + '_
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame
@@ -831,8 +833,10 @@ pub struct pixtuoid_core::sprite::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
 pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
+pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
 pub fn pixtuoid_core::sprite::Palette::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, pixtuoid_core::sprite::Pixel)> + '_
 pub fn pixtuoid_core::sprite::Palette::new() -> Self
+pub fn pixtuoid_core::sprite::Palette::ramps(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, char, i8)> + '_
 pub fn pixtuoid_core::sprite::Palette::with_override(&self, char, pixtuoid_core::sprite::Pixel) -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
@@ -851,6 +855,8 @@ pub struct pixtuoid_core::sprite::Rgb
 pub pixtuoid_core::sprite::Rgb::b: u8
 pub pixtuoid_core::sprite::Rgb::g: u8
 pub pixtuoid_core::sprite::Rgb::r: u8
+impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::mixed(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
 impl core::cmp::Eq for pixtuoid_core::sprite::Rgb
@@ -1690,8 +1696,10 @@ pub struct pixtuoid_core::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
 pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
+pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
 pub fn pixtuoid_core::sprite::Palette::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, pixtuoid_core::sprite::Pixel)> + '_
 pub fn pixtuoid_core::sprite::Palette::new() -> Self
+pub fn pixtuoid_core::sprite::Palette::ramps(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, char, i8)> + '_
 pub fn pixtuoid_core::sprite::Palette::with_override(&self, char, pixtuoid_core::sprite::Pixel) -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
@@ -1727,6 +1735,8 @@ pub struct pixtuoid_core::Rgb
 pub pixtuoid_core::Rgb::b: u8
 pub pixtuoid_core::Rgb::g: u8
 pub pixtuoid_core::Rgb::r: u8
+impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::mixed(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
 impl core::cmp::Eq for pixtuoid_core::sprite::Rgb
