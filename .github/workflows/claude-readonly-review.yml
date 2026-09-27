@@ -148,7 +148,7 @@ jobs:
             --max-turns ${{ inputs.max_turns }}
             --max-budget-usd ${{ inputs.max_budget_usd }}
             --permission-mode dontAsk
-            --allowedTools "Read,Glob,Grep"
+            --tools Read,Glob,Grep
             --json-schema ${{ steps.schema.outputs.json }}
 
       - name: Require a valid structured review
