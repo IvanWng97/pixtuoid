@@ -11,6 +11,12 @@ use crate::layout::{
 /// this value IS the counter's only size authority).
 pub(crate) const COMPACT_COUNTER: Size = Size { w: 20, h: 8 };
 
+/// The detailed kitchen-run counter, for a pantry wide enough to host it.
+pub(crate) const LARGE_COUNTER: Size = Size {
+    w: PANTRY_COUNTER_LARGE_W,
+    h: 10,
+};
+
 /// The pantry room: its bounds plus what it owns — the counter's chosen
 /// footprint and the kitchen-island body centre (`None` when the room can't host
 /// it clear of walls + the counter — refuse-don't-force).

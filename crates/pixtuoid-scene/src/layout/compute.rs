@@ -187,12 +187,9 @@ pub(super) fn compute_with_seed(
     // Large counter + a 2-px routing margin each side, else the compact fallback.
     // Width-only, so the size is known before the split prices the pantry against it.
     let pantry_counter_size: Size = if has_pantry && mid_x >= PANTRY_COUNTER_LARGE_W + 4 {
-        Size {
-            w: PANTRY_COUNTER_LARGE_W,
-            h: 10,
-        }
+        super::LARGE_COUNTER
     } else {
-        super::rooms::pantry::COMPACT_COUNTER
+        super::COMPACT_COUNTER
     };
 
     // CONTENT-FIT, donating the surplus below ALL-OR-NOTHING: a partial donation would

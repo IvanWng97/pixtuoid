@@ -1082,6 +1082,84 @@ fn desk_z_key_is_the_visual_south() {
     );
 }
 
+/// A piece the painter blits from the pack is hovered by the size its layout
+/// reads — a def's `.visual`, the elevator's, a counter's — so the two must
+/// agree for the bundled pack or the hover box misses the painted sprite.
+#[test]
+fn every_hover_size_is_its_painted_sprite_size() {
+    use crate::layout::{
+        furniture_def, Furniture, PlantKind, PodDecor, Size, WallDecor, COMPACT_COUNTER,
+        ELEVATOR_H, ELEVATOR_W, LARGE_COUNTER,
+    };
+    // Exhaustive matches, so a new variant fails to compile here until listed.
+    let plants = |k: PlantKind| match k {
+        PlantKind::Ficus | PlantKind::Tall | PlantKind::Flower | PlantKind::Succulent => k,
+    };
+    let walls = |k: WallDecor| match k {
+        WallDecor::Bookshelf
+        | WallDecor::Whiteboard
+        | WallDecor::BulletinBoard
+        | WallDecor::ExitSign
+        | WallDecor::MeetingScreen => k,
+    };
+    let def =
+        |f: Furniture, sprite: &'static str| (format!("{f:?}"), furniture_def(f).visual, sprite);
+    let mut pieces: Vec<(String, Size, &str)> = vec![
+        def(Furniture::MeetingSofaBody, "meeting_sofa"),
+        def(Furniture::SnackShelf, "snack_shelf"),
+        def(Furniture::FloorLamp, "floor_lamp"),
+        (
+            "ELEVATOR".into(),
+            Size {
+                w: ELEVATOR_W,
+                h: ELEVATOR_H,
+            },
+            "door",
+        ),
+        ("LARGE_COUNTER".into(), LARGE_COUNTER, "pantry"),
+        ("COMPACT_COUNTER".into(), COMPACT_COUNTER, "pantry_small"),
+    ];
+    pieces.extend(
+        [
+            PlantKind::Ficus,
+            PlantKind::Tall,
+            PlantKind::Flower,
+            PlantKind::Succulent,
+        ]
+        .map(plants)
+        .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+    pieces.extend(
+        [
+            WallDecor::Bookshelf,
+            WallDecor::Whiteboard,
+            WallDecor::BulletinBoard,
+            WallDecor::ExitSign,
+            WallDecor::MeetingScreen,
+        ]
+        .map(walls)
+        .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+    pieces.extend(
+        PodDecor::ALL
+            .iter()
+            .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+
+    let pack = crate::embedded_pack::test_default_pack();
+    for (name, size, sprite) in pieces {
+        let art = pack
+            .animation(sprite)
+            .and_then(|a| a.frames().first())
+            .unwrap_or_else(|| panic!("the bundled pack ships {sprite}"));
+        assert_eq!(
+            (size.w, size.h),
+            (art.width(), art.height()),
+            "{name}'s size must be {sprite}'s painted size"
+        );
+    }
+}
+
 #[test]
 fn every_pod_occludes_via_overhang() {
     use crate::layout::{furniture_def, PodDecor, Size};

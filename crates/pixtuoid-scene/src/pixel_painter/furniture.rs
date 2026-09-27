@@ -70,14 +70,9 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     let trim = theme.furniture.wood_trim;
     let mag = theme.furniture.magazine;
     let mag_trim = theme.furniture.magazine_trim;
-    // Dims come from the one furniture table so the painted block can't drift
-    // from the blocked ground.
-    let Some(fp) =
-        crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).footprint
-    else {
-        return;
-    };
-    let (w, h) = (fp.w as i32, fp.h as i32);
+    // Dims come from the one furniture table, which the hover box reads too.
+    let size = crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).visual;
+    let (w, h) = (size.w as i32, size.h as i32);
     for dy in 0..h {
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;

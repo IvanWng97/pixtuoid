@@ -415,28 +415,72 @@ fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
 // The lounge and pod-decor arms below aren't all reachable from
 // `compute_with_seed` at the tested sizes, so each is placed synthetically.
 
-#[test]
-fn furniture_hit_test_finds_lounge_sofa_via_synthetic_center() {
-    use pixtuoid_scene::layout::Point;
+/// `label` fires on exactly the cells whose pixel falls in a `size` sprite
+/// centred on `pos`, swept one sprite beyond it on every side.
+fn assert_centered_hover_box(
+    layout: &Layout,
+    label: &str,
+    pos: pixtuoid_scene::layout::Point,
+    size: Size,
+) {
+    let (x0, y0) = (pos.x - size.w / 2, pos.y - size.h / 2);
+    for mx in pos.x - size.w..pos.x + size.w {
+        for my in (pos.y - size.h) / 2..(pos.y + size.h) / 2 {
+            let py = my * 2;
+            let inside = mx >= x0 && mx < x0 + size.w && py >= y0 && py < y0 + size.h;
+            assert_eq!(
+                hit_test_furniture(layout, mx, my) == Some(label),
+                inside,
+                "{label} at cell ({mx}, {my})"
+            );
+        }
+    }
+}
+
+/// A layout whose lounge pieces sit where the caller puts them.
+fn layout_with_lounge(lounge: pixtuoid_scene::layout::Lounge) -> Layout {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
+    layout.lounge = Some(lounge);
+    layout
+}
+
+// The lounge is one aggregate, so the co-present pieces are parked far from
+// every probe.
+const PARK: pixtuoid_scene::layout::Point = pixtuoid_scene::layout::Point { x: 130, y: 6 };
+
+#[test]
+fn the_lounge_sofa_hovers_on_its_painted_sprite() {
+    use pixtuoid_scene::layout::{furniture_def, Furniture, Point};
     let c = Point { x: 40, y: 50 };
-    // The lounge is one aggregate, so the co-present pieces are parked far from
-    // every probe in this test.
-    let park = Point { x: 130, y: 6 };
-    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
+    let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
         couch_center: c,
-        floor_lamp: park,
-        side_table: park,
+        floor_lamp: PARK,
+        side_table: PARK,
         fish_tank: None,
     });
-    assert_eq!(
-        hit_test_furniture(&layout, c.x, c.y / 2),
-        Some("Lounge Sofa")
+    assert_centered_hover_box(
+        &layout,
+        "Lounge Sofa",
+        c,
+        furniture_def(Furniture::MeetingSofaBody).visual,
     );
-    // 30px right of center is outside the 20-wide hover box.
-    assert_ne!(
-        hit_test_furniture(&layout, c.x + 30, c.y / 2),
-        Some("Lounge Sofa")
+}
+
+#[test]
+fn the_side_table_hovers_on_its_painted_sprite() {
+    use pixtuoid_scene::layout::{furniture_def, Furniture, Point};
+    let t = Point { x: 40, y: 50 };
+    let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
+        couch_center: PARK,
+        floor_lamp: PARK,
+        side_table: t,
+        fish_tank: None,
+    });
+    assert_centered_hover_box(
+        &layout,
+        "Side Table",
+        t,
+        furniture_def(Furniture::LoungeSideTable).visual,
     );
 }
 
