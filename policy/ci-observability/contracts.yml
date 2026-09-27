@@ -118,16 +118,21 @@
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    The model reads untrusted PR text (a fork's too, once a maintainer comments
-    `/claude-review`) and its summary is published, so any tool beyond reading
-    inside the checkout lets an injection act or publish a runner secret.
-    `--tools` removes every other tool, and `dontAsk` denies a read outside the
-    working directory unless something pre-approves it, which a bare `Read`
-    allow rule does for every path, whether it comes from `--allowedTools`,
-    `--settings` or an action input
-    (code.claude.com/docs/en/agent-sdk/permissions). So the flags and the step's
-    inputs are pinned as whole sets; `--json-schema` keeps the answer structured
-    for the publisher to validate.
+    The model reads untrusted diff text and its answer is published, so any
+    reach beyond reading the checkout lets an injection act, or read a runner
+    secret such as the CLI's own environment and publish it. `--tools` leaves
+    only the built-in read tools, and dontAsk denies a read outside the working
+    directory unless an allow rule pre-approves it, which a bare `Read` rule
+    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
+    flag or action input can add one, so the arguments and the step's inputs
+    are pinned exactly; `--json-schema` keeps the answer structured for the
+    publisher to validate.
+  expected: >-
+    --max-turns ${{ inputs.max_turns }}
+    --max-budget-usd ${{ inputs.max_budget_usd }}
+    --permission-mode dontAsk
+    --tools Read,Glob,Grep
+    --json-schema ${{ steps.schema.outputs.json }}
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
@@ -136,34 +141,23 @@
             "anthropic_service_account_id", "classify_inline_comments", "claude_args",
             "claude_code_oauth_token", "display_report", "github_token",
             "include_fix_links", "prompt", "show_full_output", "track_progress"]
-      and (.[0].with.claude_args
-           | ([scan("(?:^|\\s)(-{1,2}[A-Za-z][-A-Za-z]*)") | .[0]] | sort)
-               == ["--json-schema", "--max-budget-usd", "--max-turns",
-                   "--permission-mode", "--tools"]
-             and ([scan("--permission-mode[\\s=]+(\\S+)")] == [["dontAsk"]])
-             and ([scan("--tools[\\s=]+(\\S+)")] == [["Read,Glob,Grep"]]))
+      and .[0].with.claude_args == $expected
   break:
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       += " --allowedTools Read"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --settings {\"permissions\":{\"allow\":[\"Read\"]}}"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --dangerously-skip-permissions"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --permission-mode\tbypassPermissions"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub(" --json-schema [^ ]+"; "")
+      += " \"--settings\" {\"permissions\":{\"allow\":[\"Read\"]}}"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--permission-mode dontAsk"; "--permission-mode bypassPermissions")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub(" --json-schema [^ ]+"; "")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
       += {"settings": "{}"}
