@@ -120,9 +120,9 @@ fn validate_reports_insufficient_frames_for_single_frame_typing() {
 fn loads_mini_pack() {
     let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
     let idle = pack.animation("idle").expect("idle animation");
-    assert_eq!(idle.frame_ms, 500);
-    assert_eq!(idle.frames.len(), 1);
-    assert_eq!(idle.frames[0].width(), 4);
+    assert_eq!(idle.frame_ms(), 500);
+    assert_eq!(idle.frames().len(), 1);
+    assert_eq!(idle.frames()[0].width(), 4);
 }
 
 #[test]
@@ -148,15 +148,15 @@ fn default_pack_loads_with_required_animations() {
         assert!(pack.animation(name).is_some(), "missing animation: {name}");
     }
     let seated = pack.animation("seated").unwrap();
-    assert_eq!(seated.frames[0].width(), 8);
-    assert_eq!(seated.frames[0].height(), 10);
+    assert_eq!(seated.frames()[0].width(), 8);
+    assert_eq!(seated.frames()[0].height(), 10);
 
     let standing = pack.animation("standing").unwrap();
-    assert_eq!(standing.frames[0].width(), 8);
-    assert_eq!(standing.frames[0].height(), 12);
+    assert_eq!(standing.frames()[0].width(), 8);
+    assert_eq!(standing.frames()[0].height(), 12);
 
     let walking = pack.animation("walking").unwrap();
-    assert_eq!(walking.frames.len(), 2);
+    assert_eq!(walking.frames().len(), 2);
 }
 
 #[test]
@@ -306,12 +306,12 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
     let base = load_pack(base_dir.path()).unwrap();
     let mut custom = load_pack(custom_dir.path()).unwrap();
-    assert_eq!(custom.animation("desk").unwrap().frames[0].width(), 1);
+    assert_eq!(custom.animation("desk").unwrap().frames()[0].width(), 1);
 
     custom.merge_from(&base);
 
     assert_eq!(
-        custom.animation("desk").unwrap().frames[0].width(),
+        custom.animation("desk").unwrap().frames()[0].width(),
         1,
         "merge_from must not overwrite an animation the custom pack already defines"
     );
@@ -328,9 +328,7 @@ fn merge_from_inherits_furniture_only_and_never_clobbers_own() {
 
 #[test]
 fn frame_wider_than_u16_max_errors_instead_of_truncating() {
-    // `rows_to_frame` casts the row width to u16; a 65536-wide row wraps to
-    // width 0 against an untruncated pixels vec, silently violating Frame's
-    // `pixels.len() == width * height` contract.
+    // The width half of `rows_to_frame`'s u16 guard.
     let mut src = String::with_capacity(2 * (u16::MAX as usize + 2) + 16);
     src.push_str("@frame 0\n");
     for _ in 0..=u16::MAX as usize {

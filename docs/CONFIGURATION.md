@@ -60,9 +60,15 @@ pixtuoid validate-pack ./my-pack # check for missing animations
 pixtuoid run --pack-dir ./my-pack
 ```
 
-A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`. See the
-[binary guide](../crates/pixtuoid/CLAUDE.md) for pack loading, and the
-[scene engine guide](../crates/pixtuoid-scene/CLAUDE.md) for the recolor palette keys.
+A **robot** pack ships as an example at `crates/pixtuoid/sprites/robot/`.
+
+Characters are recolored per agent by palette key: whatever a pack draws with `B`
+(shirt), `H` (hair), `S` (skin) or `P` (pants) takes each agent's colors, and
+every other key keeps the pack's color, even one with the same RGB. A `[ramps]`
+entry such as `"h" = { of = "H", level = -1 }` is a key with no color of its own:
+`H` one step darker and cooler (a positive level is lighter and warmer), so it
+follows whatever color replaces `H`. `of` must name a key with an opaque color in
+`[palette]`, and a key is declared in one table, never both.
 
 ## Logging & troubleshooting
 

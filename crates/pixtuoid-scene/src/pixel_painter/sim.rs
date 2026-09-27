@@ -148,7 +148,7 @@ pub(crate) fn sim_step(
     // mask, so only waypoint visitors — stable across frames — contribute.
     let char_w = pack
         .animation("standing")
-        .and_then(|a| a.frames.first())
+        .and_then(|a| a.frames().first())
         .map_or(CHARACTER_SPRITE_W, |f| f.width());
     stores.overlay.clear();
     for agent in &agents {

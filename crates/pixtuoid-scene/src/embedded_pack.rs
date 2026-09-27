@@ -3,10 +3,6 @@
 //! A custom pack is a directory at
 //! `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` holding `pack.toml` + each
 //! `.sprite` file it references (`sprites/default/` is the canonical example).
-//!
-//! Sharp edge: the per-agent recolor (`recolor_frame`) substitutes palette
-//! colors by RGB equality, so each palette key MUST map to a UNIQUE RGB triple
-//! or the pass substitutes both keys and produces artifacts.
 
 use std::path::PathBuf;
 
@@ -87,17 +83,6 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             animation = %name,
             "custom sprite pack ships a density variant whose base piece it does not — \
              its size claim is checked against the default pack's art, not yours"
-        );
-    }
-    for (name, base, got) in &report.mismatched_frame_counts {
-        tracing::warn!(
-            origin,
-            animation = %name,
-            base,
-            got,
-            "sprite pack density variant (the pack's own or one inherited from the default) \
-             has a different frame count from its base — it is skipped wherever a renderer \
-             would pick it"
         );
     }
     report
@@ -374,11 +359,11 @@ mod tests {
         fn exit(&self, _: &tracing::span::Id) {}
     }
 
-    /// The bundled pack is the one no user validates: a mis-sized or short
-    /// `@Nx` variant in it silently falls back to the upscaled base.
+    /// The bundled pack is the one no user validates: a mis-sized `@Nx` variant
+    /// in it silently falls back to the upscaled base.
     #[test]
     fn the_embedded_pack_passes_its_own_validation() {
-        let pack = load_sprite_pack(None).expect("embedded pack");
+        let pack = load_embedded_pack().expect("embedded pack");
         let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
         assert!(!report.has_errors(), "{report:?}");
     }
@@ -483,58 +468,12 @@ mod tests {
         }
     }
 
-    // Wider than the recolor-key check below: EVERY palette key must be a
-    // distinct RGB, because recolor_frame matches by equality. Transparent
-    // (None) keys are exempt.
-    #[test]
-    fn embedded_pack_all_palette_keys_are_distinct_rgbs() {
-        let pack = test_default_pack();
-        let entries: Vec<(char, pixtuoid_core::sprite::Rgb)> = pack
-            .palette
-            .iter()
-            .filter_map(|(k, p)| p.map(|rgb| (k, rgb)))
-            .collect();
-        for i in 0..entries.len() {
-            for j in (i + 1)..entries.len() {
-                assert_ne!(
-                    entries[i].1, entries[j].1,
-                    "palette keys {:?} and {:?} share an RGB — recolor_frame can't distinguish them",
-                    entries[i].0, entries[j].0
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn embedded_pack_recolor_keys_are_distinct_rgbs() {
-        let pack = test_default_pack();
-        let keys = pixtuoid_core::sprite::format::RECOLOR_KEYS;
-        let rgbs: Vec<_> = keys
-            .iter()
-            .map(|&k| {
-                pack.palette
-                    .get(k)
-                    .flatten()
-                    .unwrap_or_else(|| panic!("embedded pack missing recolor key {k:?}"))
-            })
-            .collect();
-        for i in 0..rgbs.len() {
-            for j in (i + 1)..rgbs.len() {
-                assert_ne!(
-                    rgbs[i], rgbs[j],
-                    "recolor keys {:?} and {:?} share an RGB — recolor_frame would swap both",
-                    keys[i], keys[j]
-                );
-            }
-        }
-    }
-
     #[test]
     fn character_sprite_w_matches_the_embedded_pack() {
         let pack = test_default_pack();
         let frame = pack
             .animation("standing")
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .expect("embedded pack carries a standing pose");
         let (w, h) = (frame.width(), frame.height());
         assert_eq!(
@@ -563,7 +502,7 @@ mod tests {
         let pack = test_default_pack();
         let frame = |n: &str| {
             pack.animation(n)
-                .and_then(|a| a.frames.first())
+                .and_then(|a| a.frames().first())
                 .unwrap_or_else(|| panic!("the embedded pack ships {n}"))
         };
         let (base, north) = (frame("desk"), frame("desk_north"));
@@ -617,7 +556,7 @@ mod tests {
         let pack = test_default_pack();
         let w = pack
             .animation("desk")
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .expect("embedded pack carries a desk sprite")
             .width();
         assert_eq!(
@@ -637,7 +576,7 @@ mod tests {
             for anim in [kind.walk_anim(), kind.sit_anim(), kind.sleep_anim()] {
                 let frame = pack
                     .animation(anim)
-                    .and_then(|a| a.frames.first())
+                    .and_then(|a| a.frames().first())
                     .unwrap_or_else(|| panic!("embedded pack carries a '{anim}' sprite"));
                 let hb = kind.hitbox(anim);
                 assert_eq!(

@@ -190,7 +190,7 @@ use background::{
     paint_shadow, time_of_day_look, Ellipse,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
-use palette::{agent_palette, outfit_seed_for, recolor_frame};
+use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::{
     enqueue_room_walls_h, enqueue_room_walls_v, paint_door_jamb_h, paint_door_jamb_v,
@@ -771,11 +771,21 @@ fn enqueue_characters<'a>(
     }
 }
 
-/// The frame to paint for `idx`, clamped into range: a custom `--pack-dir`
-/// animation with fewer frames than the shared cycle's `frame_idx` would
-/// otherwise vanish the sprite. `None` only for a genuinely empty animation.
+/// The frame to paint for `idx`, via [`frame_index`]. `None` only for a
+/// genuinely empty animation.
 pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
-    anim.frames.get(idx).or_else(|| anim.frames.first())
+    anim.frames().get(frame_index(anim, idx))
+}
+
+/// `idx`, or `0` once it runs past the animation: a custom `--pack-dir`
+/// animation with fewer frames than the shared cycle's `frame_idx` would
+/// otherwise vanish the sprite.
+pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
+    if idx < anim.frames().len() {
+        idx
+    } else {
+        0
+    }
 }
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
@@ -937,7 +947,7 @@ fn enqueue_pet<'a>(
     let (pet_w, pet_h) = ctx
         .pack
         .animation(anim_name)
-        .and_then(|a| a.frames.first())
+        .and_then(|a| a.frames().first())
         .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
             (f.width(), f.height())
         });
@@ -994,7 +1004,7 @@ fn enqueue_gateway_mascots<'a>(
         let (mascot_w, mascot_h) = ctx
             .pack
             .animation(anim_name)
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
                 (f.width(), f.height())
             });

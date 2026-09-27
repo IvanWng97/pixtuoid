@@ -1,7 +1,8 @@
 # Skeleton sprite pack — copy this directory and customize.
 #
-# Palette keys B/H/S are recolored per-agent; each MUST map to a unique RGB, since
-# recolor substitutes by RGB equality. '.' is always transparent.
+# Palette keys B/H/S/P (shirt, hair, skin, pants) take each agent's own colors;
+# every other key keeps its color, even one with the same RGB. '.' is always
+# transparent.
 
 [pack]
 name = "skeleton"
@@ -12,7 +13,7 @@ version = "0.1.0"
 B = "#4488cc"       # Body / shirt — recolored per agent
 H = "#443322"       # Hair — recolored per agent
 S = "#e8c090"       # Skin — recolored per agent
-P = "#334455"       # Pants
+P = "#334455"       # Pants — recolored per agent
 W = "#ffffff"       # White accent
 
 # Every animation below is required, and each uses the same placeholder — replace them.

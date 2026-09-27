@@ -446,7 +446,7 @@ fn piece_span(
 /// since a variant's frame is in buffer units and the sort space is logical.
 fn art_size(pack: &Pack, sprite: &str) -> Option<(u16, u16)> {
     pack.animation(sprite)
-        .and_then(|a| a.frames.first())
+        .and_then(|a| a.frames().first())
         .map(|f| (f.width(), f.height()))
 }
 
@@ -768,7 +768,7 @@ fn paint_wall_decor(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(art) = pack.animation(sprite).and_then(|a| a.frames.first()) else {
+    let Some(art) = pack.animation(sprite).and_then(|a| a.frames().first()) else {
         return;
     };
     blit_frame_scaled(
@@ -874,7 +874,7 @@ fn densest_art<'a>(
     name: &str,
     scale: RenderScale,
 ) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
-    let base = pack.animation(name).and_then(|a| a.frames.first())?;
+    let base = pack.animation(name).and_then(|a| a.frames().first())?;
     let s = scale.get();
     // ONE buffer, reused: the lookup key is `<name>@<N>x` and this loop runs
     // per divisor, per piece, per frame — a fresh `String` each time is an
@@ -886,7 +886,7 @@ fn densest_art<'a>(
         }
         key.clear();
         density_variant_name_into(&mut key, name, density);
-        let Some(art) = pack.animation(&key).and_then(|a| a.frames.first()) else {
+        let Some(art) = pack.animation(&key).and_then(|a| a.frames().first()) else {
             continue;
         };
         // Saturating like the validator's twin: the BASE is unbounded and a saturated
@@ -1024,7 +1024,7 @@ fn paint_prop(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let Some(base) = pack.animation(sprite).and_then(|a| a.frames.first()) else {
+    let Some(base) = pack.animation(sprite).and_then(|a| a.frames().first()) else {
         return;
     };
     let art = if mirrored {
@@ -1305,7 +1305,7 @@ mod tests {
     fn base_size(pack: &Pack, name: &str) -> (u16, u16) {
         let f = pack
             .animation(name)
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .expect("the bundled pack has this piece");
         (f.width(), f.height())
     }

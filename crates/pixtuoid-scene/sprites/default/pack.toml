@@ -5,7 +5,7 @@ version = "1"
 [palette]
 "." = "transparent"
 "H" = "#2a1a0e"   # hair (per-agent recolor target)
-"S" = "#f4c79a"   # skin
+"S" = "#f4c79a"   # skin (per-agent recolor target)
 "e" = "#1a1a1a"   # eyes
 "m" = "#a04040"   # mouth
 "B" = "#2e62cf"   # shirt (per-agent recolor target)
@@ -34,7 +34,7 @@ version = "1"
 "r" = "#a83232"   # book spine red
 "b" = "#3a5a9e"   # book spine blue
 "y" = "#c8a64c"   # book spine yellow / paperback
-"q" = "#1d1d1d"   # marker / whiteboard scribble (distinct from eyes #1a1a1a — each palette key must be a unique RGB; recolor_frame matches by RGB)
+"q" = "#1d1d1d"   # marker / whiteboard scribble
 "x" = "#c8a060"   # dog tan fur
 "z" = "#7a5030"   # dog dark brown (ears, tail tip, nose)
 "R" = "#c45050"   # dog nose/tongue

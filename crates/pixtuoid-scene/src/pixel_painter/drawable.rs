@@ -247,7 +247,7 @@ fn blit_centered(frame: &Frame, pos: Point, buf: &mut RgbBuffer) {
 /// Look up `anim_name`, take its FIRST frame, and [`blit_centered`] it on `pos`
 /// — a no-op if the pack lacks the animation.
 fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut RgbBuffer) {
-    if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
+    if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames().first()) {
         blit_centered(f, pos, buf);
     }
 }
@@ -301,7 +301,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             if *has_cabinet {
                 if let Some(cab) = pack
                     .animation("filing_cabinet")
-                    .and_then(|a| a.frames.first())
+                    .and_then(|a| a.frames().first())
                 {
                     let cab_x = desk.x.saturating_sub(cab.width() + 1);
                     let cab_y = desk.y;
@@ -312,13 +312,13 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
             let base_h = pack
                 .animation("desk")
-                .and_then(|a| a.frames.first())
+                .and_then(|a| a.frames().first())
                 .map_or(0, |f| f.height());
             // A taller variant keeps the BASE sprite's bottom row; its extra rows land above `desk.y`.
             let art = desk_sprite_name(*facing)
                 .and_then(|n| pack.animation(n))
                 .or_else(|| pack.animation("desk"))
-                .and_then(|a| a.frames.first());
+                .and_then(|a| a.frames().first());
             // The effects address the monitor by the sprite's OWN row numbering, so this is
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
@@ -392,7 +392,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         DrawableKind::MeetingSofa { pos, mirrored } => {
             if let Some(f) = pack
                 .animation("meeting_sofa")
-                .and_then(|a| a.frames.first())
+                .and_then(|a| a.frames().first())
             {
                 // Mirrored (south sofa / lounge couch): back faces NORTH toward
                 // the windows.
@@ -441,7 +441,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         }
         DrawableKind::WallDecor { kind, pos } => {
             let anim_name = kind.sprite_name();
-            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames.first()) {
+            if let Some(f) = pack.animation(anim_name).and_then(|a| a.frames().first()) {
                 blit_frame(f, pos.x, pos.y, buf);
             }
         }
@@ -586,7 +586,8 @@ fn paint_desk_coffee(
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a `--pack-dir` override.
 pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
-    pack.animation("desk_chair").and_then(|a| a.frames.first())
+    pack.animation("desk_chair")
+        .and_then(|a| a.frames().first())
 }
 
 /// Office-chair back, crossing a back-turned occupant's lower torso.
@@ -914,7 +915,7 @@ mod tests {
         let desk = Point { x: 40, y: 30 };
         let cab = pack
             .animation("filing_cabinet")
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .expect("filing_cabinet anim");
         let bg = Rgb { r: 1, g: 2, b: 3 };
         let mut buf = RgbBuffer::filled(120, 80, bg);

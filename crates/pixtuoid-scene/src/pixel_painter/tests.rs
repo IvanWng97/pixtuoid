@@ -6,7 +6,7 @@ use super::wall::WALL_THICK_H_PX;
 use super::*;
 use crate::layout::stitch_vertical_wall;
 use crate::pose;
-use pixtuoid_core::sprite::{Frame, Palette};
+use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
@@ -443,151 +443,90 @@ fn make_slot_cwd(id_path: &str, cwd: &str, unknown_cwd: bool) -> AgentSlot {
     s
 }
 
-fn base_palette() -> Palette {
-    let mut p = Palette::new();
-    p.insert(
-        'B',
-        Some(Rgb {
-            r: 10,
-            g: 20,
-            b: 30,
-        }),
-    );
-    p.insert(
-        'H',
-        Some(Rgb {
-            r: 40,
-            g: 50,
-            b: 60,
-        }),
-    );
-    p.insert(
-        'S',
-        Some(Rgb {
-            r: 70,
-            g: 80,
-            b: 90,
-        }),
-    );
-    p.insert(
-        'X',
-        Some(Rgb {
-            r: 99,
-            g: 99,
-            b: 99,
-        }),
-    );
-    p
+/// `key`'s color for `slot`, unlit and unburnt.
+fn color_of(slot: &AgentSlot, key: char) -> Pixel {
+    override_of(
+        &agent_overrides(slot, None, crate::burn::BurnTier::Normal),
+        key,
+    )
+}
+
+/// `key`'s color in an agent's overrides.
+fn override_of(overrides: &[(char, Pixel)], key: char) -> Pixel {
+    overrides
+        .iter()
+        .find(|(k, _)| *k == key)
+        .unwrap_or_else(|| panic!("no override for {key:?}"))
+        .1
 }
 
 #[test]
-fn agent_palette_is_deterministic_per_id() {
+fn agent_overrides_are_deterministic_per_id() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let base = base_palette();
-    let a = agent_palette(
-        &base,
-        &make_slot(id, ActivityState::Idle),
-        None,
-        crate::burn::BurnTier::Normal,
-    );
-    let b = agent_palette(
-        &base,
-        &make_slot(id, ActivityState::Idle),
-        None,
-        crate::burn::BurnTier::Normal,
-    );
-    assert_eq!(a.get('B'), b.get('B'));
-    assert_eq!(a.get('H'), b.get('H'));
-    assert_eq!(a.get('S'), b.get('S'));
-}
-
-#[test]
-fn agent_palette_overrides_only_bhs_keys() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let base = base_palette();
-    let p = agent_palette(
-        &base,
-        &make_slot(id, ActivityState::Idle),
-        None,
-        crate::burn::BurnTier::Normal,
-    );
-    assert_eq!(
-        p.get('X'),
-        Some(Some(Rgb {
-            r: 99,
-            g: 99,
-            b: 99
-        }))
-    );
-    assert_ne!(
-        p.get('B'),
-        Some(Some(Rgb {
-            r: 10,
-            g: 20,
-            b: 30
-        }))
-    );
-    assert_ne!(
-        p.get('H'),
-        Some(Some(Rgb {
-            r: 40,
-            g: 50,
-            b: 60
-        }))
-    );
-    assert_ne!(
-        p.get('S'),
-        Some(Some(Rgb {
-            r: 70,
-            g: 80,
-            b: 90
-        }))
-    );
-}
-
-#[test]
-fn agent_palette_glow_tint_shifts_skin_toward_given_color() {
-    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
-    let base = base_palette();
     let slot = make_slot(id, ActivityState::Idle);
-    let unlit = agent_palette(&base, &slot, None, crate::burn::BurnTier::Normal);
-    let green_glow = agent_palette(
-        &base,
+    assert_eq!(
+        agent_overrides(&slot, None, crate::burn::BurnTier::Normal),
+        agent_overrides(&slot, None, crate::burn::BurnTier::Normal)
+    );
+}
+
+/// A key no character frame draws recolors nothing, so every agent would wear
+/// the pack's own color there.
+#[test]
+fn the_embedded_pack_draws_every_key_an_agent_recolors() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let standing = pack.animation("standing").expect("standing pose");
+    let own = &standing.frames()[0];
+    let frame = standing.recolorable(0).expect("frame 0");
+    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    for key in [
+        palette::SHIRT_KEY,
+        palette::HAIR_KEY,
+        palette::SKIN_KEY,
+        palette::PANTS_KEY,
+    ] {
+        assert_ne!(
+            frame.recolored(&[(key, sentinel)]).as_slice(),
+            own.as_slice(),
+            "no standing pixel is drawn in {key:?}"
+        );
+    }
+}
+
+#[test]
+fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
+    let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
+    let slot = make_slot(id, ActivityState::Idle);
+    let normal = crate::burn::BurnTier::Normal;
+    let unlit = agent_overrides(&slot, None, normal);
+    let green_glow = agent_overrides(
         &slot,
         Some(Rgb {
             r: 140,
             g: 240,
             b: 170,
         }),
-        crate::burn::BurnTier::Normal,
+        normal,
     );
-    let blue_glow = agent_palette(
-        &base,
+    let blue_glow = agent_overrides(
         &slot,
         Some(Rgb {
             r: 100,
             g: 160,
             b: 255,
         }),
-        crate::burn::BurnTier::Normal,
+        normal,
     );
-    assert_eq!(unlit.get('B'), green_glow.get('B'));
-    assert_eq!(unlit.get('H'), green_glow.get('H'));
-    assert_eq!(unlit.get('P'), green_glow.get('P'));
-    let (Some(Some(Rgb { r: _, g: ug, b: _ })), Some(Some(Rgb { r: _, g: gg, b: _ }))) =
-        (unlit.get('S'), green_glow.get('S'))
-    else {
-        panic!("S key missing")
-    };
+    for key in [palette::SHIRT_KEY, palette::HAIR_KEY, palette::PANTS_KEY] {
+        assert_eq!(override_of(&unlit, key), override_of(&green_glow, key));
+    }
+    let skin = |o: &[(char, Pixel)]| override_of(o, palette::SKIN_KEY).expect("opaque skin");
+    let (ug, gg) = (skin(&unlit).g, skin(&green_glow).g);
     assert!(
         gg > ug,
         "green glow should push skin green (lit={gg}, unlit={ug})"
     );
-    let (Some(Some(Rgb { r: _, g: _, b: ub })), Some(Some(Rgb { r: _, g: _, b: bb }))) =
-        (unlit.get('S'), blue_glow.get('S'))
-    else {
-        panic!("S key missing")
-    };
+    let (ub, bb) = (skin(&unlit).b, skin(&blue_glow).b);
     assert!(
         bb > ub,
         "blue glow should push skin blue (lit={bb}, unlit={ub})"
@@ -622,102 +561,6 @@ fn tool_glow_tint_maps_known_tools() {
     assert!(bash_tint.is_some(), "Bash should produce glow");
     assert_eq!(idle_tint, None, "Idle should produce no glow");
     assert_ne!(edit_tint, bash_tint, "Edit and Bash should differ");
-}
-
-#[test]
-fn recolor_frame_substitutes_bhs_pixels() {
-    let base = base_palette();
-    let mut agent_pal = base.clone();
-    agent_pal.insert('B', Some(Rgb { r: 200, g: 0, b: 0 }));
-    agent_pal.insert('H', Some(Rgb { r: 0, g: 200, b: 0 }));
-    agent_pal.insert('S', Some(Rgb { r: 0, g: 0, b: 200 }));
-
-    let frame = Frame::from_pixels(
-        5,
-        1,
-        vec![
-            Some(Rgb {
-                r: 10,
-                g: 20,
-                b: 30,
-            }),
-            Some(Rgb {
-                r: 40,
-                g: 50,
-                b: 60,
-            }),
-            Some(Rgb {
-                r: 70,
-                g: 80,
-                b: 90,
-            }),
-            Some(Rgb {
-                r: 123,
-                g: 45,
-                b: 67,
-            }),
-            None,
-        ],
-    );
-
-    let out = recolor_frame(&frame, &agent_pal, &base);
-    assert_eq!(out.width(), 5);
-    assert_eq!(out.height(), 1);
-    assert_eq!(out.as_slice()[0], Some(Rgb { r: 200, g: 0, b: 0 }));
-    assert_eq!(out.as_slice()[1], Some(Rgb { r: 0, g: 200, b: 0 }));
-    assert_eq!(out.as_slice()[2], Some(Rgb { r: 0, g: 0, b: 200 }));
-    assert_eq!(
-        out.as_slice()[3],
-        Some(Rgb {
-            r: 123,
-            g: 45,
-            b: 67
-        })
-    );
-    assert_eq!(out.as_slice()[4], None);
-}
-
-/// A shade of hair must follow the agent's hair, or every shaded head keeps
-/// the default outfit's brown in its shadows.
-#[test]
-fn recolor_frame_carries_a_ramp_shade_to_the_agents_colour() {
-    let mut base = base_palette();
-    base.insert_ramp('h', 'H', -50);
-    let default_shade = base.get('h').flatten().expect("ramp derives");
-    let green = Rgb { r: 0, g: 200, b: 0 };
-    let agent_pal = base.with_override('H', Some(green));
-
-    let frame = Frame::from_pixels(1, 1, vec![Some(default_shade)]);
-    let out = recolor_frame(&frame, &agent_pal, &base);
-    assert_eq!(out.as_slice()[0], Some(green.mixed(-50)));
-}
-
-#[test]
-fn recolor_frame_handles_palette_with_no_overrides() {
-    let base = base_palette();
-    let frame = Frame::from_pixels(
-        3,
-        1,
-        vec![
-            Some(Rgb {
-                r: 10,
-                g: 20,
-                b: 30,
-            }),
-            Some(Rgb {
-                r: 40,
-                g: 50,
-                b: 60,
-            }),
-            Some(Rgb {
-                r: 70,
-                g: 80,
-                b: 90,
-            }),
-        ],
-    );
-    let out = recolor_frame(&frame, &base, &base);
-    assert_eq!(out.as_slice(), frame.as_slice());
 }
 
 fn drawable(anchor_y: u16) -> Drawable<'static> {
@@ -806,7 +649,7 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     let pos = Point { x: 40, y: 30 };
     let anim_h = |name: &str| {
         pack.animation(name)
-            .and_then(|a| a.frames.first())
+            .and_then(|a| a.frames().first())
             .map(|f| f.height())
             .unwrap_or_else(|| panic!("missing pet anim {name}"))
     };
@@ -1221,7 +1064,7 @@ fn desk_z_key_is_the_visual_south() {
     let pack = crate::embedded_pack::test_default_pack();
     let art = pack
         .animation("desk")
-        .and_then(|a| a.frames.first())
+        .and_then(|a| a.frames().first())
         .expect("the embedded pack ships a desk");
     assert_eq!(
         crate::layout::desk_furniture_def().visual.h,
@@ -2072,35 +1915,48 @@ fn weather_gallery_manifest_matches_the_weather_enum() {
 }
 
 #[test]
-fn agent_palette_outfit_is_keyed_by_cwd_not_id() {
-    let base = Palette::default();
+fn agent_overrides_outfit_is_keyed_by_cwd_not_id() {
     let a = make_slot_cwd("/demo/api/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/demo/api/bbbb.jsonl", "/demo/api", false);
-    let pa = agent_palette(&base, &a, None, crate::burn::BurnTier::Normal);
-    let pb = agent_palette(&base, &b, None, crate::burn::BurnTier::Normal);
-    assert_eq!(pa.get('B'), pb.get('B'), "same cwd should share shirt");
-    assert_eq!(pa.get('P'), pb.get('P'), "same cwd should share pants");
+    assert_eq!(
+        color_of(&a, palette::SHIRT_KEY),
+        color_of(&b, palette::SHIRT_KEY),
+        "same cwd should share shirt"
+    );
+    assert_eq!(
+        color_of(&a, palette::PANTS_KEY),
+        color_of(&b, palette::PANTS_KEY),
+        "same cwd should share pants"
+    );
     assert_ne!(
-        (pa.get('H'), pa.get('S')),
-        (pb.get('H'), pb.get('S')),
+        (
+            color_of(&a, palette::HAIR_KEY),
+            color_of(&a, palette::SKIN_KEY)
+        ),
+        (
+            color_of(&b, palette::HAIR_KEY),
+            color_of(&b, palette::SKIN_KEY)
+        ),
         "different agents in the same repo must differ in hair/skin"
     );
 }
 
 #[test]
-fn agent_palette_unknown_cwd_falls_back_to_id_outfit() {
-    let base = Palette::default();
+fn agent_overrides_unknown_cwd_falls_back_to_id_outfit() {
     let unknown = make_slot_cwd("/x/aaaa.jsonl", "/whatever", true);
     let empty = make_slot_cwd("/x/aaaa.jsonl", "", false);
-    let p_unknown = agent_palette(&base, &unknown, None, crate::burn::BurnTier::Normal);
-    let p_empty = agent_palette(&base, &empty, None, crate::burn::BurnTier::Normal);
-    assert_eq!(p_unknown.get('B'), p_empty.get('B'));
-    assert_eq!(p_unknown.get('P'), p_empty.get('P'));
+    assert_eq!(
+        color_of(&unknown, palette::SHIRT_KEY),
+        color_of(&empty, palette::SHIRT_KEY)
+    );
+    assert_eq!(
+        color_of(&unknown, palette::PANTS_KEY),
+        color_of(&empty, palette::PANTS_KEY)
+    );
     let other = make_slot_cwd("/x/zzzz.jsonl", "", false);
-    let p_other = agent_palette(&base, &other, None, crate::burn::BurnTier::Normal);
     assert_ne!(
-        p_other.get('B'),
-        p_empty.get('B'),
+        color_of(&other, palette::SHIRT_KEY),
+        color_of(&empty, palette::SHIRT_KEY),
         "cwd-less agents keep distinct per-id outfits"
     );
 }
@@ -2113,11 +1969,7 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     // or the assertion has no teeth.
     let healed = (0..64)
         .map(|i| make_slot_cwd("/p/heal.jsonl", &format!("/repo/team{i}"), false))
-        .find(|h| {
-            agent_palette(&pack.palette, h, None, crate::burn::BurnTier::Normal).get('B')
-                != agent_palette(&pack.palette, &unknown, None, crate::burn::BurnTier::Normal)
-                    .get('B')
-        })
+        .find(|h| color_of(h, palette::SHIRT_KEY) != color_of(&unknown, palette::SHIRT_KEY))
         .expect("some cwd lands on a different outfit than the fallback");
 
     let anchor = Point { x: 2, y: 2 };
@@ -2178,19 +2030,22 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
 }
 
 #[test]
-fn agent_palette_same_id_different_cwd_changes_outfit() {
-    let base = Palette::default();
+fn agent_overrides_same_id_different_cwd_changes_outfit() {
     let a = make_slot_cwd("/p/aaaa.jsonl", "/demo/api", false);
     let b = make_slot_cwd("/p/aaaa.jsonl", "/demo/infra", false);
-    let pa = agent_palette(&base, &a, None, crate::burn::BurnTier::Normal);
-    let pb = agent_palette(&base, &b, None, crate::burn::BurnTier::Normal);
     assert_ne!(
-        pa.get('B'),
-        pb.get('B'),
+        color_of(&a, palette::SHIRT_KEY),
+        color_of(&b, palette::SHIRT_KEY),
         "different cwds should pick different outfits"
     );
-    assert_eq!(pa.get('H'), pb.get('H'));
-    assert_eq!(pa.get('S'), pb.get('S'));
+    assert_eq!(
+        color_of(&a, palette::HAIR_KEY),
+        color_of(&b, palette::HAIR_KEY)
+    );
+    assert_eq!(
+        color_of(&a, palette::SKIN_KEY),
+        color_of(&b, palette::SKIN_KEY)
+    );
 }
 
 struct OwnedSimStores {
@@ -2300,12 +2155,12 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
     let wide = crate::embedded_pack::test_wide_pack();
     let default = crate::embedded_pack::test_default_pack();
     assert_eq!(
-        wide.animation("standing").expect("standing").frames[0].width(),
+        wide.animation("standing").expect("standing").frames()[0].width(),
         10,
         "the wide fixture's standing frame drives char_w"
     );
     assert_eq!(
-        default.animation("standing").expect("standing").frames[0].width(),
+        default.animation("standing").expect("standing").frames()[0].width(),
         CHARACTER_SPRITE_W,
     );
 
@@ -2822,9 +2677,9 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
     // The sofa is an un-themed sprite, so the painter can't read Theme for it —
     // these consts are deliberate copies of the pack palette's couch fabric.
     let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
-    let c = pack.palette.get('C').flatten().expect("couch fabric key");
+    let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
-        .palette
+        .palette()
         .get('G')
         .flatten()
         .expect("cushion highlight key");
@@ -2843,7 +2698,7 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
-    let seated_h = pack.animation(anim).expect("chair sprite").frames[0].height();
+    let seated_h = pack.animation(anim).expect("chair sprite").frames()[0].height();
     let anchor_y = pos.y - SEAT_RENDER_Y_OFF;
     let bottom = anchor_y + seated_h - 1;
     assert_eq!(
@@ -3589,7 +3444,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
             if let Some(p) = pet_frame {
                 let (w, h) = pack
                     .animation(p.anim)
-                    .and_then(|a| a.frames.first())
+                    .and_then(|a| a.frames().first())
                     .map_or((0, 0), |f| (f.width(), f.height()));
                 if p.pos.x < w / 2
                     || p.pos.x + w.div_ceil(2) > layout.buf_w
@@ -3713,7 +3568,7 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
             for c in &f.characters {
                 let fw = pack
                     .animation(c.anim_name)
-                    .and_then(|a| a.frames.first())
+                    .and_then(|a| a.frames().first())
                     .map_or(w, |fr| fr.width());
                 assert!(
                     c.anchor.x + fw <= layout.buf_w,

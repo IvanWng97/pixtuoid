@@ -108,7 +108,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 Don't "fix" documented design — read the item's comments first. Who owns
 what: **core** owns session lifecycle/identity (registration, dedup,
 first-sight, liveness ladder, subagent parenting, feature boundaries) ·
-**scene** owns look/motion (palette recolor by RGB equality, walk timing,
+**scene** owns look/motion (per-agent palette recolor, walk timing,
 footprints, sky/light invariants, reachability) · **binary** owns
 install/runtime wiring (config rewriting, desk growth, boot order, doctor,
 daemon announce-only) · **tui** owns the flush (popup geometry, hit-test
