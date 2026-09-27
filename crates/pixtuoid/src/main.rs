@@ -1,3 +1,6 @@
+// The lib's rule, for the same reason (see its crate root).
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 mod crash;
 mod logging;
 mod sources_cli;
@@ -52,7 +55,8 @@ fn run() -> Result<()> {
             ColorPreflight::Proceed => {}
             ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
             ColorPreflight::RefuseNoColor => {
-                eprintln!(
+                let _ = writeln!(
+                    std::io::stderr(),
                     "pixtuoid: $NO_COLOR is set, so color output is disabled — the \
                      pixel-art office is 24-bit color with no legible monochrome mode \
                      and would render as unreadable blocks. Unset NO_COLOR (or set \
@@ -62,7 +66,8 @@ fn run() -> Result<()> {
                 return Ok(());
             }
             ColorPreflight::RefuseDumbTerm => {
-                eprintln!(
+                let _ = writeln!(
+                    std::io::stderr(),
                     "pixtuoid: $TERM=dumb — this terminal can't render the pixel-art \
                      office (no cursor addressing or color). Use a graphical terminal \
                      (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, WezTerm), \
@@ -87,7 +92,8 @@ fn run() -> Result<()> {
         std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
     ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
     {
-        eprintln!(
+        let _ = writeln!(
+            std::io::stderr(),
             "⚠ pixtuoid: your terminal didn't confirm truecolor support — the \
              pixel-art office renders in 24-bit color and may look wrong. Use a \
              truecolor terminal (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, \
@@ -117,7 +123,9 @@ fn run() -> Result<()> {
         Cmd::ValidatePack { pack_dir } => validate::validate_pack(&pack_dir),
         Cmd::InitPack { dest, force } => init_pack::init_pack(&dest, force),
         Cmd::Doctor { graphics } => {
-            doctor::run(&logging::log_file_path(), graphics).map(|report| print!("{report}"))
+            let report = doctor::run(&logging::log_file_path(), graphics)?;
+            write!(pixtuoid::cli_stdout(), "{report}")?;
+            Ok(())
         }
         Cmd::Sources { action: None, json } => sources_cli::run_sources_list(json),
         Cmd::Sources {
@@ -145,17 +153,15 @@ fn run() -> Result<()> {
         // `generate_completions_from_executable` / `man` capture stays clean.
         Cmd::Completions { shell } => {
             use clap::CommandFactory;
-            clap_complete::generate(
-                shell,
-                &mut Cli::command(),
-                "pixtuoid",
-                &mut std::io::stdout(),
-            );
+            // Into a buffer first: clap_complete panics on a failed write.
+            let mut script = Vec::new();
+            clap_complete::generate(shell, &mut Cli::command(), "pixtuoid", &mut script);
+            pixtuoid::cli_stdout().write_all(&script)?;
             Ok(())
         }
         Cmd::Man => {
             use clap::CommandFactory;
-            clap_mangen::Man::new(Cli::command()).render(&mut std::io::stdout())?;
+            clap_mangen::Man::new(Cli::command()).render(&mut pixtuoid::cli_stdout())?;
             Ok(())
         }
     }
@@ -193,7 +199,7 @@ fn build_run_config(
         // not just the log file. Headless already has a stderr tracing subscriber,
         // so re-printing there would duplicate.
         for w in &cfg_warnings {
-            eprintln!("⚠ pixtuoid: {w}");
+            let _ = writeln!(std::io::stderr(), "⚠ pixtuoid: {w}");
         }
         warn_broken_installs(&connected);
     }
@@ -230,7 +236,8 @@ fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
                 .as_ref()
                 .map(|v| v.issues.join("; "))
                 .unwrap_or_default();
-            eprintln!(
+            let _ = writeln!(
+                std::io::stderr(),
                 "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
                  reconnect in the Sources panel (press s)",
                 t.core_source

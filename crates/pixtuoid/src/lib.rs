@@ -1,6 +1,10 @@
 //! Public surface for the pixtuoid binary's internals — exposed so examples and
 //! integration tests can import them.
 
+// A print macro panics when its reader leaves (`| head`): CLI output goes
+// through `cli_stdout`, a stderr notice through a `let _ = writeln!`.
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 pub mod aa_text;
 pub(crate) mod audio;
 pub mod cli;
@@ -27,12 +31,10 @@ pub mod tui;
 pub mod validate;
 pub(crate) mod version;
 
-/// Strip ASCII/Unicode control characters from an untrusted string before it
-/// reaches a terminal sink (the headless summary, the `doctor` report, the
-/// Sources-panel path, the `connect`/`disconnect` rows, the pre-altscreen config
-/// warnings). Untrusted wire values can carry control bytes that would
-/// reposition the cursor or inject escapes; one chokepoint so the policy can't
-/// drift across its call sites.
+/// Strip control characters (Cc) and bidi overrides (Cf) from an untrusted
+/// string before it reaches a terminal: such a value can carry control bytes
+/// that reposition the cursor or inject escapes, or reorder the text shown. One chokepoint, so the policy can't drift across
+/// its call sites.
 ///
 /// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
 /// emits its own SGR for level coloring, so a sink-side filter could not tell
@@ -40,18 +42,101 @@ pub(crate) mod version;
 /// they ENTER a record instead — here by this fn's callers, and in the lib by
 /// `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of this
 /// predicate pinned to it by `the_bidi_table_matches_pixtuoid_cores_display_safe`.
-pub(crate) fn strip_control_chars(s: &str) -> String {
+#[doc(hidden)]
+pub fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .collect()
+}
+
+/// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
+/// message keeps its shape.
+#[doc(hidden)]
+pub fn strip_lines(s: &str, sep: &str) -> String {
+    s.lines()
+        .map(strip_control_chars)
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+/// A path as a terminal shows it, stripped. A path from config, env or a
+/// hand-editable hook command is stripped where it enters the text that
+/// quotes it; per-output-site stripping already missed the `doctor` stdout
+/// path once.
+#[doc(hidden)]
+pub fn display_path(p: &std::path::Path) -> String {
+    strip_control_chars(&p.display().to_string())
+}
+
+/// A CLI command's stdout. A reader that leaves early (`| head`) is not a
+/// failure: a write into a broken pipe succeeds, marks the stream
+/// [`closed`](Self::closed) and drops every later write, so the command still
+/// completes its side effects and exits with its own verdict, where `println!`
+/// would panic. Any other write error still fails.
+#[doc(hidden)]
+pub struct CliOut<W> {
+    inner: W,
+    closed: bool,
+}
+
+impl<W: std::io::Write> CliOut<W> {
+    /// `inner`, with a broken pipe treated as the reader leaving.
+    pub(crate) fn new(inner: W) -> Self {
+        Self {
+            inner,
+            closed: false,
+        }
+    }
+
+    /// Whether the reader has gone away.
+    pub(crate) fn closed(&self) -> bool {
+        self.closed
+    }
+
+    fn absorb_broken_pipe<T>(
+        &mut self,
+        result: std::io::Result<T>,
+        on_close: T,
+    ) -> std::io::Result<T> {
+        match result {
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                self.closed = true;
+                Ok(on_close)
+            }
+            other => other,
+        }
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for CliOut<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.closed {
+            return Ok(buf.len());
+        }
+        let result = self.inner.write(buf);
+        self.absorb_broken_pipe(result, buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        let result = self.inner.flush();
+        self.absorb_broken_pipe(result, ())
+    }
+}
+
+/// Stdout for a CLI command's output; see [`CliOut`].
+#[doc(hidden)]
+pub fn cli_stdout() -> CliOut<std::io::Stdout> {
+    CliOut::new(std::io::stdout())
 }
 
 /// A fatal error's chain as `main` returning `Err` would print it, stripped line
 /// by line so the chain keeps its shape. Mechanism for `main`, not contract.
 #[doc(hidden)]
 pub fn fatal_error_text(e: &anyhow::Error) -> String {
-    let chain: Vec<String> = format!("{e:?}").lines().map(strip_control_chars).collect();
-    format!("Error: {}", chain.join("\n"))
+    format!("Error: {}", strip_lines(&format!("{e:?}"), "\n"))
 }
 
 /// The Unicode Bidi_Control characters. `char::is_control` covers only category
@@ -114,8 +199,75 @@ pub(crate) mod test_capture {
 }
 
 #[cfg(test)]
+pub(crate) mod test_io {
+    /// Fails ONE write, the `fail_at`th (0-based), with `kind`, and accepts
+    /// every other: a stream that recovers is what shows a caller stopped
+    /// writing rather than kept hitting the error.
+    pub(crate) struct FailOnce {
+        pub(crate) fail_at: usize,
+        pub(crate) kind: std::io::ErrorKind,
+        pub(crate) calls: usize,
+        pub(crate) written: Vec<u8>,
+    }
+
+    impl FailOnce {
+        pub(crate) fn new(fail_at: usize, kind: std::io::ErrorKind) -> Self {
+            Self {
+                fail_at,
+                kind,
+                calls: 0,
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl std::io::Write for FailOnce {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.calls += 1;
+            if self.calls - 1 == self.fail_at {
+                return Err(self.kind.into());
+            }
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_io::FailOnce;
+
+    #[test]
+    fn a_broken_pipe_closes_the_stream_and_drops_later_writes() {
+        use std::io::Write;
+        let mut out = CliOut::new(FailOnce::new(1, std::io::ErrorKind::BrokenPipe));
+        writeln!(out, "first").expect("written");
+        assert!(!out.closed());
+        writeln!(out, "second").expect("a broken pipe is not an error");
+        assert!(out.closed());
+        writeln!(out, "third").expect("dropped");
+        assert_eq!(out.inner.written, b"first\n");
+    }
+
+    #[test]
+    fn any_other_write_error_still_fails() {
+        use std::io::Write;
+        let mut out = CliOut::new(FailOnce::new(0, std::io::ErrorKind::StorageFull));
+        assert!(writeln!(out, "x").is_err());
+        assert!(!out.closed());
+    }
+
+    #[test]
+    fn display_path_strips_control_chars_from_a_hostile_path() {
+        let hostile = std::path::Path::new("/x/\x1b]0;pwned\x07\x1b[31mhook");
+        let got = display_path(hostile);
+        assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
+        assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
+    }
 
     #[test]
     fn a_fatal_error_keeps_its_chain_and_loses_its_controls() {

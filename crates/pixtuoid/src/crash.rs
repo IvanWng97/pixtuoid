@@ -41,17 +41,24 @@ pub(crate) fn install_crash_hook() {
 
         let issue_url = build_issue_url(version, &panic_msg, &location, &bt_str, &crash_path);
 
-        eprintln!("\n\x1b[1;31mpixtuoid v{version} crashed — sorry about that.\x1b[0m\n");
-        eprintln!("  \x1b[2m{panic_msg}\x1b[0m");
-        eprintln!("  \x1b[2mat {location}\x1b[0m\n");
-        eprintln!("  \x1b[1mHelp fix it\x1b[0m — open this link to file a pre-filled bug report");
-        eprintln!("  (panic + backtrace already included, no typing needed):\n");
-        eprintln!("  \x1b[4m{issue_url}\x1b[0m\n");
-        eprintln!(
-            "  Full backtrace saved to \x1b[2m{}\x1b[0m",
-            crash_path.display()
+        // The payload and the path are text we don't control, so stripped
+        // before they reach the terminal; the URL is percent-encoded already.
+        let (msg, path) = (
+            pixtuoid::strip_lines(&panic_msg, "\n  "),
+            pixtuoid::display_path(&crash_path),
         );
-        eprintln!("  \x1b[2m(attach if the reviewer asks — the link above only carries a truncated trace)\x1b[0m\n");
+        let notice = format!(
+            "\n\x1b[1;31mpixtuoid v{version} crashed — sorry about that.\x1b[0m\n\n\
+             \x20 \x1b[2m{msg}\x1b[0m\n\
+             \x20 \x1b[2mat {location}\x1b[0m\n\n\
+             \x20 \x1b[1mHelp fix it\x1b[0m — open this link to file a pre-filled bug report\n\
+             \x20 (panic + backtrace already included, no typing needed):\n\n\
+             \x20 \x1b[4m{issue_url}\x1b[0m\n\n\
+             \x20 Full backtrace saved to \x1b[2m{path}\x1b[0m\n\
+             \x20 \x1b[2m(attach if the reviewer asks — the link above only carries a truncated trace)\x1b[0m\n\n"
+        );
+        // Not `eprintln!`: a panic inside the hook aborts the process.
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), notice.as_bytes());
     }));
 }
 
@@ -207,6 +214,61 @@ mod tests {
         assert!(
             stderr.contains("crashed"),
             "the crash report itself still belongs on stderr: {stderr:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_hook_strips_the_payload_and_survives_a_broken_stderr() {
+        const CHILD: &str = "PIXTUOID_CRASH_HOOK_PAYLOAD_CHILD";
+        const PAYLOAD: &str = "\u{1b}]0;pwned\u{7}\u{202e}";
+        /// libtest's exit status for a run with a failed test.
+        const LIBTEST_FAILED: i32 = 101;
+        if std::env::var_os(CHILD).is_some() {
+            install_crash_hook();
+            panic!("deliberate panic {PAYLOAD}\nsecond line");
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let state = tmp.path().join(format!("state{PAYLOAD}"));
+        let child = || {
+            let mut c = std::process::Command::new(std::env::current_exe().unwrap());
+            c.args([
+                "--exact",
+                "crash::tests::the_hook_strips_the_payload_and_survives_a_broken_stderr",
+                "--nocapture",
+            ])
+            .env(CHILD, "1")
+            .env("XDG_STATE_HOME", &state);
+            c
+        };
+
+        let out = child().output().unwrap();
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("deliberate panic ]0;pwned\n  second line"),
+            "{stderr:?}"
+        );
+        assert!(
+            stderr.contains("state]0;pwned/pixtuoid/crash.log"),
+            "{stderr:?}"
+        );
+        assert!(
+            !stderr.contains(PAYLOAD) && !stderr.contains('\u{202e}'),
+            "{stderr:?}"
+        );
+
+        // A reader-gone pipe, not a closed fd: std swallows EBADF on stderr.
+        let (reader, writer) = std::io::pipe().unwrap();
+        drop(reader);
+        let status = child()
+            .stdout(std::process::Stdio::null())
+            .stderr(writer)
+            .status()
+            .unwrap();
+        assert_eq!(
+            status.code(),
+            Some(LIBTEST_FAILED),
+            "a failed write in the hook is a second panic, and that aborts: {status:?}"
         );
     }
 

@@ -2,6 +2,7 @@
 //! resolution/rotation.
 
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -46,7 +47,7 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
         match open_private_append(&path) {
             Ok(f) => {
                 let writer = Arc::new(Mutex::new(f));
-                tracing_subscriber::fmt()
+                fmt_builder()
                     .with_env_filter(filter)
                     .with_ansi(false)
                     .with_writer(move || MutexFileWriter(writer.clone()))
@@ -55,18 +56,22 @@ pub(crate) fn init(tui_active: bool, log_level: &'static str) {
             Err(e) => {
                 // The footer's "see log" advice would point at nothing — say so on
                 // the pre-altscreen stderr channel rather than degrading silently.
-                eprintln!(
-                    "⚠ pixtuoid: cannot open log file {} ({e}) — runtime warnings will not be recorded",
-                    path.display()
-                );
+                let _ = writeln!(std::io::stderr(), "{}", log_open_failure(&path, &e));
             }
         }
     } else {
-        tracing_subscriber::fmt()
+        fmt_builder()
             .with_env_filter(make_filter())
             .with_writer(std::io::stderr)
             .init();
     }
+}
+
+/// `tracing_subscriber::fmt()` with its internal-error report off: on a failed
+/// write that report is an `eprintln!`, which panics when stderr is the pipe
+/// that failed, and lands on the TUI's alternate screen when the log file is.
+fn fmt_builder() -> tracing_subscriber::fmt::SubscriberBuilder {
+    tracing_subscriber::fmt().log_internal_errors(false)
 }
 
 /// The tracing directive string to build the `EnvFilter` from: a NON-EMPTY
@@ -176,6 +181,15 @@ impl std::io::Write for MutexFileWriter {
     }
 }
 
+/// The path is [`log_file_path`]'s, which env decides, so it is stripped
+/// before it reaches the terminal.
+fn log_open_failure(path: &Path, e: &std::io::Error) -> String {
+    format!(
+        "⚠ pixtuoid: cannot open log file {} ({e}) — runtime warnings will not be recorded",
+        pixtuoid::display_path(path)
+    )
+}
+
 /// Serializes the bin crate's env-mutating tests: `crash.rs` and `logging.rs` both
 /// drive `XDG_STATE_HOME`/`HOME`, and the bin's unit-test target runs in ONE
 /// process under plain `cargo test`.
@@ -185,6 +199,16 @@ pub(crate) static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_log_open_failure_notice_strips_the_path() {
+        let notice = log_open_failure(
+            Path::new("/tmp/\u{1b}]0;pwned\u{7}\u{202e}.log"),
+            &std::io::ErrorKind::PermissionDenied.into(),
+        );
+        assert_eq!(pixtuoid::strip_control_chars(&notice), notice);
+        assert!(notice.contains("/tmp/]0;pwned.log"), "{notice:?}");
+    }
 
     #[cfg(unix)]
     fn mode_of(p: &Path) -> u32 {
