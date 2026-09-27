@@ -2,12 +2,29 @@ mod crash;
 mod logging;
 mod sources_cli;
 
+use std::io::Write;
+
 use anyhow::Result;
 use clap::Parser;
 use pixtuoid::cli::{Cli, Cmd, SourceArgs, SourcesAction};
 use pixtuoid::{config, doctor, floating, init_pack, install, runtime, setup, sources, validate};
 
-fn main() -> Result<()> {
+/// `ExitCode`, not `Result`: std would print the error chain raw, and pack and
+/// config text reach it; [`pixtuoid::fatal_error_text`] strips it.
+fn main() -> std::process::ExitCode {
+    match run() {
+        Ok(()) => std::process::ExitCode::SUCCESS,
+        Err(e) => {
+            // Not `eprintln!`, which panics when the write fails (a broken
+            // pipe): std's own error path ignores the failure, and a clean
+            // failure must not turn into a crash.
+            let _ = writeln!(std::io::stderr(), "{}", pixtuoid::fatal_error_text(&e));
+            std::process::ExitCode::FAILURE
+        }
+    }
+}
+
+fn run() -> Result<()> {
     crash::install_crash_hook();
     let (log_level, cli_theme, cmd) = Cli::parse().cmd_or_default();
 

@@ -3,7 +3,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::layout::Bounds;
+use crate::layout::{Bounds, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 
 /// Low meeting-room table between the sofas.
 pub(super) fn paint_meeting_table(
@@ -644,10 +644,8 @@ pub(super) fn paint_printer(
     }
 }
 
-/// Rows from a coat rack's pole top to its base: the row it y-sorts at.
-pub(super) const COAT_RACK_BASE_DY: u16 = 7;
-
-/// Meeting-room coat rack centred on `pos`, the pole top.
+/// Meeting-room coat rack centred on `pos`, the pole top, filling
+/// `coat_rack_rect_at(pos)`.
 pub(super) fn paint_coat_rack(
     buf: &mut RgbBuffer,
     pos: crate::layout::Point,
@@ -673,11 +671,15 @@ pub(super) fn paint_coat_rack(
     // Coat blobs on alternating hooks.
     for (i, &coat_color) in coats.iter().enumerate() {
         let hook_y = cy + 1 + (i as u16) * 2;
-        let side: i16 = if i % 2 == 0 { -1 } else { 1 };
-        let hx = (cx as i16 + side) as u16;
+        let left = i % 2 == 0;
+        let x0 = if left {
+            cx.wrapping_sub(COAT_HOOK_DX + COAT_W - 1)
+        } else {
+            cx + COAT_HOOK_DX
+        };
         for dy in 0..2u16 {
-            for dx in 0..2u16 {
-                let px = hx.wrapping_add(if side < 0 { dx.wrapping_sub(1) } else { dx });
+            for dx in 0..COAT_W {
+                let px = x0.wrapping_add(dx);
                 let py = hook_y + dy;
                 if px < buf.width() && py < buf.height() {
                     buf.put(px, py, coat_color);

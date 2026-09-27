@@ -10,15 +10,7 @@ use crate::sprite::{
     Frame, IndexedFrame, Palette, PaletteIndex, Pixel, Rgb, Sprite, PALETTE_CAPACITY,
 };
 
-/// Parse a `.sprite` text file. Returns one Frame per `@frame N` block.
-pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
-    let pixels = palette.resolved();
-    Ok(parse_indexed(src, palette)?
-        .iter()
-        .map(|f| f.resolve(&pixels))
-        .collect())
-}
-
+/// Parse a `.sprite` text file: one indexed frame per `@frame N` block.
 fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<IndexedFrame>> {
     let mut frames: Vec<IndexedFrame> = Vec::new();
     let mut current: Option<Vec<Vec<PaletteIndex>>> = None;
@@ -87,7 +79,7 @@ mod tests {
         let mut pal = Palette::new();
         pal.insert('X', Some(Rgb { r: 1, g: 1, b: 1 }));
         let src = "@frame 0\nX X\nX\n";
-        let err = parse_sprite_file(src, &pal).unwrap_err();
+        let err = parse_indexed(src, &pal).unwrap_err();
         let msg = format!("{err:#}");
         assert!(
             msg.contains("line"),
@@ -343,6 +335,13 @@ impl Pack {
         self.animations.get(key)
     }
 
+    /// The animation registered under `key`, or, when the pack lacks a derived
+    /// piece (`desk_north`), the piece it is drawn to match.
+    pub fn animation_or_source(&self, key: &str) -> Option<&Sprite> {
+        self.animation(key)
+            .or_else(|| derived_source(key).and_then(|source| self.animation(source)))
+    }
+
     /// The names of every animation in this pack.
     pub fn animation_names(&self) -> Vec<String> {
         self.animations.keys().cloned().collect()
@@ -374,13 +373,11 @@ impl Pack {
     /// PIECES, not the densities each is drawn at, so enumerating from it would
     /// probe every piece at every density to find the few `base` ships.
     pub fn merge_from(&mut self, base: &Pack) {
-        // A variant redraws one piece's art, so it only comes along with that
-        // piece: over this pack's own `desk`, the default's `desk@4x` would draw
-        // the default's desk wherever the density picks it.
-        let own_piece = |name: &str| {
-            split_density_variant(name)
-                .is_some_and(|(piece, _)| self.animations.contains_key(piece))
-        };
+        // Art that redraws another piece only comes along with that piece: over
+        // this pack's own `desk`, the default's `desk@4x` or `desk_north` would
+        // draw the default's desk wherever it is picked.
+        let own_piece =
+            |name: &str| redrawn_pieces(name).any(|piece| self.animations.contains_key(piece));
         let inherited: Vec<(String, Sprite)> = base
             .animations
             .iter()
@@ -390,6 +387,26 @@ impl Pack {
             .collect();
         self.animations.extend(inherited);
     }
+}
+
+/// Furniture drawn to match another piece (`desk_north` is `desk` with its
+/// monitor raised), as `(derived, source)`.
+const DERIVED_PIECES: &[(&str, &str)] = &[("desk_north", "desk")];
+
+/// The piece `piece` is drawn to match, if it is a derived one.
+fn derived_source(piece: &str) -> Option<&'static str> {
+    DERIVED_PIECES
+        .iter()
+        .find(|&&(derived, _)| derived == piece)
+        .map(|&(_, source)| source)
+}
+
+/// The pieces whose art `name` redraws: a density variant's base, then the
+/// source that base is derived from.
+fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
+    let variant_base = split_density_variant(name).map(|(base, _)| base);
+    let source = derived_source(variant_base.unwrap_or(name));
+    variant_base.into_iter().chain(source)
 }
 
 /// Assemble a `Pack` from parsed TOML, resolving each frame's source text via
@@ -604,8 +621,8 @@ pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
     OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
 }
 
-/// Environment/furniture animation names a pack MAY provide; [`Pack::merge_from`]
-/// inherits from the base pack any the custom pack lacks.
+/// Environment/furniture animation names a pack MAY provide: the ones
+/// [`Pack::merge_from`] inherits.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
@@ -908,6 +925,42 @@ mod validation_floor_tests {
         let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         custom.merge_from(&base);
         assert!(custom.animation("desk@4x").is_none());
+    }
+
+    #[test]
+    fn every_derived_piece_and_its_source_are_registered_furniture() {
+        for &(derived, source) in DERIVED_PIECES {
+            assert!(is_optional_furniture_animation(derived), "{derived}");
+            assert!(is_optional_furniture_animation(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_pack_without_a_derived_piece_draws_its_source() {
+        let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert!(desk_only.animation_or_source("desk_north").is_some());
+        assert!(desk_only.animation_or_source("plant").is_none());
+    }
+
+    #[test]
+    fn a_pack_that_redraws_a_desk_does_not_inherit_the_defaults_north_desk() {
+        let base = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_north]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk_north@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        custom.merge_from(&base);
+        assert!(custom.animation("desk_north").is_none());
+        assert!(custom.animation("desk_north@4x").is_none());
+
+        let mut bare = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        bare.merge_from(&base);
+        assert!(
+            bare.animation("desk_north").is_some(),
+            "comes along with the desk"
+        );
+        assert!(bare.animation("desk_north@4x").is_some());
     }
 
     #[test]

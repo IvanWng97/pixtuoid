@@ -760,6 +760,7 @@ pub pixtuoid_core::sprite::format::Pack::version: alloc::string::String
 impl pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::animation(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::animation_names(&self) -> alloc::vec::Vec<alloc::string::String>
+pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
@@ -804,7 +805,6 @@ pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::
 pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
-pub fn pixtuoid_core::sprite::format::parse_sprite_file(&str, &pixtuoid_core::sprite::Palette) -> anyhow::Result<alloc::vec::Vec<pixtuoid_core::sprite::Frame>>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
 pub struct pixtuoid_core::sprite::Frame(_)

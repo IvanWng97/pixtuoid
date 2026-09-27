@@ -26,6 +26,7 @@ pub use decor::{
 };
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
+pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
 // ground and the drawn glass meet the band / crossing walls at the same joints

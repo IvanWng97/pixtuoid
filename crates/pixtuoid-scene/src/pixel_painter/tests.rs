@@ -2680,6 +2680,36 @@ fn meeting_chairs_paint_with_backrests_toward_the_table_ends() {
 }
 
 #[test]
+fn a_coat_rack_fills_exactly_its_bounds() {
+    let bg = Rgb { r: 1, g: 2, b: 3 };
+    let mut buf = RgbBuffer::filled(32, 16, bg);
+    let pos = Point { x: 10, y: 2 };
+    furniture::paint_coat_rack(&mut buf, pos, &crate::theme::NORMAL);
+    let painted: Vec<(u16, u16)> = (0..16)
+        .flat_map(|y| (0..32).map(move |x| (x, y)))
+        .filter(|&(x, y)| buf.get(x, y) != bg)
+        .collect();
+    let b = crate::layout::coat_rack_rect_at(pos);
+    let (x0, x1) = (
+        painted.iter().map(|p| p.0).min(),
+        painted.iter().map(|p| p.0).max(),
+    );
+    let (y0, y1) = (
+        painted.iter().map(|p| p.1).min(),
+        painted.iter().map(|p| p.1).max(),
+    );
+    assert_eq!(
+        (x0, y0, x1, y1),
+        (
+            Some(b.x),
+            Some(b.y),
+            Some(b.x + b.width - 1),
+            Some(b.y + b.height - 1)
+        )
+    );
+}
+
+#[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
     // The sofa is an un-themed sprite, so the painter can't read Theme for it —
     // these consts are deliberate copies of the pack palette's couch fabric.
