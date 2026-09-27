@@ -28,9 +28,12 @@
 - id: review-caller-guard
   file: .github/workflows/claude-review.yml
   why: >-
-    This condition is what keeps a draft, a fork's head, a non-default base, a
-    Dependabot PR and an outside commenter from starting a review that runs
-    with the base branch's credentials.
+    This condition decides who can start a review that runs with the base
+    branch's credentials. The pull_request_target arm admits only a ready,
+    same-repo PR against the default branch that Dependabot did not open; the
+    comment arm admits any PR, but only on an owner's, member's or
+    collaborator's command, and leaves a fork head or another base to
+    claude-readonly-review.yml's `reviewable` check.
   expected: >-
     (github.event_name == 'pull_request_target' &&
     github.actor != 'dependabot[bot]' &&
@@ -101,7 +104,6 @@
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@"))]
     | length == 1
       and .[0].with.ref == "${{ github.event.repository.default_branch }}"
-      and .[0].with["fetch-depth"] == 1
       and .[0].with["persist-credentials"] == false
   break:
     - |
@@ -110,9 +112,6 @@
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with)
       |= del(.["persist-credentials"])
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@")) | .with["fetch-depth"])
-      = 0
     - '.jobs.analyze.steps += [{"uses": "actions/checkout@v7"}]'
 
 - id: reviewer-model-only-reads
@@ -216,8 +215,8 @@
   why: >-
     A review that never ran leaves no verdict at HEAD, and #805–#818 merged that
     way. report_absence says so on the PR, so it must run exactly when analyze
-    fails or declines — and without `!cancelled()` or `always()` an implicit
-    success() skips it in precisely that case.
+    fails or declines; the comment on that job explains the status function this
+    takes.
   assert: |
     [.jobs[] | (.if // "") | gsub("\r?\n[ \t]*"; " ")
      | select(contains("needs.analyze.result == 'failure'")
@@ -233,8 +232,8 @@
 - id: reviewer-publisher-only-comments
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    publish can comment on the PR; an action there runs with that scope, and a
-    checkout there stages untrusted files beside it.
+    publish can comment on the PR, and any action there, a checkout included,
+    runs with that scope.
   assert: |
     .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
       and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
@@ -331,9 +330,10 @@
   file: .github/workflows/ci.yml
   why: >-
     A called workflow's job that declares no `permissions:` runs with exactly
-    what its caller passes down, so id-token on any other group call hands a
-    repository-scoped OIDC token to every job in it; ci-tests.yml's are the jobs
-    that declare their own scopes.
+    what its caller passes down, since a called workflow can only downgrade it
+    (docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations),
+    so id-token on any other group call hands a repository-scoped OIDC token to
+    every job in it; ci-tests.yml's are the jobs that declare their own scopes.
   assert: |
     .jobs.tests.permissions == {"contents": "read", "id-token": "write"}
       and ([.jobs | to_entries[]
@@ -468,7 +468,11 @@
     this step and nowhere else, so nothing may skip or soften it and it must
     declare a GH_TOKEN; the recipe also refuses to run tokenless in CI, but only
     while that check stays in the recipe. GitHub resolves env step over job over
-    workflow, and the nearest declaration wins even when it is empty or null.
+    workflow
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#env),
+    and the nearest declaration wins even when it is empty or null, which the
+    workflow parser reads as an empty string (actions/languageservices
+    workflow-parser/src/templates/tokens/null-token.ts).
   assert: |
     (.env // {}) as $workflow_env
     | [.jobs[] | select((has("if") or has("continue-on-error")) | not)
@@ -495,10 +499,10 @@
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml
   why: >-
-    release-plz's default publishes every untagged version on every run, and
-    the release job runs on every push to main, so without this key a version
-    bump that lands outside a release PR ships to crates.io with no human
-    decision.
+    release-plz's default publishes every untagged version on every run
+    (release-plz.dev/docs/config, `release_always`), and the release job runs on
+    every push to main, so without this key a version bump that lands outside a
+    release PR ships to crates.io with no human decision.
   assert: .workspace.release_always == false
   break:
     - del(.workspace.release_always)
