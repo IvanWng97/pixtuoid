@@ -503,10 +503,10 @@ fn may_probe_version(connected: bool, cli_detected: Option<bool>) -> bool {
 /// The focus backend's name and whether it can work AT ALL here — the verdict
 /// travels as data so the focus category never has to sniff a glyph out of the
 /// display string.
-fn activation_backend() -> (String, bool) {
+fn activation_backend() -> (&'static str, bool) {
     #[cfg(target_os = "macos")]
     {
-        ("NSRunningApplication (macOS)".to_string(), true)
+        ("NSRunningApplication (macOS)", true)
     }
     #[cfg(target_os = "linux")]
     {
@@ -516,21 +516,18 @@ fn activation_backend() -> (String, bool) {
             marker_set(std::env::var("WAYLAND_DISPLAY").ok()),
             marker_set(std::env::var("DISPLAY").ok()),
         );
-        (msg.to_string(), healthy)
+        (msg, healthy)
     }
     #[cfg(windows)]
     {
         (
-            "SetForegroundWindow (Windows) — the foreground lock may still deny".to_string(),
+            "SetForegroundWindow (Windows) — the foreground lock may still deny",
             true,
         )
     }
     #[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
     {
-        (
-            "none — focus-jump is unsupported on this OS".to_string(),
-            false,
-        )
+        ("none — focus-jump is unsupported on this OS", false)
     }
 }
 
@@ -596,10 +593,26 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     }
 }
 
+/// A path as the report prints it, [`sanitize`]d when minted: a path comes from
+/// env and config, and no report field can then carry a raw one to the terminal.
+struct ShownPath(String);
+
+impl<P: AsRef<std::path::Path>> From<P> for ShownPath {
+    fn from(p: P) -> Self {
+        Self(crate::install::verify::display_safe(p.as_ref()))
+    }
+}
+
+impl std::fmt::Display for ShownPath {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
 /// One resolved transcript root — the data behind a roots-category row.
 struct RootStatus {
     source: &'static str,
-    root: std::path::PathBuf,
+    root: ShownPath,
     exists: bool,
     /// `(env var, set)` — the override that may explain a missing root.
     env: Option<(&'static str, bool)>,
@@ -618,8 +631,8 @@ fn pack_max_density(source: pixtuoid_scene::embedded_pack::PackSource) -> Result
 /// drivable off a hand-built report (no env/fs/subprocess probing in the
 /// render path).
 struct DoctorReport {
-    log_path: std::path::PathBuf,
-    config_path: std::path::PathBuf,
+    log_path: ShownPath,
+    config_path: ShownPath,
     config_warnings: Vec<String>,
     log_warning: Option<String>,
     term_env: Option<String>,
@@ -631,19 +644,19 @@ struct DoctorReport {
     max_density: u16,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
-    backend: String,
+    backend: &'static str,
     /// `false` = the focus backend itself can't work here (the Wayland /
     /// no-display arms) — the focus category's verdict, not a probe result.
     backend_healthy: bool,
     /// `None` = probe disabled (non-standard projects root).
-    cc_registry: Option<(std::path::PathBuf, bool)>,
-    codex_sessions: (std::path::PathBuf, bool),
+    cc_registry: Option<(ShownPath, bool)>,
+    codex_sessions: (ShownPath, bool),
     /// The other two probe roots (omp's probe is the stamp-less FALLBACK since
     /// the PluginStamp flip). Each is source-specific — omp's is the resolved
     /// sessions dir, grok's a registry FILE — so each needs its own
     /// hand-written row, pinned by `every_focusable_source_appears_in_the_focus_category`.
-    omp_sessions: (std::path::PathBuf, bool),
-    grok_registry: (std::path::PathBuf, bool),
+    omp_sessions: (ShownPath, bool),
+    grok_registry: (ShownPath, bool),
     home_split: Option<String>,
     /// Whether the report may carry ANSI color — see [`report_color`].
     color: bool,
@@ -736,7 +749,7 @@ fn collect_roots() -> Vec<RootStatus> {
             let exists = root.is_dir();
             Some(RootStatus {
                 source: src,
-                root,
+                root: root.into(),
                 exists,
                 env,
             })
@@ -866,8 +879,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
 
     let (backend, backend_healthy) = activation_backend();
     DoctorReport {
-        log_path: log_path.to_path_buf(),
-        config_path,
+        log_path: log_path.into(),
+        config_path: config_path.into(),
         config_warnings,
         log_warning,
         term_env,
@@ -881,10 +894,10 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         roots,
         backend,
         backend_healthy,
-        cc_registry,
-        codex_sessions: (codex_sessions, codex_exists),
-        omp_sessions: (omp_sessions, omp_exists),
-        grok_registry: (grok_registry, grok_exists),
+        cc_registry: cc_registry.map(|(p, exists)| (p.into(), exists)),
+        codex_sessions: (codex_sessions.into(), codex_exists),
+        omp_sessions: (omp_sessions.into(), omp_exists),
+        grok_registry: (grok_registry.into(), grok_exists),
         home_split,
         color,
         truecolor_probe_ran: probe_ok,
@@ -961,11 +974,7 @@ fn config_category(r: &DoctorReport) -> Option<Category> {
     Some(Category {
         status: CategoryStatus::Warn,
         name: "config",
-        summary: format!(
-            "{n} warning{} loading {}",
-            plural_s(n),
-            r.config_path.display()
-        ),
+        summary: format!("{n} warning{} loading {}", plural_s(n), r.config_path),
         details: r
             .config_warnings
             .iter()
@@ -1097,8 +1106,7 @@ fn format_root_row(r: &RootStatus, ink: &Ink) -> String {
         Some((var, true)) => format!(" (via ${var})"),
         _ => String::new(),
     };
-    let path = sanitize(&r.root.display().to_string());
-    let mut line = format!("{DETAIL_INDENT}{:<13} {path}{via}", r.source);
+    let mut line = format!("{DETAIL_INDENT}{:<13} {}{via}", r.source, r.root);
     if !r.exists {
         match r.env {
             Some((var, true)) => {
@@ -1158,7 +1166,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         Some((p, true)) => details.push(format!(
             "{DETAIL_INDENT}{cc_prefix}\u{b7}claude-code — registry probe {} {}",
             ink.ok("\u{2713}"),
-            p.display()
+            p
         )),
         Some((p, false)) => {
             problem = true;
@@ -1166,7 +1174,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
                 "{DETAIL_INDENT}{cc_prefix}\u{b7}claude-code — registry probe {} {} (focus no-ops until \
                  CC writes it)",
                 ink.bad("\u{2717} missing"),
-                p.display()
+                p
             ));
         }
         None => {
@@ -1182,7 +1190,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         details.push(format!(
             "{DETAIL_INDENT}{cx_prefix}\u{b7}codex — rollout probe {} {}",
             ink.ok("\u{2713}"),
-            r.codex_sessions.0.display()
+            r.codex_sessions.0
         ));
     } else {
         problem = true;
@@ -1190,7 +1198,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             "{DETAIL_INDENT}{cx_prefix}\u{b7}codex — rollout probe {} {} (focus no-ops until codex \
              writes it)",
             ink.bad("\u{2717} missing"),
-            r.codex_sessions.0.display()
+            r.codex_sessions.0
         ));
     }
     let om_prefix = prefix_of(pixtuoid_core::source::omp::SOURCE_NAME);
@@ -1198,7 +1206,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         details.push(format!(
             "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe (stamp-less fallback) {} {}",
             ink.ok("\u{2713}"),
-            r.omp_sessions.0.display()
+            r.omp_sessions.0
         ));
     } else {
         // Not a problem row since the PluginStamp flip: the stamped pid is the
@@ -1206,7 +1214,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         details.push(format!(
             "{DETAIL_INDENT}{om_prefix}\u{b7}omp — append-fd probe (stamp-less fallback) {} {}",
             ink.warn("\u{2717} missing"),
-            r.omp_sessions.0.display()
+            r.omp_sessions.0
         ));
     }
     let gk_prefix = prefix_of(pixtuoid_core::source::grok::SOURCE_NAME);
@@ -1214,7 +1222,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
         details.push(format!(
             "{DETAIL_INDENT}{gk_prefix}\u{b7}grok — session registry {} {}",
             ink.ok("\u{2713}"),
-            r.grok_registry.0.display()
+            r.grok_registry.0
         ));
     } else {
         problem = true;
@@ -1222,7 +1230,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             "{DETAIL_INDENT}{gk_prefix}\u{b7}grok — session registry {} {} (focus no-ops until grok \
              writes it)",
             ink.bad("\u{2717} missing"),
-            r.grok_registry.0.display()
+            r.grok_registry.0
         ));
     }
     use registry::FocusChannel;
@@ -1272,7 +1280,7 @@ fn focus_category(r: &DoctorReport, ink: &Ink) -> Category {
             CategoryStatus::Ok
         },
         name: "focus-jump",
-        summary: r.backend.clone(),
+        summary: r.backend.to_string(),
         details,
     }
 }
@@ -1310,9 +1318,9 @@ fn render(r: &DoctorReport) -> String {
     cats.extend(home_split_category(r));
 
     let mut out = String::from("pixtuoid doctor\n");
-    out.push_str(&ink.dim(&format!("log    {}", r.log_path.display())));
+    out.push_str(&ink.dim(&format!("log    {}", r.log_path)));
     out.push('\n');
-    out.push_str(&ink.dim(&format!("config {}", r.config_path.display())));
+    out.push_str(&ink.dim(&format!("config {}", r.config_path)));
     out.push('\n');
     out.push('\n');
     for (i, c) in cats.iter().enumerate() {
@@ -1423,7 +1431,7 @@ mod tests {
     #[test]
     fn focus_category_buckets_sources_from_the_registry() {
         let mut r = summary_report(vec![]);
-        r.backend = "test-backend".into();
+        r.backend = "test-backend";
         let c = focus_category(&r, &Ink { on: false });
         assert_eq!(c.status, CategoryStatus::Ok);
         assert_eq!(c.summary, "test-backend");
@@ -1641,7 +1649,7 @@ mod tests {
             max_density: 1,
             rows,
             roots: vec![],
-            backend: "NSRunningApplication (macOS)".into(),
+            backend: "NSRunningApplication (macOS)",
             backend_healthy: true,
             cc_registry: Some(("/tmp/reg".into(), true)),
             codex_sessions: ("/tmp/cx".into(), true),
@@ -1650,6 +1658,38 @@ mod tests {
             home_split: None,
             color: false,
             truecolor_probe_ran: false,
+        }
+    }
+
+    #[test]
+    fn no_probed_text_reaches_the_terminal_raw() {
+        const EVIL: &str = "\u{1b}]0;pwned\u{7}\u{202e}";
+        let evil = || format!("/tmp/{EVIL}");
+        // A field minted sanitized is poisoned through its minting fn, so the
+        // test covers the mint as well as the render.
+        let mut row = summary_row("cc", "claude-code");
+        row.installed_version = first_sanitized_line(format!("1.0.0 {EVIL}").as_bytes());
+        let mut r = summary_report(vec![row]);
+        r.log_path = evil().into();
+        r.config_path = evil().into();
+        r.config_warnings = vec![evil()];
+        r.log_warning = Some(evil());
+        r.term_env = Some(evil());
+        r.colorterm_env = Some(evil());
+        r.cc_registry = Some((evil().into(), false));
+        r.codex_sessions = (evil().into(), false);
+        r.omp_sessions = (evil().into(), false);
+        r.grok_registry = (evil().into(), false);
+        r.home_split = home_split_advisory(true, Some(&evil()), Some(r"C:\Users\me"));
+        r.roots = vec![RootStatus {
+            source: "claude-code",
+            root: evil().into(),
+            exists: false,
+            env: None,
+        }];
+        let out = render(&r);
+        for line in out.lines() {
+            assert_eq!(sanitize(line), line, "raw control text in:\n{out}");
         }
     }
 
@@ -1717,7 +1757,7 @@ mod tests {
     #[test]
     fn focus_category_warns_on_an_unhealthy_backend() {
         let mut r = summary_report(vec![]);
-        r.backend = "Wayland compositor without a pid-addressable focus channel".into();
+        r.backend = "Wayland compositor without a pid-addressable focus channel";
         r.backend_healthy = false;
         let c = focus_category(&r, &Ink { on: false });
         assert_eq!(c.status, CategoryStatus::Warn);

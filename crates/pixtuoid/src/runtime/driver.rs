@@ -255,14 +255,23 @@ async fn headless_loop(
     // in that gap notifies zero listeners and is silently lost. Boxed so the loop
     // can disarm a registration FAILURE (a resolved future must never be polled
     // again), and injected so that arm is testable in-process.
-    headless_loop_with_signal(scene_rx, health_rx, Box::pin(tokio::signal::ctrl_c())).await
+    headless_loop_with_signal(
+        scene_rx,
+        health_rx,
+        Box::pin(tokio::signal::ctrl_c()),
+        std::io::stdout(),
+    )
+    .await
 }
 
 async fn headless_loop_with_signal(
     mut scene_rx: SceneRx,
     mut health_rx: tokio::sync::watch::Receiver<Vec<pixtuoid_core::source::manager::SourceDeath>>,
     mut ctrl_c: std::pin::Pin<Box<dyn std::future::Future<Output = std::io::Result<()>> + Send>>,
+    out: impl std::io::Write,
 ) -> Result<()> {
+    use std::io::Write;
+    let mut out = crate::CliOut::new(out);
     tracing::info!("pixtuoid headless mode — Ctrl-C to quit");
     let mut prev_summary = String::new();
     // Headless has no TUI footer and no stderr subscriber guarantee, so source
@@ -271,19 +280,25 @@ async fn headless_loop_with_signal(
     let mut deaths_seen = 0usize;
     const HEADLESS_SUMMARY_POLL_INTERVAL_MS: u64 = 200;
     loop {
+        // The summary stream is headless mode's only output, so a reader that
+        // left (`| head`) ends the run.
+        if out.closed() {
+            tracing::info!("stdout closed — shutting down");
+            return Ok(());
+        }
         tokio::select! {
             _ = tokio::time::sleep(Duration::from_millis(HEADLESS_SUMMARY_POLL_INTERVAL_MS)) => {
                 let snapshot = scene_rx.borrow_and_update().clone();
                 let summary = summarize(&snapshot);
                 if summary != prev_summary {
-                    println!("{summary}");
+                    writeln!(out, "{summary}")?;
                     prev_summary = summary;
                 }
             }
             Ok(()) = health_rx.changed() => {
                 let deaths = health_rx.borrow_and_update().clone();
                 for d in super::unseen_deaths(&deaths, &mut deaths_seen) {
-                    println!("{}", super::format_source_death(d));
+                    writeln!(out, "{}", super::format_source_death(d))?;
                 }
             }
             res = &mut ctrl_c => match res {
@@ -366,9 +381,14 @@ mod tests {
     #[tokio::test(start_paused = true)]
     async fn headless_loop_shuts_down_on_a_delivered_signal() {
         let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
-        headless_loop_with_signal(scene_rx, health_rx, Box::pin(async { Ok(()) }))
-            .await
-            .expect("a delivered Ctrl-C is a clean shutdown");
+        headless_loop_with_signal(
+            scene_rx,
+            health_rx,
+            Box::pin(async { Ok(()) }),
+            std::io::sink(),
+        )
+        .await
+        .expect("a delivered Ctrl-C is a clean shutdown");
     }
 
     #[tokio::test(start_paused = true)]
@@ -382,12 +402,36 @@ mod tests {
                 scene_rx,
                 health_rx,
                 Box::pin(async { Err(std::io::Error::other("sigaction denied")) }),
+                std::io::sink(),
             ),
         )
         .await;
         assert!(
             res.is_err(),
             "the loop must still be running after a failed signal registration, got {res:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn headless_loop_ends_when_the_reader_leaves() {
+        struct Gone;
+        impl std::io::Write for Gone {
+            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+                Err(std::io::ErrorKind::BrokenPipe.into())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
+        let res = tokio::time::timeout(
+            Duration::from_secs(5),
+            headless_loop_with_signal(scene_rx, health_rx, Box::pin(std::future::pending()), Gone),
+        )
+        .await;
+        assert!(
+            matches!(res, Ok(Ok(()))),
+            "a closed stdout is a clean end of the run, got {res:?}"
         );
     }
 }

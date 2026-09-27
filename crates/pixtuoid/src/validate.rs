@@ -1,9 +1,10 @@
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations, ValidationReport};
 
-use crate::strip_control_chars;
+use crate::{cli_stderr, cli_stdout, strip_control_chars};
 
 /// The `OK:` line. **homebrew-core contract**: their `test do` asserts this output
 /// matches `OK: pack "skeleton"` after `init-pack`, so the literal prefix + quoting
@@ -31,8 +32,9 @@ fn unknown_line(name: &str) -> String {
 }
 
 pub fn validate_pack(dir: &Path) -> Result<()> {
+    let (mut out, mut err) = (cli_stdout(), cli_stderr());
     let pack = load_pack(dir)?;
-    println!("{}", ok_line(&pack.name, &pack.version));
+    writeln!(out, "{}", ok_line(&pack.name, &pack.version))?;
 
     let report = validate_pack_animations(&pack);
 
@@ -52,40 +54,46 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     // pack's own table, so it is pack input and gets the same sanitising as the
     // unknown keys.
     for name in missing_required {
-        eprintln!("ERROR: missing required animation \"{name}\"");
+        writeln!(err, "ERROR: missing required animation \"{name}\"")?;
     }
     for (name, need, got) in insufficient_frames {
-        eprintln!(
+        writeln!(
+            err,
             "ERROR: \"{}\" needs at least {need} frames, has {got}",
             strip_control_chars(name)
-        );
+        )?;
     }
     for m in mismatched_density {
-        eprintln!(
+        writeln!(
+            err,
             "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
             strip_control_chars(&m.name),
             m.found.0,
             m.found.1,
             m.claimed.0,
             m.claimed.1
-        );
+        )?;
     }
     for name in orphan_variants {
-        eprintln!(
+        writeln!(
+            err,
             "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
             strip_control_chars(name)
-        );
+        )?;
     }
     for name in missing_optional {
-        println!("WARN:  missing optional animation \"{name}\" (will not render)");
+        writeln!(
+            out,
+            "WARN:  missing optional animation \"{name}\" (will not render)"
+        )?;
     }
     for name in unknown {
-        println!("{}", unknown_line(name));
+        writeln!(out, "{}", unknown_line(name))?;
     }
 
     let errors = report.error_count();
     let warnings = missing_optional.len();
-    eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
+    writeln!(err, "\n{} error(s), {} warning(s)", errors, warnings)?;
 
     if report.has_errors() {
         bail!("pack validation failed with {errors} error(s)");

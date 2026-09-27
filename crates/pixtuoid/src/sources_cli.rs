@@ -4,6 +4,7 @@
 //! presenter-free. The `--json` row shape is the typed
 //! [`pixtuoid::sources::OutcomeRow`] wire contract.
 
+use std::io::Write;
 use std::path::Path;
 
 use anyhow::Result;
@@ -15,15 +16,22 @@ use crate::logging::log_file_path;
 /// a DRY RUN: writing to another tool's config is opt-in. Exits non-zero if any
 /// connect fails, so a `$?`-checking caller gets a real signal.
 pub(crate) fn run_setup(yes: bool) -> Result<()> {
+    let mut out = pixtuoid::cli_stdout();
     let detected = sources::detect();
     if detected.is_empty() {
-        println!("No agent CLIs detected on this machine \u{2014} nothing to set up.");
+        writeln!(
+            out,
+            "No agent CLIs detected on this machine \u{2014} nothing to set up."
+        )?;
         return Ok(());
     }
     if !yes {
-        println!("Detected agent CLIs (run `pixtuoid setup --yes` to connect):");
+        writeln!(
+            out,
+            "Detected agent CLIs (run `pixtuoid setup --yes` to connect):"
+        )?;
         for sid in &detected {
-            println!("  {sid}");
+            writeln!(out, "  {sid}")?;
         }
         return Ok(());
     }
@@ -35,9 +43,9 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
             any_failed = true;
         }
         let row = sources::OutcomeRow::new(id, &oc);
-        println!("{}", text_line(&row));
+        writeln!(out, "{}", text_line(&row))?;
         if let Some(hint) = hint_line(&row) {
-            println!("{hint}");
+            writeln!(out, "{hint}")?;
         }
     }
     if any_failed {
@@ -48,6 +56,7 @@ pub(crate) fn run_setup(yes: bool) -> Result<()> {
 
 /// `pixtuoid sources [--json]` — print every source's connection state. Read-only.
 pub(crate) fn run_sources_list(json: bool) -> Result<()> {
+    let mut out = pixtuoid::cli_stdout();
     let cfg = config::config_path();
     // An unreadable log leaves `health` under-reported, so say so instead of
     // returning a silent clean bill — via tracing, never stdout, because `--json`
@@ -58,7 +67,7 @@ pub(crate) fn run_sources_list(json: bool) -> Result<()> {
     }
     let rows = sources::status(&cfg, &log);
     if json {
-        println!("{}", serde_json::to_string_pretty(&rows)?);
+        writeln!(out, "{}", serde_json::to_string_pretty(&rows)?)?;
     } else {
         for r in &rows {
             let (mark, state) = if r.connected {
@@ -68,9 +77,9 @@ pub(crate) fn run_sources_list(json: bool) -> Result<()> {
             } else {
                 ('\u{00b7}', "not installed") // ·
             };
-            println!("{mark} {:<16} {state}", r.id);
+            writeln!(out, "{mark} {:<16} {state}", r.id)?;
             if let Some(h) = &r.health {
-                println!("    {h}");
+                writeln!(out, "    {h}")?;
             }
         }
     }
@@ -133,13 +142,14 @@ fn report_batch(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
 /// Print an [`sources::OutcomeRow`] batch as a text table or the `--json` array —
 /// the schema-backed envelope the Raycast extension parses back.
 fn emit_outcomes(rows: &[sources::OutcomeRow], json: bool) -> Result<()> {
+    let mut out = pixtuoid::cli_stdout();
     if json {
-        println!("{}", serde_json::to_string_pretty(rows)?);
+        writeln!(out, "{}", serde_json::to_string_pretty(rows)?)?;
     } else {
         for row in rows {
-            println!("{}", text_line(row));
+            writeln!(out, "{}", text_line(row))?;
             if let Some(hint) = hint_line(row) {
-                println!("{hint}");
+                writeln!(out, "{hint}")?;
             }
         }
     }

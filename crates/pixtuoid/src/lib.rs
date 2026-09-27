@@ -28,11 +28,9 @@ pub mod validate;
 pub(crate) mod version;
 
 /// Strip ASCII/Unicode control characters from an untrusted string before it
-/// reaches a terminal sink (the headless summary, the `doctor` report, the
-/// Sources-panel path, the `connect`/`disconnect` rows, the pre-altscreen config
-/// warnings). Untrusted wire values can carry control bytes that would
-/// reposition the cursor or inject escapes; one chokepoint so the policy can't
-/// drift across its call sites.
+/// reaches a terminal: such a value can carry control bytes that reposition the
+/// cursor or inject escapes. One chokepoint, so the policy can't drift across
+/// its call sites.
 ///
 /// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
 /// emits its own SGR for level coloring, so a sink-side filter could not tell
@@ -40,10 +38,80 @@ pub(crate) mod version;
 /// they ENTER a record instead — here by this fn's callers, and in the lib by
 /// `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of this
 /// predicate pinned to it by `the_bidi_table_matches_pixtuoid_cores_display_safe`.
-pub(crate) fn strip_control_chars(s: &str) -> String {
+#[doc(hidden)]
+pub fn strip_control_chars(s: &str) -> String {
     s.chars()
         .filter(|c| !c.is_control() && !is_bidi_control(*c))
         .collect()
+}
+
+/// A CLI command's output stream. A reader that goes away early (`| head`) has
+/// what it wanted, so a write into a broken pipe succeeds, marks the stream
+/// [`closed`](Self::closed) and drops every later write, where `println!` would
+/// panic and the crash hook abort. Any other write error still fails.
+#[doc(hidden)]
+pub struct CliOut<W> {
+    inner: W,
+    closed: bool,
+}
+
+impl<W: std::io::Write> CliOut<W> {
+    /// `inner`, with a broken pipe treated as the reader leaving.
+    pub fn new(inner: W) -> Self {
+        Self {
+            inner,
+            closed: false,
+        }
+    }
+
+    /// Whether the reader has gone away.
+    pub fn closed(&self) -> bool {
+        self.closed
+    }
+
+    fn absorb_broken_pipe<T>(
+        &mut self,
+        result: std::io::Result<T>,
+        on_close: T,
+    ) -> std::io::Result<T> {
+        match result {
+            Err(e) if e.kind() == std::io::ErrorKind::BrokenPipe => {
+                self.closed = true;
+                Ok(on_close)
+            }
+            other => other,
+        }
+    }
+}
+
+impl<W: std::io::Write> std::io::Write for CliOut<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.closed {
+            return Ok(buf.len());
+        }
+        let result = self.inner.write(buf);
+        self.absorb_broken_pipe(result, buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        if self.closed {
+            return Ok(());
+        }
+        let result = self.inner.flush();
+        self.absorb_broken_pipe(result, ())
+    }
+}
+
+/// Stdout for a CLI command's output; see [`CliOut`].
+#[doc(hidden)]
+pub fn cli_stdout() -> CliOut<std::io::Stdout> {
+    CliOut::new(std::io::stdout())
+}
+
+/// Stderr for a CLI command's diagnostics; see [`CliOut`].
+#[doc(hidden)]
+pub fn cli_stderr() -> CliOut<std::io::Stderr> {
+    CliOut::new(std::io::stderr())
 }
 
 /// A fatal error's chain as `main` returning `Err` would print it, stripped line
@@ -116,6 +184,55 @@ pub(crate) mod test_capture {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Fails every write with `kind` after accepting `ok` of them.
+    struct Failing {
+        ok: usize,
+        kind: std::io::ErrorKind,
+        written: Vec<u8>,
+    }
+
+    impl std::io::Write for Failing {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            if self.ok == 0 {
+                return Err(self.kind.into());
+            }
+            self.ok -= 1;
+            self.written.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_broken_pipe_closes_the_stream_and_drops_later_writes() {
+        use std::io::Write;
+        let mut out = CliOut::new(Failing {
+            ok: 1,
+            kind: std::io::ErrorKind::BrokenPipe,
+            written: Vec::new(),
+        });
+        writeln!(out, "first").expect("written");
+        assert!(!out.closed());
+        writeln!(out, "second").expect("a broken pipe is not an error");
+        assert!(out.closed());
+        writeln!(out, "third").expect("dropped");
+        assert_eq!(out.inner.written, b"first\n");
+    }
+
+    #[test]
+    fn any_other_write_error_still_fails() {
+        use std::io::Write;
+        let mut out = CliOut::new(Failing {
+            ok: 0,
+            kind: std::io::ErrorKind::StorageFull,
+            written: Vec::new(),
+        });
+        assert!(writeln!(out, "x").is_err());
+        assert!(!out.closed());
+    }
 
     #[test]
     fn a_fatal_error_keeps_its_chain_and_loses_its_controls() {

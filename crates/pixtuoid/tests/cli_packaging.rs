@@ -127,3 +127,40 @@ fn a_fatal_error_into_a_broken_pipe_still_exits_1() {
         .expect("run pixtuoid");
     assert_eq!(status.code(), Some(1), "{status:?}");
 }
+
+/// `pixtuoid … | head` closes the pipe early; the reader got what it wanted,
+/// so that is a clean exit, not a crash or a failure.
+#[test]
+fn every_printing_command_exits_0_when_its_reader_leaves() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let pack = home.path().join("pack");
+    for args in [
+        &["man"][..],
+        &["completions", "bash"],
+        &["sources", "--json"],
+        &["sources"],
+        &["setup"],
+        &["doctor"],
+        &["init-pack", pack.to_str().expect("utf-8 tempdir")],
+        &["validate-pack", pack.to_str().expect("utf-8 tempdir")],
+    ] {
+        let (reader, writer) = std::io::pipe().expect("pipe");
+        drop(reader);
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
+            .args(args)
+            .env_remove("RUST_LOG")
+            .env_remove("PIXTUOID_LOG")
+            .env("HOME", home.path())
+            .env("XDG_CONFIG_HOME", home.path().join("config"))
+            .env("XDG_STATE_HOME", home.path().join("state"))
+            .stdout(writer)
+            .output()
+            .expect("run pixtuoid");
+        assert!(
+            out.status.success(),
+            "{args:?}: {:?}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
