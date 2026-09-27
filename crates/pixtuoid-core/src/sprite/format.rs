@@ -154,6 +154,26 @@ mod tests {
         }
     }
 
+    /// Pack keys are untrusted, and these errors reach the terminal through
+    /// `validate-pack`: a key that is an ESC or a bidi override must come out
+    /// escaped, never raw.
+    #[test]
+    fn a_control_character_key_is_escaped_in_every_ramp_error() {
+        for ramps in [
+            "\"\\u001B\" = { of = \"X\", mix = -50 }",
+            "\"h\" = { of = \"\\u202E\", mix = -50 }",
+            "\"\\u001B\" = { of = \"H\", mix = 0 }",
+        ] {
+            let err = ramp_pack("\"H\"=\"#28140a\"\n\"X\"=\"#010203\"", ramps, "@frame 0\nH")
+                .expect_err(ramps);
+            let msg = format!("{err:#}");
+            assert!(
+                !msg.contains('\u{1b}') && !msg.contains('\u{202e}'),
+                "{ramps}: raw control character in {msg:?}"
+            );
+        }
+    }
+
     #[test]
     fn recolor_ramp_colliding_with_another_key_is_rejected() {
         // #140a05 is exactly #28140a mixed -50, so recoloring would swap `X` too.
@@ -177,7 +197,7 @@ fn parse_row(line: &str, palette: &Palette) -> Result<Vec<Pixel>> {
         }
         let px = palette
             .get(key)
-            .ok_or_else(|| anyhow!("unknown palette key '{key}'"))?;
+            .ok_or_else(|| anyhow!("unknown palette key {key:?}"))?;
         out.push(px);
     }
     Ok(out)
@@ -408,7 +428,7 @@ fn validate_recolor_palette(palette: &Palette) -> Result<()> {
         if let Some(Some(rgb)) = palette.get(key) {
             if let Some(prev) = recolor_rgb.insert(rgb, key) {
                 bail!(
-                    "palette recolor keys '{prev}' and '{key}' share RGB {rgb:?}; \
+                    "palette recolor keys {prev:?} and {key:?} share RGB {rgb:?}; \
                      per-agent recoloring substitutes by color and needs them distinct"
                 );
             }
@@ -421,9 +441,9 @@ fn validate_recolor_palette(palette: &Palette) -> Result<()> {
         if let Some(rgb) = pixel {
             if let Some(&base) = recolor_rgb.get(&rgb) {
                 bail!(
-                    "non-recolor palette key '{key}' and recolor key '{base}' share RGB \
+                    "non-recolor palette key {key:?} and recolor key {base:?} share RGB \
                      {rgb:?}; per-agent recoloring substitutes by color and would recolor \
-                     '{key}' too — give it a distinct color"
+                     {key:?} too — give it a distinct color"
                 );
             }
         }
@@ -446,33 +466,33 @@ fn build_palette(
     let mut palette = Palette::new();
     for (k, v) in map {
         let key = single_char(k, "palette key")?;
-        let pixel = parse_palette_value(v).with_context(|| format!("palette key '{k}'"))?;
+        let pixel = parse_palette_value(v).with_context(|| format!("palette key {k:?}"))?;
         palette.insert(key, pixel);
     }
     for (k, ramp) in ramps {
         let key = single_char(k, "recolor ramp key")?;
         let of = single_char(&ramp.of, "recolor ramp `of`")?;
         if palette.get(key).is_some() {
-            bail!("'{key}' is declared in both [palette] and [recolor_ramps]");
+            bail!("{key:?} is declared in both [palette] and [recolor_ramps]");
         }
         // A recolor key as a ramp would make another ramp's base a ramp too, and
         // whether that base resolved would hang on this map's iteration order.
         if RECOLOR_KEYS.contains(&key) {
-            bail!("'{key}' is a recolor key, so it takes a colour of its own in [palette]");
+            bail!("{key:?} is a recolor key, so it takes a colour of its own in [palette]");
         }
         if !RECOLOR_KEYS.contains(&of) {
             bail!(
-                "recolor ramp '{key}' shades '{of}', which is not a recolor key {RECOLOR_KEYS:?}"
+                "recolor ramp {key:?} shades {of:?}, which is not a recolor key {RECOLOR_KEYS:?}"
             );
         }
         if !matches!(palette.get(of), Some(Some(_))) {
-            bail!("recolor ramp '{key}' shades '{of}', which has no opaque colour in [palette]");
+            bail!("recolor ramp {key:?} shades {of:?}, which has no opaque colour in [palette]");
         }
         // Zero is a second name for the base itself, and a mix of 100 or more is
         // pure white or black whatever the base, so it would never follow a recolor.
         if ramp.mix == 0 || ramp.mix.unsigned_abs() >= 100 {
             bail!(
-                "recolor ramp '{key}' mix {} must be nonzero and within -99..=99",
+                "recolor ramp {key:?} mix {} must be nonzero and within -99..=99",
                 ramp.mix
             );
         }
