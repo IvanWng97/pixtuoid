@@ -56,29 +56,14 @@ impl Ramp {
     /// the distance to the endpoint keeps the hue, where `saturating_add` on an
     /// already-bright channel clips and skews it.
     pub(crate) fn from_base(base: Rgb, tint_pct: u8, shade_pct: u8) -> Self {
+        // The pack's own mix, so a ramp here and a `[recolor_ramps]` shade move
+        // a colour by the same rule. Percentages past 100 saturate to it.
+        let pct = |p: u8| i8::try_from(p.min(100)).unwrap_or(100);
         Self {
-            lit: toward(base, 255, tint_pct),
+            lit: base.mixed(pct(tint_pct)),
             base,
-            shade: toward(base, 0, shade_pct),
+            shade: base.mixed(-pct(shade_pct)),
         }
-    }
-}
-
-/// Move each channel `pct` of the way to `target` (0 or 255).
-fn toward(c: Rgb, target: u8, pct: u8) -> Rgb {
-    let mix = |v: u8| -> u8 {
-        let (v16, t16, p) = (u16::from(v), u16::from(target), u16::from(pct.min(100)));
-        let moved = if t16 >= v16 {
-            v16 + (t16 - v16) * p / 100
-        } else {
-            v16 - (v16 - t16) * p / 100
-        };
-        moved as u8
-    };
-    Rgb {
-        r: mix(c.r),
-        g: mix(c.g),
-        b: mix(c.b),
     }
 }
 
