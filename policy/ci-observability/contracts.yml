@@ -10,7 +10,7 @@
 # of the same document that must turn `assert` red, and every run applies them
 # all; a clause is proven able to fire only while some break falsifies it alone.
 
-# ── The Claude reviewers: untrusted PR text read under pull_request_target
+# ── The Claude reviewers: untrusted PR text read with the base branch's credentials
 
 - id: reviewer-triggers-run-the-base
   file:
@@ -29,11 +29,9 @@
   file: .github/workflows/claude-review.yml
   why: >-
     This condition decides who can start a review that runs with the base
-    branch's credentials. The pull_request_target arm admits only a ready,
-    same-repo PR against the default branch that Dependabot did not open; the
-    comment arm admits any PR, but only on an owner's, member's or
-    collaborator's command, and leaves a fork head or another base to
-    claude-readonly-review.yml's `reviewable` check.
+    branch's credentials. Its comment arm vets only the commenter, and leaves a
+    fork head or another base to claude-readonly-review.yml's `reviewable`
+    check.
   expected: >-
     (github.event_name == 'pull_request_target' &&
     github.actor != 'dependabot[bot]' &&
@@ -97,9 +95,9 @@
 - id: reviewer-checks-out-the-base
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    Checking out the PR head under pull_request_target runs untrusted files
-    beside the base branch's credentials, and a persisted checkout token outlives
-    the step that needed it.
+    Checking out the PR head here runs untrusted files beside the base branch's
+    credentials, and a persisted checkout token outlives the step that needed
+    it.
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("actions/checkout@"))]
     | length == 1
@@ -197,9 +195,10 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     show_full_output prints every Claude message, tool results included, to an
-    Actions log anyone can read — the action's own docs warn it can expose
-    secrets — and this job runs on untrusted PR text with the base branch's
-    credentials.
+    Actions log anyone can read, which the input's own description warns can
+    expose secrets
+    (github.com/anthropics/claude-code-action/blob/v1/action.yml), and this job
+    runs on untrusted PR text with the base branch's credentials.
   assert: |
     [.jobs[].steps[]? | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length >= 1 and all(.[]; (.with.show_full_output // false | tostring) == "false")
@@ -215,8 +214,8 @@
   why: >-
     A review that never ran leaves no verdict at HEAD, and #805–#818 merged that
     way. report_absence says so on the PR, so it must run exactly when analyze
-    fails or declines; the comment on that job explains the status function this
-    takes.
+    fails or declines; report_absence's comment says why its `if:` needs a
+    status function.
   assert: |
     [.jobs[] | (.if // "") | gsub("\r?\n[ \t]*"; " ")
      | select(contains("needs.analyze.result == 'failure'")
@@ -233,7 +232,8 @@
   file: .github/workflows/claude-readonly-review.yml
   why: >-
     publish can comment on the PR, and any action there, a checkout included,
-    runs with that scope.
+    runs with that scope: an action reads `github.token` without being passed it
+    (docs.github.com/en/actions/tutorials/authenticate-with-github_token).
   assert: |
     .jobs.publish.permissions == {"issues": "write", "pull-requests": "write"}
       and ([.jobs.publish.steps[] | select(has("uses"))] | length == 0)
@@ -277,10 +277,10 @@
 - id: claude-refuses-forks-before-the-action
   file: .github/workflows/claude.yml
   why: >-
-    An issue_comment payload carries no pull_request object, so no `if:` can
-    tell a fork's PR from a same-repo one, and the action's tag mode checks the
-    PR head out regardless; the refusal has to be a step that runs before the
-    action stages that tree (#799).
+    An issue_comment payload's `issue.pull_request` holds only URLs, no head, so
+    no `if:` can tell a fork's PR from a same-repo one, and the action's tag
+    mode checks the PR head out regardless; the refusal has to be a step that
+    runs before the action stages that tree (#799).
   assert: |
     [.jobs[] | select(any(.steps[]?; (.uses // "") | startswith("anthropics/claude-code-action@")))] as $jobs
     | ($jobs | length == 1)
@@ -305,7 +305,7 @@
   why: >-
     Both jobs hold actions:write and one runs on pull_request_target, which a
     fork PR author can trigger; that stays harmless only while each job is
-    trigger-guarded, runs one inline step with no action to execute PR content,
+    trigger-guarded, runs one inline step and no action,
     and has no scope beyond actions:write.
   assert: |
     .permissions == {}
@@ -331,7 +331,7 @@
   why: >-
     A called workflow's job that declares no `permissions:` runs with exactly
     what its caller passes down, since a called workflow can only downgrade it
-    (docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations),
+    (docs.github.com/en/actions/reference/workflows-and-actions/reusing-workflow-configurations#supported-keywords-for-jobs-that-call-a-reusable-workflow),
     so id-token on any other group call hands a repository-scoped OIDC token to
     every job in it; ci-tests.yml's are the jobs that declare their own scopes.
   assert: |
@@ -401,9 +401,9 @@
   why: >-
     `gate` is the only CI check branch protection requires. A job skipped
     because a job it needs failed reports "Success" and does not block a merge
-    (GitHub's "Control jobs with conditions"), so `gate` must run on
-    `always()`; it must also need every group call and judge them all through
-    require-jobs, or a group left out is free to fail.
+    (docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions),
+    so `gate` must run on `always()`; it must also need every group call and
+    judge them all through require-jobs, or a group left out is free to fail.
   assert: |
     .jobs.gate as $gate
     | ([.jobs | to_entries[] | select(.value | has("uses")) | .key] | sort) == ($gate.needs | sort)
@@ -469,10 +469,10 @@
     declare a GH_TOKEN; the recipe also refuses to run tokenless in CI, but only
     while that check stays in the recipe. GitHub resolves env step over job over
     workflow
-    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#env),
-    and the nearest declaration wins even when it is empty or null, which the
-    workflow parser reads as an empty string (actions/languageservices
-    workflow-parser/src/templates/tokens/null-token.ts).
+    (docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#env)
+    even when the nearest declaration is empty or null, which the workflow
+    parser reads as an empty string
+    (github.com/actions/languageservices/blob/main/workflow-parser/src/templates/template-reader.ts).
   assert: |
     (.env // {}) as $workflow_env
     | [.jobs[] | select((has("if") or has("continue-on-error")) | not)
@@ -499,10 +499,10 @@
 - id: release-plz-publishes-only-release-prs
   file: release-plz.toml
   why: >-
-    release-plz's default publishes every untagged version on every run
-    (release-plz.dev/docs/config, `release_always`), and the release job runs on
-    every push to main, so without this key a version bump that lands outside a
-    release PR ships to crates.io with no human decision.
+    release-plz's default releases every unpublished package on every run
+    (release-plz.dev/docs/config#the-release_always-field), and the release job
+    runs on every push to main, so without this key a version bump that lands
+    outside a release PR ships to crates.io with no human decision.
   assert: .workspace.release_always == false
   break:
     - del(.workspace.release_always)
