@@ -275,8 +275,7 @@ mod tests {
         let saved_log = std::env::var_os("PIXTUOID_LOG");
         let saved_xdg = std::env::var_os("XDG_STATE_HOME");
         std::env::remove_var("PIXTUOID_LOG");
-        // Build the expectation with the SAME joins the impl uses — a hardcoded
-        // separator would drift under Windows.
+        // Build the expectation with the SAME joins the impl uses.
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
         let cache = home.join(".cache").join("pixtuoid").join("log");
         for rel in ["", "   ", "rel/state", "~/state"] {
@@ -287,8 +286,8 @@ mod tests {
                 "relative XDG_STATE_HOME {rel:?} must fall back to ~/.cache"
             );
         }
-        // A leading slash is not absolute on Windows, so pick per-platform; the impl
-        // composes via `format!`, so mirror that.
+        // A leading slash is not absolute on Windows, so pick per-platform. The
+        // literal's `/` is fine: `PathBuf` equality compares components.
         let abs = if cfg!(windows) { "C:/state" } else { "/state" };
         std::env::set_var("XDG_STATE_HOME", abs);
         assert_eq!(

@@ -237,7 +237,7 @@ fn missing_artifact_issue(missing: &[PathBuf]) -> Vec<String> {
 /// and a code artifact's baked `HOOK_PATH`, so the two can't report a moved binary
 /// differently. `display_path` because the path comes from a hand-editable hook
 /// command and these issues reach a real terminal.
-fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
+pub(crate) fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
     let shown = crate::display_path(p);
     if !p.exists() {
         issues.push(format!("shim binary missing: {shown}"));

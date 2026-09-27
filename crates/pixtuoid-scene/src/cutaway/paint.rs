@@ -595,11 +595,9 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     let Some(pantry) = &layout.pantry else {
         return;
     };
-    let sprite = if pantry.counter_size.w >= crate::layout::PANTRY_COUNTER_LARGE_W {
-        "pantry"
-    } else {
-        "pantry_small"
-    };
+    let sprite = crate::pixel_painter::pantry_counter_anim(
+        pantry.counter_size.w >= crate::layout::PANTRY_COUNTER_LARGE_W,
+    );
     let Some((w, h)) = art_size(pack, sprite) else {
         return;
     };

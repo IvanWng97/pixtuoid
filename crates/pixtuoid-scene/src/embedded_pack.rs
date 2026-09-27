@@ -42,6 +42,9 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unknown: _,
         mismatched_density,
         orphan_variants,
+        // A mixed look still renders every piece: `validate-pack` reports it.
+        partial_sets: _,
+        orphan_derived: _,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -238,6 +241,34 @@ mod tests {
     use super::*;
     use std::fs;
     use std::path::Path;
+
+    /// Core declares [`ART_SETS`] because its validator can't see this crate;
+    /// each row must be a set the painters draw as one look, and no drawn set
+    /// may be missing from it.
+    #[test]
+    fn art_sets_are_the_sets_the_painters_draw() {
+        use pixtuoid_core::sprite::format::ART_SETS;
+        use std::collections::BTreeSet;
+        let set = |names: &[&'static str]| names.iter().copied().collect::<BTreeSet<_>>();
+        let mut drawn = vec![set(&[
+            crate::pixel_painter::pantry_counter_anim(true),
+            crate::pixel_painter::pantry_counter_anim(false),
+        ])];
+        drawn.extend(
+            crate::pet::PetKind::ALL
+                .iter()
+                .map(|k| set(&[k.walk_anim(), k.sit_anim(), k.sleep_anim()])),
+        );
+        drawn.extend(
+            pixtuoid_core::source::registry::registered_source_names()
+                .filter_map(crate::creatures::gateway_mascot_def)
+                .map(|d| set(&[d.walk, d.rest])),
+        );
+        let mut declared: Vec<_> = ART_SETS.iter().map(|s| set(s)).collect();
+        drawn.sort();
+        declared.sort();
+        assert_eq!(declared, drawn);
+    }
 
     /// Copy this crate's char-only pack fixture into `dst`. It carries NO
     /// furniture, so the merge-from-embedded-default assertion isn't

@@ -2,7 +2,10 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::{bail, Result};
-use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations, ValidationReport};
+use pixtuoid_core::sprite::format::{
+    load_pack, validate_pack_animations, PartialSet, ValidationReport,
+    OPTIONAL_FURNITURE_ANIMATIONS,
+};
 
 use crate::{cli_stdout, strip_control_chars};
 
@@ -31,6 +34,43 @@ fn unknown_line(name: &str) -> String {
     )
 }
 
+/// The `WARN:` line for an optional animation the pack leaves out. A missing
+/// piece of furniture is inherited from the default pack (`Pack::merge_from`);
+/// a missing character pose is not, since a robot pack must not fall back to
+/// human sprites, so one of the pack's own poses stands in.
+fn missing_optional_line(name: &str) -> String {
+    let consequence = if OPTIONAL_FURNITURE_ANIMATIONS.contains(&name) {
+        "the default pack's art draws it"
+    } else {
+        "another of the pack's poses stands in"
+    };
+    format!("WARN:  missing optional animation \"{name}\" ({consequence})")
+}
+
+/// The `WARN:` line for an art set the pack ships only part of. The names come
+/// from the registry, not the pack.
+fn partial_set_line(set: &PartialSet) -> String {
+    let quoted = |names: &[String]| {
+        names
+            .iter()
+            .map(|n| format!("\"{n}\""))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    format!(
+        "WARN:  ships {} but not {}: the default pack's art draws those beside it",
+        quoted(&set.shipped),
+        quoted(&set.missing)
+    )
+}
+
+/// The `WARN:` line for a derived piece shipped without its source.
+fn orphan_derived_line(derived: &str, source: &str) -> String {
+    format!(
+        "WARN:  ships \"{derived}\" without \"{source}\": the default pack's \"{source}\" draws beside it"
+    )
+}
+
 pub fn validate_pack(dir: &Path) -> Result<()> {
     let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;
@@ -47,6 +87,8 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         unknown,
         mismatched_density,
         orphan_variants,
+        partial_sets,
+        orphan_derived,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it. `missing_*` names come
@@ -82,17 +124,20 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         );
     }
     for name in missing_optional {
-        writeln!(
-            out,
-            "WARN:  missing optional animation \"{name}\" (will not render)"
-        )?;
+        writeln!(out, "{}", missing_optional_line(name))?;
+    }
+    for set in partial_sets {
+        writeln!(out, "{}", partial_set_line(set))?;
+    }
+    for (derived, source) in orphan_derived {
+        writeln!(out, "{}", orphan_derived_line(derived, source))?;
     }
     for name in unknown {
         writeln!(out, "{}", unknown_line(name))?;
     }
 
     let errors = report.error_count();
-    let warnings = missing_optional.len();
+    let warnings = missing_optional.len() + partial_sets.len() + orphan_derived.len();
     let _ = writeln!(err, "\n{} error(s), {} warning(s)", errors, warnings);
 
     if report.has_errors() {
@@ -113,6 +158,25 @@ mod tests {
         let line = ok_line("ev\u{1b}il", "1.0\u{7}");
         assert!(!line.contains('\u{1b}') && !line.contains('\u{7}'));
         assert!(line.contains("evil") && line.contains("1.0"));
+    }
+
+    #[test]
+    fn a_missing_piece_of_furniture_says_the_default_draws_it() {
+        assert!(missing_optional_line("plant").contains("the default pack's art draws it"));
+        assert!(missing_optional_line("walking_coffee").contains("another of the pack's poses"));
+    }
+
+    #[test]
+    fn a_partial_set_line_names_what_ships_and_what_does_not() {
+        let line = partial_set_line(&PartialSet {
+            shipped: vec!["cat_walk".to_string()],
+            missing: vec!["cat_sit".to_string(), "cat_sleep".to_string()],
+        });
+        assert_eq!(
+            line,
+            "WARN:  ships \"cat_walk\" but not \"cat_sit\", \"cat_sleep\": \
+             the default pack's art draws those beside it"
+        );
     }
 
     #[test]

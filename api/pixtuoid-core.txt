@@ -775,12 +775,32 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::Pack
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pack
+pub struct pixtuoid_core::sprite::format::PartialSet
+pub pixtuoid_core::sprite::format::PartialSet::missing: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::PartialSet::shipped: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for pixtuoid_core::sprite::format::PartialSet
+pub fn pixtuoid_core::sprite::format::PartialSet::clone(&self) -> pixtuoid_core::sprite::format::PartialSet
+impl core::cmp::Eq for pixtuoid_core::sprite::format::PartialSet
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::PartialSet
+pub fn pixtuoid_core::sprite::format::PartialSet::eq(&self, &pixtuoid_core::sprite::format::PartialSet) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::PartialSet
+pub fn pixtuoid_core::sprite::format::PartialSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::PartialSet
+impl core::marker::Freeze for pixtuoid_core::sprite::format::PartialSet
+impl core::marker::Send for pixtuoid_core::sprite::format::PartialSet
+impl core::marker::Sync for pixtuoid_core::sprite::format::PartialSet
+impl core::marker::Unpin for pixtuoid_core::sprite::format::PartialSet
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::PartialSet
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::PartialSet
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::PartialSet
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_variants: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::partial_sets: alloc::vec::Vec<pixtuoid_core::sprite::format::PartialSet>
 pub pixtuoid_core::sprite::format::ValidationReport::unknown: alloc::vec::Vec<alloc::string::String>
 impl pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::error_count(&self) -> usize
@@ -796,6 +816,7 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
+pub const pixtuoid_core::sprite::format::ART_SETS: &[&[&str]]
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]

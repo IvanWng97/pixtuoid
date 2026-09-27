@@ -3,10 +3,11 @@
 //! headless summary loop until Ctrl-C (or, headless, until the summary's
 //! reader leaves).
 //!
-//! This file is structurally unreachable by any headless test (real tokio
-//! runtime + `block_on` + `ctrl_c` + socket bind), so it is coverage-excluded on
-//! its own and must stay a pure shell: the connection-gate DECISION lives in the
-//! sibling [`super::gate`] module, which IS covered and mutation-tested.
+//! `run` and `run_async` are structurally unreachable by a headless test (a
+//! real tokio runtime + `block_on` + `ctrl_c` + socket bind), so this file is
+//! coverage-excluded and stays a shell: a DECISION lives in a covered sibling,
+//! as the connection gate does in [`super::gate`], or behind an injected seam
+//! tested here, as the headless loop's signal and stdout are.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};

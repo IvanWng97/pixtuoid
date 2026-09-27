@@ -136,11 +136,11 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
-// `floor::FloorSession::observe` is the public entry to the sim tick; the step
-// itself and its per-call borrow-set stay crate-internal.
 pub(crate) use background::BaseFillCache;
 #[cfg(test)]
 pub(crate) use furniture::COOLER_WATER;
+// `floor::FloorSession::observe` is the public entry to the sim tick; the step
+// itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
@@ -153,6 +153,16 @@ pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 /// Coffee-machine column range for the compact `pantry_small` sprite (see
 /// [`PANTRY_COFFEE_COLS_LARGE`]).
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
+
+/// The pantry counter sprite: the large kitchen run when the room fits it,
+/// else the compact one.
+pub(crate) fn pantry_counter_anim(large: bool) -> &'static str {
+    if large {
+        "pantry"
+    } else {
+        "pantry_small"
+    }
+}
 
 /// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
 /// `W×H`, drawn with a `NEON_PANEL_BORDER`-px frame on every side. A pixel

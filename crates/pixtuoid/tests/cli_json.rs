@@ -13,16 +13,13 @@
 //! Unix-only: the Windows home-var isolation differs and can't be verified here.
 #![cfg(unix)]
 
+mod common;
+
 #[test]
 fn sources_json_lists_every_source_in_an_isolated_home() {
     let home = tempfile::tempdir().expect("tempdir");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
-        .args(["sources", "--json"])
-        // A minimal PATH survives the `env_clear` only so the spawn works.
-        .env_clear()
-        .env("HOME", home.path())
-        .env("PATH", "/usr/bin:/bin")
+    let output = common::isolated(&["sources", "--json"], home.path())
         .output()
         .expect("run pixtuoid sources --json");
 
@@ -52,11 +49,7 @@ fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
     // install step, fails it, and rolls the flag back.
     std::fs::write(home.path().join(".claude"), b"not a directory").expect("seed .claude file");
 
-    let output = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
-        .args(["connect", "claude-code", "--json"])
-        .env_clear()
-        .env("HOME", home.path())
-        .env("PATH", "/usr/bin:/bin")
+    let output = common::isolated(&["connect", "claude-code", "--json"], home.path())
         .output()
         .expect("run pixtuoid connect --json");
 
@@ -149,16 +142,12 @@ fn headless_replay(sources_toml: &str, budget: std::time::Duration) -> Replay {
 
     // `debug` is required, not incidental: the gate's announcement is the only
     // observable proof of WHY a scene stayed empty.
-    let child = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
-        .args(["run", "--headless"])
+    let child = common::isolated(&["run", "--headless"], home.path())
         .arg("--codex-sessions-root")
         .arg(sessions.path())
         .arg("--projects-root")
         .arg(projects.path())
         .args(["--log-level", "debug"])
-        .env_clear()
-        .env("HOME", home.path())
-        .env("PATH", "/usr/bin:/bin")
         .env("XDG_CONFIG_HOME", cfg.path())
         .env("PIXTUOID_SOCKET", &sock)
         .stdout(out.reopen().expect("stdout handle"))

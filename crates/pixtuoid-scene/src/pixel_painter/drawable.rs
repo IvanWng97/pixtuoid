@@ -365,7 +365,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
         DrawableKind::WaypointPantry { pos, use_large } => {
-            let anim_name = if *use_large { "pantry" } else { "pantry_small" };
+            let anim_name = super::pantry_counter_anim(*use_large);
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.

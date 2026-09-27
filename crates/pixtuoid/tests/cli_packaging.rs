@@ -1,10 +1,13 @@
 //! Integration coverage for what only the REAL binary shows of `main.rs`: the
 //! `completions` / `man` packaging dispatch (the generation itself is unit-tested
 //! in `cli.rs`) — that the SHELL arg reaches clap_complete and that stdout stays
-//! the clean artifact channel homebrew-core captures — the fatal-error exit, and
-//! the clean exit when a printing command's reader leaves.
+//! the clean artifact channel homebrew-core captures — the fatal-error exit, the
+//! clean exit when a printing command's reader leaves, and `validate-pack`'s
+//! report of a pack's mixed look.
 
 use clap::ValueEnum;
+
+mod common;
 
 /// Spawn the built binary with a HERMETIC env: the binary HONORS a non-empty
 /// `$RUST_LOG`, so a test asserting a clean channel must clear it rather than
@@ -109,24 +112,42 @@ fn a_fatal_error_reaches_stderr_stripped_and_exits_1() {
     );
 }
 
+/// A mixed look still renders, so it is reported on stdout and never fails the
+/// pack.
+#[test]
+fn validate_pack_reports_a_mixed_look_and_still_passes() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let pack = tmp.path().join("pack");
+    let pack_str = pack.to_str().expect("utf-8 tempdir");
+    assert!(run(&["init-pack", pack_str]).status.success());
+    let toml = pack.join("pack.toml");
+    let mut text = std::fs::read_to_string(&toml).expect("read pack.toml");
+    text.push_str(
+        "\n[animations.cat_walk]\nframes = [\"placeholder.sprite\", \"placeholder.sprite\"]\n\
+         frame_ms = 200\n\n[animations.desk_north]\nframes = [\"placeholder.sprite\"]\n\
+         frame_ms = 500\n",
+    );
+    std::fs::write(&toml, text).expect("write pack.toml");
+
+    let out = run(&["validate-pack", pack_str]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(out.status.success(), "{stdout}");
+    assert!(
+        stdout.contains("ships \"cat_walk\" but not \"cat_sit\", \"cat_sleep\""),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("ships \"desk_north\" without \"desk\""),
+        "{stdout}"
+    );
+}
+
 /// A pipe whose reader is gone, not a closed fd: std swallows EBADF on
 /// stdout/stderr, so only a write that fails reaches the panic this guards.
 fn reader_gone() -> std::io::PipeWriter {
     let (reader, writer) = std::io::pipe().expect("pipe");
     drop(reader);
     writer
-}
-
-/// `pixtuoid args` from an env cleared to `home` and a minimal PATH, so
-/// nothing reads the developer's real config or CLI dirs.
-#[cfg(unix)]
-fn isolated(args: &[&str], home: &std::path::Path) -> std::process::Command {
-    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"));
-    cmd.args(args)
-        .env_clear()
-        .env("HOME", home)
-        .env("PATH", "/usr/bin:/bin");
-    cmd
 }
 
 #[test]
@@ -191,7 +212,7 @@ fn home_reading_commands_exit_0_when_their_reader_leaves() {
         // detected CLI reaches the apply loop's rows.
         &["setup", "--yes"],
     ] {
-        let out = isolated(args, home.path())
+        let out = common::isolated(args, home.path())
             .stdout(reader_gone())
             .output()
             .expect("run pixtuoid");
@@ -211,8 +232,17 @@ fn home_reading_commands_exit_0_when_their_reader_leaves() {
 #[test]
 fn a_tracing_warning_into_a_gone_stderr_exits_0() {
     let home = tempfile::TempDir::new().expect("tempdir");
+    // The positive control: with stderr kept, the warning this test relies on
+    // is there.
+    let kept = common::isolated(&["sources"], home.path())
+        .env("PIXTUOID_LOG", home.path())
+        .output()
+        .expect("run pixtuoid");
+    let stderr = String::from_utf8_lossy(&kept.stderr);
+    assert!(stderr.contains("log unreadable"), "{stderr}");
+
     let gone = reader_gone();
-    let status = isolated(&["sources"], home.path())
+    let status = common::isolated(&["sources"], home.path())
         .env("PIXTUOID_LOG", home.path())
         .stdout(gone.try_clone().expect("clone pipe"))
         .stderr(gone)

@@ -587,7 +587,7 @@ pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
 /// the render scale leaves the scene's `RenderScale::fit` nothing to round to,
 /// so the pack's real variants go unused.
 ///
-/// 64 is far past any authoring grid, so the bound costs no real pack anything.
+/// The bound is far past any authoring grid, so it costs no real pack anything.
 pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
 
 /// The base piece and density a variant name denotes, if it is one.
@@ -656,6 +656,17 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk_chair",
 ];
 
+/// Furniture a painter shows as one look: the two pantry counters it picks
+/// between by room size, and each creature's poses. [`Pack::merge_from`] fills
+/// whatever a pack leaves out from the default, so shipping part of a set draws
+/// the rest in the default's style beside the pack's own.
+pub const ART_SETS: &[&[&str]] = &[
+    &["pantry", "pantry_small"],
+    &["cat_walk", "cat_sit", "cat_sleep"],
+    &["dog_walk", "dog_sit", "dog_sleep"],
+    &["lobster_walk", "lobster_rest"],
+];
+
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("typing", 2),
     ("walking", 2),
@@ -697,6 +708,15 @@ pub struct DensityMismatch {
     pub found: (u16, u16),
 }
 
+/// A set from [`ART_SETS`] that a pack ships only part of.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PartialSet {
+    /// The set's pieces the pack ships.
+    pub shipped: Vec<String>,
+    /// The set's pieces it leaves to the default pack.
+    pub missing: Vec<String>,
+}
+
 /// Per-category tally of a pack's animation discrepancies.
 #[derive(Debug, Default)]
 pub struct ValidationReport {
@@ -720,6 +740,12 @@ pub struct ValidationReport {
     /// otherwise gets a clean bill of health from the one tool whose job is to
     /// tell them.
     pub orphan_variants: Vec<String>,
+    /// Each [`ART_SETS`] set the pack ships only part of.
+    pub partial_sets: Vec<PartialSet>,
+    /// `(derived, source)` for each derived piece (`desk_north`) the pack ships
+    /// without the piece it is drawn to match: the default's source piece is
+    /// inherited and drawn beside it.
+    pub orphan_derived: Vec<(String, String)>,
 }
 
 impl ValidationReport {
@@ -735,6 +761,8 @@ impl ValidationReport {
             unknown: _,
             mismatched_density,
             orphan_variants,
+            partial_sets: _,
+            orphan_derived: _,
         } = self;
         missing_required.len()
             + insufficient_frames.len()
@@ -836,6 +864,27 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
                 claimed: claimed_variant_size(base_art, *density),
                 found: (art.width(), art.height()),
             });
+        }
+    }
+
+    for set in ART_SETS {
+        let (shipped, missing): (Vec<&str>, Vec<&str>) = set
+            .iter()
+            .partition(|&&name| pack.animation(name).is_some());
+        if !shipped.is_empty() && !missing.is_empty() {
+            let owned = |names: Vec<&str>| names.into_iter().map(String::from).collect();
+            report.partial_sets.push(PartialSet {
+                shipped: owned(shipped),
+                missing: owned(missing),
+            });
+        }
+    }
+
+    for &(derived, source) in DERIVED_PIECES {
+        if pack.animation(derived).is_some() && pack.animation(source).is_none() {
+            report
+                .orphan_derived
+                .push((derived.to_string(), source.to_string()));
         }
     }
 
@@ -977,6 +1026,87 @@ mod validation_floor_tests {
             report.missing_optional
         );
         assert!(!report.unknown.contains(&"desk".to_string()));
+    }
+
+    /// Pins [`ValidationReport::partial_sets`].
+    #[test]
+    fn a_pack_that_ships_part_of_an_art_set_is_told_which_pieces_it_left_out() {
+        let two = "frames=[\"f.sprite\", \"f.sprite\"]\nframe_ms=100\n";
+        let one = "frames=[\"f.sprite\"]\nframe_ms=100\n";
+        let report = validate_pack_animations(&pack_with(&format!(
+            "[animations.cat_walk]\n{two}[animations.pantry]\n{one}"
+        )));
+        assert_eq!(
+            report.partial_sets,
+            vec![
+                PartialSet {
+                    shipped: vec!["pantry".to_string()],
+                    missing: vec!["pantry_small".to_string()],
+                },
+                PartialSet {
+                    shipped: vec!["cat_walk".to_string()],
+                    missing: vec!["cat_sit".to_string(), "cat_sleep".to_string()],
+                },
+            ]
+        );
+
+        let whole = validate_pack_animations(&pack_with(&format!(
+            "[animations.cat_walk]\n{two}[animations.cat_sit]\n{one}\
+             [animations.cat_sleep]\n{one}"
+        )));
+        assert!(whole.partial_sets.is_empty(), "{:?}", whole.partial_sets);
+
+        let untouched = validate_pack_animations(&pack_with(&format!("[animations.plant]\n{one}")));
+        assert!(
+            untouched.partial_sets.is_empty(),
+            "a set the pack leaves out whole is the default's art throughout: {:?}",
+            untouched.partial_sets
+        );
+    }
+
+    /// Pins [`ValidationReport::orphan_derived`].
+    #[test]
+    fn a_derived_piece_shipped_without_its_source_is_reported() {
+        let one = "frames=[\"f.sprite\"]\nframe_ms=100\n";
+        let orphan =
+            validate_pack_animations(&pack_with(&format!("[animations.desk_north]\n{one}")));
+        assert_eq!(
+            orphan.orphan_derived,
+            vec![("desk_north".to_string(), "desk".to_string())]
+        );
+
+        for animations in [
+            format!("[animations.desk]\n{one}[animations.desk_north]\n{one}"),
+            format!("[animations.desk]\n{one}"),
+        ] {
+            let report = validate_pack_animations(&pack_with(&animations));
+            assert!(report.orphan_derived.is_empty(), "{animations}");
+        }
+    }
+
+    #[test]
+    fn a_mixed_look_is_a_warning_not_an_error() {
+        let report = ValidationReport {
+            partial_sets: vec![PartialSet {
+                shipped: vec!["cat_walk".to_string()],
+                missing: vec!["cat_sit".to_string()],
+            }],
+            orphan_derived: vec![("desk_north".to_string(), "desk".to_string())],
+            ..ValidationReport::default()
+        };
+        assert!(!report.has_errors(), "the pack still renders every piece");
+    }
+
+    #[test]
+    fn every_art_set_member_is_registered_furniture_in_one_set_only() {
+        let mut seen = std::collections::HashSet::new();
+        for set in ART_SETS {
+            assert!(set.len() >= 2, "a one-piece set can't be partial: {set:?}");
+            for &name in *set {
+                assert!(is_optional_furniture_animation(name), "{name}");
+                assert!(seen.insert(name), "{name} is in two sets");
+            }
+        }
     }
 
     /// Pins the frame floor's variant arm (`validate_pack_animations`).

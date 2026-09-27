@@ -1,6 +1,7 @@
-//! `pixtuoid doctor` — read-only source self-diagnosis, surfacing the decode-drift
-//! breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift` tracing target) that
-//! otherwise die in the warn-floor log nobody reads. Strictly READ-ONLY: it never writes
+//! `pixtuoid doctor` — a read-only diagnosis of this machine's setup, one
+//! category per concern (`render`). It surfaces what otherwise dies unread: the
+//! decode-drift breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift`
+//! tracing target) in the warn-floor log. Strictly READ-ONLY: it never writes
 //! config (re-connecting hooks stays the Sources panel's job) and never spawns the TUI.
 //! The PROBED CLI is not read-only about its own state — see `may_probe_version`.
 
@@ -14,7 +15,8 @@ pub(crate) struct LogScanResult {
     pub shape_drift: u64,
     /// Sanitized, deduped, capped distinctive values — safe to print.
     pub samples: Vec<String>,
-    /// The leading timestamp token of the latest matching log line.
+    /// The leading timestamp token of the latest matching log line, sanitized:
+    /// `PIXTUOID_LOG` may name any file.
     pub last_ts: Option<String>,
 }
 
@@ -26,7 +28,6 @@ impl LogScanResult {
 
 const SAMPLE_CAP: usize = 5;
 
-// Strip control chars from an untrusted wire value before it reaches stdout.
 use crate::strip_control_chars as sanitize;
 
 struct DriftLine<'a> {
@@ -127,7 +128,7 @@ pub(crate) fn scan_log_for_source(log: &str, source: &str) -> LogScanResult {
             _ => continue,
         }
         if let Some(ts) = line.split_whitespace().next() {
-            r.last_ts = Some(ts.to_string());
+            r.last_ts = Some(sanitize(ts));
         }
     }
     r
@@ -257,7 +258,8 @@ pub(crate) struct DoctorSourceRow {
     pub connected: bool,
     pub has_target: bool,
     pub hooks_installed: bool,
-    /// Raw probe output, if probeable.
+    /// The probe's first output line, sanitized ([`first_sanitized_line`]), if
+    /// probeable.
     pub installed_version: Option<String>,
     /// The version this build's decoder was verified against; `"unknown"` = no
     /// anchor.
@@ -577,8 +579,8 @@ fn linux_activation_backend(
 /// leaves the counts UNKNOWN, and folding those into the same silent empty string made
 /// `doctor` positively assert `✓ no decode drift` off an input it never read.
 ///
-/// The warning is `sanitize`d where it is MINTED, not per presenter: the path comes from
-/// `PIXTUOID_LOG`/`XDG_STATE_HOME`, and sanitizing per reader is how the escape reached one.
+/// The warning is `sanitize`d where it is MINTED, for the reason `crate::display_path`
+/// gives: the path comes from `PIXTUOID_LOG`/`XDG_STATE_HOME`.
 pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     match std::fs::read_to_string(path) {
         Ok(s) => (s, None),
@@ -595,8 +597,8 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
 
 mod shown {
     /// A path as the report prints it, [`display_path`](crate::display_path)ed
-    /// when minted: paths come from env and config, and a private field means
-    /// no path field reaches a render site raw.
+    /// when minted; the private field means no path field reaches a render
+    /// site raw.
     pub(super) struct ShownPath(String);
 
     impl ShownPath {
@@ -723,8 +725,8 @@ impl Ink {
 /// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): a piped `doctor > file`
 /// would emit escapes and block on an answer that cannot come. That gate is the same
 /// `color_preflight` the launcher acts on, so the row matches `run`. `--graphics off` skips
-/// the graphics ask for a second reason — it spends up to 2s on a fact the flag says not
-/// to use.
+/// the graphics ask for a second reason — it spends `graphics::detect`'s whole timeout on a
+/// fact the flag says not to use.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
@@ -1068,7 +1070,7 @@ fn drift_category(r: &DoctorReport, ink: &Ink) -> Category {
             status: CategoryStatus::Warn,
             name: "decode drift",
             // The minted warning already says the counts are not meaningful.
-            summary: sanitize(w),
+            summary: w.clone(),
             details: Vec::new(),
         };
     }
@@ -1669,17 +1671,42 @@ mod tests {
     fn no_probed_text_reaches_the_terminal_raw() {
         const EVIL: &str = "\u{1b}]0;pwned\u{7}\u{202e}";
         let evil = || format!("/tmp/{EVIL}");
-        // Fields with a pure minting fn (`installed_version`, `home_split`,
-        // the `ShownPath`s) are poisoned through it, so the test covers the
-        // mint as well as the render; the rest are poisoned raw and pin the
+        // Fields with a minting fn are poisoned through it, so the test covers
+        // the mint as well as the render; the rest are poisoned raw and pin the
         // render-side strip.
         let mut row = summary_row("cc", "claude-code");
         row.installed_version = first_sanitized_line(format!("1.0.0 {EVIL}").as_bytes());
+        row.diag.drift = scan_log_for_source(
+            &format!(
+                "{EVIL}ts  WARN {}: source=claude-code kind=unknown_event name={EVIL}Hook",
+                drift::TARGET
+            ),
+            "claude-code",
+        );
+        assert!(row.diag.drift.last_ts.is_some(), "the line must parse");
+        let mut issues = Vec::new();
+        crate::install::check_shim_binary(std::path::Path::new(&evil()), &mut issues);
+        row.diag.install = Some(crate::install::verify::SchemaVerifyResult {
+            issues,
+            notes: vec![],
+        });
         let mut r = summary_report(vec![row]);
         r.log_path = ShownPath::new(evil());
         r.config_path = ShownPath::new(evil());
         r.config_warnings = vec![evil()];
-        r.log_warning = Some(evil());
+        // Through `read_log`, which mints it: a directory is no readable log.
+        // Unix-only because Windows refuses a control char in a file name.
+        #[cfg(unix)]
+        {
+            let dir = tempfile::tempdir().unwrap();
+            let unreadable = dir.path().join(format!("log{EVIL}"));
+            std::fs::create_dir(&unreadable).unwrap();
+            r.log_warning = read_log(&unreadable).1;
+            assert!(
+                r.log_warning.is_some(),
+                "a directory must not read as a log"
+            );
+        }
         r.term_env = Some(evil());
         r.colorterm_env = Some(evil());
         r.cc_registry = Some((ShownPath::new(evil()), false));
