@@ -121,15 +121,40 @@
     The model reads untrusted PR text, so any tool beyond reading turns a
     prompt injection into an action; `--json-schema` keeps its answer
     structured, which is what lets the publisher validate it before posting.
+    `--allowedTools` only pre-approves the tools it names, and every other tool
+    stays available: `dontAsk` denies whatever would then prompt, where
+    `bypassPermissions` approves it, and a subagent's own `permissionMode`
+    overrides a dontAsk parent (code.claude.com/docs/en/agent-sdk/permissions).
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
       and (.[0].with.claude_args
            | contains("--allowedTools \"Read,Glob,Grep\"")
              and contains("--json-schema")
+             and ([scan("--permission-mode[\\s=]+(\\S+)")] == [["dontAsk"]])
+             and (contains("dangerously-skip-permissions") | not)
+             and (contains("permissionMode") | not)
              and (contains("Bash") | not)
              and (contains("mcp__github") | not))
   break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--permission-mode dontAsk"; "--permission-mode bypassPermissions")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      |= sub("--permission-mode dontAsk"; "")
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --permission-mode=acceptEdits"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --permission-mode\tbypassPermissions"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --dangerously-skip-permissions"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --agents {\"r\":{\"permissionMode\":\"acceptEdits\"}}"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--allowedTools \"Read,Glob,Grep\""; "")
