@@ -118,56 +118,50 @@
 - id: reviewer-model-only-reads
   file: .github/workflows/claude-readonly-review.yml
   why: >-
-    The model reads untrusted PR text, so any tool beyond reading turns a
-    prompt injection into an action; `--json-schema` keeps its answer
-    structured, which is what lets the publisher validate it before posting.
-    `--allowedTools` only pre-approves the tools it names, and every other tool
-    stays available: `dontAsk` denies whatever would then prompt, where
-    `bypassPermissions` approves it, and a subagent's own `permissionMode`
-    overrides a dontAsk parent (code.claude.com/docs/en/agent-sdk/permissions).
+    The model reads untrusted diff text and its answer is published, so any
+    reach beyond reading the checkout lets an injection act, or read a runner
+    secret such as the CLI's own environment and publish it. `--tools` leaves
+    only the built-in read tools, and dontAsk denies a read outside the working
+    directory unless an allow rule pre-approves it, which a bare `Read` rule
+    does for every path (code.claude.com/docs/en/agent-sdk/permissions). Any
+    flag or action input can add one, so the arguments and the step's inputs
+    are pinned exactly; `--json-schema` keeps the answer structured for the
+    publisher to validate.
+  expected: >-
+    --max-turns ${{ inputs.max_turns }}
+    --max-budget-usd ${{ inputs.max_budget_usd }}
+    --permission-mode dontAsk
+    --tools Read,Glob,Grep
+    --json-schema ${{ steps.schema.outputs.json }}
   assert: |
     [.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@"))]
     | length == 1
-      and (.[0].with.claude_args
-           | contains("--allowedTools \"Read,Glob,Grep\"")
-             and contains("--json-schema")
-             and ([scan("--permission-mode[\\s=]+(\\S+)")] == [["dontAsk"]])
-             and (contains("dangerously-skip-permissions") | not)
-             and (contains("permissionMode") | not)
-             and (contains("Bash") | not)
-             and (contains("mcp__github") | not))
+      and (.[0].with | keys) == [
+            "anthropic_federation_rule_id", "anthropic_organization_id",
+            "anthropic_service_account_id", "classify_inline_comments", "claude_args",
+            "claude_code_oauth_token", "display_report", "github_token",
+            "include_fix_links", "prompt", "show_full_output", "track_progress"]
+      and .[0].with.claude_args == $expected
   break:
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " --allowedTools Read"
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
+      += " \"--settings\" {\"permissions\":{\"allow\":[\"Read\"]}}"
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub("--permission-mode dontAsk"; "--permission-mode bypassPermissions")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--permission-mode dontAsk"; "")
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --permission-mode=acceptEdits"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --permission-mode\tbypassPermissions"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --dangerously-skip-permissions"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --agents {\"r\":{\"permissionMode\":\"acceptEdits\"}}"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      |= sub("--allowedTools \"Read,Glob,Grep\""; "")
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --allowedTools Bash"
-    - |
-      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
-      += " --allowedTools mcp__github__add_comment"
+      |= sub("--tools Read,Glob,Grep"; "--tools Read,Glob,Grep,Bash")
     - |
       (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with.claude_args)
       |= sub(" --json-schema [^ ]+"; "")
-    - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--allowedTools Bash"}}]'
+    - |
+      (.jobs.analyze.steps[] | select((.uses // "") | startswith("anthropics/claude-code-action@")) | .with)
+      += {"settings": "{}"}
+    - '.jobs.analyze.steps += [{"uses": "anthropics/claude-code-action@v1", "with": {"claude_args": "--tools Bash"}}]'
 
 - id: reviewer-model-auth-is-scoped
   file: .github/workflows/claude-readonly-review.yml
