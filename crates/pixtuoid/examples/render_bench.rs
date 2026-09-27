@@ -64,7 +64,9 @@ fn populate(scene: &mut SceneState, now: SystemTime, n: usize) {
 
 fn main() -> Result<()> {
     let theme = theme_by_name("normal").expect("normal theme");
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(None)?;
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )?;
     let base = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 
     // (label, buffer w, h). The rich sizes are what a 192x80-cell terminal needs

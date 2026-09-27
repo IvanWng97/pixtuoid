@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+use pixtuoid_scene::embedded_pack::PackSource;
 
 /// One `[[pets]]` stanza. `kind` is an OPTIONAL raw `String` (NOT a serde-derived
 /// `PetKind`) on purpose: an unknown or typo'd value is warn-skipped in
@@ -135,7 +136,7 @@ pub(crate) fn save_audio_volume(path: &Path, volume: f32) -> Result<()> {
     })
 }
 
-pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
+fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Option<PathBuf> {
     cli_pack_dir.or_else(|| {
         config.pack_dir.as_ref().map(|p| {
             // The ONE tilde-expander: it handles `~\` as well as `~/` and stays in
@@ -146,17 +147,40 @@ pub fn resolve_pack_dir(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> Op
     })
 }
 
+/// The sprite pack `run` draws: `--pack-dir`, else config's `pack-dir` (both
+/// named by the user), else their own pack in `pixtuoid/sprites/` beside the
+/// config when it holds a `pack.toml`, else the bundled default.
+pub fn resolve_pack_source(config: &AppConfig, cli_pack_dir: Option<PathBuf>) -> PackSource {
+    pack_source(config, cli_pack_dir, config_base())
+}
+
+/// [`resolve_pack_source`] against an explicit config base.
+fn pack_source(
+    config: &AppConfig,
+    cli_pack_dir: Option<PathBuf>,
+    base: Option<PathBuf>,
+) -> PackSource {
+    if let Some(dir) = resolve_pack_dir(config, cli_pack_dir) {
+        return PackSource::Explicit(dir);
+    }
+    base.map(|b| b.join("pixtuoid").join("sprites"))
+        .filter(|dir| dir.join("pack.toml").is_file())
+        .map_or(PackSource::Bundled, PackSource::Discovered)
+}
+
+/// The directory `pixtuoid/` config lives under: a set `XDG_CONFIG_HOME`, else
+/// `$HOME/.config`. Empty or relative `XDG_CONFIG_HOME` is invalid (XDG spec),
+/// so `nonempty_abs_env` falls through rather than resolving against the CWD.
+fn config_base() -> Option<PathBuf> {
+    crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME")
+        .or_else(|| pixtuoid_core::platform::user_home_opt().map(|h| h.join(".config")))
+}
+
 pub fn config_path() -> PathBuf {
-    // Empty/relative XDG_CONFIG_HOME is invalid (XDG spec), so `nonempty_abs_env`
-    // falls to $HOME/.config rather than a CWD-relative `pixtuoid/config.toml`.
-    let xdg = crate::install::io::nonempty_abs_env("XDG_CONFIG_HOME");
-    if let Some(base) = xdg {
-        return base.join("pixtuoid").join("config.toml");
-    }
-    if let Some(home) = pixtuoid_core::platform::user_home_opt() {
-        return home.join(".config").join("pixtuoid").join("config.toml");
-    }
-    PathBuf::from(".config/pixtuoid/config.toml")
+    config_base().map_or_else(
+        || PathBuf::from(".config/pixtuoid/config.toml"),
+        |base| base.join("pixtuoid").join("config.toml"),
+    )
 }
 
 /// Report ONE user-facing config warning to BOTH of its sinks from a single

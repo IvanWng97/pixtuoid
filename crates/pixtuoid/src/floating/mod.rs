@@ -34,7 +34,7 @@ pub fn run(cfg: RunConfig) -> Result<()> {
         socket,
         projects_root,
         codex_sessions_root,
-        pack_dir,
+        pack,
         theme,
         pets,
         connected,
@@ -44,16 +44,13 @@ pub fn run(cfg: RunConfig) -> Result<()> {
     } = cfg;
     let app_config = config::load(&config_path, &mut Vec::new());
     let floating_cfg = config::resolve_floating(&app_config);
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack_dir)
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(pack)
         .context("loading the sprite pack for the floating window")?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .context("building the floating tokio runtime")?;
-    // The pipeline boots in `resumed` (`PipelineBoot::spawn`), which enters the
-    // runtime explicitly — nothing left on this path spawns, so `run` holds no
-    // `rt.enter()` guard.
     let connected = ConnectedSources::new(connected);
     let socket_path = socket.unwrap_or_else(ClaudeCodeSource::default_socket_path);
 
@@ -116,9 +113,9 @@ pub(crate) struct PipelineBoot {
     codex_sessions_root: Option<std::path::PathBuf>,
     connected: ConnectedSources,
     proxy: winit::event_loop::EventLoopProxy<FloatingEvent>,
-    /// A cheap handle so `resumed` can `enter()` the runtime explicitly instead
-    /// of leaning on `run`'s ambient guard surviving across `run_app` (it does —
-    /// but a `tokio::spawn` with no runtime PANICS).
+    /// How `resumed` enters the runtime to boot the pipeline
+    /// (`PipelineBoot::spawn`): `run` holds no guard, and a `tokio::spawn`
+    /// outside a runtime panics.
     rt: tokio::runtime::Handle,
 }
 

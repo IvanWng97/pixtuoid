@@ -1,5 +1,4 @@
-//! Per-agent colors (shirt / hair / skin / pants) + color math primitives
-//! (blend / lerp / mix_lab).
+//! Per-agent colors and the color math the painters share.
 
 use pixtuoid_core::id::normalize_path_key;
 use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
@@ -278,7 +277,7 @@ const SKIN_PRESETS: &[Rgb] = &[
         r: 0xf4,
         g: 0xc7,
         b: 0x9a,
-    }, // light peach (matches base palette S)
+    }, // light peach
     Rgb {
         r: 0xe0,
         g: 0xa8,
@@ -325,8 +324,8 @@ pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     }
 }
 
-/// Burn-tier ember hair — aliases the flame gradient's deep base so a gradient
-/// tweak can't desync the hair from the crown.
+/// A burning agent's hair — an alias of the flame gradient's deep base, so a
+/// gradient tweak can't desync the hair from the crown.
 const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
 
 /// The palette keys a character sprite draws its shirt, hair, skin and pants
@@ -371,8 +370,8 @@ pub(super) fn agent_overrides(
 }
 
 /// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND, via
-/// re-export, by the binary's footer tool-segment tint, so the footer's colour
-/// matches the sprite's screen glow exactly.
+/// re-export, by the binary's footer tool-segment tint, so the two share one hue
+/// per tool.
 pub fn tool_glow_for_kind(
     kind: pixtuoid_core::state::ToolKind,
     glow: &crate::theme::ToolGlowColors,

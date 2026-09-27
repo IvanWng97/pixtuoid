@@ -168,7 +168,7 @@ fn build_run_config(
     let first_run = setup::is_first_run(&cfg, &cfg_path, load_degraded);
     let theme = config::resolve_theme(&cfg, cli_theme, &mut cfg_warnings)?;
     let desk_cap = config::resolve_desk_cap(&cfg, cli_max_desks, &mut cfg_warnings);
-    let pack_dir = config::resolve_pack_dir(&cfg, pack_dir);
+    let pack = config::resolve_pack_source(&cfg, pack_dir);
     let pets = config::resolve_pets(&cfg, &mut cfg_warnings);
     let connected = config::resolve_connected(&cfg);
     if !headless {
@@ -184,7 +184,7 @@ fn build_run_config(
         socket,
         projects_root,
         codex_sessions_root,
-        pack_dir,
+        pack,
         desk_cap,
         headless,
         config_path: cfg_path,

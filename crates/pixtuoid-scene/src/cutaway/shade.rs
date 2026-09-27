@@ -6,10 +6,8 @@
 //! for the floor falloff — is what made it read as a room. Those two are what
 //! this module is.
 //!
-//! Both are constrained by the indexed-palette decision: a palette cannot
-//! blend, so "lit" is its own colour and a gradient IS a dither. That is not a
-//! limitation being worked around — it is what keeps theme recolour an index
-//! swap and SIXEL encoding free of a quantisation pass.
+//! Neither blends: "lit" is a color of its own and a gradient is a dither — the
+//! pixel-art convention the room is drawn in.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -17,23 +15,20 @@ use crate::render_scale::RenderScale;
 
 /// A material's three tones under the cutaway's single key light.
 ///
-/// Every surface in the profile carries one, so the room reads as lit from a
-/// single direction — nothing opts out.
+/// Every shaded mass carries one, so each reads as lit from the same direction.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Ramp {
     /// The face turned toward the key light — the mass's north edge.
     pub lit: Rgb,
-    /// The material's own colour, covering its body.
+    /// The material's own color, covering its body.
     pub base: Rgb,
     /// The face turned away — the mass's south edge, where it meets what's below.
     pub shade: Rgb,
 }
 
 impl Ramp {
-    /// A ramp whose three tones are all `c` — an unshaded material.
-    ///
-    /// For genuinely self-lit surfaces (a screen, an LED) where a key-light
-    /// gradient would be wrong, not for skipping the shading pass.
+    /// A ramp whose three tones are all `c`: the unshaded reference tests
+    /// compare against.
     #[cfg(test)]
     pub(crate) fn flat(c: Rgb) -> Self {
         Self {
@@ -43,14 +38,14 @@ impl Ramp {
         }
     }
 
-    /// Derive a ramp from one theme colour by tinting toward white and shading
+    /// Derive a ramp from one theme color by tinting toward white and shading
     /// toward black.
     ///
-    /// This is why the cutaway needs no theme edits: all six existing palettes
-    /// gain a lit/shade pair for free, and a NEW theme cannot ship half-shaded.
-    /// Adding two explicit roles per material to `Theme` instead would be ~90
-    /// hand-picked colours per theme, and every one a chance to drift from the
-    /// base it belongs to.
+    /// This is why the cutaway needs no theme edits: every theme gains a
+    /// lit/shade pair for free, and a NEW theme cannot ship half-shaded. Adding
+    /// two explicit roles per material to `Theme` instead would mean hand-picking
+    /// both for every material in every theme, and every one a chance to drift
+    /// from the base it belongs to.
     ///
     /// Proportional rather than a flat per-channel add: moving a fraction of
     /// the distance to the endpoint keeps the hue, where `saturating_add` on an
@@ -85,13 +80,10 @@ fn toward(c: Rgb, target: u8, pct: u8) -> Rgb {
 /// Fill a rect as a top-lit mass: one LOGICAL `lit` row at the top, one
 /// `shade` row at the bottom, `base` between.
 ///
-/// The edges are `scale` buffer pixels thick, not one. Every caller passes a
-/// height already multiplied by the scale, so a fixed 1px edge shrank to a
-/// hairline as the render got denser: the same desk read as a light band over a
-/// dark band at 1x and as solid brown at 16x. That is the inverse of what the
-/// render-scale seam exists for — richer art, not finer-and-finer detail — and
-/// it is the same buffer-space-vs-logical-space drift the centring rule warns
-/// about, one level down.
+/// The edges are `scale` buffer pixels thick, not one: every caller passes a
+/// height already multiplied by the scale, and a fixed 1px edge would thin to a
+/// hairline as the render gets denser, the inverse of what the render-scale
+/// seam exists for (richer art, not finer detail).
 ///
 /// A mass shorter than two logical rows is painted `base` only: its top and
 /// bottom edges would be the same pixels, and either tone would make a thin
@@ -137,19 +129,18 @@ pub(crate) fn fill(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, c: Rgb) 
 ///
 /// Its 16 evenly-spread levels are why a dither reads as a smooth ramp rather
 /// than as noise or as banding — the classic pixel-art answer, and the reason
-/// the floor falloff needs two palette slots instead of a dozen.
+/// the floor falloff needs two tones instead of a dozen.
 const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
 
 /// Dither a horizontal band from `light` at its top to `dark` at its bottom.
 ///
-/// The transition an indexed palette cannot express as a blend. `y1` is
-/// exclusive; a band with no height paints nothing.
+/// `y1` is exclusive; a band with no height paints nothing.
 ///
 /// One matrix cell is one LOGICAL pixel — `scale` buffer pixels square. A fixed
-/// 1px cell made the pattern finer as the render got denser, so the floor went
-/// from a bold checker matching the art's granularity at 1x to a sub-sprite
-/// stipple at 16x: dirt on a deliberately chunky office, and the class most
-/// likely to moiré once a terminal composites the image.
+/// 1px cell would make the pattern finer as the render gets denser, turning a
+/// bold checker matching the art's granularity into a sub-sprite stipple: dirt
+/// on a deliberately chunky office, and the class most likely to moiré once a
+/// terminal composites the image.
 ///
 /// The indices stay ABSOLUTE (`/ cell % 4`, not relative to `y0`) so the
 /// pattern tiles seamlessly across every band and object that shares the
@@ -228,7 +219,7 @@ mod tests {
             b: 200,
         };
         let r = Ramp::from_base(blue, 30, 30);
-        assert_eq!(r.base, blue, "the base is the theme's own colour");
+        assert_eq!(r.base, blue, "the base is the theme's own color");
         assert!(r.lit.r > blue.r && r.lit.g > blue.g && r.lit.b > blue.b);
         assert!(r.shade.r < blue.r && r.shade.g < blue.g && r.shade.b < blue.b);
         assert!(
@@ -280,13 +271,7 @@ mod tests {
         }
     }
 
-    /// THE property the whole render-scale seam exists for, at the shading
-    /// level: give the office more pixels and its VOCABULARY keeps the same
-    /// apparent weight, rather than thinning to a hairline.
-    ///
-    /// Before this, the edge rows were a fixed 1 buffer pixel while every
-    /// caller passed an already-scaled height, so the same desk read as a light
-    /// band over a dark band at 1x and as solid material at 16x.
+    /// Pins [`slab`]'s edge rule.
     #[test]
     fn a_slabs_edges_are_one_logical_row_at_every_scale() {
         for n in [1u16, 2, 4, 8, 16] {
@@ -313,9 +298,7 @@ mod tests {
         }
     }
 
-    /// The dither's cell is one logical pixel too, so the floor keeps the
-    /// art's granularity instead of becoming sub-sprite noise on a chunky
-    /// office. Absolute indexing keeps it tiling seamlessly across bands.
+    /// Pins [`dither_band`]'s cell size.
     #[test]
     fn a_dither_cell_is_one_logical_pixel_at_every_scale() {
         for n in [1u16, 4, 8] {
@@ -386,8 +369,6 @@ mod tests {
 
     #[test]
     fn a_dither_band_uses_only_its_two_tones() {
-        // The whole point of a dither under an indexed palette: it introduces
-        // no third colour, so it costs no extra slot.
         let mut buf = RgbBuffer::filled(8, 8, BG);
         dither_band(&mut buf, 0, 8, SHADE, LIT, RenderScale::ONE);
         assert!(buf.as_slice().iter().all(|&c| c == SHADE || c == LIT));

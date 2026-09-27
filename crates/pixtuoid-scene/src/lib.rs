@@ -1,7 +1,8 @@
 //! Backend-agnostic render + simulation engine shared by every front-end.
 //!
-//! It has **no** terminal or window dependency — `tui` (ratatui half-block) and
-//! `floating` (winit/softbuffer) are thin painters layered on top.
+//! It has **no** terminal or window dependency — `tui` (ratatui half-block),
+//! `floating` (winit/softbuffer) and `pixtuoid-web` (wasm canvas) are thin
+//! painters layered on top.
 //!
 //! ```
 //! use pixtuoid_scene::layout::SceneLayout;
@@ -62,9 +63,3 @@ pub mod render_scale;
 /// The color-theme MODEL: the `Theme` role palette and the bundled themes.
 pub mod theme;
 pub mod token_meter;
-
-/// Test-only mutex serializing tests that mutate process-global environment
-/// variables (`XDG_CONFIG_HOME`) — the crate's unit tests share one binary under
-/// plain `cargo test`, which the `justfile` falls back to when nextest is absent.
-#[cfg(test)]
-pub(crate) static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());

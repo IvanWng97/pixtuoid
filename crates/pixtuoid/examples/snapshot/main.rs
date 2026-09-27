@@ -14,7 +14,7 @@ use clap::Parser;
 use pixtuoid::tui::renderer::{draw_scene, DrawCtx};
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::SceneState;
-use pixtuoid_scene::embedded_pack::load_sprite_pack;
+use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
 use ratatui::backend::TestBackend;
 use ratatui::Terminal;
 
@@ -406,7 +406,11 @@ fn main() -> Result<()> {
     let backend = TestBackend::new(cols, rows);
     let mut term = Terminal::new(backend)?;
     let mut buf = RgbBuffer::filled(0, 0, Rgb { r: 0, g: 0, b: 0 });
-    let pack = load_sprite_pack(args.pack_dir.clone())?;
+    let pack = load_sprite_pack(
+        args.pack_dir
+            .clone()
+            .map_or(PackSource::Bundled, PackSource::Explicit),
+    )?;
     let mut store = pixtuoid_scene::floor::FloorCtx::new();
     // A typo'd theme silently rendering NORMAL would put wrong-palette art into
     // the docs/site screenshot pipelines.

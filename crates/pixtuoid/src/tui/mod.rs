@@ -335,6 +335,9 @@ impl FloorCapacitySweep {
                 capacity = capacity.min(cap);
             }
             if capacity > 0 {
+                // `fetch_max` keeps capacity monotone: a shrink would shift the
+                // cumulative offsets and remap floor-1+ agents onto the wrong
+                // desks (they go invisible).
                 cap_slot.fetch_max(capacity, std::sync::atomic::Ordering::Relaxed);
             }
         }
@@ -532,7 +535,7 @@ fn resolve_version_popup(config_path: &std::path::Path) -> bool {
 
 pub(crate) struct TuiSession {
     pub scene_rx: SceneRx,
-    pub pack_dir: Option<std::path::PathBuf>,
+    pub pack: embedded_pack::PackSource,
     pub floor_caps: Arc<[std::sync::atomic::AtomicUsize; pixtuoid_core::state::MAX_FLOORS]>,
     pub theme: &'static theme::Theme,
     pub config_path: std::path::PathBuf,
@@ -904,12 +907,10 @@ fn terminate_signal() -> impl std::future::Future<Output = ()> + Send {
 /// The event loop, running as the `block_on` ROOT future rather than on a tokio worker — so
 /// `tokio::task::block_in_place` here is inert, not a yield point, and does not panic either
 /// (that is `current_thread`-only). Pinned by `block_in_place_is_inert_on_the_block_on_thread`.
-/// `audio_ctl` is a LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
-/// the device thread it owns; built after the pack-load `?`, so a bad `--pack-dir` can't strand it.
 pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
     let TuiSession {
         mut scene_rx,
-        pack_dir,
+        pack,
         floor_caps,
         theme,
         config_path,
@@ -923,9 +924,12 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
         first_run,
         audio_cfg,
     } = session;
-    let pack = embedded_pack::load_sprite_pack(pack_dir)?;
+    let pack = embedded_pack::load_sprite_pack(pack)?;
     let term = setup_terminal()?;
     let mut renderer = TuiRenderer::new(term, theme, pets);
+    // A LOCAL so EVERY exit (q / Ctrl-C / terminate / error) drops it and joins
+    // the device thread it owns; built after the pack-load `?`, so a pack that
+    // fails to load can't strand it.
     let mut audio_ctl =
         crate::audio::AudioController::new(audio_cfg.muted, audio_cfg.volume, config_path.clone());
     renderer.set_audio(audio_ctl.handle().clone());
@@ -976,8 +980,6 @@ pub(crate) async fn run_tui(session: TuiSession) -> Result<()> {
             renderer.set_volume_flash(audio_ctl.volume_flash(audio_now));
             renderer.render(&snapshot, &pack, now)?;
 
-            // `fetch_max` keeps capacity monotone: a shrink would shift the cumulative
-            // offsets and remap floor-1+ agents onto the wrong desks (they go invisible).
             if let Some(layout) = renderer.cached_layout() {
                 cap_sweep.publish(layout.buf_w, layout.buf_h, desk_cap, &floor_caps);
             }

@@ -1,10 +1,10 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`, and
-//! deliberately partial: EFFECTS (weather, glow, steam, the pet) stay with the
-//! classic pass. It never advances the sim; a mover here would desync the
+//! deliberately partial: EFFECTS (weather, steam, the pet) stay with the classic
+//! pass, and of the glow it draws only the desks' and a lit sitter's tint. It never advances the sim; a mover here would desync the
 //! profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
-use pixtuoid_core::sprite::format::{density_variant_name_into, Pack};
+use pixtuoid_core::sprite::format::{density_variant_name_into, variant_fits, Pack};
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::order::{depth_sort, Span};
@@ -306,8 +306,8 @@ fn push_sofa(
 
 /// Rows of a vertical wall run per sorted segment. A segment must be no taller
 /// than the SHORTEST thing that can pass in front of it: one spanning both sides
-/// of a figure has no correct position. The bundled cast is 12 rows tall; 4
-/// leaves headroom for a shorter pack, at a piece count the draw list absorbs
+/// of a figure has no correct position. This leaves headroom under the bundled
+/// cast's height for a shorter pack, at a piece count the draw list absorbs
 /// easily.
 const WALL_SEG_H: u16 = 4;
 
@@ -398,8 +398,8 @@ fn paint_wall_seg(
 enum PieceKind {
     /// One segment of a room's wall run.
     WallSeg {
-        /// Buffer-space rect, already converted — walls are pure geometry with
-        /// no sprite, so there is nothing for the paint fn to look up.
+        /// The logical position, which `paint_wall_seg` scales; walls are pure
+        /// geometry with no sprite to look up.
         at: crate::layout::Point,
         w: u16,
         h: u16,
@@ -456,7 +456,7 @@ fn desk_front_h() -> u16 {
 }
 
 /// The wall rows inset above and below the glass run, as a fraction of the band:
-/// a 1/4 inset leaves the middle HALF of the band as glass. The windows are the
+/// the inset leaves the middle of the band as glass. The windows are the
 /// cutaway's only light SOURCE on screen, so the band has to read as glass and
 /// not as a stripe — that is what makes the north-to-south floor falloff legible
 /// as light instead of as a gradient someone chose.
@@ -632,8 +632,8 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
     let floor_top = scale.to_buffer(layout.top_margin);
     let floor_h = h.saturating_sub(floor_top);
 
-    // North sixth solid lit, dithering to base by the end of the north third,
-    // then a final fall to dark at the south edge.
+    // The lit share of the floor: its first half solid, dithering to base by its
+    // end, then a final fall to dark at the south edge.
     let lit_h = floor_h * FLOOR_LIT_NUMER / FLOOR_LIT_DENOM;
     fill(buf, 0, floor_top, w, lit_h / 2, lit);
     dither_band(
@@ -704,8 +704,8 @@ fn paint_desk(
 
 /// The screen spill of an occupied desk — the office is lit by the windows and
 /// the monitors, and this is the only place the second one shows. Full desk
-/// WIDTH, not the middle half: the occupant is 8 logical columns centred on a
-/// 14-column desk, so a half-width band is a strict subset of them and rendered
+/// WIDTH, not the middle half: the occupant (`CHARACTER_SPRITE_W`) is centred on
+/// a wider desk, so a half-width band is a strict subset of them and rendered
 /// zero visible pixels. The wings either side of the body are where it reads.
 fn paint_desk_glow(
     x: u16,
@@ -734,8 +734,8 @@ fn paint_desk_glow(
 /// The most common opaque colour in `row` of `frame` — how the cutaway learns a
 /// sprite's material without hardcoding it. The front face a top-down sprite
 /// never had has to be SOME colour, and the desk's lives in the PACK
-/// (`"D" = #8b5a2b`), not the theme, where `furniture.wood_top` reads nearly like
-/// the carpet; sampling also earns a custom `--pack-dir` desk a match for free.
+/// (palette key `D`), not the theme, where `furniture.wood_top` reads nearly like
+/// the carpet; sampling also earns a custom pack's desk a match for free.
 fn dominant_opaque_row(
     frame: &pixtuoid_core::sprite::Frame,
     row: u16,
@@ -802,7 +802,7 @@ fn paint_character(
     let at = cutaway_anchor(c);
 
     // The classic painter's own recolor + facing-flip path, through the same
-    // cache: a raw pack blit clones one placeholder-palette person twelve times.
+    // cache: a raw pack blit clones one placeholder-palette person per agent.
     let glow_tint = crate::pixel_painter::character_glow_tint(c.glow, agent, theme);
     let (art, _burn) = crate::pixel_painter::seat::character_frame(
         c.anim_name,
@@ -862,8 +862,8 @@ fn label_anchor(
 /// the remaining factor, so 4x art still halves the upscale on an 8x render
 /// instead of being discarded for not being an exact match.
 ///
-/// A pack with no variants renders exactly as it did before this existed, so
-/// richer art can land one piece at a time rather than as a flag day.
+/// A pack with no variants draws its base art, so richer art can land one piece
+/// at a time.
 ///
 /// A variant whose size is not its base's times the density its NAME claims is
 /// SKIPPED rather than drawn wrong. `validate_pack_animations` reports it as a
@@ -889,11 +889,7 @@ fn densest_art<'a>(
         let Some(art) = pack.animation(&key).and_then(|a| a.frames().first()) else {
             continue;
         };
-        // Saturating like the validator's twin: the BASE is unbounded and a saturated
-        // expectation matches nothing, so an absurd pair falls through to base art.
-        if art.width() != base.width().saturating_mul(density)
-            || art.height() != base.height().saturating_mul(density)
-        {
+        if !variant_fits(base, density, art) {
             continue;
         }
         // `density` divides `s` and both are >= 1, so the quotient is nonzero.
@@ -906,9 +902,10 @@ fn densest_art<'a>(
 
 /// The pack sprite for a waypoint kind, when it has one. `None` covers three
 /// deliberate cases: a SEAT slot whose body paints once elsewhere
-/// (MeetingSofa/MeetingChair/Island), a fixture its room already draws (Pantry),
-/// and the appliances the classic painter draws PROCEDURALLY
-/// (VendingMachine/Printer/Couch), which need cutaway geometry, not a lookup.
+/// (MeetingSofa/MeetingChair/Island), a fixture drawn elsewhere (Pantry by its
+/// room, the Couch as a mirrored meeting sofa), and the appliances the classic
+/// painter draws PROCEDURALLY (VendingMachine/Printer), which need cutaway
+/// geometry, not a lookup.
 fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
@@ -1057,8 +1054,8 @@ fn paint_prop(
 /// A tight dark band where a figure meets the floor — one row, not an ellipse: a
 /// wide soft pool reads as a stain on a dark carpet, while a band the width of
 /// the sprite reads as weight. Stamped BEFORE the body so the sprite sits on its
-/// own shadow, and skipped for a seated figure, whose three-row chair back starts
-/// at the same row and covered it completely — dead pixels.
+/// own shadow, and skipped for a seated figure, whose chair back ([`CHAIR_BACK_H`]
+/// rows) starts at the same row and covers it completely — dead pixels.
 fn contact_shadow(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1079,11 +1076,11 @@ fn contact_shadow(
     );
 }
 
-/// A chair back covering the occupant's lower torso — without it a seated figure
+/// A chair back peeking out below a seated occupant — without it a seated figure
 /// floats, since the cutaway shows the body the classic painter hid behind the
 /// desk's overhang. Painted straight after ITS occupant, not as a sorted piece:
-/// it belongs to exactly one character, so the order is correct by construction.
-/// The trade, that it cannot occlude a passing agent, buys a `Piece::Chair`.
+/// it belongs to exactly one character, so the order is correct by
+/// construction, at the cost that it cannot occlude a passing agent.
 fn paint_chair(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1186,9 +1183,9 @@ mod tests {
     }
 
     /// A centre-anchored prop standing in the aisle SOUTH of a desk must paint
-    /// in front of that desk and behind its occupant. Under the old key it
-    /// sorted on its own middle row, so a tall plant between the two painted
-    /// over the occupant while standing behind them.
+    /// in front of that desk and behind its occupant. Keyed on its own middle
+    /// row, a tall plant between the two would paint over the occupant while
+    /// standing behind them.
     #[test]
     fn an_aisle_prop_sorts_between_the_desk_and_its_occupant() {
         let pack = pack();
@@ -1289,9 +1286,10 @@ mod tests {
         );
     }
 
-    /// The bundled pack, which ships `desk` (14x8) and `desk@4x` (56x32).
+    /// The bundled pack, which ships `desk` and a `desk@4x` of it.
     fn pack() -> Pack {
-        crate::embedded_pack::load_sprite_pack(None).expect("the embedded pack loads")
+        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+            .expect("the embedded pack loads")
     }
 
     fn near_seat(desk: crate::layout::Point) -> crate::layout::Point {
@@ -1389,7 +1387,7 @@ mod tests {
     /// changes how a piece is DRAWN, never how big it is. The two branches return
     /// different (frame, factor) pairs whose PRODUCT has to agree, and getting it
     /// wrong is silent — the desk still renders, with its front face a whole desk
-    /// below the surface, which is exactly what shipped before this test existed.
+    /// below the surface.
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
         let pack = pack();
@@ -1455,6 +1453,22 @@ mod tests {
         let scale = RenderScale::new(4).expect("nonzero");
         let (art, blit_at) = densest_art(&pack, "plant", scale).expect("plant is in the pack");
         assert_eq!((art.width(), blit_at.get()), (bw, 4));
+    }
+
+    /// Pins the render-time half of `DensityMismatch`: a variant that is not
+    /// the size its name claims is skipped for the base.
+    #[test]
+    fn a_variant_that_is_not_its_claimed_size_is_skipped() {
+        let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+             [animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
+            &[("one.sprite", "@frame 0\nA")],
+        )
+        .expect("pack builds");
+        let (art, blit_at) = densest_art(&pack, "desk", RenderScale::new(2).expect("nonzero"))
+            .expect("desk is in the pack");
+        assert_eq!((art.width(), blit_at.get()), (1, 2), "the base, upscaled");
     }
 
     #[test]

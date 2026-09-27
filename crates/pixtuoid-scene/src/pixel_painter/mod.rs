@@ -150,7 +150,7 @@ pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 /// the clickable box can't drift from the painted art when the sprite is
 /// re-tuned.
 pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
-/// Coffee-machine column range for the 20-wide `pantry_small` sprite (see
+/// Coffee-machine column range for the compact `pantry_small` sprite (see
 /// [`PANTRY_COFFEE_COLS_LARGE`]).
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
@@ -331,9 +331,8 @@ struct PaintCtx<'a> {
     debug_walkable: bool,
 }
 
-/// Render `ctx`'s scene into its buffer — the SHARED world render, TWO phases:
-/// `sim_step` advances the world (no pixels) into a [`SimFrame`], then the paint
-/// pass consumes it, mutating only the buffer + recolor cache.
+/// Render `ctx`'s scene into its buffer — the shared world render; the paint
+/// half borrows only `PaintCtx`.
 pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
     let frame = sim_step(
         &mut SimStores {
@@ -777,8 +776,8 @@ pub(super) fn frame_at(anim: &Sprite, idx: usize) -> Option<&Frame> {
     anim.frames().get(frame_index(anim, idx))
 }
 
-/// `idx`, or `0` once it runs past the animation: a custom `--pack-dir`
-/// animation with fewer frames than the shared cycle's `frame_idx` would
+/// `idx`, or `0` once it runs past the animation: a custom pack's animation
+/// with fewer frames than the shared cycle's `frame_idx` would
 /// otherwise vanish the sprite.
 pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
     if idx < anim.frames().len() {
@@ -1233,10 +1232,8 @@ fn enqueue_pod_decor_and_plants<'a>(layout: &'a Layout, drawables: &mut Vec<Draw
     }
 }
 
-/// Free-standing fixtures: the floor lamp, the meeting-room coat rack, and the
-/// elevator door — whose frame is computed stateless from the agents in their
-/// entry/exit window, taking the MAX so the door is at least as open as the
-/// most-in-progress agent needs.
+/// Free-standing fixtures, and the elevator door at the frame
+/// `compute_door_frame_idx` picks.
 fn enqueue_floor_fixtures<'a>(
     ctx: &PaintCtx<'_>,
     agents: &[AgentSlot],
@@ -1284,7 +1281,7 @@ fn enqueue_floor_fixtures<'a>(
         .filter_map(|r| r.coat_rack_pos())
     {
         drawables.push(Drawable {
-            anchor_y: rack.y + 7,
+            anchor_y: rack.y + furniture::COAT_RACK_BASE_DY,
             kind: DrawableKind::CoatRack { pos: rack },
         });
     }

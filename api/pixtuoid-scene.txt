@@ -74,7 +74,26 @@ pub fn pixtuoid_scene::chitchat::supports_chitchat(pixtuoid_scene::layout::Waypo
 pub fn pixtuoid_scene::chitchat::update_and_collect(&mut std::collections::hash::map::HashMap<pixtuoid_scene::chitchat::VenueKey, pixtuoid_scene::chitchat::ActiveChitchat>, usize, &[pixtuoid_scene::chitchat::Visitor], std::time::SystemTime) -> alloc::vec::Vec<pixtuoid_scene::chitchat::ChitchatBubble>
 pub fn pixtuoid_scene::chitchat::venue_wp_idx(pixtuoid_scene::layout::WaypointKind, usize, &[pixtuoid_scene::layout::Waypoint]) -> usize
 pub mod pixtuoid_scene::embedded_pack
-pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(core::option::Option<std::path::PathBuf>) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
+pub enum pixtuoid_scene::embedded_pack::PackSource
+pub pixtuoid_scene::embedded_pack::PackSource::Bundled
+pub pixtuoid_scene::embedded_pack::PackSource::Discovered(std::path::PathBuf)
+pub pixtuoid_scene::embedded_pack::PackSource::Explicit(std::path::PathBuf)
+impl core::clone::Clone for pixtuoid_scene::embedded_pack::PackSource
+pub fn pixtuoid_scene::embedded_pack::PackSource::clone(&self) -> pixtuoid_scene::embedded_pack::PackSource
+impl core::cmp::Eq for pixtuoid_scene::embedded_pack::PackSource
+impl core::cmp::PartialEq for pixtuoid_scene::embedded_pack::PackSource
+pub fn pixtuoid_scene::embedded_pack::PackSource::eq(&self, &pixtuoid_scene::embedded_pack::PackSource) -> bool
+impl core::fmt::Debug for pixtuoid_scene::embedded_pack::PackSource
+pub fn pixtuoid_scene::embedded_pack::PackSource::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_scene::embedded_pack::PackSource
+impl core::marker::Freeze for pixtuoid_scene::embedded_pack::PackSource
+impl core::marker::Send for pixtuoid_scene::embedded_pack::PackSource
+impl core::marker::Sync for pixtuoid_scene::embedded_pack::PackSource
+impl core::marker::Unpin for pixtuoid_scene::embedded_pack::PackSource
+impl core::marker::UnsafeUnpin for pixtuoid_scene::embedded_pack::PackSource
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_scene::embedded_pack::PackSource
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_scene::embedded_pack::PackSource
+pub fn pixtuoid_scene::embedded_pack::load_sprite_pack(pixtuoid_scene::embedded_pack::PackSource) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub mod pixtuoid_scene::floor
 pub use pixtuoid_scene::floor::MAX_FLOORS
 pub struct pixtuoid_scene::floor::AudioObserver

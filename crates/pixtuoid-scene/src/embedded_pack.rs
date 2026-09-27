@@ -1,86 +1,79 @@
-//! Sprite pack loader: the user-config path (XDG-style) first, falling back to
-//! the embedded default pack (`include_str!`) so the binary ships standalone.
-//! A custom pack is a directory at
-//! `${XDG_CONFIG_HOME:-~/.config}/pixtuoid/sprites/` holding `pack.toml` + each
-//! `.sprite` file it references (`sprites/default/` is the canonical example).
+//! Sprite packs: the compiled-in default (`include_str!`, so the binary ships
+//! standalone), with at most one custom pack merged over it. A custom pack is a
+//! directory holding `pack.toml` + each `.sprite` file it references
+//! (`sprites/default/` is the canonical example); [`PackSource`] names where it
+//! comes from, and deciding that is the caller's job.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use pixtuoid_core::sprite::format::{
     load_pack, load_pack_from_strings, validate_pack_animations, Pack, ValidationReport,
 };
 
-/// The user's sprite-pack directory, if XDG settings point at one holding a
-/// `pack.toml`.
-fn xdg_pack_dir() -> Option<PathBuf> {
-    let base = xdg_config_base(
-        std::env::var_os("XDG_CONFIG_HOME"),
-        pixtuoid_core::platform::user_home_opt(),
-    )?;
-    let dir = base.join("pixtuoid").join("sprites");
-    if dir.join("pack.toml").is_file() {
-        Some(dir)
-    } else {
-        None
-    }
-}
-
-/// Resolve the XDG config base: the env value when set to a NON-EMPTY ABSOLUTE
-/// path, else `<home>/.config`. Per the XDG basedir spec an EMPTY **or
-/// RELATIVE** `XDG_CONFIG_HOME` is invalid and counts as unset; without
-/// `is_absolute()` a `Some("rel")` yields a CWD-RELATIVE `pixtuoid/sprites`
-/// path, silently loading an untrusted pack from the launch directory. Pure (the
-/// env value is passed in) so the precedence is testable without mutating env.
-fn xdg_config_base(xdg: Option<std::ffi::OsString>, home: Option<PathBuf>) -> Option<PathBuf> {
-    xdg.filter(|v| std::path::Path::new(v).is_absolute())
-        .map(PathBuf::from)
-        .or_else(|| home.map(|h| h.join(".config")))
+/// Where a sprite pack's custom half comes from. The source decides what a
+/// custom pack that fails to load means.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PackSource {
+    /// The compiled-in default alone.
+    Bundled,
+    /// A pack the user named (`--pack-dir`, config `pack-dir`): failing to load
+    /// it is an error, since they asked for it.
+    Explicit(PathBuf),
+    /// A pack found without being named, in the user's config directory:
+    /// failing to load it falls back to the default, so a broken file nobody
+    /// pointed at never stops the office starting.
+    Discovered(PathBuf),
 }
 
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
 /// required pose LOADS fine and then renders it as NOTHING, so without this the
 /// only signal is agents silently vanishing. Warn, don't fail — a
-/// partially-authored pack still renders every pose it does carry. Must run
-/// AFTER `merge_from`, or furniture inherited from the embedded default is
-/// misreported as missing.
+/// partially-authored pack still renders every pose it does carry.
 fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     let report = validate_pack_animations(pack);
-    for name in &report.missing_required {
+    // Destructured without `..`: a field added to the report does not compile
+    // until it is named here, so a new error category cannot bypass this
+    // load-time warning unnoticed.
+    let ValidationReport {
+        missing_required,
+        missing_optional: _,
+        insufficient_frames,
+        unknown: _,
+        mismatched_density,
+        orphan_variants,
+    } = &report;
+    for name in missing_required {
         tracing::warn!(
             origin,
-            animation = %name,
+            animation = ?name,
             "custom sprite pack is missing a REQUIRED character animation — \
              agents will be invisible in that pose (run `pixtuoid validate-pack`)"
         );
     }
-    for (name, min, got) in &report.insufficient_frames {
+    for (name, min, got) in insufficient_frames {
         tracing::warn!(
             origin,
-            animation = %name,
+            animation = ?name,
             min,
             got,
             "custom sprite pack animation has too few frames — it will render as nothing"
         );
     }
-    // Every error category `has_errors` counts must warn here, or the load path
-    // stays quiet about exactly the failure the check exists to catch: a
-    // mis-sized variant is picked up BY NAME and drawn at the wrong size, and
-    // the author only ever sees it if they happened to run `validate-pack`.
-    for m in &report.mismatched_density {
+    for m in mismatched_density {
         tracing::warn!(
             origin,
-            animation = %m.name,
+            animation = ?m.name,
             claimed = ?m.claimed,
             found = ?m.found,
             "custom sprite pack density variant is not the size its name claims — \
-             it will draw at the wrong size wherever a renderer picks that density"
+             renderers skip it for the densest art that fits"
         );
     }
-    for name in &report.orphan_variants {
+    for name in orphan_variants {
         tracing::warn!(
             origin,
-            animation = %name,
+            animation = ?name,
             "custom sprite pack ships a density variant whose base piece it does not — \
              its size claim is checked against the default pack's art, not yours"
         );
@@ -88,52 +81,47 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
     report
 }
 
-/// Load the character sprite pack: the compiled-in default pack, with an
-/// optional `--pack-dir` custom pack merged over it.
-pub fn load_sprite_pack(pack_dir: Option<PathBuf>) -> Result<Pack> {
+/// Load the compiled-in default pack, with `source`'s custom pack merged over
+/// it. Reads nothing but the path `source` names, so a test, a benchmark or a
+/// committed snapshot draws the same art on every machine.
+pub fn load_sprite_pack(source: PackSource) -> Result<Pack> {
     let base = load_embedded_pack()?;
-
-    if let Some(dir) = pack_dir {
-        let mut custom = load_pack(&dir).map_err(|e| {
-            anyhow::anyhow!("failed to load sprite pack from {}: {e}", dir.display())
-        })?;
-        tracing::info!(path = ?dir, "loaded sprite pack from --pack-dir");
-        custom.merge_from(&base);
-        warn_pack_validation_gaps(&custom, "--pack-dir");
-        return Ok(custom);
-    }
-    if let Some(dir) = xdg_pack_dir() {
-        match load_pack(&dir) {
-            Ok(mut p) => {
-                tracing::info!(path = ?dir, "loaded user sprite pack");
-                p.merge_from(&base);
-                warn_pack_validation_gaps(&p, "xdg");
-                return Ok(p);
-            }
+    match source {
+        PackSource::Bundled => Ok(base),
+        PackSource::Explicit(dir) => load_custom_over(&base, &dir, "explicit")
+            .with_context(|| format!("failed to load sprite pack from {dir:?}")),
+        PackSource::Discovered(dir) => match load_custom_over(&base, &dir, "discovered") {
+            Ok(pack) => Ok(pack),
             Err(e) => {
+                let chain = format!("{e:#}");
                 tracing::warn!(
                     path = ?dir,
-                    error = %e,
+                    error = ?chain,
                     "user sprite pack failed to load; falling back to embedded default"
                 );
+                Ok(base)
             }
-        }
+        },
     }
-    Ok(base)
 }
 
-/// Test-only default-pack loader: takes the crate's `TEST_ENV_LOCK` around the
-/// `XDG_CONFIG_HOME` read inside [`load_sprite_pack`], so an env-READING pack
-/// load can't race the env-MUTATING XDG test under plain `cargo test` (one
-/// binary, many threads; nextest's per-process isolation masks the race). Every
-/// unit test resolving the default pack MUST come through here, never a bare
-/// `load_sprite_pack(None)`.
+/// The custom pack in `dir`, with the furniture it leaves out inherited from
+/// `base`.
+fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
+    let mut custom = load_pack(dir)?;
+    tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
+    // Before the merge, so the report is about what the author shipped: after
+    // it, a variant whose base the pack leaves out is checked against the
+    // default's art and never reported as an orphan.
+    warn_pack_validation_gaps(&custom, origin);
+    custom.merge_from(base);
+    Ok(custom)
+}
+
+/// The bundled pack, for unit tests.
 #[cfg(test)]
 pub(crate) fn test_default_pack() -> Pack {
-    let _env = crate::TEST_ENV_LOCK
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    load_sprite_pack(None).expect("default pack loads")
+    load_sprite_pack(PackSource::Bundled).expect("default pack loads")
 }
 
 fn load_embedded_pack() -> Result<Pack> {
@@ -141,15 +129,6 @@ fn load_embedded_pack() -> Result<Pack> {
         include_str!("../sprites/default/pack.toml"),
         &embedded_sprite_srcs(),
     )
-}
-
-/// The compiled-in default pack with NO user-pack merge — the deterministic
-/// loader for measurement harnesses (`benches/`), where an operator's
-/// `$XDG_CONFIG_HOME` pack silently changing the drawable set would make the
-/// numbers non-reproducible. Mechanism, not contract (hence hidden).
-#[doc(hidden)]
-pub fn embedded_default_pack() -> Result<Pack> {
-    load_embedded_pack()
 }
 
 /// Every default sprite as `(filename, source)`. The macro keeps a new sprite to
@@ -227,8 +206,6 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
 /// still finds every pose; only `standing.sprite` is swapped.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
-    // No TEST_ENV_LOCK: unlike test_default_pack this builds via the pure
-    // load_pack_from_strings and never reads XDG_CONFIG_HOME.
     // The bundled 8x12 standing pose padded to 10 wide with transparent columns
     // (same palette keys).
     const WIDE_STANDING: &str = "\
@@ -262,50 +239,6 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
-    #[test]
-    fn xdg_config_base_treats_empty_or_relative_as_unset() {
-        for invalid in ["", "   ", "rel/config", "~/config"] {
-            assert_eq!(
-                xdg_config_base(
-                    Some(std::ffi::OsString::from(invalid)),
-                    Some(PathBuf::from("/home/u"))
-                ),
-                Some(PathBuf::from("/home/u/.config")),
-                "invalid XDG_CONFIG_HOME {invalid:?} must fall to ~/.config"
-            );
-        }
-    }
-
-    #[test]
-    fn xdg_config_base_prefers_a_set_value_over_home() {
-        // A leading-slash path is NOT absolute on Windows (no drive prefix).
-        let abs = if cfg!(windows) { "C:/xdg" } else { "/xdg" };
-        assert_eq!(
-            xdg_config_base(
-                Some(std::ffi::OsString::from(abs)),
-                Some(PathBuf::from("/home/u")),
-            ),
-            Some(PathBuf::from(abs)),
-        );
-    }
-
-    #[test]
-    fn xdg_config_base_falls_back_to_home_when_absent() {
-        assert_eq!(
-            xdg_config_base(None, Some(PathBuf::from("/home/u"))),
-            Some(PathBuf::from("/home/u/.config")),
-        );
-    }
-
-    #[test]
-    fn xdg_config_base_is_none_without_xdg_or_home() {
-        assert_eq!(
-            xdg_config_base(Some(std::ffi::OsString::from("")), None),
-            None
-        );
-        assert_eq!(xdg_config_base(None, None), None);
-    }
-
     /// Copy this crate's char-only pack fixture into `dst`. It carries NO
     /// furniture, so the merge-from-embedded-default assertion isn't
     /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
@@ -330,7 +263,7 @@ mod tests {
         let pack_dir = tmp.path().join("custom");
         copy_skeleton_pack(&pack_dir);
 
-        let pack = load_sprite_pack(Some(pack_dir)).expect("custom pack loads");
+        let pack = load_sprite_pack(PackSource::Explicit(pack_dir)).expect("custom pack loads");
         assert!(
             pack.animation("seated").is_some(),
             "custom pack must carry the seated character pose"
@@ -368,11 +301,18 @@ mod tests {
         assert!(!report.has_errors(), "{report:?}");
     }
 
+    /// What a default run's render scale rounds to (`RenderScale::fit`): a
+    /// change to the bundled art's densest variant should be a decision.
+    #[test]
+    fn the_bundled_pack_is_drawn_at_most_at_4x() {
+        assert_eq!(test_default_pack().max_density_variant(), 4);
+    }
+
     #[test]
     fn embedded_default_pack_animations_are_all_in_the_registry() {
         // An animation the EMBEDDED pack ships but the registry doesn't know is
         // falsely reported "unused by renderer" by validate-pack.
-        let pack = load_sprite_pack(None).expect("embedded pack");
+        let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
         let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
         assert!(
             report.unknown.is_empty(),
@@ -399,7 +339,7 @@ mod tests {
 
         let warns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let pack = tracing::subscriber::with_default(WarnCounter(warns.clone()), || {
-            load_sprite_pack(Some(pack_dir))
+            load_sprite_pack(PackSource::Explicit(pack_dir))
         })
         .expect("a pack missing a required pose must still LOAD (warn, not fail)");
         assert!(
@@ -422,50 +362,76 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let missing = tmp.path().join("does-not-exist");
         assert!(
-            load_sprite_pack(Some(missing)).is_err(),
+            load_sprite_pack(PackSource::Explicit(missing)).is_err(),
             "a nonexistent --pack-dir must surface a load error"
         );
     }
 
-    // Mutates a process-global env var, so it takes TEST_ENV_LOCK to serialize
-    // against every env-READING `test_default_pack()` caller. It calls
-    // `load_sprite_pack` DIRECTLY, not the locked helper: it already holds the
-    // (non-reentrant) lock.
     #[test]
-    fn load_sprite_pack_resolves_then_falls_back_via_xdg() {
-        let _env = crate::TEST_ENV_LOCK
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let saved = std::env::var_os("XDG_CONFIG_HOME");
+    fn a_discovered_pack_loads_over_the_default_and_a_broken_one_falls_back() {
+        let seated = |p: &Pack| p.animation("seated").expect("seated").frames()[0].clone();
+        let embedded = seated(&test_default_pack());
 
         let good = tempfile::TempDir::new().expect("tempdir");
-        let good_sprites = good.path().join("pixtuoid").join("sprites");
-        copy_skeleton_pack(&good_sprites);
-        std::env::set_var("XDG_CONFIG_HOME", good.path());
-        let pack = load_sprite_pack(None).expect("xdg pack loads");
+        copy_skeleton_pack(good.path());
+        let pack =
+            load_sprite_pack(PackSource::Discovered(good.path().into())).expect("user pack loads");
+        assert_ne!(
+            seated(&pack).as_slice(),
+            embedded.as_slice(),
+            "the user's own art"
+        );
         assert!(
-            pack.animation("seated").is_some(),
-            "the valid XDG pack must be loaded (xdg Ok arm)"
+            pack.animation("desk").is_some(),
+            "furniture merged from the default"
         );
 
-        // A malformed pack.toml at the XDG path takes the Err arm.
         let bad = tempfile::TempDir::new().expect("tempdir");
-        let bad_sprites = bad.path().join("pixtuoid").join("sprites");
-        fs::create_dir_all(&bad_sprites).expect("mkdir bad sprites");
-        fs::write(bad_sprites.join("pack.toml"), b"this is not valid toml {{{")
+        fs::write(bad.path().join("pack.toml"), b"this is not valid toml {{{")
             .expect("write malformed pack.toml");
-        std::env::set_var("XDG_CONFIG_HOME", bad.path());
-        let fallback = load_sprite_pack(None).expect("malformed pack falls back, never errors");
+        let fallback = load_sprite_pack(PackSource::Discovered(bad.path().into()))
+            .expect("a broken discovered pack never errors");
+        assert_eq!(seated(&fallback).as_slice(), embedded.as_slice());
         assert!(
-            fallback.animation("seated").is_some(),
-            "fallback to the embedded default after a malformed user pack"
+            load_sprite_pack(PackSource::Explicit(bad.path().into())).is_err(),
+            "the same pack, named, is an error"
         );
+    }
 
-        // Restore env for the rest of the suite.
-        match saved {
-            Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
-            None => std::env::remove_var("XDG_CONFIG_HOME"),
-        }
+    /// A variant whose base the pack leaves out is only an orphan before the
+    /// merge fills the base in from the default. Sized as a true 4x of the
+    /// default's desk, so a check after the merge finds nothing to warn about.
+    #[test]
+    fn a_custom_variant_without_its_base_warns_at_load() {
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        copy_skeleton_pack(tmp.path());
+        let load_warns = || {
+            let warns = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            tracing::subscriber::with_default(WarnCounter(warns.clone()), || {
+                load_sprite_pack(PackSource::Explicit(tmp.path().into()))
+            })
+            .expect("pack loads");
+            warns.load(std::sync::atomic::Ordering::SeqCst)
+        };
+        assert_eq!(load_warns(), 0, "the fixture itself is clean");
+
+        let desk = test_default_pack()
+            .animation("desk")
+            .expect("desk")
+            .frames()[0]
+            .clone();
+        let row = vec!["W"; usize::from(desk.width()) * 4].join(" ");
+        let rows = vec![row; usize::from(desk.height()) * 4].join("\n");
+        fs::write(
+            tmp.path().join("desk4x.sprite"),
+            format!("@frame 0\n{rows}\n"),
+        )
+        .expect("write desk4x.sprite");
+        let toml_path = tmp.path().join("pack.toml");
+        let mut toml = fs::read_to_string(&toml_path).expect("read pack.toml");
+        toml.push_str("\n[animations.\"desk@4x\"]\nframes=[\"desk4x.sprite\"]\nframe_ms=100\n");
+        fs::write(&toml_path, toml).expect("write pack.toml");
+        assert_eq!(load_warns(), 1, "the orphan desk@4x warns");
     }
 
     #[test]
