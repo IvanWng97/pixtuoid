@@ -103,7 +103,6 @@ Symptoms of weak identity:
 - Every row in a `.sprite` file must have **exactly** the same number of space-separated cells. Off-by-one is the most common bug.
 - Verify with: `awk '/^@/{next}/^#/{next}NF{print NR": "NF}' crates/pixtuoid-scene/sprites/default/foo.sprite` — all NF values must match.
 - Or visualize packed rows: `awk '/^@/{next}/^#/{next}NF{for(i=1;i<=NF;i++)printf "%s",$i;print " ["NF"]"}' foo.sprite`.
-- Palette keys must be unique RGB (the per-agent recolor pass substitutes by RGB equality — see `embedded_pack.rs` header comment).
 - Reuse existing palette keys when possible; new keys go in `crates/pixtuoid-scene/sprites/default/pack.toml` `[palette]` section.
 
 ### 7. Layout integration checklist

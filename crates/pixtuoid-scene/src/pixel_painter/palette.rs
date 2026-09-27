@@ -1,9 +1,8 @@
-//! Per-agent palette (shirt / hair / skin) + frame recolor + color math
-//! primitives (blend / lerp / mix_lab).
+//! Per-agent colors (shirt / hair / skin / pants) + color math primitives
+//! (blend / lerp / mix_lab).
 
 use pixtuoid_core::id::normalize_path_key;
-use pixtuoid_core::sprite::format::RECOLOR_KEYS;
-use pixtuoid_core::sprite::{Frame, Palette, Pixel, Rgb, RgbBuffer};
+use pixtuoid_core::sprite::{Frame, Pixel, Rgb, RgbBuffer};
 use pixtuoid_core::AgentSlot;
 
 /// A complete shirt + pants combo, keyed by the agent's normalized working
@@ -316,7 +315,8 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
 
 /// The outfit-determining seed for `agent`. Extracted so
 /// `FrameCache::note_outfit_seed` watches the mid-lifetime cwd backfill through
-/// the EXACT unknown-cwd fallback the palette uses; a second copy would drift.
+/// the EXACT unknown-cwd fallback [`agent_overrides`] uses; a second copy would
+/// drift.
 pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
     if agent.unknown_cwd || agent.cwd.as_os_str().is_empty() {
         agent.agent_id.raw()
@@ -329,14 +329,25 @@ pub(super) fn outfit_seed_for(agent: &AgentSlot) -> u64 {
 /// tweak can't desync the hair from the crown.
 const EMBER_HAIR: Rgb = super::effects::FLAME_DEEP;
 
-/// Build the per-agent palette. `Some(glow_tint)` blends the skin toward the
-/// monitor glow so a seated agent reads as lit by their screen.
-pub(super) fn agent_palette(
-    base: &Palette,
+/// The palette keys a character sprite draws its shirt, hair, skin and pants
+/// in: the keys [`agent_overrides`] replaces, so a pack's own sprites take each
+/// agent's colors.
+pub(super) const SHIRT_KEY: char = 'B';
+/// See [`SHIRT_KEY`].
+pub(super) const HAIR_KEY: char = 'H';
+/// See [`SHIRT_KEY`].
+pub(super) const SKIN_KEY: char = 'S';
+/// See [`SHIRT_KEY`].
+pub(super) const PANTS_KEY: char = 'P';
+
+/// One agent's colors, as the palette overrides a character frame is
+/// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
+/// a seated agent reads as lit by their screen.
+pub(super) fn agent_overrides(
     agent: &AgentSlot,
     glow_tint: Option<Rgb>,
     burn: crate::burn::BurnTier,
-) -> Palette {
+) -> [(char, Pixel); 4] {
     let id_seed = agent.agent_id.raw() as usize;
     let outfit_seed = outfit_seed_for(agent);
     let outfit = OUTFITS[outfit_seed as usize % OUTFITS.len()];
@@ -351,10 +362,12 @@ pub(super) fn agent_palette(
     } else {
         skin
     };
-    base.with_override('B', Some(outfit.shirt))
-        .with_override('H', Some(hair))
-        .with_override('S', Some(final_skin))
-        .with_override('P', Some(outfit.pants))
+    [
+        (SHIRT_KEY, Some(outfit.shirt)),
+        (HAIR_KEY, Some(hair)),
+        (SKIN_KEY, Some(final_skin)),
+        (PANTS_KEY, Some(outfit.pants)),
+    ]
 }
 
 /// The exhaustive `ToolKind → hue` map. Read by the office monitor glow AND, via
@@ -386,29 +399,6 @@ pub(super) fn tool_glow_tint(
         ActivityState::Active { kind, .. } => Some(tool_glow_for_kind(*kind, glow)),
         _ => None,
     }
-}
-
-pub(super) fn recolor_frame(frame: &Frame, pal: &Palette, base_pal: &Palette) -> Frame {
-    // Keyed off `RECOLOR_KEYS` (core's single source of truth, the same set
-    // `validate_recolor_palette` guards for RGB-uniqueness) so the substitution
-    // and the load-time guard can't drift. A `None` base never equals a `Some`
-    // pixel, so an absent key naturally substitutes nothing.
-    let swaps: Vec<(Pixel, Pixel)> = RECOLOR_KEYS
-        .iter()
-        .map(|&k| (base_pal.get(k).flatten(), pal.get(k).flatten()))
-        .collect();
-    let pixels: Vec<Pixel> = frame
-        .as_slice()
-        .iter()
-        .map(|p| match p {
-            Some(rgb) => swaps
-                .iter()
-                .find(|(base, _)| *base == Some(*rgb))
-                .map_or(*p, |(_, agent)| *agent),
-            None => None,
-        })
-        .collect();
-    Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
 /// Map one mascot pixel to its "degraded" look: a gateway that is UP but whose
@@ -547,6 +537,26 @@ pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Pins `MAX_RAMP_LEVEL` against the colors a recolor feeds a ramp: every
+    /// agent color keeps a shade of its own at every level a pack may declare.
+    #[test]
+    fn every_agent_color_keeps_a_distinct_shade_at_every_ramp_level() {
+        use pixtuoid_core::sprite::format::MAX_RAMP_LEVEL;
+        let outfits = OUTFITS.iter().flat_map(|o| [o.shirt, o.pants]);
+        let colors = HAIR_PRESETS
+            .iter()
+            .chain(SKIN_PRESETS)
+            .copied()
+            .chain(outfits)
+            .chain([EMBER_HAIR]);
+        for c in colors {
+            let shades: Vec<Rgb> = (-MAX_RAMP_LEVEL..=MAX_RAMP_LEVEL)
+                .map(|n| c.ramp(n))
+                .collect();
+            assert!(shades.windows(2).all(|w| w[0] != w[1]), "{c:?}: {shades:?}");
+        }
+    }
 
     #[test]
     fn blend_pixel_composites_in_bounds_and_noops_out_of_bounds() {

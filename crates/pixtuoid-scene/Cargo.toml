@@ -34,7 +34,7 @@ tracing       = { workspace = true }
 chrono        = { version = "0.4", default-features = false, features = ["clock"] }
 # Lab-space color blending — perceptually-correct twilight transitions and dim
 # overlays vs naive sRGB linear blend.
-palette       = { version = "0.7", default-features = false, features = ["std"] }
+palette       = { workspace = true }
 
 [dev-dependencies]
 # `harness` is dev-only (see core's manifest), so `examples/corpus_check.rs`

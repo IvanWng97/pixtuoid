@@ -398,7 +398,7 @@ mod tests {
         let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack loads");
         let h = |name: &str| {
             pack.animation(name)
-                .and_then(|a| a.frames.first())
+                .and_then(|a| a.frames().first())
                 .unwrap_or_else(|| panic!("the embedded pack ships {name}"))
                 .height()
         };

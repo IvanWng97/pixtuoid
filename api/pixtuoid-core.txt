@@ -756,13 +756,13 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
 pub struct pixtuoid_core::sprite::format::Pack
 pub pixtuoid_core::sprite::format::Pack::name: alloc::string::String
-pub pixtuoid_core::sprite::format::Pack::palette: pixtuoid_core::sprite::Palette
 pub pixtuoid_core::sprite::format::Pack::version: alloc::string::String
 impl pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::animation(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::animation_names(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
+pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
 impl core::clone::Clone for pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::clone(&self) -> pixtuoid_core::sprite::format::Pack
 impl core::fmt::Debug for pixtuoid_core::sprite::format::Pack
@@ -794,9 +794,9 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
+pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
-pub const pixtuoid_core::sprite::format::RECOLOR_KEYS: [char; 4]
 pub const pixtuoid_core::sprite::format::REQUIRED_CHARACTER_ANIMATIONS: &[&str]
 pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::string::String
 pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
@@ -831,9 +831,8 @@ pub struct pixtuoid_core::sprite::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
 pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
-pub fn pixtuoid_core::sprite::Palette::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, pixtuoid_core::sprite::Pixel)> + '_
+pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
 pub fn pixtuoid_core::sprite::Palette::new() -> Self
-pub fn pixtuoid_core::sprite::Palette::with_override(&self, char, pixtuoid_core::sprite::Pixel) -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
 impl core::default::Default for pixtuoid_core::sprite::Palette
@@ -847,10 +846,27 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Palette
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Palette
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Palette
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Palette
+pub struct pixtuoid_core::sprite::RecolorableFrame<'a>
+impl pixtuoid_core::sprite::RecolorableFrame<'_>
+pub fn pixtuoid_core::sprite::RecolorableFrame<'_>::recolored(&self, &[(char, pixtuoid_core::sprite::Pixel)]) -> pixtuoid_core::sprite::Frame
+impl<'a> core::clone::Clone for pixtuoid_core::sprite::RecolorableFrame<'a>
+pub fn pixtuoid_core::sprite::RecolorableFrame<'a>::clone(&self) -> pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::fmt::Debug for pixtuoid_core::sprite::RecolorableFrame<'a>
+pub fn pixtuoid_core::sprite::RecolorableFrame<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Copy for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::marker::Freeze for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::marker::Send for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::marker::Sync for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::marker::Unpin for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::marker::UnsafeUnpin for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::RecolorableFrame<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::RecolorableFrame<'a>
 pub struct pixtuoid_core::sprite::Rgb
 pub pixtuoid_core::sprite::Rgb::b: u8
 pub pixtuoid_core::sprite::Rgb::g: u8
 pub pixtuoid_core::sprite::Rgb::r: u8
+impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::ramp(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
 impl core::cmp::Eq for pixtuoid_core::sprite::Rgb
@@ -893,8 +909,10 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::RgbBuffer
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::RgbBuffer
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::RgbBuffer
 pub struct pixtuoid_core::sprite::Sprite
-pub pixtuoid_core::sprite::Sprite::frame_ms: u32
-pub pixtuoid_core::sprite::Sprite::frames: alloc::vec::Vec<pixtuoid_core::sprite::Frame>
+impl pixtuoid_core::sprite::Sprite
+pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
+pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
+pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite
 impl core::fmt::Debug for pixtuoid_core::sprite::Sprite
@@ -1690,9 +1708,8 @@ pub struct pixtuoid_core::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
 pub fn pixtuoid_core::sprite::Palette::insert(&mut self, char, pixtuoid_core::sprite::Pixel)
-pub fn pixtuoid_core::sprite::Palette::iter(&self) -> impl core::iter::traits::iterator::Iterator<Item = (char, pixtuoid_core::sprite::Pixel)> + '_
+pub fn pixtuoid_core::sprite::Palette::insert_ramp(&mut self, char, char, i8)
 pub fn pixtuoid_core::sprite::Palette::new() -> Self
-pub fn pixtuoid_core::sprite::Palette::with_override(&self, char, pixtuoid_core::sprite::Pixel) -> Self
 impl core::clone::Clone for pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::clone(&self) -> pixtuoid_core::sprite::Palette
 impl core::default::Default for pixtuoid_core::sprite::Palette
@@ -1727,6 +1744,8 @@ pub struct pixtuoid_core::Rgb
 pub pixtuoid_core::Rgb::b: u8
 pub pixtuoid_core::Rgb::g: u8
 pub pixtuoid_core::Rgb::r: u8
+impl pixtuoid_core::sprite::Rgb
+pub fn pixtuoid_core::sprite::Rgb::ramp(self, i8) -> pixtuoid_core::sprite::Rgb
 impl core::clone::Clone for pixtuoid_core::sprite::Rgb
 pub fn pixtuoid_core::sprite::Rgb::clone(&self) -> pixtuoid_core::sprite::Rgb
 impl core::cmp::Eq for pixtuoid_core::sprite::Rgb
@@ -1829,8 +1848,10 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::state::SlotLabel
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::state::SlotLabel
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::state::SlotLabel
 pub struct pixtuoid_core::Sprite
-pub pixtuoid_core::Sprite::frame_ms: u32
-pub pixtuoid_core::Sprite::frames: alloc::vec::Vec<pixtuoid_core::sprite::Frame>
+impl pixtuoid_core::sprite::Sprite
+pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
+pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
+pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite
 impl core::fmt::Debug for pixtuoid_core::sprite::Sprite

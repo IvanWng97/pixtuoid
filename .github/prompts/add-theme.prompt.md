@@ -24,10 +24,8 @@ Add a new color theme named `${input:name}` to pixtuoid.
    asserts the manifest ids == `ALL_THEMES` names, so the theme **fails `just test`**
    until the row exists; then run `just gen-media` to regenerate the committed
    theme stills (else the smoke `gen-check` reds the PR).
-5. Theme roles **may share an RGB** (every bundled theme does) — the unique-RGB
-   rule belongs to sprite packs (`RECOLOR_KEYS` B/H/S/P, enforced at pack load by
-   `validate_recolor_palette`), not to themes. What binds you are the per-theme
-   legibility guards in `theme/mod.rs`.
+5. Theme roles **may share an RGB** (every bundled theme does). What binds you
+   are the per-theme legibility guards in `theme/mod.rs`.
 6. Run `just test`. The `appliance_palette_is_legible_for_every_theme`,
    `source_badges_legible_for_every_theme`,
    `token_paper_is_legible_on_the_desk_for_every_theme` and

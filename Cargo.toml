@@ -92,3 +92,5 @@ crossterm          = "0.29"
 # glyphs don't miscount against its layout.
 unicode-width      = "0.2"
 clap               = { version = "4", features = ["derive"] }
+# Shared so core and scene resolve one version.
+palette            = { version = "0.7", default-features = false, features = ["std"] }

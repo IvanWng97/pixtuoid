@@ -55,6 +55,8 @@ toml        = { workspace = true }
 anyhow      = { workspace = true }
 tracing     = { workspace = true }
 notify      = { workspace = true, optional = true }
+# `Rgb::ramp`'s OKLab.
+palette     = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

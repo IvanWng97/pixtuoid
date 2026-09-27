@@ -29,10 +29,8 @@ full field set, then:
    fall back to the normal palette.
 2. Register: `mod` in `theme/mod.rs`, append `&<NAME>` to `ALL_THEMES`,
    `theme_by_name()` resolves the kebab-case name.
-3. **Theme roles MAY share an RGB** (every bundled theme does) — the unique-RGB
-   rule belongs to SPRITE PACKS (`RECOLOR_KEYS` B/H/S/P, enforced at pack load by
-   `validate_recolor_palette`), not to themes. What binds a theme author are the
-   per-theme legibility guards in `theme/mod.rs`:
+3. **Theme roles MAY share an RGB** (every bundled theme does). What binds a
+   theme author are the per-theme legibility guards in `theme/mod.rs`:
    `appliance_palette_is_legible_for_every_theme`,
    `source_badges_legible_for_every_theme`,
    `token_paper_is_legible_on_the_desk_for_every_theme`, and

@@ -33,7 +33,7 @@ pub(crate) fn character_frame<'c>(
     now: SystemTime,
 ) -> Option<(&'c Frame, crate::burn::BurnTier)> {
     let anim = pack.animation(anim_name)?;
-    let frame = frame_at(anim, frame_idx)?;
+    let frame = anim.recolorable(frame_index(anim, frame_idx))?;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
@@ -48,8 +48,7 @@ pub(crate) fn character_frame<'c>(
             burn,
         },
         || {
-            let pal = agent_palette(&pack.palette, agent, glow_tint, burn);
-            let recolored = recolor_frame(frame, &pal, &pack.palette);
+            let recolored = frame.recolored(&agent_overrides(agent, glow_tint, burn));
             if flip_x {
                 // HORIZONTAL: `flip_x` is which way the character FACES.
                 recolored.mirror_horizontal()

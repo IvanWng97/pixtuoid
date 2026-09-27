@@ -289,7 +289,7 @@ fn the_mascot_differential_is_signal_not_render_churn() {
     let frame = &pk
         .animation("lobster_walk")
         .expect("the pack ships the lobster")
-        .frames[0];
+        .frames()[0];
     let (sw, sh) = (frame.width(), frame.height());
     assert!(
         w <= sw * 2 && h <= sh * 2,

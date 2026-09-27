@@ -1,15 +1,27 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
 
-use crate::sprite::{Frame, Palette, Pixel, Rgb, Sprite};
+use crate::grid::Grid;
+use crate::sprite::{
+    Frame, IndexedFrame, Palette, PaletteIndex, Pixel, Rgb, Sprite, PALETTE_CAPACITY,
+};
 
 /// Parse a `.sprite` text file. Returns one Frame per `@frame N` block.
 pub fn parse_sprite_file(src: &str, palette: &Palette) -> Result<Vec<Frame>> {
-    let mut frames: Vec<Frame> = Vec::new();
-    let mut current: Option<Vec<Vec<Pixel>>> = None;
+    let pixels = palette.resolved();
+    Ok(parse_indexed(src, palette)?
+        .iter()
+        .map(|f| f.resolve(&pixels))
+        .collect())
+}
+
+fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<IndexedFrame>> {
+    let mut frames: Vec<IndexedFrame> = Vec::new();
+    let mut current: Option<Vec<Vec<PaletteIndex>>> = None;
     let mut last_lineno = 0;
 
     for (lineno, raw) in src.lines().enumerate() {
@@ -83,34 +95,154 @@ mod tests {
         );
     }
 
+    fn ramp_pack(palette: &str, ramps: &str, sprite: &str) -> Result<Pack> {
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n{palette}\n\
+             [ramps]\n{ramps}\n\
+             [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n"
+        );
+        load_pack_from_strings(&toml, &[("f.sprite", sprite)])
+    }
+
+    const HAIR: Rgb = Rgb {
+        r: 40,
+        g: 20,
+        b: 10,
+    };
+
     #[test]
-    fn recolor_palette_rejects_colliding_recolor_keys() {
-        let red = Some(Rgb { r: 200, g: 0, b: 0 });
-        let mut ok = Palette::new();
-        ok.insert('B', red);
-        ok.insert('H', Some(Rgb { r: 0, g: 200, b: 0 }));
-        ok.insert('S', Some(Rgb { r: 0, g: 0, b: 200 }));
-        ok.insert('P', None);
-        assert!(validate_recolor_palette(&ok).is_ok());
+    fn ramp_keys_draw_as_a_step_of_their_base() {
+        let pack = ramp_pack(
+            "\"H\"=\"#28140a\"",
+            "\"h\" = { of = \"H\", level = -1 }",
+            "@frame 0\nH h",
+        )
+        .expect("pack builds");
+        let frame = &pack.animation("seated").expect("anim").frames()[0];
+        assert_eq!(frame.get(0, 0).copied().flatten(), Some(HAIR));
+        assert_eq!(frame.get(1, 0).copied().flatten(), Some(HAIR.ramp(-1)));
+    }
 
-        let mut bad = ok.clone();
-        bad.insert('H', red);
-        let err = validate_recolor_palette(&bad).unwrap_err();
-        assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
+    /// `X` shares `B`'s color and stays; `h` is never named and follows `H`;
+    /// `.` is transparent and stays so.
+    #[test]
+    fn a_recolor_replaces_keys_not_colors() {
+        let pack = ramp_pack(
+            "\"B\"=\"#2e62cf\"\n\"X\"=\"#2e62cf\"\n\"H\"=\"#28140a\"\n\".\"=\"transparent\"",
+            "\"h\" = { of = \"H\", level = -1 }",
+            "@frame 0\nB X h .",
+        )
+        .expect("pack builds");
+        let seated = pack.animation("seated").expect("anim");
+        let (red, blond) = (
+            Rgb { r: 200, g: 0, b: 0 },
+            Rgb {
+                r: 200,
+                g: 160,
+                b: 80,
+            },
+        );
+        let out = seated.recolorable(0).expect("frame 0").recolored(&[
+            ('B', Some(red)),
+            ('H', Some(blond)),
+            ('.', Some(red)),
+            ('Q', None),
+        ]);
+        let shirt = pack.palette().get('B').flatten();
+        assert_eq!(
+            out.as_slice(),
+            &[Some(red), shirt, Some(blond.ramp(-1)), None][..]
+        );
+        assert!(seated.recolorable(1).is_none());
+        assert_eq!(
+            seated.frames()[0].as_slice(),
+            &[shirt, shirt, Some(HAIR.ramp(-1)), None][..],
+            "the pack's own colors are untouched"
+        );
+    }
 
-        let mut other = ok.clone();
-        other.insert('X', red);
-        let err = validate_recolor_palette(&other).unwrap_err();
-        assert!(format!("{err:#}").contains("share RGB"), "{err:#}");
+    #[test]
+    fn a_ramp_may_step_as_far_as_the_bound_either_way() {
+        for level in [MAX_RAMP_LEVEL, -MAX_RAMP_LEVEL] {
+            let ramps = format!("\"h\" = {{ of = \"H\", level = {level} }}");
+            ramp_pack("\"H\"=\"#28140a\"", &ramps, "@frame 0\nh").expect(&ramps);
+        }
+    }
 
-        let mut fine = ok.clone();
-        fine.insert('X', Some(Rgb { r: 1, g: 2, b: 3 }));
-        fine.insert('q', None);
-        assert!(validate_recolor_palette(&fine).is_ok());
+    #[test]
+    fn a_ramp_rejects_a_malformed_declaration() {
+        for (ramps, needle) in [
+            ("\"h\" = { of = \"Q\", level = -1 }", "no opaque color"),
+            ("\"h\" = { of = \"P\", level = -1 }", "no opaque color"),
+            (
+                "\"h\" = { of = \"H\", level = -1 }\n\"k\" = { of = \"h\", level = -1 }",
+                "no opaque color",
+            ),
+            ("\"H2\" = { of = \"H\", level = -1 }", "one character"),
+            ("\"X\" = { of = \"H\", level = -1 }", "both"),
+            ("\"h\" = { of = \"H\", level = 0 }", "nonzero"),
+            ("\"h\" = { of = \"H\", level = 11 }", "within"),
+            ("\"h\" = { of = \"H\", level = -11 }", "within"),
+            (
+                "\"h\" = { of = \"H\", level = -1, typo = 1 }",
+                "unknown field",
+            ),
+        ] {
+            let err = ramp_pack(
+                "\"H\"=\"#28140a\"\n\"X\"=\"#010203\"\n\"P\"=\"transparent\"",
+                ramps,
+                "@frame 0\nH",
+            )
+            .expect_err(ramps);
+            assert!(format!("{err:#}").contains(needle), "{ramps}: {err:#}");
+        }
+    }
+
+    /// Pack keys are untrusted, and these errors reach the terminal through
+    /// `validate-pack`: a key that is an ESC or a bidi override must come out
+    /// escaped, never raw.
+    #[test]
+    fn a_control_character_key_is_escaped_in_every_ramp_error() {
+        for ramps in [
+            "\"\\u001B\" = { of = \"Q\", level = -1 }",
+            "\"h\" = { of = \"\\u202E\", level = -1 }",
+            "\"\\u001B\\u001B\" = { of = \"H\", level = -1 }",
+            "\"\\u001B\" = { of = \"H\", level = 11 }",
+        ] {
+            let err = ramp_pack("\"H\"=\"#28140a\"", ramps, "@frame 0\nH").expect_err(ramps);
+            let msg = format!("{err:#}");
+            assert!(
+                !msg.contains('\u{1b}') && !msg.contains('\u{202e}'),
+                "{ramps}: raw control character in {msg:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_palette_past_what_a_frame_can_index_is_rejected() {
+        let keys: String = ('\u{100}'..)
+            .take(PALETTE_CAPACITY + 1)
+            .map(|k| format!("\"{k}\"=\"#010203\"\n"))
+            .collect();
+        let err = ramp_pack(&keys, "", "@frame 0\n\u{100}").expect_err("over capacity");
+        assert!(format!("{err:#}").contains("at most"), "{err:#}");
+        let fits: String = keys
+            .lines()
+            .take(PALETTE_CAPACITY)
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(ramp_pack(&fits, "", "@frame 0\n\u{100}").is_ok());
+        let err = ramp_pack(
+            &fits,
+            "\"h\" = { of = \"\u{100}\", level = -1 }",
+            "@frame 0\n\u{100}",
+        )
+        .expect_err("a ramp is a key too");
+        assert!(format!("{err:#}").contains("at most"), "{err:#}");
     }
 }
 
-fn parse_row(line: &str, palette: &Palette) -> Result<Vec<Pixel>> {
+fn parse_row(line: &str, palette: &Palette) -> Result<Vec<PaletteIndex>> {
     let mut out = Vec::new();
     for tok in line.split_whitespace() {
         let mut chars = tok.chars();
@@ -118,21 +250,24 @@ fn parse_row(line: &str, palette: &Palette) -> Result<Vec<Pixel>> {
         if chars.next().is_some() {
             bail!("each pixel must be a single character (got {tok:?})");
         }
-        let px = palette
-            .get(key)
-            .ok_or_else(|| anyhow!("unknown palette key '{key}'"))?;
-        out.push(px);
+        let index = palette
+            .drawable_index(key)
+            .ok_or_else(|| anyhow!("unknown palette key {key:?}"))?;
+        let index = PaletteIndex::try_from(index).map_err(|_| {
+            anyhow!("palette key {key:?} is past the {PALETTE_CAPACITY} a frame can index")
+        })?;
+        out.push(index);
     }
     Ok(out)
 }
 
-fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
+fn rows_to_frame(rows: Vec<Vec<PaletteIndex>>) -> Result<IndexedFrame> {
     if rows.is_empty() {
         bail!("frame has no rows");
     }
-    // Frame dims are u16: a silent `as u16` truncation would wrap them while
-    // `pixels` keeps the full flattened length, breaking Frame's
-    // `pixels.len() == width * height` contract that blit/mirror index against.
+    // Grid dims are u16: an `as u16` truncation would wrap them while `data`
+    // keeps its full length, and `Grid::from_vec`'s length assert would panic
+    // on pack input instead of rejecting it.
     if rows.len() > u16::MAX as usize {
         bail!("frame has {} rows (maximum {})", rows.len(), u16::MAX);
     }
@@ -150,15 +285,27 @@ fn rows_to_frame(rows: Vec<Vec<Pixel>>) -> Result<Frame> {
     }
     let height = rows.len() as u16;
     let width = w as u16;
-    let pixels = rows.into_iter().flatten().collect();
-    Ok(Frame::from_pixels(width, height, pixels))
+    let data = rows.into_iter().flatten().collect();
+    Ok(IndexedFrame(Grid::from_vec(width, height, data)))
 }
 
 #[derive(Debug, Deserialize)]
 struct PackToml {
     pack: PackMeta,
-    palette: HashMap<String, String>,
+    /// Ordered, like `ramps`, so a pack loads the same way every time: the same
+    /// indices, and the same key reported first when several are bad.
+    palette: BTreeMap<String, String>,
+    #[serde(default)]
+    ramps: BTreeMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
+}
+
+/// One `[ramps]` entry, loaded by [`Palette::insert_ramp`].
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RampToml {
+    of: String,
+    level: i8,
 }
 
 #[derive(Debug, Deserialize)]
@@ -180,12 +327,17 @@ pub struct Pack {
     pub name: String,
     /// Pack version string from the `[pack]` table in `pack.toml`.
     pub version: String,
-    /// The shared color palette its frames reference by single-char code.
-    pub palette: Palette,
+    palette: Arc<Palette>,
     animations: HashMap<String, Sprite>,
 }
 
 impl Pack {
+    /// The palette the pack's own frames were drawn with. An animation
+    /// inherited by [`merge_from`](Self::merge_from) keeps its own.
+    pub fn palette(&self) -> &Palette {
+        &self.palette
+    }
+
     /// The animation registered under `key`, if the pack defines one.
     pub fn animation(&self, key: &str) -> Option<&Sprite> {
         self.animations.get(key)
@@ -239,23 +391,19 @@ impl Pack {
 /// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
 /// untrusted paths to escape.
 fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
-    let palette = build_palette(&parsed.palette)?;
-    validate_recolor_palette(&palette)?;
+    let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
         let mut frames = Vec::new();
         for fname in &anim.frames {
             let src = get_src(fname)?;
             let mut decoded =
-                parse_sprite_file(&src, &palette).with_context(|| format!("decoding {fname}"))?;
+                parse_indexed(&src, &palette).with_context(|| format!("decoding {fname}"))?;
             frames.append(&mut decoded);
         }
         animations.insert(
             anim_name,
-            Sprite {
-                frames,
-                frame_ms: anim.frame_ms,
-            },
+            Sprite::new(frames, Arc::clone(&palette), anim.frame_ms),
         );
     }
 
@@ -313,56 +461,51 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     })
 }
 
-/// The base palette keys per-agent recoloring substitutes by RGB equality
-/// (shirt/hair/skin/pants) — the single source of truth for the tui's
-/// `recolor_frame` and for `validate_recolor_palette`. They MUST map to
-/// distinct RGBs: if two share a color, recolor swaps only the first and the
-/// other silently keeps the wrong color.
-pub const RECOLOR_KEYS: [char; 4] = ['B', 'H', 'S', 'P'];
-
-/// Fail a pack where `recolor_frame`'s by-RGB substitution would be ambiguous:
-/// it swaps EVERY opaque pixel matching a recolor base, so a NON-recolor key
-/// sharing that RGB would be recolored to the agent's color too. Transparent
-/// keys never participate.
-fn validate_recolor_palette(palette: &Palette) -> Result<()> {
-    let mut recolor_rgb: HashMap<Rgb, char> = HashMap::new();
-    for key in RECOLOR_KEYS {
-        if let Some(Some(rgb)) = palette.get(key) {
-            if let Some(prev) = recolor_rgb.insert(rgb, key) {
-                bail!(
-                    "palette recolor keys '{prev}' and '{key}' share RGB {rgb:?}; \
-                     per-agent recoloring substitutes by color and needs them distinct"
-                );
-            }
-        }
-    }
-    for (key, pixel) in palette.iter() {
-        if RECOLOR_KEYS.contains(&key) {
-            continue;
-        }
-        if let Some(rgb) = pixel {
-            if let Some(&base) = recolor_rgb.get(&rgb) {
-                bail!(
-                    "non-recolor palette key '{key}' and recolor key '{base}' share RGB \
-                     {rgb:?}; per-agent recoloring substitutes by color and would recolor \
-                     '{key}' too — give it a distinct color"
-                );
-            }
-        }
-    }
-    Ok(())
+fn single_char(k: &str, what: &str) -> Result<char> {
+    let mut it = k.chars();
+    let (Some(key), None) = (it.next(), it.next()) else {
+        bail!("{what} {k:?} must be exactly one character");
+    };
+    Ok(key)
 }
 
-fn build_palette(map: &HashMap<String, String>) -> Result<Palette> {
+/// The furthest a `[ramps]` level may step either way. Past it the darkest
+/// colors stop changing from one level to the next in 8 bits.
+pub const MAX_RAMP_LEVEL: i8 = 10;
+
+fn build_palette(
+    colors: &BTreeMap<String, String>,
+    ramps: &BTreeMap<String, RampToml>,
+) -> Result<Palette> {
+    let keys = colors.len() + ramps.len();
+    if keys > PALETTE_CAPACITY {
+        bail!("the palette declares {keys} keys; a frame can index at most {PALETTE_CAPACITY}");
+    }
     let mut palette = Palette::new();
-    for (k, v) in map {
-        let mut it = k.chars();
-        let key = it.next();
-        let (Some(key), None) = (key, it.next()) else {
-            bail!("palette key {k:?} must be exactly one character");
-        };
-        let pixel = parse_palette_value(v).with_context(|| format!("palette key '{k}'"))?;
+    for (k, v) in colors {
+        let key = single_char(k, "palette key")?;
+        let pixel = parse_palette_value(v).with_context(|| format!("palette key {k:?}"))?;
         palette.insert(key, pixel);
+    }
+    for (k, ramp) in ramps {
+        let key = single_char(k, "ramp key")?;
+        let of = single_char(&ramp.of, "ramp `of`")?;
+        if colors.contains_key(k) {
+            bail!("{key:?} is declared in both [palette] and [ramps]");
+        }
+        // `colors`, not the palette being built, names the possible bases, so
+        // an earlier-loaded ramp is never one.
+        if !colors.contains_key(&ramp.of) || !matches!(palette.get(of), Some(Some(_))) {
+            bail!("ramp {key:?} steps from {of:?}, which has no opaque color in [palette]");
+        }
+        // Zero is a second name for the base itself.
+        if ramp.level == 0 || ramp.level.unsigned_abs() > MAX_RAMP_LEVEL.unsigned_abs() {
+            bail!(
+                "ramp {key:?} level {} must be nonzero and within ±{MAX_RAMP_LEVEL}",
+                ramp.level
+            );
+        }
+        palette.insert_ramp(key, of, ramp.level);
     }
     Ok(palette)
 }
@@ -598,7 +741,7 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
 
     // Implicit min-1 floor: a `frames = []` entry deserializes and makes
     // `animation()` return Some (dodging the missing-required check above)
-    // while every render consumer guards with `.frames.first()` and silently
+    // while every render consumer guards with `.frames().first()` and silently
     // draws nothing; an empty OPTIONAL entry additionally SHADOWS the embedded
     // default in `Pack::merge_from` (`contains_key` is true). A density variant
     // rides its BASE's minimum — same piece, bigger grid — so an empty
@@ -624,10 +767,12 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
             .find(|&&(n, _)| n == requirement_key)
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name) {
-            if anim.frames.len() < min_frames {
-                report
-                    .insufficient_frames
-                    .push((name.to_string(), min_frames, anim.frames.len()));
+            if anim.frames().len() < min_frames {
+                report.insufficient_frames.push((
+                    name.to_string(),
+                    min_frames,
+                    anim.frames().len(),
+                ));
             }
         }
     };
@@ -642,13 +787,13 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     // the claim is only ever tested by whichever renderer happens to look for
     // that density — i.e. silently, at paint time, on someone else's terminal.
     for (name, base, density) in &variants {
-        let Some(base_art) = pack.animation(base).and_then(|a| a.frames.first()) else {
+        let Some(base_art) = pack.animation(base).and_then(|a| a.frames().first()) else {
             // No base means no claim to check it against. Reported rather than
             // skipped: silence here is what let a renamed `desk.sprite` pass.
             report.orphan_variants.push(name.clone());
             continue;
         };
-        let Some(art) = pack.animation(name).and_then(|a| a.frames.first()) else {
+        let Some(art) = pack.animation(name).and_then(|a| a.frames().first()) else {
             // An empty variant is already `insufficient_frames`' finding.
             continue;
         };

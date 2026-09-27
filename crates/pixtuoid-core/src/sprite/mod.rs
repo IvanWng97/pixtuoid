@@ -1,4 +1,8 @@
 use std::collections::HashMap;
+use std::sync::Arc;
+
+use palette::convert::FromColorUnclamped;
+use palette::{FromColor, IsWithinBounds, LinSrgb, Oklab, Srgb};
 
 use crate::grid::Grid;
 
@@ -18,14 +22,113 @@ pub struct Rgb {
     pub b: u8,
 }
 
+/// The share of the distance left to white or black that one ramp level covers.
+/// Small, so a ramp's contrast is chosen per material by how many levels it
+/// spans.
+const RAMP_LIGHTNESS_STEP: f32 = 0.1;
+
+/// How far one ramp level pulls a color toward the warm or cool hue, in OKLab
+/// chroma.
+const RAMP_HUE_PULL: f32 = 0.006;
+
+/// The OKLCH hue highlights pull toward: amber, a warm key light.
+const RAMP_WARM_HUE_DEG: f32 = 80.0;
+
+/// The OKLCH hue shadows pull toward: blue-violet, a cool ambient fill.
+const RAMP_COOL_HUE_DEG: f32 = 280.0;
+
+/// Halvings of an out-of-gamut color's chroma search; far past the point where
+/// a further halving moves no 8-bit channel.
+const GAMUT_BISECTION_STEPS: u32 = 16;
+
+impl Rgb {
+    /// This color `level` steps along a hue-shifted ramp: lighter and warmer
+    /// above zero, darker and cooler below, itself at zero.
+    ///
+    /// Stepped in OKLab, where equal lightness steps look equal whatever the
+    /// hue. A level covers a share of the distance left to white or black
+    /// rather than a fixed amount, so levels close in on them instead of
+    /// clamping: a fixed step would merge a dark base's deeper shadows into one
+    /// black.
+    ///
+    /// The warm and cool shift is a pull in OKLab's a/b plane toward a fixed
+    /// hue, not a hue rotation. A rotation "toward yellow" flips direction at
+    /// the hue opposite yellow and has nothing to rotate on a grey; the pull is
+    /// continuous for every base, and gives a grey warm lights and cool shadows.
+    pub fn ramp(self, level: i8) -> Rgb {
+        if level == 0 {
+            return self;
+        }
+        let base = self.to_oklab();
+        let steps = level.unsigned_abs();
+        let keep = (1.0 - RAMP_LIGHTNESS_STEP).powi(i32::from(steps));
+        let (l, hue) = if level > 0 {
+            (1.0 - (1.0 - base.l) * keep, RAMP_WARM_HUE_DEG)
+        } else {
+            (base.l * keep, RAMP_COOL_HUE_DEG)
+        };
+        let (sin, cos) = hue.to_radians().sin_cos();
+        let pull = RAMP_HUE_PULL * f32::from(steps);
+        Rgb::from_oklab_in_gamut(Oklab::new(l, base.a + pull * cos, base.b + pull * sin))
+    }
+
+    fn to_oklab(self) -> Oklab {
+        Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
+    }
+
+    /// The sRGB color at `c`'s lightness and hue with as much of its chroma as
+    /// fits. Clipping each channel instead shifts the hue and can undo the step
+    /// outright: lit yellow clips back to the yellow itself.
+    fn from_oklab_in_gamut(c: Oklab) -> Rgb {
+        let at =
+            |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
+        let mut share = 1.0;
+        if !at(share).is_within_bounds() {
+            let (mut fits, mut spills) = (0.0, 1.0);
+            for _ in 0..GAMUT_BISECTION_STEPS {
+                let mid = (fits + spills) / 2.0;
+                if at(mid).is_within_bounds() {
+                    fits = mid;
+                } else {
+                    spills = mid;
+                }
+            }
+            share = fits;
+        }
+        let out: Srgb<u8> = Srgb::<f32>::from_linear(at(share)).into_format();
+        Rgb {
+            r: out.red,
+            g: out.green,
+            b: out.blue,
+        }
+    }
+}
+
 /// A single pixel: `Some(rgb)` or `None` (transparent).
 pub type Pixel = Option<Rgb>;
 
-/// A map from single-character frame codes to pixels (opaque `Rgb` or
-/// transparent).
+/// How a palette key gets its color.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Entry {
+    Color(Pixel),
+    /// `level` steps along `of`'s ramp ([`Rgb::ramp`]).
+    Ramp {
+        of: char,
+        level: i8,
+    },
+}
+
+/// A palette of single-character keys, each with an index and a color: its
+/// own, or a ramp step of another key's.
+///
+/// A pack holds its frames as these indices ([`Sprite::recolorable`]), so
+/// replacing a key's color recolors exactly the pixels drawn with that key and
+/// every ramp of it, even where another key has the same color.
 #[derive(Debug, Clone, Default)]
 pub struct Palette {
-    map: HashMap<char, Pixel>,
+    /// In index order.
+    entries: Vec<(char, Entry)>,
+    index: HashMap<char, usize>,
 }
 
 impl Palette {
@@ -34,28 +137,101 @@ impl Palette {
         Self::default()
     }
 
-    /// Map `key` to `pixel` (opaque `Some(rgb)` or transparent `None`).
+    /// Map `key` to `pixel` (opaque `Some(rgb)` or transparent `None`). A key
+    /// that was a ramp becomes this fixed color.
     pub fn insert(&mut self, key: char, pixel: Pixel) {
-        self.map.insert(key, pixel);
+        self.set(key, Entry::Color(pixel));
     }
 
-    /// Look up `key`: `None` if the key is undefined, else `Some(pixel)` (the
+    /// Declare `key` as `level` steps along `of`'s ramp ([`Rgb::ramp`]). It has
+    /// no color of its own, so replacing `of`'s color moves it too.
+    ///
+    /// It resolves only while `of` has a color of its own: a ramp of an
+    /// undefined key or of another ramp is undefined, so resolution never
+    /// chains or cycles.
+    pub fn insert_ramp(&mut self, key: char, of: char, level: i8) {
+        self.set(key, Entry::Ramp { of, level });
+    }
+
+    /// Replace `key`'s entry in place: frames hold its index, so a second slot
+    /// for the key would leave them reading the old one.
+    fn set(&mut self, key: char, entry: Entry) {
+        match self.index.get(&key).and_then(|&i| self.entries.get_mut(i)) {
+            Some(slot) => slot.1 = entry,
+            None => {
+                self.index.insert(key, self.entries.len());
+                self.entries.push((key, entry));
+            }
+        }
+    }
+
+    /// Look up `key`: `None` if it is undefined, a ramp that does not resolve
+    /// included ([`insert_ramp`](Self::insert_ramp)), else `Some(pixel)` (the
     /// pixel itself may be transparent).
     pub fn get(&self, key: char) -> Option<Pixel> {
-        self.map.get(&key).copied()
+        self.resolve(self.entry(key)?)
     }
 
-    /// Iterate `(key, pixel)` pairs — lets callers assert that every key maps
-    /// to a DISTINCT RGB, which `recolor_frame`'s substitute-by-RGB requires.
-    pub fn iter(&self) -> impl Iterator<Item = (char, Pixel)> + '_ {
-        self.map.iter().map(|(&k, &p)| (k, p))
+    fn entry(&self, key: char) -> Option<Entry> {
+        self.entries.get(self.index_of(key)?).map(|&(_, e)| e)
     }
 
-    /// Replace one palette key's color — used for per-agent recoloring.
-    pub fn with_override(&self, key: char, pixel: Pixel) -> Self {
-        let mut out = self.clone();
-        out.map.insert(key, pixel);
-        out
+    fn resolve(&self, entry: Entry) -> Option<Pixel> {
+        match entry {
+            Entry::Color(pixel) => Some(pixel),
+            Entry::Ramp { of, level } => match self.entry(of)? {
+                Entry::Color(pixel) => Some(pixel.map(|rgb| rgb.ramp(level))),
+                Entry::Ramp { .. } => None,
+            },
+        }
+    }
+
+    fn index_of(&self, key: char) -> Option<usize> {
+        self.index.get(&key).copied()
+    }
+
+    /// The index a frame stores for `key`, if the key resolves: decided from
+    /// the entries alone, so parsing a pixel never derives a ramp's color.
+    fn drawable_index(&self, key: char) -> Option<usize> {
+        let index = self.index_of(key)?;
+        match self.entry(key)? {
+            Entry::Color(_) => Some(index),
+            Entry::Ramp { of, .. } => matches!(self.entry(of)?, Entry::Color(_)).then_some(index),
+        }
+    }
+
+    /// Every index's pixel: what a frame's indices resolve through. An index
+    /// that does not resolve is transparent, though no parsed frame holds one.
+    fn resolved(&self) -> Vec<Pixel> {
+        self.entries
+            .iter()
+            .map(|&(_, e)| self.resolve(e).flatten())
+            .collect()
+    }
+}
+
+/// A palette index as a frame stores it: the indexed-color convention, so a
+/// palette addresses at most [`PALETTE_CAPACITY`] keys.
+type PaletteIndex = u8;
+
+/// The most keys a palette's frames can address.
+const PALETTE_CAPACITY: usize = PaletteIndex::MAX as usize + 1;
+
+/// A frame as palette indices: how a pack holds its art, so a recolor resolves
+/// the same indices through a different palette.
+#[derive(Debug, Clone)]
+struct IndexedFrame(Grid<PaletteIndex>);
+
+impl IndexedFrame {
+    /// The frame in `pixels`' colors, one entry per palette index.
+    fn resolve(&self, pixels: &[Pixel]) -> Frame {
+        let data = self
+            .0
+            .as_slice()
+            .iter()
+            .map(|&i| pixels.get(usize::from(i)).copied().flatten())
+            .collect();
+        Frame::from_pixels(self.0.width(), self.0.height(), data)
     }
 }
 
@@ -113,13 +289,76 @@ impl Frame {
     }
 }
 
-/// An animation: an ordered list of frames plus the per-frame hold time.
+/// An animation: its frames in order, the palette indices they were drawn
+/// with, and the per-frame hold time.
 #[derive(Debug, Clone)]
 pub struct Sprite {
+    /// The frames in their own palette's colors.
+    frames: Vec<Frame>,
+    /// The same frames as indices into `palette`, for a recolor to resolve again.
+    indexed: Vec<IndexedFrame>,
+    /// The palette `indexed` refers to: the sprite's own pack's, which it keeps
+    /// when a custom pack inherits it, so a recolor never reads its indices
+    /// through another pack's keys.
+    palette: Arc<Palette>,
+    frame_ms: u32,
+}
+
+impl Sprite {
+    fn new(indexed: Vec<IndexedFrame>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+        let pixels = palette.resolved();
+        let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
+        Sprite {
+            frames,
+            indexed,
+            palette,
+            frame_ms,
+        }
+    }
+
     /// The frames, played in order.
-    pub frames: Vec<Frame>,
+    pub fn frames(&self) -> &[Frame] {
+        &self.frames
+    }
+
     /// How long each frame holds before advancing, in milliseconds.
-    pub frame_ms: u32,
+    pub fn frame_ms(&self) -> u32 {
+        self.frame_ms
+    }
+
+    /// Frame `idx` as the palette indices a recolor resolves; `None` past the
+    /// last frame.
+    pub fn recolorable(&self, idx: usize) -> Option<RecolorableFrame<'_>> {
+        Some(RecolorableFrame {
+            indexed: self.indexed.get(idx)?,
+            palette: &self.palette,
+        })
+    }
+}
+
+/// One frame of a [`Sprite`] as palette indices, from [`Sprite::recolorable`].
+#[derive(Debug, Clone, Copy)]
+pub struct RecolorableFrame<'a> {
+    indexed: &'a IndexedFrame,
+    palette: &'a Palette,
+}
+
+impl RecolorableFrame<'_> {
+    /// The frame with each `(key, pixel)` of `overrides` replacing that key's
+    /// color, and so every ramp of it.
+    ///
+    /// An override replaces a color and never adds one: a key the palette
+    /// lacks or holds transparent stays as it is, so a pack that leaves a part
+    /// out (a robot with no hair) keeps it out for every agent.
+    pub fn recolored(&self, overrides: &[(char, Pixel)]) -> Frame {
+        let mut palette = self.palette.clone();
+        for &(key, pixel) in overrides {
+            if let Some(Some(_)) = palette.get(key) {
+                palette.insert(key, pixel);
+            }
+        }
+        self.indexed.resolve(&palette.resolved())
+    }
 }
 
 /// A flat RGB buffer used as a blit target.
@@ -198,14 +437,87 @@ impl RgbBuffer {
 mod tests {
     use super::*;
 
+    const fn rgb(r: u8, g: u8, b: u8) -> Rgb {
+        Rgb { r, g, b }
+    }
+
+    /// Mid grey, dark hair, skin, and red, blue and yellow, which a lit step
+    /// pushes out of gamut; black and white are left out, having no darker or
+    /// lighter.
+    const RAMP_BASES: [Rgb; 6] = [
+        rgb(128, 128, 128),
+        rgb(42, 26, 14),
+        rgb(232, 180, 138),
+        rgb(255, 0, 0),
+        rgb(0, 0, 255),
+        rgb(255, 255, 0),
+    ];
+
+    /// Also catches a clipped out-of-gamut step ([`Rgb::from_oklab_in_gamut`]).
     #[test]
-    fn palette_get_and_override() {
+    fn every_ramp_level_a_pack_may_declare_is_lighter_than_the_one_below() {
+        let max = format::MAX_RAMP_LEVEL;
+        for base in RAMP_BASES {
+            assert_eq!(base.ramp(0), base);
+            let lightness: Vec<f32> = (-max..=max).map(|n| base.ramp(n).to_oklab().l).collect();
+            assert!(
+                lightness.windows(2).all(|w| w[0] < w[1]),
+                "{base:?}: {lightness:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_ramp_warms_its_lights_and_cools_its_shadows_even_on_a_grey() {
+        let grey = rgb(128, 128, 128);
+        let (lit, shaded) = (grey.ramp(1), grey.ramp(-1));
+        assert!(lit.r > lit.b, "lit grey should lean warm: {lit:?}");
+        assert!(
+            shaded.b > shaded.r,
+            "shaded grey should lean cool: {shaded:?}"
+        );
+    }
+
+    #[test]
+    fn palette_ramp_derives_from_its_base_and_follows_an_override() {
+        let hair = rgb(40, 20, 10);
         let mut p = Palette::new();
-        p.insert('B', Some(Rgb { r: 0, g: 0, b: 255 }));
-        assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
-        let p2 = p.with_override('B', Some(Rgb { r: 255, g: 0, b: 0 }));
-        assert_eq!(p2.get('B'), Some(Some(Rgb { r: 255, g: 0, b: 0 })));
-        assert_eq!(p.get('B'), Some(Some(Rgb { r: 0, g: 0, b: 255 })));
+        p.insert('H', Some(hair));
+        p.insert_ramp('h', 'H', -1);
+        assert_eq!(p.get('h'), Some(Some(hair.ramp(-1))));
+
+        let blond = rgb(200, 160, 80);
+        p.insert('H', Some(blond));
+        assert_eq!(p.get('h'), Some(Some(blond.ramp(-1))));
+
+        let picked = rgb(90, 40, 60);
+        p.insert('h', Some(picked));
+        assert_eq!(p.get('h'), Some(Some(picked)), "a hand-picked shade wins");
+    }
+
+    #[test]
+    fn a_ramp_of_a_ramp_or_of_a_missing_key_is_undefined() {
+        let mut p = Palette::new();
+        p.insert('H', Some(rgb(40, 20, 10)));
+        p.insert_ramp('h', 'H', -1);
+        p.insert_ramp('x', 'h', -1);
+        p.insert_ramp('y', 'Q', 1);
+        assert_eq!(p.get('x'), None, "a ramp of a ramp");
+        assert_eq!(p.get('y'), None, "a ramp of a missing key");
+        assert_eq!(p.drawable_index('x'), None);
+        assert_eq!(p.drawable_index('y'), None);
+        assert_eq!(p.drawable_index('h'), Some(1));
+    }
+
+    #[test]
+    fn palette_insert_replaces_a_keys_color_in_place() {
+        let mut p = Palette::new();
+        p.insert('B', Some(rgb(0, 0, 255)));
+        p.insert('X', Some(rgb(9, 9, 9)));
+        p.insert('B', Some(rgb(255, 0, 0)));
+        assert_eq!(p.get('B'), Some(Some(rgb(255, 0, 0))));
+        assert_eq!(p.index_of('B'), Some(0));
+        assert_eq!(p.resolved().len(), 2);
     }
 
     #[cfg(debug_assertions)]

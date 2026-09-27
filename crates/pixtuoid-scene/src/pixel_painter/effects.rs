@@ -201,9 +201,8 @@ pub(super) fn paint_waiting_bubble(buf: &mut RgbBuffer, anchor: Point, theme: &T
     }
 }
 
-/// The flame gradient's deep-ember base — ONE literal shared with the Premium
-/// ember-hair recolor (`palette::agent_palette`), so a gradient tweak can't
-/// desync the hair from the crown.
+/// The flame gradient's deep-ember base, which a burning agent's hair also
+/// wears (`palette::EMBER_HAIR` aliases it).
 pub(crate) const FLAME_DEEP: Rgb = Rgb {
     r: 0xc2,
     g: 0x28,
