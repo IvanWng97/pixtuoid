@@ -1,9 +1,10 @@
 //! The one per-entry rule for "is this file a transcript this source watches".
 //!
-//! Ungated on purpose: the production watcher is behind `native` and the offline
-//! drivers behind `harness`, and the whole point is that both ask the same
-//! question. The TRAVERSAL stays with each caller — the watcher's is async and
-//! retires a vanished path's cursor, the harness's is a plain recursion.
+//! Compiled whenever `native` or `harness` is on, either alone being enough: the
+//! production watcher is behind `native` and the offline drivers behind
+//! `harness`, and the whole point is that both ask the same question. The
+//! TRAVERSAL stays with each caller — the watcher's is async and retires a
+//! vanished path's cursor, the harness's is a plain recursion.
 
 use std::path::Path;
 
