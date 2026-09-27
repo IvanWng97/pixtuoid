@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use anyhow::{bail, Result};
-use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations};
+use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations, ValidationReport};
 
 use crate::strip_control_chars;
 
@@ -36,22 +36,31 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     let report = validate_pack_animations(&pack);
 
+    // Destructured without `..`: a report field added in core does not compile
+    // here until this presenter prints it.
+    let ValidationReport {
+        missing_required,
+        missing_optional,
+        insufficient_frames,
+        unknown,
+        mismatched_density,
+        orphan_variants,
+    } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
-    // parseable channel even when a caller redirects it. `missing_required`/
-    // `missing_optional` are registry constants, but insufficient-frames,
-    // mismatched-density and orphan-variant names can be DENSITY VARIANTS,
-    // which the validator finds by walking the pack's own table — so those are
-    // pack input too, and get the same sanitising as the unknown keys.
-    for name in &report.missing_required {
+    // parseable channel even when a caller redirects it. `missing_*` names come
+    // from the registry; every other name can be a density variant found in the
+    // pack's own table, so it is pack input and gets the same sanitising as the
+    // unknown keys.
+    for name in missing_required {
         eprintln!("ERROR: missing required animation \"{name}\"");
     }
-    for (name, need, got) in &report.insufficient_frames {
+    for (name, need, got) in insufficient_frames {
         eprintln!(
             "ERROR: \"{}\" needs at least {need} frames, has {got}",
             strip_control_chars(name)
         );
     }
-    for m in &report.mismatched_density {
+    for m in mismatched_density {
         eprintln!(
             "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
             strip_control_chars(&m.name),
@@ -61,24 +70,21 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
             m.claimed.1
         );
     }
-    for name in &report.orphan_variants {
+    for name in orphan_variants {
         eprintln!(
             "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
             strip_control_chars(name)
         );
     }
-    for name in &report.missing_optional {
+    for name in missing_optional {
         println!("WARN:  missing optional animation \"{name}\" (will not render)");
     }
-    for name in &report.unknown {
+    for name in unknown {
         println!("{}", unknown_line(name));
     }
 
-    let errors = report.missing_required.len()
-        + report.insufficient_frames.len()
-        + report.mismatched_density.len()
-        + report.orphan_variants.len();
-    let warnings = report.missing_optional.len();
+    let errors = report.error_count();
+    let warnings = missing_optional.len();
     eprintln!("\n{} error(s), {} warning(s)", errors, warnings);
 
     if report.has_errors() {

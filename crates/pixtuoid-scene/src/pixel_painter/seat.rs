@@ -2,8 +2,8 @@
 //! facing) is the single source of truth for an occupant of ANY seat — waypoint
 //! couch, sofa, meeting chair, island stool, or a home desk: sprite + flip,
 //! render anchor, z-key and sit-down glide all derive from it. [`SeatView`] is
-//! the LOOK it resolves to, not the authority. `paint_character_at` is the
-//! shared recolor-blit.
+//! the LOOK it resolves to, not the authority. `character_frame` is the
+//! recolored sprite both profiles share.
 
 use super::*;
 
@@ -104,7 +104,7 @@ const SEATED_BACK_VIEWS: &[(&str, &str)] = &[("seated", SEATED_BACK), ("typing",
 /// recurring "sit facing the wrong way then snap" bug: a window-facing (`North`)
 /// seat is approached from the north but its foot-cell is pinned SOUTH, so the
 /// settle travels south, renders a FRONT walk, and the agent sits facing the
-/// camera for ~1s before snapping to `back_couch`.
+/// camera for the whole settle before snapping to `back_couch`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum SeatView {
     /// Faces the camera (south).
@@ -134,8 +134,8 @@ enum SeatKind {
 /// newcomer to the upright anchor and feet-row key without complaint. The net
 /// for THAT is `sit_arc_z_key_is_stable_and_on_the_right_side_of_its_furniture`,
 /// a per-kind z-key oracle that stops on a kind it does not name — and it sees
-/// a newcomer only if the furniture is `occupies_pos` and ONE 192x158 layout
-/// places it, not the whole sweep.
+/// a newcomer only if the furniture is `occupies_pos` and the ONE layout it
+/// renders places it, not the whole sweep.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(super) struct Seat {
     kind: SeatKind,
@@ -175,7 +175,7 @@ impl Seat {
     /// arms so they cannot disagree — a seat-height anchor paired with a
     /// feet-row z-key sorts a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
-    /// sprite's 8x10 bottom-row geometry.
+    /// sprite's bottom-row geometry.
     fn seated_furniture(self) -> bool {
         use crate::layout::WaypointKind;
         matches!(
@@ -262,11 +262,10 @@ impl Seat {
     /// [`sprite_for`](Self::sprite_for) resolved against a PACK. Character
     /// animations are never inherited from the embedded default (`merge_from` is
     /// furniture-only), so a pre-`side_seated` custom pack degrades to the front
-    /// pose — a missing animation must never mean an invisible sitter. Two kinds
-    /// of sitter reach this ladder that did not: an UPRIGHT kind used to bypass
-    /// the pack check entirely and painted NOTHING when its art was missing, and
-    /// a back-turned couch lacking `back_couch` now falls to `seated_back` when
-    /// the pack HAS it, rather than to a face at the window.
+    /// pose — a missing animation must never mean an invisible sitter. An
+    /// UPRIGHT kind goes through it too, so missing art degrades instead of
+    /// painting nothing; and a back-turned couch lacking `back_couch` falls to
+    /// `seated_back` when the pack HAS it, rather than to a face at the window.
     pub(super) fn sprite_in_pack(self, base: &'static str, pack: &Pack) -> (&'static str, bool) {
         let (anim, flip) = self.sprite_for(base);
         if pack.animation(anim).is_some() {
@@ -298,8 +297,8 @@ impl Seat {
     /// mid-glide, then jumps behind it.
     pub(super) fn z_key(self) -> u16 {
         if self.seated_furniture() {
-            // Behind a couch/sofa back (which sorts at pos+3) or tied with a
-            // front sofa, where insertion order puts the sitter on top.
+            // Behind a couch/sofa back or tied with a front sofa, where
+            // insertion order puts the sitter on top.
             return self.pos.y + 2;
         }
         // The plain feet row, which for the bartender sits INSIDE the island

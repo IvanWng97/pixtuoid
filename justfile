@@ -933,9 +933,8 @@ gen-wasm: gen-wasm-tools wasm-build
 # STILLS are re-rendered and pixel-diffed at threshold 0 by gen-check, so media
 # staleness IS mechanically gated and wasm staleness is not. Nothing here reads
 # a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
-# hero with every gate green; the compensating control is the merge-gate brief
-# (.github/prompts/pr-review.prompt.md, "a scene change stales the wasm"), not
-# this recipe. Input-hash stamping was considered and rejected: most commits
+# hero with every gate green; the compensating control is CLAUDE.md's build
+# notes ("a scene/web change ALSO needs `just gen-wasm`"), not this recipe. Input-hash stamping was considered and rejected: most commits
 # under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
 # links, so the gate would demand a binary regen on changes that provably
 # cannot alter it.

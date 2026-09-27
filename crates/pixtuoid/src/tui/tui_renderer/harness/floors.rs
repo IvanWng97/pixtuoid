@@ -3,7 +3,10 @@ use pixtuoid_scene::layout::Point;
 
 #[test]
 fn offscreen_floor_freezes_and_resyncs_on_return() {
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )
+    .expect("embedded pack");
     let theme = pixtuoid_scene::theme::ALL_THEMES[0];
     let t0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
 

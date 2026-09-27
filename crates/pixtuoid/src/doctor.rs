@@ -800,10 +800,12 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         crossterm::style::force_color_output(true);
     }
     let (truecolor_probe, detected) = probe_terminal_caps(probe_ok, graphics);
-    // What a default `run` resolves, user sprites merged over embedded — NOT the bundled
-    // art alone, which understates a user pack shipping density variants.
-    let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(None)
-        .map_or(1, |p| p.max_density_variant());
+    // The pack `run` draws, not the bundled art alone, which understates a user
+    // pack shipping density variants.
+    let max_density = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        crate::config::resolve_pack_source(&cfg, None),
+    )
+    .map_or(1, |p| p.max_density_variant());
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
         .map(|src| {

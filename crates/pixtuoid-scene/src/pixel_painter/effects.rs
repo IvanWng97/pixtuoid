@@ -1,3 +1,6 @@
+//! Effects that ride on a character, a pet or a fixture, painted with it in
+//! z-order.
+
 use std::time::SystemTime;
 
 use crate::layout::WALKING_Y_OFF;
@@ -52,8 +55,10 @@ pub(super) fn paint_screen_glow(
     let put = |buf: &mut RgbBuffer, dx: u16, dy: u16, c: Rgb| {
         buf.put_checked(desk_x + dx, sprite_top + dy, c);
     };
+    // The casing frames the glass, one column proud of it on each side.
+    let casing_cols = SCREEN_GLASS_COLS.start() - 1..=SCREEN_GLASS_COLS.end() + 1;
     for dy in SCREEN_CASING_ROWS {
-        for dx in 3..=10 {
+        for dx in casing_cols.clone() {
             put(buf, dx, dy, frame_lit);
         }
     }
@@ -68,7 +73,8 @@ pub(super) fn paint_screen_glow(
     const SCANLINE_STEP_MS: u64 = 120;
     let elapsed_ms = epoch_ms(now);
     let phase = (elapsed_ms / SCANLINE_STEP_MS) as u16 + desk_x;
-    let scan_col = 4 + (phase % 6);
+    let glass_w = SCREEN_GLASS_COLS.end() - SCREEN_GLASS_COLS.start() + 1;
+    let scan_col = SCREEN_GLASS_COLS.start() + phase % glass_w;
     for dy in SCREEN_GLASS_ROWS {
         put(buf, scan_col, dy, scanline);
     }

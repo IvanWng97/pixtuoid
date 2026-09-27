@@ -1,7 +1,7 @@
 use super::*;
 
-/// A scene carrying an OpenClaw gateway presence and nothing else, so the only
-/// lobster-red pixels on the floor are the lobster's.
+/// A scene carrying an OpenClaw gateway presence and nothing else, so its diff
+/// against [`no_presence`] is the lobster alone.
 fn gateway_scene(
     liveness: pixtuoid_core::state::DaemonLiveness,
     entered_at: SystemTime,
@@ -157,8 +157,9 @@ fn the_port_suffix_names_a_gateway_only_when_it_has_a_sibling() {
         let cells: Vec<_> = mascot_cells(&mut r, &scene, t0()).into_iter().collect();
         assert!(!cells.is_empty(), "the gateways must paint lobsters");
         let mut out = Vec::new();
-        // A stride, not every cell: the hitbox is 14px wide, so it still lands
-        // inside BOTH mascots without paying a full render per pixel.
+        // A stride, not every cell: the hitbox is the painted lobster frame
+        // (`MascotFrame.w`), so it still lands inside BOTH mascots without
+        // paying a full render per pixel.
         for &(x, y) in cells.iter().step_by(5) {
             r.set_mouse_pos(Some((x, y / 2)));
             r.render(&scene, &pack(), t0()).unwrap();
@@ -258,8 +259,7 @@ fn one_gateway_going_down_leaves_its_sibling_on_the_floor() {
 
 /// The differential's own control: the metric every probe in this file reads has
 /// to be SIGNAL. Two identical scenes must differ in zero cells, or a render that
-/// churns between calls would satisfy `> 0` with no mascot drawn at all — the
-/// failure the colour probes were rewritten into and had to be rewritten out of.
+/// churns between calls would satisfy `> 0` with no mascot drawn at all.
 #[test]
 fn the_mascot_differential_is_signal_not_render_churn() {
     let mut r = build(160, 80, vec![]);
@@ -270,7 +270,7 @@ fn the_mascot_differential_is_signal_not_render_churn() {
     );
 
     // And a real mascot's cells stay a mascot-sized blob rather than scattering
-    // across the office, which is what "the diff IS the lobster" claims.
+    // across the office, which is what `gateway_scene`'s doc claims.
     let up = gateway_scene(
         pixtuoid_core::state::DaemonLiveness::UP,
         t0() - Duration::from_secs(20),
@@ -440,7 +440,8 @@ fn gateway_mascot_tooltip_on_hover() {
     let (x0, y0, x1, y1) = mascot_bbox(&mut r, &scene, t0()).expect("lobster on screen");
     let cx = (x0 + x1) / 2;
     let cy_px = (y0 + y1) / 2;
-    // The 14px-wide hitbox tolerates the approximate center; half-block ⇒ /2.
+    // The hitbox is the painted frame (`MascotFrame.w`), which tolerates the
+    // approximate center; half-block ⇒ /2.
     r.set_mouse_pos(Some((cx, cy_px / 2)));
     r.render(&scene, &pack(), t0()).unwrap();
 

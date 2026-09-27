@@ -45,7 +45,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
         socket,
         projects_root,
         codex_sessions_root,
-        pack_dir,
+        pack,
         desk_cap,
         headless,
         config_path,
@@ -86,7 +86,7 @@ async fn run_async(cfg: RunConfig) -> Result<()> {
     } else {
         crate::tui::run_tui(crate::tui::TuiSession {
             scene_rx,
-            pack_dir,
+            pack,
             floor_caps,
             theme,
             config_path,

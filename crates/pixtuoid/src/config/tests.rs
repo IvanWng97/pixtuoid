@@ -523,6 +523,64 @@ fn save_preserves_max_desks() {
 }
 
 #[test]
+fn a_named_pack_outranks_the_users_own_which_outranks_the_bundled_one() {
+    use pixtuoid_scene::embedded_pack::PackSource;
+    let base = tempfile::TempDir::new().expect("tempdir");
+    let sprites = base.path().join("pixtuoid").join("sprites");
+    std::fs::create_dir_all(&sprites).expect("mkdir sprites");
+    let base_dir = Some(base.path().to_path_buf());
+    let none = AppConfig::default();
+    assert_eq!(
+        pack_source(&none, None, base_dir.clone()),
+        PackSource::Bundled,
+        "a sprites dir without a pack.toml holds no pack"
+    );
+
+    std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
+    assert_eq!(
+        pack_source(&none, None, base_dir.clone()),
+        PackSource::Discovered(sprites)
+    );
+    let named = AppConfig {
+        pack_dir: Some("/config/pack".into()),
+        ..AppConfig::default()
+    };
+    assert_eq!(
+        pack_source(&named, None, base_dir.clone()),
+        PackSource::Explicit(PathBuf::from("/config/pack"))
+    );
+    assert_eq!(
+        pack_source(&named, Some(PathBuf::from("/cli/pack")), base_dir),
+        PackSource::Explicit(PathBuf::from("/cli/pack"))
+    );
+    assert_eq!(pack_source(&none, None, None), PackSource::Bundled);
+}
+
+// Reads process-global env, so it holds TEST_ENV_LOCK like
+// `config_path_xdg_home_and_relative_branches`.
+#[test]
+fn resolve_pack_source_finds_the_users_pack_under_xdg_config_home() {
+    let _env = crate::TEST_ENV_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    let saved_xdg = std::env::var_os("XDG_CONFIG_HOME");
+    let base = tempfile::TempDir::new().expect("tempdir");
+    let sprites = base.path().join("pixtuoid").join("sprites");
+    std::fs::create_dir_all(&sprites).expect("mkdir sprites");
+    std::fs::write(sprites.join("pack.toml"), b"").expect("write pack.toml");
+    std::env::set_var("XDG_CONFIG_HOME", base.path());
+    let found = resolve_pack_source(&AppConfig::default(), None);
+    match saved_xdg {
+        Some(v) => std::env::set_var("XDG_CONFIG_HOME", v),
+        None => std::env::remove_var("XDG_CONFIG_HOME"),
+    }
+    assert_eq!(
+        found,
+        pixtuoid_scene::embedded_pack::PackSource::Discovered(sprites)
+    );
+}
+
+#[test]
 fn pack_dir_cli_wins_over_config() {
     let cfg = AppConfig {
         pack_dir: Some("/config/pack".into()),

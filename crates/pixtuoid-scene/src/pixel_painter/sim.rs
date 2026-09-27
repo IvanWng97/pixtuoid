@@ -1,9 +1,9 @@
 //! The SIM half of the frame — advance the world, produce no pixels.
 //!
 //! `sim_step` mutates the [`SimStores`] and returns an immutable [`SimFrame`];
-//! the paint pass consumes `&SimFrame` and only ever writes the pixel buffer +
-//! the paint-local `FrameCache`. That cache is deliberately NOT a sim store:
-//! flushing it changes no behavior, only repaint cost. Headless consumers drive
+//! the paint pass consumes `&SimFrame` and writes only what `PaintCtx` lends it
+//! mutably. The paint-local caches it borrows are deliberately NOT sim stores:
+//! flushing them changes no behavior, only repaint cost. Headless consumers drive
 //! `floor::FloorSession::observe` to observe poses/positions without buying a
 //! pixel pass.
 
@@ -60,13 +60,13 @@ pub struct CharacterPlacement {
     pub agent_idx: usize,
     /// Y-sort key (breath-independent).
     pub anchor_y: u16,
-    /// The sprite animation to blit (e.g. `"seated"`, `"walk"`).
+    /// The sprite animation to blit (e.g. `"seated"`, `"walking"`).
     pub anim_name: &'static str,
     /// The frame within `anim_name` to draw this tick.
     pub frame_idx: usize,
     /// Top-left screen position to blit the sprite at.
     pub anchor: Point,
-    /// Whether to mirror the sprite horizontally (facing west).
+    /// Whether to mirror the sprite horizontally.
     pub flip_x: bool,
     /// The glow decision for this character (paint maps it to a color).
     pub glow: CharacterGlow,
@@ -77,9 +77,8 @@ pub struct CharacterPlacement {
     /// `Some(frame)` draws the walking dust puff; `None` when standing still.
     pub walking_dust_frame: Option<usize>,
     /// The home desk this placement is SEATED AT, in logical units — `None` for
-    /// anyone not sitting at one (walking, at a waypoint, standing).
-    ///
-    /// The occupant's desk, carried because `anchor` is already PROJECTED and cannot yield it back.
+    /// anyone not sitting at one (walking, at a waypoint, standing). Carried
+    /// because `anchor` is already PROJECTED and cannot yield it back.
     pub seat_desk: Option<Point>,
 }
 
@@ -139,6 +138,10 @@ pub(crate) fn sim_step(
         now,
     );
 
+    let char_w = pack
+        .animation("standing")
+        .and_then(|a| a.frames().first())
+        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     // Per-frame occupancy from STATIONARY agent positions only, BEFORE the
     // routed pose pass (which routes Walking poses against THIS overlay).
     // Walkers are deliberately excluded: their position interpolates every
@@ -146,10 +149,6 @@ pub(crate) fn sim_step(
     // path cache, recompute A*, and snap walkers to new path segments (the
     // visible "flash"). Sitters at desks are already covered by the static desk
     // mask, so only waypoint visitors — stable across frames — contribute.
-    let char_w = pack
-        .animation("standing")
-        .and_then(|a| a.frames().first())
-        .map_or(CHARACTER_SPRITE_W, |f| f.width());
     stores.overlay.clear();
     for agent in &agents {
         let Some(pose) = pose::derive(agent, now, layout) else {

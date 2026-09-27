@@ -7,10 +7,9 @@
 //! be split into headcount-driven and activity-driven halves.
 //! Run via `just bench`; profile via
 //! `cargo bench -p pixtuoid-scene --bench render_frame -- --profile-time 10`
-//! under `samply record`. Numbers are LOCAL statistical evidence (criterion's
-//! own FAQ warns shared-CI wall-clock is noise) — CI runs this advisory-only.
-//! The pack is the compiled-in default, never the operator's XDG pack, so two
-//! machines measure the same drawable set. Distinct instrument:
+//! under `samply record`. Numbers are LOCAL statistical evidence: shared-CI
+//! wall-clock is noise, so CI runs this advisory-only.
+//! Distinct instrument:
 //! `crates/pixtuoid/examples/render_bench.rs` measures buffer-size SCALING
 //! through the floating offscreen renderer for the 2.5D design gate.
 
@@ -107,7 +106,10 @@ fn office_scene(n: usize, max_desks: usize, base: SystemTime, busy: bool) -> Sce
 }
 
 fn render_frame(c: &mut Criterion) {
-    let pack = pixtuoid_scene::embedded_pack::embedded_default_pack().expect("embedded pack");
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )
+    .expect("embedded pack");
     let theme = pixtuoid_scene::theme::theme_by_name("normal").expect("normal theme");
     let base = SystemTime::UNIX_EPOCH + Duration::from_secs(BASE_EPOCH_SECS);
     let busy = office_scene(12, 16, base, true);

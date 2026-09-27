@@ -644,6 +644,9 @@ pub(super) fn paint_printer(
     }
 }
 
+/// Rows from a coat rack's pole top to its base: the row it y-sorts at.
+pub(super) const COAT_RACK_BASE_DY: u16 = 7;
+
 /// Meeting-room coat rack centred on `pos`, the pole top.
 pub(super) fn paint_coat_rack(
     buf: &mut RgbBuffer,
@@ -654,13 +657,13 @@ pub(super) fn paint_coat_rack(
     let pole = theme.furniture.wood_trim;
     let base = theme.furniture.wood_top;
     let coats = theme.appliance.coats;
-    for dy in 0..8u16 {
+    for dy in 0..=COAT_RACK_BASE_DY {
         let py = cy + dy;
         if py < buf.height() && cx < buf.width() {
             buf.put(cx, py, pole);
         }
     }
-    let by = cy + 7;
+    let by = cy + COAT_RACK_BASE_DY;
     for dx in 0..3u16 {
         let px = cx.saturating_sub(1) + dx;
         if px < buf.width() && by < buf.height() {

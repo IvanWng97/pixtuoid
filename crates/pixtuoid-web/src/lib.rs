@@ -24,7 +24,7 @@ use crate::script::{
 };
 
 use pixtuoid_scene::audio::OneShotPool;
-use pixtuoid_scene::embedded_pack::load_sprite_pack;
+use pixtuoid_scene::embedded_pack::{load_sprite_pack, PackSource};
 use pixtuoid_scene::floor::{floor_capacity, FloorMeta, FloorSession, FrameInputs};
 use pixtuoid_scene::layout::{Size, CHARACTER_SPRITE_W};
 use pixtuoid_scene::theme::{Theme, ALL_THEMES};
@@ -145,7 +145,8 @@ impl Office {
     /// only if the compile-time-embedded sprite pack fails to parse.
     #[wasm_bindgen(constructor)]
     pub fn new(seed: u32) -> Result<Office, JsError> {
-        let pack = load_sprite_pack(None).map_err(|e| JsError::new(&e.to_string()))?;
+        let pack =
+            load_sprite_pack(PackSource::Bundled).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(Office {
             // Capacity starts empty and is synced from the CANVAS's own layout
             // on every `step` before any beat fires, so the reducer only admits

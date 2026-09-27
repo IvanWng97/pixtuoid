@@ -287,7 +287,8 @@ fn seat_view_maps_facing_to_sprite_and_flip() {
 #[test]
 fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
     use crate::layout::{Facing, Point};
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("pack");
     let desk = Point { x: 40, y: 30 };
     let back = Seat::at_desk(desk, Facing::North);
     let front = Seat::at_desk(desk, Facing::South);
@@ -310,7 +311,9 @@ fn a_back_turned_desk_shows_the_pose_s_own_back_view() {
         );
     }
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack = crate::embedded_pack::load_sprite_pack(Some(fixture)).expect("fixture pack");
+    let old_pack =
+        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
+            .expect("fixture pack");
     assert!(
         old_pack.animation("seated_back").is_none(),
         "fixture must lack every back view to bite"
@@ -347,7 +350,8 @@ fn fixture_pack(without: &[&str], extra: &str, tmp: &std::path::Path) -> Pack {
         })
         .collect();
     std::fs::write(dir.join("pack.toml"), format!("{kept}{extra}")).expect("write manifest");
-    crate::embedded_pack::load_sprite_pack(Some(dir)).expect("fixture pack")
+    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(dir))
+        .expect("fixture pack")
 }
 
 /// The middle rung of `sprite_in_pack`: a pack carrying the STILL back view but
@@ -376,7 +380,8 @@ fn a_pose_whose_own_back_view_is_missing_falls_back_to_the_still_one() {
 #[test]
 fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
     use crate::layout::{Facing, WaypointKind};
-    let full = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let full = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("pack");
     assert_eq!(
         Seat::at_waypoint(
             WaypointKind::MeetingChair,
@@ -388,7 +393,9 @@ fn sprite_in_pack_degrades_to_front_when_side_seated_is_missing() {
         "a pack WITH the profile sprite uses it"
     );
     let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/charpack");
-    let old_pack = crate::embedded_pack::load_sprite_pack(Some(fixture)).expect("fixture pack");
+    let old_pack =
+        crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Explicit(fixture))
+            .expect("fixture pack");
     assert!(
         old_pack.animation("side_seated").is_none(),
         "fixture must lack the profile sprite for this test to bite"
@@ -2676,7 +2683,8 @@ fn meeting_chairs_paint_with_backrests_toward_the_table_ends() {
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
     // The sofa is an un-themed sprite, so the painter can't read Theme for it —
     // these consts are deliberate copies of the pack palette's couch fabric.
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("embedded pack");
     let c = pack.palette().get('C').flatten().expect("couch fabric key");
     let g = pack
         .palette()
@@ -2694,7 +2702,8 @@ fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
 #[test]
 fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
     use crate::layout::{Facing, Point, WaypointKind, SEAT_RENDER_Y_OFF};
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("embedded pack");
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("embedded pack");
     let pos = Point { x: 40, y: 30 };
     let seat = Seat::at_waypoint(WaypointKind::MeetingChair, pos, Facing::West);
     let (anim, _) = seat.sprite_for("seated");
@@ -2716,7 +2725,8 @@ fn chair_sitter_bottom_row_lands_on_its_z_key_overlapping_the_chair_body() {
 
 #[test]
 fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("pack");
     let mut cache = FrameCache::new();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let pos = Point { x: 30, y: 20 };
@@ -2753,7 +2763,8 @@ fn busy_printer_ejects_a_page_and_idle_printer_stays_still() {
 
 #[test]
 fn busy_vending_machine_drops_a_can_and_idle_stays_stocked() {
-    let pack = crate::embedded_pack::load_sprite_pack(None).expect("pack");
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("pack");
     let mut cache = FrameCache::new();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let pos = Point { x: 30, y: 20 };

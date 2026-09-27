@@ -351,10 +351,9 @@ impl Pack {
     /// The highest density any of this pack's variants is drawn at, or 1 when
     /// it ships none.
     ///
-    /// A painter picks its render scale from the TERMINAL, but a variant only
-    /// lands at a scale its density divides — so the scale has to be chosen
-    /// knowing this. A Retina cell 17px wide makes 17 the natural scale, 17 is
-    /// prime, and every variant in the pack would sit unused.
+    /// A painter rounds its render scale to this (the scene's `RenderScale::fit`),
+    /// since a variant only lands at a scale its density divides.
+    ///
     /// Only furniture variants count: `<base>@<N>x` parses for ANY base, so a
     /// stray key in a user's pack.toml is a well-formed variant name for a
     /// piece no painter asks for.
@@ -371,18 +370,25 @@ impl Pack {
     /// `base` into self. Character animations are never inherited: a robot pack
     /// must not fall back to human sprites.
     ///
-    /// Driven by what `base` HAS rather than by the registry, because the
-    /// density axis is open: the registry names PIECES, not the grids each may
-    /// be drawn on, so enumerating variants would have to guess a ceiling.
+    /// Driven by what `base` HAS rather than by the registry: the registry names
+    /// PIECES, not the densities each is drawn at, so enumerating from it would
+    /// probe every piece at every density to find the few `base` ships.
     pub fn merge_from(&mut self, base: &Pack) {
-        for (name, sprite) in &base.animations {
-            if !is_optional_furniture_animation(name) {
-                continue;
-            }
-            self.animations
-                .entry(name.clone())
-                .or_insert_with(|| sprite.clone());
-        }
+        // A variant redraws one piece's art, so it only comes along with that
+        // piece: over this pack's own `desk`, the default's `desk@4x` would draw
+        // the default's desk wherever the density picks it.
+        let own_piece = |name: &str| {
+            split_density_variant(name)
+                .is_some_and(|(piece, _)| self.animations.contains_key(piece))
+        };
+        let inherited: Vec<(String, Sprite)> = base
+            .animations
+            .iter()
+            .filter(|(name, _)| is_optional_furniture_animation(name))
+            .filter(|(name, _)| !self.animations.contains_key(*name) && !own_piece(name))
+            .map(|(name, sprite)| (name.clone(), sprite.clone()))
+            .collect();
+        self.animations.extend(inherited);
     }
 }
 
@@ -447,8 +453,8 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
     })
 }
 
-/// Same as `load_pack` but takes in-memory strings — used by binaries that
-/// `include_str!` their assets at compile time.
+/// Same as [`load_pack`] but takes in-memory strings — used by the embedded
+/// default pack, which `include_str!`s its assets at compile time.
 pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Result<Pack> {
     let parsed: PackToml = toml::from_str(pack_toml).context("parsing pack.toml")?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
@@ -536,11 +542,9 @@ pub const OPTIONAL_CHARACTER_ANIMATIONS: &[&str] = &[
 /// `desk@4x` is the `desk` piece drawn on a 4x grid, for a painter rendering
 /// at a scale where the base art would otherwise be block-upscaled.
 ///
-/// The SCALE is in the name, following the prevailing asset convention
-/// (`@2x`/`@3x` on Apple platforms, `scale-200` on Windows). A name that says
-/// only "denser" cannot express a pack shipping BOTH a 2x and a 4x variant of
-/// one piece, and leaves the file's meaning dependent on whichever render
-/// scale happens to measure it.
+/// The SCALE is in the name: a name that says only "denser" cannot express a
+/// pack shipping BOTH a 2x and a 4x variant of one piece, and leaves the file's
+/// meaning dependent on whichever render scale happens to measure it.
 pub(crate) const DENSITY_VARIANT_SEP: char = '@';
 
 /// The animation name for `base` drawn at `density`x.
@@ -550,11 +554,8 @@ pub fn density_variant_name(base: &str, density: u16) -> String {
     out
 }
 
-/// [`density_variant_name`] into a caller-owned buffer.
-///
-/// The lookup happens per divisor, per piece, per frame, and the key is only
-/// borrowed for a map probe — so the hot path reuses one buffer rather than
-/// allocating a `String` it immediately drops.
+/// [`density_variant_name`] into a caller-owned buffer, so a lookup loop reuses
+/// one allocation.
 pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
     use std::fmt::Write;
     // Writing to a String is infallible.
@@ -563,17 +564,13 @@ pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
 
 /// The largest density a variant name may claim.
 ///
-/// A pack author types this number, so it is untrusted input to arithmetic that
-/// multiplies it by a frame dimension. `desk@60000x` parsed happily and then
-/// overflowed `base.width() * density` — a panic in any debug build (the crash
-/// hook fires, offering to file a bug for a pack typo) and a wrapped, wrong
-/// dimension in release. Bounding it HERE fixes every downstream multiply at
-/// once, and keeps a nonsense density out of `RenderScale::fit`, where
-/// `(available / density) * density` would floor to zero and silently withdraw
-/// the richer profile.
+/// A pack author types this number, so past any real grid it is a typo, and
+/// bounding it keeps `desk@60000x` an unknown name rather than a variant. As a
+/// variant it would become [`Pack::max_density_variant`], and a density above
+/// the render scale leaves the scene's `RenderScale::fit` nothing to round to,
+/// so the pack's real variants go unused.
 ///
-/// 64 is far past any authoring grid: the bundled art is 4x, and a 64x variant
-/// of the 14px desk would already be a 896px sprite.
+/// 64 is far past any authoring grid, so the bound costs no real pack anything.
 pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
 
 /// The base piece and density a variant name denotes, if it is one.
@@ -597,7 +594,7 @@ pub(crate) fn split_density_variant(name: &str) -> Option<(&str, u16)> {
 /// registry entry or one of their density variants.
 ///
 /// Variants are legal BY DERIVATION rather than by their own registry rows, so
-/// authoring one is a sprite file and nothing else. A second list would have
+/// authoring one needs no registry row. A second list would have
 /// to be kept in step with the first, and forgetting an entry fails QUIETLY in
 /// its least visible direction: the variant loads for the bundled pack but
 /// `Pack::merge_from` never inherits it, so a `--pack-dir` user silently drops
@@ -607,8 +604,8 @@ pub(crate) fn is_optional_furniture_animation(name: &str) -> bool {
     OPTIONAL_FURNITURE_ANIMATIONS.contains(&base)
 }
 
-/// Environment/furniture animation names a pack MAY provide; `Pack::merge_from`
-/// inherits any that are missing from the base pack, density variants included.
+/// Environment/furniture animation names a pack MAY provide; [`Pack::merge_from`]
+/// inherits from the base pack any the custom pack lacks.
 pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "desk",
     "desk_north",
@@ -652,24 +649,33 @@ const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
     ("lobster_walk", 2),
 ];
 
+/// The size a `<base>@<N>x` variant must be: `base`'s times `density`, exactly.
+///
+/// Wider than a frame dimension: a claim past `u16::MAX` stays a size no frame
+/// can meet, where a saturated one would equal a `u16::MAX`-wide frame.
+pub fn claimed_variant_size(base: &Frame, density: u16) -> (u32, u32) {
+    (
+        u32::from(base.width()) * u32::from(density),
+        u32::from(base.height()) * u32::from(density),
+    )
+}
+
+/// Whether `variant` is exactly the size its density claims over `base`
+/// ([`claimed_variant_size`]).
+pub fn variant_fits(base: &Frame, density: u16, variant: &Frame) -> bool {
+    claimed_variant_size(base, density) == (u32::from(variant.width()), u32::from(variant.height()))
+}
+
 /// A density variant whose frame size is not what its name claims.
 ///
-/// Worse than an absent variant: a renderer picking it up by name draws the
-/// piece at the wrong size, so `validate_pack_animations` calls it an error.
-///
-/// `claimed != found` is what makes an instance mean anything, and it is held
-/// by CONSTRUCTION: the one producer (`validate_pack_animations`) pushes only
-/// inside that comparison, and nothing else in the workspace builds one. The
-/// fields stay `pub` because the `validate-pack` presenter reads all three to
-/// print them. Encoding the invariant in the type would mean a private
-/// constructor plus three accessors for a struct with one producer and one
-/// consumer — cost with no reachable failure to prevent.
+/// [`validate_pack_animations`] calls it an error: a renderer skips such a
+/// variant, so the art the author shipped never shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DensityMismatch {
     /// The variant's animation name, e.g. `desk@4x`.
     pub name: String,
-    /// The size the name claims: the base piece's, times that density.
-    pub claimed: (u16, u16),
+    /// The size the name claims: [`claimed_variant_size`].
+    pub claimed: (u32, u32),
     /// The size the variant's first frame actually is.
     pub found: (u16, u16),
 }
@@ -700,20 +706,36 @@ pub struct ValidationReport {
 }
 
 impl ValidationReport {
-    /// True when the pack is unusable — a required animation is missing, one
-    /// has too few frames, or a density variant is not the size it claims (or
-    /// has no base to claim it against). Missing OPTIONAL animations do not
-    /// count.
+    /// How many findings make the pack unusable. Missing OPTIONAL and unknown
+    /// animations are reported, not counted.
+    pub fn error_count(&self) -> usize {
+        // No `..`: a new report field must be classed error-or-not here before
+        // this compiles.
+        let ValidationReport {
+            missing_required,
+            missing_optional: _,
+            insufficient_frames,
+            unknown: _,
+            mismatched_density,
+            orphan_variants,
+        } = self;
+        missing_required.len()
+            + insufficient_frames.len()
+            + mismatched_density.len()
+            + orphan_variants.len()
+    }
+
+    /// True when the pack is unusable; see [`error_count`](Self::error_count).
     pub fn has_errors(&self) -> bool {
-        !self.missing_required.is_empty()
-            || !self.insufficient_frames.is_empty()
-            || !self.mismatched_density.is_empty()
-            || !self.orphan_variants.is_empty()
+        self.error_count() > 0
     }
 }
 
 /// Check a pack's animations against the required/optional/multi-frame
-/// registries.
+/// registries, and each density variant against its base.
+///
+/// An unauthored variant is not reported missing: a pack that has not been
+/// redrawn at a density is the normal case, not a gap.
 pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     let mut report = ValidationReport::default();
     let known_names = || {
@@ -739,15 +761,6 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         }
     }
 
-    // Implicit min-1 floor: a `frames = []` entry deserializes and makes
-    // `animation()` return Some (dodging the missing-required check above)
-    // while every render consumer guards with `.frames().first()` and silently
-    // draws nothing; an empty OPTIONAL entry additionally SHADOWS the embedded
-    // default in `Pack::merge_from` (`contains_key` is true). A density variant
-    // rides its BASE's minimum — same piece, bigger grid — so an empty
-    // `desk@4x` shadows the default exactly as an empty `desk` does. Variants
-    // are found by walking the PACK, not by enumerating densities: that axis
-    // has no ceiling to enumerate to.
     let variants: Vec<(String, &str, u16)> = pack
         .animation_names()
         .into_iter()
@@ -765,6 +778,11 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
         let min_frames = MULTI_FRAME_REQUIREMENTS
             .iter()
             .find(|&&(n, _)| n == requirement_key)
+            // Implicit min-1 floor: a `frames = []` entry deserializes and makes
+            // `animation()` return Some (dodging the missing-required check)
+            // while every render consumer guards with `.frames().first()` and
+            // draws nothing; an empty OPTIONAL entry also SHADOWS the embedded
+            // default in `Pack::merge_from` (`contains_key` is true).
             .map_or(1, |&(_, min)| min);
         if let Some(anim) = pack.animation(name) {
             if anim.frames().len() < min_frames {
@@ -779,17 +797,15 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
     for name in known_names() {
         check_frames(name, name);
     }
+    // A variant rides its BASE's minimum (same piece, bigger grid), so an
+    // empty `desk@4x` shadows the default exactly as an empty `desk` does.
     for (name, base, _) in &variants {
         check_frames(name, base);
     }
 
-    // The name CLAIMS a density; the frame size is what proves it. Without this
-    // the claim is only ever tested by whichever renderer happens to look for
-    // that density — i.e. silently, at paint time, on someone else's terminal.
     for (name, base, density) in &variants {
         let Some(base_art) = pack.animation(base).and_then(|a| a.frames().first()) else {
-            // No base means no claim to check it against. Reported rather than
-            // skipped: silence here is what let a renamed `desk.sprite` pass.
+            // No base, no claim to check: see `ValidationReport::orphan_variants`.
             report.orphan_variants.push(name.clone());
             continue;
         };
@@ -797,20 +813,11 @@ pub fn validate_pack_animations(pack: &Pack) -> ValidationReport {
             // An empty variant is already `insufficient_frames`' finding.
             continue;
         };
-        // Saturating, not `*`: the density is bounded but the BASE is not — a
-        // pack may ship art of any size, and this number is only ever REPORTED.
-        // A saturated claim still differs from any real frame size, so the
-        // mismatch fires either way.
-        let claimed = (
-            base_art.width().saturating_mul(*density),
-            base_art.height().saturating_mul(*density),
-        );
-        let found = (art.width(), art.height());
-        if claimed != found {
+        if !variant_fits(base_art, *density, art) {
             report.mismatched_density.push(DensityMismatch {
                 name: name.clone(),
-                claimed,
-                found,
+                claimed: claimed_variant_size(base_art, *density),
+                found: (art.width(), art.height()),
             });
         }
     }
@@ -844,10 +851,7 @@ mod validation_floor_tests {
         load_pack_from_strings(&toml, &[("f.sprite", "@frame 0\nA")]).expect("pack builds")
     }
 
-    /// The whole point of deriving: authoring `<piece>@<N>x` is a sprite
-    /// file and nothing else. A second registry list would have to be kept
-    /// in step with the first, and every entry someone forgets is a silent
-    /// downgrade for `--pack-dir` users.
+    /// Pins [`is_optional_furniture_animation`]'s derivation.
     #[test]
     fn a_density_variant_is_known_by_derivation_not_by_its_own_row() {
         assert!(is_optional_furniture_animation("desk"));
@@ -865,8 +869,6 @@ mod validation_floor_tests {
         assert_eq!(density_variant_name("desk", 4), "desk@4x");
         assert_eq!(split_density_variant("desk@4x"), Some(("desk", 4)));
         assert_eq!(split_density_variant("desk@12x"), Some(("desk", 12)));
-        // `1x` is the base piece under a second name — one thing with two
-        // names is how a pack ends up shipping both and disagreeing.
         assert_eq!(split_density_variant("desk@1x"), None);
         assert_eq!(split_density_variant("desk@0x"), None);
         // Malformed claims are not variants; they fall through to the plain
@@ -877,11 +879,8 @@ mod validation_floor_tests {
         assert_eq!(split_density_variant("desk@-2x"), None);
     }
 
-    /// THE failure this derivation exists to prevent, and it is invisible
-    /// from inside the bundled pack: a `--pack-dir` pack that ships its own
-    /// `desk` but no density variant must still inherit the default's, or the
-    /// custom pack silently renders block-upscaled while the bundled one
-    /// does not.
+    /// Pins [`Pack::merge_from`]'s variant inheritance, which the bundled pack
+    /// alone never exercises.
     #[test]
     fn merge_from_inherits_a_density_variant_so_a_custom_pack_keeps_the_richer_art() {
         let base = pack_with(
@@ -900,10 +899,17 @@ mod validation_floor_tests {
         );
     }
 
-    /// Neither "missing" nor "unknown": a density variant is authored or it
-    /// is not, and every pack that has not been redrawn is the normal case.
-    /// Listing them as missing optionals would put ~28 permanent lines in
-    /// every `validate-pack` run.
+    #[test]
+    fn a_pack_that_redraws_a_piece_does_not_inherit_the_defaults_variant_of_it() {
+        let base = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        let mut custom = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        custom.merge_from(&base);
+        assert!(custom.animation("desk@4x").is_none());
+    }
+
     #[test]
     fn an_unauthored_density_variant_is_not_reported_missing() {
         let report = validate_pack_animations(&pack_with(
@@ -920,9 +926,7 @@ mod validation_floor_tests {
         assert!(!report.unknown.contains(&"desk".to_string()));
     }
 
-    /// An empty `desk@4x` is the WORSE shadow: `contains_key` is true, so
-    /// `merge_from` skips the default's real art and the piece renders
-    /// nothing at the density it claims to serve.
+    /// Pins the frame floor's variant arm (`validate_pack_animations`).
     #[test]
     fn an_empty_density_variant_still_fails_the_frame_floor() {
         let report = validate_pack_animations(&pack_with(
@@ -939,10 +943,7 @@ mod validation_floor_tests {
         );
     }
 
-    /// A painter picks its scale from the TERMINAL, but a variant only lands
-    /// at a scale its density divides — so it needs ONE number from the pack
-    /// to round against, and it must be the MAX because one scale serves
-    /// every piece at once.
+    /// Pins [`Pack::max_density_variant`].
     #[test]
     fn the_packs_max_density_is_the_scale_a_painter_has_to_round_to() {
         let plain = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
@@ -960,21 +961,6 @@ mod validation_floor_tests {
         );
         assert_eq!(mixed.max_density_variant(), 4);
 
-        // The bundled pack is what a default run paints with, so the number a
-        // real terminal rounds against is pinned here rather than assumed.
-        let bundled = load_pack_from_strings(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.\"desk@4x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
-            &[("f.sprite", "@frame 0\nA")],
-        )
-        .expect("pack builds");
-        assert_eq!(bundled.max_density_variant(), 4);
-
-        // A key nothing can ever draw must not raise the number. `<base>@<N>x`
-        // parses for ANY base, so a typo'd or stray entry in a user's pack.toml
-        // is a well-formed variant name for a piece no painter asks for — it is
-        // reported only as `unknown`, and rounding the scale to it would round
-        // to art that does not exist.
         let stray = pack_with(
             "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
              [animations.\"desk@2x\"]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
@@ -987,10 +973,7 @@ mod validation_floor_tests {
         );
     }
 
-    /// The name is a CLAIM and the size is the proof. Without this check the
-    /// claim is only ever tested by whichever renderer happens to look for
-    /// that density — silently, at paint time, on someone else's terminal —
-    /// and the piece draws at the wrong size when it is.
+    /// Pins [`DensityMismatch`].
     #[test]
     fn a_variant_that_lies_about_its_density_is_a_hard_error() {
         let pack = load_pack_from_strings(
@@ -1038,35 +1021,29 @@ mod validation_floor_tests {
         assert!(!is_optional_furniture_animation("desk@60000x"));
     }
 
-    /// A bounded density still meets an unbounded BASE, and the claim is only
-    /// ever reported — so it saturates rather than wrapping, and the mismatch
-    /// still fires.
+    /// Pins [`claimed_variant_size`].
     #[test]
-    fn a_huge_base_saturates_its_claim_instead_of_wrapping() {
-        let wide = format!("@frame 0\n{}", "A ".repeat(2000).trim_end());
+    fn a_claim_no_frame_can_meet_is_a_mismatch() {
+        let row = |w: usize| format!("{}\n", "A ".repeat(w).trim_end());
+        let base = format!("@frame 0\n{}", row(40_000));
+        let variant = format!("@frame 0\n{0}{0}", row(u16::MAX as usize));
         let pack = load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.desk]\nframes=[\"wide.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@64x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-            &[("wide.sprite", &wide), ("one.sprite", "@frame 0\nA")],
+             [animations.desk]\nframes=[\"base.sprite\"]\nframe_ms=100\n\
+             [animations.\"desk@2x\"]\nframes=[\"variant.sprite\"]\nframe_ms=100\n",
+            &[("base.sprite", &base), ("variant.sprite", &variant)],
         )
         .expect("pack builds");
         let report = validate_pack_animations(&pack);
         let m = report
             .mismatched_density
             .first()
-            .expect("the variant is not 64x the base");
-        assert_eq!(
-            m.claimed.0,
-            u16::MAX,
-            "2000 * 64 saturates instead of wrapping to 62_464"
-        );
-        assert_ne!(m.claimed, m.found, "a saturated claim is still a mismatch");
+            .expect("80_000 wide is claimed, 65_535 is found");
+        assert_eq!(m.claimed, (80_000, 2));
+        assert_eq!(m.found, (u16::MAX, 2));
     }
 
-    /// Renaming `desk.sprite` to `desk@4x.sprite` instead of ADDING it used to
-    /// pass clean: the loader has no base to check the claim against, and the
-    /// runtime merge then validates it against the DEFAULT pack's art.
+    /// Pins `ValidationReport::orphan_variants`.
     #[test]
     fn a_variant_whose_base_the_pack_does_not_ship_is_an_error() {
         let pack = load_pack_from_strings(

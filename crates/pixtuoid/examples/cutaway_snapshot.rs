@@ -125,7 +125,9 @@ fn main() -> Result<()> {
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
-    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(None)?;
+    let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
+        pixtuoid_scene::embedded_pack::PackSource::Bundled,
+    )?;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let meta = FloorMeta::ground();
 

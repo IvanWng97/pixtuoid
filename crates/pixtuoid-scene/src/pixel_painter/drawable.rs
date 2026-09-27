@@ -36,8 +36,8 @@ use crate::pet::PetKind;
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
-// Vending pickup-slot offset from the sprite's top-left — the ONE cell where
-// the idle trim paints and the busy can-drop lands.
+/// Vending pickup-slot offset from the sprite's top-left — the ONE cell where
+/// the idle trim paints and the busy can-drop lands.
 pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
 
 /// Vending machine + printer body sizes — CENTER-anchored on their waypoint
@@ -63,7 +63,7 @@ pub(super) enum DrawableKind<'a> {
         screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
-        /// 0 = no tower (byte-identical to the pre-meter desk), 1..=3 = reams.
+        /// 0 = no tower (the plain desk), 1..=3 = reams.
         token_tier: u8,
         /// A falling sheet's distance FALLEN (px) when a big usage reading
         /// is mid-drop (`token_meter::sheet_fall_dist`), else `None`.
@@ -87,8 +87,8 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `use_large` picks the detailed 32×10 kitchen sprite vs. the
-    /// 20×8 compact fallback.
+    /// in z-order. `use_large` picks the detailed kitchen sprite vs. the compact
+    /// fallback.
     WaypointPantry {
         pos: Point,
         use_large: bool,
@@ -107,7 +107,7 @@ pub(super) enum DrawableKind<'a> {
         width: u16,
         height: u16,
     },
-    /// Lounge side table (5×3 wood + magazine), centred at `pos`.
+    /// Lounge side table (wood + magazine), centred at `pos`.
     LoungeSideTable {
         pos: Point,
     },
@@ -192,8 +192,9 @@ pub(super) enum DrawableKind<'a> {
         jamb_north: bool,
         jamb_south: bool,
     },
-    /// Meeting-room coat rack, y-sorted at its base row. `pos` is the pole top;
-    /// the base sits at `pos.y + 7`.
+    /// Meeting-room coat rack, y-sorted at its base row
+    /// ([`COAT_RACK_BASE_DY`](super::furniture::COAT_RACK_BASE_DY) below `pos`,
+    /// the pole top).
     CoatRack {
         pos: Point,
     },
@@ -202,8 +203,8 @@ pub(super) enum DrawableKind<'a> {
     FishTank {
         pos: Point,
     },
-    /// Head-of-table meeting chair, y-sorted one row ABOVE its occupant's
-    /// seated anchor (`wp.y + 2`) so the sitter always paints over it.
+    /// Head-of-table meeting chair, keyed one row before its sitter's z-key so
+    /// the sitter paints over it.
     MeetingChair {
         pos: Point,
         back_west: bool,
@@ -252,10 +253,7 @@ fn blit_centered_first_frame(pack: &Pack, anim_name: &str, pos: Point, buf: &mut
     }
 }
 
-/// The paint-time context one [`Drawable`] arm needs — the subset of `PaintCtx`
-/// they touch. Bundled rather than passed flat: this was six positional
-/// parameters and the render scale would have made seven, the growth
-/// `PixelCtx`/`PaintCtx` already answered the same way.
+/// The subset of `PaintCtx` a [`Drawable`] arm paints with.
 pub(super) struct DrawableCtx<'a> {
     pub buf: &'a mut RgbBuffer,
     pub pack: &'a Pack,
@@ -281,7 +279,6 @@ fn desk_sprite_name(facing: crate::layout::Facing) -> Option<&'static str> {
 /// Dispatch one Drawable's paint; character-attached effects paint inline so
 /// they ride along with the character in z-order.
 pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
-    // Re-bound to the original names so the arms below are untouched.
     let buf = &mut *c.buf;
     let cache = &mut *c.cache;
     let (pack, now, theme) = (c.pack, c.now, c.theme);
@@ -584,7 +581,7 @@ fn paint_desk_coffee(
 }
 
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
-/// site centres on what is actually drawn even under a `--pack-dir` override.
+/// site centres on what is actually drawn even under a custom pack.
 pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
     pack.animation("desk_chair")
         .and_then(|a| a.frames().first())
@@ -618,8 +615,10 @@ pub(super) fn paint_desk_lamp(
     buf.put_checked(lx, ly, shade);
     buf.put_checked(lx + 1, ly, shade);
     buf.put_checked(lx + 1, ly + 1, stem);
-    /// A desk is 14 wide, so a larger pool washes the neighbouring workstations.
+    /// Its diameter stays under the desk's width: a larger pool washes the
+    /// neighbouring workstations.
     const DESK_LAMP_RADIUS: u16 = 5;
+    const _: () = assert!(2 * DESK_LAMP_RADIUS < crate::layout::desk_furniture_def().visual.w);
     const DESK_LAMP_MAX: f32 = 0.42;
     const _: () = assert!(DESK_LAMP_MAX < super::SCREEN_IDLE_MAX);
     paint_warm_halo(
@@ -681,7 +680,7 @@ fn paint_token_stack(
     }
 }
 
-/// Tower geometry, relative to the 14×8 desk sprite: the stack hugs the
+/// Tower geometry, relative to the desk sprite: the stack hugs the
 /// monitor's east side on the right wood wing, its base on the surface row.
 /// 2px per ream — 1px of vertical detail is sub-legible at half-block scale.
 const STACK_X_OFF: u16 = 11;
@@ -696,17 +695,19 @@ mod tests {
 
     #[test]
     fn steam_anchor_sits_within_the_coffee_machine_columns() {
+        let pack = crate::embedded_pack::test_default_pack();
+        let width = |name: &str| pack.animation(name).expect(name).frames()[0].width() as i16;
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
         for (dx, cw, (lo, hi)) in [
             (
                 PANTRY_STEAM_DX_LARGE,
-                32i16,
+                width("pantry"),
                 crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE,
             ),
             (
                 PANTRY_STEAM_DX_SMALL,
-                20i16,
+                width("pantry_small"),
                 crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL,
             ),
         ] {
