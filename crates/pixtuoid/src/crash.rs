@@ -44,8 +44,8 @@ pub(crate) fn install_crash_hook() {
         // The payload and the path are text we don't control, so stripped
         // before they reach the terminal; the URL is percent-encoded already.
         let (msg, path) = (
-            pixtuoid::strip_control_chars(&panic_msg),
-            pixtuoid::strip_control_chars(&crash_path.display().to_string()),
+            pixtuoid::strip_lines(&panic_msg, "\n  "),
+            pixtuoid::display_path(&crash_path),
         );
         let notice = format!(
             "\n\x1b[1;31mpixtuoid v{version} crashed — sorry about that.\x1b[0m\n\n\
@@ -175,10 +175,6 @@ mod tests {
     #[cfg(unix)]
     const LEAVE_ALT_SCREEN: &str = "\x1b[?1049l";
 
-    /// libtest's exit status for a run with a failed test.
-    #[cfg(unix)]
-    const LIBTEST_FAILED: i32 = 101;
-
     /// The panic hook is process-global and writes to a real fd, so the only way
     /// to observe which stream it chose is from outside: re-exec this test binary
     /// with the child marker, let a real panic fire the hook, read the pipes apart.
@@ -226,11 +222,14 @@ mod tests {
     fn the_hook_strips_the_payload_and_survives_a_broken_stderr() {
         const CHILD: &str = "PIXTUOID_CRASH_HOOK_PAYLOAD_CHILD";
         const PAYLOAD: &str = "\u{1b}]0;pwned\u{7}\u{202e}";
+        /// libtest's exit status for a run with a failed test.
+        const LIBTEST_FAILED: i32 = 101;
         if std::env::var_os(CHILD).is_some() {
             install_crash_hook();
-            panic!("deliberate panic {PAYLOAD}");
+            panic!("deliberate panic {PAYLOAD}\nsecond line");
         }
-        let state = tempfile::tempdir().unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let state = tmp.path().join(format!("state{PAYLOAD}"));
         let child = || {
             let mut c = std::process::Command::new(std::env::current_exe().unwrap());
             c.args([
@@ -239,13 +238,20 @@ mod tests {
                 "--nocapture",
             ])
             .env(CHILD, "1")
-            .env("XDG_STATE_HOME", state.path());
+            .env("XDG_STATE_HOME", &state);
             c
         };
 
         let out = child().output().unwrap();
         let stderr = String::from_utf8_lossy(&out.stderr);
-        assert!(stderr.contains("deliberate panic ]0;pwned"), "{stderr:?}");
+        assert!(
+            stderr.contains("deliberate panic ]0;pwned\n  second line"),
+            "{stderr:?}"
+        );
+        assert!(
+            stderr.contains("state]0;pwned/pixtuoid/crash.log"),
+            "{stderr:?}"
+        );
         assert!(
             !stderr.contains(PAYLOAD) && !stderr.contains('\u{202e}'),
             "{stderr:?}"
@@ -254,7 +260,11 @@ mod tests {
         // A reader-gone pipe, not a closed fd: std swallows EBADF on stderr.
         let (reader, writer) = std::io::pipe().unwrap();
         drop(reader);
-        let status = child().stderr(writer).status().unwrap();
+        let status = child()
+            .stdout(std::process::Stdio::null())
+            .stderr(writer)
+            .status()
+            .unwrap();
         assert_eq!(
             status.code(),
             Some(LIBTEST_FAILED),

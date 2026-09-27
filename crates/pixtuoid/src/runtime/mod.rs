@@ -136,7 +136,7 @@ pub(crate) fn capacity_for_terminal(cols: u16, rows: u16, floor_seed: u64) -> us
     pixtuoid_scene::floor::floor_capacity(cols, buf_h, floor_seed)
 }
 
-// The headless `println!` summary derives labels / tool detail / Notification reason
+// The headless stdout summary derives labels / tool detail / Notification reason
 // from untrusted transcript+hook input, so a crafted ANSI/OSC escape would otherwise
 // reach the user's terminal verbatim (the TUI is immune — ratatui neutralizes escapes
 // in its cell buffer).
@@ -165,7 +165,7 @@ fn summarize(scene: &SceneState) -> String {
     // Daemon-style sources (the OpenClaw gateway lobster) render as wandering mascots,
     // not desk agents — surface them here too so headless is a complete window onto the
     // scene. The source name is a registry id (controlled), but sanitize it like every
-    // other field on this println path.
+    // other field on this stdout path.
     let daemons: Vec<String> = scene
         .daemons()
         .map(|(source, instance, p)| {

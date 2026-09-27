@@ -4,7 +4,7 @@ use std::path::Path;
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{load_pack, validate_pack_animations, ValidationReport};
 
-use crate::{cli_stderr, cli_stdout, strip_control_chars};
+use crate::{cli_stdout, strip_control_chars};
 
 /// The `OK:` line. **homebrew-core contract**: their `test do` asserts this output
 /// matches `OK: pack "skeleton"` after `init-pack`, so the literal prefix + quoting
@@ -32,7 +32,7 @@ fn unknown_line(name: &str) -> String {
 }
 
 pub fn validate_pack(dir: &Path) -> Result<()> {
-    let (mut out, mut err) = (cli_stdout(), cli_stderr());
+    let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;
     writeln!(out, "{}", ok_line(&pack.name, &pack.version))?;
 
@@ -54,17 +54,17 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     // pack's own table, so it is pack input and gets the same sanitising as the
     // unknown keys.
     for name in missing_required {
-        writeln!(err, "ERROR: missing required animation \"{name}\"")?;
+        let _ = writeln!(err, "ERROR: missing required animation \"{name}\"");
     }
     for (name, need, got) in insufficient_frames {
-        writeln!(
+        let _ = writeln!(
             err,
             "ERROR: \"{}\" needs at least {need} frames, has {got}",
             strip_control_chars(name)
-        )?;
+        );
     }
     for m in mismatched_density {
-        writeln!(
+        let _ = writeln!(
             err,
             "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
             strip_control_chars(&m.name),
@@ -72,14 +72,14 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
             m.found.1,
             m.claimed.0,
             m.claimed.1
-        )?;
+        );
     }
     for name in orphan_variants {
-        writeln!(
+        let _ = writeln!(
             err,
             "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
             strip_control_chars(name)
-        )?;
+        );
     }
     for name in missing_optional {
         writeln!(
@@ -93,7 +93,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
 
     let errors = report.error_count();
     let warnings = missing_optional.len();
-    writeln!(err, "\n{} error(s), {} warning(s)", errors, warnings)?;
+    let _ = writeln!(err, "\n{} error(s), {} warning(s)", errors, warnings);
 
     if report.has_errors() {
         bail!("pack validation failed with {errors} error(s)");

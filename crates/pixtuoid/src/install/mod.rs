@@ -92,10 +92,7 @@ pub(crate) fn verify_target(
         Ok(c) => c,
         Err(_) => {
             return verify::SchemaVerifyResult {
-                issues: vec![format!(
-                    "config unreadable: {}",
-                    verify::display_safe(&path)
-                )],
+                issues: vec![format!("config unreadable: {}", crate::display_path(&path))],
                 notes: vec![],
             }
         }
@@ -152,7 +149,7 @@ fn verify_extra_artifacts(t: &Target, issues: &mut Vec<String>, notes: &mut Vec<
             continue;
         }
         let Ok(installed) = io::read_config(&p) else {
-            notes.push(format!("could not read {}", verify::display_safe(&p)));
+            notes.push(format!("could not read {}", crate::display_path(&p)));
             continue;
         };
         check_artifact_content(&p, &installed, &intended, issues, notes);
@@ -179,7 +176,7 @@ fn check_artifact_content(
             "{} differs from the plugin this pixtuoid ships — it \
              predates an upgrade, so anything added since is not \
              forwarded. Reconnect the source to refresh it.",
-            verify::display_safe(p)
+            crate::display_path(p)
         ));
     }
     // Existence misses a shim that MOVED — a green doctor over a plugin whose every
@@ -191,7 +188,7 @@ fn check_artifact_content(
         Some(baked) => check_shim_binary(&baked, issues),
         None => notes.push(format!(
             "could not read the baked shim path from {}",
-            verify::display_safe(p)
+            crate::display_path(p)
         )),
     }
 }
@@ -226,22 +223,22 @@ fn missing_artifact_issue(missing: &[PathBuf]) -> Vec<String> {
         return vec![format!(
             "{} plugin artifacts missing from {}: {}",
             missing.len(),
-            verify::display_safe(dir.unwrap_or(first)),
+            crate::display_path(dir.unwrap_or(first)),
             crate::strip_control_chars(&names.join(", "))
         )];
     }
     missing
         .iter()
-        .map(|p| format!("plugin artifact missing: {}", verify::display_safe(p)))
+        .map(|p| format!("plugin artifact missing: {}", crate::display_path(p)))
         .collect()
 }
 
 /// Stat one resolved shim path — the ONE check shared by an embedded hook command
 /// and a code artifact's baked `HOOK_PATH`, so the two can't report a moved binary
-/// differently. `display_safe` because the path comes from a hand-editable hook
+/// differently. `display_path` because the path comes from a hand-editable hook
 /// command and these issues reach a real terminal.
 fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
-    let shown = verify::display_safe(p);
+    let shown = crate::display_path(p);
     if !p.exists() {
         issues.push(format!("shim binary missing: {shown}"));
     } else if !is_executable(p) {

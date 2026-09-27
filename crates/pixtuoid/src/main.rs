@@ -1,3 +1,6 @@
+// The lib's rule, for the same reason (see its crate root).
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 mod crash;
 mod logging;
 mod sources_cli;
@@ -52,24 +55,24 @@ fn run() -> Result<()> {
             ColorPreflight::Proceed => {}
             ColorPreflight::ForceColor => crossterm::style::force_color_output(true),
             ColorPreflight::RefuseNoColor => {
-                writeln!(
-                    pixtuoid::cli_stderr(),
+                let _ = writeln!(
+                    std::io::stderr(),
                     "pixtuoid: $NO_COLOR is set, so color output is disabled — the \
                      pixel-art office is 24-bit color with no legible monochrome mode \
                      and would render as unreadable blocks. Unset NO_COLOR (or set \
                      CLICOLOR_FORCE=1 to override) to run it, or use \
                      `pixtuoid run --headless` for a text summary."
-                )?;
+                );
                 return Ok(());
             }
             ColorPreflight::RefuseDumbTerm => {
-                writeln!(
-                    pixtuoid::cli_stderr(),
+                let _ = writeln!(
+                    std::io::stderr(),
                     "pixtuoid: $TERM=dumb — this terminal can't render the pixel-art \
                      office (no cursor addressing or color). Use a graphical terminal \
                      (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, WezTerm), \
                      or `pixtuoid run --headless` for a text summary."
-                )?;
+                );
                 return Ok(());
             }
         }
@@ -89,14 +92,14 @@ fn run() -> Result<()> {
         std::env::var("PIXTUOID_NO_TRUECOLOR_WARN").ok().as_deref(),
     ) && pixtuoid::term::query_truecolor(pixtuoid::term::TRUECOLOR_PROBE_TIMEOUT) != Some(true)
     {
-        writeln!(
-            pixtuoid::cli_stderr(),
+        let _ = writeln!(
+            std::io::stderr(),
             "⚠ pixtuoid: your terminal didn't confirm truecolor support — the \
              pixel-art office renders in 24-bit color and may look wrong. Use a \
              truecolor terminal (Windows Terminal, iTerm2, Ghostty, Alacritty, kitty, \
              WezTerm), run `pixtuoid doctor` to check, or set \
              PIXTUOID_NO_TRUECOLOR_WARN=1 to silence."
-        )?;
+        );
     }
     let log_level: &'static str = log_level.as_str();
     let tui_active = matches!(&cmd, Cmd::Run { headless, .. } if !*headless)
@@ -196,7 +199,7 @@ fn build_run_config(
         // not just the log file. Headless already has a stderr tracing subscriber,
         // so re-printing there would duplicate.
         for w in &cfg_warnings {
-            writeln!(pixtuoid::cli_stderr(), "⚠ pixtuoid: {w}")?;
+            let _ = writeln!(std::io::stderr(), "⚠ pixtuoid: {w}");
         }
         warn_broken_installs(&connected);
     }
@@ -234,7 +237,7 @@ fn warn_broken_installs(connected: &std::collections::HashSet<String>) {
                 .map(|v| v.issues.join("; "))
                 .unwrap_or_default();
             let _ = writeln!(
-                pixtuoid::cli_stderr(),
+                std::io::stderr(),
                 "⚠ pixtuoid: {} hooks are installed but BROKEN: {issues} — \
                  reconnect in the Sources panel (press s)",
                 t.core_source

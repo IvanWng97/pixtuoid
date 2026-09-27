@@ -1,7 +1,8 @@
 //! Integration coverage for what only the REAL binary shows of `main.rs`: the
 //! `completions` / `man` packaging dispatch (the generation itself is unit-tested
 //! in `cli.rs`) — that the SHELL arg reaches clap_complete and that stdout stays
-//! the clean artifact channel homebrew-core captures — and the fatal-error exit.
+//! the clean artifact channel homebrew-core captures — the fatal-error exit, and
+//! the clean exit when a printing command's reader leaves.
 
 use clap::ValueEnum;
 
@@ -108,12 +109,28 @@ fn a_fatal_error_reaches_stderr_stripped_and_exits_1() {
     );
 }
 
-#[test]
-fn a_fatal_error_into_a_broken_pipe_still_exits_1() {
-    // A pipe whose reader is gone, not a closed fd: std swallows EBADF on
-    // stderr, so only a write that fails reaches the panic this guards.
+/// A pipe whose reader is gone, not a closed fd: std swallows EBADF on
+/// stdout/stderr, so only a write that fails reaches the panic this guards.
+fn reader_gone() -> std::io::PipeWriter {
     let (reader, writer) = std::io::pipe().expect("pipe");
     drop(reader);
+    writer
+}
+
+/// `pixtuoid args` from an env cleared to `home` and a minimal PATH, so
+/// nothing reads the developer's real config or CLI dirs.
+#[cfg(unix)]
+fn isolated(args: &[&str], home: &std::path::Path) -> std::process::Command {
+    let mut cmd = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"));
+    cmd.args(args)
+        .env_clear()
+        .env("HOME", home)
+        .env("PATH", "/usr/bin:/bin");
+    cmd
+}
+
+#[test]
+fn a_fatal_error_into_a_broken_pipe_still_exits_1() {
     // A regression crashes, and the crash hook must not log into the real
     // state dir.
     let state = tempfile::TempDir::new().expect("tempdir");
@@ -122,38 +139,31 @@ fn a_fatal_error_into_a_broken_pipe_still_exits_1() {
         .env_remove("RUST_LOG")
         .env_remove("PIXTUOID_LOG")
         .env("XDG_STATE_HOME", state.path())
-        .stderr(writer)
+        .stderr(reader_gone())
         .status()
         .expect("run pixtuoid");
     assert_eq!(status.code(), Some(1), "{status:?}");
 }
 
-/// `pixtuoid … | head` closes the pipe early; the reader got what it wanted,
-/// so that is a clean exit, not a crash or a failure.
+/// Every platform: these read no home, so they need no env isolation, and
+/// Windows reports a gone reader through its own error code.
 #[test]
-fn every_printing_command_exits_0_when_its_reader_leaves() {
-    let home = tempfile::TempDir::new().expect("tempdir");
-    let pack = home.path().join("pack");
+fn artifact_commands_exit_0_when_their_reader_leaves() {
+    let tmp = tempfile::TempDir::new().expect("tempdir");
+    let pack = tmp.path().join("pack");
+    let pack = pack.to_str().expect("utf-8 tempdir");
     for args in [
         &["man"][..],
         &["completions", "bash"],
-        &["sources", "--json"],
-        &["sources"],
-        &["setup"],
-        &["doctor"],
-        &["init-pack", pack.to_str().expect("utf-8 tempdir")],
-        &["validate-pack", pack.to_str().expect("utf-8 tempdir")],
+        &["init-pack", pack],
+        &["validate-pack", pack],
     ] {
-        let (reader, writer) = std::io::pipe().expect("pipe");
-        drop(reader);
         let out = std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
             .args(args)
             .env_remove("RUST_LOG")
             .env_remove("PIXTUOID_LOG")
-            .env("HOME", home.path())
-            .env("XDG_CONFIG_HOME", home.path().join("config"))
-            .env("XDG_STATE_HOME", home.path().join("state"))
-            .stdout(writer)
+            .env("XDG_STATE_HOME", tmp.path())
+            .stdout(reader_gone())
             .output()
             .expect("run pixtuoid");
         assert!(
@@ -163,4 +173,50 @@ fn every_printing_command_exits_0_when_its_reader_leaves() {
             String::from_utf8_lossy(&out.stderr)
         );
     }
+}
+
+#[cfg(unix)]
+#[test]
+fn home_reading_commands_exit_0_when_their_reader_leaves() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    for args in [
+        &["sources", "--json"][..],
+        &["sources"],
+        &["setup"],
+        &["doctor"],
+        &["connect", "claude-code", "--json"],
+        &["disconnect", "claude-code"],
+        &["sources", "set", "claude-code"],
+        // After `connect`: its config is what `setup` detects, and only a
+        // detected CLI reaches the apply loop's rows.
+        &["setup", "--yes"],
+    ] {
+        let out = isolated(args, home.path())
+            .stdout(reader_gone())
+            .output()
+            .expect("run pixtuoid");
+        assert!(
+            out.status.success(),
+            "{args:?}: {:?}\n{}",
+            out.status,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+}
+
+/// The tracing sink's own report of a failed write is an `eprintln!` onto the
+/// stream that failed; `PIXTUOID_LOG` naming a directory makes `sources` log a
+/// warning on stderr.
+#[cfg(unix)]
+#[test]
+fn a_tracing_warning_into_a_gone_stderr_exits_0() {
+    let home = tempfile::TempDir::new().expect("tempdir");
+    let gone = reader_gone();
+    let status = isolated(&["sources"], home.path())
+        .env("PIXTUOID_LOG", home.path())
+        .stdout(gone.try_clone().expect("clone pipe"))
+        .stderr(gone)
+        .status()
+        .expect("run pixtuoid");
+    assert_eq!(status.code(), Some(0), "{status:?}");
 }

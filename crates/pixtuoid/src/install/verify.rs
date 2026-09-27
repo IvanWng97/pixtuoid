@@ -75,14 +75,6 @@ impl SchemaVerifyResult {
     }
 }
 
-/// Control-char-strip a path for display in a HARD issue string that may reach a
-/// REAL terminal. The shim path comes from the user's HAND-EDITABLE hook command,
-/// so sanitize at the SOURCE (where the untrusted value enters the issue Vec) —
-/// per-output-site sanitizing already missed the `doctor` stdout path once.
-pub(crate) fn display_safe(p: &std::path::Path) -> String {
-    crate::strip_control_chars(&p.display().to_string())
-}
-
 /// Assemble a `SchemaParse` from a per-target scan, centralizing the issue
 /// wording so every target reports consistently.
 pub(crate) fn assemble(
@@ -427,14 +419,6 @@ mod tests {
             p.shim,
             ShimRef::Absolute(PathBuf::from("/opt/pixtuoid-hook"))
         );
-    }
-
-    #[test]
-    fn display_safe_strips_control_chars_from_a_hostile_path() {
-        let hostile = std::path::Path::new("/x/\x1b]0;pwned\x07\x1b[31mhook");
-        let got = display_safe(hostile);
-        assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
-        assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
     }
 
     #[test]

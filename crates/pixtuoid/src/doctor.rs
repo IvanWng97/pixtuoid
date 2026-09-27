@@ -409,7 +409,7 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         version
     );
     // `issues` are already control-char sanitized at the source
-    // (`verify::display_safe`).
+    // (`crate::display_path`).
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
@@ -593,21 +593,25 @@ pub fn read_log(path: &std::path::Path) -> (String, Option<String>) {
     }
 }
 
-/// A path as the report prints it, [`sanitize`]d when minted: a path comes from
-/// env and config, and no report field can then carry a raw one to the terminal.
-struct ShownPath(String);
+mod shown {
+    /// A path as the report prints it, [`display_path`](crate::display_path)ed
+    /// when minted: paths come from env and config, and a private field means
+    /// no path field reaches a render site raw.
+    pub(super) struct ShownPath(String);
 
-impl<P: AsRef<std::path::Path>> From<P> for ShownPath {
-    fn from(p: P) -> Self {
-        Self(crate::install::verify::display_safe(p.as_ref()))
+    impl ShownPath {
+        pub(super) fn new(p: impl AsRef<std::path::Path>) -> Self {
+            Self(crate::display_path(p.as_ref()))
+        }
+    }
+
+    impl std::fmt::Display for ShownPath {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(&self.0)
+        }
     }
 }
-
-impl std::fmt::Display for ShownPath {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
+use shown::ShownPath;
 
 /// One resolved transcript root — the data behind a roots-category row.
 struct RootStatus {
@@ -749,7 +753,7 @@ fn collect_roots() -> Vec<RootStatus> {
             let exists = root.is_dir();
             Some(RootStatus {
                 source: src,
-                root: root.into(),
+                root: ShownPath::new(root),
                 exists,
                 env,
             })
@@ -879,8 +883,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
 
     let (backend, backend_healthy) = activation_backend();
     DoctorReport {
-        log_path: log_path.into(),
-        config_path: config_path.into(),
+        log_path: ShownPath::new(log_path),
+        config_path: ShownPath::new(config_path),
         config_warnings,
         log_warning,
         term_env,
@@ -894,10 +898,10 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         roots,
         backend,
         backend_healthy,
-        cc_registry: cc_registry.map(|(p, exists)| (p.into(), exists)),
-        codex_sessions: (codex_sessions.into(), codex_exists),
-        omp_sessions: (omp_sessions.into(), omp_exists),
-        grok_registry: (grok_registry.into(), grok_exists),
+        cc_registry: cc_registry.map(|(p, exists)| (ShownPath::new(p), exists)),
+        codex_sessions: (ShownPath::new(codex_sessions), codex_exists),
+        omp_sessions: (ShownPath::new(omp_sessions), omp_exists),
+        grok_registry: (ShownPath::new(grok_registry), grok_exists),
         home_split,
         color,
         truecolor_probe_ran: probe_ok,
@@ -1465,8 +1469,8 @@ mod tests {
     #[test]
     fn focus_category_warns_on_missing_and_disabled_probe_roots() {
         let mut r = summary_report(vec![]);
-        r.cc_registry = Some(("/home/u/.claude/sessions".into(), false));
-        r.codex_sessions = ("/home/u/.codex/sessions".into(), false);
+        r.cc_registry = Some((ShownPath::new("/home/u/.claude/sessions"), false));
+        r.codex_sessions = (ShownPath::new("/home/u/.codex/sessions"), false);
         let c = focus_category(&r, &Ink { on: false });
         assert_eq!(c.status, CategoryStatus::Warn);
         let s = c.details.join("\n");
@@ -1477,7 +1481,7 @@ mod tests {
         assert!(s.contains("focus no-ops until codex writes it"), "{s}");
 
         r.cc_registry = None;
-        r.codex_sessions = ("/home/u/.codex/sessions".into(), true);
+        r.codex_sessions = (ShownPath::new("/home/u/.codex/sessions"), true);
         let c = focus_category(&r, &Ink { on: false });
         assert_eq!(c.status, CategoryStatus::Warn);
         assert!(
@@ -1497,10 +1501,10 @@ mod tests {
     #[test]
     fn every_focusable_source_appears_in_the_focus_category() {
         let mut r = summary_report(vec![]);
-        r.cc_registry = Some(("/home/u/x".into(), true));
-        r.codex_sessions = ("/home/u/x".into(), true);
-        r.omp_sessions = ("/home/u/x".into(), true);
-        r.grok_registry = ("/home/u/x".into(), true);
+        r.cc_registry = Some((ShownPath::new("/home/u/x"), true));
+        r.codex_sessions = (ShownPath::new("/home/u/x"), true);
+        r.omp_sessions = (ShownPath::new("/home/u/x"), true);
+        r.grok_registry = (ShownPath::new("/home/u/x"), true);
         let s = focus_category(&r, &Ink { on: false }).details.join("\n");
         for src in registry::registered_source_names() {
             let Some(d) = registry::descriptor_for(src) else {
@@ -1636,8 +1640,8 @@ mod tests {
 
     fn summary_report(rows: Vec<DoctorSourceRow>) -> DoctorReport {
         DoctorReport {
-            log_path: "/tmp/log".into(),
-            config_path: "/tmp/config.toml".into(),
+            log_path: ShownPath::new("/tmp/log"),
+            config_path: ShownPath::new("/tmp/config.toml"),
             config_warnings: vec![],
             log_warning: None,
             term_env: Some("xterm".into()),
@@ -1651,10 +1655,10 @@ mod tests {
             roots: vec![],
             backend: "NSRunningApplication (macOS)",
             backend_healthy: true,
-            cc_registry: Some(("/tmp/reg".into(), true)),
-            codex_sessions: ("/tmp/cx".into(), true),
-            omp_sessions: ("/tmp/om".into(), true),
-            grok_registry: ("/tmp/gk/active_sessions.json".into(), true),
+            cc_registry: Some((ShownPath::new("/tmp/reg"), true)),
+            codex_sessions: (ShownPath::new("/tmp/cx"), true),
+            omp_sessions: (ShownPath::new("/tmp/om"), true),
+            grok_registry: (ShownPath::new("/tmp/gk/active_sessions.json"), true),
             home_split: None,
             color: false,
             truecolor_probe_ran: false,
@@ -1665,25 +1669,27 @@ mod tests {
     fn no_probed_text_reaches_the_terminal_raw() {
         const EVIL: &str = "\u{1b}]0;pwned\u{7}\u{202e}";
         let evil = || format!("/tmp/{EVIL}");
-        // A field minted sanitized is poisoned through its minting fn, so the
-        // test covers the mint as well as the render.
+        // Fields with a pure minting fn (`installed_version`, `home_split`,
+        // the `ShownPath`s) are poisoned through it, so the test covers the
+        // mint as well as the render; the rest are poisoned raw and pin the
+        // render-side strip.
         let mut row = summary_row("cc", "claude-code");
         row.installed_version = first_sanitized_line(format!("1.0.0 {EVIL}").as_bytes());
         let mut r = summary_report(vec![row]);
-        r.log_path = evil().into();
-        r.config_path = evil().into();
+        r.log_path = ShownPath::new(evil());
+        r.config_path = ShownPath::new(evil());
         r.config_warnings = vec![evil()];
         r.log_warning = Some(evil());
         r.term_env = Some(evil());
         r.colorterm_env = Some(evil());
-        r.cc_registry = Some((evil().into(), false));
-        r.codex_sessions = (evil().into(), false);
-        r.omp_sessions = (evil().into(), false);
-        r.grok_registry = (evil().into(), false);
+        r.cc_registry = Some((ShownPath::new(evil()), false));
+        r.codex_sessions = (ShownPath::new(evil()), false);
+        r.omp_sessions = (ShownPath::new(evil()), false);
+        r.grok_registry = (ShownPath::new(evil()), false);
         r.home_split = home_split_advisory(true, Some(&evil()), Some(r"C:\Users\me"));
         r.roots = vec![RootStatus {
             source: "claude-code",
-            root: evil().into(),
+            root: ShownPath::new(evil()),
             exists: false,
             env: None,
         }];
@@ -1900,13 +1906,13 @@ mod tests {
         r.roots = vec![
             RootStatus {
                 source: "claude-code",
-                root: "/home/u/.claude/projects".into(),
+                root: ShownPath::new("/home/u/.claude/projects"),
                 exists: true,
                 env: None,
             },
             RootStatus {
                 source: "hermes",
-                root: "/home/u/.hermes".into(),
+                root: ShownPath::new("/home/u/.hermes"),
                 exists: false,
                 env: Some(("HERMES_HOME", true)),
             },
@@ -1941,7 +1947,7 @@ mod tests {
     #[test]
     fn report_focus_probe_failure_warns_with_detail() {
         let mut r = summary_report(vec![summary_row("cc", "claude-code")]);
-        r.cc_registry = Some(("/tmp/reg".into(), false));
+        r.cc_registry = Some((ShownPath::new("/tmp/reg"), false));
         let out = render(&r);
         assert!(
             out.contains("[!] focus-jump — NSRunningApplication (macOS)\n"),
@@ -2077,7 +2083,7 @@ mod tests {
         let ink = Ink { on: false };
         let root = |exists, env| RootStatus {
             source: "copilot",
-            root: "/home/u/.copilot/session-state".into(),
+            root: ShownPath::new("/home/u/.copilot/session-state"),
             exists,
             env,
         };

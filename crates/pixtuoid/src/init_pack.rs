@@ -26,20 +26,20 @@ pub fn init_pack(dest: &Path, force: bool) -> Result<()> {
         ),
     ];
 
+    let mut out = crate::cli_stdout();
     // A per-file exists-skip would be dead code: with force=false a dest already
     // holding these files trips the non-empty guard above, and force=true
     // overwrites by design.
-    let mut out = crate::cli_stdout();
     for (name, content) in files {
         let path = dest.join(name);
         std::fs::write(&path, content)?;
         writeln!(out, "wrote: {name}")?;
     }
-    writeln!(out, "\nSkeleton pack extracted to {}", dest.display())?;
+    let shown = crate::display_path(dest);
+    writeln!(out, "\nSkeleton pack extracted to {shown}")?;
     writeln!(
         out,
-        "Edit the sprites, then validate: pixtuoid validate-pack {}",
-        dest.display()
+        "Edit the sprites, then validate: pixtuoid validate-pack {shown}"
     )?;
     Ok(())
 }

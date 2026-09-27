@@ -1,6 +1,10 @@
 //! Public surface for the pixtuoid binary's internals — exposed so examples and
 //! integration tests can import them.
 
+// A print macro panics when its reader leaves (`| head`): CLI output goes
+// through `cli_stdout`, a stderr notice through a `let _ = writeln!`.
+#![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
+
 pub mod aa_text;
 pub(crate) mod audio;
 pub mod cli;
@@ -27,9 +31,9 @@ pub mod tui;
 pub mod validate;
 pub(crate) mod version;
 
-/// Strip ASCII/Unicode control characters from an untrusted string before it
-/// reaches a terminal: such a value can carry control bytes that reposition the
-/// cursor or inject escapes. One chokepoint, so the policy can't drift across
+/// Strip control characters (Cc) and bidi overrides (Cf) from an untrusted
+/// string before it reaches a terminal: such a value can carry control bytes
+/// that reposition the cursor or inject escapes, or reorder the text shown. One chokepoint, so the policy can't drift across
 /// its call sites.
 ///
 /// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
@@ -45,10 +49,30 @@ pub fn strip_control_chars(s: &str) -> String {
         .collect()
 }
 
-/// A CLI command's output stream. A reader that goes away early (`| head`) has
-/// what it wanted, so a write into a broken pipe succeeds, marks the stream
-/// [`closed`](Self::closed) and drops every later write, where `println!` would
-/// panic and the crash hook abort. Any other write error still fails.
+/// `s` stripped line by line, the lines rejoined with `sep`, so a multi-line
+/// message keeps its shape.
+#[doc(hidden)]
+pub fn strip_lines(s: &str, sep: &str) -> String {
+    s.lines()
+        .map(strip_control_chars)
+        .collect::<Vec<_>>()
+        .join(sep)
+}
+
+/// A path as a terminal shows it, stripped. A path from config, env or a
+/// hand-editable hook command is stripped where it enters the text that
+/// quotes it; per-output-site stripping already missed the `doctor` stdout
+/// path once.
+#[doc(hidden)]
+pub fn display_path(p: &std::path::Path) -> String {
+    strip_control_chars(&p.display().to_string())
+}
+
+/// A CLI command's stdout. A reader that leaves early (`| head`) is not a
+/// failure: a write into a broken pipe succeeds, marks the stream
+/// [`closed`](Self::closed) and drops every later write, so the command still
+/// completes its side effects and exits with its own verdict, where `println!`
+/// would panic. Any other write error still fails.
 #[doc(hidden)]
 pub struct CliOut<W> {
     inner: W,
@@ -57,7 +81,7 @@ pub struct CliOut<W> {
 
 impl<W: std::io::Write> CliOut<W> {
     /// `inner`, with a broken pipe treated as the reader leaving.
-    pub fn new(inner: W) -> Self {
+    pub(crate) fn new(inner: W) -> Self {
         Self {
             inner,
             closed: false,
@@ -65,7 +89,7 @@ impl<W: std::io::Write> CliOut<W> {
     }
 
     /// Whether the reader has gone away.
-    pub fn closed(&self) -> bool {
+    pub(crate) fn closed(&self) -> bool {
         self.closed
     }
 
@@ -108,18 +132,11 @@ pub fn cli_stdout() -> CliOut<std::io::Stdout> {
     CliOut::new(std::io::stdout())
 }
 
-/// Stderr for a CLI command's diagnostics; see [`CliOut`].
-#[doc(hidden)]
-pub fn cli_stderr() -> CliOut<std::io::Stderr> {
-    CliOut::new(std::io::stderr())
-}
-
 /// A fatal error's chain as `main` returning `Err` would print it, stripped line
 /// by line so the chain keeps its shape. Mechanism for `main`, not contract.
 #[doc(hidden)]
 pub fn fatal_error_text(e: &anyhow::Error) -> String {
-    let chain: Vec<String> = format!("{e:?}").lines().map(strip_control_chars).collect();
-    format!("Error: {}", chain.join("\n"))
+    format!("Error: {}", strip_lines(&format!("{e:?}"), "\n"))
 }
 
 /// The Unicode Bidi_Control characters. `char::is_control` covers only category
@@ -182,22 +199,34 @@ pub(crate) mod test_capture {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Fails every write with `kind` after accepting `ok` of them.
-    struct Failing {
-        ok: usize,
-        kind: std::io::ErrorKind,
-        written: Vec<u8>,
+pub(crate) mod test_io {
+    /// Fails ONE write, the `fail_at`th (0-based), with `kind`, and accepts
+    /// every other: a stream that recovers is what shows a caller stopped
+    /// writing rather than kept hitting the error.
+    pub(crate) struct FailOnce {
+        pub(crate) fail_at: usize,
+        pub(crate) kind: std::io::ErrorKind,
+        pub(crate) calls: usize,
+        pub(crate) written: Vec<u8>,
     }
 
-    impl std::io::Write for Failing {
+    impl FailOnce {
+        pub(crate) fn new(fail_at: usize, kind: std::io::ErrorKind) -> Self {
+            Self {
+                fail_at,
+                kind,
+                calls: 0,
+                written: Vec::new(),
+            }
+        }
+    }
+
+    impl std::io::Write for FailOnce {
         fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-            if self.ok == 0 {
+            self.calls += 1;
+            if self.calls - 1 == self.fail_at {
                 return Err(self.kind.into());
             }
-            self.ok -= 1;
             self.written.extend_from_slice(buf);
             Ok(buf.len())
         }
@@ -205,15 +234,17 @@ mod tests {
             Ok(())
         }
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_io::FailOnce;
 
     #[test]
     fn a_broken_pipe_closes_the_stream_and_drops_later_writes() {
         use std::io::Write;
-        let mut out = CliOut::new(Failing {
-            ok: 1,
-            kind: std::io::ErrorKind::BrokenPipe,
-            written: Vec::new(),
-        });
+        let mut out = CliOut::new(FailOnce::new(1, std::io::ErrorKind::BrokenPipe));
         writeln!(out, "first").expect("written");
         assert!(!out.closed());
         writeln!(out, "second").expect("a broken pipe is not an error");
@@ -225,13 +256,17 @@ mod tests {
     #[test]
     fn any_other_write_error_still_fails() {
         use std::io::Write;
-        let mut out = CliOut::new(Failing {
-            ok: 0,
-            kind: std::io::ErrorKind::StorageFull,
-            written: Vec::new(),
-        });
+        let mut out = CliOut::new(FailOnce::new(0, std::io::ErrorKind::StorageFull));
         assert!(writeln!(out, "x").is_err());
         assert!(!out.closed());
+    }
+
+    #[test]
+    fn display_path_strips_control_chars_from_a_hostile_path() {
+        let hostile = std::path::Path::new("/x/\x1b]0;pwned\x07\x1b[31mhook");
+        let got = display_path(hostile);
+        assert!(!got.chars().any(|c| c.is_control()), "{got:?}");
+        assert!(got.contains("hook") && got.contains("/x/"), "{got:?}");
     }
 
     #[test]

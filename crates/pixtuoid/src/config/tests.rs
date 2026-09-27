@@ -126,7 +126,7 @@ const HOSTILE_BYTES: [char; 3] = ['\u{1b}', '\u{7}', '\u{202e}'];
 fn config_warnings_are_control_char_stripped_on_both_sinks() {
     // `toml::de::Error`'s Display embeds the RAW offending source line, and BOTH of
     // a warning's sinks are real terminals: the Vec (`main`'s pre-altscreen
-    // `eprintln!`, the `doctor` report) AND `tracing`, which writes to raw stderr in
+    // stderr notice, the `doctor` report) AND `tracing`, which writes to raw stderr in
     // every non-TUI mode.
     let dir = tempfile::tempdir().unwrap();
     let p = dir.path().join("config.toml");

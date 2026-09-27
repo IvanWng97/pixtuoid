@@ -1,6 +1,7 @@
 //! The async runtime glue: builds the tokio runtime, spawns the reducer
 //! task + sources, binds the hook socket, and drives either the TUI or the
-//! headless summary loop until Ctrl-C.
+//! headless summary loop until Ctrl-C (or, headless, until the summary's
+//! reader leaves).
 //!
 //! This file is structurally unreachable by any headless test (real tokio
 //! runtime + `block_on` + `ctrl_c` + socket bind), so it is coverage-excluded on
@@ -280,8 +281,8 @@ async fn headless_loop_with_signal(
     let mut deaths_seen = 0usize;
     const HEADLESS_SUMMARY_POLL_INTERVAL_MS: u64 = 200;
     loop {
-        // The summary stream is headless mode's only output, so a reader that
-        // left (`| head`) ends the run.
+        // Headless mode exists to feed this stream, so a reader that left
+        // (`| head`) ends the run.
         if out.closed() {
             tracing::info!("stdout closed — shutting down");
             return Ok(());
@@ -414,19 +415,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn headless_loop_ends_when_the_reader_leaves() {
-        struct Gone;
-        impl std::io::Write for Gone {
-            fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
-                Err(std::io::ErrorKind::BrokenPipe.into())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
         let (_scene_tx, scene_rx, (_health_tx, health_rx)) = channels();
         let res = tokio::time::timeout(
             Duration::from_secs(5),
-            headless_loop_with_signal(scene_rx, health_rx, Box::pin(std::future::pending()), Gone),
+            headless_loop_with_signal(
+                scene_rx,
+                health_rx,
+                Box::pin(std::future::pending()),
+                crate::test_io::FailOnce::new(0, std::io::ErrorKind::BrokenPipe),
+            ),
         )
         .await;
         assert!(
