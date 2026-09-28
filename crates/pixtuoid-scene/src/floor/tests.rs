@@ -905,6 +905,7 @@ fn reset_frame_cache_clears_cached_sprites() {
             flip_x: false,
             glow_tint: None,
             burn: crate::burn::BurnTier::Normal,
+            density: std::num::NonZeroU16::MIN,
         },
         Frame::default,
     );

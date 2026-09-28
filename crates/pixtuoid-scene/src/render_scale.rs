@@ -1,9 +1,9 @@
 //! The seam between LAYOUT space and BUFFER space.
 //!
-//! Every layout coordinate is a buffer pixel today, so the office's SIZE and
-//! its RESOLUTION are one axis: doubling the buffer does not draw the same room
-//! sharper, it builds a room with several times the desks, which is why "render
-//! the same office with more detail" is currently unexpressible. Pinned by
+//! Were every layout coordinate a buffer pixel, the office's SIZE and its
+//! RESOLUTION would be one axis: doubling the buffer would not draw the same
+//! room sharper, it would build a room with several times the desks, and
+//! "render the same office with more detail" would be unexpressible. Pinned by
 //! `floor_capacity_is_invariant_under_render_scale` and its negative control
 //! `without_the_seam_a_bigger_buffer_builds_a_bigger_office`.
 //!
@@ -46,8 +46,8 @@ impl RenderScale {
     /// Found on a real Retina Ghostty: a 17px cell makes 17 the natural scale,
     /// 17 is PRIME, and every `@4x` sprite in the pack sits unused while the
     /// base art block-scales 17x. Giving up at most `max_density - 1` px of
-    /// office (17 -> 16, ~6%) is not a close call — not being upscaled is the
-    /// whole point of the variants.
+    /// office is not a close call — not being upscaled is the whole point of the
+    /// variants.
     ///
     /// A pack with no variants passes `max_density = 1`, so this is exactly
     /// [`RenderScale::new`] there and the classic path is untouched.
@@ -69,8 +69,8 @@ impl RenderScale {
     ///
     /// `pixtuoid-core` owns the pixel primitives but sits BELOW this crate in
     /// the DAG, so it cannot name `RenderScale`; it takes the bare non-zero
-    /// factor and this is the one conversion. Core gets "repeat each pixel N
-    /// times", the layout↔buffer meaning stays here.
+    /// factor, which this module and the density-variant picker make. Core gets
+    /// "repeat each pixel N times", the layout↔buffer meaning stays here.
     pub fn factor(self) -> NonZeroU16 {
         self.0
     }
@@ -101,8 +101,8 @@ mod tests {
     use super::*;
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
 
-    /// A pack ships art at ONE density; a painter picks a scale from its own
-    /// surface. `fit` is where those meet, and the rule is that the art must
+    /// A pack ships art at its own densities; a painter picks a scale from its
+    /// own surface. `fit` is where those meet, and the rule is that the art must
     /// divide the scale or it is simply never drawn.
     #[test]
     fn a_scale_rounds_down_so_the_packs_densest_art_can_land_on_it() {
@@ -169,8 +169,8 @@ mod tests {
         assert_eq!(s.to_buffer(u16::MAX), u16::MAX);
     }
 
-    /// The invariant the whole seam exists for, and the spec's acceptance
-    /// criterion #10: raising render fidelity must not change the office.
+    /// The invariant the whole seam exists for: raising render fidelity must
+    /// not change the office.
     #[test]
     fn floor_capacity_is_invariant_under_render_scale() {
         let seed = floor_seed(0);

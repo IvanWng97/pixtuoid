@@ -75,6 +75,7 @@ mod ambient;
 mod anchors;
 mod background;
 mod debug_overlay;
+mod dense;
 mod drawable;
 mod effects;
 mod furniture;
@@ -137,6 +138,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
     })
 }
 pub(crate) use background::BaseFillCache;
+pub(crate) use dense::densest_frame;
 #[cfg(test)]
 pub(crate) use furniture::COOLER_WATER;
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step

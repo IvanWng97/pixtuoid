@@ -24,6 +24,9 @@ pub struct FrameKey {
     /// Burn tier keys the recolor too (ember hair) — a tier flip mid-life
     /// simply misses to a fresh entry, evicted with the agent.
     pub burn: crate::burn::BurnTier,
+    /// The grid the recolored art is authored on — 1 for the base sprite, `N`
+    /// for its `@Nx` variant: the same frame at two densities is two images.
+    pub density: std::num::NonZeroU16,
 }
 
 #[derive(Default)]
@@ -98,6 +101,7 @@ mod tests {
             flip_x: false,
             glow_tint: None,
             burn: crate::burn::BurnTier::Normal,
+            density: std::num::NonZeroU16::MIN,
         }
     }
 

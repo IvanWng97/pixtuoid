@@ -500,6 +500,253 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
     }
 }
 
+/// A person drawn from `@Nx` art is the SAME person: the variant is picked at
+/// the render scale and recolored through the same per-agent palette, so the
+/// dense shirt is the classic profile's shirt colour.
+#[test]
+fn character_frame_takes_a_density_variant_recolored_like_the_base() {
+    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
+    let one = format!("@frame 0\n{SHIRT_KEY}");
+    let two = format!("@frame 0\n{SHIRT_KEY} {SHIRT_KEY}\n{SHIRT_KEY} {SHIRT_KEY}");
+    let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
+        &format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
+             \"{SHIRT_KEY}\"=\"#0a141e\"\n\"{HAIR_KEY}\"=\"#28323c\"\n\
+             \"{SKIN_KEY}\"=\"#46505a\"\n\"{PANTS_KEY}\"=\"#646e78\"\n\
+             [animations.typing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n"
+        ),
+        &[("one.sprite", one.as_str()), ("two.sprite", two.as_str())],
+    )
+    .expect("pack builds");
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/dense.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut cache = crate::frame_cache::FrameCache::new();
+    let now = SystemTime::UNIX_EPOCH;
+    let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
+
+    let dense = seat::character_frame(
+        "typing", 0, &slot, &pack, false, None, scale, &mut cache, now,
+    )
+    .expect("art");
+    let got = (dense.frame.width(), dense.logical, dense.blit_at.get());
+    let dense_shirt = dense.frame.get(0, 0).copied().flatten();
+    assert_eq!(got, (2, (1, 1), 2));
+
+    let classic = seat::character_frame(
+        "typing",
+        0,
+        &slot,
+        &pack,
+        false,
+        None,
+        crate::render_scale::RenderScale::ONE,
+        &mut cache,
+        now,
+    )
+    .expect("art");
+    // Same agent, animation and frame through one cache: only the density key
+    // keeps the classic request from being served the dense recolor.
+    assert_eq!((classic.frame.width(), classic.logical), (1, (1, 1)));
+    assert_eq!(dense_shirt, classic.frame.get(0, 0).copied().flatten());
+    assert_ne!(
+        dense_shirt,
+        pack.palette().get(SHIRT_KEY).flatten(),
+        "the shirt took the agent's outfit, not the pack default"
+    );
+}
+
+/// The cutaway draws a person from the variant its scale lands, laid out in
+/// LOGICAL units whatever density the art came from: a variant that is exactly
+/// its base upscaled renders the same pixels, shadow and badge as the base
+/// blitted at the scale, and one drawn differently renders differently.
+#[test]
+fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
+    use super::palette::{HAIR_KEY, PANTS_KEY, SHIRT_KEY, SKIN_KEY};
+    use crate::layout::{CHARACTER_SPRITE_H, CHARACTER_SPRITE_W};
+    use crate::render_scale::RenderScale;
+    const DENSITY: u16 = 2;
+    let (scene, layout, _, now0, bundled) = sim_rig();
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        &scene,
+        &layout,
+        &bundled,
+        &coffee,
+        0,
+        now0 + std::time::Duration::from_millis(250),
+    );
+    let anim = frame
+        .characters
+        .first()
+        .expect("the agent is on screen")
+        .anim_name;
+
+    // Two frames of a shirt block topped with hair (frame 0) then skin
+    // (frame 1): recolorable, and whole-pixel so an upscale by `DENSITY` is the
+    // variant exactly.
+    let rows = |w: u16, h: u16, top: char| -> String {
+        (0..h)
+            .map(|y| {
+                let key = if y < h / 3 { top } else { SHIRT_KEY };
+                vec![key.to_string(); usize::from(w)].join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let (w, h) = (CHARACTER_SPRITE_W, CHARACTER_SPRITE_H);
+    let (dw, dh) = (w * DENSITY, h * DENSITY);
+    // `variant_top`: the keys the variant's head rows use per frame — the
+    // base's for a faithful upscale — or no variant at all.
+    let pack = |variant_top: Option<(char, char)>| {
+        let (g0, g1) = variant_top.unwrap_or((HAIR_KEY, SKIN_KEY));
+        let variant = if variant_top.is_some() {
+            format!("[animations.\"{anim}@{DENSITY}x\"]\nframes=[\"g0.sprite\", \"g1.sprite\"]\nframe_ms=100\n")
+        } else {
+            String::new()
+        };
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
+             \"{SHIRT_KEY}\"=\"#0a141e\"\n\"{HAIR_KEY}\"=\"#28323c\"\n\
+             \"{SKIN_KEY}\"=\"#46505a\"\n\"{PANTS_KEY}\"=\"#646e78\"\n\
+             [animations.{anim}]\nframes=[\"f0.sprite\", \"f1.sprite\"]\nframe_ms=100\n{variant}"
+        );
+        let art = [
+            ("f0.sprite", format!("@frame 0\n{}", rows(w, h, HAIR_KEY))),
+            ("f1.sprite", format!("@frame 0\n{}", rows(w, h, SKIN_KEY))),
+            ("g0.sprite", format!("@frame 0\n{}", rows(dw, dh, g0))),
+            ("g1.sprite", format!("@frame 0\n{}", rows(dw, dh, g1))),
+        ];
+        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
+    };
+
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let scale = RenderScale::new(DENSITY).expect("nonzero");
+    let render = |pack: &Pack| {
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let labels = crate::cutaway::paint::render_cutaway(
+            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+        );
+        let anchors: Vec<_> = labels.iter().map(|l| l.anchor_px).collect();
+        (buf.as_slice().to_vec(), anchors)
+    };
+
+    let (base_px, base_badges) = render(&pack(None));
+    let (dense_px, dense_badges) = render(&pack(Some((HAIR_KEY, SKIN_KEY))));
+    assert!(
+        !base_badges.is_empty(),
+        "the person must be drawn to be compared"
+    );
+    assert_eq!(
+        dense_badges, base_badges,
+        "the badge moved with the art's density"
+    );
+    assert!(
+        dense_px == base_px,
+        "the person's pixels moved with the art's density"
+    );
+    let (other_px, _) = render(&pack(Some((PANTS_KEY, PANTS_KEY))));
+    assert!(
+        other_px != base_px,
+        "the cutaway did not draw from the variant"
+    );
+}
+
+/// The cutaway places a desk's front face, glow and contact shadow by its
+/// LOGICAL size, so a desk drawn from a variant that is exactly its base
+/// upscaled renders the same pixels as the base blitted at the scale, and one
+/// drawn differently renders differently.
+#[test]
+fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
+    use crate::render_scale::RenderScale;
+    const DENSITY: u16 = 2;
+    let (scene, layout, _, now0, bundled) = sim_rig();
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        &scene,
+        &layout,
+        &bundled,
+        &coffee,
+        0,
+        now0 + std::time::Duration::from_secs(40),
+    );
+
+    // A desk top over a darker front row, whole-pixel so an upscale by
+    // `DENSITY` is the variant exactly.
+    let rows = |w: u16, h: u16, top: char| -> String {
+        (0..h)
+            .map(|y| {
+                let key = if y + h / 3 < h { top } else { 'E' };
+                vec![key.to_string(); usize::from(w)].join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let (w, h) = (6, 3);
+    let pack = |variant_top: Option<char>| {
+        let variant = if variant_top.is_some() {
+            format!("[animations.\"desk@{DENSITY}x\"]\nframes=[\"g.sprite\"]\nframe_ms=100\n")
+        } else {
+            String::new()
+        };
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
+             \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"F\"=\"#aa2222\"\n\
+             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}"
+        );
+        let art = [
+            ("f.sprite", format!("@frame 0\n{}", rows(w, h, 'D'))),
+            (
+                "g.sprite",
+                format!(
+                    "@frame 0\n{}",
+                    rows(w * DENSITY, h * DENSITY, variant_top.unwrap_or('D'))
+                ),
+            ),
+        ];
+        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
+    };
+
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let scale = RenderScale::new(DENSITY).expect("nonzero");
+    let render = |pack: &Pack| {
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = crate::frame_cache::FrameCache::new();
+        crate::cutaway::paint::render_cutaway(
+            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+        );
+        buf.as_slice().to_vec()
+    };
+
+    assert!(!layout.home_desks.is_empty(), "the office must have a desk");
+    let base_px = render(&pack(None));
+    assert!(
+        render(&pack(Some('D'))) == base_px,
+        "the desk moved with the art's density"
+    );
+    assert!(
+        render(&pack(Some('F'))) != base_px,
+        "the cutaway did not draw the desk from the variant"
+    );
+}
+
 #[test]
 fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
