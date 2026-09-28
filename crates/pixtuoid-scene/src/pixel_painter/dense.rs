@@ -17,7 +17,7 @@ pub(crate) struct DenseFrame<'a> {
     /// The same art as palette indices, for a per-agent recolor.
     pub(crate) recolorable: RecolorableFrame<'a>,
     /// The piece's size in layout units: its base frame's, since a variant
-    /// only draws that frame finer ([`variant_redraws`]).
+    /// redraws that frame's box on a finer grid ([`variant_redraws`]).
     pub(crate) logical: (u16, u16),
     /// The grid the art is authored on: 1 for the base, `N` for `<name>@<N>x`.
     pub(crate) density: NonZeroU16,
@@ -29,11 +29,11 @@ pub(crate) struct DenseFrame<'a> {
 /// divides `scale`, else the base art. `frame_idx` resolves through the classic
 /// painter's own `frame_index`.
 ///
-/// A variant is the SAME art on an N-times grid, so it is taken only where it
-/// can honour that: at a scale its density divides (4x art at 8x blits at 2
-/// rather than being discarded for not matching), and only if it redraws its
-/// base whole ([`variant_redraws`]), so an animation never mixes densities
-/// mid-cycle. A variant that does not redraw its base is SKIPPED rather than
+/// A variant is the same PIECE on an N-times grid — the base's logical box
+/// drawn finer, as cutaway art — so it is taken only where it can honour that:
+/// at a scale its density divides (4x art at 8x blits at 2 rather than being
+/// discarded for not matching), and only if it redraws its base whole
+/// ([`variant_redraws`]), so an animation never mixes densities mid-cycle. A variant that does not redraw its base is SKIPPED rather than
 /// drawn wrong — `validate_pack_animations` reports it as a hard error, so this
 /// is the render-time backstop for a pack that was never validated.
 ///

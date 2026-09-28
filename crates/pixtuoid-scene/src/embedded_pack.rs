@@ -196,33 +196,56 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     }
     embedded_sprites![
         "seated.sprite",
+        "seated@8x.sprite",
         "seated_back.sprite",
+        "seated_back@8x.sprite",
         "typing_back_0.sprite",
         "typing_back_1.sprite",
+        "typing_back_0@8x.sprite",
+        "typing_back_1@8x.sprite",
         "side_seated.sprite",
+        "side_seated@8x.sprite",
         "typing_0.sprite",
         "typing_1.sprite",
+        "typing_0@8x.sprite",
+        "typing_1@8x.sprite",
         "standing.sprite",
+        "standing@8x.sprite",
         "walking_0.sprite",
         "walking_1.sprite",
+        "walking_0@8x.sprite",
+        "walking_1@8x.sprite",
         "walking_back_0.sprite",
         "walking_back_1.sprite",
+        "walking_back_0@8x.sprite",
+        "walking_back_1@8x.sprite",
         "walking_coffee_0.sprite",
         "walking_coffee_1.sprite",
+        "walking_coffee_0@8x.sprite",
+        "walking_coffee_1@8x.sprite",
         "desk.sprite",
         "desk@4x.sprite",
+        "desk@8x.sprite",
         "desk_north.sprite",
+        "desk_north@8x.sprite",
         "plant.sprite",
+        "plant@8x.sprite",
         "plant_tall.sprite",
+        "plant_tall@8x.sprite",
         "plant_flower.sprite",
+        "plant_flower@8x.sprite",
         "plant_succulent.sprite",
+        "plant_succulent@8x.sprite",
         "floor_lamp.sprite",
         "door.sprite",
         "door_half.sprite",
         "door_open.sprite",
         "bulletin_board.sprite",
+        "bulletin_board@8x.sprite",
         "exit_sign.sprite",
+        "exit_sign@8x.sprite",
         "desk_chair.sprite",
+        "desk_chair@8x.sprite",
         "filing_cabinet.sprite",
         "cat_walk_0.sprite",
         "cat_walk_1.sprite",
@@ -236,19 +259,33 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "lobster_walk_1.sprite",
         "lobster_rest.sprite",
         "meeting_sofa.sprite",
+        "meeting_sofa@8x.sprite",
         "meeting_screen.sprite",
+        "meeting_screen@8x.sprite",
         "back_couch.sprite",
+        "back_couch@8x.sprite",
         "seated_sleeping.sprite",
+        "seated_sleeping@8x.sprite",
         "seated_sleeping_alt.sprite",
+        "seated_sleeping_alt@8x.sprite",
         "holding_coffee.sprite",
+        "holding_coffee@8x.sprite",
         "pantry.sprite",
+        "pantry@8x.sprite",
         "pantry_small.sprite",
+        "pantry_small@8x.sprite",
         "whiteboard.sprite",
+        "whiteboard@8x.sprite",
         "bookshelf.sprite",
+        "bookshelf@8x.sprite",
         "snack_shelf.sprite",
+        "snack_shelf@8x.sprite",
         "tv_stand.sprite",
+        "tv_stand@8x.sprite",
         "phone_booth.sprite",
+        "phone_booth@8x.sprite",
         "standing_desk.sprite",
+        "standing_desk@8x.sprite",
     ]
 }
 
@@ -257,6 +294,10 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
 /// to drive `sim_step`/`resolve_characters` occupancy + anchors end-to-end at a
 /// non-default width. Reuses the FULL default sprite set so `resolve_characters`
 /// still finds every pose; only `standing.sprite` is swapped.
+///
+/// Classic scale only: `standing@8x` still redraws the 8-wide pose, so a denser
+/// scale skips it ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws))
+/// and draws the swapped base instead.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
     // The bundled 8x12 standing pose padded to 10 wide with transparent columns
@@ -377,8 +418,8 @@ mod tests {
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
     /// change to the bundled art's densest variant should be a decision.
     #[test]
-    fn the_bundled_pack_is_drawn_at_most_at_4x() {
-        assert_eq!(test_default_pack().max_density_variant(), 4);
+    fn the_bundled_pack_is_drawn_at_most_at_8x() {
+        assert_eq!(test_default_pack().max_density_variant(), 8);
     }
 
     #[test]

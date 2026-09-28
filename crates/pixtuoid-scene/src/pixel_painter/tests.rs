@@ -478,26 +478,78 @@ fn agent_overrides_are_deterministic_per_id() {
 }
 
 /// A key no character frame draws recolors nothing, so every agent would wear
-/// the pack's own color there.
+/// the pack's own color there: `standing` shows all four, at every density.
 #[test]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
+    use pixtuoid_core::sprite::format::density_variant_name;
     let pack = crate::embedded_pack::test_default_pack();
-    let standing = pack.animation("standing").expect("standing pose");
-    let own = &standing.frames()[0];
-    let frame = standing.recolorable(0).expect("frame 0");
     let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
-    for key in [
-        palette::SHIRT_KEY,
-        palette::HAIR_KEY,
-        palette::SKIN_KEY,
-        palette::PANTS_KEY,
-    ] {
-        assert_ne!(
-            frame.recolored(&[(key, sentinel)]).as_slice(),
-            own.as_slice(),
-            "no standing pixel is drawn in {key:?}"
-        );
+    let names = std::iter::once("standing".to_string())
+        .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
+    let mut drawn = 0;
+    for name in names {
+        let Some(standing) = pack.animation(&name) else {
+            continue;
+        };
+        let own = &standing.frames()[0];
+        let frame = standing.recolorable(0).expect("frame 0");
+        for key in [
+            palette::SHIRT_KEY,
+            palette::HAIR_KEY,
+            palette::SKIN_KEY,
+            palette::PANTS_KEY,
+        ] {
+            assert_ne!(
+                frame.recolored(&[(key, sentinel)]).as_slice(),
+                own.as_slice(),
+                "no {name} pixel is drawn in {key:?}"
+            );
+        }
+        drawn += 1;
     }
+    assert!(
+        drawn > 1,
+        "the bundled pack ships a density variant of standing"
+    );
+}
+
+/// Hair and shirt show in every pose, even face-down asleep, and they are how a
+/// viewer tells two agents apart: every frame, base or `@Nx` variant, draws
+/// them in a key the agent's recolor reaches (the key itself or one of its
+/// `[ramps]` shades), or it shows every agent in the pack's own colours. Skin
+/// and pants may be out of sight.
+#[test]
+fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
+    use pixtuoid_core::sprite::format::{
+        density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
+    };
+    let pack = crate::embedded_pack::test_default_pack();
+    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    let mut variants = 0;
+    for &base in REQUIRED_CHARACTER_ANIMATIONS
+        .iter()
+        .chain(OPTIONAL_CHARACTER_ANIMATIONS)
+    {
+        let densities = std::iter::once(None).chain((2..=pack.max_density_variant()).map(Some));
+        for density in densities {
+            let name = density.map_or_else(|| base.to_string(), |d| density_variant_name(base, d));
+            let Some(anim) = pack.animation(&name) else {
+                continue;
+            };
+            variants += usize::from(density.is_some());
+            for (i, own) in anim.frames().iter().enumerate() {
+                let frame = anim.recolorable(i).expect("frame");
+                for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
+                    assert_ne!(
+                        frame.recolored(&[(key, sentinel)]).as_slice(),
+                        own.as_slice(),
+                        "{name} frame {i} draws nothing the {key:?} recolor reaches"
+                    );
+                }
+            }
+        }
+    }
+    assert!(variants > 0, "the bundled pack ships character variants");
 }
 
 /// A person drawn from `@Nx` art is the SAME person: the variant is picked at
@@ -662,13 +714,14 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     );
 }
 
-/// The cutaway places a desk's front face and contact shadow by its LOGICAL
-/// size, so a desk drawn from a variant that is exactly its base upscaled
-/// renders the same pixels as the base blitted at the scale, and one drawn
-/// differently renders differently. The lit screen's pin is
-/// `a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base`.
+/// A desk drawn from a variant that is exactly its base upscaled lands where the
+/// base does — the cutaway places it by its LOGICAL size — and, being cutaway
+/// art with its own front, gets no derived face
+/// ([`assert_variant_desk_foot`](crate::cutaway::paint::assert_variant_desk_foot));
+/// a variant drawn differently renders differently. The lit screen's pin is
+/// `a_lit_desk_variant_lands_its_screen_where_the_base_does`.
 #[test]
-fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
+fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
     use crate::render_scale::RenderScale;
     const DENSITY: u16 = 2;
     let (scene, layout, _, now0, bundled) = sim_rig();
@@ -736,11 +789,14 @@ fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
         buf.as_slice().to_vec()
     };
 
-    assert!(!layout.home_desks.is_empty(), "the office must have a desk");
     let base_px = render(&pack(None));
-    assert!(
-        render(&pack(Some('D'))) == base_px,
-        "the desk moved with the art's density"
+    crate::cutaway::paint::assert_variant_desk_foot(
+        &render(&pack(Some('D'))),
+        &base_px,
+        &layout,
+        &pack(None),
+        theme,
+        scale,
     );
     assert!(
         render(&pack(Some('F'))) != base_px,
@@ -748,10 +804,12 @@ fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
     );
 }
 
-/// A lit screen is the desk's own glass key relit, so a desk drawn from a
-/// variant that is exactly its base upscaled lights the same pixels as the base.
+/// A lit screen is the desk's own screen keys relit, so a desk drawn from a
+/// variant that is exactly its base upscaled lights the same pixels as the
+/// base, and draws its own front
+/// ([`assert_variant_desk_foot`](crate::cutaway::paint::assert_variant_desk_foot)).
 #[test]
-fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
+fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
     use crate::layout::Facing;
     use crate::render_scale::RenderScale;
     use std::time::Duration;
@@ -861,9 +919,13 @@ fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
         base_px != render(&unlit, &pack(None)),
         "the typing agent's screen must be lit, or this pins nothing"
     );
-    assert!(
-        render(&frame, &pack(Some(glass_key))) == base_px,
-        "the lit screen moved with the art's density"
+    crate::cutaway::paint::assert_variant_desk_foot(
+        &render(&frame, &pack(Some(glass_key))),
+        &base_px,
+        &layout,
+        &pack(None),
+        theme,
+        scale,
     );
     assert!(
         render(&frame, &pack(Some('D'))) != base_px,

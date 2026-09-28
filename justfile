@@ -805,10 +805,16 @@ site-e2e:
 # README sections from site/src/*.json (gen-readme), and the office images for
 # BOTH docs/images/ and site/public/demos/ from scripts/media.json (gen-media).
 
-# Regenerate everything: README sections + docs images + site demos.
+# Regenerate everything: 8x sprites + README sections + docs images + site demos.
 [group('gen')]
-[doc('Regenerate ALL committed artifacts (README sections + docs images + site demos)')]
-gen: gen-icons gen-media gen-readme
+[doc('Regenerate ALL committed artifacts (8x sprites + README sections + docs images + site demos)')]
+gen: gen-art gen-icons gen-media gen-readme
+
+# First in `gen`: the media renders from the sprites this writes.
+[group('gen')]
+[doc("Regenerate the bundled pack's @8x cutaway sprites from scripts/gen-cutaway-art.py")]
+gen-art:
+    python3 scripts/gen-cutaway-art.py crates/pixtuoid-scene/sprites/default
 
 # Sync the README's install/features/tools sections from site/src/*.json.
 [group('gen')]
