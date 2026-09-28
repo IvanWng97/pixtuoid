@@ -15,9 +15,9 @@
 //! - [`check_order`] turns every pairwise fact into an assertion. A sort key
 //!   silently mis-orders whatever it cannot express; a constraint that is
 //!   CHECKED tells you the day something stops fitting.
-//! - The relation is pairwise, so it still holds if depth ever stops being a
-//!   function of screen y (elevation would do that), where a single key cannot
-//!   express it.
+//! - The relation is pairwise, so it still holds if the draw order ever stops
+//!   being a function of screen y (elevation would do that), where a single key
+//!   cannot express it.
 //!
 //! ## The one thing a graph cannot fix
 //!
@@ -28,13 +28,13 @@
 //! a cycle"). `paint.rs` splits wall runs; this module assumes it happened, and
 //! [`check_order`] is what notices when it did not.
 
-/// A piece's screen footprint in LOGICAL units, inclusive on both ends, and the
+/// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
 ///
-/// The footprint bounds EVERY pixel the piece paints — a repaint of the pieces
-/// whose footprints meet a damaged rect is only complete if nothing a piece
-/// draws falls outside its own. The depth is a separate fact: a person sorts on
-/// the sim's z-key, which is not the south edge of what they paint.
+/// The bounds hold EVERY pixel the piece paints — a repaint of the pieces whose
+/// bounds meet a damaged rect is only complete if nothing a piece draws falls
+/// outside its own. The depth is a separate fact: a person sorts on the sim's
+/// z-key, which is not the south edge of what they paint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Span {
     /// Westmost column.
@@ -45,7 +45,9 @@ pub(crate) struct Span {
     pub y0: u16,
     /// Southmost row.
     pub y1: u16,
-    /// The BASE row, the "feet" the order is built on.
+    /// The row it sorts on (the module's "base row"); greater draws later.
+    /// [`Span::new`] puts it on `y1`; [`Span::with_depth`] keys a piece
+    /// elsewhere.
     pub depth: u16,
 }
 
@@ -64,9 +66,18 @@ impl Span {
         }
     }
 
-    /// The same footprint, sorted on `depth` instead.
+    /// The same bounds, sorted on `depth` instead.
     pub(crate) fn with_depth(self, depth: u16) -> Self {
         Self { depth, ..self }
+    }
+
+    /// The same depth, its bounds grown `rows` further south: rows a piece
+    /// paints under the part it sorts on.
+    pub(crate) fn painting_below(self, rows: u16) -> Self {
+        Self {
+            y1: self.y1.saturating_add(rows),
+            ..self
+        }
     }
 
     fn overlaps_x(self, other: Self) -> bool {

@@ -104,7 +104,9 @@ pub fn render_cutaway(
     labels
 }
 
-/// Every floor-standing piece of the office, each with its [`Span`], unordered.
+/// Every floor-standing piece of the office, each with its [`Span`]. The push
+/// order breaks depth ties, so it is part of the result: a chair pushed after
+/// the people keeps it over a sitter who shares its depth.
 fn draw_list(
     frame: &SimFrame,
     layout: &Layout,
@@ -238,9 +240,9 @@ fn desk_span(
         },
         w,
         h,
-        desk_face_rows(pack, art, scale) + 1,
+        desk_face_rows(pack, art, scale),
     );
-    Some(span.with_depth(span.y1 - 1))
+    Some(span.painting_below(1))
 }
 
 /// The rows of front face the cutaway derives under desk `art` at `scale`.
@@ -487,7 +489,7 @@ fn push_characters(
             desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
         });
         // +1 for the contact shadow `paint_character` stamps under a figure
-        // no seat grounds.
+        // not seated at a desk (`seat_desk`).
         let shadow = u16::from(c.seat_desk.is_none());
         order.push((
             occupant_span(
@@ -511,10 +513,10 @@ fn push_characters(
     carried
 }
 
-/// A figure's box for depth: its drawn box, sorted on `depth` — the sim's own
-/// z-key, which neither breath nor the sit arc moves, so a person never flips
-/// against a neighbour mid-breath. A back-turned sitter and their chair are one
-/// piece, spanning the chair's columns too.
+/// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
+/// which neither breath nor the sit arc moves, so a person never flips against a
+/// neighbour mid-breath. A back-turned sitter and their chair are one piece,
+/// bounding the chair's whole box too.
 fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
     let body = body.with_depth(depth);
     match chair {
@@ -683,10 +685,10 @@ enum PieceKind {
     },
 }
 
-/// A piece's screen footprint, as [`Span::new`] builds it from its sprite's box.
+/// A piece's bounds, as [`Span::new`] builds them from its sprite's box.
 /// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
-/// the walkable mask and the classic painter use, so the box a piece SORTS by
-/// cannot drift from the box it BLITS into.
+/// the walkable mask, the classic painter and every paint fn here use, so a
+/// piece's bounds cannot drift from the box it BLITS into.
 fn piece_span(
     anchor: crate::layout::Anchor,
     pos: crate::layout::Point,
@@ -1127,8 +1129,8 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
 fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
     let ramp = Ramp::from_base(theme.furniture.wood_top);
     let (w, h) = (TABLE_W, TABLE_H);
-    let x = at.x.saturating_sub(w / 2);
-    let y = at.y.saturating_sub(h / 2);
+    let crate::layout::Point { x, y } =
+        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
     slab(
         buf,
         scale.to_buffer(x),
@@ -1182,8 +1184,8 @@ fn paint_appliance(
         _ => (theme.appliance.vending_body, theme.appliance.vending_panel),
     };
     let (w, h) = (def.visual.w, def.visual.h);
-    let x = at.x.saturating_sub(w / 2);
-    let y = at.y.saturating_sub(h / 2);
+    let crate::layout::Point { x, y } =
+        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
     slab(
         buf,
         scale.to_buffer(x),
@@ -1234,8 +1236,8 @@ fn paint_prop(
     // The layout's point is the piece's CENTRE; `blit_frame_scaled` takes a
     // top-left, so undo the centring in logical space before converting.
     let (w, h) = dense.logical;
-    let x = at.x.saturating_sub(w / 2);
-    let y = at.y.saturating_sub(h / 2);
+    let crate::layout::Point { x, y } =
+        crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
     contact_shadow(crate::layout::Point { x, y }, w, h, theme, scale, buf);
     blit_frame_scaled(
         art,
@@ -1319,10 +1321,9 @@ mod tests {
         piece_span(anchor, pos, 1, h, below).depth
     }
 
-    /// Every piece's sort row measured the same way: the south base row of what it
-    /// actually blits. At their true base rows the chair lands south of the desk's
-    /// front face, so the ratified "head over the surface" reading falls out of the
-    /// shared convention with no divergence.
+    /// The desk sorts on its face's south edge and a back-turned sitter on their
+    /// seat's z-key; that key lands south of the face, so the ratified "head
+    /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
         let pack = pack();
@@ -1572,6 +1573,19 @@ mod tests {
         assert_eq!((piece.x0, piece.x1), (8, 15));
     }
 
+    /// A chair that rises above its sitter's head still lies inside their
+    /// piece, which sorts on the later of the two depths.
+    #[test]
+    fn an_occupant_span_bounds_a_chair_taller_than_its_sitter() {
+        let body = Span::new(10, 20, 8, 12, 0);
+        let chair = Span::new(9, 15, 10, 20, 1).with_depth(40);
+        let piece = occupant_span(body, 31, Some(chair));
+        assert_eq!(
+            (piece.x0, piece.x1, piece.y0, piece.y1, piece.depth),
+            (9, 18, 15, 35, 40)
+        );
+    }
+
     /// Relighting recolors the screen KEYS and nothing else — not even a pixel
     /// of another key the same colour as the glass — so the glow is exactly the
     /// screen the art drew, at whatever density.
@@ -1819,9 +1833,8 @@ mod tests {
         pack: &Pack,
         desk: crate::layout::Point,
     ) -> Option<bool> {
-        let mut order = Vec::new();
-        let carried = push_characters(frame, layout, pack, RenderScale::ONE, &mut order);
-        push_chairs(layout, pack, &carried, &mut order);
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let order = draw_list(frame, layout, pack, theme, RenderScale::ONE);
         let (person, person_span) = order
             .iter()
             .enumerate()
@@ -2070,10 +2083,8 @@ mod tests {
         }
     }
 
-    /// The dirty-rect repaint over a cached office rests on this: whatever a
-    /// piece's paint fn writes lies inside its span, so repainting every piece
-    /// whose span meets a damaged rect restores each pixel in it. A pixel counts
-    /// as WRITTEN where two paints over different fills agree, so no colour is
+    /// Pins [`Span`]'s bounds contract for every piece kind. A pixel counts as
+    /// WRITTEN where two paints over different fills agree, so no colour is
     /// assumed to be one the paint never uses.
     #[test]
     fn every_piece_paints_only_inside_its_span() {
@@ -2107,7 +2118,7 @@ mod tests {
             // included...
             check(frames.last().expect("a seated frame"), &layout, false);
         }
-        // ...and offices big enough for the size-gated pieces, empty.
+        // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let frame = FloorSession::new()
                 .observe(
