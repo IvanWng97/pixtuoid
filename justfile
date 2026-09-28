@@ -24,8 +24,8 @@ set windows-shell := ["bash", "-cu"]
 # The published API surface: the ONLY two crates whose public API is a contract
 # (the binary lib target is not). Single-sourced here so both gates over it —
 # api-surface / api-surface-check — can't drift; a newly-published crate is
-# added in ONE place. release-plz runs cargo-semver-checks over the same two, by
-# reading which crates are published rather than this list.
+# added in ONE place. release-plz semver-checks every crate with a library, so
+# release-plz.toml switches the check off for the binary's lib target.
 PUBLISHED_CRATES := "pixtuoid-core pixtuoid-scene"
 
 # Standalone shell FILES share one authority so formatting and lint coverage
