@@ -49,7 +49,7 @@ pub struct PixelPassResult {
 /// each render, since the wandering position is recomputed every frame.
 #[derive(Clone)]
 pub struct MascotFrame {
-    /// The mascot's top-left screen position this tick.
+    /// The mascot's centre screen position this tick.
     pub pos: Point,
     /// The painted sprite's pixel width, read from the pack's real frame so
     /// the binary's `hit_test_mascot` click box derives from what's drawn.
@@ -1140,7 +1140,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
             anchor_y: z_sort_row(
                 Anchor::Center,
                 center,
-                crate::layout::furniture_def(crate::layout::Furniture::Couch)
+                crate::layout::furniture_def(crate::layout::Furniture::MeetingSofaBody)
                     .visual
                     .h,
             ),

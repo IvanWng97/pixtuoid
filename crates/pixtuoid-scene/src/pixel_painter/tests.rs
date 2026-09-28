@@ -621,24 +621,6 @@ fn drawables_sort_is_stable_on_ties() {
 }
 
 #[test]
-fn back_view_meeting_sofa_sorts_over_its_sitter() {
-    let sofa_y: u16 = 40;
-    let sitter_anchor_y = (sofa_y - 7) + 9; // back_couch_anchor + sprite_h
-    let back_sofa_anchor_y = sofa_y + 3; // faces_away bump
-    let front_sofa_anchor_y = sofa_y + 2; // sitter-on-top default
-    assert!(
-        back_sofa_anchor_y > sitter_anchor_y,
-        "back-view sofa must sort AFTER its sitter (paint on top): \
-         sofa={back_sofa_anchor_y}, sitter={sitter_anchor_y}"
-    );
-    assert!(
-        front_sofa_anchor_y <= sitter_anchor_y,
-        "front-view sofa must not sort after its sitter: \
-         sofa={front_sofa_anchor_y}, sitter={sitter_anchor_y}"
-    );
-}
-
-#[test]
 fn center_pin_south_offset_lands_on_the_sprite_south_row() {
     for h in 1u16..=16 {
         let expected_south = h - 1 - h / 2;
@@ -1082,6 +1064,66 @@ fn desk_z_key_is_the_visual_south() {
     );
 }
 
+/// The painter centres a pack sprite by the ART's size, while its z-sort row,
+/// ground strip and the binary's hover box place it by the size the layout
+/// reads — a def's `.visual`, the elevator's, a counter's — so the two must
+/// agree for the bundled pack. The desk is the exception: its box starts under
+/// the bezel row it blits above `desk.y` (`desk_z_key_is_the_visual_south`).
+#[test]
+fn every_hover_size_is_its_painted_sprite_size() {
+    use crate::layout::{
+        furniture_def, Furniture, PlantKind, PodDecor, Size, WallDecor, COMPACT_COUNTER,
+        ELEVATOR_H, ELEVATOR_W, LARGE_COUNTER,
+    };
+    let def =
+        |f: Furniture, sprite: &'static str| (format!("{f:?}"), furniture_def(f).visual, sprite);
+    let mut pieces: Vec<(String, Size, &str)> = vec![
+        def(Furniture::MeetingSofaBody, "meeting_sofa"),
+        def(Furniture::SnackShelf, "snack_shelf"),
+        def(Furniture::FloorLamp, "floor_lamp"),
+        (
+            "ELEVATOR".into(),
+            Size {
+                w: ELEVATOR_W,
+                h: ELEVATOR_H,
+            },
+            "door",
+        ),
+        ("LARGE_COUNTER".into(), LARGE_COUNTER, "pantry"),
+        ("COMPACT_COUNTER".into(), COMPACT_COUNTER, "pantry_small"),
+    ];
+    pieces.extend(
+        PlantKind::ALL
+            .iter()
+            .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+    pieces.extend(
+        WallDecor::ALL
+            .iter()
+            .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+    pieces.extend(
+        PodDecor::ALL
+            .iter()
+            .map(|k| def(k.furniture(), k.sprite_name())),
+    );
+
+    let pack = crate::embedded_pack::test_default_pack();
+    for (name, size, sprite) in pieces {
+        let frames = pack
+            .animation(sprite)
+            .map(|a| a.frames())
+            .unwrap_or_else(|| panic!("the bundled pack ships {sprite}"));
+        for (i, art) in frames.iter().enumerate() {
+            assert_eq!(
+                (size.w, size.h),
+                (art.width(), art.height()),
+                "{name}'s size must be {sprite}'s painted size (frame {i})"
+            );
+        }
+    }
+}
+
 #[test]
 fn every_pod_occludes_via_overhang() {
     use crate::layout::{furniture_def, PodDecor, Size};
@@ -1103,19 +1145,6 @@ fn every_pod_occludes_via_overhang() {
             def.visual.h
         );
     }
-}
-
-#[test]
-fn back_view_seats_sort_over_their_sitter() {
-    let base: u16 = 40;
-    let sitter = (base - 7) + 9; // = base + 2
-    let couch_furniture = base + 3; // lounge couch (MeetingSofa{mirrored:true})
-    let back_meeting_sofa = base + 3; // faces_away meeting sofa
-    assert!(couch_furniture > sitter, "couch must sort over its sitter");
-    assert!(
-        back_meeting_sofa > sitter,
-        "north meeting sofa must sort over its sitter"
-    );
 }
 
 #[test]
@@ -1701,7 +1730,7 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
     };
     let small_pantry = crate::layout::PantryRoom {
         bounds: small,
-        counter_size: crate::layout::Size { w: 20, h: 8 },
+        counter_size: crate::layout::COMPACT_COUNTER,
         kitchen_island: None,
     };
     let assert_noop = |f: &dyn Fn(&mut RgbBuffer)| {
@@ -1741,7 +1770,7 @@ fn furniture_room_decor_large_bounds_paint() {
     };
     let big_pantry = crate::layout::PantryRoom {
         bounds: big,
-        counter_size: crate::layout::Size { w: 20, h: 8 },
+        counter_size: crate::layout::COMPACT_COUNTER,
         kitchen_island: None,
     };
     let assert_paints = |f: &dyn Fn(&mut RgbBuffer)| {
@@ -1773,7 +1802,7 @@ fn furniture_painters_fill_exactly_their_rect_authority() {
     };
     let pantry = crate::layout::PantryRoom {
         bounds: big,
-        counter_size: crate::layout::Size { w: 20, h: 8 },
+        counter_size: crate::layout::COMPACT_COUNTER,
         kitchen_island: None,
     };
     let meeting = crate::layout::MeetingRoom {
@@ -2848,7 +2877,7 @@ fn water_cooler_glugs_a_rising_bubble() {
     };
     let pantry = crate::layout::PantryRoom {
         bounds: pr,
-        counter_size: crate::layout::Size { w: 20, h: 8 },
+        counter_size: crate::layout::COMPACT_COUNTER,
         kitchen_island: None,
     };
     let render = |ms: u64| {
@@ -3727,7 +3756,7 @@ fn a_desk_lamp_is_lit_whichever_way_the_desk_seats_its_occupant() {
     );
 }
 
-/// The two emitters this PR added; the ceiling pools and the floor lamp share the
+/// The two desk emitters (`lamp`, `screen_idle`); the ceiling pools and the floor lamp share the
 /// rule but not this pin. Dropping either factor makes that emitter's two
 /// readings equal.
 #[test]
@@ -3770,7 +3799,7 @@ fn a_lamp_casting_no_pool_is_not_drawn_lit() {
 }
 
 /// Asserted on the DRAWABLE list, not on pixels: a chair's rect is lit by the
-/// desk's ceiling pool, which this branch made facing-dependent, so contrasting
+/// desk's ceiling pool, which is facing-dependent, so contrasting
 /// a north desk's rect against a south one measures the pool as much as the
 /// chair — it passes with no chair drawn.
 #[test]

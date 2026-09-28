@@ -377,25 +377,14 @@ fn compute_returns_none_when_buf_too_small() {
 
 #[test]
 fn every_role_enum_variant_maps_to_a_furniture_row() {
-    for wd in [
-        WallDecor::Bookshelf,
-        WallDecor::Whiteboard,
-        WallDecor::BulletinBoard,
-        WallDecor::ExitSign,
-        WallDecor::MeetingScreen,
-    ] {
+    for &wd in WallDecor::ALL {
         let f = wd.furniture();
         assert!(
             furniture_def(f).visual.w > 0 && furniture_def(f).visual.h > 0,
             "{wd:?} → {f:?} must resolve a sized Furniture row"
         );
     }
-    for pk in [
-        PlantKind::Ficus,
-        PlantKind::Tall,
-        PlantKind::Flower,
-        PlantKind::Succulent,
-    ] {
+    for &pk in PlantKind::ALL {
         let f = pk.furniture();
         let def = furniture_def(f);
         assert!(

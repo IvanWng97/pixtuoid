@@ -27,6 +27,7 @@ pub use decor::{
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
+pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
 // ground and the drawn glass meet the band / crossing walls at the same joints
@@ -135,8 +136,8 @@ pub type Layout = SceneLayout;
 /// stays `Option`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Lounge {
-    /// Centre of the 3-seat couch sprite — the sprite + rug + side table
-    /// paint once, centred here.
+    /// Centre of the 3-seat couch sprite; the rug and side table are placed
+    /// relative to it.
     pub couch_center: Point,
     /// Floor lamp, just east of the couch.
     pub floor_lamp: Point,
@@ -186,7 +187,7 @@ pub struct SceneLayout {
     /// Meeting rooms in floor order — the index IS the `room_id` every
     /// waypoint and painter joins on.
     pub meeting_rooms: Vec<MeetingRoom>,
-    /// The pantry aggregate (bounds + counter footprint + island) — `None`
+    /// The pantry aggregate (bounds + counter size + island) — `None`
     /// on floors without a pantry (Dense dual-meeting).
     pub pantry: Option<PantryRoom>,
     /// Interior room-wall segments the painter draws and the mask blocks.
@@ -274,8 +275,9 @@ pub const CHARACTER_SPRITE_H_CELLS: u16 = 6;
 /// The same default height in buffer PIXELS — the width-unknown fallback's
 /// twin, for the paths where a custom pack's real frame isn't available.
 pub(crate) const CHARACTER_SPRITE_H: u16 = CHARACTER_SPRITE_H_CELLS * 2;
-/// Elevator-door sprite width in buffer px. Both the layout and the renderer
-/// read this, so the door footprint can't drift between them.
+/// Elevator-door sprite width in buffer px, read by the layout, the wall's
+/// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
+/// pins it to the door sprite.
 pub const ELEVATOR_W: u16 = 16;
 /// Elevator-door sprite height in buffer px — the door's z-sort anchor row.
 pub const ELEVATOR_H: u16 = 14;
@@ -355,8 +357,9 @@ impl SceneLayout {
     ///
     /// Destructured with NO `..`, the same guarantee `placement_sweep::pieces`
     /// takes: a new collection is a compile error HERE, not a finding two review
-    /// rounds later. Three kinds carry a `0x0` table `visual` because their sprite
-    /// is runtime-sized, so each is read from its own authority below.
+    /// rounds later. Three kinds carry a `0x0` table `visual` — the pantry's
+    /// sprite is runtime-sized, and a meeting-sofa seat's or island stand's is
+    /// another row's — so each is read from its own authority below.
     pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
         let SceneLayout {
             home_desks,
@@ -487,12 +490,11 @@ impl SceneLayout {
         self.lounge.as_ref().and_then(|l| l.fish_tank)
     }
 
-    /// The pantry counter's footprint, or the `rooms::pantry::COMPACT_COUNTER`
-    /// fallback when no pantry exists — `approach_point`'s signature needs SOME
+    /// The pantry counter's size, or the `COMPACT_COUNTER` fallback
+    /// when no pantry exists — `approach_point`'s signature needs SOME
     /// size even on pantry-less floors, where it is never consulted.
     pub fn pantry_counter_size(&self) -> Size {
-        self.pantry
-            .map_or(rooms::pantry::COMPACT_COUNTER, |p| p.counter_size)
+        self.pantry.map_or(COMPACT_COUNTER, |p| p.counter_size)
     }
 
     /// Where an agent's sprite RENDERS when it visits furniture `kind` at `pos`

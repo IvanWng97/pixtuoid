@@ -464,7 +464,9 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     match kind {
         Furniture::Couch => FurnitureDef {
             footprint: Some(Size { w: 8, h: 7 }),
-            visual: Size { w: 8, h: 7 }, // procedural render; visual unused
+            // One seat's box: three tile the `MeetingSofaBody` sprite the lounge
+            // couch blits.
+            visual: Size { w: 8, h: 7 },
             occupies_pos: true,
             exclusive: true,
             dwell: DwellWindow {
@@ -477,7 +479,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         },
         Furniture::Pantry => FurnitureDef {
             footprint: None,
-            visual: Size { w: 0, h: 0 }, // runtime-sized; procedural render
+            visual: Size { w: 0, h: 0 }, // runtime-sized: `PantryRoom::counter_size`
             occupies_pos: false,
             exclusive: false,
             dwell: DwellWindow {
@@ -616,7 +618,7 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
         },
         Furniture::MeetingSofaBody => FurnitureDef {
             footprint: Some(Size { w: 16, h: 3 }),
-            visual: Size { w: 20, h: 7 }, // == the real meeting_sofa.sprite
+            visual: Size { w: 20, h: 7 },
             ground_y: GroundAlign::Center,
             ..DECOR
         },
@@ -879,6 +881,15 @@ pub enum WallDecor {
 }
 
 impl WallDecor {
+    /// Every variant.
+    pub const ALL: &'static [WallDecor] = &[
+        WallDecor::Bookshelf,
+        WallDecor::Whiteboard,
+        WallDecor::BulletinBoard,
+        WallDecor::ExitSign,
+        WallDecor::MeetingScreen,
+    ];
+
     /// Geometry kind in the unified [`Furniture`] table. Wall decor isn't
     /// mask-stamped, so only `.visual` is read from the row.
     pub const fn furniture(self) -> Furniture {
@@ -921,6 +932,14 @@ pub enum PlantKind {
 }
 
 impl PlantKind {
+    /// Every variant.
+    pub const ALL: &'static [PlantKind] = &[
+        PlantKind::Ficus,
+        PlantKind::Tall,
+        PlantKind::Flower,
+        PlantKind::Succulent,
+    ];
+
     /// Geometry kind in the unified [`Furniture`] table.
     pub const fn furniture(self) -> Furniture {
         match self {
@@ -1235,20 +1254,12 @@ mod tests {
     #[test]
     fn role_enum_sprite_names_resolve_in_the_animation_registry() {
         use pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS;
-        let names: Vec<&str> = [
-            WallDecor::Bookshelf.sprite_name(),
-            WallDecor::Whiteboard.sprite_name(),
-            WallDecor::BulletinBoard.sprite_name(),
-            WallDecor::ExitSign.sprite_name(),
-            WallDecor::MeetingScreen.sprite_name(),
-            PlantKind::Ficus.sprite_name(),
-            PlantKind::Tall.sprite_name(),
-            PlantKind::Flower.sprite_name(),
-            PlantKind::Succulent.sprite_name(),
-        ]
-        .into_iter()
-        .chain(PodDecor::ALL.iter().map(|p| p.sprite_name()))
-        .collect();
+        let names: Vec<&str> = WallDecor::ALL
+            .iter()
+            .map(|w| w.sprite_name())
+            .chain(PlantKind::ALL.iter().map(|p| p.sprite_name()))
+            .chain(PodDecor::ALL.iter().map(|p| p.sprite_name()))
+            .collect();
         for n in names {
             assert!(
                 OPTIONAL_FURNITURE_ANIMATIONS.contains(&n),

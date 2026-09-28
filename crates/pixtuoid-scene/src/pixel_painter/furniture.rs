@@ -70,14 +70,9 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
     let trim = theme.furniture.wood_trim;
     let mag = theme.furniture.magazine;
     let mag_trim = theme.furniture.magazine_trim;
-    // Dims come from the one furniture table so the painted block can't drift
-    // from the blocked ground.
-    let Some(fp) =
-        crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).footprint
-    else {
-        return;
-    };
-    let (w, h) = (fp.w as i32, fp.h as i32);
+    // Dims come from the one furniture table, which the hover box reads too.
+    let size = crate::layout::furniture_def(crate::layout::Furniture::LoungeSideTable).visual;
+    let (w, h) = (size.w as i32, size.h as i32);
     for dy in 0..h {
         for dx in 0..w {
             let px = cx as i32 - w / 2 + dx;
@@ -108,7 +103,7 @@ pub(super) fn paint_side_table(buf: &mut RgbBuffer, cx: u16, cy: u16, theme: &cr
 
 /// Kitchen island — the pantry's counter-height centre piece; ALL dims read from
 /// the FurnitureDef row. The mask blocks only the south-anchored base
-/// (footprint.h = visual.h − 2, invariant #6).
+/// (invariant #6).
 pub(super) fn paint_kitchen_island(
     buf: &mut RgbBuffer,
     cx: u16,
@@ -367,7 +362,7 @@ pub(super) fn paint_island_bar_mat(
 
 /// Aquarium on a low cabinet: theme water behind a shared-dark frame, two fish
 /// patrolling opposite lanes on the anim clock, a rising bubble and a plant sprig.
-/// Geometry derives from the `FishTank` furniture row, matching its mask stamp.
+/// Geometry derives from the `FishTank` furniture row.
 pub(super) fn paint_fish_tank(
     buf: &mut RgbBuffer,
     pos: crate::layout::Point,

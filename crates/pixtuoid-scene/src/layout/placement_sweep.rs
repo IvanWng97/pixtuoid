@@ -1114,25 +1114,18 @@ fn every_kind_is_placed_somewhere_in_the_sweep() {
             missing.push(k);
         }
     }
-    for kind in [
-        PlantKind::Tall,
-        PlantKind::Flower,
-        PlantKind::Succulent,
-        PlantKind::Ficus,
-    ] {
+    for kind in PlantKind::ALL {
         let k = format!("plant:{kind:?}");
         if !seen.contains(&k) {
             missing.push(k);
         }
     }
-    for kind in [
-        WallDecor::Bookshelf,
-        WallDecor::Whiteboard,
-        WallDecor::ExitSign,
-        WallDecor::MeetingScreen,
-        // BulletinBoard: allowlisted — unplaced by design, registered for pack
-        // authors, so it has no push site in compute.
-    ] {
+    // BulletinBoard: allowlisted — unplaced by design, registered for pack
+    // authors, so it has no push site in compute.
+    for kind in WallDecor::ALL
+        .iter()
+        .filter(|&&k| k != WallDecor::BulletinBoard)
+    {
         let k = format!("wall:{kind:?}");
         if !seen.contains(&k) {
             missing.push(k);

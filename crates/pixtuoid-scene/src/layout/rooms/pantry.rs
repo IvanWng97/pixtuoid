@@ -1,15 +1,22 @@
-//! The pantry aggregate: bounds + the counter footprint + the island.
+//! The pantry aggregate: bounds + the counter size + the island.
 
 use crate::layout::{
     furniture_def, pct, Bounds, Facing, Furniture, Point, Size, Waypoint, WaypointKind,
     OBSTACLE_PAD_PX, PANTRY_COUNTER_LARGE_W, WALL_THICK_H,
 };
 
-/// Compact counter footprint — the fallback for pantries narrower than the
-/// detailed 32px kitchen run, and the size consumers read when no pantry exists
-/// at all (the runtime-sized `Furniture::Pantry` row is `footprint: None`, so
-/// this value IS the counter's only size authority).
+/// The compact counter — the fallback for a pantry too narrow for
+/// `LARGE_COUNTER`, and the size consumers read when no pantry exists. The
+/// `Furniture::Pantry` row is runtime-sized, so this pair is the counter's only
+/// size authority; each is its sprite's size, the ground being
+/// `pantry_ground_rect`'s shallow strip.
 pub(crate) const COMPACT_COUNTER: Size = Size { w: 20, h: 8 };
+
+/// The detailed kitchen-run counter, for a pantry wide enough to host it.
+pub(crate) const LARGE_COUNTER: Size = Size {
+    w: PANTRY_COUNTER_LARGE_W,
+    h: 10,
+};
 
 /// The pantry room: its bounds plus what it owns — the counter's chosen
 /// footprint and the kitchen-island body centre (`None` when the room can't host
@@ -18,8 +25,8 @@ pub(crate) const COMPACT_COUNTER: Size = Size { w: 20, h: 8 };
 pub struct PantryRoom {
     /// The pantry room's interior rectangle (buffer pixels).
     pub bounds: Bounds,
-    /// Footprint of the pantry counter sprite: the detailed kitchen run when the
-    /// pantry is wide enough, else `COMPACT_COUNTER`. The renderer reads this to
+    /// Size of the pantry counter sprite: `LARGE_COUNTER` when the pantry is
+    /// wide enough, else `COMPACT_COUNTER`. The renderer reads this to
     /// pick which sprite to paint (`pantry` vs `pantry_small`).
     pub counter_size: Size,
     /// Kitchen-island body centre.
@@ -65,7 +72,7 @@ impl PantryRoom {
         (u32::from(island_need) * 100).div_ceil(u32::from(pantry_counter_y_pct(counter.w))) as u16
     }
 
-    /// The water cooler's 3×6 sprite box against the pantry's east side, or
+    /// The water cooler's sprite box against the pantry's east side, or
     /// `None` when the room can't fit it. THE one authority `paint_water_cooler`
     /// AND the binary's hover hit-test both read, so the drawn sprite and its
     /// hover box can't drift across the crate boundary.
@@ -81,7 +88,7 @@ impl PantryRoom {
         })
     }
 
-    /// The trash bin's 4×5 sprite box near the pantry's west counter, or `None`
+    /// The trash bin's sprite box near the pantry's west counter, or `None`
     /// when the room is too short. Shared placement authority for
     /// `paint_trash_bin` and the hover hit-test — see [`Self::water_cooler_rect`].
     pub fn trash_bin_rect(&self) -> Option<Bounds> {

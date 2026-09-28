@@ -1,16 +1,16 @@
-//! Hit-test functions for mouse interaction: agent hover, coffee machine
-//! click-to-open, and furniture tooltip detection.
+//! Mouse hit-testing: which agent, pet, mascot or piece of furniture is painted
+//! under a terminal cell.
 
 use std::time::SystemTime;
 
 use pixtuoid_core::{AgentId, SceneState};
 
-use pixtuoid_scene::layout::{Layout, Size};
+use pixtuoid_scene::layout::{anchored_top_left, Anchor, Bounds, Layout, Point, Size};
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::character_anchor;
 use pixtuoid_scene::pose;
 
-/// Hit-test the mouse cursor against each agent's current sprite footprint,
+/// Hit-test the mouse cursor against each agent's current sprite box,
 /// anchored on `character_anchor`. `(mx, my)` is in terminal cell coordinates.
 pub(crate) fn hit_test_agent(
     scene: &SceneState,
@@ -43,7 +43,8 @@ pub(crate) fn hit_test_agent(
 
 /// Home-desk-only agent hit-test (no router/overlay state) — the deterministic
 /// seated-agent locator for the test harness, which has no populated `route_ctx`.
-/// A seated agent's `character_anchor` == its desk box, so the two agree.
+/// A seated agent's `character_anchor` is `seated_anchor_facing` of its desk,
+/// which this reads directly, so the two agree.
 ///
 /// `scene` must be a SINGLE-FLOOR scene matching `layout` (the caller projects via
 /// `project_floor_scene` first): indexing `layout.home_desks` with a raw
@@ -64,7 +65,8 @@ pub(crate) fn hit_test_from_tui(
         let Some(desk) = layout.home_desk(agent.desk_index.single_floor_local()) else {
             continue;
         };
-        // The painter's OWN anchor: a south-facing desk seats off `desk.y - 8`.
+        // The painter's own anchor, not the desk box: a south-facing desk seats
+        // its sitter north of the desk.
         let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
             desk,
             SPRITE_W,
@@ -119,58 +121,55 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
         WallDecorItem, WaypointKind, ELEVATOR_H, ELEVATOR_W,
     };
-    // Hover boxes derive from the one furniture table — `.visual` (the visible
-    // sprite) for what the user points at, `.footprint` where the obstacle is the
-    // thing — so a geometry edit can't leave a stale hit box behind.
+    // Every hover box reads the size its piece is laid out and z-sorted by — the
+    // furniture table's `.visual`, a room's rect, or a layout size — never a
+    // literal; `every_hover_size_is_its_painted_sprite_size` pins the
+    // pack-blitted ones to their sprite.
     let visual = |f| furniture_def(f).visual;
-    let px = mx;
-    let py = my * 2;
-
-    let hit = |x: u16, y: u16, w: u16, h: u16| -> bool {
-        px >= x && px < x.saturating_add(w) && py >= y && py < y.saturating_add(h)
+    let centered = |pos, size| box_hit(Anchor::Center, pos, size, mx, my);
+    let on_rect = |b: Bounds| {
+        box_hit(
+            Anchor::TopLeft,
+            Point { x: b.x, y: b.y },
+            Size {
+                w: b.width,
+                h: b.height,
+            },
+            mx,
+            my,
+        )
     };
 
-    // Home desks are top-left-anchored, unlike the center-anchored arms below.
     let desk_vis = visual(Furniture::Desk);
-    for desk in &layout.home_desks {
-        if hit(desk.x, desk.y, desk_vis.w, desk_vis.h) {
+    for &desk in &layout.home_desks {
+        if box_hit(Anchor::TopLeft, desk, desk_vis, mx, my) {
             return Some("Desk");
         }
     }
 
-    // ONE hover region centred on the sofa: it's 3 seat waypoints, so per-seat
-    // boxes would over-cover and multi-fire.
+    // ONE hover region on the sofa sprite, which the lounge shares with the
+    // meeting rooms: it's 3 seat waypoints, so per-seat boxes would over-cover
+    // and multi-fire.
     if let Some(c) = layout.couch_sprite_center() {
-        if hit(c.x.saturating_sub(10), c.y.saturating_sub(3), 20, 7) {
+        if centered(c, visual(Furniture::MeetingSofaBody)) {
             return Some("Lounge Sofa");
         }
     }
 
     for wp in &layout.waypoints {
-        let Size { w, h } = match wp.kind {
+        let size = match wp.kind {
             // Hovers via the one-time region above.
             WaypointKind::Couch => continue,
             WaypointKind::Pantry => layout.pantry_counter_size(),
-            // Meeting slots hover via the meeting_sofas loop below; island stands
-            // are footprint-less slots on the island body, which has its own
-            // hover region.
+            // Meeting slots hover on their furniture below (the trio's sofas, the
+            // head-of-table chairs); island stands are footprint-less slots on the
+            // island body, which has its own hover region.
             WaypointKind::MeetingSofa | WaypointKind::MeetingChair | WaypointKind::Island => {
                 continue
             }
-            // The shelf's sprite is CENTRED on the waypoint while its walkable
-            // footprint is the End-anchored south strip, so a footprint hover box
-            // would leave only a 2px band mid-sprite.
-            WaypointKind::SnackShelf => furniture_def(Furniture::SnackShelf).visual,
-            // Footprint owned by furniture_def — the same shape the mask + stand
-            // point use, so the hover box can't drift from them.
-            other => match furniture_def(other.furniture()).footprint {
-                Some(fp) => fp,
-                None => continue,
-            },
+            other => visual(other.furniture()),
         };
-        let wx = wp.pos.x.saturating_sub(w / 2);
-        let wy = wp.pos.y.saturating_sub(h / 2);
-        if hit(wx, wy, w, h) {
+        if centered(wp.pos, size) {
             return Some(match wp.kind {
                 WaypointKind::Pantry => "Pantry Counter",
                 WaypointKind::PhoneBooth => "Phone Booth",
@@ -191,42 +190,23 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
         for sofa in trio.sofas {
-            let Size { w, h } = visual(Furniture::MeetingSofaBody); // full sprite, not the footprint
-            if hit(
-                sofa.x.saturating_sub(w / 2),
-                sofa.y.saturating_sub(h / 2),
-                w,
-                h,
-            ) {
+            if centered(sofa, visual(Furniture::MeetingSofaBody)) {
                 return Some("Meeting Sofa");
             }
         }
-        let Size { w, h } = visual(Furniture::MeetingTable);
-        if hit(
-            trio.table.x.saturating_sub(w / 2),
-            trio.table.y.saturating_sub(h / 2),
-            w,
-            h,
-        ) {
+        if centered(trio.table, visual(Furniture::MeetingTable)) {
             return Some("Meeting Table");
         }
     }
 
     if let Some(p) = layout.pantry.and_then(|p| p.kitchen_island) {
-        let Size { w, h } = visual(Furniture::KitchenIsland);
-        if hit(p.x.saturating_sub(w / 2), p.y.saturating_sub(h / 2), w, h) {
+        if centered(p, visual(Furniture::KitchenIsland)) {
             return Some("Kitchen Island");
         }
     }
 
     for &PlantItem { kind, pos } in &layout.plants {
-        let Size { w, h } = visual(kind.furniture());
-        if hit(
-            pos.x.saturating_sub(w / 2),
-            pos.y.saturating_sub(h / 2),
-            w,
-            h,
-        ) {
+        if centered(pos, visual(kind.furniture())) {
             return Some(match kind {
                 PlantKind::Ficus => "Ficus",
                 PlantKind::Tall => "Tall Plant",
@@ -237,13 +217,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     if let Some(tank) = layout.fish_tank() {
-        let Size { w, h } = visual(Furniture::FishTank);
-        if hit(
-            tank.x.saturating_sub(w / 2),
-            tank.y.saturating_sub(h / 2),
-            w,
-            h,
-        ) {
+        if centered(tank, visual(Furniture::FishTank)) {
             return Some("Fish Tank");
         }
     }
@@ -251,34 +225,21 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // Head-of-table meeting chairs; an occupant's own hover wins, because the
     // agent pass runs before furniture.
     for wp in &layout.waypoints {
-        if wp.kind == pixtuoid_scene::layout::WaypointKind::MeetingChair {
-            let Size { w, h } = visual(Furniture::MeetingChair);
-            if hit(
-                wp.pos.x.saturating_sub(w / 2),
-                wp.pos.y.saturating_sub(h / 2),
-                w,
-                h,
-            ) {
-                return Some("Meeting Chair");
-            }
+        if wp.kind == WaypointKind::MeetingChair
+            && centered(wp.pos, visual(Furniture::MeetingChair))
+        {
+            return Some("Meeting Chair");
         }
     }
 
     if let Some(lamp) = layout.floor_lamp() {
-        let Size { w, h } = visual(Furniture::FloorLamp);
-        if hit(
-            lamp.x.saturating_sub(w / 2),
-            lamp.y.saturating_sub(h / 2),
-            w,
-            h,
-        ) {
+        if centered(lamp, visual(Furniture::FloorLamp)) {
             return Some("Floor Lamp");
         }
     }
 
     for &WallDecorItem { kind, pos } in &layout.wall_decor {
-        let Size { w, h } = furniture_def(kind.furniture()).visual;
-        if hit(pos.x, pos.y, w, h) {
+        if box_hit(Anchor::TopLeft, pos, visual(kind.furniture()), mx, my) {
             return Some(match kind {
                 WallDecor::Whiteboard => "Whiteboard",
                 WallDecor::Bookshelf => "Bookshelf",
@@ -290,13 +251,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     for &PodDecorItem { kind, pos } in &layout.pod_decor {
-        let Size { w, h } = furniture_def(kind.furniture()).visual;
-        if hit(
-            pos.x.saturating_sub(w / 2),
-            pos.y.saturating_sub(h / 2),
-            w,
-            h,
-        ) {
+        if centered(pos, visual(kind.furniture())) {
             return Some(match kind {
                 PodDecor::PlantTall => "Tall Plant",
                 PodDecor::Whiteboard => "Whiteboard",
@@ -308,44 +263,39 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     if let Some(t) = layout.lounge_side_table() {
-        if hit(t.x.saturating_sub(3), t.y.saturating_sub(2), 7, 4) {
+        if centered(t, visual(Furniture::LoungeSideTable)) {
             return Some("Side Table");
         }
     }
 
-    // EVERY room, not just room 0 (#555 left room 1 bare of decor). Rack and
-    // doormat come from the SAME room-aggregate authority the painter draws from.
+    // EVERY room, not just room 0 (#555 left room 1 bare of decor).
     for room in &layout.meeting_rooms {
-        if let Some(b) = room.coat_rack_rect() {
-            if hit(b.x, b.y, b.width, b.height) {
-                return Some("Coat Rack");
-            }
+        if room.coat_rack_rect().is_some_and(on_rect) {
+            return Some("Coat Rack");
         }
-        if let Some(mat) = room.doormat_rect() {
-            if hit(mat.x, mat.y, mat.width, mat.height) {
-                return Some("Doormat");
-            }
+        if room.doormat_rect().is_some_and(on_rect) {
+            return Some("Doormat");
         }
     }
 
-    // Placement + fit-gate from the PantryRoom aggregate, shared with the painter.
     if let Some(pantry) = layout.pantry {
-        if let Some(cooler) = pantry.water_cooler_rect() {
-            if hit(cooler.x, cooler.y, cooler.width, cooler.height) {
-                return Some("Water Cooler");
-            }
+        if pantry.water_cooler_rect().is_some_and(on_rect) {
+            return Some("Water Cooler");
         }
-        if let Some(bin) = pantry.trash_bin_rect() {
-            if hit(bin.x, bin.y, bin.width, bin.height) {
-                return Some("Trash Bin");
-            }
+        if pantry.trash_bin_rect().is_some_and(on_rect) {
+            return Some("Trash Bin");
         }
     }
 
-    if let Some(d) = layout.door {
-        if hit(d.x, d.y, ELEVATOR_W, ELEVATOR_H) {
-            return Some("Elevator");
-        }
+    let door = Size {
+        w: ELEVATOR_W,
+        h: ELEVATOR_H,
+    };
+    if layout
+        .door
+        .is_some_and(|d| box_hit(Anchor::TopLeft, d, door, mx, my))
+    {
+        return Some("Elevator");
     }
 
     None
@@ -354,41 +304,25 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
 /// Whether `(mx, my)` (terminal cell coords) falls inside the office pet's
 /// sprite. `pet_pos` is its center anchor in pixel coordinates; `anim_name`
 /// selects the bounding-box size via `PetKind::hitbox`.
-pub fn hit_test_pet(
-    kind: PetKind,
-    pet_pos: pixtuoid_scene::layout::Point,
-    anim_name: &str,
-    mx: u16,
-    my: u16,
-) -> bool {
-    center_hit(pet_pos, kind.hitbox(anim_name), mx, my)
+pub fn hit_test_pet(kind: PetKind, pet_pos: Point, anim_name: &str, mx: u16, my: u16) -> bool {
+    box_hit(Anchor::Center, pet_pos, kind.hitbox(anim_name), mx, my)
 }
 
-/// Whether cell `(mx, my)` falls on a `size`-px sprite CENTER-anchored at `pos`
-/// (pixel coords). Owns the half-block `my * 2` conversion for every
-/// center-anchored hover box, so the `* 2` can't be dropped at one site.
-fn center_hit(pos: pixtuoid_scene::layout::Point, size: Size, mx: u16, my: u16) -> bool {
-    let tl_x = pos.x.saturating_sub(size.w / 2);
-    let tl_y = pos.y.saturating_sub(size.h / 2);
-    let cell_y = my * 2;
-    mx >= tl_x
-        && mx < tl_x.saturating_add(size.w)
-        && cell_y >= tl_y
-        && cell_y < tl_y.saturating_add(size.h)
+/// Whether cell `(mx, my)` falls on a `size`-px box placed at `pos` (pixel
+/// coords) by `anchor` — through [`anchored_top_left`], the painter's own
+/// placement. Owns the half-block `my * 2`, so it can't be dropped at one site.
+fn box_hit(anchor: Anchor, pos: Point, size: Size, mx: u16, my: u16) -> bool {
+    let tl = anchored_top_left(anchor, pos, size.w, size.h);
+    let py = my * 2;
+    mx >= tl.x && mx < tl.x.saturating_add(size.w) && py >= tl.y && py < tl.y.saturating_add(size.h)
 }
 
 /// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
 /// `w`×`h`-px sprite, centered at `pos` (pixel coords). `w`/`h` must come from the
 /// PAINTED frame (`MascotFrame`, which reads the pack's real size), so a re-tuned
 /// or custom-pack mascot keeps its click box aligned with what's drawn.
-pub fn hit_test_mascot(
-    pos: pixtuoid_scene::layout::Point,
-    w: u16,
-    h: u16,
-    mx: u16,
-    my: u16,
-) -> bool {
-    center_hit(pos, pixtuoid_scene::layout::Size { w, h }, mx, my)
+pub fn hit_test_mascot(pos: Point, w: u16, h: u16, mx: u16, my: u16) -> bool {
+    box_hit(Anchor::Center, pos, Size { w, h }, mx, my)
 }
 
 #[cfg(test)]
