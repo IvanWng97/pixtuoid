@@ -1,10 +1,10 @@
 # pixtuoid-core/tests — agent guide
 
 Integration tests organized **by capability/layer**; the per-CLI dimension
-lives where the actual variation is — the source fixtures. 9 test binaries
-(each top-level `tests/*.rs` or `tests/<area>/main.rs` is one binary — a
-multi-file area MUST be `<area>/main.rs`, because a top-level `<area>.rs` is a
-crate root whose `mod foo;` resolves to a SIBLING `tests/foo.rs`):
+lives where the actual variation is — the source fixtures. Each top-level
+`tests/*.rs` or `tests/<area>/main.rs` is one test binary; a multi-file area
+MUST be `<area>/main.rs`, because a top-level `<area>.rs` is a crate root whose
+`mod foo;` resolves to a SIBLING `tests/foo.rs`:
 
 ```
 tests/

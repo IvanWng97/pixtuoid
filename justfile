@@ -8,7 +8,7 @@
 #   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
 #   gen      — regenerate committed artifacts, and check the committed copies
-#   release  — the npm package gate the publish job runs (npm-check)
+#   release  — the npm package gate release.yml's npm job runs (npm-check)
 #   meta     — tooling setup, the full pre-push / full-stack gates, and the gates' selftests
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe

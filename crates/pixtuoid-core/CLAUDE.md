@@ -11,4 +11,4 @@ Module map: `ls src/` — each file's `//!` header is its annotation.
 
 ## When refactoring
 
-The channel type, `Source` trait, `AgentEvent` enum, and reducer signature are workspace-wide contracts — see the root [`CLAUDE.md`](../../CLAUDE.md) "When refactoring" for the full list of test files to update and the add-a-CLI checklist.
+The channel type, `Source` trait, `AgentEvent` enum, and reducer signature are workspace-wide contracts — see the root [`CLAUDE.md`](../../CLAUDE.md) "Where to look" for the full list of test files to update and the add-a-CLI checklist.
