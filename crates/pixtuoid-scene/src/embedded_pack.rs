@@ -177,16 +177,17 @@ pub(crate) fn test_default_pack() -> Pack {
     load_sprite_pack(PackSource::Bundled).expect("default pack loads")
 }
 
-/// The default pack's manifest.
-const EMBEDDED_PACK_TOML: &str = include_str!("../sprites/default/pack.toml");
+/// The default pack's manifest, as `build.rs` embeds it: without its density
+/// variants when the `density-art` feature is off.
+const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
 fn load_embedded_pack() -> Result<Pack> {
     load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
-/// `sprites/default/`, listed by `build.rs`, so a sprite committed there cannot
-/// be left out. Extracted so [`test_wide_pack`] reuses the EXACT sprite set and
+/// `sprites/default/` the embedded manifest draws, listed by `build.rs`, so a
+/// sprite committed there cannot be left out. Extracted so [`test_wide_pack`] reuses the EXACT sprite set and
 /// only overrides `standing.sprite`.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
@@ -229,6 +230,10 @@ pub(crate) fn test_wide_pack() -> Pack {
     }
     load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("wide test pack loads")
 }
+
+#[cfg(test)]
+#[path = "../build_support/density_art.rs"]
+mod density_art;
 
 #[cfg(test)]
 mod tests {
@@ -340,6 +345,34 @@ mod tests {
             unregistered.is_empty(),
             "sprites no animation registers: {unregistered:?}"
         );
+    }
+
+    /// The pack a build without `density-art` embeds — the web hero's — loads,
+    /// draws no density variant, validates clean and carries no sprite it does
+    /// not draw. Built here through the same filter `build.rs` runs.
+    #[test]
+    fn the_pack_without_density_art_loads_whole() {
+        let (toml, dropped) =
+            density_art::strip_density_art(include_str!("../sprites/default/pack.toml"));
+        assert!(!dropped.is_empty(), "the bundled pack ships density art");
+        let srcs: Vec<_> = embedded_sprite_srcs()
+            .into_iter()
+            .filter(|(name, _)| !dropped.contains(*name))
+            .collect();
+        let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
+        assert_eq!(pack.max_density_variant(), 1);
+        let report = validate_pack(&pack);
+        assert!(!report.has_errors(), "{report:?}");
+        assert_eq!(report.warning_count(), 0, "{report:?}");
+        let unregistered: Vec<&str> = srcs
+            .iter()
+            .map(|&(name, _)| name)
+            .filter(|&name| {
+                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
+                load_pack_from_strings(&toml, &without).is_ok()
+            })
+            .collect();
+        assert!(unregistered.is_empty(), "undrawn sprites: {unregistered:?}");
     }
 
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
