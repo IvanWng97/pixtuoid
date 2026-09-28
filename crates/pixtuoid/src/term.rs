@@ -1,6 +1,8 @@
-//! Terminal capability detection for the truecolor preflight. The warning is a
-//! WARN signal, never a gate on Unix — Windows is the exception, `tui::mod`
-//! hard-gates VT there because the WinAPI color fallback renders black-on-black.
+//! Terminal capability detection: the truecolor preflight, and the
+//! controlling-terminal query (`query_tty`) it shares with the graphics probe.
+//! The truecolor warning is a WARN signal, never a gate on Unix — Windows is
+//! the exception, `tui::mod` hard-gates VT there because the WinAPI color
+//! fallback renders black-on-black.
 //!
 //! We do NOT guess truecolor from a `$TERM` name allowlist. Detection ASKS the
 //! terminal directly: set an unlikely 24-bit background, then `DECRQSS`-query the
@@ -200,9 +202,9 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
 ///
 /// The controlling terminal (`/dev/tty`), so a piped stdout never receives the
 /// escapes; in raw mode, so the reply isn't echoed and arrives un-buffered; and
-/// its mode restored on every path, a panic included. The wait is bounded HERE,
-/// on this thread — a query answered by a reader it cannot stop would keep
-/// reading the terminal after the budget.
+/// its mode restored on every return. The wait is bounded HERE, on this thread
+/// — a query answered by a reader it cannot stop would keep reading the
+/// terminal after the budget.
 #[cfg(unix)]
 pub(crate) fn query_tty(
     query: &[u8],

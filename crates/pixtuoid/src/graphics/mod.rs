@@ -20,7 +20,9 @@ mod probe;
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
 
-/// How long the capability query may take, start to finish.
+/// How long the capability query may take: start to finish on Unix, where
+/// [`probe`] reads the reply itself; between reads on Windows, whose upstream
+/// probe restarts the clock on each one (`picker.rs:615`).
 ///
 /// The query ends with a device-status request (ratatui-image 11.0.8
 /// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
@@ -170,7 +172,8 @@ pub(crate) enum Probe {
     /// The terminal answered.
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
     Answered(Detected),
-    /// Nothing was asked: there is no terminal to ask, or `$TERM` is dumb.
+    /// Nothing was asked: the caller said not to, or there is no controlling
+    /// terminal to ask.
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
     NotQueried,
     /// The terminal was asked and its reply never completed. Only the Unix
@@ -268,8 +271,9 @@ impl ClassicReason {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
             Self::Unsupported => "this build has no terminal-graphics support".to_string(),
-            Self::NotQueried => "the terminal was not asked (there is no terminal, or $TERM \
-                 is dumb) — run in an interactive terminal to see what it supports"
+            Self::NotQueried => "the terminal was not asked (stdout is not a terminal, there \
+                 is no controlling terminal, or $TERM is dumb) — run in an interactive \
+                 terminal to see what it supports"
                 .to_string(),
             Self::NoAnswer => "the terminal did not answer the capability query".to_string(),
             Self::NoProtocol => {
@@ -424,7 +428,7 @@ mod tests {
         );
     }
 
-    /// Every protocol the picker can report reaches the plan as itself.
+    /// Every protocol the probe can report reaches the plan as itself.
     #[test]
     fn auto_takes_the_cutaway_through_the_protocol_the_terminal_speaks() {
         for protocol in [

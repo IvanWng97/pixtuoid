@@ -42,16 +42,13 @@ impl EnvHints {
         }
     }
 
-    /// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux`
-    /// (`picker.rs:320-326`).
     fn tmux(&self) -> bool {
-        self.term.as_deref().is_some_and(|t| t.starts_with("tmux"))
-            || self.term_program.as_deref() == Some("tmux")
+        in_tmux(self.term.as_deref(), self.term_program.as_deref())
     }
 
-    /// Protocols never asked for: WezTerm and Konsole answer the kitty and
-    /// SIXEL queries with implementations upstream found broken
-    /// (`picker.rs:108-119`).
+    /// Protocols never asked for under WezTerm or Konsole: neither implements
+    /// kitty's placeholders, Konsole's SIXEL is buggy, and WezTerm draws better
+    /// through iTerm2 (`picker.rs:110-119`).
     fn blacklist(&self) -> Vec<ProtocolType> {
         if self.wezterm || self.konsole {
             vec![ProtocolType::Kitty, ProtocolType::Sixel]
@@ -87,6 +84,13 @@ impl EnvHints {
                 .is_some_and(|t| t.contains("iTerm"));
         (outer || named).then_some(ImageProtocol::Iterm2)
     }
+}
+
+/// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
+/// upstream applies before wrapping every image in passthrough
+/// (`picker.rs:320-326`), on every platform.
+fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
+    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
 }
 
 /// What the terminal's answer and the environment together say: kitty over
@@ -239,7 +243,10 @@ pub(crate) fn probe(ask: bool) -> Probe {
             w: font.width,
             h: font.height,
         }),
-        tmux: false,
+        tmux: in_tmux(
+            std::env::var("TERM").ok().as_deref(),
+            std::env::var("TERM_PROGRAM").ok().as_deref(),
+        ),
     })
 }
 
