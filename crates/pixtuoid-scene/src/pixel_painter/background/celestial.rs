@@ -26,6 +26,10 @@ pub(super) struct Disc {
     /// Illuminated fraction (0 new..1 full) — `1.0` for the sun; for the moon it
     /// drives the elliptical terminator in the disc-core render.
     pub(super) lit_frac: f32,
+    /// The lit limb is on the right, as a northern-hemisphere sky shows a waxing
+    /// moon; `false` puts it on the left ([`Sky::moon_waxing`]). The sun is
+    /// fully lit, so it never reads this.
+    pub(super) lit_right: bool,
 }
 
 const DISC_RADIUS_PX: f32 = 5.0;
@@ -76,9 +80,9 @@ pub(super) fn compute_disc(sky: &Sky, buf_w: u16, top_wall_h: u16, theme: &Theme
         Body::Sun => (theme.lighting.sun_core, theme.lighting.sun_core),
         Body::Moon => (theme.lighting.moon_core, theme.lighting.moon_core),
     };
-    let lit_frac = match e.body {
-        Body::Sun => 1.0,
-        Body::Moon => sky.moon_phase(),
+    let (lit_frac, lit_right) = match e.body {
+        Body::Sun => (1.0, true),
+        Body::Moon => (sky.moon_phase(), sky.moon_waxing()),
     };
     Some(Disc {
         cx,
@@ -88,6 +92,7 @@ pub(super) fn compute_disc(sky: &Sky, buf_w: u16, top_wall_h: u16, theme: &Theme
         glow,
         vis,
         lit_frac,
+        lit_right,
     })
 }
 

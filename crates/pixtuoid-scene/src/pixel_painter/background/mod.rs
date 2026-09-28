@@ -678,7 +678,8 @@ fn paint_floor_to_ceiling_window(
                         } else {
                             let terminator_x =
                                 (1.0 - 2.0 * d.lit_frac) * (d.r * d.r - dy * dy).max(0.0).sqrt();
-                            if dx >= terminator_x {
+                            let toward_lit_limb = if d.lit_right { dx } else { -dx };
+                            if toward_lit_limb >= terminator_x {
                                 d.core
                             } else {
                                 MOON_SHADOW
