@@ -325,6 +325,9 @@ mod tests {
     #[test]
     fn every_embedded_sprite_is_a_frame_the_pack_loads() {
         let srcs = embedded_sprite_srcs();
+        // Every leave-one-out load below errors when the whole set does, which
+        // would report nothing unregistered.
+        load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("the whole set loads");
         let unregistered: Vec<&str> = srcs
             .iter()
             .map(|&(name, _)| name)

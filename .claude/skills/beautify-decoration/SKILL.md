@@ -51,7 +51,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 ### 1. The rebuild trap
 
 - `cargo build --release --workspace` **does not** rebuild examples. Use `cargo build --release --example snapshot` when iterating on `examples/snapshot`.
-- `crates/pixtuoid-scene/build.rs` embeds every `.sprite` in `sprites/default/` at compile time and declares each (and `pack.toml`) a rerun trigger, so a sprite edit rebuilds. If edits still aren't being picked up, check that build.rs matches its extension.
+- `crates/pixtuoid-scene/build.rs` embeds every `.sprite` in `sprites/default/` at compile time, and a sprite edit, add or remove rebuilds it.
 - If unsure, verify with: `strings target/release/examples/snapshot | grep "<some unique string from your sprite>"`.
 
 ### 2. Snapshot defaults hide the large sprite variants

@@ -1,8 +1,6 @@
-//! Embed the default pack's sprites, and rebuild whenever one changes.
-//!
-//! The embedded sprite list is generated from `sprites/default/` itself, so a
-//! sprite committed there is embedded by construction; `include_str!` alone does
-//! not make cargo track those paths, so each is also declared a rerun trigger.
+//! Embed the default pack's sprites: the list is generated from
+//! `sprites/default/` itself, so a sprite committed there is embedded by
+//! construction.
 
 use std::fmt::Write as _;
 use std::path::Path;
@@ -12,14 +10,21 @@ fn main() {
     let out_dir = std::env::var("OUT_DIR").expect("OUT_DIR must be set");
     let asset_dir = Path::new(&manifest_dir).join("sprites/default");
 
+    // The one rerun trigger: cargo rescans a directory for any change, so an
+    // added or removed sprite regenerates the list. An edited sprite rebuilds
+    // the crate without it, since rustc tracks every `include_str!` input.
     println!("cargo:rerun-if-changed={}", asset_dir.display());
 
     let mut sprites: Vec<_> = std::fs::read_dir(&asset_dir)
         .expect("read sprites/default")
         .map(|entry| entry.expect("read a sprites/default entry").path())
+        // A dotfile is never a sprite, whatever its extension: macOS writes
+        // `._<name>` AppleDouble files beside real ones on non-HFS volumes.
         .filter(|path| {
-            path.extension()
-                .is_some_and(|e| e == "sprite" || e == "toml")
+            path.extension().is_some_and(|e| e == "sprite")
+                && !path
+                    .file_name()
+                    .is_some_and(|n| n.as_encoded_bytes().starts_with(b"."))
         })
         .collect();
     // Sorted, so the generated list — and the binary — do not depend on the
@@ -28,25 +33,20 @@ fn main() {
 
     let mut list = String::from("&[\n");
     for path in &sprites {
-        println!("cargo:rerun-if-changed={}", path.display());
-        if path.extension().is_some_and(|e| e == "sprite") {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .expect("a sprite file name is UTF-8");
-            // `{:?}` escapes the path for a Rust string literal, backslashes
-            // included.
-            writeln!(
-                list,
-                "    ({name:?}, include_str!({:?})),",
-                path.display().to_string()
-            )
-            .expect("writing to a String");
-        }
+        let name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .expect("a sprite file name is UTF-8");
+        // `{:?}` escapes the path for a Rust string literal, backslashes
+        // included.
+        writeln!(
+            list,
+            "    ({name:?}, include_str!({:?})),",
+            path.display().to_string()
+        )
+        .expect("writing to a String");
     }
     list.push_str("]\n");
     std::fs::write(Path::new(&out_dir).join("embedded_sprites.rs"), list)
         .expect("write embedded_sprites.rs");
-
-    println!("cargo:rerun-if-changed=build.rs");
 }
