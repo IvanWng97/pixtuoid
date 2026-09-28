@@ -250,7 +250,7 @@ fn desk_span(
 /// Only this profile draws a density variant (the classic painter's scale is 1,
 /// where `densest_frame` returns the base), so `@Nx` art is authored for this
 /// profile with its whole front; a derived face under it would read as a plank
-/// on the floor. Only base art gets the derived face.
+/// on the floor.
 fn desk_face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     match crate::pixel_painter::densest_frame(pack, art, 0, scale) {
         Some(d) if d.density.get() > 1 => 0,
@@ -380,8 +380,7 @@ fn chair_span(
     Some((span, at))
 }
 
-/// Every centre-anchored prop rides one helper, so none of them can grow its own
-/// convention again.
+/// The layout's plants, floor props, pod decor and lounge couch.
 fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
     let push_prop =
         |order: &mut Vec<(Span, PieceKind)>, at: crate::layout::Point, sprite: &'static str| {
@@ -410,8 +409,8 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     for d in &layout.pod_decor {
         push_prop(order, d.pos, d.kind.sprite_name());
     }
-    // The lounge couch IS a vertical-mirrored meeting sofa, back facing NORTH toward
-    // the windows — the classic painter's rule, read from there, not re-guessed.
+    // The lounge couch IS a mirrored meeting sofa — the classic painter's rule,
+    // read from there, not re-guessed.
     if let Some(at) = layout.couch_sprite_center() {
         push_sofa(order, pack, at, true);
     }
@@ -531,7 +530,7 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
     }
 }
 
-/// Queue one `meeting_sofa` body. `mirrored` flips it so its back faces north.
+/// Queue one `meeting_sofa` body, flipped top-to-bottom when `mirrored`.
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// drawing it here put a headless torso in the corridor where the couch belongs.
@@ -665,7 +664,8 @@ enum PieceKind {
     Prop {
         at: crate::layout::Point,
         sprite: &'static str,
-        /// Flip rows top-to-bottom, turning a sofa's back to the north windows.
+        /// Flip rows top-to-bottom, as the classic painter's `MeetingSofa`
+        /// does.
         mirrored: bool,
     },
     Table {
@@ -1139,7 +1139,7 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         &ramp,
         scale,
     );
-    // The same front face every solid in this profile gets.
+    // A front face, as the base desk gets one.
     slab(
         buf,
         scale.to_buffer(x),
@@ -1149,7 +1149,7 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         &Ramp::from_base(theme.furniture.wood_trim),
         scale,
     );
-    // ...and the ground contact every OTHER solid gets: without it the table was
+    // ...and the ground contact every other solid gets: without it the table was
     // the one piece with no weight, floating while the sofas beside it sat.
     contact_shadow(
         crate::layout::Point {
@@ -1165,8 +1165,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
 }
 
 /// A corridor appliance as a cutaway solid. Vending machine and printer have no
-/// sprite — classic paints them per-pixel — so this gives them the same body +
-/// front-face + lit-panel treatment every other solid here gets. Its footprint
+/// sprite — classic paints them per-pixel — so this gives them a lit body and
+/// the contact shadow every solid here gets. Its footprint
 /// comes from the SHARED furniture table, not a second set of numbers, so the
 /// cutaway box matches the ground the mask actually blocks.
 fn paint_appliance(
@@ -1253,7 +1253,7 @@ fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
     Ramp::from_base(theme.surface.carpet_dark).shade
 }
 
-/// A tight dark band where a figure meets the floor — one row, not an ellipse: a
+/// A tight dark band where a solid meets the floor — one row, not an ellipse: a
 /// wide soft pool reads as a stain on a dark carpet, while a band the width of
 /// the sprite reads as weight. Stamped BEFORE the body so the sprite sits on its
 /// own shadow.
@@ -1950,7 +1950,7 @@ mod tests {
 
     /// The badge follows the CUTAWAY's body, not the classic one:
     /// `overlay::build_overlay` anchors off the classic projection, which for a
-    /// seated agent is eight rows higher.
+    /// seated agent is not where the cutaway draws them.
     #[test]
     fn a_label_anchor_sits_above_the_head_and_centred_on_the_sprite() {
         let scale = RenderScale::new(3).expect("nonzero");
@@ -2277,9 +2277,7 @@ mod tests {
         assert_eq!((d.frame.width(), d.blit_at.get()), (bw, 4));
     }
 
-    /// The base desk is top-down art, so the painter derives its front face; a
-    /// density variant is drawn in this profile's own 3/4 view, and a derived
-    /// face under it reads as a plank on the floor.
+    /// [`desk_face_rows`]' rule, through the real paint.
     #[test]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
         let pack = pack();

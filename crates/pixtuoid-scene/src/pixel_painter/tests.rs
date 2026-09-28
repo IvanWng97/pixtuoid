@@ -1743,15 +1743,15 @@ fn door_frame_closing_then_closed_at_end_of_entry() {
 #[test]
 fn door_frame_expired_entry_contributes_nothing() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // Older than the 4 s entry window → no contribution.
+    // Older than the entry window → no contribution.
     let old = entry_slot(pose::ENTRY_ANIMATION_MS + 1, now);
     assert_eq!(compute_door_frame_idx(&[old], now, 0), 0);
 }
 
 #[test]
-fn door_frame_exit_window_uses_4500ms_total() {
+fn door_frame_exit_window_uses_the_exit_animation_total() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // 2 s into a 4.5 s exit window → mid-flight → fully open.
+    // Mid-way through the exit window → fully open.
     let exiting = exit_slot(2_000, now);
     assert_eq!(compute_door_frame_idx(&[exiting], now, 0), 2);
 }
@@ -1767,7 +1767,7 @@ fn door_frame_takes_max_across_agents() {
 #[test]
 fn door_frame_uses_physics_window_when_nonzero() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // A short physics window (2500 ms) replaces ENTRY_ANIMATION_MS as the total.
+    // A short physics window replaces ENTRY_ANIMATION_MS as the total.
     let short_window_ms: u64 = 2_500;
     // elapsed 3000 > total 2500 → remaining 0 → closed.
     let slot = entry_slot(3_000, now);
@@ -3232,8 +3232,6 @@ fn a_coat_rack_fills_exactly_its_bounds() {
 
 #[test]
 fn meeting_chair_fabric_matches_the_sofa_sprite_palette() {
-    // The sofa is an un-themed sprite, so the painter can't read Theme for it —
-    // these consts are deliberate copies of the pack palette's couch fabric.
     let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
         .expect("embedded pack");
     let c = pack.palette().get('C').flatten().expect("couch fabric key");

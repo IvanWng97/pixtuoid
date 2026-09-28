@@ -45,8 +45,9 @@ does not mean a green PR:
   media, @8x sprite art, README and npm manifest freshness.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
-- **wasm-check** — the wasm32 build plus committed-`site/public/wasm/`
-  freshness (`just gen-wasm-check`).
+- **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
+  pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
+  pair is fresh, so a scene/web change runs `just gen-wasm` by hand.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists

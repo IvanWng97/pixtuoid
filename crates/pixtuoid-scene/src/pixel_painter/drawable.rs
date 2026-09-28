@@ -75,7 +75,8 @@ pub(super) enum DrawableKind<'a> {
         screen_idle: f32,
         has_coffee: bool,
         coffee_steam: bool,
-        /// 0 = no tower (the plain desk), 1..=3 = reams.
+        /// 0 = no tower (the plain desk), else the reams up to
+        /// [`MAX_TIER`](crate::token_meter::MAX_TIER).
         token_tier: u8,
         /// A falling sheet's distance FALLEN (px) when a big usage reading
         /// is mid-drop (`token_meter::sheet_fall_dist`), else `None`.
@@ -106,6 +107,10 @@ pub(super) enum DrawableKind<'a> {
     },
     MeetingSofa {
         pos: Point,
+        /// Flip the art top-to-bottom. `meeting_sofa` draws its backrest in its
+        /// top rows, so a mirrored sofa's back is its SOUTH edge and it seats
+        /// people facing north: the south sofa of a meeting trio, and the
+        /// lounge couch facing the windows.
         mirrored: bool,
     },
     MeetingTable {
@@ -402,8 +407,6 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 .animation("meeting_sofa")
                 .and_then(|a| a.frames().first())
             {
-                // Mirrored (south sofa / lounge couch): back faces NORTH toward
-                // the windows.
                 if *mirrored {
                     blit_centered(&f.mirror_vertical(), *pos, buf);
                 } else {
@@ -646,8 +649,9 @@ pub(super) fn paint_desk_lamp(
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
-/// the monitor's east side, growing NORTH past the bezel at T3 so the
-/// silhouette reads across the room; the T3 top sheet teeters 1px east.
+/// the monitor's east side, growing NORTH past the bezel at
+/// [`MAX_TIER`](crate::token_meter::MAX_TIER) so the silhouette reads across the
+/// room; that tier's top sheet teeters 1px east.
 ///
 /// Tier 0 suppresses the SHEET too, deliberately: a sheet needs a pile to land
 /// on, it keeps the tier-0 desk byte-identical, and the early return is what
@@ -696,10 +700,10 @@ fn paint_token_stack(
 
 /// Tower geometry, relative to the desk sprite: the stack hugs the
 /// monitor's east side on the right wood wing, its base on the surface row.
-/// 2px per ream — 1px of vertical detail is sub-legible at half-block scale.
 const STACK_X_OFF: u16 = 11;
 const STACK_W: u16 = 3;
 const STACK_BASE_DY: u16 = 3;
+/// Rows per ream: one row of vertical detail is sub-legible at half-block scale.
 const STACK_PX_PER_TIER: u16 = 2;
 
 #[cfg(test)]

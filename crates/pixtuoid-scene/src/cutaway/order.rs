@@ -124,9 +124,8 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
 
     // A min-heap on (base row, index): among pieces that are mutually
     // unconstrained the shallower one wins, so the result matches the plain
-    // base-row order the office produces today, and the index tie-break keeps
-    // it deterministic — a topological order is not unique, and a render that
-    // reshuffles equal-depth pieces between frames flickers.
+    // base-row order the office produces today; the index is the fn doc's
+    // determinism.
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let mut ready: BinaryHeap<Reverse<(u16, usize)>> = (0..n)

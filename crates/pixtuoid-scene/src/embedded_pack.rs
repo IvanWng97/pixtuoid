@@ -289,17 +289,17 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
 }
 
 /// The default pack with a 10px-wide `standing` frame so the pack-resolved
-/// `char_w` differs from the bundled 8-wide `CHARACTER_SPRITE_W` — the only way
+/// `char_w` differs from the bundled `CHARACTER_SPRITE_W` — the only way
 /// to drive `sim_step`/`resolve_characters` occupancy + anchors end-to-end at a
 /// non-default width. Reuses the FULL default sprite set so `resolve_characters`
 /// still finds every pose; only `standing.sprite` is swapped.
 ///
-/// Classic scale only: `standing@8x` still redraws the 8-wide pose, so a denser
+/// Classic scale only: `standing@8x` still redraws the bundled pose, so a denser
 /// scale skips it ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws))
 /// and draws the swapped base instead.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
-    // The bundled 8x12 standing pose padded to 10 wide with transparent columns
+    // The bundled standing pose padded to 10 wide with transparent columns
     // (same palette keys).
     const WIDE_STANDING: &str = "\
 @frame 0

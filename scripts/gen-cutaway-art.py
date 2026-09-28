@@ -1163,7 +1163,7 @@ def exit_sign():
         "I": ("1",) * 5,
         "T": ("111", "010", "010", "010", "010"),
     }
-    # E X I T: 3x5 cells of 2x2 px, centred on the panel
+    # E X I T: five-row glyphs of 2x2 px cells, centred on the panel
     for x0, letter in zip((7, 15, 23, 27), "EXIT"):
         for r, row in enumerate(glyphs[letter]):
             for c, bit in enumerate(row):
