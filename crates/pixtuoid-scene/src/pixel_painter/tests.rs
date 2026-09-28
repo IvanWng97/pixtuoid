@@ -480,6 +480,7 @@ fn agent_overrides_are_deterministic_per_id() {
 /// A key no character frame draws recolors nothing, so every agent would wear
 /// the pack's own color there: `standing` shows all four, at every density.
 #[test]
+#[cfg(feature = "density-art")]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::density_variant_name;
     let pack = crate::embedded_pack::test_default_pack();
@@ -519,6 +520,7 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 /// `[ramps]` shades), or it shows every agent in the pack's own colours. Skin
 /// and pants may be out of sight.
 #[test]
+#[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
     use pixtuoid_core::sprite::format::{
         density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,

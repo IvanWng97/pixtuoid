@@ -20,11 +20,15 @@ categories.workspace   = true
 [lints]
 workspace = true
 
-# `--no-default-features` drops `native`, giving a wasm32-buildable render
-# engine (no tokio/notify) — the WebAssembly office hero.
 [features]
-default = ["native"]
-native  = ["pixtuoid-core/native"]
+default     = ["native", "density-art"]
+# Without it the render engine builds for wasm32 (no tokio/notify): the
+# WebAssembly office hero.
+native      = ["pixtuoid-core/native"]
+# The bundled `@Nx` art. Only a render scale above `RenderScale::ONE` looks it
+# up (`densest_frame`), and the wasm hero renders at ONE, so building without
+# this keeps those bytes out of the page.
+density-art = []
 
 [dependencies]
 pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-features = false }
@@ -36,6 +40,9 @@ chrono        = { version = "0.4", default-features = false, features = ["clock"
 # overlays vs naive sRGB linear blend.
 palette       = { workspace = true }
 
+[build-dependencies]
+toml_edit = { workspace = true }
+
 [dev-dependencies]
 # `harness` is dev-only (see core's manifest), so `examples/corpus_check.rs`
 # requests it here rather than in [dependencies].
@@ -43,6 +50,8 @@ pixtuoid-core = { path = "../pixtuoid-core", version = "0.19.0", default-feature
 serde_json = { workspace = true }
 proptest   = "1"
 tempfile   = "3"
+# build_support/density_art.rs, which the tests compile too.
+toml_edit  = { workspace = true }
 # Statistical render-path benchmarks (`just bench`). The CodSpeed compat
 # package is a documented passthrough to real criterion when CodSpeed is
 # inactive, so local `cargo bench` behaves as plain criterion; codspeed.yml

@@ -1342,6 +1342,7 @@ mod tests {
     /// own front, so someone on the first row south of the art stands in FRONT
     /// of the desk, not behind a face that is never drawn.
     #[test]
+    #[cfg(feature = "density-art")]
     fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
         let pack = pack();
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
@@ -1635,6 +1636,7 @@ mod tests {
     /// (the base grid has no room for text), or a key names nothing and that
     /// screen never lights.
     #[test]
+    #[cfg(feature = "density-art")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
         let pack = pack();
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
@@ -2280,6 +2282,7 @@ mod tests {
 
     /// [`desk_face_rows`]' rule, through the real paint.
     #[test]
+    #[cfg(feature = "density-art")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
         let pack = pack();
         let theme = &crate::theme::NORMAL;

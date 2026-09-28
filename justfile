@@ -927,12 +927,9 @@ gen-wasm: gen-wasm-tools wasm-build
 # user-timings:pixtuoid-revealed, `error`-level; site.yml fires on site/**, where
 # the wasm lives). WIRE cost is gated twice on purpose — here, naming the wasm,
 # and there via `interactive`/`largest-contentful-paint`, byte budgets under
-# simulated throttling sized to admit a wasm AT this cap. Meanwhile the cap is
-# deliberately LOOSE — sized for the density-art phase rather than today's
-# payload, so its headroom is art budget and NOT regression
-# sensitivity; the recipe prints the gap so you can see how much. RETIRE that
-# slack once the art phase lands: re-run the recipe and set the cap to the new
-# figure plus a margin. Pair (#424): the
+# simulated throttling sized to admit a wasm AT this cap. The cap sits a margin
+# above the committed payload, so its headroom is regression sensitivity; the
+# recipe prints the gap. Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
@@ -961,8 +958,8 @@ gen-wasm-check:
     # by 0".
     test -s "$W" || { echo "missing or empty $W — run 'just gen-wasm'"; exit 1; }
     # Not tuned to the last KB: this measures gzip locally while the CDN does its
-    # own, and the cap carries deliberate art-phase slack (see the note above).
-    CAP=524288
+    # own.
+    CAP=409600
     # Compress to a FILE, not through a pipe: POSIX sh has no `pipefail`, so
     # `gzip … | wc -c` reports wc's status and a broken gzip would measure zero
     # bytes and pass the cap unconditionally — the gate would go green exactly
