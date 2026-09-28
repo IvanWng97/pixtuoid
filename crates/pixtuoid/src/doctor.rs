@@ -625,8 +625,7 @@ struct RootStatus {
 }
 
 /// The density variants of the pack `source` loads, or why that pack fails to
-/// load: `run` refuses to start on it, so doctor says so rather than fitting a
-/// scale to art it never draws.
+/// load: `run` refuses to start on it, so doctor says so.
 fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
         .map(|pack| pack.density_variants())
@@ -728,7 +727,7 @@ impl Ink {
 /// would emit escapes and block on an answer that cannot come. That gate is the same
 /// `color_preflight` the launcher acts on, so the row matches `run`. `--graphics off` skips
 /// the graphics ask for a second reason — a terminal that stays silent spends
-/// [`crate::graphics::GRAPHICS_PROBE_TIMEOUT`] on a fact the flag says not to use.
+/// `graphics::GRAPHICS_PROBE_TIMEOUT` on a fact the flag says not to use.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,

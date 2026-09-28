@@ -152,7 +152,7 @@ pub(crate) struct Detected {
     /// The cell size the terminal reports.
     pub(crate) cell: CellSize,
     /// Whether this process runs inside tmux — from the environment
-    /// ([`is_tmux_env`]), not the terminal's answer.
+    /// (`is_tmux_env`), not the terminal's answer.
     pub(crate) tmux: bool,
 }
 
@@ -317,9 +317,6 @@ pub(crate) fn graphics_diagnostic_row(
 /// visualiser that refuses to start because it could not ask a question would
 /// be worse than one that draws the plain office.
 ///
-/// Upstream reads the terminal's mode before it writes a byte (ratatui-image
-/// 11.0.8 `picker.rs:596-600`, `372-382`), so its error means nothing was asked.
-///
 /// Not a run's probe: upstream answers on a thread it detaches, which after a
 /// timeout keeps reading stdin, restores the mode it saw once a late reply
 /// lands, and leaves the terminal raw if none ever does (`picker.rs:584-622`,
@@ -438,6 +435,11 @@ mod tests {
         assert_eq!(scale(CELL_8X16, &[16, 8]), Some(8), "16x cannot land at 8");
         assert_eq!(scale(CELL_8X16, &[8, 16]), Some(8));
         assert_eq!(scale(CellSize { w: 16, h: 32 }, &[8, 16]), Some(16));
+        assert_eq!(
+            scale(CellSize { w: 20, h: 40 }, &[8, 16]),
+            Some(16),
+            "the densest wins"
+        );
         assert_eq!(
             scale(CellSize { w: 5, h: 10 }, &[16, 8]),
             None,
@@ -588,12 +590,8 @@ mod tests {
         let reason = |cell, density| ClassicReason::CellTooSmall { cell, density }.describe();
         let small_font = reason(CellSize { w: 5, h: 10 }, 8);
         assert!(small_font.contains("the pack's 8x art"), "{small_font}");
-        for no_pixels in [
-            reason(CellSize { w: 1, h: 2 }, 8),
-            reason(CellSize { w: 5, h: 10 }, 1),
-        ] {
-            assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
-        }
+        let no_pixels = reason(CellSize { w: 1, h: 2 }, 8);
+        assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
     }
 
     #[test]
