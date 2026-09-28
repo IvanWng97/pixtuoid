@@ -194,9 +194,13 @@ def encode_mp4_webm(frames_glob, fps, vf, out_stem):
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
            "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
            f"{out_stem}.mp4")
+    # `+bitexact`: the Matroska muxer otherwise writes a random SegmentUID (and
+    # the ffmpeg version) into every file, so a regen re-commits clips whose
+    # frames did not change.
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
            "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", VP9_CRF, "-row-mt", "1",
-           "-pix_fmt", "yuv420p", "-vf", vf, f"{out_stem}.webm")
+           "-pix_fmt", "yuv420p", "-fflags", "+bitexact", "-vf", vf,
+           f"{out_stem}.webm")
 
 
 def run_clip(job, out_dirs, work, intermediates):
