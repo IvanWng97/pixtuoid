@@ -15,15 +15,19 @@
 
 use pixtuoid_scene::render_scale::RenderScale;
 
-/// How long the capability query waits for the terminal's next reply.
+#[cfg(feature = "graphics")]
+mod probe;
+#[cfg(feature = "graphics")]
+pub(crate) use probe::probe;
+
+/// How long the capability query may take, start to finish.
 ///
 /// The query ends with a device-status request (ratatui-image 11.0.8
 /// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
-/// moment its reply lands; the budget is only spent where no reply comes (a
-/// ConPTY that drops replies, a hidden tmux pane refusing passthrough), which is
-/// why it can outlast [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has
-/// no such terminator. Upstream restarts the clock on every read
-/// (`picker.rs:615`), so this bounds silence, not the whole query.
+/// moment its reply is complete; the budget is only spent where no reply comes
+/// (a ConPTY that drops replies, a hidden tmux pane refusing passthrough), which
+/// is why it can outlast [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query
+/// has no such terminator.
 #[cfg(feature = "graphics")]
 pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
@@ -89,12 +93,16 @@ pub(crate) enum ClassicReason {
     Unsupported,
     /// The terminal was never asked.
     NotQueried,
-    /// The query ran and no protocol came of it.
-    ///
-    /// Also what a terminal that never answered gets: upstream answers a
-    /// timeout with its no-protocol fallback picker (ratatui-image 11.0.8
-    /// `picker.rs:147-157`), so through it the two cannot be told apart.
+    /// The terminal was asked and its reply never completed.
+    NoAnswer,
+    /// The terminal answered, and it has no graphics protocol.
     NoProtocol,
+    /// Inside tmux with `allow-passthrough` off: no image, and no query for
+    /// one, reaches the terminal (tmux(1), `allow-passthrough`).
+    TmuxPassthroughOff,
+    /// The terminal has a protocol but reports no cell size, so there is no
+    /// scale to fit.
+    NoCellSize,
     /// Inside tmux, with a protocol other than kitty.
     ///
     /// SIXEL and iTerm2, as ratatui-image sends them inside tmux, ride tmux's
@@ -149,23 +157,29 @@ pub(crate) struct Detected {
     /// The graphics protocol the terminal speaks, `None` when it has none we
     /// can drive.
     pub(crate) protocol: Option<ImageProtocol>,
-    /// The cell size the terminal reports.
-    pub(crate) cell: CellSize,
-    /// Whether this process runs inside tmux — from the environment
-    /// (`is_tmux_env`), not the terminal's answer.
+    /// The cell size the terminal reports, `None` when it reports none.
+    pub(crate) cell: Option<CellSize>,
+    /// Whether this process runs inside tmux — from the environment, not the
+    /// terminal's answer.
     pub(crate) tmux: bool,
 }
 
 /// The outcome of asking the terminal — [`resolve`]'s input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Probe {
-    /// The query ran.
+    /// The terminal answered.
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
     Answered(Detected),
-    /// Nothing was asked: stdin or stdout is not a terminal, or `$TERM` is
-    /// dumb.
+    /// Nothing was asked: there is no terminal to ask, or `$TERM` is dumb.
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
     NotQueried,
+    /// The terminal was asked and its reply never completed. Only the Unix
+    /// probe can tell (see `probe`).
+    #[cfg_attr(not(all(feature = "graphics", unix)), allow(dead_code))]
+    NoAnswer,
+    /// Inside tmux with `allow-passthrough` off, so nothing was asked.
+    #[cfg_attr(not(all(feature = "graphics", unix)), allow(dead_code))]
+    TmuxPassthroughOff,
     /// This build cannot ask.
     #[cfg_attr(feature = "graphics", allow(dead_code))]
     Unsupported,
@@ -214,20 +228,25 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Pl
     let d = match probe {
         Probe::Answered(d) => d,
         Probe::NotQueried => return classic(ClassicReason::NotQueried),
+        Probe::NoAnswer => return classic(ClassicReason::NoAnswer),
+        Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
         Probe::Unsupported => return classic(ClassicReason::Unsupported),
     };
     let Some(protocol) = d.protocol else {
         return classic(ClassicReason::NoProtocol);
     };
+    let Some(cell) = d.cell else {
+        return classic(ClassicReason::NoCellSize);
+    };
     // The cell before tmux: a user told to switch to kitty should not then
     // find the cell was too small all along.
-    let scale = match render_scale_for_cell(d.cell, densities) {
+    let scale = match render_scale_for_cell(cell, densities) {
         // Scale 1 IS the classic density: an encode per frame that draws the
         // identical picture.
         Some(scale) if scale.get() > 1 => scale,
         _ => {
             return classic(ClassicReason::CellTooSmall {
-                cell: d.cell,
+                cell,
                 density: densities.iter().copied().min().unwrap_or(1),
             })
         }
@@ -238,7 +257,7 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Pl
     Plan::Cutaway {
         scale,
         protocol,
-        cell: d.cell,
+        cell,
         tmux: d.tmux,
     }
 }
@@ -249,12 +268,17 @@ impl ClassicReason {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
             Self::Unsupported => "this build has no terminal-graphics support".to_string(),
-            Self::NotQueried => "the terminal was not asked (stdin or stdout is not a terminal, \
-                 or $TERM is dumb) — run in an interactive terminal to see what it supports"
+            Self::NotQueried => "the terminal was not asked (there is no terminal, or $TERM \
+                 is dumb) — run in an interactive terminal to see what it supports"
                 .to_string(),
-            Self::NoProtocol => "terminal reports no graphics protocol (kitty/iterm2/sixel), or \
-                 did not answer the capability query"
+            Self::NoAnswer => "the terminal did not answer the capability query".to_string(),
+            Self::NoProtocol => {
+                "terminal reports no graphics protocol (kitty/iterm2/sixel)".to_string()
+            }
+            Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
+                 `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
+            Self::NoCellSize => "terminal reports no cell size in pixels".to_string(),
             Self::TmuxNeedsKitty(p) => format!(
                 "inside tmux only kitty graphics survive a pane switch here, and this terminal \
                  speaks {}",
@@ -309,70 +333,11 @@ pub(crate) fn graphics_diagnostic_row(
     }
 }
 
-/// Ask the terminal what it can do, when `ask`.
-///
-/// The IO half, and the one part of this module tests never reach. A failed
-/// query is a [`Probe`] outcome, not an error: every caller's fallback is the
-/// classic profile, which is also what a terminal without graphics gets, and a
-/// visualiser that refuses to start because it could not ask a question would
-/// be worse than one that draws the plain office.
-///
-/// Not a run's probe: upstream answers on a thread it detaches, which after a
-/// timeout keeps reading stdin, restores the mode it saw once a late reply
-/// lands, and leaves the terminal raw if none ever does (`picker.rs:584-622`,
-/// `372-391`). Inside tmux it also sets the pane's `allow-passthrough`
-/// (`picker.rs:320-334`).
-#[cfg(feature = "graphics")]
-pub(crate) fn probe(ask: bool) -> Probe {
-    use ratatui_image::picker::cap_parser::QueryStdioOptions;
-    use ratatui_image::picker::{Picker, ProtocolType};
-
-    if !ask {
-        return Probe::NotQueried;
-    }
-    let options = QueryStdioOptions {
-        timeout: GRAPHICS_PROBE_TIMEOUT,
-        ..QueryStdioOptions::default()
-    };
-    let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
-        return Probe::NotQueried;
-    };
-    let font = picker.font_size();
-    Probe::Answered(Detected {
-        protocol: match picker.protocol_type() {
-            ProtocolType::Kitty => Some(ImageProtocol::Kitty),
-            ProtocolType::Sixel => Some(ImageProtocol::Sixel),
-            ProtocolType::Iterm2 => Some(ImageProtocol::Iterm2),
-            // ratatui-image's OWN "no protocol here" fallback: driving it would
-            // hand our half-block office to a second one.
-            ProtocolType::Halfblocks => None,
-        },
-        cell: CellSize {
-            w: font.width,
-            h: font.height,
-        },
-        tmux: is_tmux_env(
-            std::env::var("TERM").ok().as_deref(),
-            std::env::var("TERM_PROGRAM").ok().as_deref(),
-        ),
-    })
-}
-
 /// Built without the `graphics` feature: there is no query to run, whatever
 /// the terminal.
 #[cfg(not(feature = "graphics"))]
 pub(crate) fn probe(_ask: bool) -> Probe {
     Probe::Unsupported
-}
-
-/// Whether `TERM`/`TERM_PROGRAM` place this process inside tmux — the test
-/// ratatui-image itself applies before wrapping every image in passthrough
-/// (11.0.8 `picker.rs:320-326`), mirrored because its `is_tmux` is private:
-/// the two answers must agree, or a plan would ask for kitty-in-tmux while the
-/// encoder wrapped nothing.
-#[cfg(any(feature = "graphics", test))]
-fn is_tmux_env(term: Option<&str>, term_program: Option<&str>) -> bool {
-    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
 }
 
 #[cfg(test)]
@@ -388,7 +353,7 @@ mod tests {
     fn answered(protocol: Option<ImageProtocol>, cell: CellSize, tmux: bool) -> Probe {
         Probe::Answered(Detected {
             protocol,
-            cell,
+            cell: Some(cell),
             tmux,
         })
     }
@@ -532,15 +497,6 @@ mod tests {
         );
     }
 
-    /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.
-    #[test]
-    fn tmux_is_named_by_term_or_term_program() {
-        assert!(is_tmux_env(Some("tmux-256color"), None));
-        assert!(is_tmux_env(Some("xterm-ghostty"), Some("tmux")));
-        assert!(!is_tmux_env(Some("screen-256color"), Some("ghostty")));
-        assert!(!is_tmux_env(None, None));
-    }
-
     /// The fallback is the common path — most terminals have no protocol —
     /// so it must never be silent. A user asking "why is it not the pretty
     /// one" gets an answer in every shape.
@@ -549,7 +505,22 @@ mod tests {
         let too_small = |cell, density| ClassicReason::CellTooSmall { cell, density };
         let cases = [
             (Probe::NotQueried, BASE_ONLY, ClassicReason::NotQueried),
+            (Probe::NoAnswer, BASE_ONLY, ClassicReason::NoAnswer),
+            (
+                Probe::TmuxPassthroughOff,
+                BASE_ONLY,
+                ClassicReason::TmuxPassthroughOff,
+            ),
             (Probe::Unsupported, BASE_ONLY, ClassicReason::Unsupported),
+            (
+                Probe::Answered(Detected {
+                    protocol: Some(ImageProtocol::Kitty),
+                    cell: None,
+                    tmux: false,
+                }),
+                BASE_ONLY,
+                ClassicReason::NoCellSize,
+            ),
             (
                 answered(None, CELL_8X16, false),
                 BASE_ONLY,
@@ -613,6 +584,8 @@ mod tests {
         for (mode, probe) in [
             (GraphicsMode::Off, capable(CELL_8X16)),
             (GraphicsMode::Auto, Probe::NotQueried),
+            (GraphicsMode::Auto, Probe::NoAnswer),
+            (GraphicsMode::Auto, Probe::TmuxPassthroughOff),
             (GraphicsMode::Auto, Probe::Unsupported),
             (GraphicsMode::Auto, capable(CellSize { w: 0, h: 0 })),
         ] {
