@@ -188,22 +188,16 @@ fn load_embedded_pack() -> Result<Pack> {
 /// Every default sprite as `(filename, source)`: every `.sprite` in
 /// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
 /// frames only a density variant draws), so a sprite committed there cannot be
-/// left out by omission. Extracted so [`test_wide_pack`] reuses the EXACT
-/// sprite set and only overrides `standing.sprite`.
+/// left out by omission. [`test_pack_with`] swaps files within this EXACT set.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
     SPRITES.to_vec()
 }
 
-/// The default pack with a 10px-wide `standing` frame so the pack-resolved
-/// `char_w` differs from the bundled `CHARACTER_SPRITE_W` — the only way
-/// to drive `sim_step`/`resolve_characters` occupancy + anchors end-to-end at a
-/// non-default width. Reuses the FULL default sprite set so `resolve_characters`
-/// still finds every pose; only `standing.sprite` is swapped.
-///
-/// Classic scale only: `standing@8x` still redraws the bundled pose, so a denser
-/// scale skips it ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws))
-/// and draws the swapped base instead.
+/// The default pack with a wider `standing` frame (`WIDE_STANDING`), so the
+/// pack-resolved `char_w` differs from the bundled `CHARACTER_SPRITE_W`: the
+/// only way to drive `sim_step`/`resolve_characters` occupancy and anchors end
+/// to end at a non-default width.
 #[cfg(test)]
 pub(crate) fn test_wide_pack() -> Pack {
     // The bundled standing pose padded to 10 wide with transparent columns
@@ -223,13 +217,26 @@ pub(crate) fn test_wide_pack() -> Pack {
 . . P P P P P P . .
 . . P . . . . P . .
 ";
+    test_pack_with(&[("standing.sprite", WIDE_STANDING)])
+}
+
+/// The default pack with each `(file, source)` in `overrides` swapped in.
+///
+/// An override orphans any density variant that redraws its file: a denser
+/// scale skips that variant
+/// ([`variant_redraws`](pixtuoid_core::sprite::format::variant_redraws)) and
+/// draws the swapped base.
+#[cfg(test)]
+pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
     let mut srcs = embedded_sprite_srcs();
-    for entry in &mut srcs {
-        if entry.0 == "standing.sprite" {
-            entry.1 = WIDE_STANDING;
-        }
+    for &(file, source) in overrides {
+        let entry = srcs
+            .iter_mut()
+            .find(|(name, _)| *name == file)
+            .expect("an override names a bundled sprite");
+        entry.1 = source;
     }
-    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("wide test pack loads")
+    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("the test pack loads")
 }
 
 #[cfg(test)]
@@ -650,9 +657,9 @@ mod tests {
         }
     }
 
-    // The desk art's width is a copy of `DESK_W + 4` in scripts/gen-art.py
-    // (`DESK_ART_W`): a `DESK_W` edit moves `visual.w` but not the generated art,
-    // silently desyncing render vs mask/occlusion/collision.
+    // The desk art's width is scripts/gen-art.py's `DESK_ART_W`, a copy of
+    // `desk_furniture_def().visual.w`: a `DESK_W` edit moves `visual.w` but not
+    // the generated art, silently desyncing render vs mask/occlusion/collision.
     #[test]
     fn desk_sprite_width_tracks_the_footprint_overhang() {
         let pack = test_default_pack();
@@ -664,7 +671,7 @@ mod tests {
         assert_eq!(
             w,
             crate::layout::desk_furniture_def().visual.w,
-            "embedded 'desk' sprite is {w}px wide but visual.w (DESK_W+4) is {} — \
+            "embedded 'desk' sprite is {w}px wide but visual.w is {} — \
              a DESK_W edit moved visual.w but not scripts/gen-art.py's DESK_ART_W; render/mask/z-sort will drift",
             crate::layout::desk_furniture_def().visual.w
         );
