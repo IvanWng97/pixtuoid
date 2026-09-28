@@ -46,8 +46,6 @@ pub(crate) struct Span {
     /// Southmost row.
     pub y1: u16,
     /// The row it sorts on (the module's "base row"); greater draws later.
-    /// [`Span::new`] puts it on `y1`; [`Span::with_depth`] keys a piece
-    /// elsewhere.
     pub depth: u16,
 }
 

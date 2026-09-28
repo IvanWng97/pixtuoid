@@ -687,8 +687,7 @@ enum PieceKind {
 
 /// A piece's bounds, as [`Span::new`] builds them from its sprite's box.
 /// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
-/// the walkable mask, the classic painter and every paint fn here use, so a
-/// piece's bounds cannot drift from the box it BLITS into.
+/// the walkable mask and the classic painter use.
 fn piece_span(
     anchor: crate::layout::Anchor,
     pos: crate::layout::Point,
