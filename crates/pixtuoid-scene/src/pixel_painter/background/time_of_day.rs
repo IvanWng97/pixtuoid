@@ -8,23 +8,27 @@ use crate::pixel_painter::palette::{blend_rgb, mix_lab, RgbLut};
 use crate::sky::{Body, Sky};
 use crate::theme::Theme;
 
-/// Window glass color + spill intensity + spill slant for the current local
-/// hour. `spill_slant` is x-shift per row going down; `darkness` is
-/// 1 - daylight, which drives the artificial-light effects.
+/// [`time_of_day_look`]'s output for one [`Sky`].
 pub(in crate::pixel_painter) struct TimeOfDayLook {
     pub(in crate::pixel_painter) glass_a: Rgb,
     pub(in crate::pixel_painter) glass_b: Rgb,
     pub(in crate::pixel_painter) spill_strength: f32,
+    /// The floor spill's x-shift per row going down.
     pub(in crate::pixel_painter) spill_slant: f32,
+    /// `1 - exterior`: the darkness the artificial lights fight.
     pub(in crate::pixel_painter) darkness: f32,
-    /// The cast this hour + weather puts on a LIT OBJECT: the cool night term
-    /// then the warm day one, applied in order like the floor's two overlays.
+    /// The cast this sky puts on a LIT OBJECT: the cool night term then the
+    /// warm day one, applied in order like the floor's two overlays.
     pub(in crate::pixel_painter) object_wash: [(Rgb, f32); 2],
 }
+
+// Max window-spill horizontal lean (px/row) at the low-sun extremes.
+const SPILL_SLANT_MAX: f32 = 0.7;
 
 pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> TimeOfDayLook {
     let light = sky.light();
     let (interior, exterior) = (light.interior, light.exterior);
+    let e = sky.emitter();
 
     let day_a = theme.lighting.day_sky_a;
     let day_b = theme.lighting.day_sky_b;
@@ -33,22 +37,23 @@ pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> Ti
     let twilight_a = theme.lighting.twilight_a;
     let twilight_b = theme.lighting.twilight_b;
 
-    let warm = (sky.emitter().warmth * interior).clamp(0.0, 1.0);
+    let warm = (e.warmth * interior).clamp(0.0, 1.0);
     let glass_a = mix_lab(mix_lab(night_a, day_a, exterior), twilight_a, warm * 0.5);
     let glass_b = mix_lab(mix_lab(night_b, day_b, exterior), twilight_b, warm * 0.5);
 
-    let spill_strength = match sky.emitter().body {
-        Body::Sun => interior,
-        Body::Moon => 0.0,
+    // Azimuth runs 0=east/dawn .. 1=west/dusk, so the morning sun casts
+    // light leftward (negative slant) and the evening sun rightward.
+    let (spill_strength, spill_slant) = match e.body {
+        Body::Sun => (interior, (e.azimuth - 0.5) * 2.0 * SPILL_SLANT_MAX),
+        Body::Moon => (0.0, 0.0),
     };
-    let spill_slant = light.spill_slant;
 
     // Below the floor's own share: a sprite carries art contrast a full-strength pass would swallow.
     const OBJECT_WASH_SHARE: f32 = 0.55;
     let darkness = 1.0 - exterior;
     // SUPERPOSED, never chosen between: the floor runs both overlays every frame,
-    // so picking one arm on `interior >= darkness` stepped every object 16-27 luma
-    // in the frame that crossed it while the floor slid smoothly under them.
+    // so switching arms on `interior >= darkness` would step every object in the
+    // frame that crossed it while the floor slid smoothly under them.
     let object_wash = [
         (
             theme.lighting.night_tint,
@@ -92,13 +97,13 @@ const AZ_EAST_MAX: f32 = 0.30;
 const AZ_WEST_MIN: f32 = 0.70;
 
 pub(in crate::pixel_painter) fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
-    let sky = sky.emitter();
-    if !matches!(sky.body, Body::Sun) {
+    let e = sky.emitter();
+    if !matches!(e.body, Body::Sun) {
         return None;
     }
     // The SAME azimuth that places the disc and leans the floor spill, so the
-    // wall, the disc, and the spill direction can never disagree.
-    let az = sky.azimuth;
+    // wall and the disc can never disagree.
+    let az = e.azimuth;
     let (wall, along) = if az < AZ_EAST_MAX {
         (WallSide::East, az / AZ_EAST_MAX)
     } else if az < AZ_WEST_MIN {
@@ -112,8 +117,8 @@ pub(in crate::pixel_painter) fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
     Some(SunSpot {
         wall,
         along,
-        intensity: sky.altitude,
-        warmth: sky.warmth,
+        intensity: e.altitude,
+        warmth: e.warmth,
     })
 }
 
@@ -165,7 +170,7 @@ const SUN_TINT: Rgb = Rgb {
 };
 
 /// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
-/// and the model's only positive day term (without it a clear noon leaves the
+/// and the lighting's only positive day term (without it a clear noon leaves the
 /// floor at its plain brownish base). Sun enters regardless of occupancy, so —
 /// unlike the dim — this is NOT scaled by the empty-floor boost.
 pub(in crate::pixel_painter) fn daylight_floor_overlay(
@@ -180,10 +185,8 @@ pub(in crate::pixel_painter) fn daylight_floor_overlay(
 
 #[cfg(test)]
 mod tests {
-    use std::time::SystemTime;
-
     use super::*;
-    use crate::sky::{atmo, set_weather_override, Weather};
+    use crate::sky::{atmo, Weather};
 
     #[test]
     fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
@@ -355,129 +358,18 @@ mod tests {
         }
     }
 
-    use crate::localclock::{at_hour_min, on_day};
-
-    /// Local `h:m` on the reference day — `localclock` owns the construction.
-    fn at_hour(h: u32, m: u32) -> SystemTime {
-        at_hour_min(h, m)
-    }
-
-    /// Local 02:00 (always night) on a given January day. Weather varies by day
-    /// at a fixed hour, so searching days finds different weathers/moon phases.
-    fn night_on(day: u32) -> SystemTime {
-        on_day(day, 2)
-    }
-
-    /// Local midnight on a given January day — near the night arc's apex, so
-    /// it's close to the brightest instant of that night.
-    fn midnight_on(day: u32) -> SystemTime {
-        on_day(day, 0)
-    }
-
-    #[test]
-    fn night_darkness_tracks_weather_at_fixed_phase() {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                set_weather_override(None);
-            }
-        }
-        let _reset = Reset;
-        let theme = crate::theme::ALL_THEMES[0];
-        let night = night_on(1); // fixed instant -> fixed moon phase; only weather varies
-        set_weather_override(Some(Weather::Clear));
-        let clear = time_of_day_look(&Sky::at(night), theme).darkness;
-        set_weather_override(Some(Weather::Storm));
-        let storm = time_of_day_look(&Sky::at(night), theme).darkness;
-        set_weather_override(None);
-        assert!(
-            clear < storm,
-            "clear night brighter than storm night at equal phase: {clear} vs {storm}"
-        );
-        assert!(storm < 1.0, "storm night keeps some city glow: {storm}");
-        set_weather_override(Some(Weather::Clear));
-        let noon = time_of_day_look(&Sky::at(at_hour(12, 0)), theme).darkness;
-        set_weather_override(None);
-        assert!(noon < 0.1, "clear noon ~fully lit: {noon}");
-    }
-
-    #[test]
-    fn interior_brightness_is_altitude_coupled() {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                set_weather_override(None);
-            }
-        }
-        let _reset = Reset;
-        let theme = crate::theme::ALL_THEMES[0];
-        set_weather_override(Some(Weather::Storm));
-        let noon = time_of_day_look(&Sky::at(at_hour(12, 0)), theme).darkness;
-        let dusk = time_of_day_look(&Sky::at(at_hour(18, 0)), theme).darkness;
-        set_weather_override(None);
-        assert!(
-            noon < dusk,
-            "a stormy noon out-lights a stormy dusk: {noon} vs {dusk}"
-        );
-    }
-
-    #[test]
-    fn solar_noon_outshines_the_brightest_night() {
-        struct Reset;
-        impl Drop for Reset {
-            fn drop(&mut self) {
-                set_weather_override(None);
-            }
-        }
-        let _reset = Reset;
-        let theme = crate::theme::ALL_THEMES[0];
-
-        // Snow/Clear at the FULLEST moon are the two brightest cases night can
-        // offer — the highest `city_bounce` floor plus peak lunar illumination.
-        let full_moon_day = (1..=31u32)
-            .max_by(|&a, &b| {
-                Sky::at(night_on(a))
-                    .moon_phase()
-                    .partial_cmp(&Sky::at(night_on(b)).moon_phase())
-                    .expect("moon_phase is never NaN")
-            })
-            .expect("January has days");
-        let full_moon_midnight = midnight_on(full_moon_day);
-
-        set_weather_override(Some(Weather::Storm));
-        let storm_noon = time_of_day_look(&Sky::at(at_hour(12, 0)), theme).darkness;
-
-        set_weather_override(Some(Weather::Clear));
-        let clear_full_moon = time_of_day_look(&Sky::at(full_moon_midnight), theme).darkness;
-
-        set_weather_override(Some(Weather::Snow));
-        let snow_full_moon = time_of_day_look(&Sky::at(full_moon_midnight), theme).darkness;
-
-        set_weather_override(None);
-
-        assert!(
-            storm_noon < clear_full_moon,
-            "a stormy solar noon must outshine even a clear full-moon midnight: \
-             storm_noon darkness={storm_noon} vs clear_full_moon={clear_full_moon}"
-        );
-        assert!(
-            storm_noon < snow_full_moon,
-            "a stormy solar noon must outshine even a snow-lit full-moon midnight \
-             (snow has the highest city_bounce floor): \
-             storm_noon darkness={storm_noon} vs snow_full_moon={snow_full_moon}"
-        );
-    }
+    use crate::localclock::at_hour_min;
 
     #[test]
     fn sun_on_wall_east_at_morning() {
-        let s = sun_on_wall(&Sky::at(at_hour(7, 0))).expect("sun should be up at 07:00");
+        let s = sun_on_wall(&Sky::at(at_hour_min(7, 0))).expect("sun should be up at 07:00");
         assert_eq!(s.wall, WallSide::East);
         assert!(s.warmth > 0.5, "morning sun should be warm: {}", s.warmth);
     }
 
     #[test]
     fn sun_on_wall_overhead_at_noon() {
-        let s = sun_on_wall(&Sky::at(at_hour(12, 0))).expect("sun should be up at 12:00");
+        let s = sun_on_wall(&Sky::at(at_hour_min(12, 0))).expect("sun should be up at 12:00");
         assert_eq!(s.wall, WallSide::South);
         assert!(
             s.intensity > 0.85,
@@ -488,14 +380,14 @@ mod tests {
 
     #[test]
     fn sun_on_wall_west_at_evening() {
-        let s = sun_on_wall(&Sky::at(at_hour(18, 0))).expect("sun should be up at 18:00");
+        let s = sun_on_wall(&Sky::at(at_hour_min(18, 0))).expect("sun should be up at 18:00");
         assert_eq!(s.wall, WallSide::West);
         assert!(s.warmth > 0.55, "evening sun should be warm: {}", s.warmth);
     }
 
     #[test]
     fn sun_on_wall_none_at_midnight() {
-        assert!(sun_on_wall(&Sky::at(at_hour(0, 0))).is_none());
+        assert!(sun_on_wall(&Sky::at(at_hour_min(0, 0))).is_none());
     }
 
     #[test]

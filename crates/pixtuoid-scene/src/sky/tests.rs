@@ -1,17 +1,5 @@
-use std::time::SystemTime;
-
 use super::*;
 use crate::localclock::{at_hour_min, on_day};
-
-/// Local `h:m` on the reference day — `localclock` owns the construction.
-fn at_hour(h: u32, m: u32) -> SystemTime {
-    at_hour_min(h, m)
-}
-
-/// Local 02:00 (always night) on a given January day.
-fn night_on(day: u32) -> SystemTime {
-    on_day(day, 2)
-}
 
 #[test]
 fn the_clock_picks_every_weather_within_a_week() {
@@ -43,7 +31,7 @@ fn weather_name_round_trips_for_every_variant() {
 fn emitter_is_sun_by_day_moon_by_night_never_both() {
     for slot in 0..48u32 {
         let (h, m) = (slot / 2, (slot % 2) * 30);
-        let s = at_hour(h, m);
+        let s = at_hour_min(h, m);
         let e = *Sky::at(s).emitter();
         match e.body {
             Body::Sun => assert!(
@@ -60,13 +48,12 @@ fn emitter_is_sun_by_day_moon_by_night_never_both() {
 
 #[test]
 fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
-    let noon = Sky::at(at_hour(12, 30)).emitter().altitude;
-    let dawn = Sky::at(at_hour(6, 30)).emitter().altitude;
-    let dusk = Sky::at(at_hour(18, 0)).emitter().altitude;
+    let noon = Sky::at(at_hour_min(12, 30)).emitter().altitude;
+    let dawn = Sky::at(at_hour_min(6, 30)).emitter().altitude;
+    let dusk = Sky::at(at_hour_min(18, 0)).emitter().altitude;
     assert!(noon > 0.8, "midday sun rides high: {noon}");
-    // The two thresholds differ because these sample hours aren't
-    // equidistant from their horizon crossings on the 5..20 day span — dusk
-    // sits 2h before sunset, dawn 1.5h after sunrise.
+    // The two thresholds differ because 06:30 and 18:00 sit unequally far from
+    // [`SUN_RISE_H`] and [`SUN_SET_H`].
     assert!(
         dawn < 0.4 && dusk < 0.5,
         "dawn/dusk sit low: {dawn} / {dusk}"
@@ -76,20 +63,20 @@ fn sun_altitude_peaks_near_midday_and_bottoms_at_the_horizon() {
 #[test]
 fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
     assert!(
-        Sky::at(at_hour(6, 30)).emitter().warmth > 0.6,
+        Sky::at(at_hour_min(6, 30)).emitter().warmth > 0.6,
         "low sun is warm/red"
     );
     assert!(
-        Sky::at(at_hour(12, 30)).emitter().warmth < 0.3,
+        Sky::at(at_hour_min(12, 30)).emitter().warmth < 0.3,
         "apex sun is neutral"
     );
 }
 
 #[test]
 fn azimuth_advances_west_across_the_day() {
-    let a = Sky::at(at_hour(7, 0)).emitter().azimuth;
-    let b = Sky::at(at_hour(12, 0)).emitter().azimuth;
-    let c = Sky::at(at_hour(18, 0)).emitter().azimuth;
+    let a = Sky::at(at_hour_min(7, 0)).emitter().azimuth;
+    let b = Sky::at(at_hour_min(12, 0)).emitter().azimuth;
+    let c = Sky::at(at_hour_min(18, 0)).emitter().azimuth;
     assert!(a < b && b < c, "azimuth marches E->W: {a} < {b} < {c}");
 }
 
@@ -98,7 +85,7 @@ fn moon_luminance_tracks_phase() {
     let (mut lo, mut hi) = (f32::MAX, f32::MIN);
     let (mut lo_lum, mut hi_lum) = (0.0, 0.0);
     for day in 1..=30u32 {
-        let s = night_on(day);
+        let s = on_day(day, 2);
         let frac = moon_phase_at(s);
         let lum = Sky::at(s).emitter().emitter_lum;
         if frac < lo {
@@ -281,8 +268,8 @@ fn the_weather_is_deterministic_and_changes_across_slots() {
     assert!(unique.len() >= 2, "weather should vary across slots");
 }
 
-/// The clock-to-strike composition the painter tests no longer drive: they set
-/// the flash on the [`Sky`] directly.
+/// The one pin on the clock-to-flash path through [`Sky::at`]; painter tests
+/// inject the flash with [`Sky::with_flash`].
 #[test]
 fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
     for bucket in 0..24u64 {
@@ -292,17 +279,75 @@ fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
                 + std::time::Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms)
         };
         assert_eq!(
-            flash_level_at(at(off)),
+            Sky::at(at(off)).flash(),
             lightning_envelope(0),
             "bucket {bucket}"
         );
         assert_eq!(
-            flash_level_at(at(off + LIGHTNING_FLASH_MS)),
+            Sky::at(at(off + LIGHTNING_FLASH_MS)).flash(),
             0.0,
             "bucket {bucket}"
         );
         if off > 0 {
-            assert_eq!(flash_level_at(at(off - 1)), 0.0, "bucket {bucket}");
+            assert_eq!(Sky::at(at(off - 1)).flash(), 0.0, "bucket {bucket}");
         }
+    }
+}
+
+#[test]
+fn night_exterior_tracks_weather_at_a_fixed_phase() {
+    // One instant, so one moon phase: only the weather varies.
+    let night = on_day(1, 2);
+    let clear = Sky::at_with(night, Weather::Clear).light().exterior;
+    let storm = Sky::at_with(night, Weather::Storm).light().exterior;
+    assert!(
+        clear > storm,
+        "clear night brighter than storm night at equal phase: {clear} vs {storm}"
+    );
+    assert!(storm > 0.0, "storm night keeps some city glow: {storm}");
+    let noon = Sky::at_with(at_hour_min(12, 0), Weather::Clear)
+        .light()
+        .exterior;
+    assert!(noon > 0.9, "clear noon ~fully lit: {noon}");
+}
+
+#[test]
+fn interior_brightness_is_altitude_coupled() {
+    let noon = Sky::at_with(at_hour_min(12, 0), Weather::Storm)
+        .light()
+        .exterior;
+    let dusk = Sky::at_with(at_hour_min(18, 0), Weather::Storm)
+        .light()
+        .exterior;
+    assert!(
+        noon > dusk,
+        "a stormy noon out-lights a stormy dusk: {noon} vs {dusk}"
+    );
+}
+
+#[test]
+fn solar_noon_outshines_the_brightest_night() {
+    // Snow/Clear at the FULLEST moon are the two brightest cases night can
+    // offer — the highest `city_bounce` floor plus peak lunar illumination.
+    let full_moon_day = (1..=31u32)
+        .max_by(|&a, &b| {
+            moon_phase_at(on_day(a, 2))
+                .partial_cmp(&moon_phase_at(on_day(b, 2)))
+                .expect("moon_phase is never NaN")
+        })
+        .expect("January has days");
+    // Near the night arc's apex, so close to that night's brightest instant.
+    let full_moon_midnight = on_day(full_moon_day, 0);
+
+    let storm_noon = Sky::at_with(at_hour_min(12, 0), Weather::Storm)
+        .light()
+        .exterior;
+    for w in [Weather::Clear, Weather::Snow] {
+        let full_moon = Sky::at_with(full_moon_midnight, w).light().exterior;
+        assert!(
+            storm_noon > full_moon,
+            "a stormy solar noon must outshine a {w:?} full-moon midnight: \
+             storm_noon={storm_noon} vs {full_moon}"
+        );
     }
 }

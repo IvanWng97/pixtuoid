@@ -307,9 +307,7 @@ fn cwd_outfit_seed(cwd_norm: &str) -> u64 {
     let folded = cwd_norm
         .bytes()
         .fold(0u64, |h, b| h.wrapping_mul(131).wrapping_add(b as u64));
-    let z = (folded ^ (folded >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    let z = (z ^ (z >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    z ^ (z >> 31)
+    pixtuoid_core::id::splitmix64(folded)
 }
 
 /// The outfit-determining seed for `agent`. Extracted so

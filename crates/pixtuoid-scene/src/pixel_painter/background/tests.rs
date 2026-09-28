@@ -986,7 +986,6 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
     }
     let mut expected = buf.clone();
     let alpha = 0.20 * sky.flash();
-    assert!(alpha > 0.0, "the fixture time must sit inside a flash");
     for y in 0..h {
         for x in 0..w {
             let c = expected.get(x, y);

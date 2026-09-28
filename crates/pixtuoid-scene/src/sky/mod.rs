@@ -14,7 +14,6 @@ use pixtuoid_core::id::splitmix64;
 #[cfg(test)]
 mod tests;
 
-/// The outdoor weather.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Weather {
     Clear,
@@ -64,9 +63,9 @@ impl Weather {
 }
 
 thread_local! {
-    /// Screenshot/test affordance: when `Some`, every [`Sky`] sampled on this
-    /// thread shows it. Production never sets it (only `snapshot --weather`),
-    /// so live rendering is byte-identical.
+    /// [`force_weather`](crate::pixel_painter::force_weather)'s override: when
+    /// `Some`, every [`Sky`] sampled on this thread shows it instead of the
+    /// clock's pick.
     static WEATHER_OVERRIDE: Cell<Option<Weather>> = const { Cell::new(None) };
 }
 
@@ -77,8 +76,9 @@ pub(crate) fn set_weather_override(w: Option<Weather>) {
 /// How long one weather holds before the next slot picks again.
 const WEATHER_CYCLE_SECS: u64 = 600;
 
-/// splitmix64's increment, applied before the finalizer so consecutive inputs
-/// land far apart.
+/// splitmix64's golden-ratio increment: `splitmix64(x + GAMMA)` is the first
+/// draw of a splitmix64 stream seeded at `x`, not the bare finalizer (which
+/// maps 0 to 0).
 const SPLITMIX64_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 
 /// The weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
@@ -108,8 +108,6 @@ fn weather_at(now: SystemTime) -> Weather {
 // (`K_BEAM + atmo(Clear).diffuse · K_FILL ≈ 1`).
 const K_BEAM: f32 = 0.70;
 const K_FILL: f32 = 0.55;
-// Max window-spill horizontal lean (px/row) at the low-sun extremes.
-const SPILL_SLANT_MAX: f32 = 0.7;
 
 /// City-light bounce reaching the interior at night — a small, weather-keyed
 /// FLOOR so the room is never pitch black even at a new moon. Snow albedo bounces
@@ -218,8 +216,7 @@ pub(crate) fn hour_is_day(h: f32) -> bool {
 }
 
 /// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now` — the
-/// sky's clock decode. `paint_clock`'s analog hands keep their own because they
-/// need raw `hour % 12` / `minute`, not this value.
+/// sky's clock decode.
 pub(crate) fn local_hour_frac(now: SystemTime) -> f32 {
     use chrono::Timelike;
     let unix_now = now
@@ -270,10 +267,10 @@ fn moon_phase_at(now: SystemTime) -> f32 {
     (1.0 - (std::f32::consts::TAU * age / SYNODIC_DAYS).cos()) / 2.0
 }
 
-/// Lightning strike cadence (Storm only): a flash fires on average every
-/// `LIGHTNING_PERIOD_MS` — a much faster cadence reads as a hyperactive storm —
-/// lasting `LIGHTNING_FLASH_MS`.
+/// Lightning cadence: one strike per bucket this long, at a hashed offset
+/// ([`strike_offset`]) — a much faster cadence reads as a hyperactive storm.
 const LIGHTNING_PERIOD_MS: u64 = 15000;
+/// How long one strike's [`lightning_envelope`] window lasts.
 const LIGHTNING_FLASH_MS: u64 = 90;
 
 /// Intensity envelope (0..1) of a lightning flash given ms since the strike
@@ -313,12 +310,8 @@ fn flash_level_at(now: SystemTime) -> f32 {
 pub(crate) struct InteriorLight {
     /// Emitter light reaching the interior through the atmosphere, 0..=1.
     pub(crate) interior: f32,
-    /// The glass's daylight: the interior plus the night's city-light floor,
-    /// 0..=1 (`1 - exterior` is the darkness the artificial lights fight).
+    /// The glass's daylight: the interior plus the night's city-light floor, 0..=1.
     pub(crate) exterior: f32,
-    /// The window spill's x-shift per row going down: negative for the
-    /// morning sun (east, casting leftward), positive for the evening.
-    pub(crate) spill_slant: f32,
 }
 
 /// The sky at one instant, sampled once per frame.
@@ -331,7 +324,6 @@ pub(crate) struct Sky {
 }
 
 impl Sky {
-    /// The sky at `now`.
     pub(crate) fn at(now: SystemTime) -> Self {
         let moon_phase = moon_phase_at(now);
         Self {
@@ -371,14 +363,12 @@ impl Sky {
         atmo(self.weather)
     }
 
-    /// Illuminated fraction of the moon (0 new .. 1 full).
+    /// [`moon_phase_at`] at this instant.
     pub(crate) fn moon_phase(&self) -> f32 {
         self.moon_phase
     }
 
-    /// The lightning envelope at this instant, whatever the weather: 0 between
-    /// strikes. The window bolt and the room bounce read the same value, so
-    /// they fire together.
+    /// [`flash_level_at`] at this instant.
     pub(crate) fn flash(&self) -> f32 {
         self.flash
     }
@@ -420,16 +410,9 @@ impl Sky {
             Body::Moon => city_bounce(self.weather),
             Body::Sun => 0.0,
         };
-        // Azimuth runs 0=east/dawn .. 1=west/dusk, so the morning sun casts
-        // light leftward (negative slant) and the evening sun rightward.
-        let spill_slant = match e.body {
-            Body::Sun => (e.azimuth - 0.5) * 2.0 * SPILL_SLANT_MAX,
-            Body::Moon => 0.0,
-        };
         InteriorLight {
             interior,
             exterior: (interior + night_floor).min(1.0),
-            spill_slant,
         }
     }
 }

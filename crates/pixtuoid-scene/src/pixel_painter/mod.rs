@@ -243,8 +243,8 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     }
 }
 
-/// How hard it is raining at `now`, as a scalar (0.0 clear … 1.0 storm) — the
-/// audio model's weather feed.
+/// How hard it is raining at `now` (0.0 dry … 1.0 storm; snow and fog are 0.0) —
+/// the audio model's weather feed.
 pub fn precipitation_level(now: std::time::SystemTime) -> f32 {
     crate::sky::Sky::at(now).precipitation()
 }
@@ -329,6 +329,8 @@ struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a Layout,
     pack: &'a Pack,
+    /// Animation phase, event ages and the wall clock — every sky fact reads
+    /// [`Self::sky`].
     now: SystemTime,
     /// The sky at `now`, sampled once for the whole pass.
     sky: crate::sky::Sky,
@@ -541,8 +543,6 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    // Threaded through every dependent helper, so the chrono local hour isn't
-    // recomputed per window + ceiling pool + lamp halo.
     let look = time_of_day_look(&ctx.sky, ctx.theme);
     let top_wall_h = ctx.layout.wall_band_h();
     // The elevator door replaces the rightmost window, so `paint_floor_and_walls`

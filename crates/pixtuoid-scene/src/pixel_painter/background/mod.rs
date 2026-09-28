@@ -415,8 +415,7 @@ fn city_dot_twinkle(window_idx: u16, dx: u16, dy: u16, now: SystemTime) -> bool 
 
 /// Warm sunlight tint spilling onto the floor below a window — a trapezoid
 /// blended with the existing floor so it reads as "light through window", not
-/// "yellow rectangle". `slant_per_row` is positive rightward (morning sun in
-/// the east), negative leftward (evening sun in the west).
+/// "yellow rectangle". `slant_per_row` shifts the band +x per row going down.
 fn paint_window_light_spill(
     buf: &mut RgbBuffer,
     window_x: u16,
