@@ -325,8 +325,8 @@ fn interior_brightness_is_altitude_coupled() {
 
 #[test]
 fn solar_noon_outshines_the_brightest_night() {
-    // Snow/Clear at the FULLEST moon are the two brightest cases night can
-    // offer — the highest `city_bounce` floor plus peak lunar illumination.
+    // Every weather at the FULLEST moon: its `city_bounce` floor plus peak lunar
+    // illumination.
     let full_moon_day = (1..=31u32)
         .max_by(|&a, &b| {
             moon_phase_at(on_day(a, 2))
@@ -340,7 +340,7 @@ fn solar_noon_outshines_the_brightest_night() {
     let storm_noon = Sky::at_with(at_hour_min(12, 0), Weather::Storm)
         .light()
         .exterior;
-    for w in [Weather::Clear, Weather::Snow] {
+    for w in Weather::ALL {
         let full_moon = Sky::at_with(full_moon_midnight, w).light().exterior;
         assert!(
             storm_noon > full_moon,
