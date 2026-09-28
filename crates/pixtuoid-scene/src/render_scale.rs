@@ -33,39 +33,38 @@ impl RenderScale {
         NonZeroU16::new(n).map(Self)
     }
 
-    /// The multiple of `max_density` nearest the surface's `natural` scale,
+    /// The multiple of `density` nearest the surface's `natural` scale,
     /// measured by RATIO, or `None` when none lies within the ratio bound
     /// `FIT_MAX_RATIO_SQUARED` sets.
     ///
-    /// Only a multiple of the pack's densest art lands every sprite
-    /// pixel-exact: a scale the density does not divide falls back to coarser
-    /// art, and a painter mixing densities draws a room whose pieces disagree
-    /// about what a pixel is. The multiple may lie ABOVE `natural` — a painter
-    /// sizes the office from its surface's pixels, so rounding changes how much
-    /// office fits, never whether the art is resampled — and ratio, not
-    /// difference, is the measure because framing is perceived
-    /// multiplicatively: at a natural 12, 8 and 16 are equally far by
+    /// Only at a multiple of a density does art drawn at it land: at a scale
+    /// the density does not divide, those variants fall back to coarser art or
+    /// the upscaled base. The multiple may lie ABOVE `natural`, so a painter
+    /// must size the office from its surface's pixels ([`RenderScale::logical`]):
+    /// rounding then changes how much office fits, never whether the art is
+    /// resampled. Ratio, not difference, is the measure because framing is
+    /// perceived multiplicatively: at a natural 12, 8 and 16 are equally far by
     /// difference, but 16 (×4/3) is nearer than 8 (×3/2).
-    /// Two adjacent multiples `kd` and `(k+1)d` never tie, since that needs
-    /// `k(k+1)` to be a square.
     ///
-    /// The rule meets HERE, in the engine, because `max_density` is a property
-    /// of the PACK and every painter that picks a scale needs it; the terminal
-    /// only contributes `natural`.
+    /// The rule meets HERE, in the engine, because the densities are the
+    /// PACK's ([`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants))
+    /// and every painter that picks a scale
+    /// needs it; a surface only contributes `natural`.
     ///
-    /// A pack with no variants passes `max_density = 1` (what
-    /// `Pack::max_density_variant` reports), so every scale is a multiple and
-    /// this is exactly [`RenderScale::new`] there.
-    pub fn fit(natural: u16, max_density: u16) -> Option<Self> {
+    /// A density of 1 — a pack with no variants — makes every scale a
+    /// multiple, so this is exactly [`RenderScale::new`] there.
+    pub fn fit(natural: u16, density: u16) -> Option<Self> {
         // u64: a square of a u16-range value times the bound overflows u32.
-        let d = u64::from(max_density.max(1));
+        let d = u64::from(density.max(1));
         let n = u64::from(natural);
         let below = n / d * d;
         // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
         let above = Some(below + d).filter(|&a| a <= u64::from(u16::MAX));
-        // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in integers.
         let nearest = match above {
-            Some(a) if below == 0 || n * n >= below * a => a,
+            // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in
+            // integers; adjacent multiples `kd` and `(k+1)d` never tie, since
+            // that needs `k(k+1)` to be a square.
+            Some(a) if n * n >= below * a => a,
             _ => below,
         };
         let (lo, hi) = (nearest.min(n), nearest.max(n));
@@ -108,10 +107,11 @@ impl RenderScale {
 /// The square of how far, as a ratio, [`RenderScale::fit`] may move a scale
 /// off its natural value — squared so the comparison stays in integers.
 ///
-/// It only bites below the densest art, where `max_density` is the one
-/// candidate: a ratio of √2 is a factor of 2 in AREA, so past it the office
-/// would keep under half the logical area the surface's natural scale gives
-/// it, and the classic profile draws more office than that.
+/// It only bites where `natural` is below the density, whose own value is then
+/// the one candidate (above it, the nearest multiple always lies within √2): a
+/// ratio of √2 is a factor of 2 in AREA, so past it the office would keep
+/// under half the logical area the surface's natural scale gives it, and the
+/// classic profile draws more office than that.
 const FIT_MAX_RATIO_SQUARED: u64 = 2;
 
 impl Default for RenderScale {
@@ -125,13 +125,13 @@ mod tests {
     use super::*;
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
 
-    fn fit(natural: u16, max_density: u16) -> Option<u16> {
-        RenderScale::fit(natural, max_density).map(RenderScale::get)
+    fn fit(natural: u16, density: u16) -> Option<u16> {
+        RenderScale::fit(natural, density).map(RenderScale::get)
     }
 
-    /// The bundled pack's case, natural scale by natural scale: every pick is a
-    /// multiple of the densest art, rounding goes whichever way is nearer by
-    /// ratio, and a cell too small to reach 8 within √2 gets no scale at all.
+    /// At a density of 8, natural scale by natural scale: every pick is a
+    /// multiple of 8, rounding goes whichever way is nearer by ratio, and a
+    /// natural scale too small to reach 8 within the bound gets no scale.
     #[test]
     fn a_scale_snaps_to_the_multiple_of_the_densest_art_nearest_by_ratio() {
         let want: [(u16, Option<u16>); 12] = [
@@ -153,11 +153,11 @@ mod tests {
         }
     }
 
-    /// The properties the table samples, over every natural scale a terminal
-    /// could report and every density a pack could ship.
+    /// The properties the table samples, over natural scales to 256 and every
+    /// density a pack may claim (core's `MAX_DENSITY_VARIANT`).
     #[test]
     fn every_pick_is_a_multiple_within_the_ratio_bound_and_the_nearest_one() {
-        for d in 1..=16u16 {
+        for d in 1..=64u16 {
             for n in 0..=256u16 {
                 let Some(s) = fit(n, d) else {
                     // Only a scale with no multiple of `d` in reach goes without.

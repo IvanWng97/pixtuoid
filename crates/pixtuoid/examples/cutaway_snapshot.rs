@@ -96,7 +96,7 @@ fn main() -> Result<()> {
         .next()
         .ok_or_else(|| anyhow!("usage: cutaway_snapshot <out.png> [--scale N] [--agents N]"))?;
 
-    let (mut scale_n, mut agents, mut theme_name) = (4u16, 10usize, "tokyo-night".to_string());
+    let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -107,7 +107,7 @@ fn main() -> Result<()> {
                 .ok_or_else(|| anyhow!("{k} needs a value"))
         };
         match rest[i].as_str() {
-            "--scale" => scale_n = val("--scale")?.parse().context("bad --scale")?,
+            "--scale" => scale_n = Some(val("--scale")?.parse().context("bad --scale")?),
             "--agents" => agents = val("--agents")?.parse().context("bad --agents")?,
             "--theme" => theme_name = val("--theme")?,
             "--logical" => {
@@ -122,12 +122,14 @@ fn main() -> Result<()> {
         }
         i += 2;
     }
-    let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     let theme =
         theme_by_name(&theme_name).ok_or_else(|| anyhow!("unknown theme {theme_name:?}"))?;
     let pack = pixtuoid_scene::embedded_pack::load_sprite_pack(
         pixtuoid_scene::embedded_pack::PackSource::Bundled,
     )?;
+    // Defaults to the pack's densest art, the density it was drawn for.
+    let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
+    let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
     let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let meta = FloorMeta::ground();
 

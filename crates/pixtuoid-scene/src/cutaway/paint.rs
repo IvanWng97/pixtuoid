@@ -2080,8 +2080,9 @@ mod tests {
         }
     }
 
-    /// The other half of "the asset work lands one piece at a time": a piece
-    /// with no variant that lands at the scale must be untouched by the lookup,
+    /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
+    /// pin a variant winning): a piece with no variant that lands at the scale
+    /// must be untouched by the lookup,
     /// or adding one `@Nx` sprite would be a flag day for all of them. `plant`
     /// ships only 8x art, and 8 does not divide 4.
     #[test]
