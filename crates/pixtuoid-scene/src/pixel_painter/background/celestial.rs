@@ -7,8 +7,8 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::Rgb;
 
 use super::epoch_ms;
-use super::sky::{self, Weather};
 use super::{window_columns, WINDOW_W};
+use crate::sky::{Atmo, Body, Emitter, Sky};
 use crate::theme::Theme;
 
 /// One frame's celestial disc (sun by day, moon by night), arcing across the
@@ -50,18 +50,17 @@ const ARC_RISE_FRAC: f32 = 0.80; // apex lifts top_wall_h * ARC_RISE_FRAC above 
 pub(super) const MIN_DISC_VIS: f32 = 0.08;
 
 /// This frame's disc placement, or `None` under thick cloud. `cx`/`cy` derive
-/// from the SAME `sky::emitter` arc that drives `time_of_day_look`'s spill lean
+/// from the SAME [`Sky::emitter`] arc that drives `time_of_day_look`'s spill lean
 /// and `sun_on_wall`'s wall spot, so all three read one `azimuth` and can never
 /// disagree on where the light comes from.
 pub(super) fn compute_disc(
-    now: SystemTime,
-    weather: Weather,
+    frame_sky: &Sky,
     buf_w: u16,
     top_wall_h: u16,
     theme: &Theme,
 ) -> Option<Disc> {
-    let sky = sky::emitter(now);
-    let vis = sky::atmo(weather).disc;
+    let sky = frame_sky.emitter();
+    let vis = frame_sky.atmo().disc;
     if vis < MIN_DISC_VIS {
         return None;
     }
@@ -84,12 +83,12 @@ pub(super) fn compute_disc(
     // glow reuses the SAME hue as core — the soft halo is a lower-alpha ring
     // of the same color, so each theme's disc reads as one coherent body.
     let (core, glow) = match sky.body {
-        sky::Body::Sun => (theme.lighting.sun_core, theme.lighting.sun_core),
-        sky::Body::Moon => (theme.lighting.moon_core, theme.lighting.moon_core),
+        Body::Sun => (theme.lighting.sun_core, theme.lighting.sun_core),
+        Body::Moon => (theme.lighting.moon_core, theme.lighting.moon_core),
     };
     let lit_frac = match sky.body {
-        sky::Body::Sun => 1.0,
-        sky::Body::Moon => sky::moon_phase(now),
+        Body::Sun => 1.0,
+        Body::Moon => frame_sky.moon_phase(),
     };
     Some(Disc {
         cx,
@@ -128,10 +127,10 @@ const STAR_TWINKLE_CYCLE_SPAN_MS: u64 = 3000;
 /// emitter is the MOON: dawn/dusk twilight has a high `darkness` yet the
 /// brightening sky washes stars out, so gating on `darkness` alone paints a
 /// full starfield at ~7am.
-pub(super) fn night_star_strength(now: SystemTime, darkness: f32, weather: Weather) -> f32 {
-    match sky::emitter(now).body {
-        sky::Body::Moon => (darkness * sky::atmo(weather).disc).clamp(0.0, 1.0),
-        sky::Body::Sun => 0.0,
+pub(super) fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
+    match sky.emitter().body {
+        Body::Moon => (darkness * sky.atmo().disc).clamp(0.0, 1.0),
+        Body::Sun => 0.0,
     }
 }
 
@@ -157,9 +156,9 @@ pub(super) fn star_twinkle(px: u16, py: u16, now: SystemTime) -> bool {
 /// Golden-hour blaze strength on the city silhouette — SUN-only: a low moon
 /// must never paint an orange cast, however warm/lit it computes, so the gate
 /// is absolute rather than incidental.
-pub(super) fn golden_hour_blaze(sky: &sky::SkyState, a: &sky::Atmo) -> f32 {
+pub(super) fn golden_hour_blaze(sky: &Emitter, a: &Atmo) -> f32 {
     match sky.body {
-        sky::Body::Sun => (sky.warmth * sky.emitter_lum * a.disc).clamp(0.0, 1.0),
-        sky::Body::Moon => 0.0,
+        Body::Sun => (sky.warmth * sky.emitter_lum * a.disc).clamp(0.0, 1.0),
+        Body::Moon => 0.0,
     }
 }

@@ -7,7 +7,7 @@
 
 mod celestial;
 mod lighting;
-mod sky;
+mod time_of_day;
 
 use celestial::{
     compute_disc, golden_hour_blaze, night_star_strength, star_exists, star_twinkle, Disc,
@@ -18,10 +18,9 @@ pub(super) use lighting::{
     paint_neon_glow, paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo,
     Ellipse, RadialFalloff,
 };
-pub(super) use sky::{
-    beam_strength, daylight_floor_overlay, dim_floor_overlay, hour_is_day, set_weather_override,
-    sun_on_wall, time_of_day_look, weather_state, TimeOfDayLook, WallSide, Weather,
-    DAYLIGHT_FLOOR_LIFT, NIGHT_FLOOR_DIM,
+pub(super) use time_of_day::{
+    daylight_floor_overlay, dim_floor_overlay, sun_on_wall, time_of_day_look, TimeOfDayLook,
+    WallSide, DAYLIGHT_FLOOR_LIFT, NIGHT_FLOOR_DIM,
 };
 
 use std::time::SystemTime;
@@ -32,19 +31,8 @@ use super::ambient::SunbeamColumn;
 use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut, BLACK, WHITE};
 
-/// Fractional local hour (`hour + minute/60`, in `0.0..24.0`) for `now`. The
-/// ambient/sky clock-decode funnel; `paint_clock`'s analog hands keep their own
-/// decode because they need raw `hour % 12` / `minute`, not this value.
-pub(in crate::pixel_painter) fn local_hour_frac(now: std::time::SystemTime) -> f32 {
-    use chrono::Timelike;
-    let unix_now = now
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default();
-    let local = chrono::DateTime::<chrono::Local>::from(std::time::UNIX_EPOCH + unix_now);
-    local.hour() as f32 + local.minute() as f32 / 60.0
-}
-
 use crate::layout::{Layout, ELEVATOR_W};
+use crate::sky::{Emitter, Sky, Weather};
 use crate::theme::Theme;
 
 /// Floor-to-ceiling window width + inter-pane gap. [`window_columns`] owns the
@@ -61,59 +49,14 @@ const WINDOW_EDGE_MARGIN: u16 = 2;
 /// Vertical depth of the warm spill band below each window.
 const SPILL_DEPTH: u16 = 12;
 
-/// Lightning strike cadence (Storm only): a flash fires on average every
-/// `LIGHTNING_PERIOD_MS` — a much faster cadence reads as a hyperactive storm —
-/// lasting `LIGHTNING_FLASH_MS`.
-const LIGHTNING_PERIOD_MS: u64 = 15000;
-const LIGHTNING_FLASH_MS: u64 = 90;
-
-/// Intensity envelope (0..1) of a lightning flash given ms since the strike
-/// began: primary strike → brief dim → after-flash, so it reads as a real
-/// flicker rather than a single on/off blink. Returns 0 outside the flash.
-fn lightning_envelope(since_strike_ms: u64) -> f32 {
-    match since_strike_ms {
-        0..=24 => 1.0,   // primary strike
-        25..=39 => 0.15, // dim between flickers
-        40..=69 => 0.55, // after-flash
-        _ => 0.0,
-    }
-}
-
-/// Per-bucket strike offset (ms into the bucket) so strikes don't fire on a
-/// fixed metronome. Each `LIGHTNING_PERIOD_MS`-long bucket hashes to its own
-/// offset in `[0, PERIOD - FLASH)`, keeping the whole flash inside the bucket.
-//
-// splitmix64 is open-coded here (and in `sky::weather_state` +
-// `ambient::dust_mote_positions`) by DELIBERATE choice: each is an independent
-// noise source over a disjoint input domain, so no two sites need equal output.
-fn strike_offset(bucket: u64) -> u64 {
-    let mut h = bucket.wrapping_add(0x9e37_79b9_7f4a_7c15);
-    h = (h ^ (h >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    h = (h ^ (h >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    h ^= h >> 31;
-    h % (LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS)
-}
-
-/// `lightning_envelope` for the current clock, or 0 when not mid-strike.
-/// Shared by the window bolt and the room bounce so they fire together.
-fn lightning_flash_level(now: SystemTime) -> f32 {
-    let elapsed_ms = epoch_ms(now);
-    let bucket = elapsed_ms / LIGHTNING_PERIOD_MS;
-    let phase = elapsed_ms % LIGHTNING_PERIOD_MS;
-    match phase.checked_sub(strike_offset(bucket)) {
-        Some(since) if since < LIGHTNING_FLASH_MS => lightning_envelope(since),
-        _ => 0.0,
-    }
-}
-
 /// Room-wide ambient bounce from a Storm lightning strike. Painted LAST in the
 /// pixel pass (after floor/walls/furniture/characters) so the whole interior
 /// briefly flares; the on-glass bolt alone lit only the window strip.
-pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, now: SystemTime, weather: Weather) {
-    if weather != Weather::Storm {
+pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
+    if sky.weather() != Weather::Storm {
         return;
     }
-    let level = lightning_flash_level(now);
+    let level = sky.flash();
     if level <= 0.0 {
         return;
     }
@@ -229,8 +172,8 @@ fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
 /// too), and folding them in would darken a stormy noon twice.
 const NIGHT_VEIL_FLOOR: f32 = 0.35;
 
-fn veil_lum(sky: &sky::SkyState) -> f32 {
-    NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * sky.emitter_lum.clamp(0.0, 1.0)
+fn veil_lum(e: &Emitter) -> f32 {
+    NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * e.emitter_lum.clamp(0.0, 1.0)
 }
 
 /// A veil colour at the frame's daylight — hue preserved, luminance tracked.
@@ -354,6 +297,7 @@ pub(super) fn paint_floor_and_walls(
     buf_w: u16,
     buf_h: u16,
     now: SystemTime,
+    sky: &Sky,
     look: &TimeOfDayLook,
     top_wall_h: u16,
     skip_window_x_range: Option<(u16, u16)>,
@@ -367,8 +311,7 @@ pub(super) fn paint_floor_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let weather = weather_state(now);
-    let tint = weather_floor_tint(weather);
+    let tint = weather_floor_tint(sky.weather());
 
     // The noise picks one of THREE colours and the tint is fixed for the frame,
     // so resolve the blend once, not per pixel.
@@ -393,8 +336,8 @@ pub(super) fn paint_floor_and_walls(
     let window_y: u16 = 1;
     let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
-    let disc = compute_disc(now, weather, buf_w, top_wall_h, theme);
-    let star_strength = night_star_strength(now, look.darkness, weather);
+    let disc = compute_disc(sky, buf_w, top_wall_h, theme);
+    let star_strength = night_star_strength(sky, look.darkness);
     for w in window_columns(buf_w, skip_window_x_range) {
         let x = w.x_left;
         // The disc paints ONLY in the window its centre sits over. Ungated, a
@@ -411,7 +354,7 @@ pub(super) fn paint_floor_and_walls(
             window_frame,
             w.idx,
             now,
-            weather,
+            sky,
             altitude,
             &lit_colors,
             building,
@@ -659,7 +602,7 @@ fn paint_floor_to_ceiling_window(
     frame: Rgb,
     window_idx: u16,
     now: SystemTime,
-    weather: Weather,
+    sky: &Sky,
     altitude: f32,
     lit_colors: &[Rgb; 3],
     building: Rgb,
@@ -757,8 +700,8 @@ fn paint_floor_to_ceiling_window(
         }
     }
 
-    let sky_now = sky::emitter(now);
-    let veil = veil_lum(&sky_now);
+    let weather = sky.weather();
+    let veil = veil_lum(sky.emitter());
 
     // The haze goes on BEFORE the streak/flash effects, so rain/snow/lightning
     // still read on top of the murk.
@@ -831,7 +774,7 @@ fn paint_floor_to_ceiling_window(
             );
             // The bright on-glass bolt — the strike's source. Rides the shared
             // flash level so it fires in lockstep with `paint_lightning_flash`.
-            let level = lightning_flash_level(now);
+            let level = sky.flash();
             if level > 0.0 {
                 wash_glass(buf, x, y, w, h, WHITE, 0.6 * level);
             }
@@ -931,8 +874,7 @@ fn paint_floor_to_ceiling_window(
         Weather::Clear => {}
     }
 
-    let a = sky::atmo(weather);
-    let sunset = golden_hour_blaze(&sky_now, &a);
+    let sunset = golden_hour_blaze(sky.emitter(), &sky.atmo());
     if sunset > 0.05 {
         let min_building_h = (glass_h / 5).max(3);
         for dy in 1..h.saturating_sub(1) {

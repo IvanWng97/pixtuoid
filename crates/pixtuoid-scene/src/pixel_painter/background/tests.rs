@@ -1,17 +1,18 @@
 use super::*;
+use crate::sky::{hour_is_day, set_weather_override, Atmo, Body};
 
-// Hand-built SkyState/Atmo values, not real clock times: a real moon's low
+// Hand-built Emitter/Atmo values, not real clock times: a real moon's low
 // altitude/luminance could never produce these, so a maximally warm/lit MOON
 // proves the gate is absolute rather than merely well-behaved in practice.
 #[test]
 fn golden_hour_blaze_is_sun_only() {
-    let full_atmo = sky::Atmo {
+    let full_atmo = Atmo {
         direct: 1.0,
         diffuse: 1.0,
         disc: 1.0,
     };
-    let moon = sky::SkyState {
-        body: sky::Body::Moon,
+    let moon = Emitter {
+        body: Body::Moon,
         altitude: 1.0,
         azimuth: 0.5,
         warmth: 1.0,
@@ -22,8 +23,8 @@ fn golden_hour_blaze_is_sun_only() {
         0.0,
         "a moon must never blaze, even at maximal warmth/luminance"
     );
-    let sun = sky::SkyState {
-        body: sky::Body::Sun,
+    let sun = Emitter {
+        body: Body::Sun,
         ..moon
     };
     assert!(
@@ -83,31 +84,8 @@ fn skyline_haze_obscures_fog_and_storm_only_when_expected() {
 }
 
 #[test]
-fn lightning_envelope_is_a_two_pulse_then_dark() {
-    assert_eq!(lightning_envelope(0), 1.0, "primary strike");
-    assert!(
-        lightning_envelope(30) < lightning_envelope(0),
-        "dim between flickers"
-    );
-    assert!(
-        lightning_envelope(50) > lightning_envelope(30),
-        "after-flash rebrightens"
-    );
-    assert_eq!(lightning_envelope(LIGHTNING_FLASH_MS), 0.0, "flash is over");
-    assert_eq!(lightning_envelope(5000), 0.0, "dark between strikes");
-}
-
-#[test]
 fn lightning_flash_storm_only_and_mid_strike_only() {
-    use std::time::{Duration, UNIX_EPOCH};
-    // Strikes are jittered per bucket, so the flash is at `strike_offset(bucket)`
-    // into the bucket, not phase 0. Pick a low-offset bucket so off+1000 (the
-    // quiet probe) stays inside the same bucket.
-    let bucket = (0u64..)
-        .find(|&b| strike_offset(b) < 500)
-        .expect("a low-offset bucket exists");
-    let off = strike_offset(bucket);
-    let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms);
+    let now = SystemTime::UNIX_EPOCH;
     let mk = || {
         RgbBuffer::filled(
             8,
@@ -119,74 +97,31 @@ fn lightning_flash_storm_only_and_mid_strike_only() {
             },
         )
     };
+    let quiet_fill = Rgb {
+        r: 10,
+        g: 10,
+        b: 12,
+    };
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, at(off), Weather::Storm);
+    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(1.0));
     assert!(b.get(0, 0).r > 10, "storm strike should brighten the room");
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, at(off + 1000), Weather::Storm);
-    assert_eq!(
-        b.get(0, 0),
-        Rgb {
-            r: 10,
-            g: 10,
-            b: 12
-        },
-        "no flash between strikes"
-    );
+    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Storm).with_flash(0.0));
+    assert_eq!(b.get(0, 0), quiet_fill, "no flash between strikes");
 
     let mut b = mk();
-    paint_lightning_flash(&mut b, at(off), Weather::Clear);
-    assert_eq!(
-        b.get(0, 0),
-        Rgb {
-            r: 10,
-            g: 10,
-            b: 12
-        },
-        "flash is storm-only"
-    );
+    paint_lightning_flash(&mut b, &Sky::at_with(now, Weather::Clear).with_flash(1.0));
+    assert_eq!(b.get(0, 0), quiet_fill, "flash is storm-only");
 }
-
-#[test]
-fn lightning_strikes_are_jittered_not_metronomic() {
-    let offsets: Vec<u64> = (0..24u64).map(strike_offset).collect();
-    let distinct = offsets
-        .iter()
-        .collect::<std::collections::HashSet<_>>()
-        .len();
-    assert!(
-        distinct > 12,
-        "strike offsets should vary across buckets, got {offsets:?}"
-    );
-    assert!(offsets
-        .iter()
-        .all(|&o| o < LIGHTNING_PERIOD_MS - LIGHTNING_FLASH_MS));
-}
-
 #[test]
 fn storm_window_bolt_brightens_glass_during_the_flash() {
-    use std::time::{Duration, UNIX_EPOCH};
-    // Low-offset bucket for the same reason as `lightning_flash_storm_only`.
-    let bucket = (0u64..)
-        .find(|&b| strike_offset(b) < 500)
-        .expect("a low-offset bucket exists");
-    let off = strike_offset(bucket);
-    let at = |ms: u64| UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms);
-    assert!(
-        lightning_flash_level(at(off)) > 0.0,
-        "flash at strike offset"
-    );
-    assert_eq!(
-        lightning_flash_level(at(off + 1000)),
-        0.0,
-        "quiet 1 s later"
-    );
-
+    let now = SystemTime::UNIX_EPOCH;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
-    let render_lum = |now: SystemTime| -> u64 {
-        let look = time_of_day_look(now, theme);
+    let render_lum = |flash: f32| -> u64 {
+        let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
+        let look = time_of_day_look(&sky, theme);
         let (lit_colors, building, sky_row) = window_glass_invariants(30, &look, theme);
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
@@ -198,7 +133,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             theme.surface.window_frame,
             0,
             now,
-            Weather::Storm,
+            &sky,
             0.0,
             &lit_colors,
             building,
@@ -215,8 +150,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
         }
         sum
     };
-    let flashing = render_lum(at(off));
-    let quiet = render_lum(at(off + 1000));
+    let flashing = render_lum(1.0);
+    let quiet = render_lum(0.0);
     assert!(
         flashing > quiet,
         "the on-glass bolt must brighten the storm glass during the flash \
@@ -251,6 +186,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         buf_w,
         buf_h,
         now,
+        &Sky::at(now),
         &look,
         top_wall_h,
         None,
@@ -301,7 +237,7 @@ fn render_office_themed(
     let _reset = Reset;
     set_weather_override(Some(weather));
     let now = crate::localclock::on_day(day, hour);
-    let look = time_of_day_look(now, theme);
+    let look = time_of_day_look(&Sky::at(now), theme);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
     paint_floor_and_walls(
@@ -310,6 +246,7 @@ fn render_office_themed(
         buf_w,
         buf_h,
         now,
+        &Sky::at(now),
         &look,
         top_wall_h,
         None,
@@ -553,16 +490,16 @@ fn stars_gate_on_night_not_darkness_alone() {
     // passed at an hour when the sun is up.
     let at = crate::localclock::at_hour;
     assert_eq!(
-        night_star_strength(at(7), 0.6, Weather::Clear),
+        night_star_strength(&Sky::at_with(at(7), Weather::Clear), 0.6),
         0.0,
         "no stars at 7am while the sun is up"
     );
     assert!(
-        night_star_strength(at(2), 0.9, Weather::Clear) > STAR_MIN,
+        night_star_strength(&Sky::at_with(at(2), Weather::Clear), 0.9) > STAR_MIN,
         "a clear night should light the stars"
     );
     assert!(
-        night_star_strength(at(2), 0.9, Weather::Overcast) < STAR_MIN,
+        night_star_strength(&Sky::at_with(at(2), Weather::Overcast), 0.9) < STAR_MIN,
         "overcast should hide the stars even at night"
     );
 }
@@ -614,8 +551,7 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     let top_wall_h = 40u16;
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let geom = compute_disc(
-        crate::localclock::at_hour(21),
-        Weather::Clear,
+        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
         buf_w,
         top_wall_h,
         theme,
@@ -623,10 +559,10 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     .expect("moon disc visible at 21:00 under Clear");
 
     let crescent_day = (1..=31u32)
-        .find(|&d| sky::moon_phase(crate::localclock::on_day(d, 21)) < 0.35)
+        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() < 0.35)
         .expect("a crescent night exists in January 2026");
     let full_day = (1..=31u32)
-        .find(|&d| sky::moon_phase(crate::localclock::on_day(d, 21)) > 0.9)
+        .find(|&d| Sky::at(crate::localclock::on_day(d, 21)).moon_phase() > 0.9)
         .expect("a near-full night exists in January 2026");
 
     let count_dark_and_bright = |day: u32| -> (usize, usize) {
@@ -690,7 +626,7 @@ fn moon_glow_dims_at_new_moon() {
     let (mut new_moon_day, mut new_moon_frac) = (1u32, f32::MAX);
     let (mut full_moon_day, mut full_moon_frac) = (1u32, f32::MIN);
     for day in 1..=31u32 {
-        let frac = sky::moon_phase(crate::localclock::on_day(day, 21));
+        let frac = Sky::at(crate::localclock::on_day(day, 21)).moon_phase();
         if frac < new_moon_frac {
             new_moon_frac = frac;
             new_moon_day = day;
@@ -788,7 +724,7 @@ fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
 fn fullest_moon_day() -> u32 {
     (1..=31u32)
         .max_by(|&a, &b| {
-            let phase = |d: u32| sky::moon_phase(crate::localclock::on_day(d, 0));
+            let phase = |d: u32| Sky::at(crate::localclock::on_day(d, 0)).moon_phase();
             phase(a)
                 .partial_cmp(&phase(b))
                 .expect("moon_phase is never NaN")
@@ -819,7 +755,7 @@ const NOON_HOUR: u32 = 12;
 /// [`sky::hour_is_day`] — the ONE day/night boundary, so this sweep can't drift
 /// from a second hand-written hour list.
 fn night_hours() -> impl Iterator<Item = u32> {
-    (0..24u32).filter(|h| !sky::hour_is_day(*h as f32))
+    (0..24u32).filter(|h| !hour_is_day(*h as f32))
 }
 
 /// The most of its OWN solar-noon brightness a pane may still show at any night
@@ -914,10 +850,20 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
     let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
-        let look = time_of_day_look(now, theme);
+        let look = time_of_day_look(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
-            base_fill, &mut buf, buf_w, buf_h, now, &look, top_wall_h, None, theme, 0.0,
+            base_fill,
+            &mut buf,
+            buf_w,
+            buf_h,
+            now,
+            &Sky::at(now),
+            &look,
+            top_wall_h,
+            None,
+            theme,
+            0.0,
         );
         buf
     };
@@ -974,9 +920,21 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
-        let look = time_of_day_look(now, theme);
+        let look = time_of_day_look(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
-        paint_floor_and_walls(base_fill, &mut buf, w, h, now, &look, 14, None, theme, 0.0);
+        paint_floor_and_walls(
+            base_fill,
+            &mut buf,
+            w,
+            h,
+            now,
+            &Sky::at(now),
+            &look,
+            14,
+            None,
+            theme,
+            0.0,
+        );
         buf
     };
     // The memo is single-slot, so each leg varies ONE key component against
@@ -1009,12 +967,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
 
 #[test]
 fn lightning_flash_matches_the_per_pixel_blend_reference() {
-    use std::time::{Duration, UNIX_EPOCH};
-    let bucket = (0u64..)
-        .find(|&b| strike_offset(b) < 500)
-        .expect("a low-offset bucket exists");
-    let at =
-        UNIX_EPOCH + Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + strike_offset(bucket));
+    let sky = Sky::at_with(SystemTime::UNIX_EPOCH, Weather::Storm).with_flash(1.0);
     let mut lcg = 0xC0FFEEu32;
     let mut next = || {
         lcg = lcg.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -1032,7 +985,7 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
         }
     }
     let mut expected = buf.clone();
-    let alpha = 0.20 * lightning_flash_level(at);
+    let alpha = 0.20 * sky.flash();
     assert!(alpha > 0.0, "the fixture time must sit inside a flash");
     for y in 0..h {
         for x in 0..w {
@@ -1052,7 +1005,7 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
             );
         }
     }
-    paint_lightning_flash(&mut buf, at, Weather::Storm);
+    paint_lightning_flash(&mut buf, &sky);
     for y in 0..h {
         for x in 0..w {
             assert_eq!(

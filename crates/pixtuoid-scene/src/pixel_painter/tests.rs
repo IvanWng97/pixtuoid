@@ -1788,42 +1788,6 @@ fn door_frame_uses_physics_window_when_nonzero() {
 }
 
 #[test]
-fn weather_state_covers_all_variants() {
-    let mut seen = std::collections::HashSet::new();
-    let base = SystemTime::UNIX_EPOCH;
-    for cycle in 0..200u64 {
-        let now = base + std::time::Duration::from_secs(cycle * 600);
-        seen.insert(std::mem::discriminant(&background::weather_state(now)));
-    }
-    assert!(
-        seen.len() >= 8,
-        "expected all 8 weather variants in 200 cycles, got {}",
-        seen.len()
-    );
-}
-
-#[test]
-fn weather_state_deterministic() {
-    let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
-    let a = background::weather_state(now);
-    let b = background::weather_state(now);
-    assert_eq!(a, b);
-}
-
-#[test]
-fn weather_state_changes_across_cycles() {
-    let mut states = Vec::new();
-    let base = SystemTime::UNIX_EPOCH;
-    for cycle in 0..20u64 {
-        states.push(background::weather_state(
-            base + std::time::Duration::from_secs(cycle * 600),
-        ));
-    }
-    let unique: std::collections::HashSet<_> = states.iter().map(std::mem::discriminant).collect();
-    assert!(unique.len() >= 2, "weather should vary across cycles");
-}
-
-#[test]
 fn waypoint_rank_offset_x_decollision_table() {
     use super::anchors::waypoint_rank_offset_x;
     use crate::layout::WaypointKind;
@@ -2364,17 +2328,17 @@ fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
     // override is a thread-local Cell — every assert must run on one thread.
     let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(10_000);
     force_weather(None).expect("clear is Ok");
-    let natural = background::weather_state(t);
+    let natural = crate::sky::Sky::at(t).weather();
 
     assert!(force_weather(Some("storm")).is_ok(), "known name → Ok");
     assert_eq!(
-        background::weather_state(t),
-        background::Weather::Storm,
-        "force_weather(storm) must drive weather_state to Storm",
+        crate::sky::Sky::at(t).weather(),
+        crate::sky::Weather::Storm,
+        "force_weather(storm) must drive the sky to Storm",
     );
     assert_eq!(
-        background::weather_state(t + std::time::Duration::from_secs(987_654)),
-        background::Weather::Storm,
+        crate::sky::Sky::at(t + std::time::Duration::from_secs(987_654)).weather(),
+        crate::sky::Weather::Storm,
         "the override must ignore the clock",
     );
 
@@ -2382,12 +2346,12 @@ fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
         force_weather(Some("STORM")).is_ok(),
         "case-insensitive → Ok"
     );
-    assert_eq!(background::weather_state(t), background::Weather::Storm);
+    assert_eq!(crate::sky::Sky::at(t).weather(), crate::sky::Weather::Storm);
 
     assert!(force_weather(Some("snow")).is_ok());
     assert_eq!(
-        background::weather_state(t),
-        background::Weather::Snow,
+        crate::sky::Sky::at(t).weather(),
+        crate::sky::Weather::Snow,
         "a second known name must re-set the override",
     );
 
@@ -2398,14 +2362,14 @@ fn force_weather_sets_known_clears_none_and_errs_on_unknown() {
         "Err payload must be the canonical weather names",
     );
     assert_eq!(
-        background::weather_state(t),
-        background::Weather::Snow,
+        crate::sky::Sky::at(t).weather(),
+        crate::sky::Weather::Snow,
         "an unknown name must NOT touch the override",
     );
 
     assert!(force_weather(None).is_ok(), "None → Ok");
     assert_eq!(
-        background::weather_state(t),
+        crate::sky::Sky::at(t).weather(),
         natural,
         "None must restore the clock-based selection",
     );
@@ -2923,6 +2887,7 @@ fn paint_frame_is_pure_and_byte_identical() {
                 layout: &layout,
                 pack: &pack,
                 now,
+                sky: crate::sky::Sky::at(now),
                 buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
@@ -3975,6 +3940,7 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 layout: &layout,
                 pack: &pack,
                 now,
+                sky: crate::sky::Sky::at(now),
                 buf: &mut buf,
                 cache: &mut cache,
                 base_fill: &mut base_fill,
