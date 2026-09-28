@@ -351,3 +351,43 @@ fn solar_noon_outshines_the_brightest_night() {
         );
     }
 }
+
+/// The phase lands on real lunations far from its epoch: NASA GSFC's "Phases
+/// of the Moon 2001 to 2100" (eclipse.gsfc.nasa.gov/phase/phases2001.html,
+/// Universal Time). A mean month strays from a true lunation by under a day, and
+/// `ILLUMINATION_TOLERANCE` is the illuminated fraction a one-day miss leaves.
+#[test]
+fn the_moon_phase_lands_on_published_lunations() {
+    const ILLUMINATION_TOLERANCE: f32 = 0.012;
+    let utc = |y: i32, mo: u32, d: u32, h: u32, mi: u32| {
+        let secs = chrono::NaiveDate::from_ymd_opt(y, mo, d)
+            .and_then(|date| date.and_hms_opt(h, mi, 0))
+            .expect("a valid instant")
+            .and_utc()
+            .timestamp();
+        std::time::UNIX_EPOCH
+            + std::time::Duration::from_secs(u64::try_from(secs).expect("after 1970"))
+    };
+    for new in [
+        utc(2026, 1, 18, 19, 52),
+        utc(2026, 7, 14, 9, 43),
+        utc(2026, 12, 9, 0, 52),
+    ] {
+        let lit = moon_phase_at(new);
+        assert!(
+            lit < ILLUMINATION_TOLERANCE,
+            "new moon lit {lit} at {new:?}"
+        );
+    }
+    for full in [
+        utc(2026, 2, 1, 22, 9),
+        utc(2026, 8, 28, 4, 18),
+        utc(2026, 12, 24, 1, 28),
+    ] {
+        let lit = moon_phase_at(full);
+        assert!(
+            lit > 1.0 - ILLUMINATION_TOLERANCE,
+            "full moon lit {lit} at {full:?}"
+        );
+    }
+}
