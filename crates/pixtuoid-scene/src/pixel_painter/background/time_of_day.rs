@@ -41,8 +41,8 @@ pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> Ti
     let glass_a = mix_lab(mix_lab(night_a, day_a, exterior), twilight_a, warm * 0.5);
     let glass_b = mix_lab(mix_lab(night_b, day_b, exterior), twilight_b, warm * 0.5);
 
-    // Light lands on the far side from the sun: the morning disc sits left,
-    // so the spill leans right (positive slant), and the evening one left.
+    // Leans away from the disc, which `compute_disc` places off this same azimuth;
+    // `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins the sign.
     let (spill_strength, spill_slant) = match e.body {
         Body::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
         Body::Moon => (0.0, 0.0),
@@ -90,10 +90,9 @@ pub(in crate::pixel_painter) struct SunSpot {
     pub warmth: f32,
 }
 
-/// Azimuth bands for the wall the sun lights, across the room from the disc:
-/// `0.0..AZ_EAST_MAX` (morning, the disc on the left) lights the east wall,
-/// `AZ_EAST_MAX..AZ_WEST_MIN` (midday) the south/window wall, and
-/// `AZ_WEST_MIN..1.0` (evening) the west wall.
+/// The azimuths where [`sun_on_wall`]'s spot hands off east wall → window
+/// wall → west wall; the side each lands on is pinned by
+/// `the_wall_spot_and_the_spill_fall_away_from_the_disc`.
 const AZ_EAST_MAX: f32 = 0.30;
 const AZ_WEST_MIN: f32 = 0.70;
 
