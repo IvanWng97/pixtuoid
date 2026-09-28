@@ -168,8 +168,8 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let buf_h = top_wall_h + 2;
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
-    // A hand-built look with positive spill, so the spill path runs regardless
-    // of the local clock.
+    // A hand-built look with nonzero spill strength, so the spill path runs
+    // regardless of the local clock.
     let look = TimeOfDayLook {
         glass_a: theme.office.building_light,
         glass_b: theme.office.building_dark,
@@ -1013,5 +1013,69 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
                 "({x},{y}) diverged from the per-pixel blend reference"
             );
         }
+    }
+}
+
+/// Light through a window lands across the room from the sun. The disc
+/// (`compute_disc`), the wall spot (`paint_sun_spot`) and the spill
+/// (`paint_window_light_spill`) each map the one azimuth to a side on their own,
+/// so this is the only check that sees them disagree, read off the pixels each
+/// paints.
+#[test]
+fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
+    const BUF_W: u16 = 192;
+    const BUF_H: u16 = 80;
+    const TOP_WALL_H: u16 = 30;
+    const FILL: Rgb = Rgb {
+        r: 20,
+        g: 20,
+        b: 24,
+    };
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let layout = crate::layout::Layout::compute(BUF_W, BUF_H, Some(4)).expect("layout fits");
+    let mid = f32::from(BUF_W) / 2.0;
+    // The mean x of the pixels a paint changed in rows `ys`, or `None` if none.
+    let lit_x = |buf: &RgbBuffer, ys: std::ops::Range<u16>| {
+        let xs: Vec<f32> = ys
+            .flat_map(|y| (0..buf.width()).map(move |x| (x, y)))
+            .filter(|&(x, y)| buf.get(x, y) != FILL)
+            .map(|(x, _)| f32::from(x))
+            .collect();
+        (!xs.is_empty()).then(|| xs.iter().sum::<f32>() / xs.len() as f32)
+    };
+    for hour in [6, 19] {
+        let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
+        let look = time_of_day_look(&sky, theme);
+        let disc = compute_disc(&sky, BUF_W, TOP_WALL_H, theme).expect("a clear low sun");
+        let disc_side = (disc.cx - mid).signum();
+
+        let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
+        crate::pixel_painter::ambient::paint_sun_spot(&mut buf, theme, &layout, &sky, &look);
+        let spot_x = lit_x(&buf, 0..BUF_H).expect("a low sun paints a wall spot");
+        assert_eq!(
+            (spot_x - mid).signum(),
+            -disc_side,
+            "wall spot vs disc at {hour}:00"
+        );
+
+        // One centred window, so the lean can run either way unclipped.
+        let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
+        let window_x = (BUF_W - WINDOW_W) / 2;
+        paint_window_light_spill(
+            &mut buf,
+            window_x,
+            WINDOW_W,
+            0,
+            1.0,
+            look.spill_slant,
+            theme,
+        );
+        let top = lit_x(&buf, 0..1).expect("the spill's first row");
+        let bottom = lit_x(&buf, SPILL_DEPTH - 1..SPILL_DEPTH).expect("the spill's last row");
+        assert_eq!(
+            (bottom - top).signum(),
+            -disc_side,
+            "spill lean vs disc at {hour}:00"
+        );
     }
 }

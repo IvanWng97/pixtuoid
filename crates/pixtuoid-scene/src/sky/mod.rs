@@ -185,7 +185,7 @@ pub(crate) struct Emitter {
     pub(crate) body: Body,
     /// 0 horizon .. 1 apex.
     pub(crate) altitude: f32,
-    /// 0 (east/dawn) .. 1 (west/dusk).
+    /// Progress along this body's arc: 0 as it rises .. 1 as it sets.
     pub(crate) azimuth: f32,
     /// 0 neutral (apex) .. 1 warm/red (horizon).
     pub(crate) warmth: f32,

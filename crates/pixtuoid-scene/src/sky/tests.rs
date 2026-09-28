@@ -73,11 +73,14 @@ fn warmth_is_high_low_on_the_horizon_and_neutral_at_apex() {
 }
 
 #[test]
-fn azimuth_advances_west_across_the_day() {
+fn azimuth_advances_from_dawn_to_dusk() {
     let a = Sky::at(at_hour_min(7, 0)).emitter().azimuth;
     let b = Sky::at(at_hour_min(12, 0)).emitter().azimuth;
     let c = Sky::at(at_hour_min(18, 0)).emitter().azimuth;
-    assert!(a < b && b < c, "azimuth marches E->W: {a} < {b} < {c}");
+    assert!(
+        a < b && b < c,
+        "azimuth grows through the day: {a} < {b} < {c}"
+    );
 }
 
 #[test]
