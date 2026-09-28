@@ -2077,67 +2077,124 @@ mod tests {
     /// assumed to be one the paint never uses.
     #[test]
     fn every_piece_paints_only_inside_its_span() {
-        use pixtuoid_core::sprite::Rgb;
+        use crate::floor::{FloorMeta, FloorSession};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let fills = [
+        let pack = pack();
+        let mut seen = std::collections::BTreeSet::new();
+        let mut check = |frame: &SimFrame, layout: &Layout, only_people: bool| {
+            for s in [1, 3, pack.max_density_variant()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                for (span, kind) in draw_list(frame, layout, &pack, theme, scale) {
+                    if only_people && !matches!(kind, PieceKind::Character { .. }) {
+                        continue;
+                    }
+                    seen.insert(kind_name(&kind));
+                    assert_eq!(
+                        stray_pixel(&kind, span, frame, layout, &pack, theme, scale),
+                        None,
+                        "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
+                    );
+                }
+            }
+        };
+        // Every step of a walk to each desk facing and the sit, for the mover...
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let (layout, _, frames, _) = sit_down(facing, 2);
+            for frame in &frames {
+                check(frame, &layout, true);
+            }
+            // ...the office around them once, a lit screen and a carried chair
+            // included...
+            check(frames.last().expect("a seated frame"), &layout, false);
+        }
+        // ...and offices big enough for the size-gated pieces, empty.
+        for (w, h) in [(240u16, 144u16), (100, 60)] {
+            let frame = FloorSession::new()
+                .observe(
+                    &pixtuoid_core::SceneState::uniform(16),
+                    &pack,
+                    w,
+                    h,
+                    FloorMeta::ground(),
+                    std::time::SystemTime::UNIX_EPOCH,
+                )
+                .expect("lays out");
+            let layout = Layout::compute_with_seed(w, h, None, FloorMeta::ground().floor_seed)
+                .expect("lays out");
+            check(&frame, &layout, false);
+        }
+        assert_eq!(
+            seen.into_iter().collect::<Vec<_>>(),
+            [
+                "appliance",
+                "chair",
+                "character",
+                "desk",
+                "prop",
+                "table",
+                "wall"
+            ],
+            "a piece kind went untested"
+        );
+    }
+
+    fn kind_name(kind: &PieceKind) -> &'static str {
+        match kind {
+            PieceKind::WallSeg { .. } => "wall",
+            PieceKind::Desk { .. } => "desk",
+            PieceKind::Chair { .. } => "chair",
+            PieceKind::Prop { .. } => "prop",
+            PieceKind::Table { .. } => "table",
+            PieceKind::Appliance { .. } => "appliance",
+            PieceKind::Character { .. } => "character",
+        }
+    }
+
+    /// The first logical pixel `kind` writes outside `span`, painted alone.
+    fn stray_pixel(
+        kind: &PieceKind,
+        span: Span,
+        frame: &SimFrame,
+        layout: &Layout,
+        pack: &Pack,
+        theme: &Theme,
+        scale: RenderScale,
+    ) -> Option<(u16, u16)> {
+        use pixtuoid_core::sprite::Rgb;
+        let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        let [a, b] = [
             Rgb { r: 0, g: 0, b: 0 },
             Rgb {
                 r: 255,
                 g: 255,
                 b: 255,
             },
-        ];
-        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let (layout, pack, frames, _) = sit_down(facing, 2);
-            for s in [1, 3, pack.max_density_variant()] {
-                let scale = RenderScale::new(s).expect("nonzero");
-                let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
-                for (n, frame) in frames.iter().enumerate() {
-                    // Every step of the walk and the sit for the mover; the office
-                    // around them once.
-                    let whole_office = n + 1 == frames.len();
-                    for (span, kind) in draw_list(frame, &layout, &pack, theme, scale) {
-                        if !whole_office && !matches!(kind, PieceKind::Character { .. }) {
-                            continue;
-                        }
-                        let [a, b] = fills.map(|fill| {
-                            let mut buf = RgbBuffer::filled(w, h, fill);
-                            let mut cache = crate::frame_cache::FrameCache::new();
-                            paint_piece(
-                                &kind,
-                                frame,
-                                &pack,
-                                theme,
-                                scale,
-                                std::time::SystemTime::UNIX_EPOCH,
-                                &mut cache,
-                                &mut buf,
-                            );
-                            buf
-                        });
-                        let stray = a
-                            .as_slice()
-                            .iter()
-                            .zip(b.as_slice())
-                            .enumerate()
-                            .filter(|(_, (pa, pb))| pa == pb)
-                            .map(|(i, _)| {
-                                let i = i as u32;
-                                let (x, y) = ((i % u32::from(w)) as u16, (i / u32::from(w)) as u16);
-                                (scale.logical(x), scale.logical(y))
-                            })
-                            .find(|&(x, y)| {
-                                !((span.x0..=span.x1).contains(&x)
-                                    && (span.y0..=span.y1).contains(&y))
-                            });
-                        assert_eq!(
-                            stray, None,
-                            "{kind:?} at scale {s} wrote logical pixel {stray:?} outside {span:?}"
-                        );
-                    }
-                }
-            }
-        }
+        ]
+        .map(|fill| {
+            let mut buf = RgbBuffer::filled(w, h, fill);
+            let mut cache = crate::frame_cache::FrameCache::new();
+            paint_piece(
+                kind,
+                frame,
+                pack,
+                theme,
+                scale,
+                std::time::SystemTime::UNIX_EPOCH,
+                &mut cache,
+                &mut buf,
+            );
+            buf
+        });
+        a.as_slice()
+            .iter()
+            .zip(b.as_slice())
+            .enumerate()
+            .filter(|(_, (pa, pb))| pa == pb)
+            .map(|(i, _)| {
+                let (x, y) = (i % usize::from(w), i / usize::from(w));
+                (scale.logical(x as u16), scale.logical(y as u16))
+            })
+            .find(|&(x, y)| !((span.x0..=span.x1).contains(&x) && (span.y0..=span.y1).contains(&y)))
     }
 
     /// Splitting is what makes the office above orderable, so pin it directly:
