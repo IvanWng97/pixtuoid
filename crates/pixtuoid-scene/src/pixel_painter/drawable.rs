@@ -278,7 +278,7 @@ pub(super) struct DrawableCtx<'a> {
 }
 
 /// The monitor bezel standing proud of the desk back, above `desk.y`.
-const DESK_BEZEL_RAISE: u16 = 1;
+pub(crate) const DESK_BEZEL_RAISE: u16 = 1;
 
 /// The base desk's pack animation, whose bottom row every desk's art keeps.
 pub(crate) const DESK_SPRITE: &str = "desk";

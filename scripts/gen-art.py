@@ -15,7 +15,7 @@ drawn here (a write deletes those).
 It resolves no colour itself: the engine owns the palette and its ramps, so look
 at the result through the real renderer: `cargo run --release --example
 cutaway_snapshot -- <out.png> --scale 8` for the `@8x` art, `cargo run --release
---example snapshot -- --crop-furniture <piece> <out.png>` for the 1x.
+--example snapshot -- --crop-furniture desk <out.png>` for the 1x desk.
 """
 
 import argparse
@@ -26,7 +26,7 @@ import random
 import sys
 import tempfile
 
-S = 8  # authoring density
+S = 8  # the cutaway art's density
 
 # ---- palette keys ---------------------------------------------------------
 # recolor bases and their shades (bases in [palette], shades in [ramps])
@@ -266,127 +266,153 @@ def chair():
     return g
 
 
-# ---- the raised back-turned desk -----------------------------------------------
-# ---- the desk: one layout, drawn at 1x (classic) and at `S` (cutaway) ------
-# Logical units, shared by both drawings so the `@8x` art is always exactly `S`
-# times the 1x it redraws (validate-pack rejects any other size).
+# ---- the desk: one skeleton, drawn at 1x (classic) and at `S` (cutaway) -----
+# Logical units. Both drawings scale every row and column below by their own
+# density, so the `@8x` art cannot drift from the 1x it redraws.
 #
-# The width is the desk's `FurnitureDef` visual width, pinned by
-# `desk_sprite_width_tracks_the_footprint_overhang`.
-DESK_W = 14
-# The viewer-facing desk. Its row 0 is the monitor rising a row above the
-# desk's back edge (the painter blits it at `desk.y - 1`).
-DESK_H = 9
-# The back-turned desk: two rows taller, all of them above, so the occupant
-# (who y-sorts in FRONT of the desk) leaves the upper screen row clear. Its
-# lower screen row sits inside the wood, flanked by it: the owner picked a
-# monitor standing on its desk over one floating clear of every head.
-DESK_NORTH_H = 11
+# Rust owns these facts; the copies here are pinned against the generated art
+# by `embedded_pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
+# `the_glow_lands_on_the_desk_arts_monitor`.
+#
+# The desk `FurnitureDef`'s visual width (`desk_sprite_width_tracks_the_footprint_overhang`).
+DESK_ART_W = 14
+# `pixel_painter::drawable`'s `DESK_BEZEL_RAISE`: the monitor's row above the wood.
+DESK_BEZEL_RAISE = 1
+# `layout`'s `DESK_SURFACE_ROWS`, `DESK_FRONT_ROWS`, `DESK_LEG_ROWS`.
+DESK_SURFACE_ROWS, DESK_FRONT_ROWS, DESK_LEG_ROWS = 5, 1, 2
+DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS
+# The back-turned desk's extra rows, all above, so the occupant (who y-sorts in
+# FRONT of the desk) leaves the upper screen row clear. Its lower screen row
+# sits inside the wood, flanked by it: the owner picked a monitor standing on
+# its desk over one floating clear of every head.
+DESK_NORTH_LIFT = 2
 DESK_LEG_W = 2
-# The monitor's columns, and its rows from the sprite's top: casing 0-1, glass
-# 2-3, chin 4 — where the classic painter's screen glow lands
-# (`pixel_painter::effects`'s `SCREEN_*`), so the art keeps each role there.
+# The monitor box: its columns (half-open), and from the sprite's top the first
+# glass row and the chin row — casing above the glass, glass down to the chin —
+# where the classic painter's glow lands (`pixel_painter::effects`'s `SCREEN_*`).
 DESK_MONITOR_X0, DESK_MONITOR_X1 = 3, 11
+DESK_GLASS_Y0, DESK_CHIN_Y = 2, 4
 
 
-def desk_1x(h, monitor_top):
+def desk_rows(lift):
+    """The wood's rows for a desk `lift` rows taller above: `(top, lip, legs,
+    height)`, the first rows of the surface, the front lip and the legs."""
+    top = DESK_BEZEL_RAISE + lift
+    lip = top + DESK_SURFACE_ROWS
+    legs = lip + DESK_FRONT_ROWS
+    return top, lip, legs, legs + DESK_LEG_ROWS
+
+
+def desk_1x(lift):
     """The classic desk's wood: a lit back edge, a bright front lip, and legs
     dark on their inner side, with open floor between them so the carpet and
-    anyone walking behind the desk show through. Both desks share these bottom
-    three rows. The props (lamp, mug, paper tower) are the classic painter's
-    live overlays, so the art draws none of them."""
-    g = canvas(DESK_W, h)
-    top, lip = monitor_top + 1 if monitor_top else 1, h - 3
-    rect(g, 0, top, DESK_W, lip, WOOD)
-    rect(g, 0, top, DESK_W, top + 1, WOOD_LT)
-    rect(g, 0, lip, DESK_W, lip + 1, WOOD_HI)
-    for x0, inner in ((0, DESK_LEG_W - 1), (DESK_W - DESK_LEG_W, DESK_W - DESK_LEG_W)):
-        rect(g, x0, lip + 1, x0 + DESK_LEG_W, h, WOOD_SH)
-        rect(g, inner, lip + 1, inner + 1, h, WOOD_DK)
+    anyone walking behind the desk show through. The props (lamp, mug, paper
+    tower) are the classic painter's live overlays, so the art draws none of
+    them."""
+    top, lip, legs, h = desk_rows(lift)
+    g = canvas(DESK_ART_W, h)
+    rect(g, 0, top, DESK_ART_W, lip, WOOD)
+    rect(g, 0, top, DESK_ART_W, top + 1, WOOD_LT)
+    rect(g, 0, lip, DESK_ART_W, legs, WOOD_HI)
+    for x0, inner in ((0, DESK_LEG_W - 1), (DESK_ART_W - DESK_LEG_W, DESK_ART_W - DESK_LEG_W)):
+        rect(g, x0, legs, x0 + DESK_LEG_W, h, WOOD_SH)
+        rect(g, inner, legs, inner + 1, h, WOOD_DK)
     return g
+
+
+def monitor_stand_1x(g):
+    """The chin under the monitor, the stand's shadow either side of it."""
+    rect(g, DESK_MONITOR_X0 + 1, DESK_CHIN_Y, DESK_MONITOR_X1 - 1, DESK_CHIN_Y + 1, BEZEL)
+    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
+        put(g, x, DESK_CHIN_Y, SHADOW)
 
 
 def desk_south_1x():
     """The viewer-facing desk at 1x: the monitor's back, lit along its top
-    edge, on a stand throwing a shadow either side. Its glass rows stay casing:
-    a viewer-facing seat never shows a screen, though the glow still lights
-    them where a pack ships no `desk_north` and this art stands in for it."""
-    g = desk_1x(DESK_H, 0)
-    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 4, BEZEL)
+    edge. Its glass rows stay casing: a viewer-facing seat never shows a
+    screen, though the glow still lights them where a pack ships no
+    `desk_north` and this art stands in for it."""
+    g = desk_1x(0)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, DESK_CHIN_Y, BEZEL)
     rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
-    rect(g, DESK_MONITOR_X0 + 1, 4, DESK_MONITOR_X1 - 1, 5, BEZEL)
-    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
-        put(g, x, 4, SHADOW)
+    monitor_stand_1x(g)
     return g
 
 
 def desk_north_1x():
-    """The back-turned desk at 1x: the raised monitor shows its glass, dim
-    lines of text on it, and a keyboard sits in front of the stand."""
-    g = desk_1x(DESK_NORTH_H, 2)
-    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 4, BEZEL)
-    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
-    rect(g, DESK_MONITOR_X0 + 1, 2, DESK_MONITOR_X1 - 1, 4, GLASS)
-    for x, y in ((5, 2), (6, 2), (8, 2), (6, 3), (7, 3)):
-        put(g, x, y, GLASS_TXT)
-    rect(g, DESK_MONITOR_X0 + 1, 4, DESK_MONITOR_X1 - 1, 5, BEZEL)
-    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
-        put(g, x, 4, SHADOW)
-    rect(g, DESK_MONITOR_X0 + 1, 5, DESK_MONITOR_X1 - 1, 6, GREY)
-    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
-        put(g, x, 5, KEY_DK)
+    """The back-turned desk at 1x: the raised monitor, its casing outlined in
+    grey so it reads against a dark carpet, two lines of dim text on its glass,
+    and a keyboard a row clear of the stand so the two never merge into one
+    dark base."""
+    g = desk_1x(DESK_NORTH_LIFT)
+    x0, x1 = DESK_MONITOR_X0, DESK_MONITOR_X1
+    rect(g, x0, 0, x1, DESK_CHIN_Y, SLATE)
+    rect(g, x0 + 1, 1, x1 - 1, DESK_CHIN_Y, BEZEL)
+    rect(g, x0 + 1, DESK_GLASS_Y0, x1 - 1, DESK_CHIN_Y, GLASS)
+    rect(g, x0 + 2, DESK_GLASS_Y0, x0 + 6, DESK_GLASS_Y0 + 1, GLASS_TXT)
+    rect(g, x0 + 2, DESK_GLASS_Y0 + 1, x0 + 4, DESK_GLASS_Y0 + 2, GLASS_TXT)
+    monitor_stand_1x(g)
+    keys = DESK_CHIN_Y + 2
+    rect(g, x0 + 1, keys, x1 - 1, keys + 1, GREY)
+    for x in (x0 + 1, x1 - 2):
+        put(g, x, keys, KEY_DK)
     return g
 
 
+# ---- the raised back-turned desk -----------------------------------------------
 def desk_north():
-    w, h = DESK_W * S, DESK_NORTH_H * S
+    top, lip, legs, rows = desk_rows(DESK_NORTH_LIFT)
+    w, h = DESK_ART_W * S, rows * S
+    ty, ly, gy, leg = top * S, lip * S, legs * S, DESK_LEG_W * S
+    mx0, mx1, chin = DESK_MONITOR_X0 * S, DESK_MONITOR_X1 * S, DESK_CHIN_Y * S
+    mid = (mx0 + mx1) // 2
     g = canvas(w, h)
     rng = random.Random(3)
-    # top surface, boards running left-right: the base's rows 3 to 7
-    rect(g, 0, 24, w, 64, WOOD)
-    for y in range(24, 64):
-        if (y - 24) % 12 == 0:
+    # top surface, boards running left-right
+    rect(g, 0, ty, w, ly, WOOD)
+    for y in range(ty, ly):
+        if (y - ty) % 12 == 0:
             rect(g, 0, y, w, y + 1, WOOD_SH)
     for _ in range(26):
-        y = rng.randrange(25, 63)
-        if (y - 24) % 12 == 0:
+        y = rng.randrange(ty + 1, ly - 1)
+        if (y - ty) % 12 == 0:
             continue
         x0 = rng.randrange(0, w - 8)
         rect(g, x0, y, min(w, x0 + rng.randrange(8, 26)), y + 1,
              WOOD_SH if rng.random() < 0.6 else WOOD_LT)
-    rect(g, 0, 24, w, 25, WOOD_LT)
+    rect(g, 0, ty, w, ty + 1, WOOD_LT)
     # the lamp's warm pool on the east wing
-    for y in range(26, 64):
+    for y in range(ty + 2, ly):
         for x in range(64, w):
             d = math.hypot((x - 100) / 30, (y - 44) / 18)
             if d < 1 and g[y][x] == WOOD:
                 g[y][x] = POOL if d < 0.55 else WOOD_LT
-    # front lip and legs: the base's rows 8 to 10
-    rect(g, 0, 64, w, 72, WOOD)
-    rect(g, 0, 64, w, 66, WOOD_HI)
-    rect(g, 0, 70, w, 72, WOOD_SH)
-    rect(g, 0, 72, 16, 88, WOOD_SH)
-    rect(g, 96, 72, w, 88, WOOD_SH)
-    rect(g, 14, 72, 16, 88, WOOD_DK)
-    rect(g, 96, 72, 98, 88, WOOD_DK)
+    # front lip and legs
+    rect(g, 0, ly, w, gy, WOOD)
+    rect(g, 0, ly, w, ly + 2, WOOD_HI)
+    rect(g, 0, gy - 2, w, gy, WOOD_SH)
+    rect(g, 0, gy, leg, h, WOOD_SH)
+    rect(g, w - leg, gy, w, h, WOOD_SH)
+    rect(g, leg - 2, gy, leg, h, WOOD_DK)
+    rect(g, w - leg, gy, w - leg + 2, h, WOOD_DK)
     # monitor on a stand, raised above the desk's back edge
-    rect(g, 24, 1, 88, 31, BEZEL)
-    rect(g, 24, 1, 88, 2, SLATE)
-    rect(g, 24, 30, 88, 31, SHADOW)
-    rect(g, 27, 4, 85, 28, GLASS)
-    for i, (x0, ln) in enumerate(((31, 22), (31, 30), (35, 18), (35, 26), (31, 12), (35, 32), (31, 20))):
-        rect(g, x0, 7 + i * 3, x0 + ln, 8 + i * 3, GLASS_TXT)
-    rect(g, 52, 31, 60, 36, SHADOW)
-    rect(g, 44, 35, 68, 38, BEZEL)
-    rect(g, 44, 35, 68, 36, SLATE)
+    rect(g, mx0, 1, mx1, chin - 1, BEZEL)
+    rect(g, mx0, 1, mx1, 2, SLATE)
+    rect(g, mx0, chin - 2, mx1, chin - 1, SHADOW)
+    rect(g, mx0 + 3, 4, mx1 - 3, chin - 4, GLASS)
+    for i, (dx, ln) in enumerate(((7, 22), (7, 30), (11, 18), (11, 26), (7, 12), (11, 32), (7, 20))):
+        rect(g, mx0 + dx, 7 + i * 3, mx0 + dx + ln, 8 + i * 3, GLASS_TXT)
+    rect(g, mid - 4, chin - 1, mid + 4, chin + 4, SHADOW)
+    rect(g, mid - 12, chin + 3, mid + 12, chin + 6, BEZEL)
+    rect(g, mid - 12, chin + 3, mid + 12, chin + 4, SLATE)
     # keyboard and mouse
-    rect(g, 32, 40, 80, 47, KEY_DK)
+    rect(g, mx0 + 8, 40, mx1 - 8, 47, KEY_DK)
     for ky in (41, 43, 45):
-        for kx in range(33, 79, 3):
+        for kx in range(mx0 + 9, mx1 - 9, 3):
             rect(g, kx, ky, kx + 2, ky + 1, KEYCAP)
-    rect(g, 32, 40, 80, 41, GREY)
-    rect(g, 84, 41, 89, 47, KEYCAP)
-    rect(g, 84, 41, 89, 42, GREY)
+    rect(g, mx0 + 8, 40, mx1 - 8, 41, GREY)
+    rect(g, mx1 - 4, 41, mx1 + 1, 47, KEYCAP)
+    rect(g, mx1 - 4, 41, mx1 + 1, 42, GREY)
     # desk lamp on the east wing: weighted base, jointed arm, cone shade
     rect(g, 95, 46, 109, 51, LAMP)
     rect(g, 95, 46, 109, 47, LAMP_HI)
@@ -412,6 +438,74 @@ def desk_north():
     rect(g, 8, 52, 17, 54, MUG_SH)
     rect(g, 17, 55, 19, 59, MUG_SH)
     outline(g, {BEZEL, SLATE, GLASS, GLASS_TXT}, SHADOW)
+    return g
+
+
+# ---- the viewer-facing desk: the monitor's BACK --------------------------------
+def desk_south():
+    top, lip, legs, rows = desk_rows(0)
+    w, h = DESK_ART_W * S, rows * S
+    ty, ly, gy, leg = top * S, lip * S, legs * S, DESK_LEG_W * S
+    mx0, mx1, chin = DESK_MONITOR_X0 * S, DESK_MONITOR_X1 * S, DESK_CHIN_Y * S
+    mid = (mx0 + mx1) // 2
+    g = canvas(w, h)
+    rng = random.Random(5)
+    # top surface, boards left-right
+    rect(g, 0, ty, w, ly, WOOD)
+    for y in range(ty, ly):
+        if (y - ty) % 12 == 0:
+            rect(g, 0, y, w, y + 1, WOOD_SH)
+    for _ in range(22):
+        y = rng.randrange(ty + 1, ly - 1)
+        if (y - ty) % 12 == 0:
+            continue
+        x0 = rng.randrange(0, w - 8)
+        rect(g, x0, y, min(w, x0 + rng.randrange(8, 24)), y + 1,
+             WOOD_SH if rng.random() < 0.6 else WOOD_LT)
+    rect(g, 0, ty, w, ty + 1, WOOD_LT)
+    # lamp pool on the west wing
+    for y in range(ty + 2, ly):
+        for x in range(0, 48):
+            d = math.hypot((x - 12) / 28, (y - 26) / 17)
+            if d < 1 and g[y][x] == WOOD:
+                g[y][x] = POOL if d < 0.55 else WOOD_LT
+    # front lip and legs
+    rect(g, 0, ly, w, gy, WOOD)
+    rect(g, 0, ly, w, ly + 2, WOOD_HI)
+    rect(g, 0, gy - 2, w, gy, WOOD_SH)
+    rect(g, 0, gy, leg, h, WOOD_SH)
+    rect(g, w - leg, gy, w, h, WOOD_SH)
+    rect(g, leg - 2, gy, leg, h, WOOD_DK)
+    rect(g, w - leg, gy, w - leg + 2, h, WOOD_DK)
+    # the monitor's back: casing, a vent grille and a badge, on a stand
+    rect(g, mx0, 0, mx1, chin - 2, BEZEL)
+    rect(g, mx0, 0, mx1, 1, SLATE)
+    rect(g, mx0, 1, mx0 + 1, chin - 2, SLATE)
+    rect(g, mx0, chin - 4, mx1, chin - 2, SHADOW)
+    for vy in range(6, 14, 2):
+        rect(g, mx0 + 10, vy, mx1 - 10, vy + 1, SHADOW)
+    rect(g, mid - 4, 18, mid + 4, 22, SLATE)
+    rect(g, mid - 4, chin - 2, mid + 4, chin + 4, SHADOW)
+    rect(g, mid - 14, chin + 3, mid + 14, chin + 7, BEZEL)
+    rect(g, mid - 14, chin + 3, mid + 14, chin + 4, SLATE)
+    # desk lamp on the west wing, shade toward the occupant's side
+    rect(g, 3, 32, 17, 37, LAMP)
+    rect(g, 3, 32, 17, 33, LAMP_HI)
+    for t in range(16):
+        rect(g, 10 + t // 5, 31 - t, 12 + t // 5, 32 - t, LAMP_HI if t % 5 else LAMP)
+    rect(g, 11, 12, 15, 16, LAMP)
+    for i in range(7):
+        rect(g, 12 - i // 2, 6 + i, 22 + i // 2, 7 + i, LAMP if i else LAMP_HI)
+    rect(g, 11, 13, 23, 14, BULB)
+    # a paper stack and a mug on the east wing
+    rect(g, 92, 18, 109, 34, OFFWHITE_SH)
+    rect(g, 91, 17, 108, 32, OFFWHITE)
+    for i in range(4):
+        rect(g, 93, 20 + i * 3, 104 - (i % 2) * 4, 21 + i * 3, PRINT)
+    rect(g, 94, 37, 103, 46, MUG)
+    rect(g, 94, 37, 103, 39, MUG_SH)
+    rect(g, 103, 40, 105, 44, MUG_SH)
+    outline(g, {BEZEL, SLATE}, SHADOW)
     return g
 
 
@@ -516,70 +610,6 @@ def figure_front(height, hands):
     outline(g, {HAIR, HAIR_SH, HAIR_LT, HAIR_HI}, HAIR_OUT)
     outline(g, {SHIRT, SHIRT_SH, SHIRT_LT, WHITE, WHITE_SH}, SHIRT_OUT)
     outline(g, {SKIN, SKIN_SH, SKIN_DK}, OUTLINE)
-    return g
-
-
-# ---- the viewer-facing desk: the monitor's BACK --------------------------------
-def desk_south():
-    w, h = DESK_W * S, DESK_H * S
-    g = canvas(w, h)
-    rng = random.Random(5)
-    # top surface, boards left-right: the base's rows 1 to 5
-    rect(g, 0, 8, w, 48, WOOD)
-    for y in range(8, 48):
-        if (y - 8) % 12 == 0:
-            rect(g, 0, y, w, y + 1, WOOD_SH)
-    for _ in range(22):
-        y = rng.randrange(9, 47)
-        if (y - 8) % 12 == 0:
-            continue
-        x0 = rng.randrange(0, w - 8)
-        rect(g, x0, y, min(w, x0 + rng.randrange(8, 24)), y + 1,
-             WOOD_SH if rng.random() < 0.6 else WOOD_LT)
-    rect(g, 0, 8, w, 9, WOOD_LT)
-    # lamp pool on the west wing
-    for y in range(10, 48):
-        for x in range(0, 48):
-            d = math.hypot((x - 12) / 28, (y - 26) / 17)
-            if d < 1 and g[y][x] == WOOD:
-                g[y][x] = POOL if d < 0.55 else WOOD_LT
-    # front lip and legs: the base's rows 6 to 8
-    rect(g, 0, 48, w, 56, WOOD)
-    rect(g, 0, 48, w, 50, WOOD_HI)
-    rect(g, 0, 54, w, 56, WOOD_SH)
-    rect(g, 0, 56, 16, 72, WOOD_SH)
-    rect(g, 96, 56, w, 72, WOOD_SH)
-    rect(g, 14, 56, 16, 72, WOOD_DK)
-    rect(g, 96, 56, 98, 72, WOOD_DK)
-    # the monitor's back: casing, a vent grille and a badge, on a stand
-    rect(g, 24, 0, 88, 30, BEZEL)
-    rect(g, 24, 0, 88, 1, SLATE)
-    rect(g, 24, 1, 25, 30, SLATE)
-    rect(g, 24, 28, 88, 30, SHADOW)
-    for vy in range(6, 14, 2):
-        rect(g, 34, vy, 78, vy + 1, SHADOW)
-    rect(g, 52, 18, 60, 22, SLATE)
-    rect(g, 52, 30, 60, 36, SHADOW)
-    rect(g, 42, 35, 70, 39, BEZEL)
-    rect(g, 42, 35, 70, 36, SLATE)
-    # desk lamp on the west wing, shade toward the occupant's side
-    rect(g, 3, 32, 17, 37, LAMP)
-    rect(g, 3, 32, 17, 33, LAMP_HI)
-    for t in range(16):
-        rect(g, 10 + t // 5, 31 - t, 12 + t // 5, 32 - t, LAMP_HI if t % 5 else LAMP)
-    rect(g, 11, 12, 15, 16, LAMP)
-    for i in range(7):
-        rect(g, 12 - i // 2, 6 + i, 22 + i // 2, 7 + i, LAMP if i else LAMP_HI)
-    rect(g, 11, 13, 23, 14, BULB)
-    # a paper stack and a mug on the east wing
-    rect(g, 92, 18, 109, 34, OFFWHITE_SH)
-    rect(g, 91, 17, 108, 32, OFFWHITE)
-    for i in range(4):
-        rect(g, 93, 20 + i * 3, 104 - (i % 2) * 4, 21 + i * 3, PRINT)
-    rect(g, 94, 37, 103, 46, MUG)
-    rect(g, 94, 37, 103, 39, MUG_SH)
-    rect(g, 103, 40, 105, 44, MUG_SH)
-    outline(g, {BEZEL, SLATE}, SHADOW)
     return g
 
 
@@ -1399,12 +1429,8 @@ def main():
     }
     classic = {
         "desk": ("The viewer-facing desk: the monitor's back on its stand, the wood lit\nalong its back edge and front lip.", [desk_south_1x()]),
-        "desk_north": ("The back-turned desk: its raised monitor's glass with dim text, a\nkeyboard before the stand.", [desk_north_1x()]),
+        "desk_north": ("The back-turned desk: its raised monitor outlined in grey, dim text on\nthe glass, a keyboard a row clear of the stand.", [desk_north_1x()]),
     }
-    for base, (_, frames) in classic.items():
-        if base in pieces:
-            small, big = frames[0], pieces[base][1][0]
-            assert (len(big[0]), len(big)) == (S * len(small[0]), S * len(small)), base
     sprites = {
         f"{base}@{S}x.sprite": render_sprite(header, frames)
         for base, (header, frames) in pieces.items()

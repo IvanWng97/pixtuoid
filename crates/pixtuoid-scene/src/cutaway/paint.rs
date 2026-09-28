@@ -1632,9 +1632,8 @@ mod tests {
     /// Pins the screen keys ([`SCREEN_GLASS_KEY`](crate::pixel_painter::SCREEN_GLASS_KEY),
     /// [`SCREEN_TEXT_KEY`](crate::pixel_painter::SCREEN_TEXT_KEY)) to the bundled
     /// art: the raised desk a back-turned sitter works at must light its glass
-    /// at every density the pack draws it, and its text in the density variants
-    /// (the base grid has no room for text), or a key names nothing and that
-    /// screen never lights.
+    /// and its text at every density the pack draws it, or a key names nothing
+    /// and that screen never lights.
     #[test]
     #[cfg(feature = "density-art")]
     fn the_bundled_back_turned_desk_draws_its_screen_in_the_screen_keys() {
@@ -1648,15 +1647,12 @@ mod tests {
         let glass_and_text = [SCREEN_GLASS_LEVEL, SCREEN_TEXT_LEVEL];
         let variants = (2..=pack.max_density_variant())
             .map(|d| pixtuoid_core::sprite::format::density_variant_name(art, d))
-            .filter(|n| pack.animation(n).is_some())
-            .map(|n| (n, &glass_and_text[..]));
+            .filter(|n| pack.animation(n).is_some());
         let mut drawn = 0;
-        for (name, levels) in
-            std::iter::once((art.to_string(), &glass_and_text[..1])).chain(variants)
-        {
+        for name in std::iter::once(art.to_string()).chain(variants) {
             let anim = pack.animation(&name).expect("the bundled pack ships it");
             let lit = relight_screen(anim.recolorable(0).expect("frame 0"), sentinel);
-            for &level in levels {
+            for level in glass_and_text {
                 assert!(
                     lit.as_slice().contains(&Some(sentinel.ramp(level))),
                     "{name} has no pixel lit at level {level}"
@@ -1668,6 +1664,31 @@ mod tests {
             drawn > 1,
             "the bundled pack ships a density variant of {art}"
         );
+    }
+
+    /// A base desk's derived face is its bottom row's material, and the bundled
+    /// legs tie their shadow against their dark inner side: the tie breaks
+    /// west-first, onto the shadow wood. An art edit that flips it recolours
+    /// every base-art face in the cutaway and nothing else notices.
+    #[test]
+    fn a_bundled_base_desks_face_is_its_shadow_wood() {
+        let pack = pack();
+        let shadow = pack
+            .palette()
+            .get('d')
+            .flatten()
+            .expect("`d` is the desk's opaque shadow wood");
+        for name in ["desk", "desk_north"] {
+            let f = pack
+                .animation(name)
+                .and_then(|a| a.frames().first())
+                .unwrap_or_else(|| panic!("the bundled pack ships {name}"));
+            assert_eq!(
+                dominant_opaque_row(f, f.height() - 1),
+                Some(shadow),
+                "{name}'s derived face"
+            );
+        }
     }
 
     /// The bundled office with one editing agent homed at its first desk facing
