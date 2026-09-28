@@ -360,13 +360,33 @@ fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> SystemTime {
     std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(secs).expect("after 1970"))
 }
 
-/// The phase lands on every 2026 new and full moon in NASA GSFC's "Phases of the
-/// Moon 2001 to 2100" (<https://eclipse.gsfc.nasa.gov/phase/phases2001.html>,
-/// Universal Time). A true lunation strays from the mean one by under a day, and
-/// the tolerance is the illuminated fraction a one-day miss leaves.
+/// How far a true lunation strays from the mean one: under a day.
+const MAX_MISS_DAYS: f32 = 1.0;
+
+/// 2026's full moons, `(month, day, hour, minute)` UTC, from NASA GSFC's "Phases
+/// of the Moon 2001 to 2100"
+/// (<https://eclipse.gsfc.nasa.gov/phase/phases2001.html>, Universal Time).
+const FULL_MOONS_2026: [(u32, u32, u32, u32); 13] = [
+    (1, 3, 10, 3),
+    (2, 1, 22, 9),
+    (3, 3, 11, 38),
+    (4, 2, 2, 12),
+    (5, 1, 17, 23),
+    (5, 31, 8, 45),
+    (6, 29, 23, 57),
+    (7, 29, 14, 36),
+    (8, 28, 4, 18),
+    (9, 26, 16, 49),
+    (10, 26, 4, 12),
+    (11, 24, 14, 53),
+    (12, 24, 1, 28),
+];
+
+/// The phase lands on every 2026 new and full moon in the same NASA table as
+/// [`FULL_MOONS_2026`]; the tolerance is the illuminated fraction a
+/// [`MAX_MISS_DAYS`] miss leaves.
 #[test]
 fn the_moon_phase_lands_on_published_lunations() {
-    const MAX_MISS_DAYS: f32 = 1.0;
     let tolerance = (1.0 - (std::f32::consts::TAU * MAX_MISS_DAYS / SYNODIC_DAYS).cos()) / 2.0;
     let new_moons = [
         (1, 18, 19, 52),
@@ -386,22 +406,7 @@ fn the_moon_phase_lands_on_published_lunations() {
         let lit = moon_phase_at(utc(2026, mo, d, h, mi));
         assert!(lit < tolerance, "new moon 2026-{mo}-{d} {h}:{mi} lit {lit}");
     }
-    let full_moons = [
-        (1, 3, 10, 3),
-        (2, 1, 22, 9),
-        (3, 3, 11, 38),
-        (4, 2, 2, 12),
-        (5, 1, 17, 23),
-        (5, 31, 8, 45),
-        (6, 29, 23, 57),
-        (7, 29, 14, 36),
-        (8, 28, 4, 18),
-        (9, 26, 16, 49),
-        (10, 26, 4, 12),
-        (11, 24, 14, 53),
-        (12, 24, 1, 28),
-    ];
-    for (mo, d, h, mi) in full_moons {
+    for (mo, d, h, mi) in FULL_MOONS_2026 {
         let lit = moon_phase_at(utc(2026, mo, d, h, mi));
         assert!(
             lit > 1.0 - tolerance,
@@ -441,6 +446,20 @@ fn the_moon_waxes_to_full_and_wanes_after() {
         assert!(
             !Sky::at(utc(2026, mo, d, h, mi)).moon_waxing(),
             "last quarter 2026-{mo}-{d} {h}:{mi} wanes"
+        );
+    }
+    // The flip itself sits within a miss of every full moon, not just somewhere
+    // between the quarters.
+    let miss = std::time::Duration::from_secs_f32(MAX_MISS_DAYS * 86_400.0);
+    for (mo, d, h, mi) in FULL_MOONS_2026 {
+        let full = utc(2026, mo, d, h, mi);
+        assert!(
+            Sky::at(full - miss).moon_waxing(),
+            "waxes a miss before full 2026-{mo}-{d}"
+        );
+        assert!(
+            !Sky::at(full + miss).moon_waxing(),
+            "wanes a miss after full 2026-{mo}-{d}"
         );
     }
 }
