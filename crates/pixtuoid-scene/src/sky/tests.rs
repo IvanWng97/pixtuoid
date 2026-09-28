@@ -14,27 +14,18 @@ fn night_on(day: u32) -> SystemTime {
 }
 
 #[test]
-fn weather_state_emits_every_variant_within_a_week() {
+fn the_clock_picks_every_weather_within_a_week() {
     use std::collections::HashSet;
     use std::time::Duration;
     let start = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let mut seen: HashSet<Weather> = HashSet::new();
-    for slot in 0..(7u64 * 24 * 6) {
-        seen.insert(weather_at(start + Duration::from_secs(slot * 600)));
-    }
-    for w in [
-        Weather::Clear,
-        Weather::Rain,
-        Weather::Storm,
-        Weather::Snow,
-        Weather::Fog,
-        Weather::Overcast,
-        Weather::Windy,
-        Weather::Smog,
-    ] {
+    const WEEK_SECS: u64 = 7 * 24 * 3600;
+    let seen: HashSet<Weather> = (0..WEEK_SECS / WEATHER_CYCLE_SECS)
+        .map(|slot| weather_at(start + Duration::from_secs(slot * WEATHER_CYCLE_SECS)))
+        .collect();
+    for w in Weather::ALL {
         assert!(
             seen.contains(&w),
-            "weather_state never emitted {w:?} in a week of slots"
+            "the clock never picked {w:?} in a week of slots"
         );
     }
 }
@@ -288,4 +279,30 @@ fn the_weather_is_deterministic_and_changes_across_slots() {
     assert_eq!(weather_at(at(17)), weather_at(at(17)));
     let unique: std::collections::HashSet<_> = (0..20).map(|slot| weather_at(at(slot))).collect();
     assert!(unique.len() >= 2, "weather should vary across slots");
+}
+
+/// The clock-to-strike composition the painter tests no longer drive: they set
+/// the flash on the [`Sky`] directly.
+#[test]
+fn a_strike_flashes_at_its_bucket_offset_and_ends_with_the_flash() {
+    for bucket in 0..24u64 {
+        let off = strike_offset(bucket);
+        let at = |ms: u64| {
+            std::time::UNIX_EPOCH
+                + std::time::Duration::from_millis(bucket * LIGHTNING_PERIOD_MS + ms)
+        };
+        assert_eq!(
+            flash_level_at(at(off)),
+            lightning_envelope(0),
+            "bucket {bucket}"
+        );
+        assert_eq!(
+            flash_level_at(at(off + LIGHTNING_FLASH_MS)),
+            0.0,
+            "bucket {bucket}"
+        );
+        if off > 0 {
+            assert_eq!(flash_level_at(at(off - 1)), 0.0, "bucket {bucket}");
+        }
+    }
 }

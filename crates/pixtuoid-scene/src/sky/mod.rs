@@ -77,8 +77,8 @@ pub(crate) fn set_weather_override(w: Option<Weather>) {
 /// How long one weather holds before the next slot picks again.
 const WEATHER_CYCLE_SECS: u64 = 600;
 
-/// splitmix64's increment, applied before the finalizer so consecutive slot
-/// indices land far apart.
+/// splitmix64's increment, applied before the finalizer so consecutive inputs
+/// land far apart.
 const SPLITMIX64_GAMMA: u64 = 0x9e37_79b9_7f4a_7c15;
 
 /// The weather at `now`: one hashed pick per [`WEATHER_CYCLE_SECS`] slot.
@@ -104,7 +104,8 @@ fn weather_at(now: SystemTime) -> Weather {
 }
 
 // Weights folding the two transmission channels into one interior illuminance,
-// calibrated so a CLEAR noon lands at full brightness (K_BEAM + 0.55·K_FILL ≈ 1).
+// calibrated so a CLEAR noon lands at full brightness
+// (`K_BEAM + atmo(Clear).diffuse · K_FILL ≈ 1`).
 const K_BEAM: f32 = 0.70;
 const K_FILL: f32 = 0.55;
 // Max window-spill horizontal lean (px/row) at the low-sun extremes.
@@ -234,7 +235,7 @@ fn emitter_at(now: SystemTime, moon_phase: f32) -> Emitter {
     let (rise, set) = if is_day {
         (SUN_RISE_H, SUN_SET_H)
     } else {
-        // Night span wraps midnight: dusk(20:00) -> next dawn(05:00) = 9h.
+        // The night span wraps midnight: dusk to the next dawn.
         (SUN_SET_H, SUN_RISE_H + 24.0)
     };
     let h_lin = if is_day || h >= SUN_SET_H {
