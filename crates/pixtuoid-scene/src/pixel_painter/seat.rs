@@ -33,38 +33,109 @@ pub(crate) fn character_frame<'c>(
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
     let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
+    let key = character_key_at(
+        dense.density,
+        anim_name,
+        frame_idx,
+        agent,
+        flip_x,
+        glow_tint,
+        now,
+    );
+    Some(recolor(dense, &key, cache))
+}
+
+/// [`character_frame`] for a [`CharacterKey`] resolved at `scale`.
+pub(crate) fn keyed_character_frame<'c>(
+    key: &CharacterKey,
+    pack: &Pack,
+    scale: crate::render_scale::RenderScale,
+    cache: &'c mut FrameCache,
+) -> Option<CharacterFrame<'c>> {
+    let dense = super::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
+    Some(recolor(dense, key, cache))
+}
+
+fn recolor<'c>(
+    dense: super::dense::DenseFrame<'_>,
+    key: &CharacterKey,
+    cache: &'c mut FrameCache,
+) -> CharacterFrame<'c> {
+    let (burn, flip_x) = (key.frame.burn, key.frame.flip_x);
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
-    cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
+    cache.note_outfit_seed(key.frame.agent_id, key.outfit);
+    let frame = cache.get_or_make(key.frame.clone(), || {
+        let recolored = dense.recolorable.recolored(&key.palette);
+        if flip_x {
+            // HORIZONTAL: `flip_x` is which way the character FACES.
+            recolored.mirror_horizontal()
+        } else {
+            recolored
+        }
+    });
+    CharacterFrame {
+        frame,
+        burn,
+        logical: dense.logical,
+        blit_at: dense.blit_at,
+    }
+}
+
+/// Every input [`character_frame`] recolors from: the cache's key, the outfit
+/// seed the cache drops an agent's entries on, and the palette itself. Within
+/// one pack, two equal keys recolor to the same frame.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CharacterKey {
+    pub(crate) frame: crate::frame_cache::FrameKey,
+    pub(crate) outfit: u64,
+    /// The agent's colours, resolved: the recolor reads nothing of the agent
+    /// beyond what this and `frame` carry.
+    palette: [(char, pixtuoid_core::sprite::Pixel); 4],
+}
+
+/// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
+/// draws nothing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn character_key(
+    anim_name: &'static str,
+    frame_idx: usize,
+    agent: &AgentSlot,
+    pack: &Pack,
+    flip_x: bool,
+    glow_tint: Option<Rgb>,
+    scale: crate::render_scale::RenderScale,
+    now: SystemTime,
+) -> Option<CharacterKey> {
+    let density = super::densest_frame(pack, anim_name, frame_idx, scale)?.density;
+    Some(character_key_at(
+        density, anim_name, frame_idx, agent, flip_x, glow_tint, now,
+    ))
+}
+
+fn character_key_at(
+    density: std::num::NonZeroU16,
+    anim_name: &'static str,
+    frame_idx: usize,
+    agent: &AgentSlot,
+    flip_x: bool,
+    glow_tint: Option<Rgb>,
+    now: SystemTime,
+) -> CharacterKey {
     let burn = crate::burn::slot_burn_tier(agent, now);
-    let frame = cache.get_or_make(
-        crate::frame_cache::FrameKey {
+    CharacterKey {
+        frame: crate::frame_cache::FrameKey {
             agent_id: agent.agent_id,
             anim_name,
             frame_idx,
             flip_x,
             glow_tint,
             burn,
-            density: dense.density,
+            density,
         },
-        || {
-            let recolored = dense
-                .recolorable
-                .recolored(&agent_overrides(agent, glow_tint, burn));
-            if flip_x {
-                // HORIZONTAL: `flip_x` is which way the character FACES.
-                recolored.mirror_horizontal()
-            } else {
-                recolored
-            }
-        },
-    );
-    Some(CharacterFrame {
-        frame,
-        burn,
-        logical: dense.logical,
-        blit_at: dense.blit_at,
-    })
+        outfit: outfit_seed_for(agent),
+        palette: agent_overrides(agent, glow_tint, burn),
+    }
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked

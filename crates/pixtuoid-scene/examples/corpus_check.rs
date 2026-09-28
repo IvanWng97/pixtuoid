@@ -1,9 +1,9 @@
 //! Corpus check — real transcripts in, "did we parse it AND would the UI show
 //! it" out, for the whole corpus on the machine. The ONE shell that closes the
 //! loop to the render layer: `harness::Drive` (decode → reduce) →
-//! `FloorSession::observe`, whose `characters` are the fully resolved sprites
-//! the painter would draw. The first half is the shared pipeline every other
-//! driver runs, so a difference here is a difference in the BYTES.
+//! `FloorSession::observe`, whose frame's `characters` are the fully resolved
+//! sprites the painter would draw. The first half is the shared pipeline every
+//! other driver runs, so a difference here is a difference in the BYTES.
 //!
 //! It REPORTS rather than asserts. Corpus content is unbounded and partly
 //! historical, so a failing file is not automatically a bug — the value is the
@@ -118,8 +118,14 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     // verdict.
     let mut session = FloorSession::new();
     v.drawn = session
-        .observe(&driven.scene, pack, 192, 80, FloorMeta::ground(), now())
-        .map_or(0, |frame| frame.characters.len());
+        .observe(
+            &driven.scene,
+            pack,
+            pixtuoid_scene::layout::Size { w: 192, h: 80 },
+            FloorMeta::ground(),
+            now(),
+        )
+        .map_or(0, |observed| observed.frame.characters.len());
     v
 }
 

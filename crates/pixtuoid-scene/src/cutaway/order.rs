@@ -36,7 +36,7 @@
 /// bounds meet a damaged rect is only complete if nothing a piece draws falls
 /// outside its own. The depth is a separate fact: a person sorts on the sim's
 /// z-key, which is not the south edge of what they paint.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Span {
     /// Westmost column.
     pub x0: u16,
