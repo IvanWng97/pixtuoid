@@ -182,8 +182,9 @@ mod tests {
 
     #[test]
     fn outcome_envelope_is_the_id_outcome_raycast_contract() {
-        // Raycast is not the only consumer: homebrew-core's formula `test do`
-        // parses `connect claude-code --json` and asserts the row equals
+        // Raycast is not the only consumer. homebrew-core contract: the
+        // formula's `test do` parses `connect claude-code --json` and asserts
+        // the row equals
         // `{"id" => "claude-code", "outcome" => "connected"}`. Reshaping this
         // envelope breaks Homebrew's CI on the next autobump.
         let rows = vec![

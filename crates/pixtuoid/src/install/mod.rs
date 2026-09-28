@@ -7,7 +7,8 @@ pub(crate) mod hermes;
 mod hook_cmd;
 pub(crate) mod kimi;
 // `io` holds the config-write authority (invariant #4), which must never be
-// cross-crate reachable — only its env filters (below) are re-exported.
+// cross-crate reachable — only its env filters and owner-only file-mode
+// helpers (below) are re-exported.
 pub(crate) mod io;
 pub use io::{nonempty, nonempty_abs_env, nonempty_env, owner_only_create, tighten_to_owner_only};
 pub(crate) mod dsh;
@@ -235,8 +236,7 @@ fn missing_artifact_issue(missing: &[PathBuf]) -> Vec<String> {
 
 /// Stat one resolved shim path — the ONE check shared by an embedded hook command
 /// and a code artifact's baked `HOOK_PATH`, so the two can't report a moved binary
-/// differently. `display_path` because the path comes from a hand-editable hook
-/// command and these issues reach a real terminal.
+/// differently.
 pub(crate) fn check_shim_binary(p: &std::path::Path, issues: &mut Vec<String>) {
     let shown = crate::display_path(p);
     if !p.exists() {

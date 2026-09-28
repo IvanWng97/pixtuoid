@@ -12,9 +12,9 @@
 //! which is a total order, so the graph is acyclic by construction and a plain
 //! sort produces the same list. The graph earns its place two other ways:
 //!
-//! - [`check_order`] turns every pairwise fact into an assertion. A sort key
-//!   silently mis-orders whatever it cannot express; a constraint that is
-//!   CHECKED tells you the day something stops fitting.
+//! - [`check_order`] turns every pairwise fact into an assertion. While
+//!   [`Span::behind`] is acyclic it guards the sort itself; it becomes the
+//!   detector the day an edge can contradict the base-row order.
 //! - The relation is pairwise, so it still holds if the draw order ever stops
 //!   being a function of screen y (elevation would do that), where a single key
 //!   cannot express it.
@@ -26,7 +26,8 @@
 //! inside. No predicate rescues that; the object has to be SPLIT into pieces
 //! each of which does have a base row (the canonical "split a block to prevent
 //! a cycle"). `paint.rs` splits wall runs; this module assumes it happened, and
-//! [`check_order`] is what notices when it did not.
+//! `no_wall_segment_is_taller_than_the_cast` pins that no segment is tall
+//! enough to straddle a figure.
 
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
@@ -83,7 +84,7 @@ impl Span {
     }
 
     /// Whether `self` must be drawn BEFORE `other` — i.e. it is further from the
-    /// viewer where the two actually overlap on screen.
+    /// viewer where their columns overlap.
     ///
     /// Pieces that do not overlap horizontally impose no constraint at all,
     /// which is what keeps the graph sparse: a desk on the west wall and a
@@ -102,7 +103,7 @@ impl Span {
 ///
 /// A cycle cannot arise from the current predicate, so the recovery arm is a
 /// backstop rather than a live path: the pieces still in the graph are emitted
-/// in base-row order. That degrades to the pre-graph behaviour instead of
+/// in base-row order. That degrades to a plain base-row sort instead of
 /// dropping them, which is the one outcome a renderer must never have.
 pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
     let n = items.len();
@@ -124,9 +125,8 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
 
     // A min-heap on (base row, index): among pieces that are mutually
     // unconstrained the shallower one wins, so the result matches the plain
-    // base-row order the office produces today, and the index tie-break keeps
-    // it deterministic — a topological order is not unique, and a render that
-    // reshuffles equal-depth pieces between frames flickers.
+    // base-row order the office produces today; the index is the fn doc's
+    // determinism.
     use std::cmp::Reverse;
     use std::collections::BinaryHeap;
     let mut ready: BinaryHeap<Reverse<(u16, usize)>> = (0..n)
@@ -166,11 +166,10 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
 /// Every pairwise "must be behind" fact the geometry states, checked against the
 /// order actually produced.
 ///
-/// This is the half of the graph that pays for itself today. A sort key cannot
-/// express a constraint it gets wrong, so a violation is invisible; here it is a
-/// returned pair — an object that stops fitting the model (one too long to have
-/// a base row, one at a different elevation) becomes a failing test rather than
-/// a render nobody looks at.
+/// A correct sort satisfies every edge of an acyclic [`Span::behind`], so today
+/// this guards [`depth_sort`] itself; an edge a future predicate (elevation)
+/// leaves unsatisfied comes back as the returned pair, a failing test rather
+/// than a render nobody looks at.
 ///
 /// Test-only deliberately. It is O(n²) on top of the sort's own O(n²), which is
 /// affordable once over a fixture and not per frame; `paint.rs` drives it over
@@ -217,7 +216,7 @@ mod tests {
         let east = span(90, 0, 4, 4);
         // West has the SOUTHERN feet, so a pure base-row sort would put it last.
         // They never overlap, so either order renders identically — what the
-        // test pins is that the result is deterministic and total.
+        // test pins is that the result is total.
         let out = depth_sort(vec![(west, "west"), (east, "east")]);
         assert_eq!(out.len(), 2);
         assert!(out.contains(&"west") && out.contains(&"east"));
@@ -248,15 +247,11 @@ mod tests {
         );
     }
 
-    /// The property that makes splitting mandatory, pinned so the reason cannot
-    /// be lost: ONE tall span covering a whole room is behind nothing and in
-    /// front of nothing it contains, so it lands wherever its own feet fall.
-    /// Split into segments, each lands correctly.
-    /// A 40-row wall run and a thing standing halfway down it, in the same
-    /// column. Unsplit, the run's only base row is its south end, so it paints
-    /// in front of everything it encloses — including what is south of it in
-    /// the part of the wall that is genuinely BEHIND. Split, each segment
-    /// carries its own base row and lands on the correct side.
+    /// Why splitting is mandatory: a 40-row wall run and a thing standing halfway
+    /// down it, in the same column. Unsplit, the run's only base row is its south
+    /// end, so it paints in front of everything it encloses, its north half
+    /// included. Split, each segment carries its own base row and lands on the
+    /// correct side.
     #[test]
     fn a_long_run_must_be_split_to_order_correctly_against_its_contents() {
         let thing = span(0, 20, 6, 4); // feet at 23

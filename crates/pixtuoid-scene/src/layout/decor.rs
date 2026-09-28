@@ -464,8 +464,8 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
     match kind {
         Furniture::Couch => FurnitureDef {
             footprint: Some(Size { w: 8, h: 7 }),
-            // One seat's box: three tile the `MeetingSofaBody` sprite the lounge
-            // couch blits.
+            // One seat's box: the lounge couch's three seats overlap across
+            // the `MeetingSofaBody` sprite it blits.
             visual: Size { w: 8, h: 7 },
             occupies_pos: true,
             exclusive: true,

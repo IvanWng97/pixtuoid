@@ -80,7 +80,7 @@ crop.save('/tmp/crop.png')
 
 Then inspect the cropped PNG with the agent's image-viewing tool.
 
-PIL is available system-wide (installed via `pip3 install --user --break-system-packages Pillow`). If a fresh environment misses it, install once.
+PIL comes from the repo's `.venv` (`requirements-dev.txt`), the interpreter the loop's step 4 runs.
 
 ### 4. Resolution budget
 
@@ -113,13 +113,9 @@ When a sprite **changes size**:
 1. Update the decoration's footprint in the `furniture_def(Furniture)` geometry table in `crates/pixtuoid-scene/src/layout/decor.rs` — the single source of truth for footprint + visual, read by `mask::build_walkable_mask` (waypoints via `approach::obstacle_footprint`), `approach.rs`, and the z-sort. Do NOT hardcode a `(w, h)` at the mask stamp site; it would diverge from the table that `stand_point`/approach and render-centering read.
 2. A non-waypoint obstacle (plant, wall decor, pod decor) is likewise stamped from its `FurnitureDef` row via `furniture_def(kind.furniture()).footprint`, not an inline literal — so the same table edit covers it.
 3. Run `cargo test -p pixtuoid-scene` — the `walkable_is_one_connected_region` test (lives in `layout/placement_sweep.rs`) catches mask/sprite mismatches by sweeping buffer sizes × seeds and asserting every walkable pixel is reachable from the door threshold; `narrow_band_connectivity_boundary_scan` re-runs the same assert at the step-1 widths that discrete grid skips.
-4. If the connectivity test fails at a small buffer (`SWEEP_SIZES` starts at 34×60), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
+4. If the connectivity test fails at a small buffer (`SWEEP_SIZES` starts at the minimum layout size), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
 5. Update animation list in `crates/pixtuoid-scene/sprites/default/pack.toml` and `embedded_pack.rs` to include both `foo.sprite` and `foo_small.sprite` if you added a variant.
 6. Redraw a `foo@8x.sprite` it ships in `scripts/gen-cutaway-art.py` at exactly 8× the resized base, or `validate-pack` reds.
-
-### 8. Live binary uses different binary than snapshot
-
-`./target/release/pixtuoid run` uses the main binary. `examples/snapshot` uses its own binary. **Both** need `cargo build --release --example snapshot` (or `cargo build --release --workspace --example snapshot`) when iterating on snapshot — and `cargo build --release` is fine for the live TUI binary.
 
 ## Self-critique checklist — MANDATORY before every SendUserFile
 
@@ -144,7 +140,7 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 4. Add the include_str! line to `embedded_pack.rs`.
 5. Add the `[animations.foo]` block to `pack.toml`.
 6. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
-7. Add the obstacle footprint to `build_walkable_mask` (or a waypoint kind if it's interactive).
+7. Give it a `Furniture` variant + `furniture_def` row (§7 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
 8. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
 9. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
 10. Snapshot + iterate.

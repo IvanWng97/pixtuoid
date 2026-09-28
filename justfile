@@ -802,9 +802,8 @@ site-e2e:
     npx playwright test
 
 # ── gen ───────────────────────────────────────────────────────────
-# Regenerate the committed artifacts that derive from a single source of truth:
-# README sections from site/src/*.json (gen-readme), and the office images for
-# BOTH docs/images/ and site/public/demos/ from scripts/media.json (gen-media).
+# Regenerate the committed artifacts that derive from a single source of truth,
+# and check the committed copies (each `*-check` header says against what).
 
 [group('gen')]
 [doc('Regenerate the committed art (@8x sprites + icons + README sections + docs images + site demos)')]

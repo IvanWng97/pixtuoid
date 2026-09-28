@@ -1201,8 +1201,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
                     .visual
                     .h,
             ),
-            // The lounge couch IS a vertical-mirrored meeting sofa — same
-            // sprite, back facing NORTH toward the windows.
+            // The lounge couch IS the meeting sofa's sprite, mirrored.
             kind: DrawableKind::MeetingSofa {
                 pos: center,
                 mirrored: true,

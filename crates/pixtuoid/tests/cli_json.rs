@@ -77,9 +77,9 @@ fn a_failing_connect_emits_the_outcome_rows_and_exits_nonzero() {
     );
 }
 
-/// The gate's own announcement, from `runtime/driver.rs`'s reducer_task. Paired
-/// by literal because an integration test cannot see a `pub(crate)` const; the
-/// negative arm below is what fails if the two drift apart.
+/// The gate's own announcement, the constant message `runtime/gate.rs` logs.
+/// Paired by literal because an integration test cannot see the binary's
+/// internals; the negative arm below is what fails if the two drift apart.
 const GATE_DROP_MSG: &str = "dropping events: source not connected";
 
 /// Everything a caller needs to tell "the gate kept the scene empty" apart from

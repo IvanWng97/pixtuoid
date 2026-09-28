@@ -143,13 +143,14 @@ fn create_owner_only_append(path: &Path) -> std::io::Result<std::fs::File> {
     opts.open(path)
 }
 
+/// The size past which [`rotate_if_large`] rotates the log.
+const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
+
 /// One-deep rotation at startup (log → log.old) keeps the last two generations
 /// without a rotation dependency. Accepted edge: with several instances sharing
 /// the default path, one instance's startup rotation renames the file out from
 /// under a running sibling (its fd follows; a later rotation strands it on an
 /// unlinked inode).
-const LOG_ROTATE_BYTES: u64 = 5 * 1024 * 1024;
-
 fn rotate_if_large(path: &Path) {
     let too_large = std::fs::metadata(path).is_ok_and(|m| m.len() > LOG_ROTATE_BYTES);
     if too_large {
@@ -312,7 +313,7 @@ mod tests {
         rotate_if_large(&log);
         assert!(log.exists(), "under-cap log must not rotate");
 
-        // Sparse via set_len — no real 5MB write.
+        // Sparse via set_len — no real `LOG_ROTATE_BYTES` write.
         let f = std::fs::OpenOptions::new().write(true).open(&log).unwrap();
         f.set_len(LOG_ROTATE_BYTES + 1).unwrap();
         drop(f);
