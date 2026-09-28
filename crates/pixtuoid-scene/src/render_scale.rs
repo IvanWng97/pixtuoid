@@ -57,19 +57,19 @@ impl RenderScale {
     /// `Pack::max_density_variant` reports), so every scale is a multiple and
     /// this is exactly [`RenderScale::new`] there.
     pub fn fit(natural: u16, max_density: u16) -> Option<Self> {
-        let d = u32::from(max_density.max(1));
-        let n = u32::from(natural);
+        // u64: a square of a u16-range value times the bound overflows u32.
+        let d = u64::from(max_density.max(1));
+        let n = u64::from(natural);
         let below = n / d * d;
-        let above = below + d;
+        // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
+        let above = Some(below + d).filter(|&a| a <= u64::from(u16::MAX));
         // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in integers.
-        let nearest = if below > 0 && n * n < below * above {
-            below
-        } else {
-            above
+        let nearest = match above {
+            Some(a) if below == 0 || n * n >= below * a => a,
+            _ => below,
         };
         let (lo, hi) = (nearest.min(n), nearest.max(n));
-        let within = hi * hi <= FIT_MAX_RATIO_SQUARED * lo * lo;
-        if !within {
+        if hi * hi > FIT_MAX_RATIO_SQUARED * lo * lo {
             return None;
         }
         u16::try_from(nearest).ok().and_then(Self::new)
@@ -112,7 +112,7 @@ impl RenderScale {
 /// candidate: a ratio of √2 is a factor of 2 in AREA, so past it the office
 /// would keep under half the logical area the surface's natural scale gives
 /// it, and the classic profile draws more office than that.
-const FIT_MAX_RATIO_SQUARED: u32 = 2;
+const FIT_MAX_RATIO_SQUARED: u64 = 2;
 
 impl Default for RenderScale {
     fn default() -> Self {
@@ -178,6 +178,15 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The far end of the range: the multiple above `u16::MAX` is no scale, so
+    /// the one below it wins, and the arithmetic never overflows on the way.
+    #[test]
+    fn the_largest_natural_scales_pick_a_representable_multiple() {
+        assert_eq!(fit(u16::MAX, 8), Some(u16::MAX / 8 * 8));
+        assert_eq!(fit(u16::MAX, 1), Some(u16::MAX));
+        assert_eq!(fit(u16::MAX - 3, 16), Some((u16::MAX - 3) / 16 * 16));
     }
 
     /// A pack with no variants must be untouched: every scale is a multiple of
