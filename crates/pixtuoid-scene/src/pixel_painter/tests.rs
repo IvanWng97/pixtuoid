@@ -1749,9 +1749,8 @@ fn door_frame_expired_entry_contributes_nothing() {
 }
 
 #[test]
-fn door_frame_exit_window_uses_the_exit_animation_total() {
+fn door_frame_is_fully_open_mid_exit() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
-    // Mid-way through the exit window → fully open.
     let exiting = exit_slot(2_000, now);
     assert_eq!(compute_door_frame_idx(&[exiting], now, 0), 2);
 }

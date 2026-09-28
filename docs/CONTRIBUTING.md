@@ -47,7 +47,7 @@ does not mean a green PR:
   full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
   pair's integrity and size cap (`just gen-wasm-check`); nothing checks the
-  pair is fresh, so a scene/web change runs `just gen-wasm` by hand.
+  pair is fresh, so a core/scene/web change runs `just gen-wasm` by hand.
 - **snapshots** — `cargo insta`; fails on a pending OR orphan `.snap`, the rot
   plain `cargo test` can't see.
 - **hygiene** — the same `just lint` recipes preflight runs (its CI job exists

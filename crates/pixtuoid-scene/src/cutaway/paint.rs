@@ -1103,7 +1103,7 @@ fn label_anchor(
 }
 
 /// The pack sprite for a waypoint kind, when it has one. `None` covers three
-/// deliberate cases: a SEAT slot whose body paints once elsewhere
+/// deliberate cases: a SEAT slot, which is never a body
 /// (MeetingSofa/MeetingChair/Island), a fixture drawn elsewhere (Pantry by its
 /// room, the Couch as a mirrored meeting sofa), and the corridor appliances
 /// (VendingMachine/Printer), which [`paint_appliance`] draws.

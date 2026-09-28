@@ -803,7 +803,7 @@ site-e2e:
 
 # ── gen ───────────────────────────────────────────────────────────
 # Regenerate the committed artifacts that derive from a single source of truth,
-# and gate them against it.
+# and check the committed copies (each `*-check` header says against what).
 
 [group('gen')]
 [doc('Regenerate the committed art (@8x sprites + icons + README sections + docs images + site demos)')]

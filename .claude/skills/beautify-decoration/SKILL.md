@@ -80,7 +80,7 @@ crop.save('/tmp/crop.png')
 
 Then inspect the cropped PNG with the agent's image-viewing tool.
 
-PIL comes from the repo's `.venv` (`requirements-dev.txt`), the interpreter step 4 runs.
+PIL comes from the repo's `.venv` (`requirements-dev.txt`), the interpreter the loop's step 4 runs.
 
 ### 4. Resolution budget
 
@@ -140,7 +140,7 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 4. Add the include_str! line to `embedded_pack.rs`.
 5. Add the `[animations.foo]` block to `pack.toml`.
 6. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
-7. Give it a `furniture_def` row (§7.1) — the mask, approach and z-sort read its footprint from there (or add a waypoint kind if it's interactive).
+7. Give it a `Furniture` variant + `furniture_def` row (§7 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
 8. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
 9. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
 10. Snapshot + iterate.

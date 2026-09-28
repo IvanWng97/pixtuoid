@@ -74,11 +74,12 @@ A pack can also redraw an animation on a denser grid, registered as
 `<name>@<N>x` (`desk@8x` is `desk` drawn on an 8x grid). Each frame is exactly
 `N` times the size of the matching base frame, and the frame counts match;
 `validate-pack` reports a variant that breaks either rule, and it is never
-drawn. The half-block renderer always draws the base art. A pixel-graphics
-renderer takes the densest variant whose `N` divides its render scale and draws
-it as it is: a variant carries its own front, where a desk's top-down base art
-gets a front face derived under it. The recolor keys and `[ramps]` apply at
-every density.
+drawn. Every renderer pixtuoid ships today — the terminal office, the
+`floating` window and the site's live office — draws the base art. Variants
+are for the pixel-graphics cutaway, not yet wired to `run`: it takes the
+densest variant whose `N` divides its render scale and draws it as it is — a
+variant carries its own front, where a desk's top-down base art gets a front
+face derived under it. The recolor keys and `[ramps]` apply at every density.
 
 ## Logging & troubleshooting
 
