@@ -224,7 +224,6 @@ fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
         "walking_coffee_0@8x.sprite",
         "walking_coffee_1@8x.sprite",
         "desk.sprite",
-        "desk@4x.sprite",
         "desk@8x.sprite",
         "desk_north.sprite",
         "desk_north@8x.sprite",

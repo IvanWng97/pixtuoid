@@ -648,7 +648,7 @@ struct DoctorReport {
     truecolor_probe: Option<bool>,
     color_pf: crate::term::ColorPreflight,
     graphics: crate::GraphicsMode,
-    detected: Option<crate::graphics::Detected>,
+    graphics_probe: crate::graphics::Probe,
     max_density: u16,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
@@ -732,14 +732,18 @@ impl Ink {
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
-) -> (Option<bool>, Option<crate::graphics::Detected>) {
+) -> (Option<bool>, crate::graphics::Probe) {
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
         None
     };
-    let ask = probe_ok && graphics != crate::GraphicsMode::Off;
-    (truecolor_probe, ask.then(crate::graphics::detect).flatten())
+    let graphics_probe = if probe_ok && graphics != crate::GraphicsMode::Off {
+        crate::graphics::detect()
+    } else {
+        crate::graphics::Probe::NotQueried
+    };
+    (truecolor_probe, graphics_probe)
 }
 
 /// A wrong root has no symptom but an empty office, so state it outright (#880). Goes
@@ -829,7 +833,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let (truecolor_probe, detected) = probe_terminal_caps(probe_ok, graphics);
+    let (truecolor_probe, graphics_probe) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
     let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
@@ -896,7 +900,7 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         truecolor_probe,
         color_pf,
         graphics,
-        detected,
+        graphics_probe,
         max_density,
         rows,
         roots,
@@ -947,7 +951,7 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        crate::graphics::graphics_diagnostic_row(r.graphics, r.detected, r.max_density)
+        crate::graphics::graphics_diagnostic_row(r.graphics, r.graphics_probe, r.max_density)
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
@@ -1653,7 +1657,7 @@ mod tests {
             truecolor_probe: None,
             color_pf: crate::term::ColorPreflight::Proceed,
             graphics: crate::GraphicsMode::Auto,
-            detected: None,
+            graphics_probe: crate::graphics::Probe::NotQueried,
             max_density: 1,
             rows,
             roots: vec![],
