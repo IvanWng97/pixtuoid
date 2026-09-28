@@ -448,37 +448,20 @@ fn first_sanitized_line(bytes: &[u8]) -> Option<String> {
 /// Probe a source's `<cli> --version` (argv from the static registry — never user input)
 /// → the first non-empty output line, sanitized. Best-effort: a spawn error, a NONZERO
 /// exit (whose error text must never show as a version), or a hang all yield None. stdin
-/// is nulled so the child can't block on the inherited TTY, and it is killed after a
-/// deadline because `output()` has no timeout.
+/// is nulled so the child can't block on the inherited TTY.
 fn probe_version(argv: &'static [&'static str]) -> Option<String> {
     use std::process::{Command, Stdio};
-    use std::time::{Duration, Instant};
+    const PROBE_VERSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
     let (cmd, args) = argv.split_first()?;
-    let mut child = Command::new(cmd)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .ok()?;
-    // `--version` output is tiny, so the piped buffers never fill while we poll
-    // (no reader-vs-writer deadlock for this use).
-    const PROBE_VERSION_TIMEOUT_SECS: u64 = 5;
-    const PROBE_POLL_INTERVAL_MS: u64 = 20;
-    let deadline = Instant::now() + Duration::from_secs(PROBE_VERSION_TIMEOUT_SECS);
-    loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break,
-            Ok(None) if Instant::now() >= deadline => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return None;
-            }
-            Ok(None) => std::thread::sleep(Duration::from_millis(PROBE_POLL_INTERVAL_MS)),
-            Err(_) => return None,
-        }
-    }
-    let output = child.wait_with_output().ok()?;
+    let output = crate::output_within(
+        Command::new(cmd)
+            .args(args)
+            .stdin(Stdio::null())
+            // `--version` output is tiny, which `output_within` requires.
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped()),
+        PROBE_VERSION_TIMEOUT,
+    )?;
     if !output.status.success() {
         return None;
     }

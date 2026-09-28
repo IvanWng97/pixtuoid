@@ -20,9 +20,11 @@ mod probe;
 #[cfg(feature = "graphics")]
 pub(crate) use probe::probe;
 
-/// How long the capability query may take: start to finish on Unix, where
-/// [`probe()`] reads the reply itself; between reads on Windows, whose upstream
-/// probe restarts the clock on each one (ratatui-image 11.0.8 `picker.rs:615`).
+/// How long each wait of the capability probe may take: on Unix, the query start
+/// to finish, where [`probe()`] reads the reply itself, and, inside tmux, the
+/// `allow-passthrough` read before it; on Windows, each read of the reply, since
+/// the upstream probe restarts the clock on every one (ratatui-image 11.0.8
+/// `picker.rs:615`).
 ///
 /// The query ends with a device-status request (ratatui-image 11.0.8
 /// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
