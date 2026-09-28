@@ -30,12 +30,13 @@ pub(crate) struct DenseFrame<'a> {
 /// painter's own `frame_index`.
 ///
 /// A variant is the same PIECE on an N-times grid — the base's logical box
-/// drawn finer, as cutaway art — so it is taken only where it can honour that:
-/// at a scale its density divides (4x art at 8x blits at 2 rather than being
-/// discarded for not matching), and only if it redraws its base whole
-/// ([`variant_redraws`]), so an animation never mixes densities mid-cycle. A variant that does not redraw its base is SKIPPED rather than
-/// drawn wrong — `validate_pack_animations` reports it as a hard error, so this
-/// is the render-time backstop for a pack that was never validated.
+/// drawn finer — so it is taken only where it can honour that: at a scale its
+/// density divides (4x art at 8x blits at 2 rather than being discarded for not
+/// matching), and only if it redraws its base whole ([`variant_redraws`]), so an
+/// animation never mixes densities mid-cycle. A variant that does not redraw its
+/// base is SKIPPED rather than drawn wrong — `validate_pack_animations` reports
+/// it as a hard error, so this is the render-time backstop for a pack that was
+/// never validated.
 ///
 /// A piece with no variant renders exactly as it did before variants existed,
 /// so richer art lands one piece at a time rather than as a flag day.

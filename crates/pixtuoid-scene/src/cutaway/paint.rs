@@ -194,7 +194,7 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
 }
 
 /// The box a desk drawn with `art` at `desk` occupies at `scale`, with the rows
-/// [`desk_face_rows`] paints below it — the sort reserves exactly what is drawn.
+/// [`desk_face_rows`] paints below it.
 /// A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(

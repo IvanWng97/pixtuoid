@@ -87,7 +87,7 @@ version = "1"
 "Ж" = "#34424e"   # a display's sheen or dim content
 
 # Shades of a recolor key, derived from it: `level` steps along the key's
-# hue-shifted ramp, lighter and warmer above zero, darker and cooler below.
+# ramp (`Rgb::ramp`).
 # They carry no colour of their own, so a per-agent recolor re-derives every
 # shade and shaded art keeps its shading.
 [ramps]

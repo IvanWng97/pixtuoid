@@ -1002,6 +1002,8 @@ gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }
     .venv/bin/python3 scripts/gen-media.py --check
     .venv/bin/python3 scripts/gen-pix-icons.py --check
+    .venv/bin/python3 scripts/gen-cutaway-art.py --selftest
+    .venv/bin/python3 scripts/gen-cutaway-art.py --check crates/pixtuoid-scene/sprites/default
 
 # ── release ───────────────────────────────────────────────────────
 

@@ -114,6 +114,7 @@ When a sprite **changes size**:
 3. Run `cargo test -p pixtuoid-scene` — the `walkable_is_one_connected_region` test (lives in `layout/placement_sweep.rs`) catches mask/sprite mismatches by sweeping buffer sizes × seeds and asserting every walkable pixel is reachable from the door threshold; `narrow_band_connectivity_boundary_scan` re-runs the same assert at the step-1 widths that discrete grid skips.
 4. If the connectivity test fails at a small buffer (`SWEEP_SIZES` starts at 34×60), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
 5. Update animation list in `crates/pixtuoid-scene/sprites/default/pack.toml` and `embedded_pack.rs` to include both `foo.sprite` and `foo_small.sprite` if you added a variant.
+6. A piece with a `foo@8x.sprite` has its cutaway art drawn by `scripts/gen-cutaway-art.py`: redraw it there and run `just gen-art` (`just gen-check` fails on a hand edit), and keep the variant exactly 8× the resized base, or `validate-pack` reds.
 
 ### 8. Live binary uses different binary than snapshot
 
