@@ -426,11 +426,14 @@ fn paint_window_light_spill(
     let warm = theme.lighting.sun_spill;
     let fade_start = 0.32 * intensity;
     for dy in 0..SPILL_DEPTH {
-        let widen = (dy / 2).min(3);
+        let widen = i32::from((dy / 2).min(3));
         let shift = (slant_per_row * dy as f32).round() as i32;
-        let base_x = (window_x as i32 + shift).max(0) as u16;
-        let start_x = base_x.saturating_sub(widen);
-        let end_x = (base_x + window_w + widen).min(buf.width());
+        let base_x = i32::from(window_x) + shift;
+        // Both edges clip to the canvas, so a band leaning off either side is
+        // trimmed there rather than pushed back on whole.
+        let clip = |x: i32| x.clamp(0, i32::from(buf.width())) as u16;
+        let start_x = clip(base_x - widen);
+        let end_x = clip(base_x + i32::from(window_w) + widen);
         let y = top_y + dy;
         if y >= buf.height() {
             break;

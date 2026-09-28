@@ -1115,3 +1115,30 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         );
     }
 }
+
+/// A spill leaning off the canvas's left edge lights only the columns that land
+/// on the canvas: the same clip the right edge applies at the buffer's width.
+#[test]
+fn a_spill_leaning_off_the_left_edge_is_clipped() {
+    const FILL: Rgb = Rgb {
+        r: 20,
+        g: 20,
+        b: 24,
+    };
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let window_x = 1u16;
+    let buf_w = window_x + WINDOW_W + SPILL_DEPTH;
+    let mut buf = RgbBuffer::filled(buf_w, SPILL_DEPTH, FILL);
+    // One column left per row: every row past the first leans off the edge.
+    paint_window_light_spill(&mut buf, window_x, WINDOW_W, 0, 1.0, -1.0, theme);
+    for dy in 0..SPILL_DEPTH {
+        let widen = i32::from((dy / 2).min(3));
+        let left = i32::from(window_x) - i32::from(dy) - widen;
+        let right = i32::from(window_x) - i32::from(dy) + i32::from(WINDOW_W) + widen;
+        let lit: Vec<u16> = (0..buf_w).filter(|&x| buf.get(x, dy) != FILL).collect();
+        let want: Vec<u16> = (0..buf_w)
+            .filter(|&x| (left..right).contains(&i32::from(x)))
+            .collect();
+        assert_eq!(lit, want, "row {dy}");
+    }
+}
