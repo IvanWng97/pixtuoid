@@ -879,8 +879,7 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
     );
 }
 
-/// A second profile paints the layout the sim stepped on, not one it lays out
-/// again beside it.
+/// `observe` hands back the memoized layout itself, not an equal copy.
 #[test]
 fn observe_hands_back_the_layout_the_sim_stepped_on() {
     let pack = crate::embedded_pack::test_default_pack();

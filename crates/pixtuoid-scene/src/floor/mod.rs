@@ -1,6 +1,7 @@
 //! Multi-floor office partitioning: the floor arithmetic, the per-floor
-//! rendering context ([`FloorCtx`]), the shared headless frame seam
-//! ([`render_floor`]), the per-floor fade states ([`LightingState`], the neon
+//! rendering context ([`FloorCtx`]), the shared headless frame seams
+//! ([`render_floor`], and [`FloorSession::observe`] for a painter that draws the
+//! frame itself), the per-floor fade states ([`LightingState`], the neon
 //! sign's), and the per-office [`CoffeeState`] bookkeeping.
 
 use std::collections::hash_map::Entry;
@@ -405,7 +406,7 @@ pub struct ObservedFloor {
 /// painter that draws the frame some other way. `None` when the size can't lay
 /// out; eviction stays the caller's, as there.
 #[allow(clippy::too_many_arguments)]
-pub fn observe_floor(
+pub(crate) fn observe_floor(
     fctx: &mut FloorCtx,
     coffee: &mut CoffeeState,
     chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
@@ -714,7 +715,9 @@ impl FloorSession {
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
-    /// the shared [`observe_floor`] seam.
+    /// [`render_floor`]'s layout prologue, sim tick and epilogue, minus its paint
+    /// pass. `size` is the layout's logical extent, whatever scale a painter
+    /// draws it at.
     pub fn observe(
         &mut self,
         scene: &SceneState,
