@@ -1,6 +1,8 @@
-//! Terminal capability detection for the truecolor preflight. The warning is a
-//! WARN signal, never a gate on Unix — Windows is the exception, `tui::mod`
-//! hard-gates VT there because the WinAPI color fallback renders black-on-black.
+//! Terminal capability detection: the truecolor preflight, and the
+//! controlling-terminal query (`query_tty`) it shares with the graphics probe.
+//! The truecolor warning is a WARN signal, never a gate on Unix — Windows is
+//! the exception, `tui::mod` hard-gates VT there because the WinAPI color
+//! fallback renders black-on-black.
 //!
 //! We do NOT guess truecolor from a `$TERM` name allowlist. Detection ASKS the
 //! terminal directly: set an unlikely 24-bit background, then `DECRQSS`-query the
@@ -175,12 +177,41 @@ pub(crate) fn truecolor_verdict(
 #[cfg(unix)]
 const DECRQSS_TRUECOLOR_PROBE: &[u8] = b"\x1b[48;2;1;2;3m\x1bP$qm\x1b\\\x1b[0m";
 
-/// Ask the terminal whether it is truecolor by querying it directly. Uses the
-/// controlling terminal (`/dev/tty`, so a piped `pixtuoid doctor > file` never
-/// receives escape codes) in raw mode, so the reply isn't echoed and arrives
-/// un-buffered. Returns `None` on any I/O failure or no answer.
+/// Ask the terminal whether it is truecolor by querying it directly. Returns
+/// `None` on any I/O failure or no answer.
 #[cfg(unix)]
 pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
+    let mut reply = Vec::new();
+    query_tty(
+        DECRQSS_TRUECOLOR_PROBE,
+        timeout,
+        MAX_DECRQSS_RESPONSE_BYTES,
+        |chunk| {
+            reply.extend_from_slice(chunk);
+            response_terminated(&reply)
+        },
+    )?;
+    parse_decrqss_truecolor(&reply)
+}
+
+/// Write `query` to the controlling terminal and hand each chunk of its reply
+/// to `on_reply` until that returns `true`. `Some(true)` when it did;
+/// `Some(false)` when the reply never completed — `timeout` elapsed, more than
+/// `cap` bytes arrived, or the read failed; `None` when the terminal could not
+/// be opened, put in raw mode, or written to.
+///
+/// The controlling terminal (`/dev/tty`), so a piped stdout never receives the
+/// escapes; in raw mode, so the reply isn't echoed and arrives un-buffered; and
+/// its mode restored on every return. The wait is bounded HERE, on this thread
+/// — a query answered by a reader it cannot stop would keep reading the
+/// terminal after the budget.
+#[cfg(unix)]
+pub(crate) fn query_tty(
+    query: &[u8],
+    timeout: std::time::Duration,
+    cap: usize,
+    on_reply: impl FnMut(&[u8]) -> bool,
+) -> Option<bool> {
     use std::io::Write;
     use std::os::fd::AsRawFd;
 
@@ -207,10 +238,10 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
         return None;
     }
 
-    tty.write_all(DECRQSS_TRUECOLOR_PROBE).ok()?;
+    tty.write_all(query).ok()?;
     tty.flush().ok()?;
 
-    parse_decrqss_truecolor(&read_until_terminator(&mut tty, fd, timeout))
+    Some(read_reply(&mut tty, fd, timeout, cap, on_reply))
 }
 
 /// RAII restore of the terminal's saved `termios` — fires on return, `?`, and
@@ -229,40 +260,41 @@ impl Drop for TermiosRestore {
     }
 }
 
-/// Per-`read` chunk / initial buffer size — a DECRQSS SGR reply is a few dozen
-/// bytes, so one small chunk usually drains it in a single syscall.
+/// Per-`read` chunk: a longer reply arrives over several reads, within the one
+/// budget.
 #[cfg(unix)]
-const DECRQSS_READ_CHUNK: usize = 64;
-/// Hard cap on bytes buffered before giving up — the bound just stops a
+const TTY_READ_CHUNK: usize = 64;
+/// Hard cap on the DECRQSS reply before giving up — the bound just stops a
 /// chatty/garbage stream from looping.
 #[cfg(unix)]
 const MAX_DECRQSS_RESPONSE_BYTES: usize = 1024;
 
-/// Read the terminal's reply, bounded by `timeout`, until the `DCS` string
-/// terminator (`ESC \`) or `BEL` arrives (or the budget elapses / the buffer
-/// caps).
+/// Read the terminal's reply into `on_reply`, bounded by `timeout` and `cap`:
+/// `true` when `on_reply` reported it complete.
 #[cfg(unix)]
-fn read_until_terminator(
+fn read_reply(
     tty: &mut std::fs::File,
     fd: std::os::fd::RawFd,
     timeout: std::time::Duration,
-) -> Vec<u8> {
+    cap: usize,
+    mut on_reply: impl FnMut(&[u8]) -> bool,
+) -> bool {
     use std::io::Read;
 
     // `FD_SET` on an fd >= FD_SETSIZE writes outside the fd_set's bit array (UB),
     // so the soundness of the unsafe block below rests on this structural guard
     // rather than a prose claim (a negative fd wraps past FD_SETSIZE via the cast
-    // and is caught too). An empty reply reads as "no confirmation".
+    // and is caught too). Unread, the reply never completes.
     if fd as usize >= libc::FD_SETSIZE {
-        return Vec::new();
+        return false;
     }
     let start = std::time::Instant::now();
-    let mut buf = Vec::with_capacity(DECRQSS_READ_CHUNK);
-    let mut chunk = [0u8; DECRQSS_READ_CHUNK];
+    let mut read_total = 0usize;
+    let mut chunk = [0u8; TTY_READ_CHUNK];
     loop {
         let elapsed = start.elapsed();
         if elapsed >= timeout {
-            break;
+            return false;
         }
         let remaining = timeout - elapsed;
         let mut tv = libc::timeval {
@@ -270,9 +302,8 @@ fn read_until_terminator(
             tv_usec: remaining.subsec_micros() as libc::suseconds_t,
         };
         // `select`, NOT `poll`: macOS `poll()` is broken on tty/pty devices and
-        // returns `POLLNVAL` for a valid terminal fd, which would make every
-        // non-`$COLORTERM` terminal read nothing and falsely warn. `select` works
-        // on ttys on both macOS and Linux.
+        // returns `POLLNVAL` for a valid terminal fd, so no query would ever read
+        // a reply. `select` works on ttys on both macOS and Linux.
         // SAFETY: a zeroed `fd_set` with our single valid fd registered; the fd
         // is < FD_SETSIZE by the structural guard at the top of this fn.
         let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
@@ -289,29 +320,32 @@ fn read_until_terminator(
         };
         if ready < 0 {
             // A signal (e.g. SIGWINCH at startup) interrupted the wait — retry
-            // within the remaining budget rather than give up to a false warn.
+            // within the remaining budget rather than give up on a reply still
+            // coming.
             if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
                 continue;
             }
-            break;
+            return false;
         }
         // SAFETY: `rfds` was populated by `select`; checking our fd's membership.
         if ready == 0 || !unsafe { libc::FD_ISSET(fd, &rfds) } {
-            break;
+            return false;
         }
         match tty.read(&mut chunk) {
-            Ok(0) => break,
+            Ok(0) => return false,
             Ok(n) => {
-                buf.extend_from_slice(&chunk[..n]);
-                if response_terminated(&buf) || buf.len() > MAX_DECRQSS_RESPONSE_BYTES {
-                    break;
+                if on_reply(&chunk[..n]) {
+                    return true;
+                }
+                read_total += n;
+                if read_total > cap {
+                    return false;
                 }
             }
             Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(_) => break,
+            Err(_) => return false,
         }
     }
-    buf
 }
 
 /// A `DCS` reply ends with the string terminator `ESC \` (some terminals use
