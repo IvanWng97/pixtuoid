@@ -1015,3 +1015,26 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
         }
     }
 }
+
+/// Light through the windows lands on the side AWAY from the sun: with the disc
+/// low on one side, the wall spot and the floor spill both fall on the other.
+#[test]
+fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
+    const BUF_W: u16 = 192;
+    const TOP_WALL_H: u16 = 30;
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    for hour in [6, 19] {
+        let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
+        let disc = compute_disc(&sky, BUF_W, TOP_WALL_H, theme).expect("a clear low sun");
+        let disc_side = (disc.cx - f32::from(BUF_W) / 2.0).signum();
+        let spot = sun_on_wall(&sky).expect("the sun is up");
+        let spot_side = match spot.wall {
+            WallSide::East => 1.0,
+            WallSide::West => -1.0,
+            WallSide::South => panic!("a low sun lights a side wall at {hour}:00"),
+        };
+        let spill_side = time_of_day_look(&sky, theme).spill_slant.signum();
+        assert_eq!(spot_side, -disc_side, "wall spot vs disc at {hour}:00");
+        assert_eq!(spill_side, -disc_side, "spill lean vs disc at {hour}:00");
+    }
+}

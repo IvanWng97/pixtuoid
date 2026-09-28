@@ -41,10 +41,10 @@ pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> Ti
     let glass_a = mix_lab(mix_lab(night_a, day_a, exterior), twilight_a, warm * 0.5);
     let glass_b = mix_lab(mix_lab(night_b, day_b, exterior), twilight_b, warm * 0.5);
 
-    // Azimuth runs 0=east/dawn .. 1=west/dusk, so the morning sun casts
-    // light leftward (negative slant) and the evening sun rightward.
+    // Light lands on the far side from the sun: the morning disc sits left,
+    // so the spill leans right (positive slant), and the evening one left.
     let (spill_strength, spill_slant) = match e.body {
-        Body::Sun => (interior, (e.azimuth - 0.5) * 2.0 * SPILL_SLANT_MAX),
+        Body::Sun => (interior, (0.5 - e.azimuth) * 2.0 * SPILL_SLANT_MAX),
         Body::Moon => (0.0, 0.0),
     };
 
@@ -90,9 +90,10 @@ pub(in crate::pixel_painter) struct SunSpot {
     pub warmth: f32,
 }
 
-/// Azimuth band boundaries partitioning the sun's E->W arc onto the office
-/// walls: `0.0..AZ_EAST_MAX` = east wall (morning), `AZ_EAST_MAX..AZ_WEST_MIN`
-/// = south/window wall (midday), `AZ_WEST_MIN..1.0` = west wall (evening).
+/// Azimuth bands for the wall the sun lights, across the room from the disc:
+/// `0.0..AZ_EAST_MAX` (morning, the disc on the left) lights the east wall,
+/// `AZ_EAST_MAX..AZ_WEST_MIN` (midday) the south/window wall, and
+/// `AZ_WEST_MIN..1.0` (evening) the west wall.
 const AZ_EAST_MAX: f32 = 0.30;
 const AZ_WEST_MIN: f32 = 0.70;
 
@@ -101,8 +102,8 @@ pub(in crate::pixel_painter) fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
     if !matches!(e.body, Body::Sun) {
         return None;
     }
-    // The SAME azimuth that places the disc and leans the floor spill, so the
-    // wall and the disc can never disagree.
+    // The SAME azimuth that places the disc and leans the floor spill;
+    // `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins their sides.
     let az = e.azimuth;
     let (wall, along) = if az < AZ_EAST_MAX {
         (WallSide::East, az / AZ_EAST_MAX)
