@@ -26,12 +26,36 @@ pub enum PackSource {
     Discovered(PathBuf),
 }
 
+/// The sets of pieces a pack should ship whole, each read from the authority its
+/// painter picks by: each row is the pantry counters
+/// (`pixel_painter::pantry_counter_anim` picks one by room width), a pet kind's
+/// poses, or a gateway mascot's poses.
+fn art_sets() -> Vec<Vec<&'static str>> {
+    let mut sets = vec![crate::pixel_painter::PANTRY_COUNTER_ANIMS.to_vec()];
+    sets.extend(
+        crate::pet::PetKind::ALL
+            .iter()
+            .map(|k| vec![k.walk_anim(), k.sit_anim(), k.sleep_anim()]),
+    );
+    sets.extend(
+        pixtuoid_core::source::registry::registered_source_names()
+            .filter_map(crate::creatures::gateway_mascot_def)
+            .map(|d| vec![d.walk, d.rest]),
+    );
+    sets
+}
+
+/// [`validate_pack_animations`], against this crate's painters' art sets.
+pub fn validate_pack(pack: &Pack) -> ValidationReport {
+    validate_pack_animations(pack, &art_sets())
+}
+
 /// Log a custom pack's animation-validation gaps at load time: a pack missing a
 /// required pose LOADS fine and then renders it as NOTHING, so without this the
 /// only signal is agents silently vanishing. Warn, don't fail — a
 /// partially-authored pack still renders every pose it does carry.
 fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
-    let report = validate_pack_animations(pack);
+    let report = validate_pack(pack);
     // Destructured without `..`: a field added to the report does not compile
     // until it is named here, so a new error category cannot bypass this
     // load-time warning unnoticed.
@@ -42,6 +66,9 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unknown: _,
         mismatched_density,
         orphan_variants,
+        // A mixed look still renders every piece: `validate-pack` reports it.
+        partial_sets: _,
+        orphan_derived: _,
     } = &report;
     for name in missing_required {
         tracing::warn!(
@@ -239,6 +266,23 @@ mod tests {
     use std::fs;
     use std::path::Path;
 
+    #[test]
+    fn every_art_set_member_is_registered_furniture_in_one_set_only() {
+        let sets = art_sets();
+        assert!(!sets.is_empty());
+        let mut seen = std::collections::HashSet::new();
+        for set in &sets {
+            assert!(set.len() >= 2, "a one-piece set can't be partial: {set:?}");
+            for &name in set {
+                assert!(
+                    pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS.contains(&name),
+                    "{name}"
+                );
+                assert!(seen.insert(name), "{name} is in two sets");
+            }
+        }
+    }
+
     /// Copy this crate's char-only pack fixture into `dst`. It carries NO
     /// furniture, so the merge-from-embedded-default assertion isn't
     /// tautological, and it lives INSIDE pixtuoid-scene so `cargo test` passes
@@ -297,8 +341,11 @@ mod tests {
     #[test]
     fn the_embedded_pack_passes_its_own_validation() {
         let pack = load_embedded_pack().expect("embedded pack");
-        let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
+        let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
+        // `StandIn::DefaultPack` promises the default draws what a custom pack
+        // leaves out.
+        assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
@@ -313,7 +360,7 @@ mod tests {
         // An animation the EMBEDDED pack ships but the registry doesn't know is
         // falsely reported "unused by renderer" by validate-pack.
         let pack = load_sprite_pack(PackSource::Bundled).expect("embedded pack");
-        let report = pixtuoid_core::sprite::format::validate_pack_animations(&pack);
+        let report = validate_pack(&pack);
         assert!(
             report.unknown.is_empty(),
             "embedded animation missing from the registry: {:?}",

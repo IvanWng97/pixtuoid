@@ -136,11 +136,11 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
         }
     })
 }
-// `floor::FloorSession::observe` is the public entry to the sim tick; the step
-// itself and its per-call borrow-set stay crate-internal.
 pub(crate) use background::BaseFillCache;
 #[cfg(test)]
 pub(crate) use furniture::COOLER_WATER;
+// `floor::FloorSession::observe` is the public entry to the sim tick; the step
+// itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 
@@ -153,6 +153,20 @@ pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 /// Coffee-machine column range for the compact `pantry_small` sprite (see
 /// [`PANTRY_COFFEE_COLS_LARGE`]).
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
+
+/// The pantry counter sprites, compact then large.
+pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
+
+/// The pantry counter sprite for a counter `counter_w` px wide: the large
+/// kitchen run when the room fits it, else the compact one.
+pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
+    let [compact, large] = PANTRY_COUNTER_ANIMS;
+    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
+        large
+    } else {
+        compact
+    }
+}
 
 /// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
 /// `W×H`, drawn with a `NEON_PANEL_BORDER`-px frame on every side. A pixel
@@ -1179,7 +1193,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
                         pos: wp.pos,
-                        use_large: cw >= crate::layout::PANTRY_COUNTER_LARGE_W,
+                        anim: pantry_counter_anim(cw),
                     },
                 });
             }

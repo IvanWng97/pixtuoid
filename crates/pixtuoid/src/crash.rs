@@ -1,6 +1,6 @@
 //! Crash reporting: the panic hook that restores the terminal, appends a
-//! timestamped backtrace to `~/.cache/pixtuoid/crash.log`, and prints a
-//! pre-filled GitHub issue URL.
+//! timestamped backtrace to [`crash_log_path`], and prints a pre-filled GitHub
+//! issue URL.
 
 use std::path::PathBuf;
 
@@ -92,7 +92,8 @@ fn build_issue_url(
     };
     let title = format!("Crash: {title_msg}");
 
-    // Truncate backtrace to keep URL under GitHub's 8191-byte limit.
+    // Truncated so the URL stays under GitHub's limit, pinned by
+    // `build_issue_url_truncates_long_backtrace`.
     const MAX_BT: usize = 1500;
     let bt_body = if backtrace.len() > MAX_BT {
         let cut = truncate_to_char_boundary(backtrace, MAX_BT);
@@ -324,9 +325,14 @@ mod tests {
 
     #[test]
     fn build_issue_url_truncates_long_backtrace() {
-        let long_bt = "x".repeat(2000);
+        /// GitHub's limit on a URL, in bytes.
+        const GITHUB_URL_LIMIT: usize = 8191;
+        // A newline percent-encodes to three bytes, so untruncated this trace
+        // alone is three times the limit.
+        let long_bt = "\n".repeat(GITHUB_URL_LIMIT);
         let url = build_issue_url("0.4.0", "msg", "loc", &long_bt, Path::new("/tmp/x"));
-        assert!(url.len() < 8191);
+        assert!(url.len() < GITHUB_URL_LIMIT, "{}", url.len());
+        assert!(url.contains("truncated"));
     }
 
     #[test]

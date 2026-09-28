@@ -320,16 +320,18 @@ pub(crate) fn verify_schema(content: &str) -> SchemaParse {
                     if let Ok(expected) = plugin_path() {
                         if Path::new(&n) != expected {
                             parse.issues.push(format!(
-                                "the mount entry points at {n}, not this home's \
+                                "the mount entry points at {}, not this home's \
                                  plugin ({}) — reconnect dsh to re-mount",
-                                expected.display()
+                                crate::display_path(Path::new(&n)),
+                                crate::display_path(&expected)
                             ));
                         }
                     }
                 }
                 Some(n) => parse.issues.push(format!(
-                    "the mount entry's plugin path {n} is not absolute — dsh's loader only \
-                     imports bare absolute paths"
+                    "the mount entry's plugin path {} is not absolute — dsh's loader only \
+                     imports bare absolute paths",
+                    crate::display_path(Path::new(&n))
                 )),
                 None => parse
                     .issues
@@ -632,6 +634,44 @@ mod tests {
         assert!(rel.issues.iter().any(|i| i.contains("not absolute")));
 
         std::env::remove_var("DSH_HOME");
+    }
+
+    /// The mount entry's `name` is a hand-editable YAML scalar and `$DSH_HOME`
+    /// an env path; both reach `doctor` and the boot warning through these
+    /// issues.
+    #[test]
+    fn a_hostile_mount_entry_reaches_the_issues_stripped() {
+        let _env = crate::TEST_ENV_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        // Windows forbids the Cc half in a path component; U+202E it allows.
+        let home = if cfg!(windows) {
+            dir.path().join("home\u{202e}")
+        } else {
+            dir.path().join("home\u{1b}]0;pwned\u{7}\u{202e}")
+        };
+        std::env::set_var("DSH_HOME", &home);
+        // Absolute on each platform: Windows needs the drive prefix.
+        let abs = if cfg!(windows) { "C:/abs" } else { "/abs" };
+        let issues: Vec<String> = [abs, "rel"]
+            .iter()
+            .map(|root| {
+                format!(
+                    "- insert:\n    - id: pixtuoid\n      name: \"{root}\\e]0;pwned\\a\\u202E/p.mjs\"\n"
+                )
+            })
+            .flat_map(|content| verify_schema(&content).issues)
+            .collect();
+        std::env::remove_var("DSH_HOME");
+        assert!(
+            issues.iter().any(|i| i.contains("not this home's plugin"))
+                && issues.iter().any(|i| i.contains("not absolute")),
+            "both arms must fire: {issues:?}"
+        );
+        for issue in &issues {
+            assert_eq!(&crate::strip_control_chars(issue), issue);
+        }
     }
 
     #[test]

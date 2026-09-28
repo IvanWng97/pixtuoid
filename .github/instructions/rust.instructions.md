@@ -38,8 +38,9 @@ condensed coding-standard slice.
 ## Logging
 
 - Use `tracing::{info, warn, error}` — **not** `println!`/`eprintln!`, which
-  panic when the reader leaves. CLI and headless output goes through
-  `pixtuoid::cli_stdout()`; a stderr notice is a `let _ = writeln!`.
+  panic when the reader leaves. CLI and headless output goes through a
+  `CliOut` (a command's is `pixtuoid::cli_stdout()`); a stderr notice is a
+  `let _ = writeln!`.
 
 ## Tests (TDD-first)
 

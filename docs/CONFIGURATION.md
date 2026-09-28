@@ -88,7 +88,8 @@ over the screen — scroll back after quitting to see them. If a data source
 dies mid-run (e.g. the hook listener), the footer shows a persistent ⚠ warning
 and the full error is in the log file.
 
-Crashes are reported separately to `~/.cache/pixtuoid/crash.log`.
+Crashes are reported separately, to `crash.log` in the same directory as the
+default log path.
 
 Non-TUI commands (`--headless`, `validate-pack`, …) log to stderr directly.
 

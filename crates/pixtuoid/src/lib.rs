@@ -1,8 +1,8 @@
-//! Public surface for the pixtuoid binary's internals — exposed so examples and
-//! integration tests can import them.
+//! Public surface for the pixtuoid binary's internals — exposed because
+//! `main.rs`, the examples and the integration tests are separate crates.
 
-// A print macro panics when its reader leaves (`| head`): CLI output goes
-// through `cli_stdout`, a stderr notice through a `let _ = writeln!`.
+// A print macro panics when its reader leaves (`| head`): CLI and headless
+// output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod aa_text;
@@ -31,17 +31,18 @@ pub mod tui;
 pub mod validate;
 pub(crate) mod version;
 
-/// Strip control characters (Cc) and bidi overrides (Cf) from an untrusted
-/// string before it reaches a terminal: such a value can carry control bytes
-/// that reposition the cursor or inject escapes, or reorder the text shown. One chokepoint, so the policy can't drift across
-/// its call sites.
+/// Strip control characters (Cc) and bidi controls from an untrusted string
+/// before it reaches a terminal: such a value can carry control bytes that
+/// reposition the cursor or inject escapes, or reorder the text shown. One
+/// chokepoint, so the policy can't drift across its call sites.
 ///
 /// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
 /// emits its own SGR for level coloring, so a sink-side filter could not tell
 /// our escapes from an injected one. Its untrusted values are stripped where
-/// they ENTER a record instead — here by this fn's callers, and in the lib by
-/// `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of this
-/// predicate pinned to it by `the_bidi_table_matches_pixtuoid_cores_display_safe`.
+/// they ENTER a record instead — here by this fn's callers, and in the core
+/// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
+/// this predicate pinned to it by
+/// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
 #[doc(hidden)]
 pub fn strip_control_chars(s: &str) -> String {
     s.chars()
@@ -183,8 +184,9 @@ pub(crate) mod test_capture {
         }
     }
 
-    /// Capture through the SAME subscriber shape `main.rs` installs, so an
-    /// assertion is validated against the REAL line format, not an assumed one.
+    /// Capture in the line format the bin's `logging::init` writes to its log
+    /// file (no ANSI), so an assertion is validated against the REAL format, not
+    /// an assumed one.
     pub(crate) fn capture(f: impl FnOnce()) -> String {
         let buf = Buf::default();
         let sub = tracing_subscriber::fmt()
