@@ -389,6 +389,54 @@ pub fn render_floor(
     })
 }
 
+/// One floor, one tick, observed rather than painted: the world advanced, and the
+/// layout it advanced on. A second profile paints THIS layout — laying the office
+/// out again beside the sim is how a painter ends up drawing one office while the
+/// sim walked another.
+pub struct ObservedFloor {
+    /// The layout the sim stepped on.
+    pub layout: Arc<crate::layout::Layout>,
+    /// The world, advanced one tick.
+    pub frame: SimFrame,
+}
+
+/// [`render_floor`] without the classic paint pass: the same layout prologue, sim
+/// tick and bookkeeping epilogue, over the same disjoint per-floor borrows, for a
+/// painter that draws the frame some other way. `None` when the size can't lay
+/// out; eviction stays the caller's, as there.
+#[allow(clippy::too_many_arguments)]
+pub fn observe_floor(
+    fctx: &mut FloorCtx,
+    coffee: &mut CoffeeState,
+    chitchat: &mut HashMap<VenueKey, ActiveChitchat>,
+    scene: &SceneState,
+    pack: &Pack,
+    size: Size,
+    floor_meta: FloorMeta,
+    now: SystemTime,
+) -> Option<ObservedFloor> {
+    let layout = fctx.frame_layout(size.w, size.h, floor_meta.floor_seed)?;
+    let frame = sim_step(
+        &mut SimStores {
+            router: &mut fctx.router,
+            overlay: &mut fctx.overlay,
+            history: &mut fctx.history,
+            motion: &mut fctx.motion,
+            light: &mut fctx.light,
+            neon: &mut fctx.neon,
+            chitchat,
+        },
+        scene,
+        &layout,
+        pack,
+        coffee.map(),
+        floor_meta.floor_idx,
+        now,
+    );
+    frame_epilogue(fctx, coffee, frame.new_coffee_carriers.iter().copied(), now);
+    Some(ObservedFloor { layout, frame })
+}
+
 /// The per-FLOOR half of a painter's persistent session state: the sim/paint
 /// stores ([`FloorCtx`]) plus the reusable pixel buffer that floor renders into.
 pub struct PerFloor {
@@ -665,48 +713,27 @@ impl FloorSession {
         self.floor.ctx.cache = crate::frame_cache::FrameCache::new();
     }
 
-    /// Advance the world one tick WITHOUT painting — the same eviction, layout
-    /// prologue, sim tick, and bookkeeping epilogue as
-    /// [`FloorSession::render`], minus the paint pass. Returns the observed
-    /// [`SimFrame`], or `None` when the size can't lay out.
+    /// Advance the world one tick WITHOUT painting: the session's eviction, then
+    /// the shared [`observe_floor`] seam.
     pub fn observe(
         &mut self,
         scene: &SceneState,
         pack: &Pack,
-        buf_w: u16,
-        buf_h: u16,
+        size: Size,
         floor_meta: FloorMeta,
         now: SystemTime,
-    ) -> Option<SimFrame> {
+    ) -> Option<ObservedFloor> {
         self.evict_missing(scene);
-        let layout = self
-            .floor
-            .ctx
-            .frame_layout(buf_w, buf_h, floor_meta.floor_seed)?;
-        let frame = sim_step(
-            &mut SimStores {
-                router: &mut self.floor.ctx.router,
-                overlay: &mut self.floor.ctx.overlay,
-                history: &mut self.floor.ctx.history,
-                motion: &mut self.floor.ctx.motion,
-                light: &mut self.floor.ctx.light,
-                neon: &mut self.floor.ctx.neon,
-                chitchat: &mut self.office.chitchat,
-            },
-            scene,
-            &layout,
-            pack,
-            self.office.coffee.map(),
-            floor_meta.floor_idx,
-            now,
-        );
-        frame_epilogue(
+        observe_floor(
             &mut self.floor.ctx,
             &mut self.office.coffee,
-            frame.new_coffee_carriers.iter().copied(),
+            &mut self.office.chitchat,
+            scene,
+            pack,
+            size,
+            floor_meta,
             now,
-        );
-        Some(frame)
+        )
     }
 }
 

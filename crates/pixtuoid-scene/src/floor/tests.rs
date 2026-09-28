@@ -844,8 +844,15 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
     let mut session = FloorSession::new();
 
     let frame = session
-        .observe(&scene, &pack, 160, 96, FloorMeta::ground(), t)
-        .expect("a layoutable size observes");
+        .observe(
+            &scene,
+            &pack,
+            Size { w: 160, h: 96 },
+            FloorMeta::ground(),
+            t,
+        )
+        .expect("a layoutable size observes")
+        .frame;
     assert!(
         frame.poses.contains_key(&id),
         "the frame carries the agent's routed pose"
@@ -866,10 +873,30 @@ fn floor_session_observe_advances_the_world_without_a_pixel_buffer() {
 
     assert!(
         session
-            .observe(&scene, &pack, 8, 8, FloorMeta::ground(), t)
+            .observe(&scene, &pack, Size { w: 8, h: 8 }, FloorMeta::ground(), t)
             .is_none(),
         "an unlayoutable size observes nothing"
     );
+}
+
+/// A second profile paints the layout the sim stepped on, not one it lays out
+/// again beside it.
+#[test]
+fn observe_hands_back_the_layout_the_sim_stepped_on() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let scene = make_scene(1, 8);
+    let size = Size { w: 160, h: 96 };
+    let meta = FloorMeta::ground();
+    let mut session = FloorSession::new();
+    let observed = session
+        .observe(&scene, &pack, size, meta, t0())
+        .expect("a layoutable size observes");
+    let stepped = session
+        .floor
+        .ctx
+        .frame_layout(size.w, size.h, meta.floor_seed)
+        .expect("the memoized layout");
+    assert!(Arc::ptr_eq(&observed.layout, &stepped));
 }
 
 #[test]

@@ -118,8 +118,14 @@ fn check_file(source: &str, path: &Path, pack: &Pack) -> Verdict {
     // verdict.
     let mut session = FloorSession::new();
     v.drawn = session
-        .observe(&driven.scene, pack, 192, 80, FloorMeta::ground(), now())
-        .map_or(0, |frame| frame.characters.len());
+        .observe(
+            &driven.scene,
+            pack,
+            pixtuoid_scene::layout::Size { w: 192, h: 80 },
+            FloorMeta::ground(),
+            now(),
+        )
+        .map_or(0, |observed| observed.frame.characters.len());
     v
 }
 

@@ -33,38 +33,87 @@ pub(crate) fn character_frame<'c>(
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
     let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
+    let CharacterKey { frame: key, outfit } = character_key_at(
+        dense.density,
+        anim_name,
+        frame_idx,
+        agent,
+        flip_x,
+        glow_tint,
+        now,
+    );
+    let burn = key.burn;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
-    cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
-    let burn = crate::burn::slot_burn_tier(agent, now);
-    let frame = cache.get_or_make(
-        crate::frame_cache::FrameKey {
-            agent_id: agent.agent_id,
-            anim_name,
-            frame_idx,
-            flip_x,
-            glow_tint,
-            burn,
-            density: dense.density,
-        },
-        || {
-            let recolored = dense
-                .recolorable
-                .recolored(&agent_overrides(agent, glow_tint, burn));
-            if flip_x {
-                // HORIZONTAL: `flip_x` is which way the character FACES.
-                recolored.mirror_horizontal()
-            } else {
-                recolored
-            }
-        },
-    );
+    cache.note_outfit_seed(agent.agent_id, outfit);
+    let frame = cache.get_or_make(key, || {
+        let recolored = dense
+            .recolorable
+            .recolored(&agent_overrides(agent, glow_tint, burn));
+        if flip_x {
+            // HORIZONTAL: `flip_x` is which way the character FACES.
+            recolored.mirror_horizontal()
+        } else {
+            recolored
+        }
+    });
     Some(CharacterFrame {
         frame,
         burn,
         logical: dense.logical,
         blit_at: dense.blit_at,
     })
+}
+
+/// Every input [`character_frame`] recolors from: the cache's key, and the outfit
+/// seed the cache drops an agent's entries on. Two equal keys draw the same
+/// pixels, which is what lets a caller tell an unchanged figure without drawing it.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct CharacterKey {
+    pub(crate) frame: crate::frame_cache::FrameKey,
+    pub(crate) outfit: u64,
+}
+
+/// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
+/// draws nothing.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn character_key(
+    anim_name: &'static str,
+    frame_idx: usize,
+    agent: &AgentSlot,
+    pack: &Pack,
+    flip_x: bool,
+    glow_tint: Option<Rgb>,
+    scale: crate::render_scale::RenderScale,
+    now: SystemTime,
+) -> Option<CharacterKey> {
+    let density = super::densest_frame(pack, anim_name, frame_idx, scale)?.density;
+    Some(character_key_at(
+        density, anim_name, frame_idx, agent, flip_x, glow_tint, now,
+    ))
+}
+
+fn character_key_at(
+    density: std::num::NonZeroU16,
+    anim_name: &'static str,
+    frame_idx: usize,
+    agent: &AgentSlot,
+    flip_x: bool,
+    glow_tint: Option<Rgb>,
+    now: SystemTime,
+) -> CharacterKey {
+    CharacterKey {
+        frame: crate::frame_cache::FrameKey {
+            agent_id: agent.agent_id,
+            anim_name,
+            frame_idx,
+            flip_x,
+            glow_tint,
+            burn: crate::burn::slot_burn_tier(agent, now),
+            density,
+        },
+        outfit: outfit_seed_for(agent),
+    }
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked

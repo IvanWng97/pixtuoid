@@ -20,8 +20,8 @@ use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
 use pixtuoid_scene::cutaway::paint::render_cutaway;
-use pixtuoid_scene::floor::{FloorMeta, FloorSession};
-use pixtuoid_scene::layout::Layout;
+use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
+use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
 use pixtuoid_scene::theme::theme_by_name;
 
@@ -138,11 +138,9 @@ fn main() -> Result<()> {
 
     // The real sim, at LOGICAL size — the cutaway is its second reader.
     let mut session = FloorSession::new();
-    let frame = session
-        .observe(&scene, &pack, lw, lh, meta, now)
+    let ObservedFloor { layout, frame } = session
+        .observe(&scene, &pack, Size { w: lw, h: lh }, meta, now)
         .ok_or_else(|| anyhow!("{lw}x{lh} does not lay out"))?;
-    let layout = Layout::compute_with_seed(lw, lh, None, meta.floor_seed)
-        .ok_or_else(|| anyhow!("layout compute failed"))?;
 
     let (bw, bh) = (scale.to_buffer(lw), scale.to_buffer(lh));
     let mut buf = RgbBuffer::filled(bw, bh, theme.surface.bg_fallback);

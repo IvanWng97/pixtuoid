@@ -79,6 +79,21 @@ pub fn render_cutaway(
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
+    paint_backdrop(layout, pack, theme, scale, buf);
+    let list = build_list(frame, layout, pack, theme, scale, now);
+    paint_list(&list, frame, pack, theme, scale, now, cache, buf);
+    list.labels().collect()
+}
+
+/// Everything under the floor-standing pieces: floor, north wall band and the
+/// decor hung on it. None of it moves within a layout, theme, pack and scale.
+fn paint_backdrop(
+    layout: &Layout,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
     // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
@@ -86,23 +101,191 @@ pub fn render_cutaway(
     for item in &layout.wall_decor {
         paint_wall_decor(item.pos, item.kind.sprite_name(), pack, scale, buf);
     }
+}
 
-    // ONE ordered draw list, so a character and the desk it sits at resolve against
-    // each other by depth. That ordering IS the occlusion — there is no second pass.
-    let ordered = depth_sort(draw_list(frame, layout, pack, theme, scale));
-    let mut labels = Vec::with_capacity(frame.characters.len());
-    for kind in &ordered {
-        if let Some(l) = paint_piece(kind, frame, pack, theme, scale, now, cache, buf) {
-            labels.push(l);
+/// One frame's floor-standing pieces, built and ordered but not painted.
+///
+/// ONE ordered list, so a character and the desk it sits at resolve against each
+/// other by depth: that order IS the occlusion, and there is no second pass.
+pub(crate) struct DrawList {
+    pieces: Vec<Piece>,
+}
+
+/// One entry of a [`DrawList`].
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the incremental canvas diffs frames by span and fingerprint"
+    )
+)]
+pub(crate) struct Piece {
+    /// Every pixel the piece paints, and the row it sorts on.
+    pub(crate) span: Span,
+    pub(crate) kind: PieceKind,
+    /// Equal for two pieces that paint the same pixels at the same span — how a
+    /// caller tells an unchanged piece without painting it. Compare it only
+    /// within one layout, theme, pack and scale: those are not in it.
+    pub(crate) fingerprint: u64,
+}
+
+impl DrawList {
+    /// The pieces, back to front.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the incremental canvas walks them")
+    )]
+    pub(crate) fn pieces(&self) -> &[Piece] {
+        &self.pieces
+    }
+
+    /// Where each drawn agent's badge belongs, in draw order.
+    pub(crate) fn labels(&self) -> impl Iterator<Item = CutawayLabel> + '_ {
+        self.pieces.iter().filter_map(|p| match p.kind {
+            PieceKind::Character { label, .. } => label,
+            _ => None,
+        })
+    }
+
+    /// Each drawn agent's body — the box its art lands in, no shadow and no
+    /// chair — as `(agent index, box)`, in draw order: the topmost body at a
+    /// point is the last one containing it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the cutaway's hit tests read them")
+    )]
+    pub(crate) fn hover_spans(&self) -> impl Iterator<Item = (usize, Span)> + '_ {
+        self.pieces.iter().filter_map(|p| match p.kind {
+            PieceKind::Character {
+                label: Some(label),
+                body,
+                ..
+            } => Some((label.agent_idx, body)),
+            _ => None,
+        })
+    }
+}
+
+/// Build `frame`'s [`DrawList`]; `now` is the only input it reads that a
+/// [`SimFrame`] does not carry, through a figure's burn tier.
+pub(crate) fn build_list(
+    frame: &SimFrame,
+    layout: &Layout,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    now: std::time::SystemTime,
+) -> DrawList {
+    let collected = collect_pieces(frame, layout, pack, theme, scale);
+    let pieces = depth_sort(
+        collected
+            .into_iter()
+            .map(|(span, kind)| (span, (span, kind)))
+            .collect(),
+    )
+    .into_iter()
+    .map(|(span, kind)| Piece {
+        span,
+        fingerprint: fingerprint(&kind, frame, pack, theme, scale, now),
+        kind,
+    })
+    .collect();
+    DrawList { pieces }
+}
+
+/// Paint every piece of `list` over what `buf` already holds, back to front.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_list(
+    list: &DrawList,
+    frame: &SimFrame,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    now: std::time::SystemTime,
+    cache: &mut crate::frame_cache::FrameCache,
+    buf: &mut RgbBuffer,
+) {
+    for piece in &list.pieces {
+        paint_piece(&piece.kind, frame, pack, theme, scale, now, cache, buf);
+    }
+}
+
+/// A hash of every input `paint_piece` draws `kind` from beyond the layout,
+/// theme, pack and scale. Each arm names every field, so a field a paint fn
+/// comes to read cannot be left out of it without the arm failing to compile.
+fn fingerprint(
+    kind: &PieceKind,
+    frame: &SimFrame,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    now: std::time::SystemTime,
+) -> u64 {
+    use std::hash::{Hash, Hasher};
+    // `DefaultHasher::new` is one hasher on every call, so one frame built twice
+    // hashes alike (`one_frame_builds_one_list`); a `RandomState` would not.
+    let mut h = std::hash::DefaultHasher::new();
+    std::mem::discriminant(kind).hash(&mut h);
+    match *kind {
+        PieceKind::WallSeg { at, w, h: height } => (at, w, height).hash(&mut h),
+        PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
+        PieceKind::Chair { at } => at.hash(&mut h),
+        PieceKind::Prop {
+            at,
+            sprite,
+            mirrored,
+        } => (at, sprite, mirrored).hash(&mut h),
+        PieceKind::Table { at } => at.hash(&mut h),
+        PieceKind::Appliance { at, kind } => (at, kind).hash(&mut h),
+        // The label and body follow from the anchor and the frame's size, both
+        // in the figure's own part.
+        PieceKind::Character {
+            idx,
+            chair,
+            label: _,
+            body: _,
+        } => {
+            chair.hash(&mut h);
+            character_fingerprint(frame, idx, pack, theme, scale, now).hash(&mut h);
         }
     }
-    labels
+    h.finish()
+}
+
+/// What [`paint_character`] draws character `idx` from: where, whether it is
+/// grounded by a shadow, and the recolored frame's key. `None` where it draws
+/// no body.
+fn character_fingerprint(
+    frame: &SimFrame,
+    idx: usize,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    now: std::time::SystemTime,
+) -> Option<(
+    crate::layout::Point,
+    bool,
+    crate::pixel_painter::seat::CharacterKey,
+)> {
+    let c = frame.characters.get(idx)?;
+    let agent = frame.agents.get(c.agent_idx)?;
+    let key = crate::pixel_painter::seat::character_key(
+        c.anim_name,
+        c.frame_idx,
+        agent,
+        pack,
+        c.flip_x,
+        crate::pixel_painter::character_glow_tint(c.glow, agent, theme),
+        scale,
+        now,
+    )?;
+    Some((cutaway_anchor(c), c.seat_desk.is_none(), key))
 }
 
 /// Every floor-standing piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
-fn draw_list(
+fn collect_pieces(
     frame: &SimFrame,
     layout: &Layout,
     pack: &Pack,
@@ -122,7 +305,7 @@ fn draw_list(
     order
 }
 
-/// Paint one piece of the draw list, returning a character's badge anchor.
+/// Paint one piece of the draw list.
 #[allow(clippy::too_many_arguments)]
 fn paint_piece(
     kind: &PieceKind,
@@ -133,32 +316,17 @@ fn paint_piece(
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
-) -> Option<CutawayLabel> {
+) {
     match *kind {
         PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, theme, scale, buf),
         PieceKind::Chair { at } => paint_chair(at, pack, theme, scale, buf),
-        PieceKind::Character {
-            idx,
-            chair,
-            badge_ceiling,
-        } => {
-            let label = paint_character(
-                frame,
-                idx,
-                badge_ceiling,
-                pack,
-                theme,
-                scale,
-                now,
-                cache,
-                buf,
-            );
+        PieceKind::Character { idx, chair, .. } => {
+            paint_character(frame, idx, pack, theme, scale, now, cache, buf);
             // The sitter's own chair, straight after them: one piece, so
             // nothing can sort between a person and the chair they sit in.
             if let Some(at) = chair {
                 paint_chair(at, pack, theme, scale, buf);
             }
-            return label;
         }
         PieceKind::Prop {
             at,
@@ -169,7 +337,6 @@ fn paint_piece(
         PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
         PieceKind::WallSeg { at, w, h } => paint_wall_seg(at, w, h, theme, scale, buf),
     }
-    None
 }
 
 /// Each desk in its facing's art, its screen lit by the classic painter's own
@@ -484,25 +651,25 @@ fn push_characters(
         let badge_ceiling = seat.and_then(|(d, facing)| {
             desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
         });
+        let at = cutaway_anchor(c);
         // +1 for the contact shadow `paint_character` stamps under a figure
         // not seated at a desk (`seat_desk`).
         let shadow = u16::from(c.seat_desk.is_none());
         order.push((
             occupant_span(
-                piece_span(
-                    crate::layout::Anchor::TopLeft,
-                    cutaway_anchor(c),
-                    w,
-                    h,
-                    shadow,
-                ),
+                piece_span(crate::layout::Anchor::TopLeft, at, w, h, shadow),
                 c.anchor_y,
                 chair.map(|(span, _)| span),
             ),
             PieceKind::Character {
                 idx: i,
                 chair: chair.map(|(_, at)| at),
-                badge_ceiling,
+                // `paint_character` draws no body for an agent the frame lacks.
+                label: frame.agents.get(c.agent_idx).map(|_| CutawayLabel {
+                    agent_idx: c.agent_idx,
+                    anchor_px: label_anchor(at, w, badge_ceiling, scale),
+                }),
+                body: Span::new(at.x, at.y, w, h, 0),
             },
         ));
     }
@@ -637,7 +804,7 @@ fn paint_wall_seg(
 /// from it. `every_piece_paints_only_inside_its_span` pins that every pixel a
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
-enum PieceKind {
+pub(crate) enum PieceKind {
     /// One segment of a room's wall run.
     WallSeg {
         /// The logical position, which `paint_wall_seg` scales; walls are pure
@@ -674,9 +841,14 @@ enum PieceKind {
         idx: usize,
         /// A back-turned sitter's chair, painted straight after them.
         chair: Option<crate::layout::Point>,
-        /// The logical row their badge must stay above: the top of their desk's
-        /// art.
-        badge_ceiling: Option<u16>,
+        /// Where their badge belongs, or `None` where no body is drawn.
+        label: Option<CutawayLabel>,
+        /// The box their art lands in: the span without its shadow or chair.
+        #[cfg_attr(
+            not(test),
+            expect(dead_code, reason = "the cutaway's hit tests read it")
+        )]
+        body: Span,
     },
 }
 
@@ -1029,22 +1201,25 @@ fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout
 fn paint_character(
     frame: &SimFrame,
     idx: usize,
-    badge_ceiling: Option<u16>,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
-) -> Option<CutawayLabel> {
-    let c = frame.characters.get(idx)?;
-    let agent = frame.agents.get(c.agent_idx)?;
+) {
+    let Some(c) = frame.characters.get(idx) else {
+        return;
+    };
+    let Some(agent) = frame.agents.get(c.agent_idx) else {
+        return;
+    };
     let at = cutaway_anchor(c);
 
     // The classic painter's own recolor + facing-flip path, through the same
     // cache: a raw pack blit clones one placeholder-palette person per agent.
     let glow_tint = crate::pixel_painter::character_glow_tint(c.glow, agent, theme);
-    let art = crate::pixel_painter::seat::character_frame(
+    let Some(art) = crate::pixel_painter::seat::character_frame(
         c.anim_name,
         c.frame_idx,
         agent,
@@ -1054,7 +1229,9 @@ fn paint_character(
         scale,
         cache,
         now,
-    )?;
+    ) else {
+        return;
+    };
     let (art_w, art_h) = art.logical;
 
     // A sitter is grounded by their desk (and a back-turned one by their
@@ -1069,10 +1246,6 @@ fn paint_character(
         art.blit_at,
         buf,
     );
-    Some(CutawayLabel {
-        agent_idx: c.agent_idx,
-        anchor_px: label_anchor(at, art_w, badge_ceiling, scale),
-    })
 }
 
 /// The badge anchor for a body of `sprite_w` logical columns drawn at `at`:
@@ -1368,7 +1541,8 @@ mod tests {
                 PieceKind::Character {
                     idx: 0,
                     chair: None,
-                    badge_ceiling: None,
+                    label: None,
+                    body: person,
                 },
             ),
             (
@@ -1822,12 +1996,15 @@ mod tests {
                 .observe(
                     &scene,
                     &pack,
-                    LOGICAL.0,
-                    LOGICAL.1,
+                    crate::layout::Size {
+                        w: LOGICAL.0,
+                        h: LOGICAL.1,
+                    },
                     meta,
                     now0 + Duration::from_millis(100 * n),
                 )
-                .expect("lays out");
+                .expect("lays out")
+                .frame;
             if seated_at.is_none()
                 && frame
                     .seated_agents
@@ -1927,7 +2104,7 @@ mod tests {
         desk: crate::layout::Point,
     ) -> Option<bool> {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let order = draw_list(frame, layout, pack, theme, RenderScale::ONE);
+        let order = collect_pieces(frame, layout, pack, theme, RenderScale::ONE);
         let (person, person_span) = order
             .iter()
             .enumerate()
@@ -2187,7 +2364,7 @@ mod tests {
         let mut check = |pack: &Pack, frame: &SimFrame, layout: &Layout, only_people: bool| {
             for s in [1, 3, pack.max_density_variant()] {
                 let scale = RenderScale::new(s).expect("nonzero");
-                for (span, kind) in draw_list(frame, layout, pack, theme, scale) {
+                for (span, kind) in collect_pieces(frame, layout, pack, theme, scale) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
                     }
@@ -2244,19 +2421,16 @@ S B B B B B B S
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
         let pack = pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
-            let frame = FloorSession::new()
+            let observed = FloorSession::new()
                 .observe(
                     &pixtuoid_core::SceneState::uniform(16),
                     &pack,
-                    w,
-                    h,
+                    crate::layout::Size { w, h },
                     FloorMeta::ground(),
                     std::time::SystemTime::UNIX_EPOCH,
                 )
                 .expect("lays out");
-            let layout = Layout::compute_with_seed(w, h, None, FloorMeta::ground().floor_seed)
-                .expect("lays out");
-            check(&pack, &frame, &layout, false);
+            check(&pack, &observed.frame, &observed.layout, false);
         }
         assert_eq!(
             kinds.into_iter().collect::<Vec<_>>(),
@@ -2280,6 +2454,186 @@ S B B B B B B S
             assert!(
                 props.contains(sprite),
                 "no {sprite} prop was painted: {props:?}"
+            );
+        }
+    }
+
+    /// What the incremental canvas relies on: two pieces sharing a span and a
+    /// fingerprint paint the same pixels, so one may stand in for the other.
+    /// Walked over every tick of a walk to a desk and a sit — the figure's frame,
+    /// facing, position and glow and the desk's screen all change on the way.
+    /// Every piece is compared at scale 1; at the densest scale only figures,
+    /// the one kind whose fingerprint is derived rather than its paint fn's
+    /// arguments (`fingerprint`).
+    #[test]
+    fn one_span_and_fingerprint_always_paint_the_same_pixels() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let now = std::time::SystemTime::UNIX_EPOCH;
+        // Keyed by scale too: a fingerprint holds within one scale (`Piece`).
+        let mut painted: std::collections::HashMap<(u16, Span, u64), u64> =
+            std::collections::HashMap::new();
+        let (mut repeats, mut figure_changes, mut desk_changes) = (0, 0, 0);
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let (layout, pack, frames, desk) = sit_down(facing, 2);
+            for s in [1, pack.max_density_variant()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let mut last: Option<(u64, u64)> = None;
+                for frame in &frames {
+                    let list = build_list(frame, &layout, &pack, theme, scale, now);
+                    for piece in list
+                        .pieces()
+                        .iter()
+                        .filter(|p| s == 1 || matches!(p.kind, PieceKind::Character { .. }))
+                    {
+                        let pixels =
+                            painted_alone(&piece.kind, frame, &layout, &pack, theme, scale);
+                        match painted.entry((s, piece.span, piece.fingerprint)) {
+                            std::collections::hash_map::Entry::Occupied(seen) => {
+                                assert_eq!(
+                                    *seen.get(),
+                                    pixels,
+                                    "{:?} at scale {s} shares {:?}'s fingerprint but paints differently",
+                                    piece.kind,
+                                    piece.span
+                                );
+                                repeats += 1;
+                            }
+                            std::collections::hash_map::Entry::Vacant(v) => {
+                                v.insert(pixels);
+                            }
+                        }
+                    }
+                    let fp_of = |want: fn(&PieceKind, crate::layout::Point) -> bool| {
+                        list.pieces()
+                            .iter()
+                            .find(|p| want(&p.kind, desk))
+                            .map(|p| p.fingerprint)
+                    };
+                    let figure = fp_of(|k, _| matches!(k, PieceKind::Character { .. }));
+                    let desk_fp = fp_of(|k, d| matches!(k, PieceKind::Desk { at, .. } if *at == d));
+                    if let (Some((f0, d0)), Some(f1), Some(d1)) = (last, figure, desk_fp) {
+                        figure_changes += usize::from(f0 != f1);
+                        desk_changes += usize::from(d0 != d1);
+                    }
+                    last = figure.zip(desk_fp);
+                }
+            }
+        }
+        assert!(repeats > 0, "no piece recurred, so nothing was compared");
+        assert!(figure_changes > 0, "the walker never changed fingerprint");
+        assert!(
+            desk_changes > 0,
+            "the home desk's screen never changed fingerprint"
+        );
+    }
+
+    /// A hash of the pixels `kind` writes, painted alone over two fills.
+    fn painted_alone(
+        kind: &PieceKind,
+        frame: &SimFrame,
+        layout: &Layout,
+        pack: &Pack,
+        theme: &Theme,
+        scale: RenderScale,
+    ) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+        let mut hasher = std::hash::DefaultHasher::new();
+        for fill in [
+            pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
+            pixtuoid_core::sprite::Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            },
+        ] {
+            let mut buf = RgbBuffer::filled(w, h, fill);
+            let mut cache = crate::frame_cache::FrameCache::new();
+            paint_piece(
+                kind,
+                frame,
+                pack,
+                theme,
+                scale,
+                std::time::SystemTime::UNIX_EPOCH,
+                &mut cache,
+                &mut buf,
+            );
+            buf.as_slice().hash(&mut hasher);
+        }
+        hasher.finish()
+    }
+
+    /// Building one frame twice gives the same list, so a caller diffing two
+    /// frames sees only what moved.
+    #[test]
+    fn one_frame_builds_one_list() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 0);
+        let frame = frames.last().expect("a seated frame");
+        let now = std::time::SystemTime::UNIX_EPOCH;
+        let summary = |list: &DrawList| {
+            list.pieces()
+                .iter()
+                .map(|p| (p.span, p.fingerprint))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            summary(&build_list(
+                frame,
+                &layout,
+                &pack,
+                theme,
+                RenderScale::ONE,
+                now
+            )),
+            summary(&build_list(
+                frame,
+                &layout,
+                &pack,
+                theme,
+                RenderScale::ONE,
+                now
+            )),
+        );
+    }
+
+    /// Each drawn agent has one hover box, inside the span its piece paints in,
+    /// in draw order, and every badge belongs to one of them.
+    #[test]
+    fn each_drawn_agent_hovers_inside_its_piece() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        for frame in &frames {
+            let list = build_list(
+                frame,
+                &layout,
+                &pack,
+                theme,
+                RenderScale::ONE,
+                std::time::SystemTime::UNIX_EPOCH,
+            );
+            let pieces: Vec<Span> = list
+                .pieces()
+                .iter()
+                .filter(|p| matches!(p.kind, PieceKind::Character { label: Some(_), .. }))
+                .map(|p| p.span)
+                .collect();
+            let hovers: Vec<(usize, Span)> = list.hover_spans().collect();
+            assert_eq!(hovers.len(), pieces.len());
+            assert_eq!(hovers.len(), frame.characters.len());
+            for ((_, body), span) in hovers.iter().zip(&pieces) {
+                assert!(
+                    span.x0 <= body.x0
+                        && body.x1 <= span.x1
+                        && span.y0 <= body.y0
+                        && body.y1 <= span.y1,
+                    "hover box {body:?} leaves its piece's span {span:?}"
+                );
+            }
+            assert_eq!(
+                list.labels().map(|l| l.agent_idx).collect::<Vec<_>>(),
+                hovers.iter().map(|&(agent, _)| agent).collect::<Vec<_>>(),
             );
         }
     }
