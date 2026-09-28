@@ -73,6 +73,27 @@ pub(crate) fn set_weather_override(w: Option<Weather>) {
     WEATHER_OVERRIDE.with(|c| c.set(w));
 }
 
+/// A forced weather that clears itself when dropped, so a test cannot leak it
+/// into a sibling sharing its thread (plain `cargo test` reuses threads), even
+/// when an assert panics first.
+#[cfg(test)]
+pub(crate) struct ForcedWeather;
+
+#[cfg(test)]
+impl ForcedWeather {
+    pub(crate) fn new(w: Weather) -> Self {
+        set_weather_override(Some(w));
+        Self
+    }
+}
+
+#[cfg(test)]
+impl Drop for ForcedWeather {
+    fn drop(&mut self) {
+        set_weather_override(None);
+    }
+}
+
 /// How long one weather holds before the next slot picks again.
 const WEATHER_CYCLE_SECS: u64 = 600;
 
