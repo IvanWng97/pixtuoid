@@ -662,10 +662,11 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     );
 }
 
-/// The cutaway places a desk's front face, glow and contact shadow by its
-/// LOGICAL size, so a desk drawn from a variant that is exactly its base
-/// upscaled renders the same pixels as the base blitted at the scale, and one
-/// drawn differently renders differently.
+/// The cutaway places a desk's front face and contact shadow by its LOGICAL
+/// size, so a desk drawn from a variant that is exactly its base upscaled
+/// renders the same pixels as the base blitted at the scale, and one drawn
+/// differently renders differently. The lit screen's pin is
+/// `a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base`.
 #[test]
 fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
     use crate::render_scale::RenderScale;
@@ -747,6 +748,129 @@ fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
     );
 }
 
+/// A lit screen is the desk's own glass keys relit, so on a desk drawn from a
+/// variant that is exactly its base upscaled it lands on the same pixels as the
+/// base's — the glow follows the art, never the art's pixel size.
+#[test]
+fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
+    use crate::layout::Facing;
+    use crate::render_scale::RenderScale;
+    use std::time::Duration;
+    const DENSITY: u16 = 2;
+    let (mut scene, layout, id, now0, bundled) = sim_rig();
+    let north = (0..layout.home_desks.len())
+        .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == Facing::North)
+        .expect("the office has a back-turned desk");
+    let slot = scene.agents.get_mut(&id).expect("the rig's agent");
+    slot.desk_index = GlobalDeskIndex(north);
+    slot.state = ActivityState::Active {
+        tool_use_id: None,
+        detail: None,
+        kind: ToolKind::Edit,
+    };
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    // Stepped, not jumped: the sim walks the agent to their seat.
+    let frame = (1..=1200u64)
+        .map(|n| {
+            sim_step(
+                &mut owned.stores(),
+                &scene,
+                &layout,
+                &bundled,
+                &coffee,
+                0,
+                now0 + Duration::from_millis(100 * n),
+            )
+        })
+        .find(|f| {
+            f.seated_agents
+                .get(&FloorLocalDeskIndex(north))
+                .copied()
+                .unwrap_or(false)
+        })
+        .expect("the typing agent sits at their desk");
+    let unlit = sim_step(
+        &mut OwnedSimStores::new().stores(),
+        &SceneState::uniform(16),
+        &layout,
+        &bundled,
+        &coffee,
+        0,
+        now0,
+    );
+
+    // A desk top, its screen glass, and a darker front row, whole-pixel so an
+    // upscale by `DENSITY` is the variant exactly.
+    let rows = |w: u16, h: u16, glass: char| -> String {
+        (0..h)
+            .map(|y| {
+                let key = match y * 3 / h {
+                    0 => 'D',
+                    1 => glass,
+                    _ => 'E',
+                };
+                vec![key.to_string(); usize::from(w)].join(" ")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    let (w, h) = (6, 3);
+    let pack = |variant_glass: Option<char>| {
+        let variant = if variant_glass.is_some() {
+            format!("[animations.\"desk@{DENSITY}x\"]\nframes=[\"g.sprite\"]\nframe_ms=100\n")
+        } else {
+            String::new()
+        };
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
+             \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"j\"=\"#1c2a36\"\n\
+             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}"
+        );
+        let art = [
+            ("f.sprite", format!("@frame 0\n{}", rows(w, h, 'j'))),
+            (
+                "g.sprite",
+                format!(
+                    "@frame 0\n{}",
+                    rows(w * DENSITY, h * DENSITY, variant_glass.unwrap_or('j'))
+                ),
+            ),
+        ];
+        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
+    };
+
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let scale = RenderScale::new(DENSITY).expect("nonzero");
+    let render = |frame: &SimFrame, pack: &Pack| {
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = crate::frame_cache::FrameCache::new();
+        crate::cutaway::paint::render_cutaway(
+            frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+        );
+        buf.as_slice().to_vec()
+    };
+
+    let base_px = render(&frame, &pack(None));
+    assert!(
+        base_px != render(&unlit, &pack(None)),
+        "the typing agent's screen must be lit, or this pins nothing"
+    );
+    assert!(
+        render(&frame, &pack(Some('j'))) == base_px,
+        "the lit screen moved with the art's density"
+    );
+    assert!(
+        render(&frame, &pack(Some('D'))) != base_px,
+        "the cutaway did not draw the lit desk from the variant"
+    );
+}
+
 #[test]
 fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/a.jsonl");
@@ -785,6 +909,56 @@ fn agent_overrides_glow_tint_shifts_skin_toward_given_color() {
         bb > ub,
         "blue glow should push skin blue (lit={bb}, unlit={ub})"
     );
+}
+
+/// Pins [`super::desk_screen_glow`], the one screen rule both profiles light
+/// by: a seated occupant's tool, on a north-facing desk only.
+#[test]
+fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
+    use crate::layout::Facing;
+    let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
+    let editing = make_slot(
+        id,
+        ActivityState::Active {
+            tool_use_id: None,
+            detail: None,
+            kind: ToolKind::Edit,
+        },
+    );
+    let idle = make_slot(id, ActivityState::Idle);
+    let theme = &crate::theme::NORMAL;
+    let tool = palette::tool_glow_tint(&editing, &theme.tool_glow);
+    assert!(tool.is_some(), "the fixture's occupant is using a tool");
+    let glow = |occupant, facing, seated| super::desk_screen_glow(occupant, facing, seated, theme);
+    assert_eq!(glow(Some(&editing), Facing::North, true), tool);
+    assert_eq!(
+        glow(Some(&editing), Facing::South, true),
+        None,
+        "a viewer-facing desk shows its monitor's back"
+    );
+    assert_eq!(
+        glow(Some(&editing), Facing::North, false),
+        None,
+        "not seated"
+    );
+    assert_eq!(glow(Some(&idle), Facing::North, true), None, "no tool");
+    assert_eq!(glow(None, Facing::North, true), None, "nobody");
+}
+
+/// Pins [`super::desk_chair_top_left`]'s gate: only a back-turned seat's chair
+/// stands in view.
+#[test]
+fn only_a_north_facing_desk_stands_a_chair() {
+    use crate::layout::Facing;
+    let desk = Point { x: 40, y: 30 };
+    assert!(super::desk_chair_top_left(desk, 8, Facing::North).is_some());
+    for facing in [Facing::South, Facing::East, Facing::West] {
+        assert_eq!(
+            super::desk_chair_top_left(desk, 8, facing),
+            None,
+            "{facing:?}"
+        );
+    }
 }
 
 #[test]

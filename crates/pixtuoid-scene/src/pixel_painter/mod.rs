@@ -88,6 +88,7 @@ pub use anchors::character_anchor;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
+pub(crate) use drawable::{desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -806,26 +807,35 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them.
 fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
-    /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
-    const CHAIR_BACK_TOP_DY: u16 = 6;
     let Some(chair) = drawable::desk_chair_frame(pack) else {
         return;
     };
     for (i, &desk) in layout.home_desks.iter().enumerate() {
         let facing = layout.desk_facing(FloorLocalDeskIndex(i));
-        if facing != crate::layout::Facing::North {
+        let Some(pos) = desk_chair_top_left(desk, chair.width(), facing) else {
             continue;
-        }
+        };
         drawables.push(Drawable {
             anchor_y: crate::layout::desk_walk_anchor_facing(desk, facing).y,
-            kind: DrawableKind::DeskChair {
-                pos: Point {
-                    x: anchors::seated_anchor_facing(desk, chair.width(), facing).x,
-                    y: desk.y + CHAIR_BACK_TOP_DY,
-                },
-            },
+            kind: DrawableKind::DeskChair { pos },
         });
     }
+}
+
+/// Where the task chair `chair_w` wide stands at `desk`, or `None` for a desk that
+/// does not face north: a viewer-facing occupant sits behind their desk, in front
+/// of their chair. Both profiles place chairs from this.
+pub(crate) fn desk_chair_top_left(
+    desk: Point,
+    chair_w: u16,
+    facing: crate::layout::Facing,
+) -> Option<Point> {
+    /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
+    const CHAIR_BACK_TOP_DY: u16 = 6;
+    (facing == crate::layout::Facing::North).then(|| Point {
+        x: anchors::seated_anchor_facing(desk, chair_w, facing).x,
+        y: desk.y + CHAIR_BACK_TOP_DY,
+    })
 }
 
 pub(super) struct DeskLight {
@@ -852,6 +862,30 @@ fn desk_light(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> Desk
     }
 }
 
+/// The agent whose home desk is `local`, while they have not begun to leave.
+pub(crate) fn desk_occupant(
+    agents: &[AgentSlot],
+    local: FloorLocalDeskIndex,
+) -> Option<&AgentSlot> {
+    agents
+        .iter()
+        .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none())
+}
+
+/// The glow of a desk's screen: its seated occupant's tool, on a desk that
+/// faces north. A far-seated desk shows the monitor's BACK — a glow there would
+/// be light leaking out of a case. Both profiles light screens from this.
+pub(crate) fn desk_screen_glow(
+    occupant: Option<&AgentSlot>,
+    facing: crate::layout::Facing,
+    seated: bool,
+    theme: &crate::theme::Theme,
+) -> Option<pixtuoid_core::sprite::Rgb> {
+    occupant
+        .filter(|_| facing == crate::layout::Facing::North && seated)
+        .and_then(|a| palette::tool_glow_tint(a, &theme.tool_glow))
+}
+
 /// Desk cubicles — each carries its cabinet + lamp + screens. The desk
 /// sorts one row past its visual south row, just past the seated worker's feet,
 /// so the sitter stays visually behind it. Z is a VISUAL property: it tracks
@@ -867,16 +901,15 @@ fn enqueue_desk_cubicles<'a>(
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
-        let occupant = agents
-            .iter()
-            .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none());
-        // A far-seated desk shows the monitor's BACK — a glow there would be light leaking out of a case.
+        let occupant = desk_occupant(agents, local);
         let facing = ctx.layout.desk_facing(local);
         let light = desk_light(facing, darkness, indoor_scale);
-        let screen_glow = occupant
-            .filter(|_| facing == crate::layout::Facing::North)
-            .filter(|_| seated_agents.get(&local).copied().unwrap_or(false))
-            .and_then(|a| palette::tool_glow_tint(a, &ctx.theme.tool_glow));
+        let screen_glow = desk_screen_glow(
+            occupant,
+            facing,
+            seated_agents.get(&local).copied().unwrap_or(false),
+            ctx.theme,
+        );
         let has_coffee = occupant.is_some_and(|a| ctx.coffee.contains_key(&a.agent_id));
         let coffee_steam = has_coffee
             && occupant.is_some_and(|a| {

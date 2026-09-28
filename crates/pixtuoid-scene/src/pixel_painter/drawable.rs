@@ -275,9 +275,16 @@ pub(super) struct DrawableCtx<'a> {
 /// The monitor bezel standing proud of the desk back, above `desk.y`.
 const DESK_BEZEL_RAISE: u16 = 1;
 
+/// The row a desk's art blits from, for art `art_h` tall against the base desk's
+/// `base_h`: the bezel raise, plus whatever a taller art adds ABOVE `desk.y`, so
+/// it keeps the base's bottom row. Both profiles blit desks from this.
+pub(crate) fn desk_art_top(desk_y: u16, art_h: u16, base_h: u16) -> u16 {
+    desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
+}
+
 /// The desk art for a seat facing `facing`. Only a back-turned seat needs its
 /// own — its occupant y-sorts in FRONT and covers the screen.
-fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
+pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
     match facing {
         crate::layout::Facing::North => "desk_north",
         crate::layout::Facing::South
@@ -329,9 +336,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
             if let Some(frame) = art {
-                sprite_top = desk
-                    .y
-                    .saturating_sub(DESK_BEZEL_RAISE + frame.height().saturating_sub(base_h));
+                sprite_top = desk_art_top(desk.y, frame.height(), base_h);
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
             paint_desk_lamp(buf, *desk, *lamp, theme);
@@ -584,10 +589,13 @@ fn paint_desk_coffee(
     }
 }
 
+/// The desk task chair's pack animation.
+pub(crate) const DESK_CHAIR_SPRITE: &str = "desk_chair";
+
 /// The desk task chair's art — the ONE authority for its size, so the enqueue
 /// site centres on what is actually drawn even under a custom pack.
 pub(super) fn desk_chair_frame(pack: &Pack) -> Option<&Frame> {
-    pack.animation("desk_chair")
+    pack.animation(DESK_CHAIR_SPRITE)
         .and_then(|a| a.frames().first())
 }
 

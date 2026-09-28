@@ -38,42 +38,21 @@ impl Ramp {
         }
     }
 
-    /// Derive a ramp from one theme color by tinting toward white and shading
-    /// toward black.
+    /// Derive a ramp from one theme color: `lit_level` and `shade_level` steps
+    /// along its [`Rgb::ramp`], the same hue-shifted ramp a pack's `[ramps]`
+    /// shades use, so the room and the art are lit by one rule.
     ///
     /// This is why the cutaway needs no theme edits: every theme gains a
     /// lit/shade pair for free, and a NEW theme cannot ship half-shaded. Adding
     /// two explicit roles per material to `Theme` instead would mean hand-picking
     /// both for every material in every theme, and every one a chance to drift
     /// from the base it belongs to.
-    ///
-    /// Proportional rather than a flat per-channel add: moving a fraction of
-    /// the distance to the endpoint keeps the hue, where `saturating_add` on an
-    /// already-bright channel clips and skews it.
-    pub(crate) fn from_base(base: Rgb, tint_pct: u8, shade_pct: u8) -> Self {
+    pub(crate) fn from_base(base: Rgb, lit_level: i8, shade_level: i8) -> Self {
         Self {
-            lit: toward(base, 255, tint_pct),
+            lit: base.ramp(lit_level),
             base,
-            shade: toward(base, 0, shade_pct),
+            shade: base.ramp(shade_level),
         }
-    }
-}
-
-/// Move each channel `pct` of the way to `target` (0 or 255).
-fn toward(c: Rgb, target: u8, pct: u8) -> Rgb {
-    let mix = |v: u8| -> u8 {
-        let (v16, t16, p) = (u16::from(v), u16::from(target), u16::from(pct.min(100)));
-        let moved = if t16 >= v16 {
-            v16 + (t16 - v16) * p / 100
-        } else {
-            v16 - (v16 - t16) * p / 100
-        };
-        moved as u8
-    };
-    Rgb {
-        r: mix(c.r),
-        g: mix(c.g),
-        b: mix(c.b),
     }
 }
 
@@ -209,55 +188,47 @@ mod tests {
         assert_eq!(buf.get(5, 1), BG);
     }
 
+    /// Pins [`Ramp::from_base`] to the pack's own ramp, so a cutaway shade and a
+    /// sprite's `[ramps]` shade move a colour by one rule.
     #[test]
-    fn a_derived_ramp_brackets_its_base_and_keeps_the_hue() {
-        // A saturated blue: the lit tone must stay blue-dominant. A flat
-        // per-channel add would push it toward white and lose the material.
-        let blue = Rgb {
-            r: 40,
-            g: 70,
-            b: 200,
-        };
-        let r = Ramp::from_base(blue, 30, 30);
-        assert_eq!(r.base, blue, "the base is the theme's own color");
-        assert!(r.lit.r > blue.r && r.lit.g > blue.g && r.lit.b > blue.b);
-        assert!(r.shade.r < blue.r && r.shade.g < blue.g && r.shade.b < blue.b);
-        assert!(
-            r.lit.b > r.lit.r && r.lit.b > r.lit.g,
-            "the lit tone is still blue, not washed toward white: {:?}",
-            r.lit
-        );
-    }
-
-    #[test]
-    fn a_derived_ramp_never_leaves_the_channel_range() {
-        // The endpoints are where a naive add/sub wraps or clips wrongly.
-        for c in [
-            Rgb { r: 0, g: 0, b: 0 },
-            Rgb {
-                r: 255,
-                g: 255,
-                b: 255,
-            },
-        ] {
-            let r = Ramp::from_base(c, 100, 100);
-            assert_eq!(
-                r.lit,
-                Rgb {
-                    r: 255,
-                    g: 255,
-                    b: 255
-                }
-            );
-            assert_eq!(r.shade, Rgb { r: 0, g: 0, b: 0 });
-        }
-        // A zero-percent ramp is the flat material, not a shifted one.
+    fn a_derived_ramp_is_the_packs_hue_shifted_ramp() {
         let c = Rgb {
             r: 90,
             g: 20,
             b: 60,
         };
+        assert_eq!(
+            Ramp::from_base(c, 3, -4),
+            Ramp {
+                lit: c.ramp(3),
+                base: c,
+                shade: c.ramp(-4),
+            }
+        );
         assert_eq!(Ramp::from_base(c, 0, 0), Ramp::flat(c));
+    }
+
+    #[test]
+    fn a_derived_ramp_brackets_its_base_and_keeps_the_hue() {
+        // A saturated blue: the lit tone must stay blue-dominant, not wash
+        // toward white and lose the material.
+        let blue = Rgb {
+            r: 40,
+            g: 70,
+            b: 200,
+        };
+        let luma = |c: Rgb| u32::from(c.r) * 299 + u32::from(c.g) * 587 + u32::from(c.b) * 114;
+        let r = Ramp::from_base(blue, 3, -4);
+        assert_eq!(r.base, blue, "the base is the theme's own color");
+        assert!(
+            luma(r.lit) > luma(blue) && luma(r.shade) < luma(blue),
+            "{r:?}"
+        );
+        assert!(
+            r.lit.b > r.lit.r && r.lit.b > r.lit.g,
+            "the lit tone is still blue, not washed toward white: {:?}",
+            r.lit
+        );
     }
 
     #[test]
