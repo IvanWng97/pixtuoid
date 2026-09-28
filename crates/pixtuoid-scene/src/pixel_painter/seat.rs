@@ -3,7 +3,7 @@
 //! couch, sofa, meeting chair, island stool, or a home desk: sprite + flip,
 //! render anchor, z-key and sit-down glide all derive from it. [`SeatView`] is
 //! the LOOK it resolves to, not the authority. `character_frame` is the
-//! recolored sprite both profiles share.
+//! per-agent recolor both profiles draw through.
 
 use super::*;
 
@@ -13,15 +13,13 @@ use super::anchors::{back_couch_anchor, waypoint_anchor};
 ///
 /// Split out of [`paint_character_at`] so a second profile gets the identical
 /// palette without a second copy of the rule. The ART and the BLIT differ
-/// between profiles — the classic pass draws the base sprite 1:1, the cutaway
-/// the densest variant its scale lands — and a per-agent palette is exactly the
-/// thing that must NOT differ: hair, skin and the cwd-keyed outfit are how a
-/// viewer tells two agents apart, so an agent who is auburn in one profile and
-/// default-brown in the other is two different people to the eye.
-///
-/// The art is [`densest_frame`](crate::render_scale::densest_frame)'s at
-/// `scale`, so [`RenderScale::ONE`](crate::render_scale::RenderScale::ONE)
-/// gets the base sprite.
+/// between profiles — the art is [`densest_frame`](super::densest_frame)'s at
+/// `scale`, so the classic pass (at `RenderScale::ONE`) draws the base sprite
+/// 1:1 and the cutaway the densest variant its scale lands — and a per-agent
+/// palette is exactly the thing that must NOT differ: hair, skin and the
+/// cwd-keyed outfit are how a viewer tells two agents apart, so an agent who is
+/// auburn in one profile and default-brown in the other is two different
+/// people to the eye.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn character_frame<'c>(
     anim_name: &'static str,
@@ -34,7 +32,7 @@ pub(crate) fn character_frame<'c>(
     cache: &'c mut FrameCache,
     now: SystemTime,
 ) -> Option<CharacterFrame<'c>> {
-    let dense = crate::render_scale::densest_frame(pack, anim_name, frame_idx, scale)?;
+    let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
@@ -47,7 +45,7 @@ pub(crate) fn character_frame<'c>(
             flip_x,
             glow_tint,
             burn,
-            density: dense.density.get(),
+            density: dense.density,
         },
         || {
             let recolored = dense
@@ -64,19 +62,18 @@ pub(crate) fn character_frame<'c>(
     Some(CharacterFrame {
         frame,
         burn,
-        density: dense.density,
+        logical: dense.logical,
         blit_at: dense.blit_at,
     })
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked
-/// for; `density` and `blit_at` as in
-/// [`DenseFrame`](crate::render_scale::DenseFrame).
+/// for; `logical` and `blit_at` as in [`DenseFrame`](super::dense::DenseFrame).
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
     /// The caller owns the flame crown, painted at its own coordinates.
     pub(crate) burn: crate::burn::BurnTier,
-    pub(crate) density: std::num::NonZeroU16,
+    pub(crate) logical: (u16, u16),
     pub(crate) blit_at: std::num::NonZeroU16,
 }
 
@@ -99,7 +96,7 @@ pub(crate) fn paint_character_at(
     let Some(CharacterFrame {
         frame: cached,
         burn,
-        density: _,
+        logical: _,
         blit_at: _,
     }) = character_frame(
         anim_name,

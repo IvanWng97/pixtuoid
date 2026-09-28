@@ -26,7 +26,7 @@ pub struct FrameKey {
     pub burn: crate::burn::BurnTier,
     /// The grid the recolored art is authored on — 1 for the base sprite, `N`
     /// for its `@Nx` variant: the same frame at two densities is two images.
-    pub density: u16,
+    pub density: std::num::NonZeroU16,
 }
 
 #[derive(Default)]
@@ -101,7 +101,7 @@ mod tests {
             flip_x: false,
             glow_tint: None,
             burn: crate::burn::BurnTier::Normal,
-            density: 1,
+            density: std::num::NonZeroU16::MIN,
         }
     }
 

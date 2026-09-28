@@ -442,12 +442,10 @@ fn piece_span(
     Span::new(tl.x, tl.y, w, h, below)
 }
 
-/// A pack sprite's LOGICAL size — the base animation, never a density variant,
-/// since a variant's frame is in buffer units and the sort space is logical.
+/// A pack sprite's LOGICAL size — the size the sort space lays it out in,
+/// whichever density it is drawn from.
 fn art_size(pack: &Pack, sprite: &str) -> Option<(u16, u16)> {
-    pack.animation(sprite)
-        .and_then(|a| a.frames().first())
-        .map(|f| (f.width(), f.height()))
+    crate::pixel_painter::densest_frame(pack, sprite, 0, RenderScale::ONE).map(|d| d.logical)
 }
 
 /// Rows of a desk that are its front face — the thickness.
@@ -658,23 +656,26 @@ fn paint_desk(
     // height on top of this — an art difference, the cutaway's own to close.
     let top_y = scale.to_buffer(ly.saturating_sub(1));
 
-    let Some((art, blit_at)) = densest_art(pack, "desk", scale) else {
+    let Some(desk) = crate::pixel_painter::densest_frame(pack, "desk", 0, scale) else {
         return;
     };
-    blit_frame_scaled(art, x, top_y, blit_at, buf);
+    blit_frame_scaled(desk.frame, x, top_y, desk.blit_at, buf);
 
-    let Some(material) = dominant_opaque_row(art, art.height().saturating_sub(1)) else {
+    let Some(material) = dominant_opaque_row(desk.frame, desk.frame.height().saturating_sub(1))
+    else {
         return;
     };
+    // The drawn size, from the logical size: variant art blits at `blit_at`, so
+    // its own pixel size times the scale would drop the face a whole desk low.
+    let (drawn_w, drawn_h) = (
+        scale.to_buffer(desk.logical.0),
+        scale.to_buffer(desk.logical.1),
+    );
     if lit {
-        paint_desk_glow(x, top_y, art, blit_at, theme, scale, buf);
+        paint_desk_glow(x, top_y, drawn_w, drawn_h, theme, scale, buf);
     }
 
     let ramp = Ramp::from_base(material, RAMP_TINT_PCT, RAMP_SHADE_PCT);
-    // Sized off what was ACTUALLY drawn, not the base sprite: variant art blits 1:1
-    // in buffer units, so multiplying again drops the face a whole desk too low.
-    let drawn_w = art.width() * blit_at.get();
-    let drawn_h = art.height() * blit_at.get();
     let base_y = top_y + drawn_h;
     let w = drawn_w;
     slab(
@@ -706,8 +707,8 @@ fn paint_desk(
 fn paint_desk_glow(
     x: u16,
     top_y: u16,
-    art: &pixtuoid_core::sprite::Frame,
-    blit_at: std::num::NonZeroU16,
+    drawn_w: u16,
+    drawn_h: u16,
     theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
@@ -720,8 +721,8 @@ fn paint_desk_glow(
     fill(
         buf,
         x,
-        top_y + art.height() * blit_at.get() * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
-        art.width() * blit_at.get(),
+        top_y + drawn_h * GLOW_ROW_NUMER / GLOW_ROW_DENOM,
+        drawn_w,
         scale.get(),
         glow.lit,
     );
@@ -811,12 +812,7 @@ fn paint_character(
         cache,
         now,
     )?;
-    // Logical units: a variant is its base's size times its density, so dividing
-    // gives the size every anchor, shadow and badge below is laid out in.
-    let (art_w, art_h) = (
-        art.frame.width() / art.density.get(),
-        art.frame.height() / art.density.get(),
-    );
+    let (art_w, art_h) = art.logical;
 
     if c.seat_desk.is_none() {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
@@ -855,17 +851,6 @@ fn label_anchor(
             .to_buffer(at.y)
             .saturating_sub(LABEL_GAP_PX * scale.get()),
     }
-}
-
-/// The first frame of `name`'s densest art at `scale` (see
-/// [`densest_frame`](crate::render_scale::densest_frame)), and the factor to
-/// blit it at — for a piece that does not animate.
-fn densest_art<'a>(
-    pack: &'a Pack,
-    name: &str,
-    scale: RenderScale,
-) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
-    crate::render_scale::densest_frame(pack, name, 0, scale).map(|d| (d.frame, d.blit_at))
 }
 
 /// The pack sprite for a waypoint kind, when it has one. `None` covers three
@@ -1352,59 +1337,34 @@ mod tests {
     }
 
     /// THE property the whole mixed-density contract rests on: a density variant
-    /// changes how a piece is DRAWN, never how big it is. The two branches return
-    /// different (frame, factor) pairs whose PRODUCT has to agree, and getting it
-    /// wrong is silent — the desk still renders, with its front face a whole desk
-    /// below the surface.
+    /// changes how a piece is DRAWN, never how big it is. `densest_frame`'s
+    /// variant and base arms return different (frame, factor) pairs whose
+    /// PRODUCT has to agree with the logical size the desk's face is placed by,
+    /// and getting it wrong is silent — the desk still renders, with its front
+    /// face a whole desk below the surface.
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
         let pack = pack();
         let (bw, bh) = base_size(&pack, "desk");
         for s in 1..=12u16 {
             let scale = RenderScale::new(s).expect("nonzero");
-            let (art, blit_at) = densest_art(&pack, "desk", scale).expect("desk is in the pack");
+            let d = crate::pixel_painter::densest_frame(&pack, "desk", 0, scale)
+                .expect("desk is in the pack");
+            let drawn = (
+                d.frame.width() * d.blit_at.get(),
+                d.frame.height() * d.blit_at.get(),
+            );
             assert_eq!(
-                (art.width() * blit_at.get(), art.height() * blit_at.get()),
+                drawn,
                 (scale.to_buffer(bw), scale.to_buffer(bh)),
                 "scale {s} drew a different size than the base art implies"
             );
+            assert_eq!(
+                drawn,
+                (scale.to_buffer(d.logical.0), scale.to_buffer(d.logical.1)),
+                "scale {s} drew a different size than the face is placed by"
+            );
         }
-    }
-
-    /// `desk@4x` must WIN at 4x and blit 1:1 (the upscale is what richer art
-    /// exists to remove), must HALVE the upscale at 8x rather than being
-    /// discarded for not matching exactly, and must LOSE at 3x — 4 does not
-    /// divide 3, so blitting it would draw a desk a third too wide.
-    #[test]
-    fn a_density_variant_is_taken_only_at_the_density_it_was_authored_for() {
-        let pack = pack();
-        let (bw, bh) = base_size(&pack, "desk");
-        let (hi_w, hi_h) = base_size(&pack, "desk@4x");
-        assert_eq!((hi_w, hi_h), (bw * 4, bh * 4), "desk@4x is the 4x variant");
-
-        let (art, blit_at) =
-            densest_art(&pack, "desk", RenderScale::new(4).expect("nonzero")).expect("desk exists");
-        assert_eq!(
-            (art.width(), blit_at.get()),
-            (hi_w, 1),
-            "at its own density the variant art blits 1:1"
-        );
-
-        let (art, blit_at) =
-            densest_art(&pack, "desk", RenderScale::new(8).expect("nonzero")).expect("desk exists");
-        assert_eq!(
-            (art.width(), blit_at.get()),
-            (hi_w, 2),
-            "at 8x the 4x art still halves the upscale"
-        );
-
-        let (art, blit_at) =
-            densest_art(&pack, "desk", RenderScale::new(3).expect("nonzero")).expect("desk exists");
-        assert_eq!(
-            (art.width(), blit_at.get()),
-            (bw, 3),
-            "at 3x the 4x art does not divide and the base block-scales"
-        );
     }
 
     /// The other half of "the asset work lands one piece at a time": every
@@ -1419,53 +1379,9 @@ mod tests {
         );
         let (bw, _) = base_size(&pack, "plant");
         let scale = RenderScale::new(4).expect("nonzero");
-        let (art, blit_at) = densest_art(&pack, "plant", scale).expect("plant is in the pack");
-        assert_eq!((art.width(), blit_at.get()), (bw, 4));
-    }
-
-    /// Pins the render-time half of `variant_redraws`: a variant that does not
-    /// redraw every frame of its base is skipped for the base.
-    #[test]
-    fn a_variant_that_does_not_redraw_every_frame_is_skipped() {
-        let frames = &[
-            ("one.sprite", "@frame 0\nA"),
-            ("two.sprite", "@frame 0\nA A\nA A"),
-            ("three.sprite", "@frame 0\nA A A"),
-        ];
-        for variant in ["[\"two.sprite\", \"three.sprite\"]", "[\"two.sprite\"]"] {
-            let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
-                &format!(
-                    "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-                     [animations.desk]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
-                     [animations.\"desk@2x\"]\nframes={variant}\nframe_ms=100\n"
-                ),
-                frames,
-            )
-            .expect("pack builds");
-            let (art, blit_at) = densest_art(&pack, "desk", RenderScale::new(2).expect("nonzero"))
-                .expect("desk is in the pack");
-            assert_eq!(
-                (art.width(), blit_at.get()),
-                (1, 2),
-                "{variant}: the base, upscaled"
-            );
-        }
-    }
-
-    /// Pins the render-time half of `DensityMismatch`: a variant that is not
-    /// the size its name claims is skipped for the base.
-    #[test]
-    fn a_variant_that_is_not_its_claimed_size_is_skipped() {
-        let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
-             [animations.desk]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
-             [animations.\"desk@2x\"]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
-            &[("one.sprite", "@frame 0\nA")],
-        )
-        .expect("pack builds");
-        let (art, blit_at) = densest_art(&pack, "desk", RenderScale::new(2).expect("nonzero"))
-            .expect("desk is in the pack");
-        assert_eq!((art.width(), blit_at.get()), (1, 2), "the base, upscaled");
+        let d = crate::pixel_painter::densest_frame(&pack, "plant", 0, scale)
+            .expect("plant is in the pack");
+        assert_eq!((d.frame.width(), d.blit_at.get()), (bw, 4));
     }
 
     #[test]

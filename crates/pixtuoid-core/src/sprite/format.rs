@@ -356,7 +356,6 @@ impl Pack {
     /// Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    /// Character variants count although no painter draws one yet.
     pub fn max_density_variant(&self) -> u16 {
         self.animations
             .iter()
