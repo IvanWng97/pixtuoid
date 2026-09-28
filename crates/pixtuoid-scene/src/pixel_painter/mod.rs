@@ -219,7 +219,7 @@ use wall::{
 
 /// The weather names accepted by [`force_weather`], canonical order.
 pub fn weather_names() -> Vec<&'static str> {
-    background::Weather::ALL.iter().map(|w| w.name()).collect()
+    crate::sky::Weather::ALL.iter().map(|w| w.name()).collect()
 }
 
 /// Force every subsequent render **on this thread** to a specific weather (by
@@ -230,12 +230,12 @@ pub fn weather_names() -> Vec<&'static str> {
 pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     match name {
         None => {
-            background::set_weather_override(None);
+            crate::sky::set_weather_override(None);
             Ok(())
         }
-        Some(s) => match background::Weather::from_name(s) {
+        Some(s) => match crate::sky::Weather::from_name(s) {
             Some(w) => {
-                background::set_weather_override(Some(w));
+                crate::sky::set_weather_override(Some(w));
                 Ok(())
             }
             None => Err(weather_names()),
@@ -243,32 +243,24 @@ pub fn force_weather(name: Option<&str>) -> Result<(), Vec<&'static str>> {
     }
 }
 
-/// How hard it is raining, as a scalar (0.0 clear … 1.0 storm) — the audio
-/// model's weather feed. A deliberate SCALAR query so the module-private
-/// `background::Weather` enum never widens. Snow/fog/etc. are 0.0 —
-/// precipitation you can HEAR, not precipitation per se.
+/// How hard it is raining at `now` (0.0 dry … 1.0 storm; snow and fog are 0.0) —
+/// the audio model's weather feed.
 pub fn precipitation_level(now: std::time::SystemTime) -> f32 {
-    // The gap to Storm is an audible "getting heavier", not a new mix profile.
-    const RAIN_LEVEL: f32 = 0.6;
-    match background::weather_state(now) {
-        background::Weather::Storm => 1.0,
-        background::Weather::Rain => RAIN_LEVEL,
-        _ => 0.0,
-    }
+    crate::sky::Sky::at(now).precipitation()
 }
 
 /// Whether the office's sky shows the SUN at hour-of-day `hour` (0..24).
 /// Exposed so the wasm painter's `Office::is_day` can hand the site's
 /// sky-slider the SAME day/night boundary the office renders.
 pub fn hour_is_day(hour: f32) -> bool {
-    background::hour_is_day(hour)
+    crate::sky::hour_is_day(hour)
 }
 
 /// Day/night at `now` on the LOCAL clock — the native painters' feed for the
 /// audio track selector (wasm passes its own hour). Same sun window the
 /// lighting renders: the music follows what the office SHOWS.
 pub fn is_day_at(now: std::time::SystemTime) -> bool {
-    background::hour_is_day(background::local_hour_frac(now))
+    crate::sky::hour_is_day(crate::sky::local_hour_frac(now))
 }
 
 // A reference to the window `CoffeeState::record` refreshes on, not a copy.
@@ -337,7 +329,11 @@ struct PaintCtx<'a> {
     scene: &'a SceneState,
     layout: &'a Layout,
     pack: &'a Pack,
+    /// Animation phase, event ages and the wall clock — every sky fact reads
+    /// [`Self::sky`].
     now: SystemTime,
+    /// The sky at `now`, sampled once for the whole pass.
+    sky: crate::sky::Sky,
     buf: &'a mut RgbBuffer,
     cache: &'a mut FrameCache,
     base_fill: &'a mut background::BaseFillCache,
@@ -377,6 +373,7 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             layout: ctx.layout,
             pack: ctx.pack,
             now: ctx.now,
+            sky: crate::sky::Sky::at(ctx.now),
             buf: &mut *ctx.buf,
             cache: &mut ctx.store.cache,
             base_fill: &mut ctx.store.base_fill,
@@ -546,9 +543,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    // Threaded through every dependent helper, so the chrono local hour isn't
-    // recomputed per window + ceiling pool + lamp halo.
-    let look = time_of_day_look(ctx.now, ctx.theme);
+    let look = time_of_day_look(&ctx.sky, ctx.theme);
     let top_wall_h = ctx.layout.wall_band_h();
     // The elevator door replaces the rightmost window, so `paint_floor_and_walls`
     // must skip a window that would otherwise bleed through the elevator frame.
@@ -559,6 +554,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         buf_w,
         buf_h,
         ctx.now,
+        &ctx.sky,
         &look,
         top_wall_h,
         door_x_range,
@@ -736,7 +732,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.
-    background::paint_lightning_flash(ctx.buf, ctx.now, background::weather_state(ctx.now));
+    background::paint_lightning_flash(ctx.buf, &ctx.sky);
 
     if ctx.debug_walkable {
         debug_overlay::paint(ctx.buf, ctx.layout, ctx.scene, ctx.motion);

@@ -295,6 +295,8 @@ pub(in crate::pixel_painter) fn paint_clock(
         }
     }
 
+    // Its own decode, not `sky::local_hour_frac`: the hands need the raw
+    // `hour % 12` and `minute`.
     let unix_now = now
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default();

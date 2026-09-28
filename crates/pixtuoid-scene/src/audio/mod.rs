@@ -120,7 +120,7 @@ impl Default for TrackId {
 
 /// One song per this many wall-clock seconds, owner-tuned: agent sessions are
 /// usually SHORT, and an hourly rotation meant most sessions never heard the
-/// song change. The weather's matching re-roll cadence lives in `sky.rs` — a
+/// song change. The weather's matching re-roll cadence is `crate::sky`'s — a
 /// separate domain, deliberately not shared.
 pub const TRACK_EPOCH_SECS: u64 = 600;
 

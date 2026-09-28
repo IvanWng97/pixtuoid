@@ -26,8 +26,9 @@ use pixtuoid_core::{AgentSlot, SceneState};
 use pixtuoid_scene::floor::{render_floor, CoffeeState, FloorCtx, FloorMeta, FrameInputs};
 use pixtuoid_scene::layout::Size;
 
-// 400 s into `weather_state`'s 600 s bucket, so the 60 s simulated window
-// below never crosses a weather change.
+// Inside a weather slot (`sky::WEATHER_CYCLE_SECS`, crate-private) with room to
+// spare, so the `SIM_WINDOW_FRAMES` × `FRAME_STEP_MS` window below never
+// crosses a weather change.
 const BASE_EPOCH_SECS: u64 = 1_700_000_200;
 const SIM_WINDOW_FRAMES: u32 = 600;
 const FRAME_STEP_MS: u64 = 100;
