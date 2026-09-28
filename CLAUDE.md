@@ -41,7 +41,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT
 │                    (`just gen-wasm` → committed site/public/wasm/)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → socket/named pipe
-scripts/  gen-media.py (the ONE driver for committed art), e2e tiers (lib/), drift watch
+scripts/  gen-media.py (the ONE driver for committed media), gen-cutaway-art.py (the @8x sprites), e2e tiers (lib/), drift watch
 policy/   CI contracts no linter sees (jq over yq) + behavior tests of workflow shell
 site/     Astro landing page; integrations/raycast/  Raycast extension
 ```
@@ -114,7 +114,8 @@ install/runtime wiring (config rewriting, desk growth, boot order, doctor,
 daemon announce-only) · **tui** owns the flush (popup geometry, hit-test
 ladders, key dispatch). Terminal cell aspect drives sprite design: the
 half-block ▀ technique assumes ~1:2 cells, so sprites past ~16×16 px break on
-taller-cell terminals; bundled character sprites max at 8×12 px.
+taller-cell terminals; bundled base character sprites max at 8×12 px (their
+`@Nx` variants are cutaway art the half-block painter never draws).
 
 ## Things NOT to do
 

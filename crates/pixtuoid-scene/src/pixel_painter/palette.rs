@@ -342,6 +342,9 @@ pub(super) const PANTS_KEY: char = 'P';
 /// The pack key of a monitor's glass.
 pub(crate) const SCREEN_GLASS_KEY: char = 'j';
 
+/// The pack key of the dim content an idle screen shows on its glass.
+pub(crate) const SCREEN_TEXT_KEY: char = 'J';
+
 /// One agent's colors, as the palette overrides a character frame is
 /// recolored with. `Some(glow_tint)` blends the skin toward the monitor glow so
 /// a seated agent reads as lit by their screen.
