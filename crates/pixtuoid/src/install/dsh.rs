@@ -652,13 +652,17 @@ mod tests {
             dir.path().join("home\u{1b}]0;pwned\u{7}\u{202e}")
         };
         std::env::set_var("DSH_HOME", &home);
-        let issues: Vec<String> = [
-            "- insert:\n    - id: pixtuoid\n      name: \"/abs\\e]0;pwned\\a\\u202E/p.mjs\"\n",
-            "- insert:\n    - id: pixtuoid\n      name: \"rel\\e]0;pwned\\a\\u202E/p.mjs\"\n",
-        ]
-        .iter()
-        .flat_map(|content| verify_schema(content).issues)
-        .collect();
+        // Absolute on each platform: Windows needs the drive prefix.
+        let abs = if cfg!(windows) { "C:/abs" } else { "/abs" };
+        let issues: Vec<String> = [abs, "rel"]
+            .iter()
+            .map(|root| {
+                format!(
+                    "- insert:\n    - id: pixtuoid\n      name: \"{root}\\e]0;pwned\\a\\u202E/p.mjs\"\n"
+                )
+            })
+            .flat_map(|content| verify_schema(&content).issues)
+            .collect();
         std::env::remove_var("DSH_HOME");
         assert!(
             issues.iter().any(|i| i.contains("not this home's plugin"))
