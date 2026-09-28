@@ -282,14 +282,19 @@ fn emitter_at(now: SystemTime, moon_phase: f32) -> Emitter {
     }
 }
 
-/// Illuminated fraction of the moon (0 new .. 1 full), from the synodic month.
-fn moon_phase_at(now: SystemTime) -> f32 {
+/// Days into the mean lunation at `now`: 0 at new moon, half a synodic month at
+/// full.
+fn moon_age_at(now: SystemTime) -> f32 {
     let unix_days = now
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_secs_f32() / 86_400.0)
         .unwrap_or(0.0);
-    let age = (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS);
-    (1.0 - (std::f32::consts::TAU * age / SYNODIC_DAYS).cos()) / 2.0
+    (unix_days - NEW_MOON_EPOCH_UNIX_DAYS).rem_euclid(SYNODIC_DAYS)
+}
+
+/// Illuminated fraction of the moon (0 new .. 1 full), from the synodic month.
+fn moon_phase_at(now: SystemTime) -> f32 {
+    (1.0 - (std::f32::consts::TAU * moon_age_at(now) / SYNODIC_DAYS).cos()) / 2.0
 }
 
 /// Lightning cadence: one strike per bucket this long, at a hashed offset
@@ -345,6 +350,7 @@ pub(crate) struct Sky {
     weather: Weather,
     emitter: Emitter,
     moon_phase: f32,
+    moon_waxing: bool,
     flash: f32,
 }
 
@@ -355,6 +361,7 @@ impl Sky {
             weather: weather_at(now),
             emitter: emitter_at(now, moon_phase),
             moon_phase,
+            moon_waxing: moon_age_at(now) < SYNODIC_DAYS / 2.0,
             flash: flash_level_at(now),
         }
     }
@@ -391,6 +398,12 @@ impl Sky {
     /// [`moon_phase_at`] at this instant.
     pub(crate) fn moon_phase(&self) -> f32 {
         self.moon_phase
+    }
+
+    /// Whether the moon is waxing (new to full) rather than waning at this
+    /// instant: the side its lit limb faces.
+    pub(crate) fn moon_waxing(&self) -> bool {
+        self.moon_waxing
     }
 
     /// [`flash_level_at`] at this instant.

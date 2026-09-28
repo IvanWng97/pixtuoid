@@ -425,3 +425,22 @@ fn the_new_moon_epoch_is_the_instant_its_doc_names() {
         "{NEW_MOON_EPOCH_UNIX_DAYS} is not 2019-11-27 02:56 ({named})"
     );
 }
+
+/// The moon waxes from new to full and wanes after, on the First and Last
+/// Quarter columns of NASA GSFC's "Phases of the Moon 2001 to 2100"
+/// (<https://eclipse.gsfc.nasa.gov/phase/phases2001.html>, Universal Time).
+#[test]
+fn the_moon_waxes_to_full_and_wanes_after() {
+    for (mo, d, h, mi) in [(1, 26, 4, 47), (7, 21, 11, 6)] {
+        assert!(
+            Sky::at(utc(2026, mo, d, h, mi)).moon_waxing(),
+            "first quarter 2026-{mo}-{d} {h}:{mi} waxes"
+        );
+    }
+    for (mo, d, h, mi) in [(1, 10, 15, 48), (8, 6, 2, 21)] {
+        assert!(
+            !Sky::at(utc(2026, mo, d, h, mi)).moon_waxing(),
+            "last quarter 2026-{mo}-{d} {h}:{mi} wanes"
+        );
+    }
+}

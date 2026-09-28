@@ -610,6 +610,58 @@ fn crescent_moon_leaves_the_dark_limb_unlit() {
     );
 }
 
+/// A waxing moon is lit on its right limb and a waning one on its left, as a
+/// northern-hemisphere sky shows them: 2026's first quarter falls on Jan 26 and
+/// its last on Jan 10 ([`Sky::moon_waxing`]'s test cites the table).
+#[test]
+fn a_waning_moon_lights_its_left_limb() {
+    let buf_w = 96u16;
+    let top_wall_h = 40u16;
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let geom = compute_disc(
+        &Sky::at_with(crate::localclock::at_hour(21), Weather::Clear),
+        buf_w,
+        top_wall_h,
+        theme,
+    )
+    .expect("moon disc visible at 21:00 under Clear");
+    // Lit disc pixels left and right of the disc's centre column.
+    let lit_sides = |day: u32| -> (usize, usize) {
+        let buf = render_office_on(day, 21, Weather::Clear, buf_w, top_wall_h);
+        let r = geom.r.ceil() as i32;
+        let (cx, cy) = (geom.cx.round() as i32, geom.cy.round() as i32);
+        let (mut left, mut right) = (0usize, 0usize);
+        for py in (cy - r)..=(cy + r) {
+            for px in (cx - r)..=(cx + r) {
+                let dx = px as f32 - geom.cx;
+                let dy = py as f32 - geom.cy;
+                if dx * dx + dy * dy > geom.r * geom.r || px < 0 || py < 0 {
+                    continue;
+                }
+                if buf.get(px as u16, py as u16) == theme.lighting.moon_core {
+                    if dx < 0.0 {
+                        left += 1;
+                    } else if dx > 0.0 {
+                        right += 1;
+                    }
+                }
+            }
+        }
+        (left, right)
+    };
+    // `on_day` counts from Jan 1, so day 9 is Jan 10 and day 25 is Jan 26.
+    let (waning_left, waning_right) = lit_sides(9);
+    assert!(
+        waning_left > waning_right,
+        "last quarter lights the left limb: left={waning_left} right={waning_right}"
+    );
+    let (waxing_left, waxing_right) = lit_sides(25);
+    assert!(
+        waxing_right > waxing_left,
+        "first quarter lights the right limb: left={waxing_left} right={waxing_right}"
+    );
+}
+
 #[test]
 fn moon_glow_dims_at_new_moon() {
     let buf_w = 96u16;
