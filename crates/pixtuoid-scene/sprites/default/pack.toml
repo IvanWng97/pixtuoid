@@ -86,10 +86,9 @@ version = "1"
 "Ξ" = "#1c2a36"   # a display's dark glass (slides, TVs)
 "Ж" = "#34424e"   # a display's sheen or dim content
 
-# Shades of a recolor key, derived from it: `level` steps along the key's
-# hue-shifted ramp, lighter and warmer above zero, darker and cooler below.
-# They carry no colour of their own, so a per-agent recolor re-derives every
-# shade and shaded art keeps its shading.
+# Shades of a recolor key, derived from it: `level` steps along the key's ramp
+# (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
+# re-derives every shade and shaded art keeps its shading.
 [ramps]
 "h" = { of = "H", level = -2 }   # hair, turned from the light
 "Y" = { of = "H", level = 2 }    # hair, catching the light

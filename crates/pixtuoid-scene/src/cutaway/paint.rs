@@ -193,8 +193,8 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
     pack.piece_or_source(crate::pixel_painter::desk_sprite_name(facing))
 }
 
-/// The box a desk drawn with `art` at `desk` occupies at `scale`, with the rows
-/// [`desk_face_rows`] paints below it — the sort reserves exactly what is drawn.
+/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art plus
+/// the face rows [`desk_face_rows`] derives under it.
 /// A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(
@@ -599,7 +599,7 @@ fn paint_wall_seg(
 /// What a piece IS, paired with its [`Span`] in the draw list.
 ///
 /// The span is computed WHERE THE PIECE IS BUILT, by [`piece_span`] over the
-/// same anchor and painted extent the piece's paint fn uses — the extent depends
+/// same anchor and sprite box the piece's paint fn blits — the box depends
 /// on the PACK, so a sprite's height is not knowable from its layout point, and
 /// geometry derived from anywhere but where the sprite lands can drift from it.
 enum PieceKind {
@@ -1299,10 +1299,9 @@ mod tests {
         );
     }
 
-    /// The depth sort reserves exactly the rows the desk paints: under a density
-    /// variant, which draws its own front, it reserves no face, so someone on
-    /// the first row south of the art stands in FRONT of the desk, not behind a
-    /// face that is never drawn.
+    /// The depth sort reserves no face under a density variant, which draws its
+    /// own front, so someone on the first row south of the art stands in FRONT
+    /// of the desk, not behind a face that is never drawn.
     #[test]
     fn someone_just_south_of_a_variant_desk_sorts_in_front_of_it() {
         let pack = pack();
@@ -2226,7 +2225,7 @@ mod tests {
     fn a_desk_is_thicker_than_its_top_surface_alone() {
         // Without a front face the office is a floor plan; pin that the split
         // leaves BOTH parts non-empty however DESK_H moves.
-        let front_h = (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1);
+        let front_h = desk_front_h();
         let top_h = DESK_H.saturating_sub(front_h).max(1);
         assert!(front_h >= 1 && top_h >= 1, "top {top_h}, front {front_h}");
         assert!(

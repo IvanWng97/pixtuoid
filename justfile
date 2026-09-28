@@ -277,6 +277,7 @@ lint:
     pids=(); fail=0
     run fmt     cargo fmt --all --check & pids+=($!)
     run env-paths just env-paths        & pids+=($!)
+    run genart  just gen-art-check       & pids+=($!)
     run machete cargo machete           & pids+=($!)
     run deny    just deny                & pids+=($!)
     run arch    just arch                & pids+=($!)
@@ -805,16 +806,21 @@ site-e2e:
 # README sections from site/src/*.json (gen-readme), and the office images for
 # BOTH docs/images/ and site/public/demos/ from scripts/media.json (gen-media).
 
-# Regenerate everything: 8x sprites + README sections + docs images + site demos.
 [group('gen')]
-[doc('Regenerate ALL committed artifacts (8x sprites + README sections + docs images + site demos)')]
+[doc('Regenerate the committed art (@8x sprites + icons + README sections + docs images + site demos)')]
 gen: gen-art gen-icons gen-media gen-readme
 
-# First in `gen`: the media renders from the sprites this writes.
 [group('gen')]
 [doc("Regenerate the bundled pack's @8x cutaway sprites from scripts/gen-cutaway-art.py")]
 gen-art:
     python3 scripts/gen-cutaway-art.py crates/pixtuoid-scene/sprites/default
+
+# Stdlib-only, so `lint` runs it without the venv `gen-check` needs.
+[group('gen')]
+[doc('Fail if a committed @8x sprite differs from what scripts/gen-cutaway-art.py draws')]
+gen-art-check:
+    python3 scripts/gen-cutaway-art.py --selftest
+    python3 scripts/gen-cutaway-art.py --check crates/pixtuoid-scene/sprites/default
 
 # Sync the README's install/features/tools sections from site/src/*.json.
 [group('gen')]
@@ -986,17 +992,17 @@ gen-wasm-check:
     done
     echo "gen-wasm-check OK: $W ($WIRE bytes gzipped <= $CAP), pair manifest verified"
 
-# Drift gate: fail if any committed README section OR rendered still is stale.
+# Drift gate: fail if anything `just gen` writes is stale, or the committed wasm
+# pair is broken (`gen-wasm-check`).
 # Pixel-diffs every PNG (threshold 0); video clips + demo.gif are presence-only
 # (ffmpeg/gifsicle bytes aren't stable cross-version, but the renders feeding
 # them ARE pixel-deterministic). Run by ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
-# means: run `just gen` and commit the regenerated docs/images/ +
-# site/public/demos/ in the same change. Requires the .venv + ffmpeg + gifsicle
-# + a release build of the snapshot example.
+# means: run `just gen` and commit everything it rewrote in the same change.
+# Requires the .venv + ffmpeg + node + a release build of the snapshot example.
 [group('gen')]
-[doc('Fail if any committed README section or rendered image has drifted')]
-gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check
+[doc('Fail if anything `just gen` writes has drifted, or the wasm pair is broken')]
+gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check gen-art-check
     #!/usr/bin/env sh
     set -eu
     test -x .venv/bin/python3 || { echo "needs the venv: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"; exit 1; }

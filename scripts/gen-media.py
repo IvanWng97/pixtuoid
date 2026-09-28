@@ -375,7 +375,7 @@ def run_check(out_base, work, manifest, only=None):
         for x in failures:
             print(f"  ✗ {x}")
         return 1
-    print("\033[32mgen-check OK — every committed artifact is in sync.\033[0m")
+    print("\033[32mgen-media --check OK.\033[0m")
     return 0
 
 
