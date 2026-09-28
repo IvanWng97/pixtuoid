@@ -13,7 +13,8 @@ comments on the lines it governs, before changing it.
 ## Build & test
 
 Requires a recent stable Rust toolchain and [`just`](https://github.com/casey/just)
-(`brew install just`). On Linux you also need `lld` (`apt install lld`). The
+(`brew install just`). On Linux you also need `lld` and the ALSA headers
+(`apt install lld libasound2-dev`). The
 `justfile` is the single source of truth for every check — CI and the git hooks
 call the same recipes.
 
@@ -41,8 +42,9 @@ does not mean a green PR:
   regenerate with `just api-surface` + commit when the public surface moves.
 - **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
   deny) plus the doctests nextest skips.
-- **coverage/smoke · gen-check · gen-readme-check · npm-check** — committed
-  media, README and npm manifest freshness.
+- **smoke (`just gen-check`) · readme (`just gen-readme-check`) · npm-gen
+  (`just npm-check`)** — committed media, icons and @8x sprite art, README
+  freshness, and the npm package generator + OpenClaw plugin contract.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
@@ -107,9 +109,9 @@ weaken the lint.
 3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
    publishes every crate to crates.io over OIDC, creates `vX.Y.Z` and a DRAFT
    GitHub release carrying the changelog; the tag then fires `release.yml`,
-   which builds the six targets and the debs, attaches them, publishes the
-   draft, and publishes the npm packages. The tag also starts a homebrew-core
-   autobump.
+   which builds every target in its build matrix and the debs, attaches them,
+   publishes the draft, and publishes the npm packages. The tag also starts a
+   homebrew-core autobump.
 
 The crates.io upload happens in the `release` job, which runs on the merge push
 with no `needs` — `ci.yml` is still running at that moment. What makes that safe

@@ -7,12 +7,12 @@
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
 #   site     — the Astro landing page under site/ (npm, its own CI)
-#   gen      — regenerate committed artifacts (README sections + docs images + site demos)
-#   release  — the release-PR gate (npm-check)
-#   meta     — tooling setup + the full pre-push / full-stack gates
+#   gen      — regenerate committed artifacts, and check the committed copies
+#   release  — the npm package gate the publish job runs (npm-check)
+#   meta     — tooling setup, the full pre-push / full-stack gates, and the gates' selftests
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
-# single-sourced cross-platform (CI never writes inline commands).
+# single-sourced cross-platform (the windows jobs call recipes, never inline commands).
 set windows-shell := ["bash", "-cu"]
 
 # ── variables ─────────────────────────────────────────────────────
@@ -174,7 +174,7 @@ ci-observability:
 # consumer reads at runtime — the review schema reaches the Claude CLI, the
 # raycast ones pin the `--json` shape — and nothing else parses them: a broken
 # one is invisible until the consumer refuses to start, which is exactly how the
-# review bots died for 31h.
+# review bots died.
 [group('rust')]
 [doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
 json-schemas:
@@ -226,9 +226,6 @@ env-paths:
     python3 scripts/check-env-paths.py
 
 # Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay terminal/window-free.
-# The other five invariants have test/bridge backstops; this one was
-# review-enforced only until the KB pilot's gap-closure audit (2026-06-12,
-# follow-on to the #261-#271 arc).
 [group('rust')]
 arch:
     #!/usr/bin/env bash
@@ -244,7 +241,8 @@ arch:
     # green on macOS AND on the ubuntu CI runner — invariant #1 broken on Windows
     # behind a passing gate, and `just check-windows` compiles it happily because
     # the dep is legitimate for that target. `--target all` is metadata-only (it
-    # installs nothing), and both crates' feature sets are one flag wide.
+    # installs nothing), and features are additive, so `--all-features` holds
+    # every dep any feature combination can pull.
     for crate in pixtuoid-core pixtuoid-scene; do
         # Capture first so a cargo-tree ERROR (e.g. a crate rename) kills the
         # recipe via set -e, instead of reading as "no match" inside the if —
@@ -393,9 +391,9 @@ semver:
 # `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
 # adding/removing a derive IS a public-API change). cargo-public-api takes one
 # crate per call, so a golden file is regenerated per crate. rustdoc JSON is
-# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI-only in practice (like
-# semver) — run `just api-surface` + commit the golden whenever either crate's
-# public surface changes.
+# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI runs `api-surface-check`;
+# run `just api-surface` + commit the golden whenever either crate's public
+# surface changes.
 [group('rust')]
 [doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
 api-surface: _api-toolchain
@@ -492,7 +490,7 @@ snapshots:
 # the tests catch them — the "do your assertions have TEETH?" dimension that
 # line/region coverage can't see (a covered-but-toothless assertion). DIFF-scoped
 # (`--in-diff` vs `$MUTANTS_BASE`, default origin/main) so cost scales with the
-# change, not the ~6,900-mutant tree; reads `.cargo/mutants.toml` (nextest + the
+# change, not the whole tree; reads `.cargo/mutants.toml` (nextest + the
 # untestable/timing exclusions). ADVISORY — CI runs it NON-blocking; a surviving
 # mutant is a hint to strengthen a test, not a merge gate. Run on a
 # reducer/decoder/layout PR; forwards args (e.g. `just mutants --list`). Needs
@@ -605,9 +603,8 @@ corpus-all:
 #   just fuzz grok ~/.grok/sessions            # grok ACP transcripts
 #   just fuzz omp ~/.omp/agent/sessions        # omp sessions
 #   # a PUBLIC real-session corpus, so drift shows up without waiting for your own
-#   # sessions to hit the shape. That repo moved test_data/ -> dev-docs/messages/
-#   # (verified 2026-08-14: 59 lines, 0 decode-err); its codex samples are single
-#   # .json objects, which this recipe's *.jsonl glob does not admit.
+#   # sessions to hit the shape. Its codex samples are single .json objects,
+#   # which this recipe's *.jsonl glob does not admit.
 #   git clone --depth 1 https://github.com/daaain/claude-code-log /tmp/ccl && just fuzz claude-code /tmp/ccl/dev-docs/messages
 [group('rust')]
 [doc('Never-panic fuzz a source decoder over a JSONL corpus dir: just fuzz claude-code ~/.claude/projects')]
@@ -616,10 +613,9 @@ fuzz source dir:
     set -euo pipefail
     source="{{ source }}"
     dir="{{ dir }}"
-    # Guard the corpus BEFORE fuzzing: under the default no-pipefail shell a
-    # typo'd dir made `find` fail while the pipeline status stayed the
-    # fuzzer's — which fuzzes zero lines and exits 0, reporting the
-    # never-panic contract verified having tested nothing.
+    # Guard the corpus BEFORE fuzzing: a dir with no .jsonl feeds the fuzzer
+    # zero lines, and it exits 0 — reporting the never-panic contract verified
+    # having tested nothing.
     [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
     [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || { echo "error: no .jsonl files under '$dir' — nothing to fuzz" >&2; exit 1; }
     cargo build --release --example decoder_fuzz -p pixtuoid-core
@@ -666,7 +662,8 @@ live-sources *ids:
     scripts/lib/tier-live-sources.sh {{ ids }}
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
-# socket, only the input is fixed. Recipe-less until now, for the reason above.
+# socket, only the input is fixed. Like `openclaw-backend-e2e`, the recipe exists
+# to give the script an invocation site.
 [group('rust')]
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
 replay fixture delay="3":
@@ -827,14 +824,15 @@ gen-art-check:
 gen-readme:
     node scripts/gen-readme.mjs
 
-# Regenerate the --json contract chain after changing `SourceStatus`: re-emit the
-# JSON Schema from the Rust serde type, then regenerate the Raycast TS type from
-# it. The two freshness gates (the `source_status_schema_matches…` golden test in `just test`, and
+# Regenerate the --json contract chain after changing `SourceStatus` or
+# `OutcomeRow`: re-emit their JSON Schemas from the Rust serde types, then
+# regenerate the Raycast TS types from them. The two freshness gates (the
+# `*_schema_matches_the_committed_contract` golden tests in `just test`, and
 # the raycast CI's `gen:contract` diff) FAIL until you run this — so the Rust
 # producer and the TS consumer can't hand-drift. Needs raycast deps installed
 # (`npm --prefix integrations/raycast ci`).
 [group('gen')]
-[doc('Regenerate the --json contract: SourceStatus JSON Schema (Rust) + the Raycast TS type')]
+[doc('Regenerate the --json contract: the SourceStatus + OutcomeRow JSON Schemas (Rust) + the Raycast TS types')]
 gen-contract:
     UPDATE_CONTRACT_SCHEMA=1 cargo test -p pixtuoid --lib schema_matches_the_committed_contract
     npm --prefix integrations/raycast run gen:contract
@@ -848,9 +846,9 @@ gen-readme-check:
     node scripts/gen-readme.mjs --check
 
 # Regenerate docs/images/ + site/public/demos/ from scripts/media.json — ONE
-# manifest-driven driver (replaced gen-docs-images.py + gen-demos.sh). Builds the
-# snapshot example once; Pillow for stills/composite/gif, ffmpeg for clips/crops,
-# gifsicle for the gif. Forwards args, e.g. `just gen-media --only docs`.
+# manifest-driven driver. Builds the snapshot and hero_still examples; Pillow
+# for stills/composite/gif, ffmpeg for clips/crops, gifsicle for the gif.
+# Forwards args, e.g. `just gen-media --only docs`.
 # Requires the .venv (Pillow) + ffmpeg + gifsicle.
 [group('gen')]
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
@@ -864,7 +862,7 @@ gen-icons:
 
 # The ONE wasm compile step — gen-wasm (below) and ci-builds.yml's wasm-check job both
 # call this, so the package/target/profile CI checks can't drift from what
-# gen-wasm ships. Toolchain gotcha (load-bearing, cost 2 debug cycles): the
+# gen-wasm ships. Toolchain gotcha (load-bearing): the
 # PATH cargo/rustc may be Homebrew's, which has NO wasm32 std — and even
 # `rustup run stable cargo` fails because cargo resolves `rustc` via PATH. So
 # the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
@@ -884,8 +882,8 @@ wasm-build:
 # dependency, failing fast if wasm-bindgen/wasm-opt are missing instead of after a
 # minutes-long `wasm-build` compile. wasm-bindgen-cli must match the crate's pinned
 # wasm-bindgen (see crates/pixtuoid-web/Cargo.toml); wasm-opt (binaryen) shrinks
-# the blob ~10-20%. (ci-builds.yml's wasm-check calls `wasm-build` directly — it only
-# compiles, so it needs neither of these.)
+# the blob. (ci-builds.yml's wasm-check calls `wasm-build` directly, then checks
+# the committed pair — neither step needs these.)
 [private]
 gen-wasm-tools:
     #!/usr/bin/env sh
@@ -906,11 +904,9 @@ gen-wasm: gen-wasm-tools wasm-build
     wasm-bindgen --target web --out-dir site/public/wasm \
         target/wasm32-unknown-unknown/wasm-release/pixtuoid_web.wasm
     wasm-opt -Oz -o site/public/wasm/pixtuoid_web_bg.wasm site/public/wasm/pixtuoid_web_bg.wasm
-    # Stamp the wasm/glue PAIR (#424): the JS glue's ABI must match the exact
-    # .wasm it was generated with, so every emitted file's sha256 lands in one
-    # manifest, verified by gen-wasm-check. Generation-time stamping keeps CI
-    # toolchain-free (byte-exact rebuilds drift across rustc versions — the
-    # documented reason rebuild comparison is NOT CI'd).
+    # Stamp the wasm/glue PAIR (#424): every emitted file's sha256 lands in one
+    # manifest, which gen-wasm-check verifies (its header says why a stamp and
+    # not a rebuild comparison).
     # `! -name '.*'` keeps dotfiles out: a Finder-dropped .DS_Store is gitignored,
     # so stamping it would verify locally and fail CI (missing file) — local-green/CI-red.
     (cd site/public/wasm && find . -maxdepth 1 -type f ! -name manifest.sha256 ! -name '.*' | LC_ALL=C sort | xargs shasum -a 256 > manifest.sha256)
@@ -942,10 +938,10 @@ gen-wasm: gen-wasm-tools wasm-build
 # staleness IS mechanically gated and wasm staleness is not. Nothing here reads
 # a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
 # hero with every gate green; the compensating control is CLAUDE.md's build
-# notes ("a scene/web change ALSO needs `just gen-wasm`"), not this recipe. Input-hash stamping was considered and rejected: most commits
-# under crates/pixtuoid-{core,scene}/src are `native`-gated code the wasm never
-# links, so the gate would demand a binary regen on changes that provably
-# cannot alter it.
+# notes ("a core/scene/web change ALSO needs `just gen-wasm`"), not this recipe.
+# Input-hash stamping was considered and rejected: pixtuoid-core's `native`
+# source runtime is code the wasm never links, so the gate would demand a
+# binary regen on changes that cannot alter it.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
 gen-wasm-check:
@@ -1102,10 +1098,9 @@ setup-tools:
 # The size gate's own negative control, because nothing else can be one: the
 # justfile is outside SHELL_SOURCES, so shellcheck never reads a recipe body, and
 # a size cap that stops measuring reports success for any artifact at all. This
-# pins the FAIL-OPEN class specifically — the first draft of the gzip gate wrote
-# `gzip … | wc -c`, which under POSIX sh (no pipefail) reports wc's status, so a
-# broken gzip measured zero and PASSED. Driving the real recipe with a gzip that
-# exits 1 is what that form cannot survive.
+# pins the FAIL-OPEN class specifically — the pipe hazard gen-wasm-check's gzip
+# step is written around: driving the real recipe with a gzip that exits 1 must
+# red it.
 # Not covered, deliberately: the over-cap and empty-artifact arms, which would
 # have to mutate the committed wasm to exercise. Their failures are loud; the
 # fail-open one is the silent class worth a test.
@@ -1126,12 +1121,11 @@ wasm-check-selftest:
     just gen-wasm-check >/dev/null
     echo "wasm-check-selftest: OK (reds on a broken measurement, greens on a real one)"
 
-# The pixel comparator is the primitive under `gen-check` and the smoke job, and
-# it had no test of its own — an always-green comparator reports success for any
-# render at all. Its own recipe, matching the other two selftests, because it
-# needs only Pillow while `gen-check` needs the venv plus ffmpeg, node, a release
-# snapshot build and the wasm pair: a developer who cannot run that gate should
-# still be able to run this.
+# The pixel comparator is the primitive under `gen-check` and the smoke job; an
+# always-green comparator reports success for any render at all. Its own recipe
+# because it needs only Pillow while `gen-check` needs the venv plus ffmpeg,
+# node, a release snapshot build and the wasm pair: a developer who cannot run
+# that gate should still be able to run this.
 [group('meta')]
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
 compare-selftest:
@@ -1197,13 +1191,12 @@ star-history-selftest:
 # fixtures/provenance.schema.json requires, and a recorded one's claims are
 # falsified by its own bytes. They are RUST TESTS (`tests/sources/captures.rs`)
 # and so already ride `just test` on all three platforms; this recipe is the
-# named entry point for a human who wants only this answer. `lint` no longer
-# runs it — `just test` does, on all three.
+# named entry point for a human who wants only this answer.
 #
-# They were Python until #929. Moving them deleted the mirror walk that half had
-# to keep in step with the Rust one, and with it a cross-runtime spawn that would
-# have redded the two Windows jobs — GitHub's Windows images ship `python.exe`
-# with no `python3`, and no test job installs Python.
+# They stay Rust: GitHub's Windows images ship `python.exe` with no `python3`
+# and no test job installs Python, so a Python rule would red both Windows jobs,
+# and a second-runtime copy would need its own walk kept in step with the Rust
+# one.
 [group('meta')]
 [doc("Assert every capture declares its provenance and its claims are falsifiable")]
 fixture-metadata:

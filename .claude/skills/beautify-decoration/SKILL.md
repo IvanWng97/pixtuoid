@@ -56,27 +56,13 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 ### 2. Snapshot defaults hide the large sprite variants
 
-`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when `walkway_h ≥ 9–10`. **Use the default `--cols 192 --rows 80` to see everything.**
+`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). **Use the default `--cols 192 --rows 80` to see everything.**
 
-Pantry-specific threshold: `pantry_room.width >= 36` triggers the 32×10 sprite; below that, the 20×8 `pantry_small.sprite` is used. Threshold lives in `crates/pixtuoid-scene/src/layout/compute.rs`.
+Pantry-specific threshold: the large `pantry` counter needs the left column `mid_x >= PANTRY_COUNTER_LARGE_W + 4` (`layout/compute.rs`); below that, `pantry_small.sprite` is used (`pixel_painter::pantry_counter_anim`).
 
 ### 3. Visual-inspection helper
 
-The full PNG is too big to grok at a glance and too small at thumbnail. Crop the relevant quadrant with PIL:
-
-```python
-from PIL import Image
-img = Image.open('/tmp/snap.png')
-w, h = img.size
-# Pantry is bottom-left quadrant; adjust ratios for other zones:
-#   meeting:  (0, 0, 0.30*w, 0.45*h)
-#   pantry:   (0, 0.49*h, 0.30*w, h)
-#   cubicle:  (0.30*w, 0, w, 0.55*h)
-#   lounge:   pre-2026 retired; merged into cubicle band
-crop = img.crop((0, int(h*0.49), int(w*0.30), h))
-crop = crop.resize((crop.width*2, crop.height*2), Image.NEAREST)
-crop.save('/tmp/crop.png')
-```
+The full PNG is too big to grok at a glance and too small at thumbnail. Crop with `scripts/crop-snapshot.py` (the loop's step 4; its `QUADRANTS` table is the zone map), or `snapshot --crop-furniture`/`--crop-agent` for one piece.
 
 Then inspect the cropped PNG with the agent's image-viewing tool.
 
@@ -141,7 +127,7 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 5. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
 6. Give it a `Furniture` variant + `furniture_def` row (§7 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
 7. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
-8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
+8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there.
 9. Snapshot + iterate.
 
 ## Recap of the pantry session (case study)
