@@ -223,13 +223,21 @@ pub(crate) fn test_wide_pack() -> Pack {
 . . P P P P P P . .
 . . P . . . . P . .
 ";
+    test_pack_with(&[("standing.sprite", WIDE_STANDING)])
+}
+
+/// The default pack with each `(file, source)` in `overrides` swapped in.
+#[cfg(test)]
+pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
     let mut srcs = embedded_sprite_srcs();
-    for entry in &mut srcs {
-        if entry.0 == "standing.sprite" {
-            entry.1 = WIDE_STANDING;
-        }
+    for &(file, source) in overrides {
+        let entry = srcs
+            .iter_mut()
+            .find(|(name, _)| *name == file)
+            .expect("an override names a bundled sprite");
+        entry.1 = source;
     }
-    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("wide test pack loads")
+    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("the test pack loads")
 }
 
 #[cfg(test)]

@@ -36,11 +36,6 @@ const SKYLINE_W_SPREAD: u16 = 6;
 /// Shortest skyline building — below this the city reads as a jagged floor.
 const SKYLINE_MIN_H: u16 = 2;
 
-/// Meeting-table footprint, in logical units. Sized to the trio's sofa gap.
-const TABLE_W: u16 = 18;
-/// Height of [`TABLE_W`]'s table.
-const TABLE_H: u16 = 6;
-
 /// Logical rows between a head and its name badge.
 const LABEL_GAP_PX: u16 = 2;
 
@@ -448,6 +443,7 @@ fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
 /// `sofas[1]` the south, and only the south one is mirrored — that is what makes
 /// the pair FACE each other across the table instead of both facing one way.
 fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
+    let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
     for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
         for (i, sofa) in t.sofas.iter().enumerate() {
             push_sofa(order, pack, *sofa, i % 2 != 0);
@@ -457,8 +453,8 @@ fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piece
             piece_span(
                 crate::layout::Anchor::Center,
                 t.table,
-                TABLE_W,
-                TABLE_H,
+                table.w,
+                table.h,
                 desk_front_h() + 1,
             ),
             PieceKind::Table { at: t.table },
@@ -477,7 +473,12 @@ fn push_characters(
 ) -> Vec<crate::layout::Point> {
     let mut carried = Vec::new();
     for (i, c) in frame.characters.iter().enumerate() {
-        let Some((w, h)) = art_size(pack, c.anim_name) else {
+        // The frame `paint_character` draws: an animation's frames need not
+        // share a size.
+        let Some((w, h)) =
+            crate::pixel_painter::densest_frame(pack, c.anim_name, c.frame_idx, RenderScale::ONE)
+                .map(|d| d.logical)
+        else {
             continue;
         };
         let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
@@ -1127,7 +1128,8 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
 /// procedurally too and there is no sprite to reuse.
 fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
     let ramp = Ramp::from_base(theme.furniture.wood_top);
-    let (w, h) = (TABLE_W, TABLE_H);
+    let crate::layout::Size { w, h } =
+        crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
     let crate::layout::Point { x, y } =
         crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
     slab(
@@ -1167,9 +1169,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
 
 /// A corridor appliance as a cutaway solid. Vending machine and printer have no
 /// sprite — classic paints them per-pixel — so this gives them a lit body and a
-/// contact shadow. Its footprint
-/// comes from the SHARED furniture table, not a second set of numbers, so the
-/// cutaway box matches the ground the mask actually blocks.
+/// contact shadow. Its box is the SHARED furniture table's `visual`, the box the
+/// classic painter draws it at, not a second set of numbers.
 fn paint_appliance(
     at: crate::layout::Point,
     kind: crate::layout::WaypointKind,
@@ -1574,6 +1575,69 @@ mod tests {
         assert_eq!((piece.x0, piece.x1), (8, 15));
     }
 
+    /// The desk sorts on the row just above the contact row it paints — pinned
+    /// to the paint, since the ordering tests compare depths with each other and
+    /// pass a shift both sides share.
+    #[test]
+    fn a_desk_sorts_on_the_row_above_the_contact_row_it_paints() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let desk = crate::layout::Point { x: 20, y: 30 };
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let art = desk_art(&pack, facing).expect("desk art");
+            for s in [1, pack.max_density_variant()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let span = desk_span(&pack, art, desk, scale).expect("desk");
+                let (w, h) = (scale.to_buffer(64), scale.to_buffer(64));
+                let mut buf = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
+                paint_desk(desk, art, None, &pack, theme, scale, &mut buf);
+                let contact = contact_tone(theme);
+                let contact_row = (0..h)
+                    .rev()
+                    .find(|&y| {
+                        (0..w).any(|x| {
+                            buf.as_slice()[usize::from(y) * usize::from(w) + usize::from(x)]
+                                == contact
+                        })
+                    })
+                    .map(|y| scale.logical(y))
+                    .expect("the desk paints a contact row");
+                assert_eq!(span.depth + 1, contact_row, "{art} at scale {s}");
+            }
+        }
+    }
+
+    /// A standing chair sorts on the classic painter's own chair key.
+    #[test]
+    fn a_chair_sorts_on_the_classic_chair_key() {
+        let pack = pack();
+        let desk = crate::layout::Point { x: 20, y: 30 };
+        let (span, _) = chair_span(&pack, crate::layout::Facing::North, desk)
+            .expect("a back-turned desk stands a chair");
+        assert_eq!(
+            span.depth,
+            crate::pixel_painter::desk_chair_z_key(desk, crate::layout::Facing::North)
+        );
+    }
+
+    /// A walker sorts on the sim's z-key for them, every step.
+    #[test]
+    fn a_walker_sorts_on_the_sims_z_key() {
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 0);
+        let mut walked = 0;
+        for frame in &frames {
+            let Some(c) = frame.characters.first().filter(|c| c.seat_desk.is_none()) else {
+                continue;
+            };
+            let mut order = Vec::new();
+            push_characters(frame, &layout, &pack, RenderScale::ONE, &mut order);
+            let (span, _) = order.first().expect("the walker is drawn");
+            assert_eq!(span.depth, c.anchor_y);
+            walked += 1;
+        }
+        assert!(walked > 1, "the fixture never walked, so this pins nothing");
+    }
+
     /// A chair that rises above its sitter's head still lies inside their
     /// piece, which sorts on the later of the two depths.
     #[test]
@@ -1699,11 +1763,19 @@ mod tests {
         facing: crate::layout::Facing,
         seated_ticks: usize,
     ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
+        sit_down_in(pack(), facing, seated_ticks)
+    }
+
+    /// [`sit_down`] with `pack` drawing the office.
+    fn sit_down_in(
+        pack: Pack,
+        facing: crate::layout::Facing,
+        seated_ticks: usize,
+    ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
         use crate::floor::{FloorMeta, FloorSession};
         use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, ToolKind};
         use std::time::{Duration, SystemTime};
         const LOGICAL: (u16, u16) = (160, 96);
-        let pack = pack();
         let meta = FloorMeta::ground();
         let layout = Layout::compute_with_seed(LOGICAL.0, LOGICAL.1, None, meta.floor_seed)
             .expect("lays out");
@@ -2113,18 +2185,23 @@ mod tests {
     fn every_piece_paints_only_inside_its_span() {
         use crate::floor::{FloorMeta, FloorSession};
         let theme = crate::theme::theme_by_name("normal").expect("theme");
-        let pack = pack();
-        let mut seen = std::collections::BTreeSet::new();
-        let mut check = |frame: &SimFrame, layout: &Layout, only_people: bool| {
+        let (mut kinds, mut props) = (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        );
+        let mut check = |pack: &Pack, frame: &SimFrame, layout: &Layout, only_people: bool| {
             for s in [1, 3, pack.max_density_variant()] {
                 let scale = RenderScale::new(s).expect("nonzero");
-                for (span, kind) in draw_list(frame, layout, &pack, theme, scale) {
+                for (span, kind) in draw_list(frame, layout, pack, theme, scale) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
                     }
-                    seen.insert(kind_name(&kind));
+                    kinds.insert(kind_name(&kind));
+                    if let PieceKind::Prop { sprite, .. } = kind {
+                        props.insert(sprite);
+                    }
                     assert_eq!(
-                        stray_pixel(&kind, span, frame, layout, &pack, theme, scale),
+                        stray_pixel(&kind, span, frame, layout, pack, theme, scale),
                         None,
                         "{kind:?} at scale {s} wrote a logical pixel outside {span:?}"
                     );
@@ -2133,15 +2210,44 @@ mod tests {
         };
         // Every step of a walk to each desk facing and the sit, for the mover...
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
-            let (layout, _, frames, _) = sit_down(facing, 2);
+            let (layout, pack, frames, _) = sit_down(facing, 2);
             for frame in &frames {
-                check(frame, &layout, true);
+                check(&pack, frame, &layout, true);
             }
             // ...the office around them once, a lit screen and a carried chair
             // included...
-            check(frames.last().expect("a seated frame"), &layout, false);
+            check(
+                &pack,
+                frames.last().expect("a seated frame"),
+                &layout,
+                false,
+            );
+        }
+        // ...a walk whose frames differ in size, so a span sized from the wrong
+        // frame shows...
+        const LONG_STRIDE: &str = "\
+@frame 0
+. n H H H H n .
+n H H H H H H n
+H H S S S S H H
+H S e S S e S H
+. S S S m S S .
+. n S S S S n .
+. B B B B B B .
+B B B B B B B B
+S B B B B B B S
+. P P P P P P .
+. P P P P P P .
+. P . . . . P P
+. P . . . . . P
+";
+        let uneven = crate::embedded_pack::test_pack_with(&[("walking_1.sprite", LONG_STRIDE)]);
+        let (layout, uneven, frames, _) = sit_down_in(uneven, crate::layout::Facing::South, 0);
+        for frame in &frames {
+            check(&uneven, frame, &layout, true);
         }
         // ...and offices whose sizes gate in the pieces 160x96 lacks, empty.
+        let pack = pack();
         for (w, h) in [(240u16, 144u16), (100, 60)] {
             let frame = FloorSession::new()
                 .observe(
@@ -2155,10 +2261,10 @@ mod tests {
                 .expect("lays out");
             let layout = Layout::compute_with_seed(w, h, None, FloorMeta::ground().floor_seed)
                 .expect("lays out");
-            check(&frame, &layout, false);
+            check(&pack, &frame, &layout, false);
         }
         assert_eq!(
-            seen.into_iter().collect::<Vec<_>>(),
+            kinds.into_iter().collect::<Vec<_>>(),
             [
                 "appliance",
                 "chair",
@@ -2170,6 +2276,16 @@ mod tests {
             ],
             "a piece kind went untested"
         );
+        // "prop" is four builders; each must have been reached.
+        for sprite in crate::pixel_painter::PANTRY_COUNTER_ANIMS
+            .into_iter()
+            .chain(["meeting_sofa", "plant"])
+        {
+            assert!(
+                props.contains(sprite),
+                "no {sprite} prop was painted: {props:?}"
+            );
+        }
     }
 
     fn kind_name(kind: &PieceKind) -> &'static str {
