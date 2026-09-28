@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Author the cutaway profile's `@8x` sprite art for the bundled pack.
+"""Author the bundled pack's generated sprite art: the cutaway profile's `@8x`
+pieces, and the classic profile's 1x pieces drawn from the same layout.
 
 Draws in PALETTE-KEY space, so the output is .sprite text and the recolor keys
 (H/B/S/P and their [ramps] shades) survive per-agent recoloring. The .sprite
@@ -12,8 +13,9 @@ from the committed one, or if a sprite carrying the provenance line is no longer
 drawn here (a write deletes those).
 
 It resolves no colour itself: the engine owns the palette and its ramps, so look
-at the result through the real renderer, e.g.
-`cargo run --release --example cutaway_snapshot -- <out.png> --scale 8`.
+at the result through the real renderer: `cargo run --release --example
+cutaway_snapshot -- <out.png> --scale 8` for the `@8x` art, `cargo run --release
+--example snapshot -- --crop-furniture <piece> <out.png>` for the 1x.
 """
 
 import argparse
@@ -265,8 +267,79 @@ def chair():
 
 
 # ---- the raised back-turned desk -----------------------------------------------
+# ---- the desk: one layout, drawn at 1x (classic) and at `S` (cutaway) ------
+# Logical units, shared by both drawings so the `@8x` art is always exactly `S`
+# times the 1x it redraws (validate-pack rejects any other size).
+#
+# The width is the desk's `FurnitureDef` visual width, pinned by
+# `desk_sprite_width_tracks_the_footprint_overhang`.
+DESK_W = 14
+# The viewer-facing desk. Its row 0 is the monitor rising a row above the
+# desk's back edge (the painter blits it at `desk.y - 1`).
+DESK_H = 9
+# The back-turned desk: two rows taller, all of them above, so the occupant
+# (who y-sorts in FRONT of the desk) leaves the upper screen row clear. Its
+# lower screen row sits inside the wood, flanked by it: the owner picked a
+# monitor standing on its desk over one floating clear of every head.
+DESK_NORTH_H = 11
+DESK_LEG_W = 2
+# The monitor's columns, and its rows from the sprite's top: casing 0-1, glass
+# 2-3, chin 4 — where the classic painter's screen glow lands
+# (`pixel_painter::effects`'s `SCREEN_*`), so the art keeps each role there.
+DESK_MONITOR_X0, DESK_MONITOR_X1 = 3, 11
+
+
+def desk_1x(h, monitor_top):
+    """The classic desk's wood: a lit back edge, a bright front lip, and legs
+    dark on their inner side, with open floor between them so the carpet and
+    anyone walking behind the desk show through. Both desks share these bottom
+    three rows. The props (lamp, mug, paper tower) are the classic painter's
+    live overlays, so the art draws none of them."""
+    g = canvas(DESK_W, h)
+    top, lip = monitor_top + 1 if monitor_top else 1, h - 3
+    rect(g, 0, top, DESK_W, lip, WOOD)
+    rect(g, 0, top, DESK_W, top + 1, WOOD_LT)
+    rect(g, 0, lip, DESK_W, lip + 1, WOOD_HI)
+    for x0, inner in ((0, DESK_LEG_W - 1), (DESK_W - DESK_LEG_W, DESK_W - DESK_LEG_W)):
+        rect(g, x0, lip + 1, x0 + DESK_LEG_W, h, WOOD_SH)
+        rect(g, inner, lip + 1, inner + 1, h, WOOD_DK)
+    return g
+
+
+def desk_south_1x():
+    """The viewer-facing desk at 1x: the monitor's back, lit along its top
+    edge, on a stand throwing a shadow either side. Its glass rows stay casing:
+    a viewer-facing seat never shows a screen, though the glow still lights
+    them where a pack ships no `desk_north` and this art stands in for it."""
+    g = desk_1x(DESK_H, 0)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 4, BEZEL)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
+    rect(g, DESK_MONITOR_X0 + 1, 4, DESK_MONITOR_X1 - 1, 5, BEZEL)
+    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
+        put(g, x, 4, SHADOW)
+    return g
+
+
+def desk_north_1x():
+    """The back-turned desk at 1x: the raised monitor shows its glass, dim
+    lines of text on it, and a keyboard sits in front of the stand."""
+    g = desk_1x(DESK_NORTH_H, 2)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 4, BEZEL)
+    rect(g, DESK_MONITOR_X0, 0, DESK_MONITOR_X1, 1, SLATE)
+    rect(g, DESK_MONITOR_X0 + 1, 2, DESK_MONITOR_X1 - 1, 4, GLASS)
+    for x, y in ((5, 2), (6, 2), (8, 2), (6, 3), (7, 3)):
+        put(g, x, y, GLASS_TXT)
+    rect(g, DESK_MONITOR_X0 + 1, 4, DESK_MONITOR_X1 - 1, 5, BEZEL)
+    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
+        put(g, x, 4, SHADOW)
+    rect(g, DESK_MONITOR_X0 + 1, 5, DESK_MONITOR_X1 - 1, 6, GREY)
+    for x in (DESK_MONITOR_X0 + 1, DESK_MONITOR_X1 - 2):
+        put(g, x, 5, KEY_DK)
+    return g
+
+
 def desk_north():
-    w, h = 14 * S, 11 * S
+    w, h = DESK_W * S, DESK_NORTH_H * S
     g = canvas(w, h)
     rng = random.Random(3)
     # top surface, boards running left-right: the base's rows 3 to 7
@@ -448,7 +521,7 @@ def figure_front(height, hands):
 
 # ---- the viewer-facing desk: the monitor's BACK --------------------------------
 def desk_south():
-    w, h = 14 * S, 9 * S
+    w, h = DESK_W * S, DESK_H * S
     g = canvas(w, h)
     rng = random.Random(5)
     # top surface, boards left-right: the base's rows 1 to 5
@@ -1175,7 +1248,7 @@ def exit_sign():
 
 
 # ---- output -----------------------------------------------------------------
-PROVENANCE = "Generated by scripts/gen-cutaway-art.py: edit the generator, not this file."
+PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file."
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
@@ -1208,7 +1281,7 @@ def check(pack, sprites):
     gone = orphans(pack, sprites)
     if not stale and not gone:
         return None
-    lines = [f"gen-cutaway-art --check: stale {stale}, orphaned {gone} — run `just gen-art`"]
+    lines = [f"gen-art --check: stale {stale}, orphaned {gone} — run `just gen-art`"]
     if stale and (pack / stale[0]).is_file():
         committed = (pack / stale[0]).read_text(encoding=ENCODING).splitlines()
         drawn = sprites[stale[0]].splitlines()
@@ -1244,7 +1317,7 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
-    print(f"gen-cutaway-art --selftest: OK ({len(sprites)} sprites)")
+    print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
 def main():
@@ -1324,17 +1397,26 @@ def main():
         "desk_chair": ("The task chair from behind: a tufted four-column back, armrests and a\nfive-star base.", [chair()]),
         "desk_north": ("The back-turned desk: its raised monitor, with a desk lamp, papers and\na mug on the wings.", [desk_north()]),
     }
+    classic = {
+        "desk": ("The viewer-facing desk: the monitor's back on its stand, the wood lit\nalong its back edge and front lip.", [desk_south_1x()]),
+        "desk_north": ("The back-turned desk: its raised monitor's glass with dim text, a\nkeyboard before the stand.", [desk_north_1x()]),
+    }
+    for base, (_, frames) in classic.items():
+        if base in pieces:
+            small, big = frames[0], pieces[base][1][0]
+            assert (len(big[0]), len(big)) == (S * len(small[0]), S * len(small)), base
     sprites = {
         f"{base}@{S}x.sprite": render_sprite(header, frames)
         for base, (header, frames) in pieces.items()
     }
+    sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
     if args.selftest:
         selftest(sprites)
     elif args.check:
         problem = check(args.pack, sprites)
         if problem:
             sys.exit(problem)
-        print(f"gen-cutaway-art --check: OK ({len(sprites)} sprites)")
+        print(f"gen-art --check: OK ({len(sprites)} sprites)")
     else:
         write(args.pack, sprites)
 

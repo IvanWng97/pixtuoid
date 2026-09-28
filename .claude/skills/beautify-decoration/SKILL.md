@@ -104,7 +104,7 @@ Symptoms of weak identity:
 - Verify with: `awk '/^@/{next}/^#/{next}NF{print NR": "NF}' crates/pixtuoid-scene/sprites/default/foo.sprite` — all NF values must match.
 - Or visualize packed rows: `awk '/^@/{next}/^#/{next}NF{for(i=1;i<=NF;i++)printf "%s",$i;print " ["NF"]"}' foo.sprite`.
 - Reuse existing palette keys when possible; new keys go in `crates/pixtuoid-scene/sprites/default/pack.toml` `[palette]` section.
-- A `foo@8x.sprite` is cutaway art drawn by `scripts/gen-cutaway-art.py`: redraw it there and run `just gen-art` — `just gen-art-check` fails on a hand edit.
+- A sprite whose header carries the provenance line (every `foo@8x.sprite`, and the 1x pieces the generator owns) is drawn by `scripts/gen-art.py`: redraw it there and run `just gen-art` — `just gen-art-check` fails on a hand edit.
 
 ### 7. Layout integration checklist
 
@@ -115,7 +115,7 @@ When a sprite **changes size**:
 3. Run `cargo test -p pixtuoid-scene` — the `walkable_is_one_connected_region` test (lives in `layout/placement_sweep.rs`) catches mask/sprite mismatches by sweeping buffer sizes × seeds and asserting every walkable pixel is reachable from the door threshold; `narrow_band_connectivity_boundary_scan` re-runs the same assert at the step-1 widths that discrete grid skips.
 4. If the connectivity test fails at a small buffer (`SWEEP_SIZES` starts at the minimum layout size), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
 5. Register both `foo.sprite` and `foo_small.sprite` in `crates/pixtuoid-scene/sprites/default/pack.toml` if you added a variant (an unregistered sprite fails `every_embedded_sprite_is_a_frame_the_pack_loads`).
-6. Redraw a `foo@8x.sprite` it ships in `scripts/gen-cutaway-art.py` at exactly 8× the resized base, or `validate-pack` reds.
+6. Resize the piece in `scripts/gen-art.py`, which draws its `@8x` (and, for a piece it owns, its 1x) from one layout; a variant that is not exactly 8× its base reds `validate-pack`.
 
 ## Self-critique checklist — MANDATORY before every SendUserFile
 

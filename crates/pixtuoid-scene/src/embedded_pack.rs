@@ -567,12 +567,11 @@ mod tests {
 
         // The column loop above starts at `desk.y`, so wood a variant grows ABOVE that row is
         // invisible to it; counting OPAQUE rows would miss it too (a screen row is opaque either way).
-        let wood = base
-            .get(0, BASE_DESK_Y_ROW)
-            .expect("the desk's west edge at desk.y is surface");
+        // Surface is the wood and its lit back edge, read at the west edge the monitor never covers.
+        let surface = ['D', 'O'].map(|key| pack.palette().get(key).flatten());
         let surface_rows = |f: &pixtuoid_core::sprite::Frame| {
             (0..f.height())
-                .filter(|&y| (0..f.width()).any(|x| f.get(x, y) == Some(wood)))
+                .filter(|&y| f.get(0, y).is_some_and(|px| surface.contains(px)))
                 .count() as u16
         };
         for (name, art) in [("desk", base), ("desk_north", north)] {

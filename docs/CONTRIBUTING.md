@@ -42,7 +42,7 @@ does not mean a green PR:
 - **docs** — `cargo doc` with `-D warnings` (broken/private intra-doc links
   deny) plus the doctests nextest skips.
 - **coverage/smoke · gen-check · gen-readme-check · npm-check** — committed
-  media, @8x sprite art, README and npm manifest freshness.
+  media, generated sprite art, README and npm manifest freshness.
 - **windows-check / windows-test** — msvc cross-lint on every PR, and the
   full suite on a real Windows runner.
 - **wasm-check** — the wasm32 build plus the committed `site/public/wasm/`
