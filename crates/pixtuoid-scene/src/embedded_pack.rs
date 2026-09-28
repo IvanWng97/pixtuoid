@@ -177,115 +177,20 @@ pub(crate) fn test_default_pack() -> Pack {
     load_sprite_pack(PackSource::Bundled).expect("default pack loads")
 }
 
+/// The default pack's manifest.
+const EMBEDDED_PACK_TOML: &str = include_str!("../sprites/default/pack.toml");
+
 fn load_embedded_pack() -> Result<Pack> {
-    load_pack_from_strings(
-        include_str!("../sprites/default/pack.toml"),
-        &embedded_sprite_srcs(),
-    )
+    load_pack_from_strings(EMBEDDED_PACK_TOML, &embedded_sprite_srcs())
 }
 
-/// Every default sprite as `(filename, source)`. The macro keeps a new sprite to
-/// a SINGLE line — not a `let`-binding AND a matching tuple entry that can
-/// silently drift. Extracted so [`test_wide_pack`] reuses the EXACT sprite set
-/// and only overrides `standing.sprite`.
+/// Every default sprite as `(filename, source)`: every `.sprite` in
+/// `sprites/default/`, listed by `build.rs`, so a sprite committed there cannot
+/// be left out. Extracted so [`test_wide_pack`] reuses the EXACT sprite set and
+/// only overrides `standing.sprite`.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
-    macro_rules! embedded_sprites {
-        ($($name:literal),+ $(,)?) => {
-            vec![$(($name, include_str!(concat!("../sprites/default/", $name)))),+]
-        };
-    }
-    embedded_sprites![
-        "seated.sprite",
-        "seated@8x.sprite",
-        "seated_back.sprite",
-        "seated_back@8x.sprite",
-        "typing_back_0.sprite",
-        "typing_back_1.sprite",
-        "typing_back_0@8x.sprite",
-        "typing_back_1@8x.sprite",
-        "side_seated.sprite",
-        "side_seated@8x.sprite",
-        "typing_0.sprite",
-        "typing_1.sprite",
-        "typing_0@8x.sprite",
-        "typing_1@8x.sprite",
-        "standing.sprite",
-        "standing@8x.sprite",
-        "walking_0.sprite",
-        "walking_1.sprite",
-        "walking_0@8x.sprite",
-        "walking_1@8x.sprite",
-        "walking_back_0.sprite",
-        "walking_back_1.sprite",
-        "walking_back_0@8x.sprite",
-        "walking_back_1@8x.sprite",
-        "walking_coffee_0.sprite",
-        "walking_coffee_1.sprite",
-        "walking_coffee_0@8x.sprite",
-        "walking_coffee_1@8x.sprite",
-        "desk.sprite",
-        "desk@8x.sprite",
-        "desk_north.sprite",
-        "desk_north@8x.sprite",
-        "plant.sprite",
-        "plant@8x.sprite",
-        "plant_tall.sprite",
-        "plant_tall@8x.sprite",
-        "plant_flower.sprite",
-        "plant_flower@8x.sprite",
-        "plant_succulent.sprite",
-        "plant_succulent@8x.sprite",
-        "floor_lamp.sprite",
-        "door.sprite",
-        "door_half.sprite",
-        "door_open.sprite",
-        "bulletin_board.sprite",
-        "bulletin_board@8x.sprite",
-        "exit_sign.sprite",
-        "exit_sign@8x.sprite",
-        "desk_chair.sprite",
-        "desk_chair@8x.sprite",
-        "filing_cabinet.sprite",
-        "cat_walk_0.sprite",
-        "cat_walk_1.sprite",
-        "cat_sit.sprite",
-        "cat_sleep.sprite",
-        "dog_walk_0.sprite",
-        "dog_walk_1.sprite",
-        "dog_sit.sprite",
-        "dog_sleep.sprite",
-        "lobster_walk_0.sprite",
-        "lobster_walk_1.sprite",
-        "lobster_rest.sprite",
-        "meeting_sofa.sprite",
-        "meeting_sofa@8x.sprite",
-        "meeting_screen.sprite",
-        "meeting_screen@8x.sprite",
-        "back_couch.sprite",
-        "back_couch@8x.sprite",
-        "seated_sleeping.sprite",
-        "seated_sleeping@8x.sprite",
-        "seated_sleeping_alt.sprite",
-        "seated_sleeping_alt@8x.sprite",
-        "holding_coffee.sprite",
-        "holding_coffee@8x.sprite",
-        "pantry.sprite",
-        "pantry@8x.sprite",
-        "pantry_small.sprite",
-        "pantry_small@8x.sprite",
-        "whiteboard.sprite",
-        "whiteboard@8x.sprite",
-        "bookshelf.sprite",
-        "bookshelf@8x.sprite",
-        "snack_shelf.sprite",
-        "snack_shelf@8x.sprite",
-        "tv_stand.sprite",
-        "tv_stand@8x.sprite",
-        "phone_booth.sprite",
-        "phone_booth@8x.sprite",
-        "standing_desk.sprite",
-        "standing_desk@8x.sprite",
-    ]
+    const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
+    SPRITES.to_vec()
 }
 
 /// The default pack with a 10px-wide `standing` frame so the pack-resolved
@@ -322,8 +227,7 @@ pub(crate) fn test_wide_pack() -> Pack {
             entry.1 = WIDE_STANDING;
         }
     }
-    load_pack_from_strings(include_str!("../sprites/default/pack.toml"), &srcs)
-        .expect("wide test pack loads")
+    load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("wide test pack loads")
 }
 
 #[cfg(test)]
@@ -412,6 +316,27 @@ mod tests {
         // `StandIn::DefaultPack` promises the default draws what a custom pack
         // leaves out.
         assert_eq!(report.warning_count(), 0, "{report:?}");
+    }
+
+    /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation
+    /// registers — a generated `@8x` whose `pack.toml` entry was never written —
+    /// ships as dead bytes and draws nothing. A sprite the pack still loads
+    /// without is exactly that.
+    #[test]
+    fn every_embedded_sprite_is_a_frame_the_pack_loads() {
+        let srcs = embedded_sprite_srcs();
+        let unregistered: Vec<&str> = srcs
+            .iter()
+            .map(|&(name, _)| name)
+            .filter(|&name| {
+                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
+                load_pack_from_strings(EMBEDDED_PACK_TOML, &without).is_ok()
+            })
+            .collect();
+        assert!(
+            unregistered.is_empty(),
+            "sprites no animation registers: {unregistered:?}"
+        );
     }
 
     /// What a default run's render scale rounds to (`RenderScale::fit`): a

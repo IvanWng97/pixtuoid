@@ -51,7 +51,7 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 ### 1. The rebuild trap
 
 - `cargo build --release --workspace` **does not** rebuild examples. Use `cargo build --release --example snapshot` when iterating on `examples/snapshot`.
-- `include_str!` in `crates/pixtuoid-scene/src/embedded_pack.rs` bakes sprite files at compile time. A `build.rs` exists at `crates/pixtuoid-scene/build.rs` that emits `rerun-if-changed` for every `.sprite` and `pack.toml` — so a sprite edit DOES trigger a rebuild now. If you added a new asset and edits still aren't being picked up, check that build.rs is matching its extension.
+- `crates/pixtuoid-scene/build.rs` embeds every `.sprite` in `sprites/default/` at compile time and declares each (and `pack.toml`) a rerun trigger, so a sprite edit rebuilds. If edits still aren't being picked up, check that build.rs matches its extension.
 - If unsure, verify with: `strings target/release/examples/snapshot | grep "<some unique string from your sprite>"`.
 
 ### 2. Snapshot defaults hide the large sprite variants
@@ -114,7 +114,7 @@ When a sprite **changes size**:
 2. A non-waypoint obstacle (plant, wall decor, pod decor) is likewise stamped from its `FurnitureDef` row via `furniture_def(kind.furniture()).footprint`, not an inline literal — so the same table edit covers it.
 3. Run `cargo test -p pixtuoid-scene` — the `walkable_is_one_connected_region` test (lives in `layout/placement_sweep.rs`) catches mask/sprite mismatches by sweeping buffer sizes × seeds and asserting every walkable pixel is reachable from the door threshold; `narrow_band_connectivity_boundary_scan` re-runs the same assert at the step-1 widths that discrete grid skips.
 4. If the connectivity test fails at a small buffer (`SWEEP_SIZES` starts at the minimum layout size), the sprite is too big for that pantry. Add a `_small` variant + conditional pick (see `PantryRoom::counter_size` / `SceneLayout::pantry_counter_size()` for the pattern).
-5. Update animation list in `crates/pixtuoid-scene/sprites/default/pack.toml` and `embedded_pack.rs` to include both `foo.sprite` and `foo_small.sprite` if you added a variant.
+5. Register both `foo.sprite` and `foo_small.sprite` in `crates/pixtuoid-scene/sprites/default/pack.toml` if you added a variant (an unregistered sprite fails `every_embedded_sprite_is_a_frame_the_pack_loads`).
 6. Redraw a `foo@8x.sprite` it ships in `scripts/gen-cutaway-art.py` at exactly 8× the resized base, or `validate-pack` reds.
 
 ## Self-critique checklist — MANDATORY before every SendUserFile
@@ -137,13 +137,12 @@ Skipping this checklist defeats the point of the skill — the whole reason it e
 1. Sketch the design as a list of cells per row (count exactly).
 2. Pick a palette: reuse `pack.toml` keys; only add new ones if necessary.
 3. Write the `.sprite` file; verify row widths with the awk command above.
-4. Add the include_str! line to `embedded_pack.rs`.
-5. Add the `[animations.foo]` block to `pack.toml`.
-6. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
-7. Give it a `Furniture` variant + `furniture_def` row (§7 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
-8. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
-9. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
-10. Snapshot + iterate.
+4. Add the `[animations.foo]` block to `pack.toml` (`build.rs` embeds the file itself).
+5. Decide where it lives in the layout — add a `Point` placement in `SceneLayout::compute`.
+6. Give it a `Furniture` variant + `furniture_def` row (§7 step 1). A new plant, wall-decor or pod-decor kind is then stamped by its collection's loop in `mask::build_walkable_mask`; a one-off piece also needs a `MaskObstacles` field and its own `stamp_ground` from that row, like `fish_tank` (or add a waypoint kind if it's interactive).
+7. Add a `DrawableKind::Foo` variant + `paint_drawable` arm if z-sorting matters.
+8. Run `cargo test -p pixtuoid-scene` — the layout/walkable-connectivity and painter tests this checklist relies on live there since the scene split (`-p pixtuoid-core` no longer runs any of them).
+9. Snapshot + iterate.
 
 ## Recap of the pantry session (case study)
 
