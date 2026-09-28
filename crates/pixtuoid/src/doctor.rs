@@ -624,12 +624,11 @@ struct RootStatus {
     env: Option<(&'static str, bool)>,
 }
 
-/// The densest variant of the pack `source` loads, or why that pack fails to
-/// load: `run` refuses to start on it, so doctor says so rather than showing a
-/// bare density of 1.
-fn pack_max_density(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<u16, String> {
+/// The density variants of the pack `source` loads, or why that pack fails to
+/// load: `run` refuses to start on it, so doctor says so.
+fn pack_densities(source: pixtuoid_scene::embedded_pack::PackSource) -> Result<Vec<u16>, String> {
     pixtuoid_scene::embedded_pack::load_sprite_pack(source)
-        .map(|pack| pack.max_density_variant())
+        .map(|pack| pack.density_variants())
         .map_err(|e| format!("{e:#}"))
 }
 
@@ -648,8 +647,8 @@ struct DoctorReport {
     truecolor_probe: Option<bool>,
     color_pf: crate::term::ColorPreflight,
     graphics: crate::GraphicsMode,
-    detected: Option<crate::graphics::Detected>,
-    max_density: u16,
+    graphics_probe: crate::graphics::Probe,
+    densities: Vec<u16>,
     rows: Vec<DoctorSourceRow>,
     roots: Vec<RootStatus>,
     backend: &'static str,
@@ -727,19 +726,19 @@ impl Ink {
 /// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): a piped `doctor > file`
 /// would emit escapes and block on an answer that cannot come. That gate is the same
 /// `color_preflight` the launcher acts on, so the row matches `run`. `--graphics off` skips
-/// the graphics ask for a second reason — it spends `graphics::detect`'s whole timeout on a
-/// fact the flag says not to use.
+/// the graphics ask for a second reason — a terminal that stays silent spends
+/// `graphics::GRAPHICS_PROBE_TIMEOUT` on a fact the flag says not to use.
 fn probe_terminal_caps(
     probe_ok: bool,
     graphics: crate::GraphicsMode,
-) -> (Option<bool>, Option<crate::graphics::Detected>) {
+) -> (Option<bool>, crate::graphics::Probe) {
     let truecolor_probe = if probe_ok {
         crate::term::query_truecolor(crate::term::TRUECOLOR_PROBE_TIMEOUT)
     } else {
         None
     };
-    let ask = probe_ok && graphics != crate::GraphicsMode::Off;
-    (truecolor_probe, ask.then(crate::graphics::detect).flatten())
+    let graphics_probe = crate::graphics::probe(probe_ok && graphics != crate::GraphicsMode::Off);
+    (truecolor_probe, graphics_probe)
 }
 
 /// A wrong root has no symptom but an empty office, so state it outright (#880). Goes
@@ -829,13 +828,13 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         // than rely on the Display path happening not to check today.
         crossterm::style::force_color_output(true);
     }
-    let (truecolor_probe, detected) = probe_terminal_caps(probe_ok, graphics);
+    let (truecolor_probe, graphics_probe) = probe_terminal_caps(probe_ok, graphics);
     // The pack `run` draws, not the bundled art alone, which understates a user
     // pack shipping density variants.
-    let max_density = pack_max_density(crate::config::resolve_pack_source(&cfg, None))
-        .unwrap_or_else(|reason| {
+    let densities =
+        pack_densities(crate::config::resolve_pack_source(&cfg, None)).unwrap_or_else(|reason| {
             config_warnings.push(reason);
-            1
+            Vec::new()
         });
 
     let rows: Vec<DoctorSourceRow> = registry::registered_source_names()
@@ -896,8 +895,8 @@ fn collect(log_path: &std::path::Path, graphics: crate::GraphicsMode) -> DoctorR
         truecolor_probe,
         color_pf,
         graphics,
-        detected,
-        max_density,
+        graphics_probe,
+        densities,
         rows,
         roots,
         backend,
@@ -947,7 +946,7 @@ fn terminal_category(r: &DoctorReport) -> Category {
     // classic, and a fallback must never go unexplained.
     let mut details = vec![format!(
         "{DETAIL_INDENT}{}",
-        crate::graphics::graphics_diagnostic_row(r.graphics, r.detected, r.max_density)
+        crate::graphics::graphics_diagnostic_row(r.graphics, r.graphics_probe, &r.densities)
     )];
     // Whenever it has something to say — incl. the ForceColor note, so a
     // NO_COLOR+CLICOLOR_FORCE report still states that color is being forced.
@@ -1532,9 +1531,9 @@ mod tests {
             .expect("tempdir")
             .path()
             .join("gone");
-        let reason = pack_max_density(PackSource::Explicit(missing)).expect_err("gone");
+        let reason = pack_densities(PackSource::Explicit(missing)).expect_err("gone");
         assert!(reason.contains("failed to load sprite pack"), "{reason}");
-        assert!(pack_max_density(PackSource::Bundled).is_ok());
+        assert!(pack_densities(PackSource::Bundled).is_ok());
     }
 
     // Reads process-global env (the config path), so it holds TEST_ENV_LOCK like
@@ -1653,8 +1652,8 @@ mod tests {
             truecolor_probe: None,
             color_pf: crate::term::ColorPreflight::Proceed,
             graphics: crate::GraphicsMode::Auto,
-            detected: None,
-            max_density: 1,
+            graphics_probe: crate::graphics::Probe::NotQueried,
+            densities: Vec::new(),
             rows,
             roots: vec![],
             backend: "NSRunningApplication (macOS)",

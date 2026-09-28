@@ -307,11 +307,11 @@ expected_location="\`src/lib.rs:7\`"
 # a `::error` annotation — so a rejected character reads in the checks table as
 # "the bot never posted", not "the bot was blocked", and the merge gate silently
 # becomes unsatisfiable for every finding on those files.
-variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"MEDIUM","path":"crates/pixtuoid-scene/sprites/default/desk@4x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
+variant_review='{"summary":"One finding on a density variant.","findings":[{"severity":"MEDIUM","path":"crates/pixtuoid-scene/sprites/default/desk@8x.sprite","line":6,"body":"Header names a scheme that does not exist."}]}'
 run_publisher "$variant_review" ||
     fail "Claude publisher rejected a finding on an '@' density-variant path"
 published_content="$(<"$published_comment")"
-[[ "$published_content" == *"\`crates/pixtuoid-scene/sprites/default/desk@4x.sprite:6\`"* ]] ||
+[[ "$published_content" == *"\`crates/pixtuoid-scene/sprites/default/desk@8x.sprite:6\`"* ]] ||
     fail "Claude publisher omitted the density-variant finding location"
 
 if run_publisher "$valid_review" new-head old-head >/dev/null 2>&1; then

@@ -8,19 +8,58 @@
 //!
 //! Split the way [`crate::term`] is: the policy is pure and unit-tested, the
 //! one IO call (asking the terminal) is a thin wrapper that the tests never
-//! reach. A terminal query cannot run under `cargo test` — output is captured,
-//! so there is no tty to answer — and a detection module whose decisions are
-//! only exercised through that query is a module with no tests at all.
+//! reach. A terminal query cannot be a test — it writes escapes to whatever
+//! terminal runs the suite and waits on a reply that may never come — and a
+//! detection module whose decisions are only exercised through that query is a
+//! module with no tests at all.
 
 use pixtuoid_scene::render_scale::RenderScale;
+
+/// How long the capability query waits for the terminal's next reply.
+///
+/// The query ends with a device-status request (ratatui-image 11.0.8
+/// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
+/// moment its reply lands; the budget is only spent where no reply comes (a
+/// ConPTY that drops replies, a hidden tmux pane refusing passthrough), which is
+/// why it can outlast [`crate::term::TRUECOLOR_PROBE_TIMEOUT`], whose query has
+/// no such terminator. Upstream restarts the clock on every read
+/// (`picker.rs:615`), so this bounds silence, not the whole query.
+#[cfg(feature = "graphics")]
+pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A graphics protocol the terminal speaks and the cutaway can be handed over.
+///
+/// Built only by the `graphics`-feature [`probe`]; a build without it still
+/// names every protocol, so the plan is one type in both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+pub(crate) enum ImageProtocol {
+    /// kitty's graphics protocol.
+    Kitty,
+    /// DEC SIXEL.
+    Sixel,
+    /// iTerm2's inline images.
+    Iterm2,
+}
+
+impl ImageProtocol {
+    /// The protocol's name as a user would search for it.
+    pub(crate) fn name(self) -> &'static str {
+        match self {
+            Self::Kitty => "kitty",
+            Self::Sixel => "sixel",
+            Self::Iterm2 => "iterm2",
+        }
+    }
+}
 
 /// A terminal cell's size in real pixels, as the terminal reports it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellSize {
     /// Cell width in pixels.
-    pub w: u16,
+    pub(crate) w: u16,
     /// Cell height in pixels.
-    pub h: u16,
+    pub(crate) h: u16,
 }
 
 /// What the user asked for on the command line.
@@ -38,35 +77,51 @@ pub enum GraphicsMode {
 
 /// Why a run is painting classic — the honest answer to "why is it not the
 /// pretty one?", which a user is entitled to and `doctor` prints.
+///
+/// One variant per fact the probe can establish: a merged reason makes the
+/// report assert something it never established — a verdict on the terminal
+/// when the real cause was a pipe, or on the pipe when this build cannot ask.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ClassicReason {
     /// `--graphics off`.
     Disabled,
-    /// The terminal was never asked — output is not a terminal, so the query
-    /// would have gone into a pipe and nothing could answer it.
-    ///
-    /// SEPARATE from [`Self::NoProtocol`] because collapsing them makes the
-    /// report assert something it never established: it reads as a verdict on
-    /// the terminal when the real cause is the pipe.
+    /// This build has no `graphics` feature, so there is no query to run.
+    Unsupported,
+    /// The terminal was never asked.
     NotQueried,
-    /// The terminal answered, and it has no graphics protocol.
-    NoProtocol,
-    /// The terminal has a protocol but reports a cell too small to subdivide.
+    /// The query ran and no protocol came of it.
     ///
-    /// Real case, not defensive: a terminal that answers the protocol query but
-    /// not the pixel-size one reports a zero or 1-px cell, and one pixel per
-    /// logical unit IS the classic density — there is nothing to gain.
-    CellTooSmall(CellSize),
+    /// Also what a terminal that never answered gets: upstream answers a
+    /// timeout with its no-protocol fallback picker (ratatui-image 11.0.8
+    /// `picker.rs:147-157`), so through it the two cannot be told apart.
+    NoProtocol,
+    /// Inside tmux, with a protocol other than kitty.
+    ///
+    /// SIXEL and iTerm2, as ratatui-image sends them inside tmux, ride tmux's
+    /// passthrough (tmux(1), `allow-passthrough`), which bypasses tmux: tmux
+    /// never holds the image, so a pane or window switch redraws the pane
+    /// without it. kitty's Unicode placeholders are ordinary cells tmux stores
+    /// and redraws.
+    TmuxNeedsKitty(ImageProtocol),
+    /// The terminal has a protocol, but its cell is too small for any scale the
+    /// pack's art lands on: a small font against dense art (a 5-px-wide cell
+    /// cannot reach 8x art within [`RenderScale::fit`]'s bound), or a 1-px
+    /// cell, where one pixel per logical unit IS the classic density.
+    CellTooSmall {
+        /// The cell the terminal reported.
+        cell: CellSize,
+        /// The least dense of the pack's density variants — the one the cell
+        /// came nearest to landing — or 1 when it ships none.
+        density: u16,
+    },
 }
 
 /// The resolved decision: what to paint, and — when it went the boring way —
 /// why.
 ///
-/// One type rather than a profile beside an `Option<reason>`, because "which
-/// profile" and "why not the pretty one" are one answer: a cutaway plan has
-/// nothing to explain and a classic plan always does. As two fields the pair
-/// was constructible in both contradictory shapes, and the diagnostic carried
-/// an "unknown" arm for a state no producer ever emitted.
+/// One type rather than a profile beside an `Option<reason>`: a cutaway plan
+/// has nothing to explain and a classic plan always does, and two fields could
+/// hold both contradictory shapes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Plan {
     /// The orthographic cutaway, drawn at `scale` real pixels per logical unit
@@ -74,98 +129,147 @@ pub(crate) enum Plan {
     Cutaway {
         /// Real pixels per logical office unit.
         scale: RenderScale,
+        /// How the image reaches the terminal.
+        protocol: ImageProtocol,
+        /// The cell the scale was fitted to.
+        cell: CellSize,
+        /// Inside tmux: the encoder wraps the image in passthrough.
+        tmux: bool,
     },
-    /// The half-block office. One buffer pixel per cell.
+    /// The half-block office: one buffer pixel per half-block.
     Classic {
         /// Why this run is not painting the cutaway.
         reason: ClassicReason,
     },
 }
 
-/// What the terminal said when asked.
+/// What the probe learned.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Detected {
-    /// True when the terminal speaks a graphics protocol we can drive.
-    pub has_protocol: bool,
-    /// The cell size it reports.
-    pub cell: CellSize,
+    /// The graphics protocol the terminal speaks, `None` when it has none we
+    /// can drive.
+    pub(crate) protocol: Option<ImageProtocol>,
+    /// The cell size the terminal reports.
+    pub(crate) cell: CellSize,
+    /// Whether this process runs inside tmux — from the environment
+    /// (`is_tmux_env`), not the terminal's answer.
+    pub(crate) tmux: bool,
 }
 
-/// The largest scale the CELL alone allows, before the pack gets a say.
+/// The outcome of asking the terminal — [`resolve`]'s input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Probe {
+    /// The query ran.
+    #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+    Answered(Detected),
+    /// Nothing was asked: stdin or stdout is not a terminal, or `$TERM` is
+    /// dumb.
+    #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
+    NotQueried,
+    /// This build cannot ask.
+    #[cfg_attr(feature = "graphics", allow(dead_code))]
+    Unsupported,
+}
+
+/// The natural scale: what the CELL alone makes a logical unit, before the
+/// pack gets a say.
 ///
 /// Classic paints ONE buffer pixel per half-block, so a logical unit is one
 /// cell wide and half a cell tall. Drawing the SAME logical office into real
 /// pixels makes a logical unit `cell.w` px wide and `cell.h / 2` px tall —
 /// equal exactly when the cell is the ~1:2 the half-block technique already
-/// assumes. `RenderScale` is isotropic,
-/// so the SMALLER of the two wins: a non-1:2 cell letterboxes the office
-/// rather than stretching it, and stretched pixel art is the one outcome worth
-/// ruling out by construction.
-///
-/// [`render_scale_for_cell`] is what callers want — this is half the answer.
+/// assumes. `RenderScale` is isotropic, so one axis has to give; the SMALLER
+/// wins so neither axis shows less office than classic does.
 fn raw_scale_for_cell(cell: CellSize) -> u16 {
     cell.w.min(cell.h / 2)
 }
 
-/// Real pixels per logical office unit, for this terminal and this pack.
+/// The terminal's half of [`RenderScale::fit`]: the natural scale its cell
+/// gives, fitted to the densest of `densities` (the pack's
+/// [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants))
+/// that lands.
 ///
-/// Two facts meet here and neither belongs to the other: the CELL is the
-/// terminal's, `max_density` is the PACK's. The pack half is
-/// [`RenderScale::fit`] in the engine, so the window and canvas painters get
-/// the same rule without re-deriving it — this function is only the terminal's
-/// contribution to it.
-pub(crate) fn render_scale_for_cell(cell: CellSize, max_density: u16) -> Option<RenderScale> {
-    RenderScale::fit(raw_scale_for_cell(cell), max_density)
+/// The densest that lands, not the densest alone: one outlier `@16x` sprite
+/// must not switch the cutaway off on a terminal its 8x art lands on. A pack
+/// with no variants lands its base art at the natural scale.
+pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option<RenderScale> {
+    let natural = raw_scale_for_cell(cell);
+    if densities.is_empty() {
+        return RenderScale::fit(natural, 1);
+    }
+    densities
+        .iter()
+        .filter_map(|&d| Some((d, RenderScale::fit(natural, d)?)))
+        .max_by_key(|&(d, _)| d)
+        .map(|(_, scale)| scale)
 }
 
-/// Decide what to paint. Pure — [`detect`] supplies the argument.
-///
-/// `detected` is `None` when the query could not run at all (not a tty, or the
-/// terminal never answered) — the same profile as "no protocol" but a different
-/// FACT, hence [`ClassicReason::NotQueried`] rather than one merged arm.
-pub(crate) fn resolve(mode: GraphicsMode, detected: Option<Detected>, max_density: u16) -> Plan {
+/// Decide what to paint. Pure — [`probe`] supplies the probe, and `densities`
+/// are the pack's [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants).
+pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Plan {
+    let classic = |reason| Plan::Classic { reason };
     if mode == GraphicsMode::Off {
-        return Plan::Classic {
-            reason: ClassicReason::Disabled,
-        };
+        return classic(ClassicReason::Disabled);
     }
-    let Some(d) = detected else {
-        return Plan::Classic {
-            reason: ClassicReason::NotQueried,
-        };
+    let d = match probe {
+        Probe::Answered(d) => d,
+        Probe::NotQueried => return classic(ClassicReason::NotQueried),
+        Probe::Unsupported => return classic(ClassicReason::Unsupported),
     };
-    if !d.has_protocol {
-        return Plan::Classic {
-            reason: ClassicReason::NoProtocol,
-        };
-    }
-    match render_scale_for_cell(d.cell, max_density) {
+    let Some(protocol) = d.protocol else {
+        return classic(ClassicReason::NoProtocol);
+    };
+    // The cell before tmux: a user told to switch to kitty should not then
+    // find the cell was too small all along.
+    let scale = match render_scale_for_cell(d.cell, densities) {
         // Scale 1 IS the classic density: an encode per frame that draws the
         // identical picture.
-        Some(scale) if scale.get() > 1 => Plan::Cutaway { scale },
-        _ => Plan::Classic {
-            reason: ClassicReason::CellTooSmall(d.cell),
-        },
+        Some(scale) if scale.get() > 1 => scale,
+        _ => {
+            return classic(ClassicReason::CellTooSmall {
+                cell: d.cell,
+                density: densities.iter().copied().min().unwrap_or(1),
+            })
+        }
+    };
+    if d.tmux && protocol != ImageProtocol::Kitty {
+        return classic(ClassicReason::TmuxNeedsKitty(protocol));
+    }
+    Plan::Cutaway {
+        scale,
+        protocol,
+        cell: d.cell,
+        tmux: d.tmux,
     }
 }
 
 impl ClassicReason {
-    /// One line for `doctor` / the boot log, explaining the fallback.
+    /// One line for `doctor`, explaining the fallback.
     pub(crate) fn describe(self) -> String {
         match self {
             Self::Disabled => "disabled by --graphics off".to_string(),
-            Self::NotQueried => "output is not a terminal, so nothing could answer the capability \
-                 query — run without a pipe to see what this terminal supports"
+            Self::Unsupported => "this build has no terminal-graphics support".to_string(),
+            Self::NotQueried => "the terminal was not asked (stdin or stdout is not a terminal, \
+                 or $TERM is dumb) — run in an interactive terminal to see what it supports"
                 .to_string(),
-            Self::NoProtocol => {
-                "terminal reports no graphics protocol (kitty/iterm2/sixel)".to_string()
-            }
-            Self::CellTooSmall(c) => {
+            Self::NoProtocol => "terminal reports no graphics protocol (kitty/iterm2/sixel), or \
+                 did not answer the capability query"
+                .to_string(),
+            Self::TmuxNeedsKitty(p) => format!(
+                "inside tmux only kitty graphics survive a pane switch here, and this terminal \
+                 speaks {}",
+                p.name()
+            ),
+            Self::CellTooSmall { cell, density } if density > 1 && raw_scale_for_cell(cell) > 1 => {
                 format!(
-                    "terminal reports a {}x{} cell — too small to subdivide",
-                    c.w, c.h
+                    "terminal reports a {}x{} cell — too small for the pack's {density}x art",
+                    cell.w, cell.h
                 )
             }
+            Self::CellTooSmall { cell, .. } => format!(
+                "terminal reports a {}x{} cell — too small to subdivide",
+                cell.w, cell.h
+            ),
         }
     }
 }
@@ -182,71 +286,93 @@ impl ClassicReason {
 /// same way it does for the truecolor row beside it.
 pub(crate) fn graphics_diagnostic_row(
     mode: GraphicsMode,
-    detected: Option<Detected>,
-    max_density: u16,
+    probe: Probe,
+    densities: &[u16],
 ) -> String {
-    match resolve(mode, detected, max_density) {
-        Plan::Cutaway { scale } => {
-            let cell = detected.map_or_else(
-                || String::from("unknown cell"),
-                |d| format!("{}x{} cell", d.cell.w, d.cell.h),
-            );
-            format!(
-                "graphics: terminal graphics available ({cell}) — the cutaway profile \
-                 would render at {}x (not yet wired to `run`)",
-                scale.get()
-            )
-        }
+    match resolve(mode, probe, densities) {
+        Plan::Cutaway {
+            scale,
+            protocol,
+            cell,
+            ..
+        } => format!(
+            "graphics: {} ({}x{} cell) — the cutaway profile would render at {}x \
+             (not yet wired to `run`)",
+            protocol.name(),
+            cell.w,
+            cell.h,
+            scale.get()
+        ),
         Plan::Classic { reason } => {
             format!("graphics: classic half-blocks — {}", reason.describe())
         }
     }
 }
 
-/// Ask the terminal what it can do.
+/// Ask the terminal what it can do, when `ask`.
 ///
-/// The IO half, and the one part of this module tests never reach:
-/// `Picker::from_query_stdio` writes escape sequences to the real terminal and
-/// reads the replies, which needs a tty. Under `cargo test` stdout is captured,
-/// so it would query nothing and answer nothing useful.
-///
-/// A failed query is `None`, not an error: every caller's fallback is the
+/// The IO half, and the one part of this module tests never reach. A failed
+/// query is a [`Probe`] outcome, not an error: every caller's fallback is the
 /// classic profile, which is also what a terminal without graphics gets, and a
 /// visualiser that refuses to start because it could not ask a question would
 /// be worse than one that draws the plain office.
 ///
-/// **Costs up to 2s on a terminal that never answers** — 20x this repo's own
-/// 100ms [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]. That is upstream's DEFAULT,
-/// not a fixed cost: `STDIN_READ_TIMEOUT_MILLIS` is only what
-/// `QueryStdioOptions::default()` puts in its `timeout` field, and
-/// `Picker::from_query_stdio_with_options` takes any `Duration`. `doctor` keeps
-/// the generous default because it is a diagnostic the user waits on
-/// deliberately, and a slow terminal answering late is the answer it wants; a
-/// future `run` wiring should pass [`crate::term::TRUECOLOR_PROBE_TIMEOUT`]
-/// instead of designing the query off the boot path.
+/// Not a run's probe: upstream answers on a thread it detaches, which after a
+/// timeout keeps reading stdin, restores the mode it saw once a late reply
+/// lands, and leaves the terminal raw if none ever does (`picker.rs:584-622`,
+/// `372-391`). Inside tmux it also sets the pane's `allow-passthrough`
+/// (`picker.rs:320-334`).
 #[cfg(feature = "graphics")]
-pub(crate) fn detect() -> Option<Detected> {
+pub(crate) fn probe(ask: bool) -> Probe {
+    use ratatui_image::picker::cap_parser::QueryStdioOptions;
     use ratatui_image::picker::{Picker, ProtocolType};
 
-    let picker = Picker::from_query_stdio().ok()?;
+    if !ask {
+        return Probe::NotQueried;
+    }
+    let options = QueryStdioOptions {
+        timeout: GRAPHICS_PROBE_TIMEOUT,
+        ..QueryStdioOptions::default()
+    };
+    let Ok(picker) = Picker::from_query_stdio_with_options(options) else {
+        return Probe::NotQueried;
+    };
     let font = picker.font_size();
-    let (w, h) = (font.width, font.height);
-    Some(Detected {
-        // `Halfblocks` is ratatui-image's OWN "no protocol here" fallback, so
-        // driving it would hand our half-block office to a second one.
-        has_protocol: picker.protocol_type() != ProtocolType::Halfblocks,
-        cell: CellSize { w, h },
+    Probe::Answered(Detected {
+        protocol: match picker.protocol_type() {
+            ProtocolType::Kitty => Some(ImageProtocol::Kitty),
+            ProtocolType::Sixel => Some(ImageProtocol::Sixel),
+            ProtocolType::Iterm2 => Some(ImageProtocol::Iterm2),
+            // ratatui-image's OWN "no protocol here" fallback: driving it would
+            // hand our half-block office to a second one.
+            ProtocolType::Halfblocks => None,
+        },
+        cell: CellSize {
+            w: font.width,
+            h: font.height,
+        },
+        tmux: is_tmux_env(
+            std::env::var("TERM").ok().as_deref(),
+            std::env::var("TERM_PROGRAM").ok().as_deref(),
+        ),
     })
 }
 
-/// Built without the `graphics` feature: there is no query to run.
-///
-/// `None` is the SAME answer a non-tty gets, and `ClassicReason::NotQueried`
-/// already words it as "nothing could answer", so the report stays honest
-/// without a fourth reason for "this build cannot ask".
+/// Built without the `graphics` feature: there is no query to run, whatever
+/// the terminal.
 #[cfg(not(feature = "graphics"))]
-pub(crate) fn detect() -> Option<Detected> {
-    None
+pub(crate) fn probe(_ask: bool) -> Probe {
+    Probe::Unsupported
+}
+
+/// Whether `TERM`/`TERM_PROGRAM` place this process inside tmux — the test
+/// ratatui-image itself applies before wrapping every image in passthrough
+/// (11.0.8 `picker.rs:320-326`), mirrored because its `is_tmux` is private:
+/// the two answers must agree, or a plan would ask for kitty-in-tmux while the
+/// encoder wrapped nothing.
+#[cfg(any(feature = "graphics", test))]
+fn is_tmux_env(term: Option<&str>, term_program: Option<&str>) -> bool {
+    term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
 }
 
 #[cfg(test)]
@@ -254,12 +380,25 @@ mod tests {
     use super::*;
 
     const CELL_8X16: CellSize = CellSize { w: 8, h: 16 };
+    /// A pack with no density variants.
+    const BASE_ONLY: &[u16] = &[];
+    /// The bundled pack's densities.
+    const BUNDLED: &[u16] = &[8];
 
-    fn capable(cell: CellSize) -> Option<Detected> {
-        Some(Detected {
-            has_protocol: true,
+    fn answered(protocol: Option<ImageProtocol>, cell: CellSize, tmux: bool) -> Probe {
+        Probe::Answered(Detected {
+            protocol,
             cell,
+            tmux,
         })
+    }
+
+    fn capable(cell: CellSize) -> Probe {
+        answered(Some(ImageProtocol::Kitty), cell, false)
+    }
+
+    fn scale(cell: CellSize, densities: &[u16]) -> Option<u16> {
+        render_scale_for_cell(cell, densities).map(RenderScale::get)
     }
 
     /// The ~1:2 cell the whole half-block technique assumes: 8 wide, 16
@@ -267,39 +406,45 @@ mod tests {
     /// proportions exactly.
     #[test]
     fn a_standard_cell_yields_its_width_as_the_scale() {
-        assert_eq!(
-            render_scale_for_cell(CELL_8X16, 1).map(|s| s.get()),
-            Some(8)
-        );
-        assert_eq!(
-            render_scale_for_cell(CellSize { w: 10, h: 20 }, 1).map(|s| s.get()),
-            Some(10)
-        );
+        assert_eq!(scale(CELL_8X16, BASE_ONLY), Some(8));
+        assert_eq!(scale(CellSize { w: 10, h: 20 }, BASE_ONLY), Some(10));
     }
 
     #[test]
-    fn a_non_standard_cell_letterboxes_rather_than_stretching() {
+    fn a_non_standard_cell_never_stretches_a_logical_unit() {
         // Taller than 1:2 — the width is the binding constraint.
-        assert_eq!(
-            render_scale_for_cell(CellSize { w: 8, h: 24 }, 1).map(|s| s.get()),
-            Some(8)
-        );
-        // WIDER than 1:2 — height binds. Picking width overflows the rows given,
-        // which the image widget silently refuses to draw (spike-measured).
-        assert_eq!(
-            render_scale_for_cell(CellSize { w: 12, h: 16 }, 1).map(|s| s.get()),
-            Some(8)
-        );
+        assert_eq!(scale(CellSize { w: 8, h: 24 }, BASE_ONLY), Some(8));
+        // WIDER than 1:2 — height binds.
+        assert_eq!(scale(CellSize { w: 12, h: 16 }, BASE_ONLY), Some(8));
     }
 
-    /// A terminal that answers the protocol query but not the pixel-size
-    /// one reports these. `RenderScale` cannot be zero, so the Option is
-    /// the honest return rather than a clamp to 1.
+    /// `RenderScale` cannot be zero, so the Option is the honest return rather
+    /// than a clamp to 1.
     #[test]
     fn a_degenerate_cell_has_no_scale_at_all() {
-        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 0 }, 1), None);
-        assert_eq!(render_scale_for_cell(CellSize { w: 8, h: 1 }, 1), None);
-        assert_eq!(render_scale_for_cell(CellSize { w: 0, h: 16 }, 1), None);
+        assert_eq!(scale(CellSize { w: 0, h: 0 }, BASE_ONLY), None);
+        assert_eq!(scale(CellSize { w: 8, h: 1 }, BASE_ONLY), None);
+        assert_eq!(scale(CellSize { w: 0, h: 16 }, BASE_ONLY), None);
+    }
+
+    /// One outlier density must not switch the cutaway off where the pack's
+    /// other art lands: the densest that lands wins, whatever order the
+    /// densities come in.
+    #[test]
+    fn the_densest_density_that_lands_wins_not_the_densest_alone() {
+        assert_eq!(scale(CELL_8X16, &[16, 8]), Some(8), "16x cannot land at 8");
+        assert_eq!(scale(CELL_8X16, &[8, 16]), Some(8));
+        assert_eq!(scale(CellSize { w: 16, h: 32 }, &[8, 16]), Some(16));
+        assert_eq!(
+            scale(CellSize { w: 20, h: 40 }, &[8, 16]),
+            Some(16),
+            "the densest wins"
+        );
+        assert_eq!(
+            scale(CellSize { w: 5, h: 10 }, &[16, 8]),
+            None,
+            "nothing lands"
+        );
     }
 
     #[test]
@@ -307,73 +452,171 @@ mod tests {
         // The flag is the user's, not a hint — a capable terminal must not
         // override it.
         assert_eq!(
-            resolve(GraphicsMode::Off, capable(CELL_8X16), 1),
+            resolve(GraphicsMode::Off, capable(CELL_8X16), BUNDLED),
             Plan::Classic {
                 reason: ClassicReason::Disabled
             }
         );
     }
 
+    /// Every protocol the picker can report reaches the plan as itself.
     #[test]
-    fn auto_takes_the_cutaway_on_a_capable_terminal() {
-        let plan = resolve(GraphicsMode::Auto, capable(CELL_8X16), 1);
-        let Plan::Cutaway { scale } = plan else {
-            panic!("expected the cutaway, got {plan:?}");
+    fn auto_takes_the_cutaway_through_the_protocol_the_terminal_speaks() {
+        for protocol in [
+            ImageProtocol::Kitty,
+            ImageProtocol::Sixel,
+            ImageProtocol::Iterm2,
+        ] {
+            assert_eq!(
+                resolve(
+                    GraphicsMode::Auto,
+                    answered(Some(protocol), CELL_8X16, false),
+                    BUNDLED
+                ),
+                Plan::Cutaway {
+                    scale: RenderScale::new(8).expect("nonzero"),
+                    protocol,
+                    cell: CELL_8X16,
+                    tmux: false,
+                }
+            );
+        }
+    }
+
+    /// Inside tmux, kitty alone survives — and carries the tmux fact on to
+    /// the encoder; the rest fall back, naming the protocol that was refused.
+    #[test]
+    fn inside_tmux_only_kitty_takes_the_cutaway() {
+        let plan = |p| {
+            resolve(
+                GraphicsMode::Auto,
+                answered(Some(p), CELL_8X16, true),
+                BUNDLED,
+            )
         };
-        assert_eq!(scale.get(), 8);
+        assert!(matches!(
+            plan(ImageProtocol::Kitty),
+            Plan::Cutaway {
+                protocol: ImageProtocol::Kitty,
+                tmux: true,
+                ..
+            }
+        ));
+        for p in [ImageProtocol::Sixel, ImageProtocol::Iterm2] {
+            assert_eq!(
+                plan(p),
+                Plan::Classic {
+                    reason: ClassicReason::TmuxNeedsKitty(p)
+                }
+            );
+        }
+    }
+
+    /// A tmux user on SIXEL with a cell too small for the art hears about the
+    /// cell, not about a switch to kitty that would not help.
+    #[test]
+    fn a_cell_too_small_is_reported_before_tmux() {
+        let tiny = CellSize { w: 5, h: 10 };
+        assert_eq!(
+            resolve(
+                GraphicsMode::Auto,
+                answered(Some(ImageProtocol::Sixel), tiny, true),
+                BUNDLED
+            ),
+            Plan::Classic {
+                reason: ClassicReason::CellTooSmall {
+                    cell: tiny,
+                    density: 8
+                }
+            }
+        );
+    }
+
+    /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.
+    #[test]
+    fn tmux_is_named_by_term_or_term_program() {
+        assert!(is_tmux_env(Some("tmux-256color"), None));
+        assert!(is_tmux_env(Some("xterm-ghostty"), Some("tmux")));
+        assert!(!is_tmux_env(Some("screen-256color"), Some("ghostty")));
+        assert!(!is_tmux_env(None, None));
     }
 
     /// The fallback is the common path — most terminals have no protocol —
     /// so it must never be silent. A user asking "why is it not the pretty
-    /// one" gets an answer in all four shapes.
+    /// one" gets an answer in every shape.
     #[test]
     fn every_way_of_lacking_graphics_falls_back_with_a_reason() {
+        let too_small = |cell, density| ClassicReason::CellTooSmall { cell, density };
         let cases = [
-            (None, ClassicReason::NotQueried),
+            (Probe::NotQueried, BASE_ONLY, ClassicReason::NotQueried),
+            (Probe::Unsupported, BASE_ONLY, ClassicReason::Unsupported),
             (
-                Some(Detected {
-                    has_protocol: false,
-                    cell: CELL_8X16,
-                }),
+                answered(None, CELL_8X16, false),
+                BASE_ONLY,
                 ClassicReason::NoProtocol,
             ),
             (
                 capable(CellSize { w: 0, h: 0 }),
-                ClassicReason::CellTooSmall(CellSize { w: 0, h: 0 }),
+                BASE_ONLY,
+                too_small(CellSize { w: 0, h: 0 }, 1),
             ),
             (
                 capable(CellSize { w: 1, h: 2 }),
-                ClassicReason::CellTooSmall(CellSize { w: 1, h: 2 }),
+                BASE_ONLY,
+                too_small(CellSize { w: 1, h: 2 }, 1),
+            ),
+            // 5 cannot reach 8x art within the fit's bound.
+            (
+                capable(CellSize { w: 5, h: 10 }),
+                BUNDLED,
+                too_small(CellSize { w: 5, h: 10 }, 8),
             ),
         ];
-        for (detected, want) in cases {
+        for (probe, densities, want) in cases {
             assert_eq!(
-                resolve(GraphicsMode::Auto, detected, 1),
+                resolve(GraphicsMode::Auto, probe, densities),
                 Plan::Classic { reason: want },
-                "for {detected:?}"
+                "for {probe:?}"
             );
             assert!(!want.describe().is_empty());
         }
     }
 
+    /// A cell the art cannot reach and a cell with no pixels to subdivide are
+    /// different sentences: a bigger font fixes the first, the second needs a
+    /// terminal that reports its pixels.
     #[test]
-    fn the_doctor_row_names_the_profile_and_never_leaves_a_fallback_unexplained() {
-        let row = graphics_diagnostic_row(GraphicsMode::Auto, capable(CELL_8X16), 1);
-        assert!(row.contains("8x16 cell"), "{row}");
-        assert!(row.contains("would render at 8x"), "{row}");
+    fn a_cell_too_small_names_the_art_it_is_too_small_for() {
+        let reason = |cell, density| ClassicReason::CellTooSmall { cell, density }.describe();
+        let small_font = reason(CellSize { w: 5, h: 10 }, 8);
+        assert!(small_font.contains("the pack's 8x art"), "{small_font}");
+        let no_pixels = reason(CellSize { w: 1, h: 2 }, 8);
+        assert!(no_pixels.ends_with("too small to subdivide"), "{no_pixels}");
+    }
+
+    #[test]
+    fn the_doctor_row_names_the_protocol_and_never_leaves_a_fallback_unexplained() {
+        let row = graphics_diagnostic_row(
+            GraphicsMode::Auto,
+            answered(Some(ImageProtocol::Sixel), CellSize { w: 17, h: 41 }, false),
+            BUNDLED,
+        );
+        assert!(row.starts_with("graphics: sixel (17x41 cell)"), "{row}");
+        assert!(row.contains("would render at 16x"), "{row}");
         // The row reports a CAPABILITY. Until the profile reaches a painter it
         // must not read as a prediction about `run`, which paints classic
         // whatever this says.
         assert!(row.contains("not yet wired to `run`"), "{row}");
 
-        // The fallback is the COMMON path, so every classic row must carry its
-        // reason — a bare "classic" reads as a verdict on the office.
-        for (mode, detected) in [
+        // Every classic row must carry its reason — a bare "classic" reads as
+        // a verdict on the office.
+        for (mode, probe) in [
             (GraphicsMode::Off, capable(CELL_8X16)),
-            (GraphicsMode::Auto, None),
+            (GraphicsMode::Auto, Probe::NotQueried),
+            (GraphicsMode::Auto, Probe::Unsupported),
             (GraphicsMode::Auto, capable(CellSize { w: 0, h: 0 })),
         ] {
-            let row = graphics_diagnostic_row(mode, detected, 1);
+            let row = graphics_diagnostic_row(mode, probe, BASE_ONLY);
             assert!(row.starts_with("graphics: classic half-blocks — "), "{row}");
             assert!(
                 row.len() > "graphics: classic half-blocks — ".len(),
@@ -382,37 +625,38 @@ mod tests {
         }
     }
 
-    /// The terminal half of the scale: a real Retina Ghostty reports a 17x41
-    /// cell, and 17 is what the CELL alone allows. What the pack then does with
-    /// it is `RenderScale::fit`'s test, not this one.
+    /// A real Retina Ghostty reports a 17x41 cell: 17 is what the cell alone
+    /// allows, and the pack's 8x art moves it to the nearest multiple.
     #[test]
-    fn the_cell_alone_gives_the_raw_scale() {
+    fn the_cell_gives_the_natural_scale_and_the_pack_fits_it() {
         assert_eq!(raw_scale_for_cell(CellSize { w: 17, h: 41 }), 17);
-        // And the two halves compose: 4x art cannot land on a prime scale.
-        assert_eq!(
-            render_scale_for_cell(CellSize { w: 17, h: 41 }, 4).map(|s| s.get()),
-            Some(16)
-        );
+        assert_eq!(scale(CellSize { w: 17, h: 41 }, BUNDLED), Some(16));
     }
 
-    /// Exactly 1 real pixel per logical unit IS the classic density, so an
-    /// image encode every frame would cost the encode and draw the identical
-    /// picture. 2 is the first scale that buys anything, and the boundary is
-    /// pinned from BOTH sides so a future `>=` typo cannot slip through.
+    /// 2 is the first scale that buys anything over the classic density, and
+    /// the boundary is pinned from BOTH sides so a future `>=` typo cannot
+    /// slip through.
     #[test]
     fn the_cutoff_is_where_the_image_path_starts_buying_something() {
         assert_eq!(
-            resolve(GraphicsMode::Auto, capable(CellSize { w: 1, h: 2 }), 1),
+            resolve(
+                GraphicsMode::Auto,
+                capable(CellSize { w: 1, h: 2 }),
+                BASE_ONLY
+            ),
             Plan::Classic {
-                reason: ClassicReason::CellTooSmall(CellSize { w: 1, h: 2 })
+                reason: ClassicReason::CellTooSmall {
+                    cell: CellSize { w: 1, h: 2 },
+                    density: 1,
+                }
             },
             "1px per unit buys nothing"
         );
-        assert_eq!(
-            resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), 1),
-            Plan::Cutaway {
-                scale: RenderScale::new(2).expect("nonzero"),
-            },
+        assert!(
+            matches!(
+                resolve(GraphicsMode::Auto, capable(CellSize { w: 2, h: 4 }), BASE_ONLY),
+                Plan::Cutaway { scale, .. } if scale.get() == 2
+            ),
             "2px per unit is the first density worth an encode"
         );
     }

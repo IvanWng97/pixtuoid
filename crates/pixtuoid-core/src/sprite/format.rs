@@ -358,25 +358,30 @@ impl Pack {
         self.animations.keys().cloned().collect()
     }
 
-    /// The highest density any of this pack's variants is drawn at, or 1 when
-    /// it ships none.
+    /// The densest of [`Pack::density_variants`], or 1 when the pack ships none.
+    pub fn max_density_variant(&self) -> u16 {
+        self.density_variants().first().copied().unwrap_or(1)
+    }
+
+    /// The densities this pack's variants are drawn at, densest first, each
+    /// once.
     ///
-    /// A painter rounds its render scale to this (the scene's `RenderScale::fit`),
-    /// since a variant only lands at a scale its density divides.
-    ///
-    /// Only a variant of a registered animation that redraws its base
+    /// A painter picks its render scale against these (the scene's
+    /// `RenderScale::fit`), since a variant only lands at a scale its density
+    /// divides. Only a variant of a registered animation that redraws its base
     /// ([`variant_redraws`]) counts: a stray key names nothing a painter asks
     /// for, and every renderer skips a variant that does not redraw its base.
-    pub fn max_density_variant(&self) -> u16 {
-        self.animations
+    pub fn density_variants(&self) -> Vec<u16> {
+        let densities: std::collections::BTreeSet<u16> = self
+            .animations
             .iter()
             .filter_map(|(name, variant)| {
                 let RegisteredKey { base, density } = RegisteredKey::parse(name)?;
                 let density = density?;
                 variant_redraws(self.animation(base)?, density, variant).then_some(density)
             })
-            .max()
-            .unwrap_or(1)
+            .collect();
+        densities.into_iter().rev().collect()
     }
 
     /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] — and their density variants —
@@ -400,7 +405,7 @@ impl Pack {
 
     /// The piece of this pack's own that `name` redraws, if it ships one. Art
     /// that redraws another piece only comes along with that piece: over this
-    /// pack's own `desk`, the default's `desk@4x` or `desk_north` would draw the
+    /// pack's own `desk`, the default's `desk@8x` or `desk_north` would draw the
     /// default's desk wherever it is picked, so [`Pack::merge_from`] inherits
     /// nothing a piece of this pack's own answers for.
     fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {
@@ -602,10 +607,8 @@ pub fn density_variant_name_into(out: &mut String, base: &str, density: u16) {
 ///
 /// A pack author types this number, so a claim past any real authoring grid is
 /// a typo, and a bound there costs no real pack anything. It keeps
-/// `desk@60000x` an unknown name rather than a variant, which would become
-/// [`Pack::max_density_variant`]: a density above the render scale leaves the
-/// scene's `RenderScale::fit` nothing to round to, so the pack's real variants
-/// go unused.
+/// `desk@60000x` an unknown name rather than a variant, which would become one
+/// of [`Pack::density_variants`] that no real render scale lands on.
 pub(crate) const MAX_DENSITY_VARIANT: u16 = 64;
 
 /// The base animation and density a variant name denotes, if it is one.
@@ -1220,6 +1223,29 @@ mod validation_floor_tests {
         let mut custom = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         custom.merge_from(&pack);
         assert!(custom.animation("typing_back@2x").is_none());
+    }
+
+    /// Pins [`Pack::density_variants`]: densest first, each density once, and
+    /// only variants that redraw their base.
+    #[test]
+    fn density_variants_are_the_redrawing_densities_densest_first() {
+        let pack = pack_with_frames(
+            "[animations.typing]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
+             [animations.\"typing@4x\"]\nframes=[\"four.sprite\"]\nframe_ms=100\n\
+             [animations.walking]\nframes=[\"one.sprite\"]\nframe_ms=100\n\
+             [animations.\"walking@2x\"]\nframes=[\"two.sprite\"]\nframe_ms=100\n\
+             [animations.\"walking@3x\"]\nframes=[\"three.sprite\"]\nframe_ms=100\n",
+            SIZED_FRAMES,
+        );
+        assert_eq!(
+            pack.density_variants(),
+            vec![4, 2],
+            "3x does not redraw its base"
+        );
+        assert_eq!(pack.max_density_variant(), 4);
+        let plain = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert!(plain.density_variants().is_empty());
     }
 
     /// Pins [`variant_redraws`]' every-frame proof.

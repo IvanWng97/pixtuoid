@@ -33,31 +33,45 @@ impl RenderScale {
         NonZeroU16::new(n).map(Self)
     }
 
-    /// The densest scale that `available` pixels allow AND the pack's art can
-    /// land on — rounded DOWN to a multiple of `max_density`.
+    /// The multiple of `density` nearest the surface's `natural` scale,
+    /// measured by RATIO, or `None` when none lies within the ratio bound
+    /// `FIT_MAX_RATIO_SQUARED` sets.
     ///
-    /// A density variant is only usable at a scale its density divides, so the
-    /// two facts have to meet somewhere. They meet HERE, in the engine, because
-    /// `max_density` is a property of the PACK: every painter that picks a scale
-    /// needs this rule, and only one of them is a terminal. Putting it in the
-    /// terminal's capability module (where it was first written) would make the
-    /// window and canvas painters re-derive it.
+    /// Only at a multiple of a density does art drawn at it land: at a scale
+    /// the density does not divide, those variants fall back to coarser art or
+    /// the upscaled base. The multiple may lie ABOVE `natural`, so a painter
+    /// must size the office from its surface's pixels ([`RenderScale::logical`]):
+    /// rounding then changes how much office fits, never whether the art is
+    /// resampled. Ratio, not difference, is the measure because framing is
+    /// perceived multiplicatively: at a natural 12, 8 and 16 are equally far by
+    /// difference, but 16 (×4/3) is nearer than 8 (×3/2).
     ///
-    /// Found on a real Retina Ghostty: a 17px cell makes 17 the natural scale,
-    /// 17 is PRIME, and every `@4x` sprite in the pack sits unused while the
-    /// base art block-scales 17x. Giving up at most `max_density - 1` px of
-    /// office is not a close call — not being upscaled is the whole point of the
-    /// variants.
+    /// The rule meets HERE, in the engine, because the densities are the
+    /// PACK's ([`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants))
+    /// and every painter that picks a scale
+    /// needs it; a surface only contributes `natural`.
     ///
-    /// A pack with no variants passes `max_density = 1`, so this is exactly
-    /// [`RenderScale::new`] there and the classic path is untouched.
-    pub fn fit(available: u16, max_density: u16) -> Option<Self> {
-        let usable = if max_density >= 2 && available >= max_density {
-            (available / max_density) * max_density
-        } else {
-            available
+    /// A density of 1 — a pack with no variants — makes every scale a
+    /// multiple, so this is exactly [`RenderScale::new`] there.
+    pub fn fit(natural: u16, density: u16) -> Option<Self> {
+        // u64: a square of a u16-range value times the bound overflows u32.
+        let d = u64::from(density.max(1));
+        let n = u64::from(natural);
+        let below = n / d * d;
+        // A multiple past `u16::MAX` is no scale at all, so it is no candidate.
+        let above = Some(below + d).filter(|&a| a <= u64::from(u16::MAX));
+        let nearest = match above {
+            // `n/below < above/n` ⇔ `n² < below·above`, compared exactly in
+            // integers; adjacent multiples `kd` and `(k+1)d` never tie, since
+            // that needs `k(k+1)` to be a square.
+            Some(a) if n * n >= below * a => a,
+            _ => below,
         };
-        Self::new(usable)
+        let (lo, hi) = (nearest.min(n), nearest.max(n));
+        if hi * hi > FIT_MAX_RATIO_SQUARED * lo * lo {
+            return None;
+        }
+        u16::try_from(nearest).ok().and_then(Self::new)
     }
 
     /// Buffer pixels per layout unit.
@@ -90,6 +104,16 @@ impl RenderScale {
     }
 }
 
+/// The square of how far, as a ratio, [`RenderScale::fit`] may move a scale
+/// off its natural value — squared so the comparison stays in integers.
+///
+/// It only bites where `natural` is below the density, whose own value is then
+/// the one candidate (above it, the nearest multiple always lies within √2): a
+/// ratio of √2 is a factor of 2 in AREA, so past it the office would keep
+/// under half the logical area the surface's natural scale gives it, and the
+/// classic profile draws more office than that.
+const FIT_MAX_RATIO_SQUARED: u64 = 2;
+
 impl Default for RenderScale {
     fn default() -> Self {
         Self::ONE
@@ -101,30 +125,78 @@ mod tests {
     use super::*;
     use crate::floor::{floor_capacity, floor_capacity_scaled, floor_seed};
 
-    /// A pack ships art at its own densities; a painter picks a scale from its
-    /// own surface. `fit` is where those meet, and the rule is that the art must
-    /// divide the scale or it is simply never drawn.
-    #[test]
-    fn a_scale_rounds_down_so_the_packs_densest_art_can_land_on_it() {
-        assert_eq!(RenderScale::fit(17, 4).map(|s| s.get()), Some(16));
-        // A pack with no variants must be untouched — this rule may only ever
-        // COST office area when there is richer art to spend it on.
-        assert_eq!(RenderScale::fit(17, 1).map(|s| s.get()), Some(17));
-        // Already a multiple: nothing to give up.
-        assert_eq!(RenderScale::fit(16, 4).map(|s| s.get()), Some(16));
+    fn fit(natural: u16, density: u16) -> Option<u16> {
+        RenderScale::fit(natural, density).map(RenderScale::get)
     }
 
-    /// Rounding must never round the office away.
+    /// At a density of 8, natural scale by natural scale: every pick is a
+    /// multiple of 8, rounding goes whichever way is nearer by ratio, and a
+    /// natural scale too small to reach 8 within the bound gets no scale.
     #[test]
-    fn art_denser_than_the_whole_scale_does_not_round_to_nothing() {
-        // 4x art at a 3px scale can never land however we round, so the honest
-        // answer is the unrounded scale (the art is skipped), NOT zero.
-        assert_eq!(RenderScale::fit(3, 4).map(|s| s.get()), Some(3));
-        assert_eq!(
-            RenderScale::fit(0, 4),
-            None,
-            "zero pixels is still no scale"
-        );
+    fn a_scale_snaps_to_the_multiple_of_the_densest_art_nearest_by_ratio() {
+        let want: [(u16, Option<u16>); 12] = [
+            (5, None),
+            (6, Some(8)),
+            (8, Some(8)),
+            (11, Some(8)),
+            (12, Some(16)),
+            (15, Some(16)),
+            (17, Some(16)),
+            (19, Some(16)),
+            (20, Some(24)),
+            (27, Some(24)),
+            (28, Some(32)),
+            (41, Some(40)),
+        ];
+        for (natural, scale) in want {
+            assert_eq!(fit(natural, 8), scale, "natural {natural}");
+        }
+    }
+
+    /// The properties the table samples, over natural scales to 256 and every
+    /// density a pack may claim (core's `MAX_DENSITY_VARIANT`).
+    #[test]
+    fn every_pick_is_a_multiple_within_the_ratio_bound_and_the_nearest_one() {
+        for d in 1..=64u16 {
+            for n in 0..=256u16 {
+                let Some(s) = fit(n, d) else {
+                    // Only a scale with no multiple of `d` in reach goes without.
+                    assert!(
+                        u32::from(d) * u32::from(d) > 2 * u32::from(n) * u32::from(n),
+                        "natural {n} at density {d} has a multiple in reach"
+                    );
+                    continue;
+                };
+                assert_eq!(s % d, 0, "natural {n} at density {d} picked {s}");
+                let ratio = |a: u16| f64::from(a.max(n)) / f64::from(a.min(n));
+                assert!(ratio(s) <= std::f64::consts::SQRT_2, "{n}@{d} → {s}");
+                for other in [s.saturating_sub(d), s + d].into_iter().filter(|&o| o > 0) {
+                    assert!(
+                        ratio(s) < ratio(other),
+                        "{n}@{d}: {other} is nearer than {s}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The far end of the range: the multiple above `u16::MAX` is no scale, so
+    /// the one below it wins, and the arithmetic never overflows on the way.
+    #[test]
+    fn the_largest_natural_scales_pick_a_representable_multiple() {
+        assert_eq!(fit(u16::MAX, 8), Some(u16::MAX / 8 * 8));
+        assert_eq!(fit(u16::MAX, 1), Some(u16::MAX));
+        assert_eq!(fit(u16::MAX - 3, 16), Some((u16::MAX - 3) / 16 * 16));
+    }
+
+    /// A pack with no variants must be untouched: every scale is a multiple of
+    /// 1, so the natural scale comes back as it went in.
+    #[test]
+    fn a_pack_without_variants_keeps_the_natural_scale() {
+        for n in 1..=64 {
+            assert_eq!(fit(n, 1), Some(n));
+        }
+        assert_eq!(fit(0, 1), None, "zero pixels is still no scale");
     }
 
     #[test]

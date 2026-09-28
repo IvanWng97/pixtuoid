@@ -2080,51 +2080,9 @@ mod tests {
         }
     }
 
-    /// `desk@4x` must WIN at 4x and blit 1:1 (the upscale is what richer art
-    /// exists to remove), must still cut the upscale at 12x, where the denser
-    /// `desk@8x` does not divide, rather than being discarded for not matching
-    /// exactly, and must LOSE at 3x — 4 does not divide 3, so blitting it would
-    /// draw a desk a third too wide. At 8x the 8x art wins outright.
-    #[test]
-    fn a_density_variant_is_taken_only_where_its_density_divides_the_scale() {
-        let pack = pack();
-        let (bw, bh) = base_size(&pack, "desk");
-        let (hi_w, hi_h) = base_size(&pack, "desk@4x");
-        assert_eq!((hi_w, hi_h), (bw * 4, bh * 4), "desk@4x is the 4x variant");
-        let picked = |s: u16| {
-            let d = crate::pixel_painter::densest_frame(
-                &pack,
-                "desk",
-                0,
-                RenderScale::new(s).expect("nonzero"),
-            )
-            .expect("desk exists");
-            (d.frame.width(), d.blit_at.get())
-        };
-        assert_eq!(
-            picked(4),
-            (hi_w, 1),
-            "at its own density the variant art blits 1:1"
-        );
-        assert_eq!(
-            picked(12),
-            (hi_w, 3),
-            "at 12x the 4x art still cuts the upscale"
-        );
-        assert_eq!(
-            picked(8),
-            (bw * 8, 1),
-            "at 8x the 8x art wins and blits 1:1"
-        );
-        assert_eq!(
-            picked(3),
-            (bw, 3),
-            "at 3x the 4x art does not divide and the base block-scales"
-        );
-    }
-
-    /// The other half of "the asset work lands one piece at a time": a piece
-    /// with no variant that lands at the scale must be untouched by the lookup,
+    /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
+    /// pin a variant winning): a piece with no variant that lands at the scale
+    /// must be untouched by the lookup,
     /// or adding one `@Nx` sprite would be a flag day for all of them. `plant`
     /// ships only 8x art, and 8 does not divide 4.
     #[test]

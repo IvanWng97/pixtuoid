@@ -98,8 +98,8 @@ audio = ["dep:rodio"]
 # enters a tokio binary, and on Windows a SECOND binding family (`windows 0.58`
 # beside the existing 0.62) with its proc-macro crates. Every one of those
 # transitive crates reaches `cargo install` and homebrew-core's from-source
-# build. Off is a build whose `doctor` reports the capability as unqueryable,
-# which is what every non-graphics terminal already gets.
+# build. Off is a build whose `doctor` says it cannot ask
+# (`ClassicReason::Unsupported`) and whose runs paint classic.
 graphics = ["dep:ratatui-image"]
 
 # termios/poll for the truecolor preflight's DECRQSS terminal query (term.rs).
