@@ -311,6 +311,16 @@ frame_ms = 600
 frames   = ["meeting_sofa@8x.sprite"]
 frame_ms = 600
 
+[animations.meeting_sofa_north]
+# The meeting sofa seen from behind: the south sofa of a meeting trio and the
+# lounge couch, both facing north.
+frames   = ["meeting_sofa_north.sprite"]
+frame_ms = 600
+
+[animations."meeting_sofa_north@8x"]
+frames   = ["meeting_sofa_north@8x.sprite"]
+frame_ms = 600
+
 [animations.meeting_screen]
 frames   = ["meeting_screen.sprite"]
 frame_ms = 600

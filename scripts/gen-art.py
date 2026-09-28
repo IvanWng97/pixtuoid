@@ -1040,6 +1040,86 @@ def meeting_sofa():
     return g
 
 
+# ---- the meeting sofa seen from behind: facing north ----------------------------
+# One layout for both densities, in classic rows. A back-view sitter's anchor
+# (`back_couch_anchor`) lands their shoulders on the seat rows and their lap on
+# the backrest's rows, so the seat sits under a sitter and the backrest over one.
+SOFA_W, SOFA_H = 20, 7
+SOFA_SEAT_ROWS = 3  # rows [0, SOFA_SEAT_ROWS): the seat; the backrest below
+SOFA_RIDGE_ROWS = 1  # the backrest's lit top, then its back panel to the foot
+# The three seats' centres (the seat waypoints' `SEAT_DX` about the sofa's
+# centre column), on column boundaries.
+SOFA_SEAT_COLS = (4, 10, 16)
+
+
+def meeting_sofa_north_1x():
+    """The north-facing sofa at classic density: lit cushion tops, a seam where
+    the seat meets the backrest, its lit ridge, and the back panel shading down."""
+    ridge = SOFA_SEAT_ROWS
+    g = canvas(SOFA_W, SOFA_H)
+    rect(g, 0, 1, SOFA_W, SOFA_H - 1, FABRIC)
+    rect(g, 2, 1, SOFA_W - 1, 2, FABRIC_HI)
+    for c in SOFA_SEAT_COLS[1:]:  # the seams between cushions, a column left of each boundary
+        put(g, c - 3, 1, OUTLINE)
+    rect(g, 1, ridge - 1, SOFA_W - 1, ridge, OUTLINE)
+    rect(g, 1, ridge, SOFA_W - 1, ridge + SOFA_RIDGE_ROWS, FABRIC_HI)
+    rect(g, 1, SOFA_H - 2, SOFA_W - 1, SOFA_H - 1, FABRIC_SH)
+    for y in range(1, SOFA_H - 1):
+        put(g, 0, y, OUTLINE)
+        put(g, SOFA_W - 1, y, OUTLINE)
+    put(g, 1, 1, OUTLINE)
+    rect(g, 1, 0, SOFA_W - 1, 1, OUTLINE)
+    rect(g, 1, SOFA_H - 1, SOFA_W - 1, SOFA_H, OUTLINE)
+    return g
+
+
+def meeting_sofa_north():
+    """The north-facing sofa from behind: three cushions beyond the backrest, its
+    lit ridge, and upholstered arms framing a back panel that dithers into shade."""
+    w, h = SOFA_W * S, SOFA_H * S
+    seat, ridge_end = SOFA_SEAT_ROWS * S, (SOFA_SEAT_ROWS + SOFA_RIDGE_ROWS) * S
+    panel_end = h - S // 2
+    arm = S + 2
+    g = canvas(w, h)
+    # three cushions centred on the seats, lit on top, creased at the backrest,
+    # over a seam-coloured seat base so the gaps between them read as fabric
+    rect(g, arm, 3, w - arm, seat, FABRIC_SEAM)
+    for c in SOFA_SEAT_COLS:
+        x0, x1 = max(c * S - 3 * S + 1, arm), min(c * S + 3 * S - 1, w - arm)
+        rect(g, x0, 3, x1, seat, FABRIC)
+        rect(g, x0 + 1, 4, x1 - 1, 11, FABRIC_HI)
+        rect(g, x0, seat - 5, x1, seat, FABRIC_SH)
+        rect(g, x0, 3, x0 + 1, seat, FABRIC_SEAM)
+    # the backrest's ridge, rounded where it meets the arms
+    rect(g, arm - 2, seat, w - arm + 2, ridge_end, FABRIC_HI)
+    rect(g, arm - 2, seat, w - arm + 2, seat + 1, FABRIC_SEAM)
+    rect(g, arm - 2, ridge_end - 2, w - arm + 2, ridge_end, FABRIC)
+    # the back panel faces away from the windows: body, a dithered fall into
+    # shade, and a piped rail at the foot
+    rect(g, 0, ridge_end, w, panel_end, FABRIC)
+    shade = ridge_end + (panel_end - ridge_end) // 2
+    for y in range(shade, panel_end):
+        for x in range(w):
+            if y >= panel_end - 4 or (x + y) % 2 == 0:
+                g[y][x] = FABRIC_SH
+    rect(g, 0, panel_end - 5, w, panel_end - 4, FABRIC_SEAM)
+    # upholstered arms: lit tops beside the seat, running down to the feet, a
+    # seam where each meets the back panel
+    for ax, inner in ((0, arm - 1), (w - arm, w - arm)):
+        rect(g, ax, 2, ax + arm, panel_end, FABRIC)
+        rect(g, ax, 2, ax + arm, 8, FABRIC_HI)
+        rect(g, ax + 1, 8, ax + arm - 1, seat, FABRIC)
+        for y in range(shade, panel_end):
+            for x in range(ax, ax + arm):
+                if y >= panel_end - 4 or (x + y) % 2 == 0:
+                    g[y][x] = FABRIC_SH
+        rect(g, inner, 8, inner + 1, panel_end, FABRIC_SEAM)
+    # feet
+    rect(g, 6, panel_end, 12, h, KEY_DK)
+    rect(g, w - 12, panel_end, w - 6, h, KEY_DK)
+    outline(g, {FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM}, OUTLINE)
+    return g
+
 # ---- furniture: screens, pantry, pods and small fixtures --------------------------
 CORK, CORK_SH, STEEL, STEEL_SH = "Δ", "π", "K", "ξ"
 
@@ -1409,6 +1489,7 @@ def main():
         "whiteboard": ("A mobile whiteboard: a sprint board sketched on it, a marker tray, a\nwheeled stand.", [whiteboard()]),
         "bookshelf": ("A bookshelf: three shelves of books, a drawer below.", [bookshelf()]),
         "meeting_sofa": ("A three-seat sofa: backrest to the north, tufted cushions, arms.", [meeting_sofa()]),
+        "meeting_sofa_north": ("A three-seat sofa from behind: the seat beyond a lit ridge, the back\npanel shading toward the floor.", [meeting_sofa_north()]),
         "seated_sleeping": ("Asleep face-down on folded arms: bare forearms crossed under the\ncrown of the head, a hand at each elbow.", [asleep(False)]),
         "seated_sleeping_alt": ("Dozed off, slumped east.", [asleep(True)]),
         "side_seated": ("Seated in profile.", [profile()]),
@@ -1432,6 +1513,7 @@ def main():
         "desk_north": ("The back-turned desk: its raised monitor, with a desk lamp, papers and\na mug on the wings.", [desk_north()]),
     }
     classic = {
+        "meeting_sofa_north": ("The sofa from behind: seat rows under a sitter, the backrest over one.", [meeting_sofa_north_1x()]),
         "desk": ("The viewer-facing desk: the monitor's back on its stand, the wood lit\nalong its back edge and front lip.", [desk_south_1x()]),
         "desk_north": ("The back-turned desk: its raised monitor outlined in grey, dim text on\nthe glass, a keyboard a row clear of the stand.", [desk_north_1x()]),
     }
