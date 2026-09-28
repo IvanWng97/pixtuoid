@@ -1194,7 +1194,7 @@ def orphans(pack, sprites):
     return sorted(
         p.name
         for p in pack.glob("*.sprite")
-        if p.name not in sprites and PROVENANCE in p.read_text(encoding=ENCODING)
+        if p.name not in sprites and f"# {PROVENANCE}" in p.read_text(encoding=ENCODING).splitlines()
     )
 
 
@@ -1242,8 +1242,8 @@ def selftest(sprites):
         assert check(pack, sprites) is not None, "an orphan must fail"
         write(pack, sprites)
         assert check(pack, sprites) is None, "a write must delete the orphan"
-        (pack / "hand.sprite").write_text("@frame 0\n.\n", encoding=ENCODING)
-        assert check(pack, sprites) is None, "hand art is not an orphan"
+        (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
+        assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
     print(f"gen-cutaway-art --selftest: OK ({len(sprites)} sprites)")
 
 

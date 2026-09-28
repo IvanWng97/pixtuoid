@@ -807,7 +807,7 @@ site-e2e:
 # BOTH docs/images/ and site/public/demos/ from scripts/media.json (gen-media).
 
 [group('gen')]
-[doc('Regenerate ALL committed artifacts except the wasm pair (@8x sprites + icons + README sections + docs images + site demos)')]
+[doc('Regenerate the committed art (@8x sprites + icons + README sections + docs images + site demos)')]
 gen: gen-art gen-icons gen-media gen-readme
 
 [group('gen')]
