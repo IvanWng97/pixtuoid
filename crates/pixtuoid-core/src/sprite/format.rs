@@ -338,8 +338,19 @@ impl Pack {
     /// The animation registered under `key`, or, when the pack lacks a derived
     /// piece (`desk_north`), the piece it is drawn to match.
     pub fn animation_or_source(&self, key: &str) -> Option<&Sprite> {
-        self.animation(key)
-            .or_else(|| derived_source(key).and_then(|source| self.animation(source)))
+        self.animation(self.piece_or_source(key)?)
+    }
+
+    /// The name of the animation that draws `key`: [`animation_or_source`]'s
+    /// pick. A painter that takes a piece's density variants looks them up under
+    /// this name, since a derived piece the pack lacks draws its source's.
+    ///
+    /// [`animation_or_source`]: Self::animation_or_source
+    pub fn piece_or_source<'k>(&self, key: &'k str) -> Option<&'k str> {
+        if self.animation(key).is_some() {
+            return Some(key);
+        }
+        derived_source(key).filter(|source| self.animation(source).is_some())
     }
 
     /// The names of every animation in this pack.
@@ -1168,6 +1179,22 @@ mod validation_floor_tests {
         let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
         assert!(desk_only.animation_or_source("desk_north").is_some());
         assert!(desk_only.animation_or_source("plant").is_none());
+    }
+
+    /// Pins [`Pack::piece_or_source`].
+    #[test]
+    fn a_pack_names_the_piece_that_draws_a_key() {
+        let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert_eq!(desk_only.piece_or_source("desk_north"), Some("desk"));
+        assert_eq!(desk_only.piece_or_source("desk"), Some("desk"));
+        assert_eq!(desk_only.piece_or_source("plant"), None);
+        let both = pack_with(
+            "[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n\
+             [animations.desk_north]\nframes=[\"f.sprite\"]\nframe_ms=100\n",
+        );
+        assert_eq!(both.piece_or_source("desk_north"), Some("desk_north"));
+        let plant_only = pack_with("[animations.plant]\nframes=[\"f.sprite\"]\nframe_ms=100\n");
+        assert_eq!(plant_only.piece_or_source("desk_north"), None);
     }
 
     /// Pins a character variant: validated, counted by

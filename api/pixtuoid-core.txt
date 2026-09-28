@@ -840,6 +840,7 @@ pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> 
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
+pub fn pixtuoid_core::sprite::format::Pack::piece_or_source<'k>(&self, &'k str) -> core::option::Option<&'k str>
 impl core::clone::Clone for pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::clone(&self) -> pixtuoid_core::sprite::format::Pack
 impl core::fmt::Debug for pixtuoid_core::sprite::format::Pack
