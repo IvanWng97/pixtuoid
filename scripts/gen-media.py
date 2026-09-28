@@ -186,20 +186,22 @@ def run_matrix(job, out_dirs, work, intermediates):
 SCALE_EVEN = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
 # VP9 constant-quality knob (with `-b:v 0`, no target bitrate).
 VP9_CRF = "36"
+# Without it the muxers stamp every file with ffmpeg's version (MP4's `©too`
+# atom, Matroska's MuxingApp/WritingApp) and Matroska gives each track a random
+# TrackUID (libavformat movenc.c, matroskaenc.c), so a regen whose frames did not
+# change still re-commits every clip.
+BITEXACT = ("-fflags", "+bitexact")
 
 
 def encode_mp4_webm(frames_glob, fps, vf, out_stem):
     """Encode an `f%04d.png` frame sequence at `fps`, through the `vf` filter, to
     BOTH `{out_stem}.mp4` and `{out_stem}.webm`."""
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
-           "-movflags", "+faststart", "-pix_fmt", "yuv420p", "-vf", vf,
+           "-movflags", "+faststart", "-pix_fmt", "yuv420p", *BITEXACT, "-vf", vf,
            f"{out_stem}.mp4")
-    # `+bitexact`: the Matroska muxer otherwise writes a random SegmentUID (and
-    # the ffmpeg version) into every file, so a regen re-commits clips whose
-    # frames did not change.
     ffmpeg("-framerate", str(fps), "-i", frames_glob,
            "-c:v", "libvpx-vp9", "-b:v", "0", "-crf", VP9_CRF, "-row-mt", "1",
-           "-pix_fmt", "yuv420p", "-fflags", "+bitexact", "-vf", vf,
+           "-pix_fmt", "yuv420p", *BITEXACT, "-vf", vf,
            f"{out_stem}.webm")
 
 
