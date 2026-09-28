@@ -344,7 +344,7 @@ def emit(name, img, label, out_dir, check, work, stale):
             [sys.executable, str(COMPARE), str(out), str(cand), str(DIFF_DIR / f"diff-{label}-{name}.png")]
         ).returncode
         if rc != 0:
-            stale.append(tag)
+            stale.append(f"{tag} (differs)")
     else:
         buf = io.BytesIO()
         img.save(buf, format="PNG")
@@ -371,16 +371,20 @@ def main():
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
-    if check:
-        # An orphaned committed PNG (its manifest entry removed) is invisible to
-        # the loop above, which only ever iterates ICONS.
-        for label, out_dir in OUTPUTS:
-            orphans = sorted(p.stem for p in out_dir.glob("*.png") if p.stem not in ICONS)
-            if orphans:
-                stale.append(f"{label}: orphaned {', '.join(orphans)}")
+    # An orphaned committed PNG (its manifest entry removed) is invisible to the
+    # loop above, which only ever iterates ICONS; both output dirs hold icons
+    # alone, so a write deletes it and a check fails on it.
+    for label, out_dir in OUTPUTS:
+        orphans = sorted(p for p in out_dir.glob("*.png") if p.stem not in ICONS)
+        if check and orphans:
+            stale.append(f"{label}: orphaned {', '.join(p.stem for p in orphans)}")
+        elif not check:
+            for p in orphans:
+                p.unlink()
+                print(f"deleted {p.relative_to(ROOT)}")
 
     if stale:
-        sys.exit(f"gen-pix-icons --check: stale/missing: {', '.join(stale)} — run just gen-icons")
+        sys.exit(f"gen-pix-icons --check: {', '.join(stale)} — run just gen-icons")
     if check:
         print(f"gen-pix-icons --check: OK ({len(ICONS)} icons match in both output dirs)")
 
