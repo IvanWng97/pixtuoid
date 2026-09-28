@@ -758,6 +758,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Sta
 pub struct pixtuoid_core::sprite::format::DensityMismatch
 pub pixtuoid_core::sprite::format::DensityMismatch::claimed: (u32, u32)
 pub pixtuoid_core::sprite::format::DensityMismatch::found: (u16, u16)
+pub pixtuoid_core::sprite::format::DensityMismatch::frame: usize
 pub pixtuoid_core::sprite::format::DensityMismatch::name: alloc::string::String
 impl core::clone::Clone for pixtuoid_core::sprite::format::DensityMismatch
 pub fn pixtuoid_core::sprite::format::DensityMismatch::clone(&self) -> pixtuoid_core::sprite::format::DensityMismatch
@@ -774,6 +775,25 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::DensityMismatch
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::DensityMismatch
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
+pub struct pixtuoid_core::sprite::format::FrameCountMismatch
+pub pixtuoid_core::sprite::format::FrameCountMismatch::base_frames: usize
+pub pixtuoid_core::sprite::format::FrameCountMismatch::name: alloc::string::String
+pub pixtuoid_core::sprite::format::FrameCountMismatch::variant_frames: usize
+impl core::clone::Clone for pixtuoid_core::sprite::format::FrameCountMismatch
+pub fn pixtuoid_core::sprite::format::FrameCountMismatch::clone(&self) -> pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::cmp::Eq for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::FrameCountMismatch
+pub fn pixtuoid_core::sprite::format::FrameCountMismatch::eq(&self, &pixtuoid_core::sprite::format::FrameCountMismatch) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::FrameCountMismatch
+pub fn pixtuoid_core::sprite::format::FrameCountMismatch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::marker::Freeze for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::marker::Send for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::marker::Sync for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::marker::Unpin for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::FrameCountMismatch
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::FrameCountMismatch
 pub struct pixtuoid_core::sprite::format::MissingOptional
 pub pixtuoid_core::sprite::format::MissingOptional::name: &'static str
 pub pixtuoid_core::sprite::format::MissingOptional::stand_in: pixtuoid_core::sprite::format::StandIn
@@ -852,6 +872,7 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Par
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
+pub pixtuoid_core::sprite::format::ValidationReport::mismatched_frame_counts: alloc::vec::Vec<pixtuoid_core::sprite::format::FrameCountMismatch>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingOptional>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<pixtuoid_core::sprite::format::OrphanDerived>
@@ -884,6 +905,7 @@ pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Res
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
+pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, u16, &pixtuoid_core::sprite::Sprite) -> bool
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame
 pub fn pixtuoid_core::sprite::Frame::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Pixel>) -> Self

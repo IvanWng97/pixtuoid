@@ -4,7 +4,7 @@
 //! profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
-use pixtuoid_core::sprite::format::{density_variant_name_into, variant_fits, Pack};
+use pixtuoid_core::sprite::format::{density_variant_name_into, variant_redraws, Pack};
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::order::{depth_sort, Span};
@@ -861,16 +861,17 @@ fn label_anchor(
 /// A pack with no variants draws its base art, so richer art can land one piece
 /// at a time.
 ///
-/// A variant whose size is not its base's times the density its NAME claims is
-/// SKIPPED rather than drawn wrong. `validate_pack_animations` reports it as a
-/// hard error, so the check here is the render-time backstop for a pack that
-/// was never validated — not the place an author is meant to find out.
+/// A variant that does not redraw its base (`variant_redraws`) is SKIPPED
+/// rather than drawn wrong. `validate_pack_animations` reports it as a hard
+/// error, so the check here is the render-time backstop for a pack that was
+/// never validated — not the place an author is meant to find out.
 fn densest_art<'a>(
     pack: &'a Pack,
     name: &str,
     scale: RenderScale,
 ) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
-    let base = pack.animation(name).and_then(|a| a.frames().first())?;
+    let base_anim = pack.animation(name)?;
+    let base = base_anim.frames().first()?;
     let s = scale.get();
     // ONE buffer, reused: the lookup key is `<name>@<N>x` and this loop runs
     // per divisor, per piece, per frame — a fresh `String` each time is an
@@ -882,12 +883,15 @@ fn densest_art<'a>(
         }
         key.clear();
         density_variant_name_into(&mut key, name, density);
-        let Some(art) = pack.animation(&key).and_then(|a| a.frames().first()) else {
+        let Some(variant) = pack.animation(&key) else {
             continue;
         };
-        if !variant_fits(base, density, art) {
+        if !variant_redraws(base_anim, density, variant) {
             continue;
         }
+        let Some(art) = variant.frames().first() else {
+            continue;
+        };
         // `density` divides `s` and both are >= 1, so the quotient is nonzero.
         if let Some(factor) = std::num::NonZeroU16::new(s / density) {
             return Some((art, factor));
@@ -1449,6 +1453,35 @@ mod tests {
         let scale = RenderScale::new(4).expect("nonzero");
         let (art, blit_at) = densest_art(&pack, "plant", scale).expect("plant is in the pack");
         assert_eq!((art.width(), blit_at.get()), (bw, 4));
+    }
+
+    /// Pins the render-time half of `variant_redraws`: a variant that does not
+    /// redraw every frame of its base is skipped for the base.
+    #[test]
+    fn a_variant_that_does_not_redraw_every_frame_is_skipped() {
+        let frames = &[
+            ("one.sprite", "@frame 0\nA"),
+            ("two.sprite", "@frame 0\nA A\nA A"),
+            ("three.sprite", "@frame 0\nA A A"),
+        ];
+        for variant in ["[\"two.sprite\", \"three.sprite\"]", "[\"two.sprite\"]"] {
+            let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
+                &format!(
+                    "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+                     [animations.desk]\nframes=[\"one.sprite\", \"one.sprite\"]\nframe_ms=100\n\
+                     [animations.\"desk@2x\"]\nframes={variant}\nframe_ms=100\n"
+                ),
+                frames,
+            )
+            .expect("pack builds");
+            let (art, blit_at) = densest_art(&pack, "desk", RenderScale::new(2).expect("nonzero"))
+                .expect("desk is in the pack");
+            assert_eq!(
+                (art.width(), blit_at.get()),
+                (1, 2),
+                "{variant}: the base, upscaled"
+            );
+        }
     }
 
     /// Pins the render-time half of `DensityMismatch`: a variant that is not

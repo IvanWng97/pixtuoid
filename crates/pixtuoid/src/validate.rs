@@ -3,7 +3,8 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, MissingOptional, OrphanDerived, PartialSet, StandIn, ValidationReport,
+    load_pack, DensityMismatch, FrameCountMismatch, MissingOptional, OrphanDerived, PartialSet,
+    StandIn, ValidationReport,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -71,6 +72,52 @@ fn orphan_derived_line(o: &OrphanDerived) -> String {
     )
 }
 
+/// The `ERROR:` line for a density variant with a frame that misses its claim.
+/// The name is a key from the pack's own table, so it is stripped as
+/// [`unknown_line`]'s is.
+fn mismatched_density_line(m: &DensityMismatch) -> String {
+    // Destructured without `..`, for the reason `validate_pack` gives.
+    let DensityMismatch {
+        name,
+        frame,
+        claimed,
+        found,
+    } = m;
+    format!(
+        "ERROR: \"{}\" frame {frame} (from 0) is {}x{}, but its name claims {}x{}",
+        strip_control_chars(name),
+        found.0,
+        found.1,
+        claimed.0,
+        claimed.1
+    )
+}
+
+/// The `ERROR:` line for a density variant whose frame count is not its base's.
+/// The name is stripped as [`mismatched_density_line`]'s is.
+fn frame_count_line(m: &FrameCountMismatch) -> String {
+    // Destructured without `..`, for the reason `validate_pack` gives.
+    let FrameCountMismatch {
+        name,
+        base_frames,
+        variant_frames,
+    } = m;
+    format!(
+        "ERROR: \"{}\" has {variant_frames} frame(s) but its base has {base_frames}: a \
+         density variant redraws every frame of its base",
+        strip_control_chars(name)
+    )
+}
+
+/// The `ERROR:` line for a density variant whose base the pack does not ship.
+/// The name is stripped as [`mismatched_density_line`]'s is.
+fn orphan_variant_line(name: &str) -> String {
+    format!(
+        "ERROR: \"{}\" is a density variant of an animation this pack does not ship",
+        strip_control_chars(name)
+    )
+}
+
 pub fn validate_pack(dir: &Path) -> Result<()> {
     let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;
@@ -87,41 +134,30 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         unknown,
         mismatched_density,
         orphan_variants,
+        mismatched_frame_counts,
         partial_sets,
         orphan_derived,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
-    // parseable channel even when a caller redirects it. The names in
-    // `insufficient_frames`, `mismatched_density` and `orphan_variants` can be
-    // density variants from the pack's own table, so they are pack input and are
-    // stripped like the unknown keys; every other finding names a registry entry.
+    // parseable channel even when a caller redirects it.
     for name in missing_required {
         let _ = writeln!(err, "ERROR: missing required animation \"{name}\"");
     }
+    // Registry names: the frame floor runs over the registry only.
     for (name, need, got) in insufficient_frames {
         let _ = writeln!(
             err,
-            "ERROR: \"{}\" needs at least {need} frames, has {got}",
-            strip_control_chars(name)
+            "ERROR: \"{name}\" needs at least {need} frames, has {got}"
         );
     }
     for m in mismatched_density {
-        let _ = writeln!(
-            err,
-            "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
-            strip_control_chars(&m.name),
-            m.found.0,
-            m.found.1,
-            m.claimed.0,
-            m.claimed.1
-        );
+        let _ = writeln!(err, "{}", mismatched_density_line(m));
+    }
+    for m in mismatched_frame_counts {
+        let _ = writeln!(err, "{}", frame_count_line(m));
     }
     for name in orphan_variants {
-        let _ = writeln!(
-            err,
-            "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
-            strip_control_chars(name)
-        );
+        let _ = writeln!(err, "{}", orphan_variant_line(name));
     }
     for m in missing_optional {
         writeln!(out, "{}", missing_optional_line(m))?;
@@ -185,6 +221,42 @@ mod tests {
             line,
             "WARN:  ships \"cat_walk\" but not \"cat_sit\", \"cat_sleep\": \
              the default pack draws the rest, in its own style"
+        );
+    }
+
+    #[test]
+    fn a_density_line_names_the_frame_that_misses_the_claim() {
+        let line = mismatched_density_line(&DensityMismatch {
+            name: "typing@2x\u{1b}[31m".to_string(),
+            frame: 1,
+            claimed: (2, 2),
+            found: (3, 1),
+        });
+        assert_eq!(
+            line,
+            "ERROR: \"typing@2x[31m\" frame 1 (from 0) is 3x1, but its name claims 2x2"
+        );
+    }
+
+    #[test]
+    fn a_frame_count_line_names_both_counts() {
+        let line = frame_count_line(&FrameCountMismatch {
+            name: "seated@2x\u{202e}".to_string(),
+            base_frames: 2,
+            variant_frames: 1,
+        });
+        assert_eq!(
+            line,
+            "ERROR: \"seated@2x\" has 1 frame(s) but its base has 2: a density variant \
+             redraws every frame of its base"
+        );
+    }
+
+    #[test]
+    fn an_orphan_variant_line_strips_the_pack_key() {
+        assert_eq!(
+            orphan_variant_line("desk@4x\u{1b}]0;x\u{7}"),
+            "ERROR: \"desk@4x]0;x\" is a density variant of an animation this pack does not ship"
         );
     }
 
