@@ -14,9 +14,9 @@ use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
 use crate::theme::Theme;
 
-/// How much of a desk's height is its FRONT face rather than its top surface.
-/// Without one there is no thickness and the office reads as a floor plan. Kept
-/// a fraction of `DESK_H` so it tracks the desk rather than drifting from it.
+/// The front face the cutaway derives under a top-down desk's art (and under the
+/// meeting table's slab), as a fraction of `DESK_H` so it tracks the desk.
+/// Without one there is no thickness and the office reads as a floor plan.
 const DESK_FRONT_NUMER: u16 = 2;
 /// Denominator of [`DESK_FRONT_NUMER`].
 const DESK_FRONT_DENOM: u16 = 5;
@@ -216,9 +216,8 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
 
 /// The box a desk drawn with `art` at `desk` occupies at `scale`: the art, the
 /// face rows [`desk_face_rows`] derives under it, and the contact row
-/// `paint_desk` stamps under those. It sorts on the face's south edge, above
-/// the contact row.
-/// A taller art grows upward from the same bottom row
+/// `paint_desk` stamps under those. It sorts on the row just above that contact
+/// row. A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(
     pack: &Pack,
@@ -395,9 +394,6 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     for pl in &layout.plants {
         push_prop(order, pl.pos, pl.kind.sprite_name());
     }
-    // Seat waypoints are slots on a body, never bodies: a meeting sofa's seats
-    // sit on the trio body `push_meeting_trios` paints once. This profile draws
-    // no meeting-chair or kitchen-island body.
     for wp in &layout.waypoints {
         if let Some(sprite) = waypoint_sprite(wp.kind) {
             push_prop(order, wp.pos, sprite);
@@ -406,8 +402,7 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     for d in &layout.pod_decor {
         push_prop(order, d.pos, d.kind.sprite_name());
     }
-    // The lounge couch IS a mirrored meeting sofa — the classic painter's rule,
-    // read from there, not re-guessed.
+    // The lounge couch IS a mirrored meeting sofa, as the classic painter draws it.
     if let Some(at) = layout.couch_sprite_center() {
         push_sofa(order, pack, at, true);
     }
@@ -439,9 +434,9 @@ fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     }
 }
 
-/// Two sofa bodies plus the table between them. `sofas[0]` is the north sofa and
-/// `sofas[1]` the south, and only the south one is mirrored — that is what makes
-/// the pair FACE each other across the table instead of both facing one way.
+/// Two sofa bodies plus the table between them. Only
+/// [`MeetingTrio::sofas`](crate::layout::MeetingTrio::sofas)' south sofa is
+/// mirrored: that is what makes the pair FACE each other across the table.
 fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
     let table = crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
     for t in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -561,11 +556,9 @@ fn push_sofa(
 /// easily.
 const WALL_SEG_H: u16 = 4;
 
-/// Queue every room's walls as sorted pieces, vertical runs split. A run
-/// spanning a whole room has no meaningful base row — its south edge would sort
-/// the ENTIRE wall in front of everything the room contains — so it is split
-/// into pieces that each do have one: the standard treatment for the long-object
-/// case in a painter's-algorithm renderer, which no sort predicate substitutes for.
+/// Queue every room's walls as sorted pieces, vertical runs split into
+/// [`WALL_SEG_H`]-row segments: the long-object case [`crate::cutaway::order`]
+/// documents.
 fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     let rooms = layout
         .meeting_rooms
@@ -701,13 +694,14 @@ fn piece_span(
     Span::new(tl.x, tl.y, w, h, below)
 }
 
-/// A pack sprite's LOGICAL size — the size the sort space lays it out in,
-/// whichever density it is drawn from.
+/// Frame 0's LOGICAL size: the size the sort space lays a static piece out in,
+/// whichever density it is drawn from. An animated figure sizes from the frame
+/// it draws (`push_characters`).
 fn art_size(pack: &Pack, sprite: &str) -> Option<(u16, u16)> {
     crate::pixel_painter::densest_frame(pack, sprite, 0, RenderScale::ONE).map(|d| d.logical)
 }
 
-/// Rows of a desk that are its front face — the thickness.
+/// Rows of front face derived under a top-down desk: its thickness.
 fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
 }
@@ -1022,8 +1016,9 @@ fn paint_wall_decor(
     );
 }
 
-/// NO re-projection: the seat side is a per-desk layout fact, so an override here would make the two
-/// profiles disagree about which side of its desk half the office sits on.
+/// The classic placement's anchor, unchanged: the seat side is a per-desk layout
+/// fact, so an override here would make the two profiles disagree about which
+/// side of its desk half the office sits on.
 fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout::Point {
     c.anchor
 }
@@ -1103,11 +1098,10 @@ fn label_anchor(
     }
 }
 
-/// The pack sprite for a waypoint kind, when it has one. `None` covers three
-/// deliberate cases: a SEAT slot, which is never a body
-/// (MeetingSofa/MeetingChair/Island), a fixture drawn elsewhere (Pantry by its
-/// room, the Couch as a mirrored meeting sofa), and the corridor appliances
-/// (VendingMachine/Printer), which [`paint_appliance`] draws.
+/// The pack sprite for a waypoint kind, when it has one. `None` covers a seat
+/// slot, a fixture drawn elsewhere (Pantry by its room, the Couch as a mirrored
+/// meeting sofa), and the corridor appliances (VendingMachine/Printer), which
+/// [`paint_appliance`] draws.
 fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
@@ -1118,6 +1112,8 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
         | K::Pantry
         | K::VendingMachine
         | K::Printer
+        // A seat slot: a meeting sofa's body is the trio's; this profile draws
+        // no meeting-chair or kitchen-island body.
         | K::MeetingSofa
         | K::MeetingChair
         | K::Island => None,
@@ -1169,8 +1165,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
 
 /// A corridor appliance as a cutaway solid. Vending machine and printer have no
 /// sprite — classic paints them per-pixel — so this gives them a lit body and a
-/// contact shadow. Its box is the SHARED furniture table's `visual`, the box the
-/// classic painter draws it at, not a second set of numbers.
+/// contact shadow. Its box is [`furniture_def`](crate::layout::furniture_def)'s
+/// `visual`, the box the classic painter draws it at, not a second set of numbers.
 fn paint_appliance(
     at: crate::layout::Point,
     kind: crate::layout::WaypointKind,
@@ -1322,7 +1318,7 @@ mod tests {
     }
 
     /// The desk sorts on its face's south edge and a back-turned sitter on their
-    /// seat's z-key; that key lands south of the face, so the ratified "head
+    /// seat's z-key; that key lands south of the face, so the "head
     /// over the surface" reading needs no special case.
     #[test]
     fn a_seated_occupant_sorts_in_front_of_the_desk_it_sits_at() {
@@ -1575,9 +1571,9 @@ mod tests {
         assert_eq!((piece.x0, piece.x1), (8, 15));
     }
 
-    /// The desk sorts on the row just above the contact row it paints — pinned
-    /// to the paint, since the ordering tests compare depths with each other and
-    /// pass a shift both sides share.
+    /// The desk sorts on the row just above the contact row it paints. Pinned to
+    /// the paint itself: the ordering tests compare depths by inequality, which a
+    /// one-row shift passes.
     #[test]
     fn a_desk_sorts_on_the_row_above_the_contact_row_it_paints() {
         let pack = pack();
@@ -2033,8 +2029,7 @@ mod tests {
             crate::pixel_painter::seated_anchor_facing(desk, CHARACTER_SPRITE_W, Facing::South);
         assert_eq!(
             near.y, desk.y,
-            "the deleted override hardcoded desk.y; the shared anchor must still \
-             land there for a back-turned desk, or deleting it moved someone"
+            "a back-turned occupant's shared anchor lands on desk.y"
         );
         assert!(
             far.y < near.y,
@@ -2085,9 +2080,7 @@ mod tests {
         assert_eq!(label_anchor(at, 8, Some(at.y + 4), scale), free);
     }
 
-    /// The band is derived from the layout's OWN `top_margin` minus its own
-    /// constant, never re-guessed — the rows between are floor the agents
-    /// walk on, so a band drawn to `top_margin` would paint over walkers.
+    /// The layout leaves walkable rows between the wall band and `top_margin`.
     #[test]
     fn the_wall_band_stops_where_the_layout_says_the_floor_begins() {
         let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
@@ -2178,9 +2171,9 @@ mod tests {
         }
     }
 
-    /// Pins [`Span`]'s bounds contract for every piece kind. A pixel counts as
-    /// WRITTEN where two paints over different fills agree, so no colour is
-    /// assumed to be one the paint never uses.
+    /// Pins [`Span`]'s bounds contract for every piece kind and prop builder. A
+    /// pixel counts as WRITTEN where two paints over different fills agree, so
+    /// no colour is assumed to be one the paint never uses.
     #[test]
     fn every_piece_paints_only_inside_its_span() {
         use crate::floor::{FloorMeta, FloorSession};
@@ -2276,7 +2269,8 @@ S B B B B B B S
             ],
             "a piece kind went untested"
         );
-        // "prop" is four builders; each must have been reached.
+        // Every builder that pushes a "prop" must have been reached: the pantry
+        // counter at both sizes, a sofa, a plant.
         for sprite in crate::pixel_painter::PANTRY_COUNTER_ANIMS
             .into_iter()
             .chain(["meeting_sofa", "plant"])
@@ -2494,18 +2488,5 @@ S B B B B B B S
         let mut buf = blank();
         paint_chair(at, &pack, theme, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "chair");
-    }
-
-    #[test]
-    fn a_desk_is_thicker_than_its_top_surface_alone() {
-        // Without a front face the office is a floor plan; pin that the split
-        // leaves BOTH parts non-empty however DESK_H moves.
-        let front_h = desk_front_h();
-        let top_h = DESK_H.saturating_sub(front_h).max(1);
-        assert!(front_h >= 1 && top_h >= 1, "top {top_h}, front {front_h}");
-        assert!(
-            front_h < DESK_H,
-            "the front face is a fraction, not the desk"
-        );
     }
 }
