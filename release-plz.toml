@@ -67,6 +67,11 @@ name = "pixtuoid"
 changelog_update = true
 changelog_path = "./CHANGELOG.md"
 changelog_include = ["pixtuoid-core", "pixtuoid-scene", "pixtuoid-hook"]
+# cargo-semver-checks runs on every package with a library, and a detected break
+# raises the shared workspace version. This crate's lib target is the binary's
+# internals, not a contract (the justfile's `PUBLISHED_CRATES` names the crates
+# that are), so a pub change in it must not force a minor release.
+semver_check = false
 git_tag_enable = true
 # Created as a DRAFT so the version is never visible without its binaries:
 # release.yml attaches the assets and `softprops/action-gh-release` publishes the
