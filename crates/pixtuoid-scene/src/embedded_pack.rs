@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, load_pack_from_strings, validate_pack_animations, Pack, ValidationReport,
+    load_pack, load_pack_from_strings, validate_pack_animations, DensityMismatch,
+    FrameCountMismatch, Pack, ValidationReport,
 };
 
 /// Where a sprite pack's custom half comes from. The source decides what a
@@ -88,13 +89,20 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             "custom sprite pack animation has too few frames — it will render as nothing"
         );
     }
-    for m in mismatched_density {
+    // Each finding destructured without `..`, for the reason the report is.
+    for DensityMismatch {
+        name,
+        frame,
+        claimed,
+        found,
+    } in mismatched_density
+    {
         tracing::warn!(
             origin,
-            animation = ?m.name,
-            frame = m.frame,
-            claimed = ?m.claimed,
-            found = ?m.found,
+            animation = ?name,
+            frame,
+            claimed = ?claimed,
+            found = ?found,
             "custom sprite pack density variant is not the size its name claims — \
              renderers skip it for the densest art that fits"
         );
@@ -104,17 +112,23 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
             origin,
             animation = ?name,
             "custom sprite pack ships a density variant whose base animation it does not — \
-             its size claim is checked against the default pack's art, not yours"
+             a furniture variant is checked against the default pack's art, not yours; \
+             a character variant never draws"
         );
     }
-    for m in mismatched_frame_counts {
+    for FrameCountMismatch {
+        name,
+        base_frames,
+        variant_frames,
+    } in mismatched_frame_counts
+    {
         tracing::warn!(
             origin,
-            animation = ?m.name,
-            base = m.base,
-            variant = m.variant,
+            animation = ?name,
+            base_frames,
+            variant_frames,
             "custom sprite pack density variant has a different frame count from its base — \
-             it shows the wrong frame of the animation"
+             renderers skip it for the densest art that fits"
         );
     }
     report
@@ -150,8 +164,8 @@ fn load_custom_over(base: &Pack, dir: &Path, origin: &str) -> Result<Pack> {
     let mut custom = load_pack(dir)?;
     tracing::info!(origin, path = ?dir, "loaded custom sprite pack");
     // Before the merge, so the report is about what the author shipped: after
-    // it, a variant whose base the pack leaves out is checked against the
-    // default's art and never reported as an orphan.
+    // it, a furniture variant whose base the pack leaves out is checked against
+    // the default's art and never reported as an orphan.
     warn_pack_validation_gaps(&custom, origin);
     custom.merge_from(base);
     Ok(custom)
@@ -457,9 +471,10 @@ mod tests {
         );
     }
 
-    /// A variant whose base the pack leaves out is only an orphan before the
-    /// merge fills the base in from the default. Sized as a true 4x of the
-    /// default's desk, so a check after the merge finds nothing to warn about.
+    /// A furniture variant whose base the pack leaves out is only an orphan
+    /// before the merge fills the base in from the default. Sized as a true 4x
+    /// of the default's desk, so a check after the merge finds nothing to warn
+    /// about.
     #[test]
     fn a_custom_variant_without_its_base_warns_at_load() {
         let tmp = tempfile::TempDir::new().expect("tempdir");

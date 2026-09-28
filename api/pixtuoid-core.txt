@@ -776,9 +776,9 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::DensityMismatc
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
 pub struct pixtuoid_core::sprite::format::FrameCountMismatch
-pub pixtuoid_core::sprite::format::FrameCountMismatch::base: usize
+pub pixtuoid_core::sprite::format::FrameCountMismatch::base_frames: usize
 pub pixtuoid_core::sprite::format::FrameCountMismatch::name: alloc::string::String
-pub pixtuoid_core::sprite::format::FrameCountMismatch::variant: usize
+pub pixtuoid_core::sprite::format::FrameCountMismatch::variant_frames: usize
 impl core::clone::Clone for pixtuoid_core::sprite::format::FrameCountMismatch
 pub fn pixtuoid_core::sprite::format::FrameCountMismatch::clone(&self) -> pixtuoid_core::sprite::format::FrameCountMismatch
 impl core::cmp::Eq for pixtuoid_core::sprite::format::FrameCountMismatch
@@ -905,6 +905,7 @@ pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Res
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
+pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, u16, &pixtuoid_core::sprite::Sprite) -> bool
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame
 pub fn pixtuoid_core::sprite::Frame::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Pixel>) -> Self
