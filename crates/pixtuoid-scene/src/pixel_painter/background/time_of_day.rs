@@ -75,14 +75,14 @@ pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> Ti
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(in crate::pixel_painter) enum WallSide {
     East,
-    South,
+    North,
     West,
 }
 
 #[derive(Debug, Clone, Copy)]
 pub(in crate::pixel_painter) struct SunSpot {
     pub wall: WallSide,
-    /// 0.0..=1.0 along the wall (left→right for South, top→bottom for East/West).
+    /// 0.0..=1.0 along the wall (left→right for North, top→bottom for East/West).
     pub along: f32,
     /// 0.0=dim, 1.0=brightest at noon.
     pub intensity: f32,
@@ -108,7 +108,7 @@ pub(in crate::pixel_painter) fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
         (WallSide::East, az / AZ_EAST_MAX)
     } else if az < AZ_WEST_MIN {
         (
-            WallSide::South,
+            WallSide::North,
             (az - AZ_EAST_MAX) / (AZ_WEST_MIN - AZ_EAST_MAX),
         )
     } else {
@@ -370,7 +370,7 @@ mod tests {
     #[test]
     fn sun_on_wall_overhead_at_noon() {
         let s = sun_on_wall(&Sky::at(at_hour_min(12, 0))).expect("sun should be up at 12:00");
-        assert_eq!(s.wall, WallSide::South);
+        assert_eq!(s.wall, WallSide::North);
         assert!(
             s.intensity > 0.85,
             "noon sun should be intense: {}",

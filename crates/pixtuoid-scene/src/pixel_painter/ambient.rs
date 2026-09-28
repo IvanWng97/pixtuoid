@@ -232,9 +232,9 @@ pub(super) fn paint_sun_spot(
     let Some(spot) = sun_on_wall(sky) else {
         return;
     };
-    // South wall is the glass: a spot painted on it would ghost-glow over the
+    // The north wall is the glass: a spot painted on it would ghost-glow over the
     // skyline, and the floor spill already conveys midday sun.
-    if matches!(spot.wall, WallSide::South) {
+    if matches!(spot.wall, WallSide::North) {
         return;
     }
     // The spot is the projected DIRECT beam, so diffuse light under thick
@@ -277,7 +277,7 @@ pub(super) fn paint_sun_spot(
             let along_px = along_range * spot.along.min(1.0);
             (0u16, along_px as u16)
         }
-        WallSide::South => unreachable!("guarded above"),
+        WallSide::North => unreachable!("guarded above"),
     };
 
     // Visible warm lift on the dark wall: a strong base so the small, radially
