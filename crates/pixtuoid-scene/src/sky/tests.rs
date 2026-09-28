@@ -109,15 +109,6 @@ fn moon_luminance_tracks_phase() {
 #[test]
 fn weather_override_forces_a_fixed_variant_then_restores() {
     use std::time::Duration;
-    // Clear the thread-local even if an assert below panics — plain
-    // `cargo test` shares threads, so a leaked override corrupts a sibling.
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            set_weather_override(None);
-        }
-    }
-    let _reset = Reset;
     let t = std::time::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
     let natural = weather_at(t);
     // Force a variant that differs from the natural pick so the assert is real.
@@ -125,15 +116,19 @@ fn weather_override_forces_a_fixed_variant_then_restores() {
         .into_iter()
         .find(|&w| w != natural)
         .expect("8 variants");
-    set_weather_override(Some(forced));
+    let guard = ForcedWeather::new(forced);
     assert_eq!(weather_at(t), forced);
     assert_eq!(
         weather_at(t + Duration::from_secs(987_654)),
         forced,
         "override is time-independent"
     );
-    set_weather_override(None);
-    assert_eq!(weather_at(t), natural, "None restores time-based selection");
+    drop(guard);
+    assert_eq!(
+        weather_at(t),
+        natural,
+        "dropping the guard restores time-based selection"
+    );
 }
 
 #[test]
