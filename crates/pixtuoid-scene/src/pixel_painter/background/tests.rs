@@ -1,5 +1,5 @@
 use super::*;
-use crate::sky::{hour_is_day, set_weather_override, Atmo, Body};
+use crate::sky::{hour_is_day, set_weather_override, Atmo, Body, ForcedWeather};
 
 // Hand-built Emitter/Atmo values, not real clock times: a real moon's low
 // altitude/luminance could never produce these, so a maximally warm/lit MOON
@@ -218,8 +218,6 @@ fn render_office_on(
 /// [`render_office_on`] with the theme as a parameter — the weather/light
 /// invariants hold per THEME (each ships its own night-sky + glass colours), so
 /// their pins sweep `ALL_THEMES` rather than trusting `normal` to be worst-case.
-/// The `Reset` guard clears the weather override even on a mid-test panic, which
-/// would otherwise leak into a sibling test's thread.
 fn render_office_themed(
     day: u32,
     hour: u32,
@@ -228,14 +226,7 @@ fn render_office_themed(
     buf_w: u16,
     top_wall_h: u16,
 ) -> RgbBuffer {
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            set_weather_override(None);
-        }
-    }
-    let _reset = Reset;
-    set_weather_override(Some(weather));
+    let _weather = ForcedWeather::new(weather);
     let now = crate::localclock::on_day(day, hour);
     let look = time_of_day_look(&Sky::at(now), theme);
     let buf_h = top_wall_h + 4;
@@ -891,14 +882,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
 
     // Weather leg: the tint changes the CARPET colours while the wall stays
     // put — the one key component nothing else covers.
-    struct Reset;
-    impl Drop for Reset {
-        fn drop(&mut self) {
-            set_weather_override(None);
-        }
-    }
-    let _reset = Reset;
-    set_weather_override(Some(Weather::Clear));
+    let _weather = ForcedWeather::new(Weather::Clear);
     let clear = paint(&mut shared, normal);
     set_weather_override(Some(Weather::Rain));
     let rain_shared = paint(&mut shared, normal);

@@ -1009,6 +1009,10 @@ fn the_foreground_layer_is_lit_by_the_clock() {
     // whole LAYER rather than one piece: the paint loop is the shared seam, so a
     // new DrawableKind inherits this without touching the test.
     use crate::localclock::at_hour;
+    // The weather is picked per UTC slot, so the same two local hours land on
+    // different weathers in different zones: pinned, the pair differs by the
+    // clock alone.
+    let _weather = crate::sky::ForcedWeather::new(crate::sky::Weather::Clear);
     let render = |now: SystemTime| {
         let pack = crate::embedded_pack::test_default_pack();
         let theme = crate::theme::theme_by_name("normal").expect("normal theme");
