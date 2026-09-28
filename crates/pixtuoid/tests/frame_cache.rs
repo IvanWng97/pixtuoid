@@ -15,6 +15,7 @@ fn key(id: AgentId, anim_name: &'static str, frame_idx: usize, flip_x: bool) -> 
         flip_x,
         glow_tint: None,
         burn: pixtuoid_scene::burn::BurnTier::Normal,
+        density: 1,
     }
 }
 

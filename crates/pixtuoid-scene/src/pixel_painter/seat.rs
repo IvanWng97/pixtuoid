@@ -12,15 +12,16 @@ use super::anchors::{back_couch_anchor, waypoint_anchor};
 /// The per-agent RECOLORED sprite for one character, from the cache.
 ///
 /// Split out of [`paint_character_at`] so a second profile gets the identical
-/// palette without a second copy of the rule. Only the BLIT differs between
-/// profiles — the classic pass writes 1:1, the cutaway writes at its render
-/// scale — and a per-agent palette is exactly the thing that must NOT differ:
-/// hair, skin and the cwd-keyed outfit are how a viewer tells two agents apart,
-/// so an agent who is auburn in one profile and default-brown in the other is
-/// two different people to the eye.
+/// palette without a second copy of the rule. The ART and the BLIT differ
+/// between profiles — the classic pass draws the base sprite 1:1, the cutaway
+/// the densest variant its scale lands — and a per-agent palette is exactly the
+/// thing that must NOT differ: hair, skin and the cwd-keyed outfit are how a
+/// viewer tells two agents apart, so an agent who is auburn in one profile and
+/// default-brown in the other is two different people to the eye.
 ///
-/// Returns the burn tier alongside, because the caller owns the flame crown
-/// (it is painted at the caller's own coordinates).
+/// The art is [`densest_frame`](crate::render_scale::densest_frame)'s at
+/// `scale`, so [`RenderScale::ONE`](crate::render_scale::RenderScale::ONE)
+/// gets the base sprite.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn character_frame<'c>(
     anim_name: &'static str,
@@ -29,16 +30,16 @@ pub(crate) fn character_frame<'c>(
     pack: &Pack,
     flip_x: bool,
     glow_tint: Option<Rgb>,
+    scale: crate::render_scale::RenderScale,
     cache: &'c mut FrameCache,
     now: SystemTime,
-) -> Option<(&'c Frame, crate::burn::BurnTier)> {
-    let anim = pack.animation(anim_name)?;
-    let frame = anim.recolorable(frame_index(anim, frame_idx))?;
+) -> Option<CharacterFrame<'c>> {
+    let dense = crate::render_scale::densest_frame(pack, anim_name, frame_idx, scale)?;
     // A cwd backfill re-keys the outfit (Team Palette) mid-lifetime — flag the
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(agent.agent_id, outfit_seed_for(agent));
     let burn = crate::burn::slot_burn_tier(agent, now);
-    let cached = cache.get_or_make(
+    let frame = cache.get_or_make(
         crate::frame_cache::FrameKey {
             agent_id: agent.agent_id,
             anim_name,
@@ -46,9 +47,12 @@ pub(crate) fn character_frame<'c>(
             flip_x,
             glow_tint,
             burn,
+            density: dense.density.get(),
         },
         || {
-            let recolored = frame.recolored(&agent_overrides(agent, glow_tint, burn));
+            let recolored = dense
+                .recolorable
+                .recolored(&agent_overrides(agent, glow_tint, burn));
             if flip_x {
                 // HORIZONTAL: `flip_x` is which way the character FACES.
                 recolored.mirror_horizontal()
@@ -57,7 +61,23 @@ pub(crate) fn character_frame<'c>(
             }
         },
     );
-    Some((cached, burn))
+    Some(CharacterFrame {
+        frame,
+        burn,
+        density: dense.density,
+        blit_at: dense.blit_at,
+    })
+}
+
+/// A recolored character frame and how to draw it at the scale it was picked
+/// for; `density` and `blit_at` as in
+/// [`DenseFrame`](crate::render_scale::DenseFrame).
+pub(crate) struct CharacterFrame<'c> {
+    pub(crate) frame: &'c Frame,
+    /// The caller owns the flame crown, painted at its own coordinates.
+    pub(crate) burn: crate::burn::BurnTier,
+    pub(crate) density: std::num::NonZeroU16,
+    pub(crate) blit_at: std::num::NonZeroU16,
 }
 
 /// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
@@ -76,9 +96,23 @@ pub(crate) fn paint_character_at(
     cache: &mut FrameCache,
     now: SystemTime,
 ) {
-    let Some((cached, burn)) = character_frame(
-        anim_name, frame_idx, agent, pack, flip_x, glow_tint, cache, now,
-    ) else {
+    let Some(CharacterFrame {
+        frame: cached,
+        burn,
+        density: _,
+        blit_at: _,
+    }) = character_frame(
+        anim_name,
+        frame_idx,
+        agent,
+        pack,
+        flip_x,
+        glow_tint,
+        crate::render_scale::RenderScale::ONE,
+        cache,
+        now,
+    )
+    else {
         return;
     };
     let sprite_w = cached.width();

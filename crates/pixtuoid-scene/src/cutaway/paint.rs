@@ -4,7 +4,7 @@
 //! profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
-use pixtuoid_core::sprite::format::{density_variant_name_into, variant_redraws, Pack};
+use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::order::{depth_sort, Span};
@@ -800,26 +800,32 @@ fn paint_character(
     // The classic painter's own recolor + facing-flip path, through the same
     // cache: a raw pack blit clones one placeholder-palette person per agent.
     let glow_tint = crate::pixel_painter::character_glow_tint(c.glow, agent, theme);
-    let (art, _burn) = crate::pixel_painter::seat::character_frame(
+    let art = crate::pixel_painter::seat::character_frame(
         c.anim_name,
         c.frame_idx,
         agent,
         pack,
         c.flip_x,
         glow_tint,
+        scale,
         cache,
         now,
     )?;
-    let (art_w, art_h) = (art.width(), art.height());
+    // Logical units: a variant is its base's size times its density, so dividing
+    // gives the size every anchor, shadow and badge below is laid out in.
+    let (art_w, art_h) = (
+        art.frame.width() / art.density.get(),
+        art.frame.height() / art.density.get(),
+    );
 
     if c.seat_desk.is_none() {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
     }
     blit_frame_scaled(
-        art,
+        art.frame,
         scale.to_buffer(at.x),
         scale.to_buffer(at.y),
-        scale.factor(),
+        art.blit_at,
         buf,
     );
     if c.seat_desk.is_some() {
@@ -851,53 +857,15 @@ fn label_anchor(
     }
 }
 
-/// The densest art the pack has for `name`, and the factor to blit it at.
-///
-/// A pack may ship `{name}@{N}x` — the SAME piece drawn on an N-times grid.
-/// This picks the densest one that DIVIDES the render scale and blits it at
-/// the remaining factor, so 4x art still halves the upscale on an 8x render
-/// instead of being discarded for not being an exact match.
-///
-/// A pack with no variants draws its base art, so richer art can land one piece
-/// at a time.
-///
-/// A variant that does not redraw its base (`variant_redraws`) is SKIPPED
-/// rather than drawn wrong. `validate_pack_animations` reports it as a hard
-/// error, so the check here is the render-time backstop for a pack that was
-/// never validated — not the place an author is meant to find out.
+/// The first frame of `name`'s densest art at `scale` (see
+/// [`densest_frame`](crate::render_scale::densest_frame)), and the factor to
+/// blit it at — for a piece that does not animate.
 fn densest_art<'a>(
     pack: &'a Pack,
     name: &str,
     scale: RenderScale,
 ) -> Option<(&'a pixtuoid_core::sprite::Frame, std::num::NonZeroU16)> {
-    let base_anim = pack.animation(name)?;
-    let base = base_anim.frames().first()?;
-    let s = scale.get();
-    // ONE buffer, reused: the lookup key is `<name>@<N>x` and this loop runs
-    // per divisor, per piece, per frame — a fresh `String` each time is an
-    // allocation for a HashMap probe that borrows it and drops it.
-    let mut key = String::with_capacity(name.len() + 4);
-    for density in (2..=s).rev() {
-        if !s.is_multiple_of(density) {
-            continue;
-        }
-        key.clear();
-        density_variant_name_into(&mut key, name, density);
-        let Some(variant) = pack.animation(&key) else {
-            continue;
-        };
-        if !variant_redraws(base_anim, density, variant) {
-            continue;
-        }
-        let Some(art) = variant.frames().first() else {
-            continue;
-        };
-        // `density` divides `s` and both are >= 1, so the quotient is nonzero.
-        if let Some(factor) = std::num::NonZeroU16::new(s / density) {
-            return Some((art, factor));
-        }
-    }
-    Some((base, scale.factor()))
+    crate::render_scale::densest_frame(pack, name, 0, scale).map(|d| (d.frame, d.blit_at))
 }
 
 /// The pack sprite for a waypoint kind, when it has one. `None` covers three
