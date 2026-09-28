@@ -1116,9 +1116,8 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
     }
 }
 
-/// A spill leaning past the canvas's left edge is trimmed there, as its right
-/// edge is at the buffer's width: each row lights exactly its band's columns
-/// that fall on the canvas.
+/// A spill leaning off the canvas's left edge lights only the columns that land
+/// on the canvas: the same clip the right edge applies at the buffer's width.
 #[test]
 fn a_spill_leaning_off_the_left_edge_is_clipped() {
     const FILL: Rgb = Rgb {
