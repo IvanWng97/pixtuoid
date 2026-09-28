@@ -1,7 +1,6 @@
-# Project task runner — the single source of truth for build / lint / format /
-# test. The git hooks, CI and release call these recipes rather than restating
-# their commands, so each command is defined in ONE place and cannot drift
-# between local, CI and release.
+# Project task runner. The git hooks, ci*.yml and release.yml call these recipes
+# rather than restating their commands, so a command changes in one place;
+# `workspace-version` names the one exception.
 #
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
@@ -686,10 +685,8 @@ workspace-version:
 
 # Cross-compile a release build for ONE target triple (release.yml's build
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
-# (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
-# than defaulted because callers pass it POSITIONALLY: an unquoted, unset
-# matrix.cross slides the next argument into this slot on a leg that omits the
-# key — pinned by the arg-shift case below.
+# (CI installs it via taiki-e/install-action@cross); anything but true/false
+# fails loudly (the case below).
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false":
@@ -844,10 +841,8 @@ gen-contract:
 gen-readme-check:
     node scripts/gen-readme.mjs --check
 
-# Regenerate docs/images/ + site/public/demos/ from scripts/media.json. Builds
-# the snapshot and hero_still examples; the .venv's Pillow for
-# stills/composite/gif, ffmpeg for clips/crops, gifsicle for the gif. Forwards
-# args, e.g. `just gen-media --only docs`.
+# Args are forwarded; scripts/gen-media.py's docstring owns the jobs, flags and
+# toolchain.
 [group('gen')]
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
 gen-media *args:
@@ -1034,8 +1029,9 @@ setup-tools:
     #!/usr/bin/env bash
     set -euo pipefail
     # cargo-public-api rides API_PUBLIC_API — the tool-exact story lives there.
-    # cargo-edit: `cargo set-version --workspace` corrects a release PR's version
-    # by hand when release-plz's semver check reds (docs/CONTRIBUTING.md#releasing).
+    # cargo-edit: `cargo set-version --workspace` raises a release PR's version
+    # by hand for a break cargo-semver-checks cannot see
+    # (docs/CONTRIBUTING.md#releasing).
     tools=(cargo-nextest cargo-machete cargo-deny cargo-hack cargo-edit cargo-insta lychee cargo-public-api@{{ API_PUBLIC_API }})
     if command -v cargo-binstall &>/dev/null; then
         cargo binstall -y "${tools[@]}"
@@ -1054,16 +1050,12 @@ setup-tools:
         rustup component add rust-analyzer >/dev/null 2>&1 ||
             echo "could not add the rust-analyzer component — install it for LSP support" >&2
     fi
-    # Non-cargo lint tools that `just lint` gates on: shfmt/shellcheck cover the
-    # shell sources, actionlint/zizmor the workflows, yq + jq the CI contracts,
-    # check-jsonschema the schemas. shellcheck also backs actionlint's run-block
-    # checks — WITHOUT it on PATH, actionlint silently SKIPS them, so a shell bug
-    # in a workflow `run:` block passes `just lint` green locally. brew on macOS;
-    # elsewhere the re-check below names what is missing rather than leaving
-    # `just lint` unable to run, or passing with the shellcheck pass skipped.
-    # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
-    # recipe cannot run at all (it does not degrade to a weaker scan, because a
-    # weaker scan is what it replaced).
+    # Non-cargo lint tools `just lint` refuses to start without: shfmt/shellcheck
+    # cover the shell sources, actionlint/zizmor the workflows, yq + jq the CI
+    # contracts, check-jsonschema the schemas. brew on macOS. gitleaks backs
+    # `just fixture-pii`, a REQUIRED gate: without it on PATH the recipe cannot
+    # run at all (it does not degrade to a weaker scan, because a weaker scan is
+    # what it replaced).
     for t in shfmt actionlint shellcheck zizmor yq jq check-jsonschema gitleaks; do
         command -v "$t" &>/dev/null && continue
         if command -v brew &>/dev/null; then
@@ -1149,8 +1141,8 @@ drift-selftest:
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
 # gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken
-# stripper just stops matching, and the capture comes back empty blaming the CLI. Runs in `lint`; CI's hygiene job enumerates
-# it separately.
+# stripper just stops matching, and the capture comes back empty blaming the
+# CLI. Runs in `lint`; CI's hygiene job enumerates it separately.
 [group('meta')]
 [doc("Self-test the TUI capture driver's pure logic")]
 tuidrive-selftest:
@@ -1159,9 +1151,9 @@ tuidrive-selftest:
 # The git env scrub, both copies: `e2e_init_repo` and the pre-push hook. A git
 # hook exports GIT_DIR/GIT_INDEX_FILE into every child and those OUTRANK
 # `git -C <dir>`, so an unscrubbed helper COMMITS to the developer's real repo
-# while printing nothing. The suite runs the unscrubbed form first
-# and proves it leaks, so a scrub that stopped scrubbing cannot pass. Hermetic:
-# one mktemp -d, no network, no real repo.
+# while printing nothing. The suite runs the unscrubbed form first and proves
+# it leaks, so a scrub that stopped scrubbing cannot pass. Hermetic: one
+# mktemp -d, no network, no real repo.
 [group('meta')]
 [doc("Self-test the git env scrub — the e2e helper and the pre-push hook")]
 e2e-scrub-selftest:
@@ -1253,7 +1245,7 @@ fixture-pii-selftest:
     # allowlist waives AWS's own documentation key, so that one proves nothing.
     printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
     # A real secret wearing a wire identifier's PREFIX: an unanchored wire-id
-    # allowlist waives it by substring (`.gitleaks.toml` says why they anchor).
+    # allowlist waives it by substring.
     printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
     # The RESIDUAL, pinned so it is visible rather than assumed closed: a secret
     # that lands INSIDE the wire id's own 20-32 length window still rides the

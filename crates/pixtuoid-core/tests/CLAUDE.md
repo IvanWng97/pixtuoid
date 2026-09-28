@@ -11,8 +11,8 @@ tests/
 ├── sources/main.rs      the source/decode layer
 │   ├── captures.rs      THE walk (`every_capture()`) + every provenance RULE, in Rust
 │   │                    so the rules ride `just test` on all three platforms. ONE
-│   │                    enumeration, no mirror: a second population is where a fix
-│   │                    lands on half of one. `conformance.rs` imports its
+│   │                    enumeration, no mirror: with two populations a fix lands
+│   │                    on one and misses the other. `conformance.rs` imports its
 │   │                    tree helpers, so dropping `mod captures;` fails to COMPILE.
 │   ├── decode/          cross-CLI decoder unit tests; its fixtures/{hooks,jsonl}/ are
 │   │                    hand-built decoder inputs, NOT captures (`capture_dirs()` skips it)

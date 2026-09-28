@@ -843,8 +843,9 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     let Some((w, h)) = art_size(pack, sprite) else {
         return;
     };
-    // Centred across the room, its top one row under the room's wall;
-    // `paint_prop` takes a centre.
+    // Centred across the room, one row clear of its north wall; the classic
+    // painter centres it on the Pantry waypoint instead. `paint_prop` takes a
+    // centre.
     let at = crate::layout::Point {
         x: pantry.bounds.x + pantry.bounds.width.saturating_sub(w) / 2 + w / 2,
         y: pantry.bounds.y + ROOM_WALL_PX + 1 + h / 2,

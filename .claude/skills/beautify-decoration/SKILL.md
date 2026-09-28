@@ -62,10 +62,10 @@ Pantry-specific threshold: the large `pantry` counter needs the left column to f
 
 ### 3. Resolution budget
 
-- A terminal cell shows one pixel column and two pixel rows (half-block ▀): a sprite is as many cells wide as it has pixels, and half as many tall.
+- A terminal cell shows one pixel column and two pixel rows (half-block ▀): a 1x sprite is as many cells wide as it has pixels, and half as many tall.
 - Subzones smaller than **~5 display cells wide** blur into pixel noise — users can't read them.
 - Sub-pixel detail (a 1-cell handle, a 1-cell stripe) is invisible. Iterate on **silhouette + color identity**, not pixel polish.
-- Budget subzones against the sprite's width in cells: a 32×10 sprite is 32 cells wide, room for about six ~5-cell zones. Drop items; don't shrink them.
+- Budget subzones against the sprite's width in cells: the pantry's 32-wide counter read at three zones (8/10/10), not six. Drop items; don't shrink them.
 
 ### 4. Identity mistakes that look identical to each other
 
@@ -103,7 +103,7 @@ You **must** run this checklist explicitly before each `SendUserFile` in a beaut
 |---|---|
 | Stranger-ID | If a stranger saw this with no context, would they identify each new element as the intended thing? Name each element explicitly. |
 | Visually differs | Diff is noticeable, not a sub-pixel tweak. If hash-identical to last attempt, you didn't actually rebuild. |
-| Subzone width | Each new sub-element ≥ 5 **display** cells wide (horizontal cells = buffer px; vertical cells = buffer px / 2 due to half-block). |
+| Subzone width | Each new sub-element ≥ 5 **display** cells wide (§3). |
 | Color distinctness | New elements use colors distinct from immediate neighbours. |
 | `cargo test` | Connectivity test passes (`cargo test --workspace`, or `just test`). |
 | `--debug-walkable` | Rendered the overlay and visually checked no narrow / isolated walkable pockets near the new element. |
@@ -129,7 +129,7 @@ What we did: replaced the 20×8 pantry counter with a 32×10 design through 8 it
 - **v1–v3**: Too crowded, 6 zones × 3 cells each = unreadable.
 - **v4**: Simplified to 3 zones (fridge / coffee / microwave-snacks) at 8/10/10 cells.
 - **v5–v6**: Tried adding detail (handle pairs, dividers). User said "no difference between v5/v6" — too subtle to read at scale.
-- **v7**: Discovered `cargo build --workspace` was not rebuilding the snapshot example, so v6 was never actually rendered. Fixed by adding build.rs.
+- **v7**: Discovered `cargo build --workspace` was not rebuilding the snapshot example, so v6 was never actually rendered. Fixed by rebuilding the example explicitly (step 2).
 - **v8**: Color-coded for identity — solid WHITE fridge vs. dark coffee + dark microwave. Strong silhouette differentiation. (Honest self-critique: still looks washing-machine-y due to H-frame.)
 
-Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **keep the default 192-column snapshot for the large variant**.
+Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **keep the default snapshot size for the large variant**.
