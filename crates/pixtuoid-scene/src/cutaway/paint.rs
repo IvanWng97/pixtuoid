@@ -528,9 +528,8 @@ enum PieceKind {
         idx: usize,
         /// A back-turned sitter's chair, painted straight after them.
         chair: Option<crate::layout::Point>,
-        /// The logical row their badge must stay above: the top of the desk art
-        /// behind a sitter, which a back-turned one's raised monitor lifts above
-        /// their head.
+        /// The logical row their badge must stay above: the top of their desk's
+        /// art.
         badge_ceiling: Option<u16>,
     },
 }
@@ -1427,10 +1426,14 @@ mod tests {
         assert_ne!(lit.as_slice(), anim.frames()[0].as_slice());
     }
 
-    /// The bundled office with one editing agent homed at its first back-turned
-    /// desk, observed through the real sim every tick of their walk there: the
-    /// frames up to and including the first where they sit, and that desk.
-    fn sit_down() -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
+    /// The bundled office with one editing agent homed at its first desk facing
+    /// `facing`, observed through the real sim every tick of their walk there:
+    /// the frames up to the first where they sit, then `seated_ticks` more, and
+    /// that desk.
+    fn sit_down(
+        facing: crate::layout::Facing,
+        seated_ticks: usize,
+    ) -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
         use crate::floor::{FloorMeta, FloorSession};
         use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, ToolKind};
         use std::time::{Duration, SystemTime};
@@ -1439,9 +1442,9 @@ mod tests {
         let meta = FloorMeta::ground();
         let layout = Layout::compute_with_seed(LOGICAL.0, LOGICAL.1, None, meta.floor_seed)
             .expect("lays out");
-        let north = (0..layout.home_desks.len())
-            .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == crate::layout::Facing::North)
-            .expect("the office has a back-turned desk");
+        let home = (0..layout.home_desks.len())
+            .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == facing)
+            .expect("the office has a desk facing that way");
         let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
         let id = pixtuoid_core::AgentId::from_transcript_path("/cutaway/sit.jsonl");
         let mut scene = pixtuoid_core::SceneState::uniform(16);
@@ -1463,7 +1466,7 @@ mod tests {
                 last_event_at: now0,
                 exiting_at: None,
                 pending_idle_at: None,
-                desk_index: pixtuoid_core::GlobalDeskIndex(north),
+                desk_index: pixtuoid_core::GlobalDeskIndex(home),
                 floor_idx: 0,
                 tool_call_count: 0,
                 active_ms: 0,
@@ -1478,6 +1481,7 @@ mod tests {
         );
         let mut session = FloorSession::new();
         let mut frames = Vec::new();
+        let mut seated_at = None;
         for n in 1..=1200u64 {
             let frame = session
                 .observe(
@@ -1489,14 +1493,18 @@ mod tests {
                     now0 + Duration::from_millis(100 * n),
                 )
                 .expect("lays out");
-            let seated = frame
-                .seated_agents
-                .get(&FloorLocalDeskIndex(north))
-                .copied()
-                .unwrap_or(false);
+            if seated_at.is_none()
+                && frame
+                    .seated_agents
+                    .get(&FloorLocalDeskIndex(home))
+                    .copied()
+                    .unwrap_or(false)
+            {
+                seated_at = Some(frames.len());
+            }
             frames.push(frame);
-            if seated {
-                let desk = layout.home_desks[north];
+            if seated_at.is_some_and(|at| frames.len() > at + seated_ticks) {
+                let desk = layout.home_desks[home];
                 return (layout, pack, frames, desk);
             }
         }
@@ -1507,7 +1515,7 @@ mod tests {
     /// drawn through the real render, it lands above the desk art's top.
     #[test]
     fn a_back_turned_sitters_badge_clears_their_raised_monitor() {
-        let (layout, pack, frames, desk) = sit_down();
+        let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 0);
         let seated = frames.last().expect("a seated frame");
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let scale = RenderScale::new(4).expect("nonzero");
@@ -1542,7 +1550,7 @@ mod tests {
     /// lacks carries nothing, so their desk still stands its own chair.
     #[test]
     fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
-        let (layout, pack, frames, desk) = sit_down();
+        let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::North, 0);
         let seated = frames.last().expect("a seated frame");
         let mut order = Vec::new();
         assert_eq!(
@@ -1615,21 +1623,24 @@ mod tests {
         Some(pos(chair)? > pos(person)?)
     }
 
-    /// The chair draws over its occupant the whole way from the aisle into the
-    /// seat, as in the classic painter: were it keyed on the walker's drawn box,
-    /// it would sort behind them through the sit arc and jump in front the frame
-    /// they sat.
+    /// The chair draws over its occupant through the settle arc — every frame
+    /// the sim keys them at their seat — as in the classic painter: keyed on its
+    /// own box, it would sort behind them until they sat and jump in front the
+    /// frame they did.
     #[test]
-    fn a_chair_keeps_its_order_to_its_sitter_through_the_sit_down() {
-        let (layout, pack, frames, desk) = sit_down();
+    fn a_chair_keeps_its_order_to_its_sitter_through_the_settle() {
+        use crate::layout::Facing;
+        let (layout, pack, frames, desk) = sit_down(Facing::North, 0);
+        let seat_key = crate::pixel_painter::desk_chair_z_key(desk, Facing::North);
         let orders: Vec<(usize, bool)> = frames
             .iter()
             .enumerate()
+            .filter(|(_, f)| f.characters.first().is_some_and(|c| c.anchor_y == seat_key))
             .filter_map(|(n, f)| chair_over_person(f, &layout, &pack, desk).map(|o| (n, o)))
             .collect();
         assert!(
             orders.len() > 1,
-            "the walker never overlapped the chair before sitting"
+            "the sitter was never keyed at their seat before sitting"
         );
         assert!(
             orders.iter().all(|&(_, over)| over),
@@ -1639,6 +1650,37 @@ mod tests {
                 .filter(|(_, o)| !o)
                 .map(|(n, _)| n)
                 .collect::<Vec<_>>()
+        );
+    }
+
+    /// A person sorts on the sim's own key, so a viewer-facing sitter's depth
+    /// holds while their breath moves their drawn box.
+    #[test]
+    fn a_sitters_depth_holds_through_their_breath() {
+        let (layout, pack, frames, desk) = sit_down(crate::layout::Facing::South, 60);
+        let (mut depths, mut tops) = (
+            std::collections::BTreeSet::new(),
+            std::collections::BTreeSet::new(),
+        );
+        for frame in frames.iter().filter(|f| {
+            f.characters
+                .first()
+                .is_some_and(|c| c.seat_desk == Some(desk))
+        }) {
+            let mut order = Vec::new();
+            push_characters(frame, &layout, &pack, &mut order);
+            let (span, _) = order.first().expect("the sitter is drawn");
+            depths.insert(span.y1);
+            tops.insert(span.y0);
+        }
+        assert!(
+            tops.len() > 1,
+            "the sitter never breathed, so this pins nothing: {tops:?}"
+        );
+        assert_eq!(
+            depths.len(),
+            1,
+            "their depth moved with their breath: {depths:?}"
         );
     }
 
