@@ -438,7 +438,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 // `.filter` keeps the pet arm a single branch, so a
                 // present-but-not-hit pet falls through to the next arm.
                 // Coffee before pet here must match the click arms in
-                // `tui::run_tui`; the agent-wins half above needs no such care,
+                // `tui::handle_mouse_event`; the agent-wins half above needs no such care,
                 // `hovered.is_none()` skips this block outright.
                 let pet_hit = ctx
                     .last_pet_pos
@@ -465,7 +465,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         actual_scene,
                         theme,
                     );
-                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, mx, my) {
+                } else if let Some(m) = topmost_mascot_at(&ctx.last_mascots, cell) {
                     paint_mascot_tooltip(
                         f,
                         m.name,
@@ -602,12 +602,11 @@ pub(crate) fn apply_dim(buf: &mut RgbBuffer, factor: f32) {
 /// earliest in the roster, regardless of which lobster was visible.
 fn topmost_mascot_at(
     mascots: &[pixtuoid_scene::pixel_painter::MascotFrame],
-    mx: u16,
-    my: u16,
+    cell: CellArea,
 ) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
     mascots
         .iter()
-        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, CellArea::half_block(mx, my)))
+        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, cell))
         .max_by_key(|m| m.pos.y)
 }
 
@@ -629,13 +628,12 @@ mod tests {
             degraded: false,
             active_sessions: 0,
         };
-        // `hit_test_mascot` centres the 14x12 box on `pos`, and a cell hits it when
-        // either of its half-block rows does: 18789 covers x[33,47) my[22,28) and
+        // `hit_test_mascot` centres the 14x12 box on `pos`: 18789 covers x[33,47) my[22,28) and
         // 19789 x[37,51) my[25,31) — overlapping at x[37,47) my[25,28), with 19789
         // lower and so painted last.
         let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
         let hit = |mx, my| {
-            topmost_mascot_at(&mascots, mx, my)
+            topmost_mascot_at(&mascots, CellArea::half_block(mx, my))
                 .and_then(|m| m.instance.clone())
                 .unwrap_or_else(|| "none".into())
         };
@@ -646,7 +644,7 @@ mod tests {
         assert_eq!(hit(5, 5), "none");
         let reversed = vec![frame("19789", 44, 56), frame("18789", 40, 50)];
         assert_eq!(
-            topmost_mascot_at(&reversed, 40, 26)
+            topmost_mascot_at(&reversed, CellArea::half_block(40, 26))
                 .and_then(|m| m.instance.clone())
                 .as_deref(),
             Some("19789"),
@@ -757,6 +755,50 @@ mod tests {
     }
 
     const HALF_BLOCK: &str = "\u{2580}";
+
+    /// The flush and [`CellArea::half_block`] are two copies of one mapping:
+    /// the pixels a cell's half-blocks carry are exactly the ones its area
+    /// covers.
+    #[test]
+    fn a_cells_area_is_the_pixels_its_half_blocks_carry() {
+        use pixtuoid_scene::layout::Point;
+        let (w, h) = (4u16, 6u16);
+        let mut buf = RgbBuffer::filled(w, h, rgb(0, 0, 0));
+        for (i, px) in buf.as_mut_slice().iter_mut().enumerate() {
+            *px = rgb((i % usize::from(w)) as u8, (i / usize::from(w)) as u8, 1);
+        }
+        let mut term =
+            Terminal::new(ratatui::backend::TestBackend::new(w, h / 2)).expect("test backend");
+        let rect = Rect {
+            x: 0,
+            y: 0,
+            width: w,
+            height: h / 2,
+        };
+        term.draw(|f| flush_buffer_to_term_at_offset(f, &buf, rect, 0))
+            .expect("draw");
+        let shows = |area: CellArea, x: u16, y: u16| area.overlaps(Point { x, y }, 1, 1);
+        for row in 0..h / 2 {
+            for col in 0..w {
+                let cell = term.backend().buffer().cell((col, row)).expect("cell");
+                let area = CellArea::half_block(col, row);
+                for color in [cell.fg, cell.bg] {
+                    let Color::Rgb(x, y, _) = color else {
+                        panic!("cell ({col},{row}) carries {color:?}");
+                    };
+                    assert!(
+                        shows(area, x.into(), y.into()),
+                        "cell ({col},{row}) carries ({x},{y})"
+                    );
+                }
+                let covered = (0..h)
+                    .flat_map(|y| (0..w).map(move |x| (x, y)))
+                    .filter(|&(x, y)| shows(area, x, y))
+                    .count();
+                assert_eq!(covered, 2, "cell ({col},{row}) covers its two half-blocks");
+            }
+        }
+    }
 
     #[test]
     fn flush_skips_columns_past_scene_right_edge() {

@@ -3,10 +3,6 @@
 use pixtuoid_scene::layout::Point;
 
 /// The office pixels one terminal cell shows, inclusive on both ends.
-///
-/// Hit tests ask whether a cell shows ANY pixel of a box, so a box whose edge
-/// falls inside a cell is hit from that cell — the half of the cell that shows
-/// the box is on screen, whichever half it is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct CellArea {
     x0: u16,
@@ -16,8 +12,9 @@ pub(crate) struct CellArea {
 }
 
 impl CellArea {
-    /// Under the half-block flush (`renderer::draw_scene`) a cell shows one
-    /// pixel column and two rows: its upper half and its lower half.
+    /// Under the half-block flush (`renderer::flush_buffer_to_term_at_offset`,
+    /// from `renderer::scene_rect`'s origin) a cell shows one pixel column and
+    /// two rows: its upper half and its lower half.
     pub(crate) fn half_block(col: u16, row: u16) -> Self {
         let y0 = row.saturating_mul(2);
         Self {
@@ -29,7 +26,8 @@ impl CellArea {
     }
 
     /// Whether this cell shows any pixel of the `w`×`h` box whose top-left is
-    /// `tl`. An empty box shows nowhere.
+    /// `tl`, so a box whose edge falls inside the cell is hit from it, whichever
+    /// part of the cell shows it. An empty box shows nowhere.
     pub(crate) fn overlaps(self, tl: Point, w: u16, h: u16) -> bool {
         // u32: a box's exclusive end can lie one past `u16::MAX`.
         let (end_x, end_y) = (

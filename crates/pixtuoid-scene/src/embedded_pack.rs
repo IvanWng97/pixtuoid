@@ -514,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn character_sprite_w_matches_the_embedded_pack() {
+    fn character_sprite_size_matches_the_embedded_pack() {
         let pack = test_default_pack();
         let frame = pack
             .animation("standing")
@@ -532,7 +532,7 @@ mod tests {
             h,
             crate::layout::CHARACTER_SPRITE_H,
             "embedded 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H is {} — \
-             update the const so the hit-test box tracks the pack",
+             update the const so the hit-test box and the painter's fallback track the pack",
             crate::layout::CHARACTER_SPRITE_H
         );
     }

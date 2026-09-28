@@ -1,7 +1,7 @@
 pub mod connection;
 pub mod dashboard;
 pub(crate) mod geometry;
-pub mod hit_test;
+pub(crate) mod hit_test;
 pub mod renderer;
 pub mod tui_renderer;
 mod ui_state;

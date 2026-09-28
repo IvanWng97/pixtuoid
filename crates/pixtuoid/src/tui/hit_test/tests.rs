@@ -180,14 +180,20 @@ fn furniture_hit_test_respects_floor_seed() {
 #[test]
 fn cat_hit_test_inside_sit_sprite() {
     use pixtuoid_scene::layout::Point;
-    // cat_sit is 6x6 centred at (50,80) → x[47..53), y[77..83); my=39 doubles to 78.
+    // cat_sit's `PetKind::hitbox` centred at (50,80) spans x[47..53), y[77..83):
+    // cell 39 shows rows 78–79, and cell 38 shows row 77 in its lower half.
     let pos = Point { x: 50, y: 80 };
-    assert!(hit_test_pet(
-        PetKind::Cat,
-        pos,
-        "cat_sit",
-        crate::tui::geometry::CellArea::half_block(50, 39)
-    ));
+    for row in [38, 39] {
+        assert!(
+            hit_test_pet(
+                PetKind::Cat,
+                pos,
+                "cat_sit",
+                crate::tui::geometry::CellArea::half_block(50, row)
+            ),
+            "cell row {row}"
+        );
+    }
 }
 
 #[test]
@@ -205,7 +211,8 @@ fn cat_hit_test_outside_returns_false() {
 #[test]
 fn mascot_hit_test_inside_and_outside() {
     use pixtuoid_scene::layout::Point;
-    // The 14x12 sprite centred at (50,80) spans x[43..57), y[74..86); my=39 → 78.
+    // The 14x12 sprite centred at (50,80) spans x[43..57), y[74..86); cell 39
+    // shows rows 78–79.
     let pos = Point { x: 50, y: 80 };
     assert!(hit_test_mascot(
         pos,
@@ -255,12 +262,26 @@ fn scene_with_agent_at_desk(desk_index: usize) -> (SceneState, AgentId) {
     (scene, id)
 }
 
-// The click-to-pin box must cover EXACTLY the cells the painter blits the seated
-// sprite into. The oracle is `character_anchor` — the same anchor the hover
-// tooltip and the sprite blit use — so hover and click cannot disagree.
+// Hover (`hit_test_agent`) and the harness's seated locator (`hit_test_from_tui`)
+// must hit EXACTLY the cells that show the sprite `character_anchor` places.
+// 160x200 seats its sitters on even rows; 120x90 on odd ones, where the
+// sprite's last cell shows it only in its upper half.
 #[test]
-fn from_tui_pin_box_matches_the_painted_seated_anchor() {
-    let layout = Layout::compute(160, 200, Some(4)).expect("layout");
+fn an_agent_is_hit_from_exactly_the_cells_that_show_it() {
+    let even = seated_anchor_hits_its_covering_cells(160, 200, Some(4));
+    assert_eq!(even.y % 2, 0, "160x200 must keep an even seated anchor");
+    let odd = seated_anchor_hits_its_covering_cells(120, 90, None);
+    assert_eq!(odd.y % 2, 1, "120x90 must keep an odd seated anchor");
+}
+
+/// Assert both agent hit tests hit every cell that shows desk 0's seated
+/// sprite at `w`×`h`, and none beside it; returns the anchor.
+fn seated_anchor_hits_its_covering_cells(
+    w: u16,
+    h: u16,
+    max_desks: Option<usize>,
+) -> pixtuoid_scene::layout::Point {
+    let layout = Layout::compute(w, h, max_desks).expect("layout");
     let (mut scene, id) = scene_with_agent_at_desk(0);
     // A recent last_event_at keeps the wander machine in its Seated phase;
     // the pose derives as seated either way for an Idle agent at bootstrap.
@@ -282,35 +303,39 @@ fn from_tui_pin_box_matches_the_painted_seated_anchor() {
         .expect("a seated agent has a painted anchor");
 
     let (cols, rows) = covering_cells(anchor);
-    let pin = |col, row| {
-        hit_test_from_tui(
-            &scene,
-            &layout,
-            crate::tui::geometry::CellArea::half_block(col, row),
-        )
+    let mut hits = |col, row| {
+        let cell = crate::tui::geometry::CellArea::half_block(col, row);
+        let hover = hit_test_agent(&scene, &layout, now, &mut rctx, cell);
+        let pin = hit_test_from_tui(&scene, &layout, cell);
+        assert_eq!(
+            hover, pin,
+            "hover and the locator disagree at ({col},{row})"
+        );
+        pin
     };
     for row in rows.clone() {
         for col in cols.clone() {
             assert_eq!(
-                pin(col, row),
+                hits(col, row),
                 Some(id),
-                "cell ({col},{row}) shows the sprite"
+                "{w}x{h}: cell ({col},{row}) shows the sprite"
             );
         }
     }
     let (row, col) = (*rows.start(), cols.start);
     assert_eq!(
-        pin(cols.start.wrapping_sub(1), row),
+        hits(cols.start.wrapping_sub(1), row),
         None,
         "west of the sprite"
     );
-    assert_eq!(pin(cols.end, row), None, "east of the sprite");
+    assert_eq!(hits(cols.end, row), None, "east of the sprite");
     assert_eq!(
-        pin(col, rows.start().wrapping_sub(1)),
+        hits(col, rows.start().wrapping_sub(1)),
         None,
         "north of the sprite"
     );
-    assert_eq!(pin(col, rows.end() + 1), None, "south of the sprite");
+    assert_eq!(hits(col, rows.end() + 1), None, "south of the sprite");
+    anchor
 }
 
 /// The terminal cells that show some pixel of a seated sprite whose top-left
@@ -434,8 +459,8 @@ fn furniture_hit_test_bulletin_board_via_synthetic_wall_decor() {
 #[test]
 fn cat_hit_test_sleep_smaller_box() {
     use pixtuoid_scene::layout::Point;
-    // cat_sleep is 6x4 centred at (50,80) → y[78..82): my=41 doubles to 82 (out),
-    // my=40 to 80 (in).
+    // cat_sleep's hitbox centred at (50,80) spans y[78..82): cell 41 shows rows
+    // 82–83 (out), cell 40 rows 80–81 (in).
     let pos = Point { x: 50, y: 80 };
     assert!(!hit_test_pet(
         PetKind::Cat,
@@ -665,13 +690,14 @@ fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
         .expect("192x160 places the snack shelf");
     let vis =
         pixtuoid_scene::layout::furniture_def(pixtuoid_scene::layout::Furniture::SnackShelf).visual;
-    // div_ceil: hit_test doubles the cell row back to buffer px, so an odd
-    // top edge must probe the cell whose pixel pair falls INSIDE the box.
     let top_y = shelf.y.saturating_sub(vis.h / 2);
+    assert_eq!(top_y % 2, 1, "192x160 must keep the shelf's top edge odd");
+    // `top_y / 2` holds the shelf's top row; on an odd edge only its lower half
+    // shows it.
     assert_eq!(
         hit_test_furniture(
             &layout,
-            crate::tui::geometry::CellArea::half_block(shelf.x, top_y.div_ceil(2))
+            crate::tui::geometry::CellArea::half_block(shelf.x, top_y / 2)
         ),
         Some("Snack Shelf"),
         "top shelf row hovers"

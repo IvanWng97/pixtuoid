@@ -6,13 +6,14 @@ use std::time::SystemTime;
 use pixtuoid_core::{AgentId, SceneState};
 
 use pixtuoid_scene::layout::{anchored_top_left, Anchor, Bounds, Layout, Point, Size};
-
-use crate::tui::geometry::CellArea;
 use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::character_anchor;
 use pixtuoid_scene::pose;
 
-/// The size of an agent's hover box.
+use crate::tui::geometry::CellArea;
+
+/// Hover and click box: the default sprite `character_anchor` places, not a
+/// custom pack's frame.
 const AGENT_BOX: Size = Size {
     w: pixtuoid_scene::layout::CHARACTER_SPRITE_W,
     h: pixtuoid_scene::layout::CHARACTER_SPRITE_H,

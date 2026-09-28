@@ -6,7 +6,6 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
     let mut r = build(120, 44, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
     let layout = r.cached_layout().expect("layout");
-    // hit_test_furniture takes (pixel_x, cell_y) and doubles y internally.
     let desk = layout.home_desks[0];
     let hit = crate::tui::hit_test::hit_test_furniture(
         layout,
@@ -208,14 +207,11 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
 fn hovering_an_agent_marks_its_label() {
     let mut s = idle("/hov/0.jsonl", 0, t0() - Duration::from_secs(300));
     s.label = "HOVERME".into();
+    let id = s.agent_id;
     let scene = scene_with(vec![s], 16);
     let mut r = build(140, 48, vec![]);
     r.render(&scene, &pack(), t0()).unwrap();
-    // A long-idle agent at its home desk; mirror hit_test_from_tui's anchor.
-    let desk = r.cached_layout().expect("layout").home_desks[0];
-    let cell_x = desk.x + 2;
-    let cell_y = desk.y.saturating_sub(4) / 2 + 1;
-    r.set_mouse_pos(Some((cell_x, cell_y)));
+    hover_agent(&mut r, &scene, id, 140, 48);
     r.render(&scene, &pack(), t0()).unwrap();
     let text = frame_text(r.frame_buffer());
     assert!(

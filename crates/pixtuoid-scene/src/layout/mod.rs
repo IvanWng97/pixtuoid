@@ -269,10 +269,10 @@ pub(crate) const DESK_FOOT_H: u16 = 2;
 /// pass the pack's REAL `frame.width`; this is the width-unknown fallback.
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
-/// Default character sprite height in buffer PIXELS — the painter's
-/// fallback where a custom pack's real frame isn't available, and the
-/// binary's agent hover box; the pose offsets are a SEPARATE vertical-anchor
-/// concern.
+/// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
+/// height `character_anchor` clamps by and hit tests size by, and the fallback
+/// where a custom pack's real frame isn't threaded. The pose offsets are a
+/// SEPARATE vertical-anchor concern.
 pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's
 /// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
