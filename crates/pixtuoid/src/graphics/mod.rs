@@ -21,8 +21,8 @@ mod probe;
 pub(crate) use probe::probe;
 
 /// How long the capability query may take: start to finish on Unix, where
-/// [`probe`] reads the reply itself; between reads on Windows, whose upstream
-/// probe restarts the clock on each one (`picker.rs:615`).
+/// [`probe()`] reads the reply itself; between reads on Windows, whose upstream
+/// probe restarts the clock on each one (ratatui-image 11.0.8 `picker.rs:615`).
 ///
 /// The query ends with a device-status request (ratatui-image 11.0.8
 /// `cap_parser.rs:132-134`), so a terminal that answers ends the wait the
@@ -35,7 +35,7 @@ pub(crate) const GRAPHICS_PROBE_TIMEOUT: std::time::Duration = std::time::Durati
 
 /// A graphics protocol the terminal speaks and the cutaway can be handed over.
 ///
-/// Built only by the `graphics`-feature [`probe`]; a build without it still
+/// Built only by the `graphics`-feature [`probe()`]; a build without it still
 /// names every protocol, so the plan is one type in both.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
@@ -97,7 +97,9 @@ pub(crate) enum ClassicReason {
     NotQueried,
     /// The terminal was asked and its reply never completed.
     NoAnswer,
-    /// The terminal answered, and it has no graphics protocol.
+    /// The terminal answered, and it has no graphics protocol — or, off Unix,
+    /// never answered: upstream's probe there folds a silence into no protocol
+    /// (see [`probe()`]).
     NoProtocol,
     /// Inside tmux with `allow-passthrough` off: no image, and no query for
     /// one, reaches the terminal (tmux(1), `allow-passthrough`).
@@ -169,15 +171,18 @@ pub(crate) struct Detected {
 /// The outcome of asking the terminal — [`resolve`]'s input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Probe {
-    /// The terminal answered.
+    /// What the terminal's answer and the environment established — the
+    /// environment alone where the terminal never answered but names a
+    /// protocol, as upstream falls back (see [`probe()`]).
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
-    Answered(Detected),
-    /// Nothing was asked: the caller said not to, or there is no controlling
-    /// terminal to ask.
+    Detected(Detected),
+    /// The terminal was never asked: the caller said not to, or no controlling
+    /// terminal took the query.
     #[cfg_attr(not(feature = "graphics"), allow(dead_code))]
     NotQueried,
-    /// The terminal was asked and its reply never completed. Only the Unix
-    /// probe can tell (see `probe`).
+    /// The terminal was asked, its reply never completed, and the environment
+    /// names no protocol to fall back on. Only the Unix probe can tell (see
+    /// [`probe()`]).
     #[cfg_attr(not(all(feature = "graphics", unix)), allow(dead_code))]
     NoAnswer,
     /// Inside tmux with `allow-passthrough` off, so nothing was asked.
@@ -221,7 +226,7 @@ pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option
         .map(|(_, scale)| scale)
 }
 
-/// Decide what to paint. Pure — [`probe`] supplies the probe, and `densities`
+/// Decide what to paint. Pure — [`probe()`] supplies the probe, and `densities`
 /// are the pack's [`Pack::density_variants`](pixtuoid_core::sprite::format::Pack::density_variants).
 pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Plan {
     let classic = |reason| Plan::Classic { reason };
@@ -229,7 +234,7 @@ pub(crate) fn resolve(mode: GraphicsMode, probe: Probe, densities: &[u16]) -> Pl
         return classic(ClassicReason::Disabled);
     }
     let d = match probe {
-        Probe::Answered(d) => d,
+        Probe::Detected(d) => d,
         Probe::NotQueried => return classic(ClassicReason::NotQueried),
         Probe::NoAnswer => return classic(ClassicReason::NoAnswer),
         Probe::TmuxPassthroughOff => return classic(ClassicReason::TmuxPassthroughOff),
@@ -276,9 +281,12 @@ impl ClassicReason {
                  terminal to see what it supports"
                 .to_string(),
             Self::NoAnswer => "the terminal did not answer the capability query".to_string(),
-            Self::NoProtocol => {
+            Self::NoProtocol if cfg!(unix) => {
                 "terminal reports no graphics protocol (kitty/iterm2/sixel)".to_string()
             }
+            Self::NoProtocol => "terminal reports no graphics protocol (kitty/iterm2/sixel), \
+                 or did not answer the capability query"
+                .to_string(),
             Self::TmuxPassthroughOff => "inside tmux with allow-passthrough off — \
                  `set -g allow-passthrough on` lets kitty graphics through"
                 .to_string(),
@@ -355,7 +363,7 @@ mod tests {
     const BUNDLED: &[u16] = &[8];
 
     fn answered(protocol: Option<ImageProtocol>, cell: CellSize, tmux: bool) -> Probe {
-        Probe::Answered(Detected {
+        Probe::Detected(Detected {
             protocol,
             cell: Some(cell),
             tmux,
@@ -517,7 +525,7 @@ mod tests {
             ),
             (Probe::Unsupported, BASE_ONLY, ClassicReason::Unsupported),
             (
-                Probe::Answered(Detected {
+                Probe::Detected(Detected {
                     protocol: Some(ImageProtocol::Kitty),
                     cell: None,
                     tmux: false,

@@ -25,6 +25,7 @@ struct EnvHints {
     wezterm: bool,
     konsole: bool,
     iterm_session: bool,
+    tmux_client: bool,
 }
 
 #[cfg(any(unix, test))]
@@ -39,11 +40,19 @@ impl EnvHints {
             wezterm: var("WEZTERM_EXECUTABLE").is_some(),
             konsole: var("KONSOLE_VERSION").is_some(),
             iterm_session: var("ITERM_SESSION_ID").is_some(),
+            tmux_client: var("TMUX").is_some(),
         }
     }
 
     fn tmux(&self) -> bool {
         in_tmux(self.term.as_deref(), self.term_program.as_deref())
+    }
+
+    /// Inside tmux AND a client of it (`$TMUX`): only then does a bare `tmux`
+    /// answer for the pane this process runs in. Without `$TMUX` — a tmux `TERM`
+    /// carried over ssh — it answers for whatever server this host runs.
+    fn our_tmux_pane(&self) -> bool {
+        self.tmux() && self.tmux_client
     }
 
     /// Protocols never asked for under WezTerm or Konsole: neither implements
@@ -57,10 +66,10 @@ impl EnvHints {
         }
     }
 
-    /// iTerm2 inline images, which no query reveals, guessed from the terminal
-    /// the environment names — inside tmux from the outer terminal's markers
-    /// (`picker.rs:336-347`), else from `TERM_PROGRAM`/`LC_TERMINAL`
-    /// (`picker.rs:351-369`).
+    /// iTerm2 inline images, which upstream's query does not ask about
+    /// (`cap_parser.rs:107-108`), guessed from the terminal the environment
+    /// names: inside tmux, the outer terminal's markers (`picker.rs:336-347`);
+    /// anywhere, `TERM_PROGRAM`/`LC_TERMINAL` (`picker.rs:351-369`).
     fn iterm2(&self) -> Option<ImageProtocol> {
         const ITERM2_TERM_PROGRAMS: [&str; 9] = [
             "iTerm",
@@ -87,16 +96,16 @@ impl EnvHints {
 }
 
 /// Inside tmux: `TERM` starting `tmux`, or `TERM_PROGRAM` = `tmux` — the test
-/// upstream applies before wrapping every image in passthrough
-/// (`picker.rs:320-326`), on every platform.
+/// upstream applies before wrapping every image in passthrough (ratatui-image
+/// 11.0.8 `picker.rs:320-326`), on every platform.
 fn in_tmux(term: Option<&str>, term_program: Option<&str>) -> bool {
     term.is_some_and(|t| t.starts_with("tmux")) || term_program == Some("tmux")
 }
 
 /// What the terminal's answer and the environment together say: kitty over
-/// SIXEL when it answers both (`picker.rs:523-533`), then the iTerm2 guess
-/// (`picker.rs:127-131`); the cell from its answer, else from the kernel's
-/// window size.
+/// SIXEL when it answers both (ratatui-image 11.0.8 `picker.rs:523-533`), then
+/// the iTerm2 guess (`picker.rs:127-131`); the cell from its answer, else from
+/// the kernel's window size.
 #[cfg(any(unix, test))]
 fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize>) -> Detected {
     let queried = if responses.contains(&Response::Kitty) {
@@ -117,6 +126,20 @@ fn detected(responses: &[Response], env: &EnvHints, window_cell: Option<CellSize
     }
 }
 
+/// A terminal whose reply never completed is still the protocol the
+/// environment names, as upstream falls back when its query goes unanswered
+/// (ratatui-image 11.0.8 `picker.rs:147-157`); with nothing named, it is
+/// [`Probe::NoAnswer`].
+#[cfg(any(unix, test))]
+fn unanswered(env: &EnvHints, window_cell: Option<CellSize>) -> Probe {
+    let d = detected(&[], env, window_cell);
+    if d.protocol.is_some() {
+        Probe::Detected(d)
+    } else {
+        Probe::NoAnswer
+    }
+}
+
 /// Feed one chunk of the reply to `parser`, collecting its responses; `true`
 /// once the device-status reply that ends the query has arrived.
 #[cfg(any(unix, test))]
@@ -133,7 +156,7 @@ fn take_reply(parser: &mut Parser, responses: &mut Vec<Response>, chunk: &[u8]) 
 }
 
 /// The most reply bytes read before a terminal that never sends the status
-/// reply is given up on — a capability reply is a few dozen bytes.
+/// reply is given up on.
 #[cfg(unix)]
 const MAX_REPLY_BYTES: usize = 4096;
 
@@ -144,11 +167,10 @@ const MAX_REPLY_BYTES: usize = 4096;
 /// and a visualiser that refuses to start because it could not ask a question
 /// would be worse than one that draws the plain office.
 ///
-/// Written and read on THIS thread through [`crate::term::query_tty`], so the
-/// wait is bounded by [`super::GRAPHICS_PROBE_TIMEOUT`] and the terminal's mode
-/// comes back on every path — not upstream's `Picker::from_query_stdio`, whose
-/// detached reader outlives its timeout (ratatui-image 11.0.8
-/// `picker.rs:584-622`). Nor does it change anything: inside tmux it reads
+/// Through [`crate::term::query_tty`], not upstream's
+/// `Picker::from_query_stdio`, whose detached reader outlives its timeout and
+/// restores the mode only once a reply lands (ratatui-image 11.0.8
+/// `picker.rs:584-622`); and read-only: inside tmux it reads
 /// `allow-passthrough` where upstream turns it on (`picker.rs:328-334`).
 #[cfg(unix)]
 pub(crate) fn probe(ask: bool) -> Probe {
@@ -156,12 +178,11 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     }
     let env = EnvHints::read();
-    let tmux = env.tmux();
-    if tmux && tmux_passthrough() == Some(false) {
+    if env.our_tmux_pane() && tmux_passthrough() == Some(false) {
         return Probe::TmuxPassthroughOff;
     }
     let query = Parser::query(
-        tmux,
+        env.tmux(),
         QueryStdioOptions {
             blacklist_protocols: env.blacklist(),
             ..QueryStdioOptions::default()
@@ -176,14 +197,14 @@ pub(crate) fn probe(ask: bool) -> Probe {
         |chunk| take_reply(&mut parser, &mut responses, chunk),
     ) {
         None => Probe::NotQueried,
-        Some(false) => Probe::NoAnswer,
-        Some(true) => Probe::Answered(detected(&responses, &env, window_cell())),
+        Some(false) => unanswered(&env, window_cell()),
+        Some(true) => Probe::Detected(detected(&responses, &env, window_cell())),
     }
 }
 
-/// The pane's `allow-passthrough`, inherited value included (tmux(1)
-/// `show-options -A`); `None` when tmux cannot say — a `TERM` carried over
-/// ssh from a tmux elsewhere names a server this host cannot reach.
+/// Our pane's `allow-passthrough`, inherited value included (tmux(1)
+/// `show-options -A`); `None` when tmux cannot say. Asked only where
+/// [`EnvHints::our_tmux_pane`] holds.
 #[cfg(unix)]
 fn tmux_passthrough() -> Option<bool> {
     let out = std::process::Command::new("tmux")
@@ -201,8 +222,8 @@ fn tmux_passthrough() -> Option<bool> {
     ))
 }
 
-/// A cell's size from the kernel's window size, for a terminal that answers
-/// the query but not the cell-size request.
+/// A cell's size from the kernel's window size, for a terminal that reports no
+/// cell size of its own.
 #[cfg(unix)]
 fn window_cell() -> Option<CellSize> {
     let size = crossterm::terminal::window_size().ok()?;
@@ -216,7 +237,11 @@ fn window_cell() -> Option<CellSize> {
 }
 
 /// Off Unix there is no controlling-terminal primitive yet, so the probe is
-/// upstream's, detached reader and all (see the Unix [`probe`]).
+/// upstream's, detached reader and tmux write included. Upstream answers a
+/// timeout with its fallback picker (ratatui-image 11.0.8 `picker.rs:147-157`),
+/// which without a window size — never one on Windows (`picker.rs:453-456`) —
+/// is halfblocks whatever the environment names, so a terminal that never
+/// answers arrives as [`Probe::Detected`] with no protocol.
 #[cfg(not(unix))]
 pub(crate) fn probe(ask: bool) -> Probe {
     use ratatui_image::picker::Picker;
@@ -232,7 +257,7 @@ pub(crate) fn probe(ask: bool) -> Probe {
         return Probe::NotQueried;
     };
     let font = picker.font_size();
-    Probe::Answered(Detected {
+    Probe::Detected(Detected {
         protocol: match picker.protocol_type() {
             ProtocolType::Kitty => Some(ImageProtocol::Kitty),
             ProtocolType::Sixel => Some(ImageProtocol::Sixel),
@@ -332,6 +357,43 @@ mod tests {
             ..env("xterm-ghostty", "ghostty")
         };
         assert_eq!(not_tmux.iterm2(), None);
+    }
+
+    /// A silent terminal is still the protocol the environment names; with
+    /// nothing named, the silence is the answer.
+    #[test]
+    fn a_silent_terminal_falls_back_to_the_protocol_the_environment_names() {
+        let window = Some(CellSize { w: 9, h: 18 });
+        assert_eq!(
+            unanswered(&env("xterm-256color", "iTerm.app"), window),
+            Probe::Detected(Detected {
+                protocol: Some(ImageProtocol::Iterm2),
+                cell: window,
+                tmux: false,
+            })
+        );
+        assert_eq!(
+            unanswered(&env("xterm-ghostty", "ghostty"), window),
+            Probe::NoAnswer
+        );
+    }
+
+    /// Only a tmux client's own pane is asked about: a tmux `TERM` without
+    /// `$TMUX` (carried over ssh) names no server this process runs in.
+    #[test]
+    fn passthrough_is_read_only_for_a_tmux_clients_own_pane() {
+        let carried = env("tmux-256color", "");
+        assert!(carried.tmux() && !carried.our_tmux_pane());
+        let client = EnvHints {
+            tmux_client: true,
+            ..carried
+        };
+        assert!(client.our_tmux_pane());
+        let outside = EnvHints {
+            tmux_client: true,
+            ..env("xterm-ghostty", "ghostty")
+        };
+        assert!(!outside.our_tmux_pane());
     }
 
     /// The same `TERM`/`TERM_PROGRAM` test ratatui-image applies.

@@ -723,9 +723,10 @@ impl Ink {
     }
 }
 
-/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): a piped `doctor > file`
-/// would emit escapes and block on an answer that cannot come. That gate is the same
-/// `color_preflight` the launcher acts on, so the row matches `run`. `--graphics off` skips
+/// DECRQSS only on a real tty and a non-dumb `$TERM` (`probe_ok`): the same
+/// `color_preflight` gate the launcher acts on, so the row matches `run`. Off Unix it also
+/// keeps the graphics probe, which is upstream's and writes its query to stdout, out of a
+/// piped `doctor > file`. `--graphics off` skips
 /// the graphics ask for a second reason — a terminal that stays silent spends
 /// `graphics::GRAPHICS_PROBE_TIMEOUT` on a fact the flag says not to use.
 fn probe_terminal_caps(

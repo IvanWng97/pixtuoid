@@ -195,10 +195,10 @@ pub fn query_truecolor(timeout: std::time::Duration) -> Option<bool> {
 }
 
 /// Write `query` to the controlling terminal and hand each chunk of its reply
-/// to `on_reply` until that returns `true`, `timeout` elapses, or `cap` bytes
-/// have arrived. `Some(true)` when `on_reply` saw the reply complete,
-/// `Some(false)` when the budget or the cap ran out first, `None` when there is
-/// no controlling terminal to ask.
+/// to `on_reply` until that returns `true`. `Some(true)` when it did;
+/// `Some(false)` when the reply never completed — `timeout` elapsed, more than
+/// `cap` bytes arrived, or the read failed; `None` when the terminal could not
+/// be opened, put in raw mode, or written to.
 ///
 /// The controlling terminal (`/dev/tty`), so a piped stdout never receives the
 /// escapes; in raw mode, so the reply isn't echoed and arrives un-buffered; and
@@ -260,8 +260,8 @@ impl Drop for TermiosRestore {
     }
 }
 
-/// Per-`read` chunk — a terminal's reply to a capability query is a few dozen
-/// bytes, so one small chunk usually drains it in a single syscall.
+/// Per-`read` chunk: a longer reply arrives over several reads, within the one
+/// budget.
 #[cfg(unix)]
 const TTY_READ_CHUNK: usize = 64;
 /// Hard cap on the DECRQSS reply before giving up — the bound just stops a
@@ -284,7 +284,7 @@ fn read_reply(
     // `FD_SET` on an fd >= FD_SETSIZE writes outside the fd_set's bit array (UB),
     // so the soundness of the unsafe block below rests on this structural guard
     // rather than a prose claim (a negative fd wraps past FD_SETSIZE via the cast
-    // and is caught too). No reply reads as "no confirmation".
+    // and is caught too). Unread, the reply never completes.
     if fd as usize >= libc::FD_SETSIZE {
         return false;
     }
@@ -302,9 +302,8 @@ fn read_reply(
             tv_usec: remaining.subsec_micros() as libc::suseconds_t,
         };
         // `select`, NOT `poll`: macOS `poll()` is broken on tty/pty devices and
-        // returns `POLLNVAL` for a valid terminal fd, which would make every
-        // non-`$COLORTERM` terminal read nothing and falsely warn. `select` works
-        // on ttys on both macOS and Linux.
+        // returns `POLLNVAL` for a valid terminal fd, so no query would ever read
+        // a reply. `select` works on ttys on both macOS and Linux.
         // SAFETY: a zeroed `fd_set` with our single valid fd registered; the fd
         // is < FD_SETSIZE by the structural guard at the top of this fn.
         let mut rfds: libc::fd_set = unsafe { std::mem::zeroed() };
@@ -321,7 +320,8 @@ fn read_reply(
         };
         if ready < 0 {
             // A signal (e.g. SIGWINCH at startup) interrupted the wait — retry
-            // within the remaining budget rather than give up to a false warn.
+            // within the remaining budget rather than give up on a reply still
+            // coming.
             if std::io::Error::last_os_error().kind() == std::io::ErrorKind::Interrupted {
                 continue;
             }
