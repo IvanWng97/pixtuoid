@@ -200,11 +200,13 @@ const SUN_SET_H: f32 = 20.0;
 /// the `city_bounce` floor) still stays dimmer than a stormy solar noon; see
 /// `solar_noon_outshines_the_brightest_night`.
 const MOON_PEAK_LUM: f32 = 0.12;
-/// The mean synodic month, in days (en.wikipedia.org/wiki/Lunar_month).
+/// The mean synodic month: NASA GSFC, "Phases of the Moon 2001 to 2100"
+/// (<https://eclipse.gsfc.nasa.gov/phase/phases2001.html>).
 const SYNODIC_DAYS: f32 = 29.530_588;
-/// The new moon of 2019-11-26 15:06 UT, in unix days: NASA GSFC, "Phases of
-/// the Moon 2001 to 2100" (eclipse.gsfc.nasa.gov/phase/phases2001.html).
-const NEW_MOON_EPOCH_UNIX_DAYS: f32 = 18_226.629;
+/// The MEAN new moon of 2019-11-27 02:56 TT, in unix days (Meeus, *Astronomical
+/// Algorithms*, eq. 49.1, k = 246): a true new moon would carry its own
+/// lunation's offset from the mean into every phase.
+const NEW_MOON_EPOCH_UNIX_DAYS: f32 = 18_227.123;
 
 fn arc_progress(h: f32, rise: f32, set: f32) -> f32 {
     ((h - rise) / (set - rise)).clamp(0.0, 1.0)
