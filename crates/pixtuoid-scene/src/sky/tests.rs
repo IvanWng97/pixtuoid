@@ -351,3 +351,79 @@ fn solar_noon_outshines_the_brightest_night() {
         );
     }
 }
+
+/// `y-mo-d h:mi` UTC.
+fn utc(y: i32, mo: u32, d: u32, h: u32, mi: u32) -> SystemTime {
+    let secs = chrono::NaiveDate::from_ymd_opt(y, mo, d)
+        .and_then(|date| date.and_hms_opt(h, mi, 0))
+        .expect("a valid instant")
+        .and_utc()
+        .timestamp();
+    std::time::UNIX_EPOCH + std::time::Duration::from_secs(u64::try_from(secs).expect("after 1970"))
+}
+
+/// The phase lands on every 2026 new and full moon in NASA GSFC's "Phases of the
+/// Moon 2001 to 2100" (<https://eclipse.gsfc.nasa.gov/phase/phases2001.html>,
+/// Universal Time). A true lunation strays from the mean one by under a day, and
+/// the tolerance is the illuminated fraction a one-day miss leaves.
+#[test]
+fn the_moon_phase_lands_on_published_lunations() {
+    const MAX_MISS_DAYS: f32 = 1.0;
+    let tolerance = (1.0 - (std::f32::consts::TAU * MAX_MISS_DAYS / SYNODIC_DAYS).cos()) / 2.0;
+    let new_moons = [
+        (1, 18, 19, 52),
+        (2, 17, 12, 1),
+        (3, 19, 1, 23),
+        (4, 17, 11, 52),
+        (5, 16, 20, 1),
+        (6, 15, 2, 54),
+        (7, 14, 9, 43),
+        (8, 12, 17, 37),
+        (9, 11, 3, 27),
+        (10, 10, 15, 50),
+        (11, 9, 7, 2),
+        (12, 9, 0, 52),
+    ];
+    for (mo, d, h, mi) in new_moons {
+        let lit = moon_phase_at(utc(2026, mo, d, h, mi));
+        assert!(lit < tolerance, "new moon 2026-{mo}-{d} {h}:{mi} lit {lit}");
+    }
+    let full_moons = [
+        (1, 3, 10, 3),
+        (2, 1, 22, 9),
+        (3, 3, 11, 38),
+        (4, 2, 2, 12),
+        (5, 1, 17, 23),
+        (5, 31, 8, 45),
+        (6, 29, 23, 57),
+        (7, 29, 14, 36),
+        (8, 28, 4, 18),
+        (9, 26, 16, 49),
+        (10, 26, 4, 12),
+        (11, 24, 14, 53),
+        (12, 24, 1, 28),
+    ];
+    for (mo, d, h, mi) in full_moons {
+        let lit = moon_phase_at(utc(2026, mo, d, h, mi));
+        assert!(
+            lit > 1.0 - tolerance,
+            "full moon 2026-{mo}-{d} {h}:{mi} lit {lit}"
+        );
+    }
+}
+
+/// [`NEW_MOON_EPOCH_UNIX_DAYS`]'s literal and the instant its doc names are one
+/// fact: a date that drifts from its number is how the old epoch went wrong.
+#[test]
+fn the_new_moon_epoch_is_the_instant_its_doc_names() {
+    let named = utc(2019, 11, 27, 2, 56)
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("after 1970")
+        .as_secs_f64()
+        / 86_400.0;
+    // A few minutes: above the literal's f32 step, below any mistyped date.
+    assert!(
+        (f64::from(NEW_MOON_EPOCH_UNIX_DAYS) - named).abs() < 0.005,
+        "{NEW_MOON_EPOCH_UNIX_DAYS} is not 2019-11-27 02:56 ({named})"
+    );
+}
