@@ -258,8 +258,9 @@ fn desk_face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     }
 }
 
-/// Compares a cutaway render drawn from `variant_pack` against one from its upscaled
-/// `base_pack`, `(variant, base)`, on the two things the cutaway promises: the art
+/// Compares `variant`, a cutaway render of a pack whose desks ship density
+/// variants, against `base`, one of `base_pack`, on the two things the cutaway
+/// promises: the art
 /// lands exactly where the base's does (every pixel outside each desk's foot — its
 /// face band and contact row — is identical), and a variant, which draws its own
 /// front, gets its contact row right under the art with bare floor below it, while
@@ -399,8 +400,9 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     for pl in &layout.plants {
         push_prop(order, pl.pos, pl.kind.sprite_name());
     }
-    // Seats (MeetingSofa/MeetingChair/Island) are deliberately absent: slots ON a
-    // body painted once from the room's trio, so per-seat sprites would triple it.
+    // Seat waypoints are slots on a body, never bodies: a meeting sofa's seats
+    // sit on the trio body `push_meeting_trios` paints once. This profile draws
+    // no meeting-chair or kitchen-island body.
     for wp in &layout.waypoints {
         if let Some(sprite) = waypoint_sprite(wp.kind) {
             push_prop(order, wp.pos, sprite);
@@ -416,8 +418,7 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
     }
 }
 
-/// The corridor appliances the classic painter draws procedurally: they have no
-/// sprite to reuse, so the cutaway gives them its own solid geometry.
+/// Queue the corridor appliances ([`paint_appliance`]).
 fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     for wp in layout.waypoints.iter().filter(|wp| {
         matches!(
@@ -533,7 +534,7 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
 /// Queue one `meeting_sofa` body, flipped top-to-bottom when `mirrored`.
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
-/// drawing it here put a headless torso in the corridor where the couch belongs.
+/// it would draw a headless torso where the couch belongs.
 fn push_sofa(
     order: &mut Vec<(Span, PieceKind)>,
     pack: &Pack,
@@ -598,8 +599,8 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     }
 }
 
-/// One wall segment. A horizontal run gets the top-lit [`slab`] every solid in
-/// this profile carries; a vertical one is seen edge-on, so it is a flat fill —
+/// One wall segment. A horizontal run gets the top-lit [`slab`] the procedural
+/// solids here carry; a vertical one is seen edge-on, so it is a flat fill —
 /// an edge tone on a 1-column strip would read as a highlight, not a material.
 fn paint_wall_seg(
     at: crate::layout::Point,
@@ -837,8 +838,8 @@ fn paint_skyline(
 /// Queue the pantry counter — a fixture the layout already sized, without which
 /// the room reads as an empty glass box. A sorted piece rather than a backdrop
 /// blit: it stands ON the floor, so an agent at the counter resolves against it
-/// like any other solid, and it earns the contact shadow every solid in this
-/// profile carries.
+/// like any other solid, and it earns a contact shadow like the other
+/// floor-standing pieces.
 fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
     let Some(pantry) = &layout.pantry else {
         return;
@@ -871,8 +872,9 @@ fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut Rgb
     let w = scale.to_buffer(layout.buf_w);
     fill(buf, 0, 0, w, h, base);
 
-    // Anchored where the FLOOR starts, not buffer row 0: the wall band covers
-    // everything above `top_margin` and would hide the lit zone behind it.
+    // Anchored at `top_margin`, where the layout says the floor begins, not
+    // buffer row 0: the wall band paints over the top of the buffer, so a lit
+    // zone anchored there would start behind it.
     let floor_top = scale.to_buffer(layout.top_margin);
     let floor_h = h.saturating_sub(floor_top);
 
@@ -943,7 +945,7 @@ fn paint_desk(
         );
     }
 
-    // Contact occlusion hugs the desk's foot; a wide pool reads as a stain.
+    // The contact row, as [`contact_shadow`] draws one for the other solids.
     fill(buf, x, base_y + face_h, drawn_w, s, contact_tone(theme));
 }
 
@@ -996,10 +998,10 @@ fn dominant_opaque_row(
 }
 
 /// Wall-hung decor: blitted at its own `pos`, with NO ground shadow — two things
-/// [`paint_prop`] gets wrong here, and the cutaway had both. `WallDecorItem.pos`
-/// is TOP-LEFT, like the classic painter's `Anchor::TopLeft` z-sort rather than
-/// the centre-pinned furniture, so centring hung every board up and west of where
-/// it belongs; and touching no floor, its contact shadow landed up the wall.
+/// [`paint_prop`] would get wrong here. `WallDecorItem.pos` is TOP-LEFT, like the
+/// classic painter's `Anchor::TopLeft` z-sort rather than the centre-pinned
+/// furniture, so centring would hang every board up and west of where it
+/// belongs; and touching no floor, a contact shadow would land up the wall.
 fn paint_wall_decor(
     pos: crate::layout::Point,
     sprite: &str,
@@ -1081,9 +1083,8 @@ fn paint_character(
 /// a back-turned sitter's head).
 ///
 /// A free fn so the test can drive THE anchor rather than restate its
-/// arithmetic — the earlier test recomputed this expression in its own body and
-/// then asserted properties of its own copy, which stayed green for any change
-/// to the real one.
+/// arithmetic: a test asserting properties of its own copy stays green for any
+/// change to the real one.
 fn label_anchor(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1104,9 +1105,8 @@ fn label_anchor(
 /// The pack sprite for a waypoint kind, when it has one. `None` covers three
 /// deliberate cases: a SEAT slot whose body paints once elsewhere
 /// (MeetingSofa/MeetingChair/Island), a fixture drawn elsewhere (Pantry by its
-/// room, the Couch as a mirrored meeting sofa), and the appliances the classic
-/// painter draws PROCEDURALLY (VendingMachine/Printer), which need cutaway
-/// geometry, not a lookup.
+/// room, the Couch as a mirrored meeting sofa), and the corridor appliances
+/// (VendingMachine/Printer), which [`paint_appliance`] draws.
 fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
     use crate::layout::WaypointKind as K;
     match kind {
@@ -1149,8 +1149,9 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         &Ramp::from_base(theme.furniture.wood_trim),
         scale,
     );
-    // ...and the ground contact every other solid gets: without it the table was
-    // the one piece with no weight, floating while the sofas beside it sat.
+    // ...and the ground contact the other floor-standing pieces get: without it
+    // the table would be the one piece with no weight, floating beside the
+    // seated sofas.
     contact_shadow(
         crate::layout::Point {
             x,
@@ -1165,8 +1166,8 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
 }
 
 /// A corridor appliance as a cutaway solid. Vending machine and printer have no
-/// sprite — classic paints them per-pixel — so this gives them a lit body and
-/// the contact shadow every solid here gets. Its footprint
+/// sprite — classic paints them per-pixel — so this gives them a lit body and a
+/// contact shadow. Its footprint
 /// comes from the SHARED furniture table, not a second set of numbers, so the
 /// cutaway box matches the ground the mask actually blocks.
 fn paint_appliance(
@@ -1255,8 +1256,7 @@ fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
 
 /// A tight dark band where a solid meets the floor — one row, not an ellipse: a
 /// wide soft pool reads as a stain on a dark carpet, while a band the width of
-/// the sprite reads as weight. Stamped BEFORE the body so the sprite sits on its
-/// own shadow.
+/// the sprite reads as weight.
 fn contact_shadow(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1414,7 +1414,8 @@ mod tests {
         let desk_z = desk_span(&pack, plain, desk, RenderScale::ONE)
             .expect("desk")
             .depth;
-        // Standing at the desk's north approach, feet on its top row.
+        // Standing at the desk's north approach, feet on the row just north of
+        // its anchor.
         let behind_z = sort_row(
             crate::layout::Anchor::TopLeft,
             crate::layout::Point {
