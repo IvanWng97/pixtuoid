@@ -36,6 +36,16 @@ use crate::pet::PetKind;
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
+/// The steam offset for `anim`, a [`super::pantry_counter_anim`] pick.
+fn pantry_steam_dx(anim: &str) -> i16 {
+    let [_, large] = super::PANTRY_COUNTER_ANIMS;
+    if anim == large {
+        PANTRY_STEAM_DX_LARGE
+    } else {
+        PANTRY_STEAM_DX_SMALL
+    }
+}
+
 /// Vending pickup-slot offset from the sprite's top-left — the ONE cell where
 /// the idle trim paints and the busy can-drop lands.
 pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
@@ -89,11 +99,10 @@ pub(super) enum DrawableKind<'a> {
         pos: Point,
     },
     /// Pantry counter, with coffee steam attached so the steam rides above it
-    /// in z-order. `use_large` picks the detailed kitchen sprite vs. the compact
-    /// fallback.
+    /// in z-order. `anim` is [`super::pantry_counter_anim`]'s pick.
     WaypointPantry {
         pos: Point,
-        use_large: bool,
+        anim: &'static str,
     },
     MeetingSofa {
         pos: Point,
@@ -364,17 +373,12 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             }
         }
         DrawableKind::DeskChair { pos } => paint_chair_back(buf, *pos, pack),
-        DrawableKind::WaypointPantry { pos, use_large } => {
-            let anim_name = super::pantry_counter_anim(*use_large);
+        DrawableKind::WaypointPantry { pos, anim } => {
             // A character behind the counter is occluded by the counter's own
             // sprite (it y-sorts at the south base, and the mask south-anchors a
             // shallow strip there) — no synthetic cap needed.
-            blit_centered_first_frame(pack, anim_name, *pos, buf);
-            let steam_dx: i16 = if *use_large {
-                PANTRY_STEAM_DX_LARGE
-            } else {
-                PANTRY_STEAM_DX_SMALL
-            };
+            blit_centered_first_frame(pack, anim, *pos, buf);
+            let steam_dx = pantry_steam_dx(anim);
             let steam_x = (pos.x as i32 + steam_dx as i32).max(0) as u16;
             paint_coffee_steam(
                 buf,
@@ -699,19 +703,13 @@ mod tests {
         let width = |name: &str| pack.animation(name).expect(name).frames()[0].width() as i16;
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
-        for (dx, cw, (lo, hi)) in [
-            (
-                PANTRY_STEAM_DX_LARGE,
-                width("pantry"),
-                crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE,
-            ),
-            (
-                PANTRY_STEAM_DX_SMALL,
-                width("pantry_small"),
-                crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL,
-            ),
+        let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
+        for (counter_w, (lo, hi)) in [
+            (large_w, crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE),
+            (large_w - 1, crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL),
         ] {
-            let steam_col = dx + cw / 2;
+            let anim = crate::pixel_painter::pantry_counter_anim(counter_w);
+            let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
                 steam_col >= lo as i16 && steam_col < hi as i16,
                 "steam col {steam_col} must sit within the machine cols [{lo},{hi})"

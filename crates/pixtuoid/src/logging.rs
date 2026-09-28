@@ -275,7 +275,6 @@ mod tests {
         let saved_log = std::env::var_os("PIXTUOID_LOG");
         let saved_xdg = std::env::var_os("XDG_STATE_HOME");
         std::env::remove_var("PIXTUOID_LOG");
-        // Build the expectation with the SAME joins the impl uses.
         let home = pixtuoid_core::platform::user_home_opt().expect("a home dir in the test env");
         let cache = home.join(".cache").join("pixtuoid").join("log");
         for rel in ["", "   ", "rel/state", "~/state"] {

@@ -1089,8 +1089,16 @@ fn every_hover_size_is_its_painted_sprite_size() {
             },
             "door",
         ),
-        ("LARGE_COUNTER".into(), LARGE_COUNTER, "pantry"),
-        ("COMPACT_COUNTER".into(), COMPACT_COUNTER, "pantry_small"),
+        (
+            "LARGE_COUNTER".into(),
+            LARGE_COUNTER,
+            super::pantry_counter_anim(LARGE_COUNTER.w),
+        ),
+        (
+            "COMPACT_COUNTER".into(),
+            COMPACT_COUNTER,
+            super::pantry_counter_anim(COMPACT_COUNTER.w),
+        ),
     ];
     pieces.extend(
         PlantKind::ALL

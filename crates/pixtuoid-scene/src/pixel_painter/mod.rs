@@ -154,13 +154,17 @@ pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
 /// [`PANTRY_COFFEE_COLS_LARGE`]).
 pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
 
-/// The pantry counter sprite: the large kitchen run when the room fits it,
-/// else the compact one.
-pub(crate) fn pantry_counter_anim(large: bool) -> &'static str {
-    if large {
-        "pantry"
+/// The pantry counter sprites, compact then large.
+pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
+
+/// The pantry counter sprite for a counter `counter_w` px wide: the large
+/// kitchen run when the room fits it, else the compact one.
+pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
+    let [compact, large] = PANTRY_COUNTER_ANIMS;
+    if counter_w >= crate::layout::PANTRY_COUNTER_LARGE_W {
+        large
     } else {
-        "pantry_small"
+        compact
     }
 }
 
@@ -1189,7 +1193,7 @@ fn enqueue_lounge_pantry_appliances<'a>(
                     anchor_y: z_sort_row(Anchor::Center, wp.pos, ch),
                     kind: DrawableKind::WaypointPantry {
                         pos: wp.pos,
-                        use_large: cw >= crate::layout::PANTRY_COUNTER_LARGE_W,
+                        anim: pantry_counter_anim(cw),
                     },
                 });
             }

@@ -1,8 +1,8 @@
-//! `pixtuoid doctor` — a read-only diagnosis of this machine's setup, one
-//! category per concern (`render`). It surfaces what otherwise dies unread: the
-//! decode-drift breadcrumbs (`source/drift.rs`, under the `pixtuoid::drift`
-//! tracing target) in the warn-floor log. Strictly READ-ONLY: it never writes
-//! config (re-connecting hooks stays the Sources panel's job) and never spawns the TUI.
+//! `pixtuoid doctor` — a diagnosis of this machine's setup, one category per
+//! concern (`render`). It surfaces what otherwise dies unread: the decode-drift
+//! breadcrumbs (`source/drift.rs`, under the [`drift::TARGET`] tracing target) in
+//! the warn-floor log. Strictly READ-ONLY: it never writes config (re-connecting
+//! hooks stays the Sources panel's job) and never spawns the TUI.
 //! The PROBED CLI is not read-only about its own state — see `may_probe_version`.
 
 use pixtuoid_core::source::{drift, registry};
@@ -410,8 +410,8 @@ fn format_doctor_row(row: &DoctorSourceRow, ink: &Ink) -> String {
         state,
         version
     );
-    // `issues` are already control-char sanitized at the source
-    // (`crate::display_path`).
+    // Each of `issues` is stripped where it is minted (a target's
+    // `verify_schema`, or `install::verify_target`), so it prints as is.
     if let Some(s) = &row.diag.install {
         if !s.is_sound() {
             out.push_str(&format!(
@@ -640,6 +640,8 @@ struct DoctorReport {
     log_path: ShownPath,
     config_path: ShownPath,
     config_warnings: Vec<String>,
+    /// Minted only by [`read_log`], which strips it; the render prints it as
+    /// is.
     log_warning: Option<String>,
     term_env: Option<String>,
     colorterm_env: Option<String>,
@@ -1695,18 +1697,20 @@ mod tests {
         r.config_path = ShownPath::new(evil());
         r.config_warnings = vec![evil()];
         // Through `read_log`, which mints it: a directory is no readable log.
-        // Unix-only because Windows refuses a control char in a file name.
-        #[cfg(unix)]
-        {
-            let dir = tempfile::tempdir().unwrap();
-            let unreadable = dir.path().join(format!("log{EVIL}"));
-            std::fs::create_dir(&unreadable).unwrap();
-            r.log_warning = read_log(&unreadable).1;
-            assert!(
-                r.log_warning.is_some(),
-                "a directory must not read as a log"
-            );
-        }
+        // Windows forbids the Cc half in a file name, as
+        // `the_unreadable_log_warning_is_stripped_where_it_is_minted` notes.
+        let dir = tempfile::tempdir().unwrap();
+        let unreadable = if cfg!(windows) {
+            dir.path().join("log\u{202e}")
+        } else {
+            dir.path().join(format!("log{EVIL}"))
+        };
+        std::fs::create_dir(&unreadable).unwrap();
+        r.log_warning = read_log(&unreadable).1;
+        assert!(
+            r.log_warning.is_some(),
+            "a directory must not read as a log"
+        );
         r.term_env = Some(evil());
         r.colorterm_env = Some(evil());
         r.cc_registry = Some((ShownPath::new(evil()), false));

@@ -104,7 +104,7 @@ fn validate_reports_insufficient_frames_for_single_frame_typing() {
          [palette]\n\"A\"=\"#010203\"\n\
          [animations.typing]\nframes=[\"t.sprite\"]\nframe_ms=100\n";
     let pack = load_pack_from_strings(pack_toml, &[("t.sprite", "@frame 0\nA")]).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         report
             .insufficient_frames
@@ -161,7 +161,7 @@ fn default_pack_loads_with_required_animations() {
 #[test]
 fn default_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid-scene/sprites/default")).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -177,7 +177,7 @@ fn default_pack_passes_validation() {
 #[test]
 fn robot_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid/sprites/robot")).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -200,7 +200,7 @@ fn robot_pack_passes_validation() {
 #[test]
 fn skeleton_pack_passes_validation() {
     let pack = load_pack(Path::new("../pixtuoid/sprites/skeleton")).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         report.missing_required.is_empty(),
         "missing required: {:?}",
@@ -216,7 +216,7 @@ fn skeleton_pack_passes_validation() {
 #[test]
 fn mini_pack_reports_missing_required() {
     let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         !report.missing_required.is_empty(),
         "mini pack should be missing required animations"
@@ -227,7 +227,7 @@ fn mini_pack_reports_missing_required() {
 #[test]
 fn validation_detects_unknown_animations() {
     let pack = load_pack(Path::new("tests/render/fixtures/mini_pack")).unwrap();
-    let report = validate_pack_animations(&pack);
+    let report = validate_pack_animations(&pack, &[]);
     assert!(
         report.unknown.contains(&"idle".to_string()),
         "mini pack's 'idle' animation should be flagged as unknown"

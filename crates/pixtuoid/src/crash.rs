@@ -325,11 +325,14 @@ mod tests {
 
     #[test]
     fn build_issue_url_truncates_long_backtrace() {
-        let long_bt = "x".repeat(2000);
-        let url = build_issue_url("0.4.0", "msg", "loc", &long_bt, Path::new("/tmp/x"));
         /// GitHub's limit on a URL, in bytes.
         const GITHUB_URL_LIMIT: usize = 8191;
-        assert!(url.len() < GITHUB_URL_LIMIT);
+        // A newline percent-encodes to three bytes, so untruncated this trace
+        // alone is three times the limit.
+        let long_bt = "\n".repeat(GITHUB_URL_LIMIT);
+        let url = build_issue_url("0.4.0", "msg", "loc", &long_bt, Path::new("/tmp/x"));
+        assert!(url.len() < GITHUB_URL_LIMIT, "{}", url.len());
+        assert!(url.contains("truncated"));
     }
 
     #[test]

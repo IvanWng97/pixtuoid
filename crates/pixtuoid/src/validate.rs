@@ -3,8 +3,7 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, validate_pack_animations, PartialSet, ValidationReport,
-    OPTIONAL_FURNITURE_ANIMATIONS,
+    load_pack, MissingOptional, OrphanDerived, PartialSet, StandIn, ValidationReport,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -34,23 +33,23 @@ fn unknown_line(name: &str) -> String {
     )
 }
 
-/// The `WARN:` line for an optional animation the pack leaves out. A missing
-/// piece of furniture is inherited from the default pack (`Pack::merge_from`);
-/// a missing character pose is not, since a robot pack must not fall back to
-/// human sprites, so one of the pack's own poses stands in.
-fn missing_optional_line(name: &str) -> String {
-    let consequence = if OPTIONAL_FURNITURE_ANIMATIONS.contains(&name) {
-        "the default pack's art draws it"
-    } else {
-        "another of the pack's poses stands in"
+/// The `WARN:` line for an optional animation the pack leaves out, naming
+/// what draws in its place.
+fn missing_optional_line(m: &MissingOptional) -> String {
+    let stand_in = match m.stand_in {
+        StandIn::DefaultPack => "the default pack draws it, in its own style".to_string(),
+        StandIn::OwnPiece(piece) => format!("the pack's own \"{piece}\" stands in"),
+        StandIn::OwnPose => "another of the pack's poses stands in".to_string(),
     };
-    format!("WARN:  missing optional animation \"{name}\" ({consequence})")
+    format!(
+        "WARN:  missing optional animation \"{}\" ({stand_in})",
+        m.name
+    )
 }
 
-/// The `WARN:` line for an art set the pack ships only part of. The names come
-/// from the registry, not the pack.
+/// The `WARN:` line for an art set the pack ships only part of.
 fn partial_set_line(set: &PartialSet) -> String {
-    let quoted = |names: &[String]| {
+    let quoted = |names: &[&str]| {
         names
             .iter()
             .map(|n| format!("\"{n}\""))
@@ -58,16 +57,17 @@ fn partial_set_line(set: &PartialSet) -> String {
             .join(", ")
     };
     format!(
-        "WARN:  ships {} but not {}: the default pack's art draws those beside it",
+        "WARN:  ships {} but not {}: the default pack draws the rest, in its own style",
         quoted(&set.shipped),
         quoted(&set.missing)
     )
 }
 
 /// The `WARN:` line for a derived piece shipped without its source.
-fn orphan_derived_line(derived: &str, source: &str) -> String {
+fn orphan_derived_line(o: &OrphanDerived) -> String {
     format!(
-        "WARN:  ships \"{derived}\" without \"{source}\": the default pack's \"{source}\" draws beside it"
+        "WARN:  ships \"{}\" without \"{}\": the default pack draws \"{}\", in its own style",
+        o.derived, o.source, o.source
     )
 }
 
@@ -76,7 +76,7 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
     let pack = load_pack(dir)?;
     writeln!(out, "{}", ok_line(&pack.name, &pack.version))?;
 
-    let report = validate_pack_animations(&pack);
+    let report = pixtuoid_scene::embedded_pack::validate_pack(&pack);
 
     // Destructured without `..`: a report field added in core does not compile
     // here until this presenter prints it.
@@ -91,10 +91,10 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         orphan_derived,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
-    // parseable channel even when a caller redirects it. `missing_*` names come
-    // from the registry; every other name can be a density variant found in the
-    // pack's own table, so it is pack input and gets the same sanitising as the
-    // unknown keys.
+    // parseable channel even when a caller redirects it. The names in
+    // `insufficient_frames`, `mismatched_density` and `orphan_variants` can be
+    // density variants from the pack's own table, so they are pack input and are
+    // stripped like the unknown keys; every other finding names a registry entry.
     for name in missing_required {
         let _ = writeln!(err, "ERROR: missing required animation \"{name}\"");
     }
@@ -123,22 +123,26 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
             strip_control_chars(name)
         );
     }
-    for name in missing_optional {
-        writeln!(out, "{}", missing_optional_line(name))?;
+    for m in missing_optional {
+        writeln!(out, "{}", missing_optional_line(m))?;
     }
     for set in partial_sets {
         writeln!(out, "{}", partial_set_line(set))?;
     }
-    for (derived, source) in orphan_derived {
-        writeln!(out, "{}", orphan_derived_line(derived, source))?;
+    for o in orphan_derived {
+        writeln!(out, "{}", orphan_derived_line(o))?;
     }
     for name in unknown {
         writeln!(out, "{}", unknown_line(name))?;
     }
 
     let errors = report.error_count();
-    let warnings = missing_optional.len() + partial_sets.len() + orphan_derived.len();
-    let _ = writeln!(err, "\n{} error(s), {} warning(s)", errors, warnings);
+    let _ = writeln!(
+        err,
+        "\n{} error(s), {} warning(s)",
+        errors,
+        report.warning_count()
+    );
 
     if report.has_errors() {
         bail!("pack validation failed with {errors} error(s)");
@@ -161,21 +165,26 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_piece_of_furniture_says_the_default_draws_it() {
-        assert!(missing_optional_line("plant").contains("the default pack's art draws it"));
-        assert!(missing_optional_line("walking_coffee").contains("another of the pack's poses"));
+    fn a_missing_optional_line_names_what_draws_in_its_place() {
+        let line = |name, stand_in| missing_optional_line(&MissingOptional { name, stand_in });
+        assert_eq!(
+            line("desk_north", StandIn::OwnPiece("desk")),
+            "WARN:  missing optional animation \"desk_north\" (the pack's own \"desk\" stands in)"
+        );
+        assert!(line("plant", StandIn::DefaultPack).contains("the default pack draws it"));
+        assert!(line("walking_coffee", StandIn::OwnPose).contains("another of the pack's poses"));
     }
 
     #[test]
     fn a_partial_set_line_names_what_ships_and_what_does_not() {
         let line = partial_set_line(&PartialSet {
-            shipped: vec!["cat_walk".to_string()],
-            missing: vec!["cat_sit".to_string(), "cat_sleep".to_string()],
+            shipped: vec!["cat_walk"],
+            missing: vec!["cat_sit", "cat_sleep"],
         });
         assert_eq!(
             line,
             "WARN:  ships \"cat_walk\" but not \"cat_sit\", \"cat_sleep\": \
-             the default pack's art draws those beside it"
+             the default pack draws the rest, in its own style"
         );
     }
 

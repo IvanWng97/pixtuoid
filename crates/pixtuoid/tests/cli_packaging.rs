@@ -1,4 +1,4 @@
-//! Integration coverage for what only the REAL binary shows of `main.rs`: the
+//! Integration coverage for what only the REAL binary shows: the
 //! `completions` / `man` packaging dispatch (the generation itself is unit-tested
 //! in `cli.rs`) — that the SHELL arg reaches clap_complete and that stdout stays
 //! the clean artifact channel homebrew-core captures — the fatal-error exit, the
@@ -11,12 +11,15 @@ mod common;
 
 /// Spawn the built binary with a HERMETIC env: the binary HONORS a non-empty
 /// `$RUST_LOG`, so a test asserting a clean channel must clear it rather than
-/// assume an inherited dev/CI verbosity is unset.
+/// assume an inherited dev/CI verbosity is unset, and a crash in a test must
+/// log to a scratch state dir, not the developer's real crash.log.
 fn run(args: &[&str]) -> std::process::Output {
+    let state = tempfile::TempDir::new().expect("tempdir");
     std::process::Command::new(env!("CARGO_BIN_EXE_pixtuoid"))
         .args(args)
         .env_remove("RUST_LOG")
         .env_remove("PIXTUOID_LOG")
+        .env("XDG_STATE_HOME", state.path())
         .output()
         .expect("run pixtuoid")
 }
@@ -139,7 +142,13 @@ fn validate_pack_reports_a_mixed_look_and_still_passes() {
     assert!(
         stdout.contains("ships \"desk_north\" without \"desk\""),
         "{stdout}"
-    );
+    ); // One warning per gap: the set and the orphan already name these.
+    for covered in ["cat_sit", "cat_sleep", "desk"] {
+        assert!(
+            !stdout.contains(&format!("missing optional animation \"{covered}\" ")),
+            "{covered}: {stdout}"
+        );
+    }
 }
 
 /// A pipe whose reader is gone, not a closed fd: std swallows EBADF on

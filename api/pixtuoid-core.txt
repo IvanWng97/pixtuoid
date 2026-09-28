@@ -735,6 +735,26 @@ pub mod pixtuoid_core::sprite::blit
 pub fn pixtuoid_core::sprite::blit::blit_frame(&pixtuoid_core::sprite::Frame, u16, u16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub fn pixtuoid_core::sprite::blit::blit_frame_scaled(&pixtuoid_core::sprite::Frame, u16, u16, core::num::nonzero::NonZeroU16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub mod pixtuoid_core::sprite::format
+pub enum pixtuoid_core::sprite::format::StandIn
+pub pixtuoid_core::sprite::format::StandIn::DefaultPack
+pub pixtuoid_core::sprite::format::StandIn::OwnPiece(&'static str)
+pub pixtuoid_core::sprite::format::StandIn::OwnPose
+impl core::clone::Clone for pixtuoid_core::sprite::format::StandIn
+pub fn pixtuoid_core::sprite::format::StandIn::clone(&self) -> pixtuoid_core::sprite::format::StandIn
+impl core::cmp::Eq for pixtuoid_core::sprite::format::StandIn
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::StandIn
+pub fn pixtuoid_core::sprite::format::StandIn::eq(&self, &pixtuoid_core::sprite::format::StandIn) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::StandIn
+pub fn pixtuoid_core::sprite::format::StandIn::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for pixtuoid_core::sprite::format::StandIn
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::StandIn
+impl core::marker::Freeze for pixtuoid_core::sprite::format::StandIn
+impl core::marker::Send for pixtuoid_core::sprite::format::StandIn
+impl core::marker::Sync for pixtuoid_core::sprite::format::StandIn
+impl core::marker::Unpin for pixtuoid_core::sprite::format::StandIn
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::StandIn
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::StandIn
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::StandIn
 pub struct pixtuoid_core::sprite::format::DensityMismatch
 pub pixtuoid_core::sprite::format::DensityMismatch::claimed: (u32, u32)
 pub pixtuoid_core::sprite::format::DensityMismatch::found: (u16, u16)
@@ -754,6 +774,42 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::DensityMismatch
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::DensityMismatch
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::DensityMismatch
+pub struct pixtuoid_core::sprite::format::MissingOptional
+pub pixtuoid_core::sprite::format::MissingOptional::name: &'static str
+pub pixtuoid_core::sprite::format::MissingOptional::stand_in: pixtuoid_core::sprite::format::StandIn
+impl core::clone::Clone for pixtuoid_core::sprite::format::MissingOptional
+pub fn pixtuoid_core::sprite::format::MissingOptional::clone(&self) -> pixtuoid_core::sprite::format::MissingOptional
+impl core::cmp::Eq for pixtuoid_core::sprite::format::MissingOptional
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::MissingOptional
+pub fn pixtuoid_core::sprite::format::MissingOptional::eq(&self, &pixtuoid_core::sprite::format::MissingOptional) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::MissingOptional
+pub fn pixtuoid_core::sprite::format::MissingOptional::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::MissingOptional
+impl core::marker::Freeze for pixtuoid_core::sprite::format::MissingOptional
+impl core::marker::Send for pixtuoid_core::sprite::format::MissingOptional
+impl core::marker::Sync for pixtuoid_core::sprite::format::MissingOptional
+impl core::marker::Unpin for pixtuoid_core::sprite::format::MissingOptional
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::MissingOptional
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::MissingOptional
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::MissingOptional
+pub struct pixtuoid_core::sprite::format::OrphanDerived
+pub pixtuoid_core::sprite::format::OrphanDerived::derived: &'static str
+pub pixtuoid_core::sprite::format::OrphanDerived::source: &'static str
+impl core::clone::Clone for pixtuoid_core::sprite::format::OrphanDerived
+pub fn pixtuoid_core::sprite::format::OrphanDerived::clone(&self) -> pixtuoid_core::sprite::format::OrphanDerived
+impl core::cmp::Eq for pixtuoid_core::sprite::format::OrphanDerived
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::OrphanDerived
+pub fn pixtuoid_core::sprite::format::OrphanDerived::eq(&self, &pixtuoid_core::sprite::format::OrphanDerived) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::format::OrphanDerived
+pub fn pixtuoid_core::sprite::format::OrphanDerived::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::OrphanDerived
+impl core::marker::Freeze for pixtuoid_core::sprite::format::OrphanDerived
+impl core::marker::Send for pixtuoid_core::sprite::format::OrphanDerived
+impl core::marker::Sync for pixtuoid_core::sprite::format::OrphanDerived
+impl core::marker::Unpin for pixtuoid_core::sprite::format::OrphanDerived
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::OrphanDerived
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::OrphanDerived
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::OrphanDerived
 pub struct pixtuoid_core::sprite::format::Pack
 pub pixtuoid_core::sprite::format::Pack::name: alloc::string::String
 pub pixtuoid_core::sprite::format::Pack::version: alloc::string::String
@@ -776,8 +832,8 @@ impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Pack
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Pack
 pub struct pixtuoid_core::sprite::format::PartialSet
-pub pixtuoid_core::sprite::format::PartialSet::missing: alloc::vec::Vec<alloc::string::String>
-pub pixtuoid_core::sprite::format::PartialSet::shipped: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::PartialSet::missing: alloc::vec::Vec<&'static str>
+pub pixtuoid_core::sprite::format::PartialSet::shipped: alloc::vec::Vec<&'static str>
 impl core::clone::Clone for pixtuoid_core::sprite::format::PartialSet
 pub fn pixtuoid_core::sprite::format::PartialSet::clone(&self) -> pixtuoid_core::sprite::format::PartialSet
 impl core::cmp::Eq for pixtuoid_core::sprite::format::PartialSet
@@ -796,15 +852,16 @@ impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Par
 pub struct pixtuoid_core::sprite::format::ValidationReport
 pub pixtuoid_core::sprite::format::ValidationReport::insufficient_frames: alloc::vec::Vec<(alloc::string::String, usize, usize)>
 pub pixtuoid_core::sprite::format::ValidationReport::mismatched_density: alloc::vec::Vec<pixtuoid_core::sprite::format::DensityMismatch>
-pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<alloc::string::String>
+pub pixtuoid_core::sprite::format::ValidationReport::missing_optional: alloc::vec::Vec<pixtuoid_core::sprite::format::MissingOptional>
 pub pixtuoid_core::sprite::format::ValidationReport::missing_required: alloc::vec::Vec<alloc::string::String>
-pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub pixtuoid_core::sprite::format::ValidationReport::orphan_derived: alloc::vec::Vec<pixtuoid_core::sprite::format::OrphanDerived>
 pub pixtuoid_core::sprite::format::ValidationReport::orphan_variants: alloc::vec::Vec<alloc::string::String>
 pub pixtuoid_core::sprite::format::ValidationReport::partial_sets: alloc::vec::Vec<pixtuoid_core::sprite::format::PartialSet>
 pub pixtuoid_core::sprite::format::ValidationReport::unknown: alloc::vec::Vec<alloc::string::String>
 impl pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::error_count(&self) -> usize
 pub fn pixtuoid_core::sprite::format::ValidationReport::has_errors(&self) -> bool
+pub fn pixtuoid_core::sprite::format::ValidationReport::warning_count(&self) -> usize
 impl core::default::Default for pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::ValidationReport::default() -> pixtuoid_core::sprite::format::ValidationReport
 impl core::fmt::Debug for pixtuoid_core::sprite::format::ValidationReport
@@ -816,7 +873,6 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::ValidationReport
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::ValidationReport
-pub const pixtuoid_core::sprite::format::ART_SETS: &[&[&str]]
 pub const pixtuoid_core::sprite::format::MAX_RAMP_LEVEL: i8
 pub const pixtuoid_core::sprite::format::OPTIONAL_CHARACTER_ANIMATIONS: &[&str]
 pub const pixtuoid_core::sprite::format::OPTIONAL_FURNITURE_ANIMATIONS: &[&str]
@@ -826,7 +882,7 @@ pub fn pixtuoid_core::sprite::format::density_variant_name(&str, u16) -> alloc::
 pub fn pixtuoid_core::sprite::format::density_variant_name_into(&mut alloc::string::String, &str, u16)
 pub fn pixtuoid_core::sprite::format::load_pack(&std::path::Path) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
 pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str)]) -> anyhow::Result<pixtuoid_core::sprite::format::Pack>
-pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack) -> pixtuoid_core::sprite::format::ValidationReport
+pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame

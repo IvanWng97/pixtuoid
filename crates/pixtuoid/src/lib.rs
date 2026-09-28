@@ -1,8 +1,8 @@
 //! Public surface for the pixtuoid binary's internals — exposed because
 //! `main.rs`, the examples and the integration tests are separate crates.
 
-// A print macro panics when its reader leaves (`| head`): CLI output goes
-// through `cli_stdout`, a stderr notice through a `let _ = writeln!`.
+// A print macro panics when its reader leaves (`| head`): CLI and headless
+// output goes through a `CliOut`, a stderr notice through a `let _ = writeln!`.
 #![cfg_attr(not(test), warn(clippy::print_stdout, clippy::print_stderr))]
 
 pub mod aa_text;
@@ -39,9 +39,10 @@ pub(crate) mod version;
 /// The non-TUI `tracing` stream cannot be filtered at the SINK: the subscriber
 /// emits its own SGR for level coloring, so a sink-side filter could not tell
 /// our escapes from an injected one. Its untrusted values are stripped where
-/// they ENTER a record instead — here by this fn's callers, and in pixtuoid-core by
-/// `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of this
-/// predicate pinned to it by `the_bidi_table_matches_pixtuoid_cores_display_safe`.
+/// they ENTER a record instead — here by this fn's callers, and in the core
+/// crate by `pixtuoid_core::source::decoder::display_safe`, a per-crate copy of
+/// this predicate pinned to it by
+/// `the_bidi_table_matches_pixtuoid_cores_display_safe`.
 #[doc(hidden)]
 pub fn strip_control_chars(s: &str) -> String {
     s.chars()
