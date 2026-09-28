@@ -357,7 +357,12 @@ fn furniture_tooltip_flips_below_near_top_edge() {
     let mut top_hit = None;
     'scan: for my in 0..6u16 {
         for mx in 0..140u16 {
-            if crate::tui::hit_test::hit_test_furniture(layout, mx, my).is_some() {
+            if crate::tui::hit_test::hit_test_furniture(
+                layout,
+                crate::tui::geometry::CellArea::half_block(mx, my),
+            )
+            .is_some()
+            {
                 top_hit = Some((mx, my));
                 break 'scan;
             }

@@ -10,35 +10,32 @@ use pixtuoid_scene::pet::PetKind;
 use pixtuoid_scene::pixel_painter::character_anchor;
 use pixtuoid_scene::pose;
 
-/// Hit-test the mouse cursor against each agent's current sprite box,
-/// anchored on `character_anchor`. `(mx, my)` is in terminal cell coordinates.
+use crate::tui::geometry::CellArea;
+
+/// Hover and click box: the default sprite `character_anchor` places, not a
+/// custom pack's frame.
+const AGENT_BOX: Size = Size {
+    w: pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+    h: pixtuoid_scene::layout::CHARACTER_SPRITE_H,
+};
+
+/// Hit-test `cell` against each agent's current sprite box, anchored on
+/// `character_anchor`.
 pub(crate) fn hit_test_agent(
     scene: &SceneState,
     layout: &Layout,
     now: SystemTime,
     rctx: &mut pose::RouteCtx<'_>,
-    mx: u16,
-    my: u16,
+    cell: CellArea,
 ) -> Option<AgentId> {
-    // x is NOT halved: in the half-block grid each pixel column is one cell
-    // column, while each cell is 2 pixel ROWS.
-    const SPRITE_W_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
-    const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
-    for agent in scene.agents.values() {
-        let Some(anchor) = character_anchor(agent, layout, now, rctx) else {
-            continue;
-        };
-        let cell_x = anchor.x;
-        let cell_y = anchor.y / 2;
-        if mx >= cell_x
-            && mx < cell_x.saturating_add(SPRITE_W_CELLS)
-            && my >= cell_y
-            && my < cell_y.saturating_add(SPRITE_H_CELLS)
-        {
-            return Some(agent.agent_id);
-        }
-    }
-    None
+    scene
+        .agents
+        .values()
+        .find(|agent| {
+            character_anchor(agent, layout, now, rctx)
+                .is_some_and(|anchor| box_hit(Anchor::TopLeft, anchor, AGENT_BOX, cell))
+        })
+        .map(|agent| agent.agent_id)
 }
 
 /// Home-desk-only agent hit-test (no router/overlay state) — the deterministic
@@ -53,11 +50,8 @@ pub(crate) fn hit_test_agent(
 pub(crate) fn hit_test_from_tui(
     scene: &SceneState,
     layout: &Layout,
-    mx: u16,
-    my: u16,
+    cell: CellArea,
 ) -> Option<AgentId> {
-    const SPRITE_W: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_W;
-    const SPRITE_H_CELLS: u16 = pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS;
     for agent in scene.agents.values() {
         // `single_floor_local()`, NOT the arithmetic bridge: on an out-of-range
         // desk the bridge would wrap onto a synthetic later floor and could land
@@ -69,26 +63,19 @@ pub(crate) fn hit_test_from_tui(
         // its sitter north of the desk.
         let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
             desk,
-            SPRITE_W,
+            AGENT_BOX.w,
             layout.desk_facing(agent.desk_index.single_floor_local()),
         );
-        let (ax, ay) = (a.x, a.y);
-        let cell_x = ax;
-        let cell_y = ay / 2;
-        if mx >= cell_x
-            && mx < cell_x.saturating_add(SPRITE_W)
-            && my >= cell_y
-            && my < cell_y.saturating_add(SPRITE_H_CELLS)
-        {
+        if box_hit(Anchor::TopLeft, a, AGENT_BOX, cell) {
             return Some(agent.agent_id);
         }
     }
     None
 }
 
-/// Whether `(mx, my)` (terminal cell coords) falls on the coffee-machine section
-/// of the pantry counter sprite.
-pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
+/// Whether `cell` shows the coffee-machine section of the pantry counter
+/// sprite.
+pub(crate) fn hit_test_coffee_machine(layout: &Layout, cell: CellArea) -> bool {
     let pantry_wp = layout
         .waypoints
         .iter()
@@ -106,17 +93,19 @@ pub fn hit_test_coffee_machine(layout: &Layout, mx: u16, my: u16) -> bool {
     } else {
         pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL
     };
-    let (coffee_x0, coffee_x1) = (sprite_x + dx0, sprite_x + dx1);
-    let coffee_y0 = sprite_y;
-    let coffee_y1 = sprite_y + ch;
-    let cell_y = my * 2;
-    mx >= coffee_x0 && mx < coffee_x1 && cell_y >= coffee_y0 && cell_y < coffee_y1
+    cell.overlaps(
+        Point {
+            x: sprite_x + dx0,
+            y: sprite_y,
+        },
+        dx1 - dx0,
+        ch,
+    )
 }
 
-/// A short label if `(mx, my)` (terminal cell coords) falls on any known
-/// furniture item. The coffee machine is handled separately for its
-/// click-to-open behavior.
-pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static str> {
+/// A short label if `cell` shows any known furniture item. The coffee machine
+/// is handled separately for its click-to-open behavior.
+pub(crate) fn hit_test_furniture(layout: &Layout, cell: CellArea) -> Option<&'static str> {
     use pixtuoid_scene::layout::{
         furniture_def, Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, WallDecor,
         WallDecorItem, WaypointKind, ELEVATOR_H, ELEVATOR_W,
@@ -126,7 +115,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     // literal; `every_hover_size_is_its_painted_sprite_size` pins the
     // pack-blitted ones to their sprite.
     let visual = |f| furniture_def(f).visual;
-    let centered = |pos, size| box_hit(Anchor::Center, pos, size, mx, my);
+    let centered = |pos, size| box_hit(Anchor::Center, pos, size, cell);
     let on_rect = |b: Bounds| {
         box_hit(
             Anchor::TopLeft,
@@ -135,14 +124,13 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
                 w: b.width,
                 h: b.height,
             },
-            mx,
-            my,
+            cell,
         )
     };
 
     let desk_vis = visual(Furniture::Desk);
     for &desk in &layout.home_desks {
-        if box_hit(Anchor::TopLeft, desk, desk_vis, mx, my) {
+        if box_hit(Anchor::TopLeft, desk, desk_vis, cell) {
             return Some("Desk");
         }
     }
@@ -239,7 +227,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     }
 
     for &WallDecorItem { kind, pos } in &layout.wall_decor {
-        if box_hit(Anchor::TopLeft, pos, visual(kind.furniture()), mx, my) {
+        if box_hit(Anchor::TopLeft, pos, visual(kind.furniture()), cell) {
             return Some(match kind {
                 WallDecor::Whiteboard => "Whiteboard",
                 WallDecor::Bookshelf => "Bookshelf",
@@ -293,7 +281,7 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     };
     if layout
         .door
-        .is_some_and(|d| box_hit(Anchor::TopLeft, d, door, mx, my))
+        .is_some_and(|d| box_hit(Anchor::TopLeft, d, door, cell))
     {
         return Some("Elevator");
     }
@@ -301,28 +289,29 @@ pub fn hit_test_furniture(layout: &Layout, mx: u16, my: u16) -> Option<&'static 
     None
 }
 
-/// Whether `(mx, my)` (terminal cell coords) falls inside the office pet's
-/// sprite. `pet_pos` is its center anchor in pixel coordinates; `anim_name`
-/// selects the bounding-box size via `PetKind::hitbox`.
-pub fn hit_test_pet(kind: PetKind, pet_pos: Point, anim_name: &str, mx: u16, my: u16) -> bool {
-    box_hit(Anchor::Center, pet_pos, kind.hitbox(anim_name), mx, my)
+/// Whether `cell` shows the office pet's sprite. `pet_pos` is its center
+/// anchor in pixel coordinates; `anim_name` selects the bounding-box size via
+/// `PetKind::hitbox`.
+pub(crate) fn hit_test_pet(kind: PetKind, pet_pos: Point, anim_name: &str, cell: CellArea) -> bool {
+    box_hit(Anchor::Center, pet_pos, kind.hitbox(anim_name), cell)
 }
 
-/// Whether cell `(mx, my)` falls on a `size`-px box placed at `pos` (pixel
-/// coords) by `anchor` — through [`anchored_top_left`], the painter's own
-/// placement. Owns the half-block `my * 2`, so it can't be dropped at one site.
-fn box_hit(anchor: Anchor, pos: Point, size: Size, mx: u16, my: u16) -> bool {
-    let tl = anchored_top_left(anchor, pos, size.w, size.h);
-    let py = my * 2;
-    mx >= tl.x && mx < tl.x.saturating_add(size.w) && py >= tl.y && py < tl.y.saturating_add(size.h)
+/// Whether `cell` shows a `size`-px box placed at `pos` (pixel coords) by
+/// `anchor` — through [`anchored_top_left`], the painter's own placement.
+fn box_hit(anchor: Anchor, pos: Point, size: Size, cell: CellArea) -> bool {
+    cell.overlaps(
+        anchored_top_left(anchor, pos, size.w, size.h),
+        size.w,
+        size.h,
+    )
 }
 
-/// True if `(mx, my)` (terminal cell coords) falls on the gateway mascot's
-/// `w`×`h`-px sprite, centered at `pos` (pixel coords). `w`/`h` must come from the
-/// PAINTED frame (`MascotFrame`, which reads the pack's real size), so a re-tuned
-/// or custom-pack mascot keeps its click box aligned with what's drawn.
-pub fn hit_test_mascot(pos: Point, w: u16, h: u16, mx: u16, my: u16) -> bool {
-    box_hit(Anchor::Center, pos, Size { w, h }, mx, my)
+/// True if `cell` shows the gateway mascot's `w`×`h`-px sprite, centered at
+/// `pos` (pixel coords). `w`/`h` must come from the PAINTED frame
+/// (`MascotFrame`, which reads the pack's real size), so a re-tuned or
+/// custom-pack mascot keeps its click box aligned with what's drawn.
+pub(crate) fn hit_test_mascot(pos: Point, w: u16, h: u16, cell: CellArea) -> bool {
+    box_hit(Anchor::Center, pos, Size { w, h }, cell)
 }
 
 #[cfg(test)]

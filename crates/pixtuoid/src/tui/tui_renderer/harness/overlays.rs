@@ -281,7 +281,10 @@ fn coffee_machine_tooltip_on_hover() {
     let mut hover = None;
     'scan: for my in 0..48u16 {
         for mx in 0..140u16 {
-            if crate::tui::hit_test::hit_test_coffee_machine(layout, mx, my) {
+            if crate::tui::hit_test::hit_test_coffee_machine(
+                layout,
+                crate::tui::geometry::CellArea::half_block(mx, my),
+            ) {
                 hover = Some((mx, my));
                 break 'scan;
             }

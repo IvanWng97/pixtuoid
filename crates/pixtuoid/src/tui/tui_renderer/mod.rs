@@ -239,7 +239,13 @@ impl<B: Backend<Error: Send + Sync + 'static>> TuiRenderer<B> {
         // `&mut route_ctx` below.
         let layout = self.cached_layout.as_deref()?;
         let mut rctx = self.floors[self.current_floor].ctx.route_ctx();
-        crate::tui::hit_test::hit_test_agent(floor_scene, layout, now, &mut rctx, col, row)
+        crate::tui::hit_test::hit_test_agent(
+            floor_scene,
+            layout,
+            now,
+            &mut rctx,
+            crate::tui::geometry::CellArea::half_block(col, row),
+        )
     }
 
     pub fn current_floor_seed(&self) -> u64 {

@@ -514,7 +514,7 @@ mod tests {
     }
 
     #[test]
-    fn character_sprite_w_matches_the_embedded_pack() {
+    fn character_sprite_size_matches_the_embedded_pack() {
         let pack = test_default_pack();
         let frame = pack
             .animation("standing")
@@ -528,15 +528,12 @@ mod tests {
              update the const so hit-test/decor/label geometry tracks the pack",
             crate::layout::CHARACTER_SPRITE_W
         );
-        // The px sprite is `CHARACTER_SPRITE_H_CELLS` half-block rows tall, 2 px
-        // per cell.
         assert_eq!(
             h,
-            crate::layout::CHARACTER_SPRITE_H_CELLS * 2,
-            "embedded 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H_CELLS \
-             ({}) implies {}px — update the const so the hit-test box tracks the pack",
-            crate::layout::CHARACTER_SPRITE_H_CELLS,
-            crate::layout::CHARACTER_SPRITE_H_CELLS * 2
+            crate::layout::CHARACTER_SPRITE_H,
+            "embedded 'standing' sprite is {h}px tall but CHARACTER_SPRITE_H is {} — \
+             update the const so the hit-test box and the painter's fallback track the pack",
+            crate::layout::CHARACTER_SPRITE_H
         );
     }
 

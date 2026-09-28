@@ -1,6 +1,7 @@
 pub mod connection;
 pub mod dashboard;
-pub mod hit_test;
+pub(crate) mod geometry;
+pub(crate) mod hit_test;
 pub mod renderer;
 pub mod tui_renderer;
 mod ui_state;
@@ -842,10 +843,12 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
             } else if focus_clicked_agent(renderer, scene_rx, focus_roots, m.column, m.row, now) {
                 // Empty on purpose: the click was consumed. The coffee-before-pet order below
                 // is the half no mechanism holds — keep it in step with `renderer::draw_scene`.
-            } else if renderer
-                .cached_layout()
-                .is_some_and(|layout| renderer::hit_test_coffee_machine(layout, m.column, m.row))
-            {
+            } else if renderer.cached_layout().is_some_and(|layout| {
+                renderer::hit_test_coffee_machine(
+                    layout,
+                    geometry::CellArea::half_block(m.column, m.row),
+                )
+            }) {
                 let _ = open::that("https://buymeacoffee.com/IvanWng97");
             } else if let Some(pixtuoid_scene::pet::PetFrame {
                 pos: pet_pos,
@@ -854,7 +857,12 @@ fn handle_mouse_event<B: ratatui::backend::Backend<Error: Send + Sync + 'static>
             }) = renderer.cached_pet_pos()
             {
                 if renderer.active_pet_ref().is_none_or(|p| !p.is_active(now))
-                    && renderer::hit_test_pet(kind, pet_pos, anim, m.column, m.row)
+                    && renderer::hit_test_pet(
+                        kind,
+                        pet_pos,
+                        anim,
+                        geometry::CellArea::half_block(m.column, m.row),
+                    )
                 {
                     renderer.set_active_pet(Some(renderer::PetState {
                         petted_at: now,

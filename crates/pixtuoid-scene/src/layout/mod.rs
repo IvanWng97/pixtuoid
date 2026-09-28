@@ -269,12 +269,11 @@ pub(crate) const DESK_FOOT_H: u16 = 2;
 /// pass the pack's REAL `frame.width`; this is the width-unknown fallback.
 /// Lives in `layout` so `layout::decor` can read it without a module cycle.
 pub const CHARACTER_SPRITE_W: u16 = 8;
-/// Default character sprite height in terminal CELLS — used by the tui hit-test
-/// pin box; the pixel pose offsets are a SEPARATE vertical-anchor concern.
-pub const CHARACTER_SPRITE_H_CELLS: u16 = 6;
-/// The same default height in buffer PIXELS — the width-unknown fallback's
-/// twin, for the paths where a custom pack's real frame isn't available.
-pub(crate) const CHARACTER_SPRITE_H: u16 = CHARACTER_SPRITE_H_CELLS * 2;
+/// Default character sprite height (px) — [`CHARACTER_SPRITE_W`]'s twin: the
+/// height `character_anchor` clamps by and hit tests size by, and the fallback
+/// where a custom pack's real frame isn't threaded. The pose offsets are a
+/// SEPARATE vertical-anchor concern.
+pub const CHARACTER_SPRITE_H: u16 = 12;
 /// Elevator-door sprite width in buffer px, read by the layout, the wall's
 /// window cut-out and the hover box; `every_hover_size_is_its_painted_sprite_size`
 /// pins it to the door sprite.
