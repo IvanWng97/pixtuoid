@@ -28,7 +28,13 @@
 //! a cycle"). `paint.rs` splits wall runs; this module assumes it happened, and
 //! [`check_order`] is what notices when it did not.
 
-/// A piece's screen footprint in LOGICAL units, inclusive on both ends.
+/// A piece's screen footprint in LOGICAL units, inclusive on both ends, and the
+/// row it sorts on.
+///
+/// The footprint bounds EVERY pixel the piece paints — a repaint of the pieces
+/// whose footprints meet a damaged rect is only complete if nothing a piece
+/// draws falls outside its own. The depth is a separate fact: a person sorts on
+/// the sim's z-key, which is not the south edge of what they paint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Span {
     /// Westmost column.
@@ -37,20 +43,30 @@ pub(crate) struct Span {
     pub x1: u16,
     /// Northmost row.
     pub y0: u16,
-    /// Southmost row — the BASE row, the "feet" the order is built on.
+    /// Southmost row.
     pub y1: u16,
+    /// The BASE row, the "feet" the order is built on.
+    pub depth: u16,
 }
 
 impl Span {
     /// A box of `w`x`h` whose top-left is `(x, y)`, plus `below` extra rows its
-    /// painter draws underneath (a front face, a contact shadow).
+    /// painter draws underneath (a front face, a contact shadow), sorted on its
+    /// south edge.
     pub(crate) fn new(x: u16, y: u16, w: u16, h: u16, below: u16) -> Self {
+        let y1 = y.saturating_add(h.saturating_sub(1)).saturating_add(below);
         Self {
             x0: x,
             x1: x.saturating_add(w.saturating_sub(1)),
             y0: y,
-            y1: y.saturating_add(h.saturating_sub(1)).saturating_add(below),
+            y1,
+            depth: y1,
         }
+    }
+
+    /// The same footprint, sorted on `depth` instead.
+    pub(crate) fn with_depth(self, depth: u16) -> Self {
+        Self { depth, ..self }
     }
 
     fn overlaps_x(self, other: Self) -> bool {
@@ -64,7 +80,7 @@ impl Span {
     /// which is what keeps the graph sparse: a desk on the west wall and a
     /// walker on the east one can be drawn in either order.
     fn behind(self, other: Self) -> bool {
-        self.overlaps_x(other) && self.y1 < other.y1
+        self.overlaps_x(other) && self.depth < other.depth
     }
 }
 
@@ -106,7 +122,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
     use std::collections::BinaryHeap;
     let mut ready: BinaryHeap<Reverse<(u16, usize)>> = (0..n)
         .filter(|&i| indegree[i] == 0)
-        .map(|i| Reverse((spans[i].y1, i)))
+        .map(|i| Reverse((spans[i].depth, i)))
         .collect();
 
     let mut out = Vec::with_capacity(n);
@@ -117,7 +133,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
         for &j in &edges[i] {
             indegree[j] -= 1;
             if indegree[j] == 0 {
-                ready.push(Reverse((spans[j].y1, j)));
+                ready.push(Reverse((spans[j].depth, j)));
             }
         }
     }
@@ -130,7 +146,7 @@ pub(crate) fn depth_sort<T>(items: Vec<(Span, T)>) -> Vec<T> {
             n - out.len()
         );
         let mut rest: Vec<usize> = (0..n).filter(|&i| !drawn[i]).collect();
-        rest.sort_by_key(|&i| (spans[i].y1, i));
+        rest.sort_by_key(|&i| (spans[i].depth, i));
         out.extend(rest);
     }
 

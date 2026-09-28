@@ -86,69 +86,93 @@ pub fn render_cutaway(
 ) -> Vec<CutawayLabel> {
     paint_floor(layout, theme, scale, buf);
     paint_wall(layout, theme, scale, buf);
-
-    // ONE ordered draw list, so a character and the desk it sits at resolve against
-    // each other by depth. That ordering IS the occlusion — there is no second pass.
-    let mut order: Vec<(Span, PieceKind)> =
-        Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
-    push_desks(frame, layout, pack, theme, scale, &mut order);
-    push_props(layout, pack, &mut order);
     // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
     // with the wall, before anything standing on the floor can occlude it.
     for item in &layout.wall_decor {
         paint_wall_decor(item.pos, item.kind.sprite_name(), pack, scale, buf);
     }
+
+    // ONE ordered draw list, so a character and the desk it sits at resolve against
+    // each other by depth. That ordering IS the occlusion — there is no second pass.
+    let ordered = depth_sort(draw_list(frame, layout, pack, theme, scale));
+    let mut labels = Vec::with_capacity(frame.characters.len());
+    for kind in &ordered {
+        if let Some(l) = paint_piece(kind, frame, pack, theme, scale, now, cache, buf) {
+            labels.push(l);
+        }
+    }
+    labels
+}
+
+/// Every floor-standing piece of the office, each with its [`Span`], unordered.
+fn draw_list(
+    frame: &SimFrame,
+    layout: &Layout,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+) -> Vec<(Span, PieceKind)> {
+    let mut order: Vec<(Span, PieceKind)> =
+        Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
+    push_desks(frame, layout, pack, theme, scale, &mut order);
+    push_props(layout, pack, &mut order);
     push_appliances(layout, &mut order);
     push_meeting_trios(layout, pack, &mut order);
     let carried = push_characters(frame, layout, pack, scale, &mut order);
     push_chairs(layout, pack, &carried, &mut order);
     wall_segments(layout, &mut order);
     push_pantry_counter(layout, pack, &mut order);
+    order
+}
 
-    let ordered = depth_sort(order);
-
-    let mut labels = Vec::with_capacity(frame.characters.len());
-    for kind in &ordered {
-        match *kind {
-            PieceKind::Desk { at, art, screen } => {
-                paint_desk(at, art, screen, pack, theme, scale, buf)
-            }
-            PieceKind::Chair { at } => paint_chair(at, pack, theme, scale, buf),
-            PieceKind::Character {
+/// Paint one piece of the draw list, returning a character's badge anchor.
+#[allow(clippy::too_many_arguments)]
+fn paint_piece(
+    kind: &PieceKind,
+    frame: &SimFrame,
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    now: std::time::SystemTime,
+    cache: &mut crate::frame_cache::FrameCache,
+    buf: &mut RgbBuffer,
+) -> Option<CutawayLabel> {
+    match *kind {
+        PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, theme, scale, buf),
+        PieceKind::Chair { at } => paint_chair(at, pack, theme, scale, buf),
+        PieceKind::Character {
+            idx,
+            chair,
+            badge_ceiling,
+        } => {
+            let label = paint_character(
+                frame,
                 idx,
-                chair,
                 badge_ceiling,
-            } => {
-                if let Some(l) = paint_character(
-                    frame,
-                    idx,
-                    badge_ceiling,
-                    pack,
-                    theme,
-                    scale,
-                    now,
-                    cache,
-                    buf,
-                ) {
-                    labels.push(l);
-                }
-                // The sitter's own chair, straight after them: one piece, so
-                // nothing can sort between a person and the chair they sit in.
-                if let Some(at) = chair {
-                    paint_chair(at, pack, theme, scale, buf);
-                }
+                pack,
+                theme,
+                scale,
+                now,
+                cache,
+                buf,
+            );
+            // The sitter's own chair, straight after them: one piece, so
+            // nothing can sort between a person and the chair they sit in.
+            if let Some(at) = chair {
+                paint_chair(at, pack, theme, scale, buf);
             }
-            PieceKind::Prop {
-                at,
-                sprite,
-                mirrored,
-            } => paint_prop(at, sprite, mirrored, pack, theme, scale, buf),
-            PieceKind::Table { at } => paint_table(at, theme, scale, buf),
-            PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
-            PieceKind::WallSeg { at, w, h } => paint_wall_seg(at, w, h, theme, scale, buf),
+            return label;
         }
+        PieceKind::Prop {
+            at,
+            sprite,
+            mirrored,
+        } => paint_prop(at, sprite, mirrored, pack, theme, scale, buf),
+        PieceKind::Table { at } => paint_table(at, theme, scale, buf),
+        PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
+        PieceKind::WallSeg { at, w, h } => paint_wall_seg(at, w, h, theme, scale, buf),
     }
-    labels
+    None
 }
 
 /// Each desk in its facing's art, its screen lit by the classic painter's own
@@ -193,8 +217,10 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
     pack.piece_or_source(crate::pixel_painter::desk_sprite_name(facing))
 }
 
-/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art plus
-/// the face rows [`desk_face_rows`] derives under it.
+/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art, the
+/// face rows [`desk_face_rows`] derives under it, and the contact row
+/// `paint_desk` stamps under those. It sorts on the face's south edge, above
+/// the contact row.
 /// A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(
@@ -204,7 +230,7 @@ fn desk_span(
     scale: RenderScale,
 ) -> Option<Span> {
     let (w, h) = art_size(pack, art)?;
-    Some(piece_span(
+    let span = piece_span(
         crate::layout::Anchor::TopLeft,
         crate::layout::Point {
             x: desk.x,
@@ -212,8 +238,9 @@ fn desk_span(
         },
         w,
         h,
-        desk_face_rows(pack, art, scale),
-    ))
+        desk_face_rows(pack, art, scale) + 1,
+    );
+    Some(span.with_depth(span.y1 - 1))
 }
 
 /// The rows of front face the cutaway derives under desk `art` at `scale`.
@@ -345,10 +372,9 @@ fn chair_span(
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::pixel_painter::desk_chair_top_left(pack, desk, facing)?;
     let (w, h) = art_size(pack, crate::pixel_painter::DESK_CHAIR_SPRITE)?;
-    let span = Span {
-        y1: crate::pixel_painter::desk_chair_z_key(desk, facing),
-        ..piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
-    };
+    // +1 for the contact shadow `paint_chair` stamps under the box.
+    let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 1)
+        .with_depth(crate::pixel_painter::desk_chair_z_key(desk, facing));
     Some((span, at))
 }
 
@@ -460,9 +486,18 @@ fn push_characters(
         let badge_ceiling = seat.and_then(|(d, facing)| {
             desk_span(pack, desk_art(pack, facing)?, d, scale).map(|s| s.y0)
         });
+        // +1 for the contact shadow `paint_character` stamps under a figure
+        // no seat grounds.
+        let shadow = u16::from(c.seat_desk.is_none());
         order.push((
             occupant_span(
-                piece_span(crate::layout::Anchor::TopLeft, cutaway_anchor(c), w, h, 0),
+                piece_span(
+                    crate::layout::Anchor::TopLeft,
+                    cutaway_anchor(c),
+                    w,
+                    h,
+                    shadow,
+                ),
                 c.anchor_y,
                 chair.map(|(span, _)| span),
             ),
@@ -481,13 +516,14 @@ fn push_characters(
 /// against a neighbour mid-breath. A back-turned sitter and their chair are one
 /// piece, spanning the chair's columns too.
 fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
-    let body = Span { y1: depth, ..body };
+    let body = body.with_depth(depth);
     match chair {
         Some(chair) => Span {
             x0: body.x0.min(chair.x0),
             x1: body.x1.max(chair.x1),
-            y0: body.y0,
+            y0: body.y0.min(chair.y0),
             y1: body.y1.max(chair.y1),
+            depth: body.depth.max(chair.depth),
         },
         None => body,
     }
@@ -598,10 +634,13 @@ fn paint_wall_seg(
 
 /// What a piece IS, paired with its [`Span`] in the draw list.
 ///
-/// The span is computed WHERE THE PIECE IS BUILT, by [`piece_span`] over the
-/// same anchor and sprite box the piece's paint fn blits — the box depends
-/// on the PACK, so a sprite's height is not knowable from its layout point, and
-/// geometry derived from anywhere but where the sprite lands can drift from it.
+/// The span is computed WHERE THE PIECE IS BUILT, from the same anchor and box
+/// the piece's paint fn draws, plus the rows it stamps under that box — the box
+/// depends on the PACK, so a sprite's height is not knowable from its layout
+/// point, and geometry derived from anywhere but where the sprite lands can drift
+/// from it. `every_piece_paints_only_inside_its_span` pins that every pixel a
+/// paint fn writes lies inside its span.
+#[derive(Debug)]
 enum PieceKind {
     /// One segment of a room's wall run.
     WallSeg {
@@ -1277,7 +1316,7 @@ mod tests {
         h: u16,
         below: u16,
     ) -> u16 {
-        piece_span(anchor, pos, 1, h, below).y1
+        piece_span(anchor, pos, 1, h, below).depth
     }
 
     /// Every piece's sort row measured the same way: the south base row of what it
@@ -1291,8 +1330,8 @@ mod tests {
         let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
         let desk_z = desk_span(&pack, art, desk, RenderScale::ONE)
             .expect("desk")
-            .y1;
-        let seated_z = seated_back_span(&pack, desk).y1;
+            .depth;
+        let seated_z = seated_back_span(&pack, desk).depth;
         assert!(
             seated_z > desk_z,
             "a seated occupant must paint over its desk (desk {desk_z}, seated {seated_z})"
@@ -1374,7 +1413,7 @@ mod tests {
         let plain = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
         let desk_z = desk_span(&pack, plain, desk, RenderScale::ONE)
             .expect("desk")
-            .y1;
+            .depth;
         // Standing at the desk's north approach, feet on its top row.
         let behind_z = sort_row(
             crate::layout::Anchor::TopLeft,
@@ -1401,7 +1440,7 @@ mod tests {
         let seated = seated_back_span(&pack, desk);
         let (plant_w, plant_h) = base_size(&pack, "plant");
         // A plant whose BASE sits just south of the desk's front face.
-        let plant_base = desk_box.y1 + 1;
+        let plant_base = desk_box.depth + 1;
         let plant_centre = crate::layout::Point {
             x: plant_w / 2,
             y: plant_base + plant_h / 2 - plant_h + 1,
@@ -1414,7 +1453,7 @@ mod tests {
             1,
         );
         assert!(
-            desk_box.y1 < plant.y1 && plant.y1 < seated.y1,
+            desk_box.depth < plant.depth && plant.depth < seated.depth,
             "the fixture must separate all three by depth, or a tie-break decides: \
              desk {desk_box:?}, plant {plant:?}, seated {seated:?}"
         );
@@ -1438,7 +1477,7 @@ mod tests {
         assert_ne!(north, south, "the bundled pack ships the raised art");
         let plain = desk_span(&pack, south, desk, RenderScale::ONE).expect("desk");
         let raised = desk_span(&pack, north, desk, RenderScale::ONE).expect("desk_north");
-        assert_eq!(raised.y1, plain.y1);
+        assert_eq!(raised.depth, plain.depth);
         let ((_, plain_h), (_, north_h)) = (base_size(&pack, south), base_size(&pack, north));
         assert!(
             north_h > plain_h,
@@ -1508,10 +1547,12 @@ mod tests {
                     crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::North).y;
                 let piece = occupant_span(body, depth, Some(chair));
                 assert!(
-                    piece.y1 >= chair.y1
-                        && piece.y1 >= depth
+                    piece.depth >= chair.depth
+                        && piece.depth >= depth
                         && piece.x0 <= chair.x0.min(body.x0)
-                        && piece.x1 >= chair.x1.max(body.x1),
+                        && piece.x1 >= chair.x1.max(body.x1)
+                        && piece.y0 <= chair.y0.min(body.y0)
+                        && piece.y1 >= chair.y1.max(body.y1),
                     "{anim}, bob {bob}: {piece:?} must cover {body:?} and {chair:?}"
                 );
             }
@@ -1859,7 +1900,7 @@ mod tests {
             let mut order = Vec::new();
             push_characters(frame, &layout, &pack, RenderScale::ONE, &mut order);
             let (span, _) = order.first().expect("the sitter is drawn");
-            depths.insert(span.y1);
+            depths.insert(span.depth);
             tops.insert(span.y0);
         }
         assert!(
@@ -2026,6 +2067,76 @@ mod tests {
                 None,
                 "{w}x{h}: the draw list violates a constraint its geometry states"
             );
+        }
+    }
+
+    /// The dirty-rect repaint over a cached office rests on this: whatever a
+    /// piece's paint fn writes lies inside its span, so repainting every piece
+    /// whose span meets a damaged rect restores each pixel in it. A pixel counts
+    /// as WRITTEN where two paints over different fills agree, so no colour is
+    /// assumed to be one the paint never uses.
+    #[test]
+    fn every_piece_paints_only_inside_its_span() {
+        use pixtuoid_core::sprite::Rgb;
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let fills = [
+            Rgb { r: 0, g: 0, b: 0 },
+            Rgb {
+                r: 255,
+                g: 255,
+                b: 255,
+            },
+        ];
+        for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
+            let (layout, pack, frames, _) = sit_down(facing, 2);
+            for s in [1, 3, pack.max_density_variant()] {
+                let scale = RenderScale::new(s).expect("nonzero");
+                let (w, h) = (scale.to_buffer(layout.buf_w), scale.to_buffer(layout.buf_h));
+                for (n, frame) in frames.iter().enumerate() {
+                    // Every step of the walk and the sit for the mover; the office
+                    // around them once.
+                    let whole_office = n + 1 == frames.len();
+                    for (span, kind) in draw_list(frame, &layout, &pack, theme, scale) {
+                        if !whole_office && !matches!(kind, PieceKind::Character { .. }) {
+                            continue;
+                        }
+                        let [a, b] = fills.map(|fill| {
+                            let mut buf = RgbBuffer::filled(w, h, fill);
+                            let mut cache = crate::frame_cache::FrameCache::new();
+                            paint_piece(
+                                &kind,
+                                frame,
+                                &pack,
+                                theme,
+                                scale,
+                                std::time::SystemTime::UNIX_EPOCH,
+                                &mut cache,
+                                &mut buf,
+                            );
+                            buf
+                        });
+                        let stray = a
+                            .as_slice()
+                            .iter()
+                            .zip(b.as_slice())
+                            .enumerate()
+                            .filter(|(_, (pa, pb))| pa == pb)
+                            .map(|(i, _)| {
+                                let i = i as u32;
+                                let (x, y) = ((i % u32::from(w)) as u16, (i / u32::from(w)) as u16);
+                                (scale.logical(x), scale.logical(y))
+                            })
+                            .find(|&(x, y)| {
+                                !((span.x0..=span.x1).contains(&x)
+                                    && (span.y0..=span.y1).contains(&y))
+                            });
+                        assert_eq!(
+                            stray, None,
+                            "{kind:?} at scale {s} wrote logical pixel {stray:?} outside {span:?}"
+                        );
+                    }
+                }
+            }
         }
     }
 
