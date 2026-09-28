@@ -466,16 +466,8 @@ mod tests {
         // `pantry_ground_rect`'s south edge is `pos.y + ⌈counter.h/2⌉` where the
         // forked strip used `⌊counter.h/2⌋`: equal only for an EVEN counter.h. This
         // FAILS the day an odd-height one lands and the 1px becomes a choice.
-        let mut counters = vec![crate::layout::rooms::pantry::COMPACT_COUNTER];
-        // Sweep widths so the counter height comes from `compute_with_seed`, never a
-        // copy of its literal. Duplicates are harmless — the assertion is idempotent.
-        for w in (60u16..=260).step_by(20) {
-            if let Some(l) = crate::layout::SceneLayout::compute_with_seed(w, 130, None, 0) {
-                counters.push(l.pantry_counter_size());
-            }
-        }
         let pos = Point { x: 100, y: 60 };
-        for counter in counters {
+        for counter in [crate::layout::COMPACT_COUNTER, crate::layout::LARGE_COUNTER] {
             let (tl, sz) = pantry_ground_rect(pos, counter);
             let delegated_south = tl.y + sz.h;
             let forked_south = pos.y + counter.h / 2;

@@ -6,6 +6,23 @@ fn coffee_machine_hit_test_returns_false_for_origin() {
     assert!(!hit_test_coffee_machine(&layout, 0, 0));
 }
 
+/// The middle cell of the coffee machine on `layout`'s pantry counter, which
+/// is centred on `counter`.
+fn coffee_mid_cell(layout: &Layout, counter: Point) -> (u16, u16) {
+    use pixtuoid_scene::pixel_painter::{PANTRY_COFFEE_COLS_LARGE, PANTRY_COFFEE_COLS_SMALL};
+    let Size { w: cw, h: ch } = layout.pantry_counter_size();
+    let (c0, c1) = if cw >= pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W {
+        PANTRY_COFFEE_COLS_LARGE
+    } else {
+        PANTRY_COFFEE_COLS_SMALL
+    };
+    let top = counter.y.saturating_sub(ch / 2);
+    (
+        counter.x.saturating_sub(cw / 2) + (c0 + c1) / 2,
+        (top + ch / 2) / 2,
+    )
+}
+
 #[test]
 fn coffee_machine_hit_test_returns_true_for_machine_area() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
@@ -14,15 +31,7 @@ fn coffee_machine_hit_test_returns_true_for_machine_area() {
         .iter()
         .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
         .expect("pantry");
-    let Size { w: cw, h: ch } = layout.pantry_counter_size();
-    let sprite_x = pantry_wp.pos.x.saturating_sub(cw / 2);
-    let sprite_y = pantry_wp.pos.y.saturating_sub(ch / 2);
-    let mid_x = if cw >= 32 {
-        sprite_x + 14
-    } else {
-        sprite_x + 10
-    };
-    let mid_cell_y = (sprite_y + ch / 2) / 2;
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, pantry_wp.pos);
     assert!(
         hit_test_coffee_machine(&layout, mid_x, mid_cell_y),
         "expected hit at coffee machine area ({mid_x}, {mid_cell_y})"
@@ -56,7 +65,7 @@ fn furniture_hit_test_finds_desk() {
     assert_eq!(
         hit_test_furniture(&layout, desk.x + vis_w - 1, cell_y),
         Some("Desk"),
-        "the desk's east overhang column must hover it (old DESK_W+2 box clipped it)"
+        "the desk's east overhang column must hover it"
     );
 }
 
@@ -64,9 +73,13 @@ fn furniture_hit_test_finds_desk() {
 fn furniture_hit_test_finds_elevator() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let door = layout.door.expect("door");
-    let cell_y = (door.y + 7) / 2;
+    let cell_y = (door.y + pixtuoid_scene::layout::ELEVATOR_H / 2) / 2;
     assert_eq!(
-        hit_test_furniture(&layout, door.x + 8, cell_y),
+        hit_test_furniture(
+            &layout,
+            door.x + pixtuoid_scene::layout::ELEVATOR_W / 2,
+            cell_y
+        ),
         Some("Elevator")
     );
 }
@@ -277,14 +290,12 @@ fn from_tui_oob_desk_at_capacity_boundary_does_not_wrap_to_desk_zero() {
     let (mut scene, id) = scene_with_agent_at_desk(0);
     let cap = scene.floor_capacities[0];
     scene.agents.get_mut(&id).expect("slot").desk_index = GlobalDeskIndex(cap);
-    let desk0 = layout.home_desks[0];
-    let (ax, ay) = (
-        desk0.x
-            + pixtuoid_scene::layout::DESK_W
-                .saturating_sub(pixtuoid_scene::layout::CHARACTER_SPRITE_W)
-                / 2,
-        desk0.y.saturating_sub(8) / 2,
+    let a = pixtuoid_scene::pixel_painter::seated_anchor_facing(
+        layout.home_desks[0],
+        pixtuoid_scene::layout::CHARACTER_SPRITE_W,
+        layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(0)),
     );
+    let (ax, ay) = (a.x, a.y / 2);
     for dx in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_W {
         for dy in 0..pixtuoid_scene::layout::CHARACTER_SPRITE_H_CELLS {
             assert_eq!(
@@ -351,15 +362,7 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
         .iter()
         .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
         .expect("pantry");
-    let Size { w: cw, h: ch } = layout.pantry_counter_size();
-    let sprite_x = wp.pos.x.saturating_sub(cw / 2);
-    let sprite_y = wp.pos.y.saturating_sub(ch / 2);
-    let mid_x = if cw >= 32 {
-        sprite_x + 14
-    } else {
-        sprite_x + 10
-    };
-    let mid_cell_y = (sprite_y + ch / 2) / 2;
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, wp.pos);
     assert!(
         hit_test_coffee_machine(&layout, mid_x, mid_cell_y),
         "precondition: coffee machine area should hit with the Pantry waypoint present"
@@ -374,11 +377,13 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
     assert!(!hit_test_coffee_machine(&layout, 0, 0));
 }
 
-// x+15 is the falsifier for the cw>=32 split: outside the small box but inside
-// the large one, so a hit there means the split was dropped.
+// The large box's last column is the falsifier for the large/small split:
+// outside the small box but inside the large one, so a hit there means the
+// split was dropped.
 #[test]
 fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
     let (lo, hi) = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL;
+    let large_last = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE.1 - 1;
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let wp = *layout
         .waypoints
@@ -407,16 +412,17 @@ fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
         "the counter col just right of the machine must miss"
     );
     assert!(
-        !hit_test_coffee_machine(&layout, sprite_x + 15, cell_y),
-        "x+15 is outside the small box; a hit means the cw>=32 split was dropped"
+        !hit_test_coffee_machine(&layout, sprite_x + large_last, cell_y),
+        "the large box's last column is outside the small box; a hit means the \
+         large/small split was dropped"
     );
 }
 
 // The lounge and pod-decor arms below aren't all reachable from
 // `compute_with_seed` at the tested sizes, so each is placed synthetically.
 
-/// `label` fires on exactly the cells whose pixel falls in a `size` sprite
-/// centred on `pos`, swept one sprite beyond it on every side.
+/// `label` fires on exactly the cells whose top pixel falls in a `size` sprite
+/// centred on `pos`, swept half a sprite beyond it on every side.
 fn assert_centered_hover_box(
     layout: &Layout,
     label: &str,
@@ -450,7 +456,7 @@ const PARK: pixtuoid_scene::layout::Point = pixtuoid_scene::layout::Point { x: 1
 
 #[test]
 fn the_lounge_sofa_hovers_on_its_painted_sprite() {
-    use pixtuoid_scene::layout::{furniture_def, Furniture, Point};
+    use pixtuoid_scene::layout::{furniture_def, Furniture};
     let c = Point { x: 40, y: 50 };
     let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
         couch_center: c,
@@ -468,7 +474,7 @@ fn the_lounge_sofa_hovers_on_its_painted_sprite() {
 
 #[test]
 fn the_side_table_hovers_on_its_painted_sprite() {
-    use pixtuoid_scene::layout::{furniture_def, Furniture, Point};
+    use pixtuoid_scene::layout::{furniture_def, Furniture};
     let t = Point { x: 40, y: 50 };
     let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
         couch_center: PARK,
@@ -486,14 +492,11 @@ fn the_side_table_hovers_on_its_painted_sprite() {
 
 #[test]
 fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
-    use pixtuoid_scene::layout::Point;
-    let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let p = Point { x: 40, y: 40 };
-    let park = Point { x: 130, y: 6 };
-    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
-        couch_center: park,
+    let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
+        couch_center: PARK,
         floor_lamp: p,
-        side_table: park,
+        side_table: PARK,
         fish_tank: None,
     });
     assert_eq!(
@@ -504,14 +507,11 @@ fn furniture_hit_test_finds_floor_lamp_via_synthetic() {
 
 #[test]
 fn furniture_hit_test_finds_fish_tank_via_synthetic() {
-    use pixtuoid_scene::layout::Point;
-    let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
     let p = Point { x: 40, y: 40 };
-    let park = Point { x: 130, y: 6 };
-    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
-        couch_center: park,
-        floor_lamp: park,
-        side_table: park,
+    let layout = layout_with_lounge(pixtuoid_scene::layout::Lounge {
+        couch_center: PARK,
+        floor_lamp: PARK,
+        side_table: PARK,
         fish_tank: Some(p),
     });
     assert_eq!(hit_test_furniture(&layout, p.x, p.y / 2), Some("Fish Tank"));
@@ -519,9 +519,9 @@ fn furniture_hit_test_finds_fish_tank_via_synthetic() {
 
 #[test]
 fn snack_shelf_hovers_across_its_whole_sprite_not_just_the_footprint() {
-    // The 7x10 shelf sprite is CENTRED on the waypoint while the walkable
-    // footprint is the End-anchored 7x2 south strip; hover must cover the sprite
-    // the user sees, not that strip.
+    // The shelf sprite is CENTRED on the waypoint while the walkable footprint
+    // is its End-anchored south strip; hover must cover the sprite the user
+    // sees, not that strip.
     let layout = Layout::compute(192, 160, Some(12)).expect("layout");
     let shelf = layout
         .waypoints
@@ -574,27 +574,4 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
         pos: p,
     });
     assert_eq!(hit_test_furniture(&layout, p.x, p.y / 2), Some("TV Stand"));
-}
-
-#[test]
-fn furniture_hit_test_finds_side_table_via_synthetic() {
-    use pixtuoid_scene::layout::Point;
-    let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let t = Point { x: 30, y: 90 };
-    let park = Point { x: 130, y: 6 };
-    layout.lounge = Some(pixtuoid_scene::layout::Lounge {
-        couch_center: park,
-        floor_lamp: park,
-        side_table: t,
-        fish_tank: None,
-    });
-    assert_eq!(
-        hit_test_furniture(&layout, t.x, t.y / 2),
-        Some("Side Table")
-    );
-    // 6px right of center is outside the 7-wide box (tl = t.x-3, [x-3..x+4)).
-    assert_ne!(
-        hit_test_furniture(&layout, t.x + 6, t.y / 2),
-        Some("Side Table")
-    );
 }

@@ -798,9 +798,7 @@ fn place_lounge_vignette(
         x: couch_x + 9,
         y: couch_y + 2,
     });
-    let side_half_w = furniture_def(Furniture::LoungeSideTable)
-        .footprint
-        .map_or(0, |s| s.w / 2);
+    let side_half_w = furniture_def(Furniture::LoungeSideTable).visual.w / 2;
     // The west edge must clear `west_clear_x`, else at the minimum band width
     // `couch_x − 10` drops the table onto the wall.
     let side_table = lounge_fits.then_some(Point {

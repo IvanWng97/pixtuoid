@@ -403,6 +403,7 @@ pub pixtuoid_scene::layout::PlantKind::Flower
 pub pixtuoid_scene::layout::PlantKind::Succulent
 pub pixtuoid_scene::layout::PlantKind::Tall
 impl pixtuoid_scene::layout::PlantKind
+pub const pixtuoid_scene::layout::PlantKind::ALL: &'static [pixtuoid_scene::layout::PlantKind]
 pub const fn pixtuoid_scene::layout::PlantKind::furniture(self) -> pixtuoid_scene::layout::Furniture
 pub const fn pixtuoid_scene::layout::PlantKind::sprite_name(self) -> &'static str
 impl core::clone::Clone for pixtuoid_scene::layout::PlantKind
@@ -458,6 +459,7 @@ pub pixtuoid_scene::layout::WallDecor::ExitSign
 pub pixtuoid_scene::layout::WallDecor::MeetingScreen
 pub pixtuoid_scene::layout::WallDecor::Whiteboard
 impl pixtuoid_scene::layout::WallDecor
+pub const pixtuoid_scene::layout::WallDecor::ALL: &'static [pixtuoid_scene::layout::WallDecor]
 pub const fn pixtuoid_scene::layout::WallDecor::furniture(self) -> pixtuoid_scene::layout::Furniture
 pub const fn pixtuoid_scene::layout::WallDecor::sprite_name(self) -> &'static str
 impl core::clone::Clone for pixtuoid_scene::layout::WallDecor

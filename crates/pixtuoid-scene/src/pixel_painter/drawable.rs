@@ -41,9 +41,11 @@ const PANTRY_STEAM_DX_SMALL: i16 = 1;
 pub(crate) const VENDING_PICKUP_SLOT: (u16, u16) = (2, 4);
 
 /// Vending machine + printer body sizes — CENTER-anchored on their waypoint
-/// `pos` (origin = `pos − body/2`).
-pub(crate) const VENDING_BODY: Size = Size { w: 4, h: 6 };
-pub(crate) const PRINTER_BODY: Size = Size { w: 5, h: 4 };
+/// `pos` (origin = `pos − body/2`), read from the table the hover box reads.
+pub(crate) const VENDING_BODY: Size =
+    crate::layout::furniture_def(crate::layout::Furniture::VendingMachine).visual;
+pub(crate) const PRINTER_BODY: Size =
+    crate::layout::furniture_def(crate::layout::Furniture::Printer).visual;
 
 pub(super) struct Drawable<'a> {
     pub(super) anchor_y: u16,
