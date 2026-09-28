@@ -4,7 +4,7 @@ Instructions for Claude Code (or any AI coding agent) in this repo.
 (`AGENTS.md` symlinks here.) This is the workspace map; per-crate detail lives
 in nested guides, auto-loaded when you touch their tree:
 
-- [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — headless lib: sources/decoders, reducer/state, sprites, grid/walkable. (+ [`tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md): the 9-binary test layout, add-a-CLI test steps.)
+- [`crates/pixtuoid-core/CLAUDE.md`](crates/pixtuoid-core/CLAUDE.md) — headless lib: sources/decoders, reducer/state, sprites, grid/walkable. (+ [`tests/CLAUDE.md`](crates/pixtuoid-core/tests/CLAUDE.md): the test-binary layout, add-a-CLI test steps.)
 - [`crates/pixtuoid-scene/CLAUDE.md`](crates/pixtuoid-scene/CLAUDE.md) — backend-agnostic render+sim engine: pixel painter, layout, walk/pose/pathfind, theme model, weather, pets, chitchat.
 - [`crates/pixtuoid/CLAUDE.md`](crates/pixtuoid/CLAUDE.md) — the binary: install, runtime, cli, config, multi-floor. (+ [`src/tui/CLAUDE.md`](crates/pixtuoid/src/tui/CLAUDE.md): the terminal painter.)
 - [`integrations/raycast/CLAUDE.md`](integrations/raycast/CLAUDE.md), [`site/CLAUDE.md`](site/CLAUDE.md) — the non-Rust `--json` consumers; their gates are `tsc`/`eslint` / `just site-check`, not cargo.
@@ -58,7 +58,7 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Don't chain `cargo clippy && cargo test` (two build caches) — `just preflight` or one at a time. Never pipe preflight through `tail`/`head` (exit code eaten).
 - Touched `--json` / `SourceStatus` / `OutcomeRow` / the source roster → `just gen-contract` (regenerates schemas + Raycast types).
 - Renamed a decoded/registered wire name → `just gen-drift-surface`, commit both `crates/*/drift-surface.json` — the crate's own test fails on a stale fragment; regenerate, don't hand-edit.
-- Look-changing PR → `just gen`, commit everything it rewrote; a scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
+- Look-changing PR → `just gen`, commit everything it rewrote; a core/scene/web change ALSO needs `just gen-wasm` + commit `site/public/wasm/` (`gen` deliberately excludes it, and nothing catches a skip).
 - Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
@@ -100,7 +100,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 2. **Agent events flow through ONE channel** `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives hook-wins dedup — producers tag their own events. Daemon presence rides a separate `AgentId`-free channel (`PresenceMsg { key: DaemonInstanceKey, delta }`) and never enters `Reducer::apply`.
 3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — see core's guide.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.
-5. **The hook shim never blocks CC** — always exit 0 silently; the 200 ms send bound is watchdog-enforced on both platforms. Shim coverage is child-process level only.
+5. **The hook shim never blocks CC** — always exit 0 silently; the send bound (pixtuoid-hook's `transport::WRITE_TIMEOUT`) is watchdog-enforced on both platforms. Shim coverage is child-process level only.
 6. **Walkable mask = ground footprint only**; sprite size never moves a sim position — fitting the frame is the painter's job (`keep_sprite_on_canvas`), not the sim's (#912).
 
 ## Ownership by crate
