@@ -49,9 +49,7 @@ const WINDOW_EDGE_MARGIN: u16 = 2;
 /// Vertical depth of the warm spill band below each window.
 const SPILL_DEPTH: u16 = 12;
 
-/// Room-wide ambient bounce from a Storm lightning strike. Painted LAST in the
-/// pixel pass (after floor/walls/furniture/characters) so the whole interior
-/// briefly flares; the on-glass bolt alone lit only the window strip.
+/// Room-wide ambient bounce from a Storm lightning strike, at [`Sky::flash`].
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     if sky.weather() != Weather::Storm {
         return;

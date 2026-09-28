@@ -1,7 +1,7 @@
 //! The cutaway profile's paint pass — the second reader of `SimFrame`, and
 //! deliberately partial: EFFECTS (weather, steam, the pet) stay with the classic
-//! pass, and of the glow it draws only the desks' and a lit sitter's tint. It never advances the sim; a mover here would desync the
-//! profiles.
+//! pass, and of the glow it draws only the desks' and a lit sitter's tint. It
+//! never advances the sim; a mover here would desync the profiles.
 
 use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
@@ -843,7 +843,8 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     let Some((w, h)) = art_size(pack, sprite) else {
         return;
     };
-    // The layout places it TOP-LEFT; `paint_prop` centres, so convert once.
+    // Centred across the room, its top one row under the room's wall;
+    // `paint_prop` takes a centre.
     let at = crate::layout::Point {
         x: pantry.bounds.x + pantry.bounds.width.saturating_sub(w) / 2 + w / 2,
         y: pantry.bounds.y + ROOM_WALL_PX + 1 + h / 2,
@@ -2394,9 +2395,9 @@ S B B B B B B S
 
     /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
     /// pin a variant winning): a piece with no variant that lands at the scale
-    /// must be untouched by the lookup,
-    /// or adding one `@Nx` sprite would be a flag day for all of them. `plant`
-    /// ships only 8x art, and 8 does not divide 4.
+    /// must be untouched by the lookup, or adding one `@Nx` sprite would be a
+    /// flag day for all of them. `plant` ships only 8x art, and 8 does not
+    /// divide 4.
     #[test]
     fn a_piece_with_no_variant_at_the_scale_renders_exactly_as_it_did_before() {
         let pack = pack();

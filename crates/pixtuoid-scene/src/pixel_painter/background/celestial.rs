@@ -39,8 +39,6 @@ pub(super) const MOON_SHADOW: Rgb = Rgb {
     g: 34,
     b: 52,
 };
-/// Left edge of the first window (mirrors the `x = 3` start of the window loop
-/// in `paint_floor_and_walls`).
 const FIRST_WINDOW_X: f32 = super::FIRST_WINDOW_X as f32;
 // "Real low window": the horizon sits low in the band and the apex climbs off
 // the glass entirely rather than tracking the full window height.

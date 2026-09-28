@@ -1,8 +1,7 @@
 # Project task runner — the single source of truth for build / lint / format /
-# test. Every call-site goes through these recipes — the .githooks/ hooks,
-# .github/workflows/ci*.yml, .github/workflows/release.yml, and the docs — so there is exactly ONE
-# place that defines what each command actually runs (no drift between local,
-# CI, and release).
+# test. The git hooks, CI and release call these recipes rather than restating
+# their commands, so each command is defined in ONE place and cannot drift
+# between local, CI and release.
 #
 # Recipes are grouped by intent (see `just --list`):
 #   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
@@ -96,9 +95,8 @@ actionlint:
 # The blind spot the recipe above cannot cover: actionlint models WORKFLOWS, so
 # it discovers only .github/workflows and rejects an action.yml outright
 # ("jobs section is missing"). Shell that moves from a workflow into a composite
-# action therefore loses its shellcheck coverage silently — which is exactly
-# what happened to the homebrew-core contract asserts in packaging-build. Pull
-# each `run:` out ourselves and check it with the same linter.
+# action therefore loses its shellcheck coverage silently. Pull each `run:` out
+# ourselves and check it with the same linter.
 [group('rust')]
 [doc('Shellcheck every run: block inside the composite actions (actionlint cannot parse action.yml)')]
 actionlint-composites:
@@ -220,15 +218,16 @@ deny:
     cargo deny check bans licenses sources
 
 # A PATH-valued env var read with `env::var` DROPS a non-UTF-8 value — a legal
-# path — and falls back to a different directory, silently (the #880/#343/#342/#195
-# shape reached through the encoding). `--selftest` proves the checker can FAIL.
+# path — and falls back to a different directory, silently. `--selftest` proves
+# the checker can FAIL.
 [group('rust')]
 [doc('Gate: PATH-valued env vars must be read as bytes, never via env::var')]
 env-paths:
     python3 scripts/check-env-paths.py --selftest
     python3 scripts/check-env-paths.py
 
-# Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay terminal/window-free.
+# Architecture invariant #1, mechanized: pixtuoid-core + pixtuoid-scene stay
+# terminal/window/audio-device-free.
 [group('rust')]
 arch:
     #!/usr/bin/env bash
@@ -252,10 +251,10 @@ arch:
         # which would print the green line without having checked anything.
         deps="$(cargo tree -p "$crate" --edges normal --prefix none --target all --all-features)"
         if grep -qE '^(ratatui|crossterm|winit|softbuffer|rodio|cpal)' <<<"$deps"; then
-            echo "ARCH VIOLATION: $crate depends on a terminal/window crate (CLAUDE.md invariant #1)"; exit 1
+            echo "ARCH VIOLATION: $crate depends on a terminal/window/audio-device crate (CLAUDE.md invariant #1)"; exit 1
         fi
     done
-    echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window-free"
+    echo "arch: pixtuoid-core + pixtuoid-scene are terminal/window/audio-device-free"
 
 # Fast, independent lint checks in parallel.
 [group('rust')]
@@ -562,8 +561,8 @@ corpus-all:
     cc=target/release/examples/corpus_check
     [ -x "$cc" ] || { echo "run: just build --release --examples" >&2; exit 2; }
     # Read the roster BEFORE the loop: as a process substitution its exit status
-    # is unobservable, so a roster that died fed an empty loop and the census
-    # reported "everything clean" having censused nothing.
+    # is unobservable, so a roster that dies would feed an empty loop and the
+    # census would report "everything clean" having censused nothing.
     roster="$("$cc" --roster)" || { echo "corpus_check --roster failed" >&2; exit 2; }
     [ -n "$roster" ] || { echo "corpus_check --roster returned no rows" >&2; exit 2; }
     rc=0
@@ -647,8 +646,8 @@ openclaw-multi-e2e *ports:
 # the claude-cli backend, proving the gateway's lobster and its backend's `cc·`
 # desk sprite coexist live. Real account footprint (your gateway's channels
 # connect) and it bills a turn — recipe exists so the script has an invocation
-# site and cannot silently rot on a summary-format change (it shipped broken
-# once for exactly that reason), NOT because it should be run casually.
+# site and cannot silently rot on a summary-format change, NOT because it should
+# be run casually.
 [group('rust')]
 [doc('OpenClaw + claude-cli backend live-e2e — REAL gateway AND one BILLED model turn')]
 openclaw-backend-e2e:
@@ -689,8 +688,8 @@ workspace-version:
 # matrix). Pass `true` for targets that need the Docker-backed `cross` toolchain
 # (CI installs it via taiki-e/install-action@cross). `cross` is validated rather
 # than defaulted because callers pass it POSITIONALLY: an unquoted, unset
-# matrix.cross once slid the next argument into this slot on both Linux legs
-# that omit the key — pinned by the arg-shift case below.
+# matrix.cross slides the next argument into this slot on a leg that omits the
+# key — pinned by the arg-shift case below.
 [group('rust')]
 [doc('Cross-compile a release for ONE target triple (release.yml build matrix)')]
 build-target target cross="false":
@@ -845,11 +844,10 @@ gen-contract:
 gen-readme-check:
     node scripts/gen-readme.mjs --check
 
-# Regenerate docs/images/ + site/public/demos/ from scripts/media.json — ONE
-# manifest-driven driver. Builds the snapshot and hero_still examples; Pillow
-# for stills/composite/gif, ffmpeg for clips/crops, gifsicle for the gif.
-# Forwards args, e.g. `just gen-media --only docs`.
-# Requires the .venv (Pillow) + ffmpeg + gifsicle.
+# Regenerate docs/images/ + site/public/demos/ from scripts/media.json. Builds
+# the snapshot and hero_still examples; the .venv's Pillow for
+# stills/composite/gif, ffmpeg for clips/crops, gifsicle for the gif. Forwards
+# args, e.g. `just gen-media --only docs`.
 [group('gen')]
 [doc('Regenerate docs/images/ + site/public/demos/ from scripts/media.json')]
 gen-media *args:
@@ -914,8 +912,7 @@ gen-wasm: gen-wasm-tools wasm-build
 # Bloat + PAIR gate for the committed wasm artifact. Size: the hero must stay
 # a lazy-load behind the poster, so a silent size regression (a dep pulling in
 # formatting machinery, an accidental debug build) fails loudly. The cap is on
-# the GZIPPED size, because the wire cost is what the poster is hiding — gating
-# the raw proxy instead is what blocked the density-variant sprite art (#871).
+# the GZIPPED size, because the wire cost is what the poster is hiding.
 # Raw is REPORTED, never gated as wire: the runner prices the wasm gzipped, as
 # GitHub Pages ships it (`startPagesLikeProxy`), so site/lighthouserc.json sees raw
 # growth only as parse/compile cost (total-blocking-time and
@@ -930,14 +927,10 @@ gen-wasm: gen-wasm-tools wasm-build
 # so every committed file must match gen-wasm's sha256 manifest AND every file
 # must be covered by it. Byte-exact rebuild-match is deliberately NOT checked
 # in CI — wasm output drifts across rustc versions, and CI installs latest
-# stable, so local `just gen-wasm` + review is the freshness authority. Note
-# what that does and does NOT resemble in the committed demo media: the
-# clips/gif are presence-only for this same non-determinism reason, but the
-# STILLS are re-rendered and pixel-diffed at threshold 0 by gen-check, so media
-# staleness IS mechanically gated and wasm staleness is not. Nothing here reads
-# a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
-# hero with every gate green; the compensating control is CLAUDE.md's build
-# notes ("a core/scene/web change ALSO needs `just gen-wasm`"), not this recipe.
+# stable, so local `just gen-wasm` + review is the freshness authority. Nothing
+# here reads a scene/core/web source, so a merge that skips `just gen-wasm`
+# ships a stale hero with every gate green; the compensating control is root
+# CLAUDE.md's "Build & test" gen-wasm note, not this recipe.
 # No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
 # never links, so a stamp would demand a wasm regen on changes that cannot alter
 # it. That reason does not cover scene or web, where any change can move the
@@ -991,7 +984,7 @@ gen-wasm-check:
 # them ARE pixel-deterministic). Run by ci-tests.yml's smoke job; runnable locally
 # before pushing a visual change. A red check after an INTENTIONAL office change
 # means: run `just gen` and commit everything it rewrote in the same change.
-# Requires the .venv + ffmpeg + node + a release build of the snapshot example.
+# Requires the .venv + ffmpeg + node; it builds the examples it renders with.
 [group('gen')]
 [doc('Fail if anything `just gen` writes has drifted, or the wasm pair is broken')]
 gen-check: compare-selftest wasm-check-selftest gen-readme-check gen-wasm-check gen-art-check
@@ -1061,14 +1054,13 @@ setup-tools:
         rustup component add rust-analyzer >/dev/null 2>&1 ||
             echo "could not add the rust-analyzer component — install it for LSP support" >&2
     fi
-    # Non-cargo lint tools that `just lint` gates on (shfmt formats shell,
-    # actionlint lints the workflows, and shellcheck backs actionlint's run-block
+    # Non-cargo lint tools that `just lint` gates on: shfmt/shellcheck cover the
+    # shell sources, actionlint/zizmor the workflows, yq + jq the CI contracts,
+    # check-jsonschema the schemas. shellcheck also backs actionlint's run-block
     # checks — WITHOUT it on PATH, actionlint silently SKIPS them, so a shell bug
-    # in a workflow `run:` block passes `just lint` green locally). brew on macOS;
-    # elsewhere point at the install docs rather than silently leaving `just lint`
-    # unable to run — or, worse, passing with the shellcheck pass quietly skipped.
-    # shfmt/actionlint/shellcheck/zizmor back workflow linting, while yq + jq
-    # evaluate the CI contracts.
+    # in a workflow `run:` block passes `just lint` green locally. brew on macOS;
+    # elsewhere the re-check below names what is missing rather than leaving
+    # `just lint` unable to run, or passing with the shellcheck pass skipped.
     # gitleaks backs `just fixture-pii`, a REQUIRED gate: without it on PATH the
     # recipe cannot run at all (it does not degrade to a weaker scan, because a
     # weaker scan is what it replaced).
@@ -1123,9 +1115,8 @@ wasm-check-selftest:
 
 # The pixel comparator is the primitive under `gen-check` and the smoke job; an
 # always-green comparator reports success for any render at all. Its own recipe
-# because it needs only Pillow while `gen-check` needs the venv plus ffmpeg,
-# node, a release snapshot build and the wasm pair: a developer who cannot run
-# that gate should still be able to run this.
+# because it needs only Pillow, while `gen-check` needs the toolchain its header
+# lists: a developer who cannot run that gate should still be able to run this.
 [group('meta')]
 [doc('Self-test the pixel comparator that gen-check and smoke ride on')]
 compare-selftest:
@@ -1157,9 +1148,8 @@ drift-selftest:
     python3 scripts/check_upstream_drift_selftest.py
 
 # The pty driver's pure halves — the ANSI stripper, the composer comparison, the
-# gate/menu wording. Each of those was a lost BILLED turn before it was code, and
-# each fails silently: a broken stripper just stops matching, and the capture
-# comes back empty blaming the CLI. Runs in `lint`; CI's hygiene job enumerates
+# gate/menu wording. Each fails silently, at the price of a BILLED turn: a broken
+# stripper just stops matching, and the capture comes back empty blaming the CLI. Runs in `lint`; CI's hygiene job enumerates
 # it separately.
 [group('meta')]
 [doc("Self-test the TUI capture driver's pure logic")]
@@ -1169,7 +1159,7 @@ tuidrive-selftest:
 # The git env scrub, both copies: `e2e_init_repo` and the pre-push hook. A git
 # hook exports GIT_DIR/GIT_INDEX_FILE into every child and those OUTRANK
 # `git -C <dir>`, so an unscrubbed helper COMMITS to the developer's real repo
-# while printing nothing (#893, twice). The suite runs the unscrubbed form first
+# while printing nothing. The suite runs the unscrubbed form first
 # and proves it leaks, so a scrub that stopped scrubbing cannot pass. Hermetic:
 # one mktemp -d, no network, no real repo.
 [group('meta')]
@@ -1213,10 +1203,7 @@ fixture-metadata:
 # The recorder refuses a capture carrying its own identity, but that check runs
 # ONCE, on the capturer's terminal. This re-scans what is actually COMMITTED, so
 # a fixture added by hand, edited later, or captured before the check existed is
-# covered too — both classes that slipped through on #929.
-# gitleaks, not a hand-rolled scanner: the one this replaced admitted a real
-# GitHub PAT, GitLab PAT and Stripe key, because it only knew the five patterns
-# its author thought of. Config + the WHY: `.gitleaks.toml`.
+# covered too. gitleaks, not a hand-rolled scanner: `.gitleaks.toml` says why.
 # Runs in `lint`; CI's hygiene job enumerates it separately.
 [group('meta')]
 [doc("Scan the committed fixture tree for secrets and the recorder's identity")]
@@ -1251,7 +1238,7 @@ fixture-pii-selftest:
     printf '/home/alice\n'          > "$d/probe/identity-home.txt"
     printf '/Users/bob/notes.txt\n' > "$d/probe/identity-users.txt"
     # A username that STARTS with a placeholder token, and the Windows separator:
-    # both sailed through the first form of this rule.
+    # the two shapes a looser rule admits.
     printf '/Users/dev-ops\n'  > "$d/probe/identity-prefix.txt"
     printf 'C:\\Users\\bob\n'  > "$d/probe/identity-win.txt"
     printf -- '--Users-carol-Desktop-proj--\n' > "$d/probe/identity-dashed.txt"
@@ -1265,8 +1252,8 @@ fixture-pii-selftest:
     # Assembled, and deliberately NOT `AKIAIOSFODNN7EXAMPLE` — gitleaks' default
     # allowlist waives AWS's own documentation key, so that one proves nothing.
     printf 'aws_key = "AKIA%s"\n' "QYZ3K7RFVD2NMXWB" > "$d/probe/cred-aws.txt"
-    # A real secret wearing a wire identifier's PREFIX. The allowlists waived this
-    # by substring until they were anchored against `secret` rather than `match`.
+    # A real secret wearing a wire identifier's PREFIX: an unanchored wire-id
+    # allowlist waives it by substring (`.gitleaks.toml` says why they anchor).
     printf '{"api_key":"msg_%s"}\n' "Xq7RvN2bK9wLpT4mZs8cHf1jY6dQ3aGe0uVi5nBr" > "$d/probe/cred-disguised.txt"
     # The RESIDUAL, pinned so it is visible rather than assumed closed: a secret
     # that lands INSIDE the wire id's own 20-32 length window still rides the

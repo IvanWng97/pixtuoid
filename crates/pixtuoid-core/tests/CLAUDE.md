@@ -11,8 +11,8 @@ tests/
 ├── sources/main.rs      the source/decode layer
 │   ├── captures.rs      THE walk (`every_capture()`) + every provenance RULE, in Rust
 │   │                    so the rules ride `just test` on all three platforms. ONE
-│   │                    enumeration, no mirror (three populations = a fix landing on
-│   │                    half of one, four rounds running). `conformance.rs` imports its
+│   │                    enumeration, no mirror: a second population is where a fix
+│   │                    lands on half of one. `conformance.rs` imports its
 │   │                    tree helpers, so dropping `mod captures;` fails to COMPILE.
 │   ├── decode/          cross-CLI decoder unit tests; its fixtures/{hooks,jsonl}/ are
 │   │                    hand-built decoder inputs, NOT captures (`capture_dirs()` skips it)
@@ -56,8 +56,8 @@ captures the one-AgentId rule cannot host.
 ## The one pipeline
 
 Real wire bytes ride `pixtuoid_core::harness::Drive` (dev-only `harness`
-feature): `conformance.rs`, `sources/{grok,cursor,delegation}` (hardcoded
-decoders until #929), `pixtuoid/tests/wire_to_pixels.rs`, and the on-demand
+feature): `conformance.rs`, `sources/{grok,cursor,delegation}`,
+`pixtuoid/tests/wire_to_pixels.rs`, and the on-demand
 tools (`decoder_fuzz`, `corpus_check`). A shell supplies bytes and asserts;
 it does NOT re-roll decode→reduce and never re-derives the first-sight seed's
 `AgentId` (that comes from the source's registry row — core guide).

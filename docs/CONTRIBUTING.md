@@ -35,8 +35,9 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 
 ## CI gates
 
-`just preflight` is the local gate; these run only in CI, so a green preflight
-does not mean a green PR:
+`just preflight` is the local gate. CI runs the jobs below, and all but
+**hygiene** (preflight's own `just lint`) and zizmor's offline audits are
+invisible to preflight, so a green preflight does not mean a green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -57,10 +58,8 @@ does not mean a green PR:
   (`policy/ci-observability/`: contracts for the silent, costly workflow
   failures actionlint and zizmor can't see, and behavior tests of the
   workflows' own shell) and
-  `just fixture-pii` (gitleaks over the committed capture tree). The
-  capture-tree RULES gate harder: they are Rust tests
-  (`tests/sources/captures.rs`, entry `just fixture-metadata`) and ride
-  `just test` on all three platforms.
+  `just fixture-pii` (gitleaks over the committed capture tree); the
+  capture-tree rules are Rust tests (`just fixture-metadata`).
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
@@ -194,8 +193,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    new repo docs.
 
 **Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
-(committed; `.agents/skills/` aliases them for Codex): `two-lens-review`,
-`beautify-decoration`, `add-source`, `add-theme`, `procedural-lofi`.
+(committed; `.agents/skills/` aliases them for Codex).
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own

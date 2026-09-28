@@ -44,7 +44,8 @@ pub(super) fn dust_mote_positions(
     for i in 0..MOTES_PER_COLUMN {
         // Mix floor_seed, column x, and particle id so every (column, mote) pair
         // gets an independent 64-bit seed: a plain `floor_seed * K + i` varies
-        // only the lowest bits, collapsing all three motes into one pixel.
+        // only the lowest bits, collapsing a column's `MOTES_PER_COLUMN` motes into
+        // one pixel.
         let s = pixtuoid_core::id::splitmix64(
             floor_seed
                 .wrapping_add((col.x as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9))

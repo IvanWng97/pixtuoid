@@ -1,7 +1,7 @@
 ---
 name: beautify-decoration
 version: 1.0.0
-description: "Iterate on the visual identity of a top-down pixel-art decoration (sprite + layout integration) in pixtuoid. Use when redesigning an existing decoration (pantry, lounge, meeting room, cubicle decor) or adding a new one. Captures the rebuild trap, the visual-verification loop, resolution constraints, sprite-format pitfalls, and the layout-integration checklist that we learned the hard way during the pantry beautify session."
+description: "Iterate on the visual identity of a top-down pixel-art decoration (sprite + layout integration) in pixtuoid. Use when redesigning an existing decoration (pantry, lounge, meeting room, cubicle decor) or adding a new one. Captures the rebuild trap, the visual-verification loop, resolution constraints, sprite-format pitfalls, and the layout-integration checklist."
 metadata:
   scope: "pixtuoid repo only"
 ---
@@ -44,9 +44,9 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 
 **Step 7 is mandatory.** `cargo build --release --example snapshot` does NOT rebuild the main binary. Users testing with `./target/release/pixtuoid run` won't see sprite changes until the workspace is rebuilt. Forgetting this step is how "I changed the sprite but nothing happened in the live TUI" bugs get filed.
 
-**Step 8 is mandatory.** Commit messages for sprite changes must include the iteration count and a one-line rationale for each rejected attempt. Future editors need to know which alternatives were explored — otherwise they'll re-try the same dead-end designs (the seated_sleeping sprite went through 4 iterations before reading correctly at scale).
+**Step 8 is mandatory.** Commit messages for sprite changes must include the iteration count and a one-line rationale for each rejected attempt. Future editors need to know which alternatives were explored — otherwise they'll re-try the same dead-end designs.
 
-## Sharp edges (the things that wasted time during the pantry session)
+## Sharp edges
 
 ### 1. The rebuild trap
 
@@ -54,18 +54,18 @@ The user is the final judge of "does it look like a fridge / coffee machine / et
 - `crates/pixtuoid-scene/build.rs` embeds every `.sprite` in `sprites/default/` at compile time, and a sprite edit, add or remove rebuilds it.
 - If unsure, verify with: `strings target/release/examples/snapshot | grep "<some unique string from your sprite>"`.
 
-### 2. Snapshot defaults hide the large sprite variants
+### 2. Snapshot size gates the large sprite variants
 
-`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). **Use the default `--cols 192 --rows 80` to see everything.**
+`examples/snapshot` defaults to 192×80 cells → buffer 192×160. Several layouts (pantry, corridor appliances) have conditional variants based on room dimensions. Corridor items (vending machine, printer) only appear when the cubicle aisle clears `VENDING_MIN_AISLE_*` / `PRINTER_MIN_AISLE_*` (`layout/compute.rs`). The default size clears every gate — don't shrink it while iterating.
 
 Pantry-specific threshold: the large `pantry` counter needs the left column to fit `PANTRY_COUNTER_LARGE_W` plus margin (the `pantry_counter_size` pick in `layout/compute.rs`); below that, `pantry_small.sprite` is used (`pixel_painter::pantry_counter_anim`).
 
 ### 3. Resolution budget
 
-- Each sprite pixel ≈ half a terminal cell (half-block compression).
+- A terminal cell shows one pixel column and two pixel rows (half-block ▀): a sprite is as many cells wide as it has pixels, and half as many tall.
 - Subzones smaller than **~5 display cells wide** blur into pixel noise — users can't read them.
 - Sub-pixel detail (a 1-cell handle, a 1-cell stripe) is invisible. Iterate on **silhouette + color identity**, not pixel polish.
-- A 32×10 sprite has only ~16 display cells of width. Three zones of ~5 cells each is the practical max for legibility. Drop items; don't shrink them.
+- Budget subzones against the sprite's width in cells: a 32×10 sprite is 32 cells wide, room for about six ~5-cell zones. Drop items; don't shrink them.
 
 ### 4. Identity mistakes that look identical to each other
 
@@ -132,4 +132,4 @@ What we did: replaced the 20×8 pantry counter with a 32×10 design through 8 it
 - **v7**: Discovered `cargo build --workspace` was not rebuilding the snapshot example, so v6 was never actually rendered. Fixed by adding build.rs.
 - **v8**: Color-coded for identity — solid WHITE fridge vs. dark coffee + dark microwave. Strong silhouette differentiation. (Honest self-critique: still looks washing-machine-y due to H-frame.)
 
-Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **bump cols to 192 for the large variant**.
+Lessons: **silhouette + color over detail**, **always rebuild the example explicitly**, **keep the default 192-column snapshot for the large variant**.

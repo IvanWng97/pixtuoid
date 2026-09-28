@@ -752,7 +752,7 @@ const NIGHT_HOUR: u32 = 0;
 const NOON_HOUR: u32 = 12;
 
 /// Every whole hour at which the sky shows the MOON, straight off
-/// [`sky::hour_is_day`] — the ONE day/night boundary, so this sweep can't drift
+/// [`hour_is_day`] — the ONE day/night boundary, so this sweep can't drift
 /// from a second hand-written hour list.
 fn night_hours() -> impl Iterator<Item = u32> {
     (0..24u32).filter(|h| !hour_is_day(*h as f32))
