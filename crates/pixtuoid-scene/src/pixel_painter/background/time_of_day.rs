@@ -143,8 +143,8 @@ fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s
     }
 }
 
-/// Multiplicative dim applied to floor pixels at night — pulls everything toward
-/// a dark navy so the artificial-light pools have something to stand out against.
+/// Night dim on the floor band: blends toward the theme's `night_tint` so the
+/// artificial-light pools have something to stand out against.
 pub(in crate::pixel_painter) fn dim_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,

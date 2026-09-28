@@ -35,8 +35,9 @@ Activate the git hooks once per clone: `git config core.hooksPath .githooks`
 
 ## CI gates
 
-`just preflight` is the local gate; these run only in CI, so a green preflight
-does not mean a green PR:
+`just preflight` is the local gate. CI runs the jobs below, and all but
+**hygiene** and zizmor's offline audits are invisible to preflight, so a green
+preflight does not mean a green PR:
 
 - **api-surface** — committed `cargo public-api` goldens at `api/<crate>.txt`;
   regenerate with `just api-surface` + commit when the public surface moves.
@@ -57,10 +58,8 @@ does not mean a green PR:
   (`policy/ci-observability/`: contracts for the silent, costly workflow
   failures actionlint and zizmor can't see, and behavior tests of the
   workflows' own shell) and
-  `just fixture-pii` (gitleaks over the committed capture tree). The
-  capture-tree RULES gate harder: they are Rust tests
-  (`tests/sources/captures.rs`, entry `just fixture-metadata`) and ride
-  `just test` on all three platforms.
+  `just fixture-pii` (gitleaks over the committed capture tree); the
+  capture-tree rules ride `just test` instead.
 - **zizmor** — workflow/action security: symbolic-or-SHA pins,
   credential-dropping checkouts, exact inline suppressions.
 - **The two automatic Claude reviewers** ride `claude-readonly-review.yml`: a
@@ -82,9 +81,9 @@ AND any breaking change to the published crates' API. Both halves are machine-
 applied on the release PR, not per-PR: release-plz derives the level from the
 commit log (`features_always_increment_minor` in `release-plz.toml` is the
 "features also bump minor" half), and release-plz's own `cargo-semver-checks`
-run is the "nothing breaks on a patch" half, reported in the release PR's body.
-A breaking-change verdict means raise the bump on the release branch — never
-weaken the lint.
+run is the "nothing breaks on a patch" half: a detected break raises the bump
+to the next minor on its own, and the release PR's body reports it. Never weaken
+a lint to dodge the bump.
 
 ### Cutting the release
 
@@ -101,9 +100,10 @@ weaken the lint.
    it before `ci-gate` finishes. If `main` moved, **re-dispatch — never "Update
    branch"**: only a dispatch recomputes `CHANGELOG.md` for the new commits, and
    the merge commit "Update branch" adds counts as a human's, so the next
-   dispatch closes this PR and opens a new number. If the semver verdict says the
-   bump is too small, raise it with `cargo set-version --workspace X.Y.Z`
-   (cargo-edit) and push. A user-facing change that touched no packaged file
+   dispatch closes this PR and opens a new number. release-plz has already raised
+   the bump for any break `cargo-semver-checks` detects; raise it further with
+   `cargo set-version --workspace X.Y.Z` (cargo-edit) and push only for a break
+   its lints cannot see. A user-facing change that touched no packaged file
    (`npm/`, `release.yml` packaging) is not in the generated notes — add its line
    to `CHANGELOG.md` by hand as the last commit before merging.
 3. **Merge it** (squash). That merge is the *irreversible* step: the `release` job
@@ -119,8 +119,7 @@ is the branch-protection setting above: a release PR cannot merge unless its
 tree is `main`'s tree, and that tree is the one its own CI already passed.
 
 `cargo-semver-checks` runs inside release-plz on the release PR, not as a CI
-job: a detected break RAISES the bump rather than failing, so the version in the
-PR is already the corrected one. `just semver` reproduces the verdict locally.
+job; `just semver` reproduces its verdict locally.
 
 Each crate's crates.io **Trusted Publisher** record names `release-plz.yml`.
 Renaming that workflow file, or publishing from another one, is rejected until
@@ -194,8 +193,7 @@ Non-trivial work runs as an **arc**: design → build → gate → wrap.
    new repo docs.
 
 **Skills.** Repo skills live in [`.claude/skills/`](../.claude/skills/)
-(committed; `.agents/skills/` aliases them for Codex): `two-lens-review`,
-`beautify-decoration`, `add-source`, `add-theme`, `procedural-lofi`.
+(committed; `.agents/skills/` aliases them for Codex).
 On a fresh machine or a non-Claude tool, `git clone` gives you the repo skills
 and every `just` gate; this section IS the loop for tools without skills. Do
 not scaffold a `CONTEXT.md`/`docs/adr/` convention here — a declaration's own
@@ -244,9 +242,9 @@ Advisory backstops that surface risk but never gate:
 
 ## Architecture invariants (don't break these)
 
-1. `pixtuoid-core` and `pixtuoid-scene` have **no terminal or window
-   dependencies** (`just arch` + the crate boundary enforce it); terminal/
-   window code lives in the binary's `tui/` and `floating/` painters.
+1. `pixtuoid-core` and `pixtuoid-scene` have **no terminal, window or
+   audio-device dependencies** (`just arch` + the crate boundary enforce it);
+   that code lives in the binary's `tui/`/`floating/` painters and audio gateway.
 2. Events flow through **one** channel typed `mpsc::Sender<(Transport,
    AgentEvent)>`; the `Transport` tag is load-bearing (hook-wins dedup).
 3. The **`Source` trait** is the only seam for a transcript-bearing agent CLI

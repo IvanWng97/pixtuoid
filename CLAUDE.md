@@ -62,8 +62,8 @@ cargo run --release --example snapshot -- /tmp/snap.png   # render TUI to PNG
 - Real wire bytes ride ONE pipeline: `pixtuoid_core::harness::Drive` (dev-only `harness` feature). A driver keyed off anything but the source's registry row registers NOTHING.
 - Fixtures are RECORDED, never composed (`just capture-fixture` — BILLED), and the recorder blanks every subtree no decoder reads (derived by probe, never listed); every scenario declares `provenance.json`. Rules: [`fixtures/README.md`](crates/pixtuoid-core/tests/sources/fixtures/README.md). `just restrip-fixtures` re-strips the committed corpus offline; `just corpus-all` censuses local corpora; `just fixture-age` is advisory/local.
 - Visual verification for sprite work: snapshot example → `scripts/crop-snapshot.py` → READ the PNG; loop in `.claude/skills/beautify-decoration/SKILL.md`.
-- CI-only gates preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
-- On-demand advisory (never gates): `just mutants`, `just coverage`, `just bench`, CodSpeed.
+- CI gates, and which of them preflight can't see (a green preflight is NOT a green PR): [`CONTRIBUTING.md#ci-gates`](docs/CONTRIBUTING.md#ci-gates) lists them and what each catches.
+- On-demand advisory (never gates): `just mutants`, `just bench`, CodSpeed.
 - Hooks: `git config core.hooksPath .githooks` once per clone; `just setup-tools` installs cargo tools (incl. rust-analyzer — without it the agent LSP degrades to grep).
 - Release: dispatch `release-plz.yml` → merge its PR (no `just gen` — no committed frame carries the version); that merge IS the publish (the `release` job does crates.io + the tag + a draft release; the tag fires release.yml: binaries + npm + homebrew autobump) and stays a human step. [`CONTRIBUTING.md`](docs/CONTRIBUTING.md#releasing).
 
@@ -96,7 +96,7 @@ Repo skills (committed): `two-lens-review`, `beautify-decoration`,
 
 ## Architecture invariants (load-bearing)
 
-1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`.
+1. **`pixtuoid-core` and `pixtuoid-scene` have no terminal/window/audio-device deps** (compiler-enforced by crate boundary; `just arch`). New render targets are thin painters over `pixtuoid_scene::floor::render_floor` / `pixel_painter::render_to_rgb_buffer`.
 2. **Agent events flow through ONE channel** `mpsc::Sender<(Transport, AgentEvent)>`; the `Transport` tag drives hook-wins dedup — producers tag their own events. Daemon presence rides a separate `AgentId`-free channel (`PresenceMsg { key: DaemonInstanceKey, delta }`) and never enters `Reducer::apply`.
 3. **`Source` trait is the only seam** for a transcript-bearing CLI; per-source format knowledge lives in that source's decoder. Exceptions: hook-only CLIs (Reasonix) and the shared ACP wire standard (`source/acp.rs`, reused by grok) — see core's guide.
 4. **Hook install writes through symlinks** (`resolve_symlink` in `install/io.rs`) — critical for stow-managed configs; Windows keeps the bounded rename-retry.
