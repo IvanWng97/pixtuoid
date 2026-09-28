@@ -66,6 +66,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         unknown: _,
         mismatched_density,
         orphan_variants,
+        mismatched_frame_counts,
         // A mixed look still renders every piece: `validate-pack` reports it.
         partial_sets: _,
         orphan_derived: _,
@@ -91,6 +92,7 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         tracing::warn!(
             origin,
             animation = ?m.name,
+            frame = m.frame,
             claimed = ?m.claimed,
             found = ?m.found,
             "custom sprite pack density variant is not the size its name claims — \
@@ -101,8 +103,18 @@ fn warn_pack_validation_gaps(pack: &Pack, origin: &str) -> ValidationReport {
         tracing::warn!(
             origin,
             animation = ?name,
-            "custom sprite pack ships a density variant whose base piece it does not — \
+            "custom sprite pack ships a density variant whose base animation it does not — \
              its size claim is checked against the default pack's art, not yours"
+        );
+    }
+    for m in mismatched_frame_counts {
+        tracing::warn!(
+            origin,
+            animation = ?m.name,
+            base = m.base,
+            variant = m.variant,
+            "custom sprite pack density variant has a different frame count from its base — \
+             it shows the wrong frame of the animation"
         );
     }
     report

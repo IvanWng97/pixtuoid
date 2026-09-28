@@ -3,7 +3,8 @@ use std::path::Path;
 
 use anyhow::{bail, Result};
 use pixtuoid_core::sprite::format::{
-    load_pack, MissingOptional, OrphanDerived, PartialSet, StandIn, ValidationReport,
+    load_pack, DensityMismatch, FrameCountMismatch, MissingOptional, OrphanDerived, PartialSet,
+    StandIn, ValidationReport,
 };
 
 use crate::{cli_stdout, strip_control_chars};
@@ -71,6 +72,30 @@ fn orphan_derived_line(o: &OrphanDerived) -> String {
     )
 }
 
+/// The `ERROR:` line for a density variant with a frame that misses its claim.
+fn mismatched_density_line(m: &DensityMismatch) -> String {
+    format!(
+        "ERROR: \"{}\" frame {} is {}x{}, but its name claims {}x{}",
+        strip_control_chars(&m.name),
+        m.frame,
+        m.found.0,
+        m.found.1,
+        m.claimed.0,
+        m.claimed.1
+    )
+}
+
+/// The `ERROR:` line for a density variant whose frame count is not its base's.
+fn frame_count_line(m: &FrameCountMismatch) -> String {
+    format!(
+        "ERROR: \"{}\" has {} frame(s) but its base has {}: a density variant redraws \
+         every frame of its base",
+        strip_control_chars(&m.name),
+        m.variant,
+        m.base
+    )
+}
+
 pub fn validate_pack(dir: &Path) -> Result<()> {
     let (mut out, mut err) = (cli_stdout(), std::io::stderr());
     let pack = load_pack(dir)?;
@@ -87,14 +112,16 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         unknown,
         mismatched_density,
         orphan_variants,
+        mismatched_frame_counts,
         partial_sets,
         orphan_derived,
     } = &report;
     // ERROR diagnostics and the final tally go to stderr so stdout stays the
     // parseable channel even when a caller redirects it. The names in
-    // `insufficient_frames`, `mismatched_density` and `orphan_variants` can be
-    // density variants from the pack's own table, so they are pack input and are
-    // stripped like the unknown keys; every other finding names a registry entry.
+    // `insufficient_frames`, `mismatched_density`, `orphan_variants` and
+    // `mismatched_frame_counts` can be density variants from the pack's own
+    // table, so they are pack input and are stripped like the unknown keys;
+    // every other finding names a registry entry.
     for name in missing_required {
         let _ = writeln!(err, "ERROR: missing required animation \"{name}\"");
     }
@@ -106,20 +133,15 @@ pub fn validate_pack(dir: &Path) -> Result<()> {
         );
     }
     for m in mismatched_density {
-        let _ = writeln!(
-            err,
-            "ERROR: \"{}\" is {}x{}, but its name claims {}x{}",
-            strip_control_chars(&m.name),
-            m.found.0,
-            m.found.1,
-            m.claimed.0,
-            m.claimed.1
-        );
+        let _ = writeln!(err, "{}", mismatched_density_line(m));
+    }
+    for m in mismatched_frame_counts {
+        let _ = writeln!(err, "{}", frame_count_line(m));
     }
     for name in orphan_variants {
         let _ = writeln!(
             err,
-            "ERROR: \"{}\" is a density variant of a piece this pack does not ship",
+            "ERROR: \"{}\" is a density variant of an animation this pack does not ship",
             strip_control_chars(name)
         );
     }
@@ -185,6 +207,34 @@ mod tests {
             line,
             "WARN:  ships \"cat_walk\" but not \"cat_sit\", \"cat_sleep\": \
              the default pack draws the rest, in its own style"
+        );
+    }
+
+    #[test]
+    fn a_density_line_names_the_frame_that_misses_the_claim() {
+        let line = mismatched_density_line(&DensityMismatch {
+            name: "typing@2x\u{1b}[31m".to_string(),
+            frame: 1,
+            claimed: (2, 2),
+            found: (3, 1),
+        });
+        assert_eq!(
+            line,
+            "ERROR: \"typing@2x[31m\" frame 1 is 3x1, but its name claims 2x2"
+        );
+    }
+
+    #[test]
+    fn a_frame_count_line_names_both_counts() {
+        let line = frame_count_line(&FrameCountMismatch {
+            name: "seated@2x\u{202e}".to_string(),
+            base: 2,
+            variant: 1,
+        });
+        assert_eq!(
+            line,
+            "ERROR: \"seated@2x\" has 1 frame(s) but its base has 2: a density variant \
+             redraws every frame of its base"
         );
     }
 
