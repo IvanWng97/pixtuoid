@@ -46,8 +46,8 @@ version = "1"
 "a" = "#c83828"   # lobster antenna
 "T" = "#26262c"   # desk task-chair shell — cool near-black, so it parts from the warm desk
 "I" = "#67676b"   # desk task-chair lit top edge (a flat shell reads as a hole in the floor)
-# --- density-variant art (`@Nx`): materials the base grid had no room for
-# Only the cutaway draws `@Nx` art, so each draws its own front (`desk_face_rows`).
+# --- the generator's materials (scripts/gen-art.py): every @Nx piece and the
+# 1x pieces it owns
 "&" = "#e2e8f0"   # white
 "*" = "#aab2c4"   # white, shaded
 "O" = "#b07a42"   # wood, lit

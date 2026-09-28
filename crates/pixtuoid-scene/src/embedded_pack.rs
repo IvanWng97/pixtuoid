@@ -550,13 +550,12 @@ mod tests {
             .height()
             .checked_sub(base.height())
             .expect("the raised variant is the taller one");
-        // `desk.y` is one row into the base sprite (its top row is the bezel).
-        const BASE_DESK_Y_ROW: u16 = 1;
+        let raise = crate::pixel_painter::DESK_BEZEL_RAISE;
         let edges = [0, 1, base.width() - 2, base.width() - 1];
         for x in edges {
-            for dy in 0..(base.height() - BASE_DESK_Y_ROW) {
-                let b = base.get(x, BASE_DESK_Y_ROW + dy);
-                let n = north.get(x, BASE_DESK_Y_ROW + lift + dy);
+            for dy in 0..(base.height() - raise) {
+                let b = base.get(x, raise + dy);
+                let n = north.get(x, raise + lift + dy);
                 assert_eq!(
                     b, n,
                     "column {x} differs at desk.y+{dy}: the two variants must be \
@@ -566,13 +565,24 @@ mod tests {
         }
 
         // The column loop above starts at `desk.y`, so wood a variant grows ABOVE that row is
-        // invisible to it; counting OPAQUE rows would miss it too (a screen row is opaque either way).
-        let wood = base
-            .get(0, BASE_DESK_Y_ROW)
-            .expect("the desk's west edge at desk.y is surface");
+        // invisible to it: count the rows holding surface — the wood or its lit back edge — in
+        // any column.
+        let surface = ['D', 'O'].map(|key| {
+            pack.palette()
+                .get(key)
+                .flatten()
+                .unwrap_or_else(|| panic!("{key:?} is an opaque surface key"))
+        });
         let surface_rows = |f: &pixtuoid_core::sprite::Frame| {
             (0..f.height())
-                .filter(|&y| (0..f.width()).any(|x| f.get(x, y) == Some(wood)))
+                .filter(|&y| {
+                    (0..f.width()).any(|x| {
+                        f.get(x, y)
+                            .copied()
+                            .flatten()
+                            .is_some_and(|c| surface.contains(&c))
+                    })
+                })
                 .count() as u16
         };
         for (name, art) in [("desk", base), ("desk_north", north)] {
@@ -586,8 +596,62 @@ mod tests {
         }
     }
 
-    // The desk sprite's row width is a THIRD copy of `DESK_W + 4`, baked into the
-    // `.sprite` asset rows: a `DESK_W` edit moves `visual.w` but NOT the asset,
+    /// The generated desk art follows the layout's row split — the bezel raise,
+    /// then surface, front lip and legs — which scripts/gen-art.py copies; a
+    /// drift there moves the wood the depth sort and the glow assume. Read by
+    /// STRUCTURE, so an art restyle cannot fail it: legs show open floor
+    /// between them, the lip spans the width, the surface is opaque at the west
+    /// edge, and nothing but the monitor rises above it.
+    #[test]
+    fn a_desks_rows_follow_the_layout() {
+        use crate::layout::{DESK_FRONT_ROWS, DESK_LEG_ROWS, DESK_SURFACE_ROWS};
+        let pack = test_default_pack();
+        let raise = crate::pixel_painter::DESK_BEZEL_RAISE;
+        let base_h = raise + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_ROWS;
+        for name in ["desk", "desk_north"] {
+            let f = pack
+                .animation(name)
+                .and_then(|a| a.frames().first())
+                .unwrap_or_else(|| panic!("the embedded pack ships {name}"));
+            let (w, h) = (f.width(), f.height());
+            let opaque = |x: u16, y: u16| f.get(x, y).copied().flatten().is_some();
+            let lift = h
+                .checked_sub(base_h)
+                .expect("no desk is shorter than the layout's split");
+            let legs0 = h - DESK_LEG_ROWS;
+            let lip0 = legs0 - DESK_FRONT_ROWS;
+            let top = lip0 - DESK_SURFACE_ROWS;
+            assert_eq!(
+                top,
+                raise + lift,
+                "{name}: the surface starts below the monitor's raise"
+            );
+            for y in legs0..h {
+                assert!(
+                    opaque(0, y) && !opaque(w / 2, y),
+                    "{name} row {y}: legs, open between"
+                );
+            }
+            for y in lip0..legs0 {
+                assert!(
+                    (0..w).all(|x| opaque(x, y)),
+                    "{name} row {y}: the lip spans the desk"
+                );
+            }
+            for y in top..lip0 {
+                assert!(opaque(0, y), "{name} row {y}: surface at the west edge");
+            }
+            for y in 0..top {
+                assert!(
+                    !opaque(0, y),
+                    "{name} row {y}: only the monitor rises above the wood"
+                );
+            }
+        }
+    }
+
+    // The desk art's width is a copy of `DESK_W + 4` in scripts/gen-art.py
+    // (`DESK_ART_W`): a `DESK_W` edit moves `visual.w` but not the generated art,
     // silently desyncing render vs mask/occlusion/collision.
     #[test]
     fn desk_sprite_width_tracks_the_footprint_overhang() {
@@ -601,7 +665,7 @@ mod tests {
             w,
             crate::layout::desk_furniture_def().visual.w,
             "embedded 'desk' sprite is {w}px wide but visual.w (DESK_W+4) is {} — \
-             a DESK_W edit moved visual.w but not the .sprite rows; render/mask/z-sort will drift",
+             a DESK_W edit moved visual.w but not scripts/gen-art.py's DESK_ART_W; render/mask/z-sort will drift",
             crate::layout::desk_furniture_def().visual.w
         );
     }

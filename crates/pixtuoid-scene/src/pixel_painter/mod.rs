@@ -88,6 +88,8 @@ pub use anchors::character_anchor;
 
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
+#[cfg(test)]
+pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE};
 pub(crate) use palette::{SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
 

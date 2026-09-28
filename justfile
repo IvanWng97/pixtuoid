@@ -806,20 +806,20 @@ site-e2e:
 # and check the committed copies (each `*-check` header says against what).
 
 [group('gen')]
-[doc('Regenerate the committed art (@8x sprites + icons + README sections + docs images + site demos)')]
+[doc('Regenerate the committed art (generated sprites + icons + README sections + docs images + site demos)')]
 gen: gen-art gen-icons gen-media gen-readme
 
 [group('gen')]
-[doc("Regenerate the bundled pack's @8x cutaway sprites from scripts/gen-cutaway-art.py")]
+[doc("Regenerate the bundled pack's generated sprites (all @8x art + the 1x pieces it owns) from scripts/gen-art.py")]
 gen-art:
-    python3 scripts/gen-cutaway-art.py crates/pixtuoid-scene/sprites/default
+    python3 scripts/gen-art.py crates/pixtuoid-scene/sprites/default
 
 # Stdlib-only, so `lint` runs it without the venv `gen-check` needs.
 [group('gen')]
-[doc('Fail if a committed @8x sprite differs from what scripts/gen-cutaway-art.py draws')]
+[doc('Fail if a committed generated sprite differs from what scripts/gen-art.py draws')]
 gen-art-check:
-    python3 scripts/gen-cutaway-art.py --selftest
-    python3 scripts/gen-cutaway-art.py --check crates/pixtuoid-scene/sprites/default
+    python3 scripts/gen-art.py --selftest
+    python3 scripts/gen-art.py --check crates/pixtuoid-scene/sprites/default
 
 # Sync the README's install/features/tools sections from site/src/*.json.
 [group('gen')]
