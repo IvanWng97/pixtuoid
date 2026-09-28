@@ -186,9 +186,10 @@ fn load_embedded_pack() -> Result<Pack> {
 }
 
 /// Every default sprite as `(filename, source)`: every `.sprite` in
-/// `sprites/default/` the embedded manifest draws, listed by `build.rs`, so a
-/// sprite committed there cannot be left out. Extracted so [`test_wide_pack`] reuses the EXACT sprite set and
-/// only overrides `standing.sprite`.
+/// `sprites/default/`, listed by `build.rs` (less, without `density-art`, the
+/// frames only a density variant draws), so a sprite committed there cannot be
+/// left out by omission. Extracted so [`test_wide_pack`] reuses the EXACT
+/// sprite set and only overrides `standing.sprite`.
 fn embedded_sprite_srcs() -> Vec<(&'static str, &'static str)> {
     const SPRITES: &[(&str, &str)] = include!(concat!(env!("OUT_DIR"), "/embedded_sprites.rs"));
     SPRITES.to_vec()
@@ -329,27 +330,29 @@ mod tests {
     /// without is exactly that.
     #[test]
     fn every_embedded_sprite_is_a_frame_the_pack_loads() {
-        let srcs = embedded_sprite_srcs();
-        // Every leave-one-out load below errors when the whole set does, which
-        // would report nothing unregistered.
-        load_pack_from_strings(EMBEDDED_PACK_TOML, &srcs).expect("the whole set loads");
-        let unregistered: Vec<&str> = srcs
-            .iter()
-            .map(|&(name, _)| name)
-            .filter(|&name| {
-                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
-                load_pack_from_strings(EMBEDDED_PACK_TOML, &without).is_ok()
-            })
-            .collect();
+        let unregistered = undrawn(EMBEDDED_PACK_TOML, &embedded_sprite_srcs());
         assert!(
             unregistered.is_empty(),
             "sprites no animation registers: {unregistered:?}"
         );
     }
 
-    /// The pack a build without `density-art` embeds — the web hero's — loads,
-    /// draws no density variant, validates clean and carries no sprite it does
-    /// not draw. Built here through the same filter `build.rs` runs.
+    /// The sprites `toml` loads without: the ones no animation draws.
+    fn undrawn<'a>(toml: &str, srcs: &[(&'a str, &'a str)]) -> Vec<&'a str> {
+        // Every leave-one-out load below errors when the whole set does, which
+        // would report nothing undrawn.
+        load_pack_from_strings(toml, srcs).expect("the whole set loads");
+        srcs.iter()
+            .map(|&(name, _)| name)
+            .filter(|&name| {
+                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
+                load_pack_from_strings(toml, &without).is_ok()
+            })
+            .collect()
+    }
+
+    /// The web hero's pack. Nothing runs this suite without `density-art`
+    /// (`just hack` only checks), so this is the one place it is loaded.
     #[test]
     fn the_pack_without_density_art_loads_whole() {
         let (toml, dropped) =
@@ -364,20 +367,14 @@ mod tests {
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
         assert_eq!(report.warning_count(), 0, "{report:?}");
-        let unregistered: Vec<&str> = srcs
-            .iter()
-            .map(|&(name, _)| name)
-            .filter(|&name| {
-                let without: Vec<_> = srcs.iter().copied().filter(|&(n, _)| n != name).collect();
-                load_pack_from_strings(&toml, &without).is_ok()
-            })
-            .collect();
-        assert!(unregistered.is_empty(), "undrawn sprites: {unregistered:?}");
+        let undrawn = undrawn(&toml, &srcs);
+        assert!(undrawn.is_empty(), "undrawn sprites: {undrawn:?}");
     }
 
     /// What a default run's render scale rounds to (`RenderScale::fit`): a
     /// change to the bundled art's densest variant should be a decision.
     #[test]
+    #[cfg(feature = "density-art")]
     fn the_bundled_pack_is_drawn_at_most_at_8x() {
         assert_eq!(test_default_pack().max_density_variant(), 8);
     }
