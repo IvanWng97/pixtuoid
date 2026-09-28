@@ -43,7 +43,7 @@ pub(crate) struct Span {
 
 impl Span {
     /// A box of `w`x`h` whose top-left is `(x, y)`, plus `below` extra rows its
-    /// painter draws underneath (a front face, a contact shadow, a sitter's chair).
+    /// painter draws underneath (a front face, a contact shadow).
     pub(crate) fn new(x: u16, y: u16, w: u16, h: u16, below: u16) -> Self {
         Self {
             x0: x,

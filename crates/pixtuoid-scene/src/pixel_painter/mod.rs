@@ -89,6 +89,7 @@ pub use anchors::character_anchor;
 #[doc(hidden)]
 pub use anchors::seated_anchor_facing;
 pub(crate) use drawable::{desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE};
+pub(crate) use palette::SCREEN_GLASS_KEY;
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so
@@ -807,35 +808,42 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them.
 fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
-    let Some(chair) = drawable::desk_chair_frame(pack) else {
-        return;
-    };
     for (i, &desk) in layout.home_desks.iter().enumerate() {
         let facing = layout.desk_facing(FloorLocalDeskIndex(i));
-        let Some(pos) = desk_chair_top_left(desk, chair.width(), facing) else {
+        let Some(pos) = desk_chair_top_left(pack, desk, facing) else {
             continue;
         };
         drawables.push(Drawable {
-            anchor_y: crate::layout::desk_walk_anchor_facing(desk, facing).y,
+            anchor_y: desk_chair_z_key(desk, facing),
             kind: DrawableKind::DeskChair { pos },
         });
     }
 }
 
-/// Where the task chair `chair_w` wide stands at `desk`, or `None` for a desk that
-/// does not face north: a viewer-facing occupant sits behind their desk, in front
-/// of their chair. Both profiles place chairs from this.
+/// Where the pack's task chair stands at `desk`, or `None` for a desk that does
+/// not face north (a viewer-facing occupant sits behind their desk, in front of
+/// their chair) or a pack without the chair. Both profiles place chairs from this.
 pub(crate) fn desk_chair_top_left(
+    pack: &Pack,
     desk: Point,
-    chair_w: u16,
     facing: crate::layout::Facing,
 ) -> Option<Point> {
     /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
     const CHAIR_BACK_TOP_DY: u16 = 6;
+    let chair = drawable::desk_chair_frame(pack)?;
     (facing == crate::layout::Facing::North).then(|| Point {
-        x: anchors::seated_anchor_facing(desk, chair_w, facing).x,
+        x: anchors::seated_anchor_facing(desk, chair.width(), facing).x,
         y: desk.y + CHAIR_BACK_TOP_DY,
     })
+}
+
+/// The depth a desk's task chair sorts at: its seat's own z-key, which the sim
+/// gives the occupant arriving at, sitting in and leaving the seat alike. A
+/// painter that draws chairs after people on a tie therefore draws the chair
+/// over its occupant throughout — no flip where the walk ends and the sit
+/// begins. Both profiles key chairs by this.
+pub(crate) fn desk_chair_z_key(desk: Point, facing: crate::layout::Facing) -> u16 {
+    crate::layout::desk_walk_anchor_facing(desk, facing).y
 }
 
 pub(super) struct DeskLight {

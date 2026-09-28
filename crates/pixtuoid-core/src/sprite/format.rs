@@ -1181,8 +1181,7 @@ mod validation_floor_tests {
         assert!(desk_only.animation_or_source("plant").is_none());
     }
 
-    /// Pins [`Pack::piece_or_source`]: a painter that looks up the piece's own
-    /// density variants needs the NAME the art is filed under, not just the art.
+    /// Pins [`Pack::piece_or_source`].
     #[test]
     fn a_pack_names_the_piece_that_draws_a_key() {
         let desk_only = pack_with("[animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n");

@@ -748,9 +748,8 @@ fn a_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
     );
 }
 
-/// A lit screen is the desk's own glass keys relit, so on a desk drawn from a
-/// variant that is exactly its base upscaled it lands on the same pixels as the
-/// base's — the glow follows the art, never the art's pixel size.
+/// A lit screen is the desk's own glass key relit, so a desk drawn from a
+/// variant that is exactly its base upscaled lights the same pixels as the base.
 #[test]
 fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
     use crate::layout::Facing;
@@ -802,6 +801,7 @@ fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
 
     // A desk top, its screen glass, and a darker front row, whole-pixel so an
     // upscale by `DENSITY` is the variant exactly.
+    let glass_key = super::palette::SCREEN_GLASS_KEY;
     let rows = |w: u16, h: u16, glass: char| -> String {
         (0..h)
             .map(|y| {
@@ -824,16 +824,16 @@ fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
         };
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
-             \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"j\"=\"#1c2a36\"\n\
+             \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"{glass_key}\"=\"#1c2a36\"\n\
              [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}"
         );
         let art = [
-            ("f.sprite", format!("@frame 0\n{}", rows(w, h, 'j'))),
+            ("f.sprite", format!("@frame 0\n{}", rows(w, h, glass_key))),
             (
                 "g.sprite",
                 format!(
                     "@frame 0\n{}",
-                    rows(w * DENSITY, h * DENSITY, variant_glass.unwrap_or('j'))
+                    rows(w * DENSITY, h * DENSITY, variant_glass.unwrap_or(glass_key))
                 ),
             ),
         ];
@@ -862,7 +862,7 @@ fn a_lit_desk_from_a_faithful_variant_renders_as_its_upscaled_base() {
         "the typing agent's screen must be lit, or this pins nothing"
     );
     assert!(
-        render(&frame, &pack(Some('j'))) == base_px,
+        render(&frame, &pack(Some(glass_key))) == base_px,
         "the lit screen moved with the art's density"
     );
     assert!(
@@ -950,11 +950,12 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
 #[test]
 fn only_a_north_facing_desk_stands_a_chair() {
     use crate::layout::Facing;
+    let pack = crate::embedded_pack::test_default_pack();
     let desk = Point { x: 40, y: 30 };
-    assert!(super::desk_chair_top_left(desk, 8, Facing::North).is_some());
+    assert!(super::desk_chair_top_left(&pack, desk, Facing::North).is_some());
     for facing in [Facing::South, Facing::East, Facing::West] {
         assert_eq!(
-            super::desk_chair_top_left(desk, 8, facing),
+            super::desk_chair_top_left(&pack, desk, facing),
             None,
             "{facing:?}"
         );

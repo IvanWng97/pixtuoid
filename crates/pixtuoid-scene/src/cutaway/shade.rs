@@ -13,6 +13,15 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::render_scale::RenderScale;
 
+/// How many [`Rgb::ramp`] levels a [`Ramp`]'s lit face sits above its material.
+///
+/// One value for every material: the room reads as lit from a single direction
+/// because nothing gets its own exposure. Tuned on the ratified visual mock.
+const RAMP_LIT_LEVEL: i8 = 3;
+/// Shade counterpart of [`RAMP_LIT_LEVEL`], deliberately deeper — a surface
+/// turning away from the only light loses more than a facing one gains.
+const RAMP_SHADE_LEVEL: i8 = -4;
+
 /// A material's three tones under the cutaway's single key light.
 ///
 /// Every shaded mass carries one, so each reads as lit from the same direction.
@@ -27,31 +36,20 @@ pub(crate) struct Ramp {
 }
 
 impl Ramp {
-    /// A ramp whose three tones are all `c`: the unshaded reference tests
-    /// compare against.
-    #[cfg(test)]
-    pub(crate) fn flat(c: Rgb) -> Self {
-        Self {
-            lit: c,
-            base: c,
-            shade: c,
-        }
-    }
-
-    /// Derive a ramp from one theme color: `lit_level` and `shade_level` steps
-    /// along its [`Rgb::ramp`], the same hue-shifted ramp a pack's `[ramps]`
-    /// shades use, so the room and the art are lit by one rule.
+    /// Derive a ramp from one base color, [`RAMP_LIT_LEVEL`] and
+    /// [`RAMP_SHADE_LEVEL`] steps along its [`Rgb::ramp`] — the hue-shifted ramp a
+    /// pack's `[ramps]` shades use, so the room and the art are lit by one rule.
     ///
     /// This is why the cutaway needs no theme edits: every theme gains a
     /// lit/shade pair for free, and a NEW theme cannot ship half-shaded. Adding
     /// two explicit roles per material to `Theme` instead would mean hand-picking
     /// both for every material in every theme, and every one a chance to drift
     /// from the base it belongs to.
-    pub(crate) fn from_base(base: Rgb, lit_level: i8, shade_level: i8) -> Self {
+    pub(crate) fn from_base(base: Rgb) -> Self {
         Self {
-            lit: base.ramp(lit_level),
+            lit: base.ramp(RAMP_LIT_LEVEL),
             base,
-            shade: base.ramp(shade_level),
+            shade: base.ramp(RAMP_SHADE_LEVEL),
         }
     }
 }
@@ -198,18 +196,17 @@ mod tests {
             b: 60,
         };
         assert_eq!(
-            Ramp::from_base(c, 3, -4),
+            Ramp::from_base(c),
             Ramp {
-                lit: c.ramp(3),
+                lit: c.ramp(RAMP_LIT_LEVEL),
                 base: c,
-                shade: c.ramp(-4),
+                shade: c.ramp(RAMP_SHADE_LEVEL),
             }
         );
-        assert_eq!(Ramp::from_base(c, 0, 0), Ramp::flat(c));
     }
 
     #[test]
-    fn a_derived_ramp_brackets_its_base_and_keeps_the_hue() {
+    fn a_derived_ramp_brackets_its_base_and_stays_its_material() {
         // A saturated blue: the lit tone must stay blue-dominant, not wash
         // toward white and lose the material.
         let blue = Rgb {
@@ -218,7 +215,7 @@ mod tests {
             b: 200,
         };
         let luma = |c: Rgb| u32::from(c.r) * 299 + u32::from(c.g) * 587 + u32::from(c.b) * 114;
-        let r = Ramp::from_base(blue, 3, -4);
+        let r = Ramp::from_base(blue);
         assert_eq!(r.base, blue, "the base is the theme's own color");
         assert!(
             luma(r.lit) > luma(blue) && luma(r.shade) < luma(blue),

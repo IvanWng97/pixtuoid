@@ -275,10 +275,17 @@ pub(super) struct DrawableCtx<'a> {
 /// The monitor bezel standing proud of the desk back, above `desk.y`.
 const DESK_BEZEL_RAISE: u16 = 1;
 
-/// The row a desk's art blits from, for art `art_h` tall against the base desk's
-/// `base_h`: the bezel raise, plus whatever a taller art adds ABOVE `desk.y`, so
-/// it keeps the base's bottom row. Both profiles blit desks from this.
-pub(crate) fn desk_art_top(desk_y: u16, art_h: u16, base_h: u16) -> u16 {
+/// The base desk's pack animation, whose bottom row every desk's art keeps.
+pub(crate) const DESK_SPRITE: &str = "desk";
+
+/// The row a desk's art `art_h` tall blits from at `desk_y`: the bezel raise,
+/// plus whatever a taller art adds ABOVE `desk.y`, so it keeps the base
+/// [`DESK_SPRITE`]'s bottom row. Both profiles blit desks from this.
+pub(crate) fn desk_art_top(pack: &Pack, desk_y: u16, art_h: u16) -> u16 {
+    let base_h = pack
+        .animation(DESK_SPRITE)
+        .and_then(|a| a.frames().first())
+        .map_or(0, |f| f.height());
     desk_y.saturating_sub(DESK_BEZEL_RAISE + art_h.saturating_sub(base_h))
 }
 
@@ -289,7 +296,7 @@ pub(crate) fn desk_sprite_name(facing: crate::layout::Facing) -> &'static str {
         crate::layout::Facing::North => "desk_north",
         crate::layout::Facing::South
         | crate::layout::Facing::East
-        | crate::layout::Facing::West => "desk",
+        | crate::layout::Facing::West => DESK_SPRITE,
     }
 }
 
@@ -324,11 +331,6 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                     }
                 }
             }
-            let base_h = pack
-                .animation("desk")
-                .and_then(|a| a.frames().first())
-                .map_or(0, |f| f.height());
-            // A taller variant keeps the BASE sprite's bottom row; its extra rows land above `desk.y`.
             let art = pack
                 .animation_or_source(desk_sprite_name(*facing))
                 .and_then(|a| a.frames().first());
@@ -336,7 +338,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             // the blit origin; passing `sprite_top + DESK_BEZEL_RAISE` caps every glow with a bar.
             let mut sprite_top = desk.y;
             if let Some(frame) = art {
-                sprite_top = desk_art_top(desk.y, frame.height(), base_h);
+                sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
             paint_desk_lamp(buf, *desk, *lamp, theme);

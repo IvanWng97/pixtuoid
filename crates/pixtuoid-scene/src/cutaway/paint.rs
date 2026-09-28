@@ -29,16 +29,6 @@ const FLOOR_LIT_NUMER: u16 = 1;
 /// Denominator of [`FLOOR_LIT_NUMER`].
 const FLOOR_LIT_DENOM: u16 = 3;
 
-/// How many [`Rgb::ramp`](pixtuoid_core::sprite::Rgb::ramp) levels a derived
-/// [`Ramp`]'s lit face sits above its material.
-///
-/// One value for every material: the room reads as lit from a single direction
-/// because nothing gets its own exposure. Tuned on the ratified visual mock.
-const RAMP_LIT_LEVEL: i8 = 3;
-/// Shade counterpart of [`RAMP_LIT_LEVEL`], deliberately deeper — a surface
-/// turning away from the only light loses more than a facing one gains.
-const RAMP_SHADE_LEVEL: i8 = -4;
-
 /// Narrowest skyline building, in logical units.
 const SKYLINE_MIN_W: u16 = 3;
 /// How much wider than [`SKYLINE_MIN_W`] a building may be.
@@ -57,16 +47,8 @@ const LABEL_GAP_PX: u16 = 2;
 /// Thickness of a room's glass wall, in logical units.
 const ROOM_WALL_PX: u16 = 1;
 
-/// The pack key of a monitor's glass. A lit screen is relit by recoloring this
-/// key, so the glow lands exactly on the glass the art drew, at any density.
-const SCREEN_GLASS: char = 'j';
-/// The pack key of the dim content a screen shows, relit as bright text.
-const SCREEN_TEXT: char = 'J';
-/// How many ramp levels the lit glass sits below its glow colour — the field
-/// the text reads on.
+/// How many ramp levels the lit glass sits below its glow colour.
 const SCREEN_GLASS_LEVEL: i8 = -3;
-/// How many ramp levels lit text sits above the glow colour.
-const SCREEN_TEXT_LEVEL: i8 = 9;
 
 /// Where a painter should hang one agent's name badge, in BUFFER pixels.
 ///
@@ -78,7 +60,8 @@ const SCREEN_TEXT_LEVEL: i8 = 9;
 pub struct CutawayLabel {
     /// Index into [`SimFrame::agents`].
     pub agent_idx: usize,
-    /// Badge anchor: horizontal centre of the sprite, just above its head.
+    /// Badge anchor: horizontal centre of the sprite, clear above its head and
+    /// any raised monitor behind it.
     pub anchor_px: crate::layout::Point,
 }
 
@@ -113,13 +96,8 @@ pub fn render_cutaway(
     }
     push_appliances(layout, &mut order);
     push_meeting_trios(layout, pack, &mut order);
-    push_characters(frame, layout, pack, &mut order);
-    let occupied: Vec<crate::layout::Point> = frame
-        .characters
-        .iter()
-        .filter_map(|c| c.seat_desk)
-        .collect();
-    push_chairs(layout, pack, &occupied, &mut order);
+    let carried = push_characters(frame, layout, pack, &mut order);
+    push_chairs(layout, pack, &carried, &mut order);
     wall_segments(layout, &mut order);
     push_pantry_counter(layout, pack, &mut order);
 
@@ -132,14 +110,11 @@ pub fn render_cutaway(
                 paint_desk(at, art, screen, pack, theme, scale, buf)
             }
             PieceKind::Chair { at } => paint_chair(at, pack, theme, scale, buf),
-            PieceKind::Character { idx, chair } => {
-                // A back-turned sitter's badge clears the raised monitor behind
-                // their head, or it lands on the bezel.
-                let badge_ceiling = chair.and_then(|_| {
-                    let desk = frame.characters.get(idx)?.seat_desk?;
-                    desk_span(pack, desk_art(pack, layout.desk_facing_at(desk))?, desk)
-                        .map(|s| s.y0)
-                });
+            PieceKind::Character {
+                idx,
+                chair,
+                badge_ceiling,
+            } => {
                 if let Some(l) = paint_character(
                     frame,
                     idx,
@@ -174,7 +149,7 @@ pub fn render_cutaway(
 
 /// Each desk in its facing's art, its screen lit by the classic painter's own
 /// rule ([`desk_screen_glow`](crate::pixel_painter::desk_screen_glow)) from the
-/// sim's observation, so the profiles never disagree about a screen.
+/// sim's observation, so the profiles never disagree about WHICH screens are lit.
 fn push_desks(
     frame: &SimFrame,
     layout: &Layout,
@@ -213,21 +188,16 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
     pack.piece_or_source(crate::pixel_painter::desk_sprite_name(facing))
 }
 
-/// The logical row desk art `art` blits from at `desk_y`.
-fn desk_art_top(pack: &Pack, art: &str, desk_y: u16) -> u16 {
-    let h = |n: &str| art_size(pack, n).map_or(0, |(_, h)| h);
-    crate::pixel_painter::desk_art_top(desk_y, h(art), h("desk"))
-}
-
 /// The box a desk drawn with `art` at `desk` occupies, with the front face below.
-/// A taller art grows upward from the same bottom row, so its depth never moves.
+/// A taller art grows upward from the same bottom row
+/// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(pack: &Pack, art: &str, desk: crate::layout::Point) -> Option<Span> {
     let (w, h) = art_size(pack, art)?;
     Some(piece_span(
         crate::layout::Anchor::TopLeft,
         crate::layout::Point {
             x: desk.x,
-            y: desk_art_top(pack, art, desk.y),
+            y: crate::pixel_painter::desk_art_top(pack, desk.y, h),
         },
         w,
         h,
@@ -235,16 +205,17 @@ fn desk_span(pack: &Pack, art: &str, desk: crate::layout::Point) -> Option<Span>
     ))
 }
 
-/// The task chair at each home desk nobody is seated at. An occupied desk's
-/// chair rides its sitter's piece instead (`push_characters`).
+/// The task chair at each back-turned home desk nobody sits at. The desks in
+/// `carried` are skipped: their chairs ride their sitters' pieces
+/// (`push_characters`, which returns them).
 fn push_chairs(
     layout: &Layout,
     pack: &Pack,
-    occupied: &[crate::layout::Point],
+    carried: &[crate::layout::Point],
     order: &mut Vec<(Span, PieceKind)>,
 ) {
     for (i, d) in layout.home_desks.iter().enumerate() {
-        if occupied.contains(d) {
+        if carried.contains(d) {
             continue;
         }
         let facing = layout.desk_facing(pixtuoid_core::state::FloorLocalDeskIndex(i));
@@ -254,19 +225,23 @@ fn push_chairs(
     }
 }
 
-/// The chair's box and top-left at a desk facing `facing`, placed by the
-/// classic painter's own rule
-/// ([`desk_chair_top_left`](crate::pixel_painter::desk_chair_top_left)); `None`
-/// where that rule stands no chair.
+/// The chair's box and top-left at a desk facing `facing`, placed and keyed by
+/// the classic painter's own rules
+/// ([`desk_chair_top_left`](crate::pixel_painter::desk_chair_top_left),
+/// [`desk_chair_z_key`](crate::pixel_painter::desk_chair_z_key)); `None` where
+/// those stand no chair.
 fn chair_span(
     pack: &Pack,
     facing: crate::layout::Facing,
     desk: crate::layout::Point,
 ) -> Option<(Span, crate::layout::Point)> {
+    let at = crate::pixel_painter::desk_chair_top_left(pack, desk, facing)?;
     let (w, h) = art_size(pack, crate::pixel_painter::DESK_CHAIR_SPRITE)?;
-    let at = crate::pixel_painter::desk_chair_top_left(desk, w, facing)?;
-    // One row below for the contact shadow its base casts.
-    Some((piece_span(crate::layout::Anchor::TopLeft, at, w, h, 1), at))
+    let span = Span {
+        y1: crate::pixel_painter::desk_chair_z_key(desk, facing),
+        ..piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
+    };
+    Some((span, at))
 }
 
 /// Every centre-anchored prop rides one helper, so none of them can grow its own
@@ -355,46 +330,56 @@ fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piece
     }
 }
 
+/// Queue every character, and return the desks whose chairs they carry, so
+/// [`push_chairs`] stands none of those again.
 fn push_characters(
     frame: &SimFrame,
     layout: &Layout,
     pack: &Pack,
     order: &mut Vec<(Span, PieceKind)>,
-) {
+) -> Vec<crate::layout::Point> {
+    let mut carried = Vec::new();
     for (i, c) in frame.characters.iter().enumerate() {
         let Some((w, h)) = art_size(pack, c.anim_name) else {
             continue;
         };
-        let chair = c
-            .seat_desk
-            .and_then(|d| chair_span(pack, layout.desk_facing_at(d), d));
+        let seat = c.seat_desk.map(|d| (d, layout.desk_facing_at(d)));
+        let chair = seat.and_then(|(d, facing)| chair_span(pack, facing, d));
+        if let (Some((d, _)), Some(_)) = (seat, chair) {
+            carried.push(d);
+        }
+        let badge_ceiling =
+            seat.and_then(|(d, facing)| desk_span(pack, desk_art(pack, facing)?, d).map(|s| s.y0));
         order.push((
             occupant_span(
                 piece_span(crate::layout::Anchor::TopLeft, cutaway_anchor(c), w, h, 0),
+                c.anchor_y,
                 chair.map(|(span, _)| span),
             ),
             PieceKind::Character {
                 idx: i,
                 chair: chair.map(|(_, at)| at),
+                badge_ceiling,
             },
         ));
     }
+    carried
 }
 
-/// A figure's box for depth: a back-turned sitter and their chair are one piece,
-/// reaching down to the chair's base — a person's depth is where their weight
-/// rests, in the aisle south of the desk. Anyone else carries one row for the
-/// shadow (standing) or the seat (a viewer-facing sitter, behind their desk).
-fn occupant_span(body: Span, chair: Option<Span>) -> Span {
+/// A figure's box for depth: its drawn box, sorted on `depth` — the sim's own
+/// z-key, which neither breath nor the sit arc moves, so a person never flips
+/// against a neighbour mid-breath. A back-turned sitter and their chair are one
+/// piece, spanning the chair's columns too.
+fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
+    let body = Span { y1: depth, ..body };
     match chair {
         Some(chair) => Span {
+            x0: body.x0.min(chair.x0),
+            x1: body.x1.max(chair.x1),
+            y0: body.y0,
             y1: body.y1.max(chair.y1),
-            ..body
         },
-        None => Span {
-            y1: body.y1.saturating_add(1),
-            ..body
-        },
+        None => body,
     }
 }
 
@@ -477,11 +462,7 @@ fn paint_wall_seg(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let glass = Ramp::from_base(
-        theme.office.room_wall_trim_light,
-        RAMP_LIT_LEVEL,
-        RAMP_SHADE_LEVEL,
-    );
+    let glass = Ramp::from_base(theme.office.room_wall_trim_light);
     let (x, y) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
     if w > h {
         slab(
@@ -547,11 +528,14 @@ enum PieceKind {
         idx: usize,
         /// A back-turned sitter's chair, painted straight after them.
         chair: Option<crate::layout::Point>,
+        /// The logical row their badge must stay above: the top of the desk art
+        /// behind a sitter, which a back-turned one's raised monitor lifts above
+        /// their head.
+        badge_ceiling: Option<u16>,
     },
 }
 
-/// A piece's screen footprint: the box its sprite occupies plus the `below` rows
-/// its painter draws underneath (a front face, a contact shadow, a sitter's chair).
+/// A piece's screen footprint, as [`Span::new`] builds it from its sprite's box.
 /// Anchoring goes through [`crate::layout::anchored_top_left`], the same function
 /// the walkable mask and the classic painter use, so the box a piece SORTS by
 /// cannot drift from the box it BLITS into.
@@ -600,7 +584,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     }
     let s = scale.get();
     let w = scale.to_buffer(layout.buf_w);
-    let wall = Ramp::from_base(theme.surface.wall, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL);
+    let wall = Ramp::from_base(theme.surface.wall);
     slab(buf, 0, 0, w, scale.to_buffer(band_h), &wall, scale);
 
     // One glass run inset inside the band, with a lit sill under it — the sill
@@ -608,7 +592,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let inset = (band_h * WINDOW_INSET_NUMER / WINDOW_INSET_DENOM).max(1);
     let glass_h = band_h.saturating_sub(inset * 2);
     if glass_h > 0 {
-        let glass = Ramp::from_base(theme.lighting.night_sky_a, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL);
+        let glass = Ramp::from_base(theme.lighting.night_sky_a);
         slab(
             buf,
             0,
@@ -629,14 +613,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
         );
     }
     // The wall's own contact line with the floor.
-    fill(
-        buf,
-        0,
-        scale.to_buffer(band_h),
-        w,
-        s,
-        theme.surface.carpet_dark.ramp(RAMP_SHADE_LEVEL),
-    );
+    fill(buf, 0, scale.to_buffer(band_h), w, s, contact_tone(theme));
 }
 
 /// A city skyline on the window sill, lit windows scattered through it. Flat
@@ -775,12 +752,13 @@ fn paint_desk(
     buf: &mut RgbBuffer,
 ) {
     let s = scale.get();
-    let x = scale.to_buffer(at.x);
-    let top_y = scale.to_buffer(desk_art_top(pack, art_name, at.y));
-
-    let Some(desk) = crate::pixel_painter::densest_frame(pack, art_name, 0, scale) else {
+    let (Some(span), Some(desk)) = (
+        desk_span(pack, art_name, at),
+        crate::pixel_painter::densest_frame(pack, art_name, 0, scale),
+    ) else {
         return;
     };
+    let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
     let relit;
     let art = match screen {
         Some(glow) => {
@@ -802,7 +780,7 @@ fn paint_desk(
         scale.to_buffer(desk.logical.1),
     );
 
-    let ramp = Ramp::from_base(material, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL);
+    let ramp = Ramp::from_base(material);
     let base_y = top_y + drawn_h;
     let w = drawn_w;
     slab(
@@ -822,23 +800,24 @@ fn paint_desk(
         base_y + scale.to_buffer(desk_front_h()),
         w,
         s,
-        theme.surface.carpet_dark.ramp(RAMP_SHADE_LEVEL),
+        contact_tone(theme),
     );
 }
 
-/// The desk art with its screen lit in `glow`: the glass takes the glow and the
-/// dim content turns to bright text. Recoloring the pack's own screen KEYS,
-/// rather than painting a band over the desk or matching a colour, lights
-/// exactly the glass the art drew — at whatever density it was drawn — and no
-/// other pixel, even one the same colour as the glass.
+/// The desk art with its screen lit in `glow`: the glass takes a dark step of
+/// the glow. Recoloring the pack's own glass KEY
+/// ([`SCREEN_GLASS_KEY`](crate::pixel_painter::SCREEN_GLASS_KEY)), rather than
+/// painting a band over the desk or matching a colour, lights exactly the glass
+/// the art drew — at whatever density it was drawn — and no other pixel, even
+/// one the same colour as the glass.
 fn relight_screen(
     art: pixtuoid_core::sprite::RecolorableFrame<'_>,
     glow: pixtuoid_core::sprite::Rgb,
 ) -> pixtuoid_core::sprite::Frame {
-    art.recolored(&[
-        (SCREEN_GLASS, Some(glow.ramp(SCREEN_GLASS_LEVEL))),
-        (SCREEN_TEXT, Some(glow.ramp(SCREEN_TEXT_LEVEL))),
-    ])
+    art.recolored(&[(
+        crate::pixel_painter::SCREEN_GLASS_KEY,
+        Some(glow.ramp(SCREEN_GLASS_LEVEL)),
+    )])
 }
 
 /// The most common opaque colour in `row` of `frame` — how the cutaway learns a
@@ -928,6 +907,8 @@ fn paint_character(
     )?;
     let (art_w, art_h) = art.logical;
 
+    // A sitter is grounded by their desk (and a back-turned one by their
+    // chair), not a shadow.
     if c.seat_desk.is_none() {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
     }
@@ -995,7 +976,7 @@ fn waypoint_sprite(kind: crate::layout::WaypointKind) -> Option<&'static str> {
 /// The meeting table — a slab, because the classic painter draws it
 /// procedurally too and there is no sprite to reuse.
 fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
-    let ramp = Ramp::from_base(theme.furniture.wood_top, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL);
+    let ramp = Ramp::from_base(theme.furniture.wood_top);
     let (w, h) = (TABLE_W, TABLE_H);
     let x = at.x.saturating_sub(w / 2);
     let y = at.y.saturating_sub(h / 2);
@@ -1015,7 +996,7 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         scale.to_buffer(y + h),
         scale.to_buffer(w),
         scale.to_buffer(desk_front_h()),
-        &Ramp::from_base(theme.furniture.wood_trim, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL),
+        &Ramp::from_base(theme.furniture.wood_trim),
         scale,
     );
     // ...and the ground contact every OTHER solid gets: without it the table was
@@ -1060,7 +1041,7 @@ fn paint_appliance(
         scale.to_buffer(y),
         scale.to_buffer(w),
         scale.to_buffer(h),
-        &Ramp::from_base(body, RAMP_LIT_LEVEL, RAMP_SHADE_LEVEL),
+        &Ramp::from_base(body),
         scale,
     );
     // The lit face — a vending display or a printer's glass — is what stops
@@ -1116,10 +1097,16 @@ fn paint_prop(
     );
 }
 
+/// The tone where a solid meets the floor: the carpet's own shade under the key
+/// light, so contact reads as weight rather than as a colour of its own.
+fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
+    Ramp::from_base(theme.surface.carpet_dark).shade
+}
+
 /// A tight dark band where a figure meets the floor — one row, not an ellipse: a
 /// wide soft pool reads as a stain on a dark carpet, while a band the width of
 /// the sprite reads as weight. Stamped BEFORE the body so the sprite sits on its
-/// own shadow, and skipped for a seated figure, whom the chair and desk ground.
+/// own shadow.
 fn contact_shadow(
     at: crate::layout::Point,
     sprite_w: u16,
@@ -1128,7 +1115,7 @@ fn contact_shadow(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let shade = theme.surface.carpet_dark.ramp(RAMP_SHADE_LEVEL);
+    let shade = contact_tone(theme);
     let s = scale.get();
     fill(
         buf,
@@ -1140,9 +1127,7 @@ fn contact_shadow(
     );
 }
 
-/// A task chair from the pack's art, over its occupant's lower torso, with the
-/// shadow its base casts. A sorted piece rather than part of the occupant: it
-/// stands at an empty desk too, and a passer-by can walk in front of it.
+/// A task chair from the pack's art, with the contact shadow its base casts.
 fn paint_chair(
     at: crate::layout::Point,
     pack: &Pack,
@@ -1202,12 +1187,15 @@ mod tests {
         );
     }
 
-    /// A back-turned sitter's depth box, built the way `push_characters` builds it.
+    /// A back-turned sitter's depth box, built the way `push_characters` builds
+    /// it, at the z-key the sim seats an occupant at (their seat's walk anchor).
     fn seated_back_span(pack: &Pack, desk: crate::layout::Point) -> Span {
+        use crate::layout::Facing;
         let (w, h) = base_size(pack, "seated_back");
-        let chair = chair_span(pack, crate::layout::Facing::North, desk).map(|(s, _)| s);
+        let chair = chair_span(pack, Facing::North, desk).map(|(s, _)| s);
         occupant_span(
             piece_span(crate::layout::Anchor::TopLeft, near_seat(desk), w, h, 0),
+            crate::layout::desk_walk_anchor_facing(desk, Facing::North).y,
             chair,
         )
     }
@@ -1220,7 +1208,8 @@ mod tests {
         let desk = crate::layout::Point { x: 0, y: 20 };
         let (_, body_h) = base_size(&pack, "standing");
 
-        let desk_z = desk_span(&pack, "desk", desk).expect("desk").y1;
+        let plain = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
+        let desk_z = desk_span(&pack, plain, desk).expect("desk").y1;
         // Standing at the desk's north approach, feet on its top row.
         let behind_z = sort_row(
             crate::layout::Anchor::TopLeft,
@@ -1259,11 +1248,16 @@ mod tests {
             plant_h,
             1,
         );
-        // Pushed in the render's own order: desks, props, then figures.
+        assert!(
+            desk_box.y1 < plant.y1 && plant.y1 < seated.y1,
+            "the fixture must separate all three by depth, or a tie-break decides: \
+             desk {desk_box:?}, plant {plant:?}, seated {seated:?}"
+        );
+        // Pushed in REVERSE, so no tie-break by push order can produce the answer.
         let drawn = crate::cutaway::order::depth_sort(vec![
-            (desk_box, "desk"),
-            (plant, "plant"),
             (seated, "seated"),
+            (plant, "plant"),
+            (desk_box, "desk"),
         ]);
         assert_eq!(drawn, vec!["desk", "plant", "seated"]);
     }
@@ -1275,17 +1269,17 @@ mod tests {
         let pack = pack();
         let desk = crate::layout::Point { x: 20, y: 30 };
         let north = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
-        assert_eq!(north, "desk_north", "the bundled pack ships the raised art");
-        assert_eq!(desk_art(&pack, crate::layout::Facing::South), Some("desk"));
-        let plain = desk_span(&pack, "desk", desk).expect("desk");
+        let south = desk_art(&pack, crate::layout::Facing::South).expect("desk art");
+        assert_ne!(north, south, "the bundled pack ships the raised art");
+        let plain = desk_span(&pack, south, desk).expect("desk");
         let raised = desk_span(&pack, north, desk).expect("desk_north");
         assert_eq!(raised.y1, plain.y1);
-        let raise = desk_art_top(&pack, "desk", desk.y) - desk_art_top(&pack, north, desk.y);
-        assert_eq!(plain.y0 - raised.y0, raise);
+        let ((_, plain_h), (_, north_h)) = (base_size(&pack, south), base_size(&pack, north));
         assert!(
-            raise > 0,
+            north_h > plain_h,
             "the back-turned desk's monitor stands above the base desk"
         );
+        assert_eq!(plain.y0 - raised.y0, north_h - plain_h);
     }
 
     /// A pack without the facing's own art draws the piece it derives from, the
@@ -1303,7 +1297,7 @@ mod tests {
 
     /// A back-turned sitter and their chair are ONE piece, so nothing can sort
     /// between them: the occupied desk pushes no chair of its own, and the
-    /// sitter's box reaches the chair's base at either phase of the breathing bob.
+    /// sitter's box covers the chair's at either phase of the breathing bob.
     #[test]
     fn a_back_turned_sitter_carries_their_own_chair() {
         let pack = pack();
@@ -1345,10 +1339,15 @@ mod tests {
                     h,
                     0,
                 );
-                let piece = occupant_span(body, Some(chair));
+                let depth =
+                    crate::layout::desk_walk_anchor_facing(desk, crate::layout::Facing::North).y;
+                let piece = occupant_span(body, depth, Some(chair));
                 assert!(
-                    piece.y1 >= chair.y1 && piece.y1 >= body.y1,
-                    "{anim}, bob {bob}"
+                    piece.y1 >= chair.y1
+                        && piece.y1 >= depth
+                        && piece.x0 <= chair.x0.min(body.x0)
+                        && piece.x1 >= chair.x1.max(body.x1),
+                    "{anim}, bob {bob}: {piece:?} must cover {body:?} and {chair:?}"
                 );
             }
         }
@@ -1356,19 +1355,31 @@ mod tests {
             chair_span(&pack, crate::layout::Facing::South, desk).is_none(),
             "a viewer-facing occupant sits in front of their own chair"
         );
+
+        // A chair wider than its sitter is still inside their piece: a passer-by
+        // overlapping only the chair's columns sorts against the sitter too.
+        let piece = occupant_span(
+            Span::new(10, 10, 4, 6, 0),
+            16,
+            Some(Span::new(8, 13, 8, 4, 0)),
+        );
+        assert_eq!((piece.x0, piece.x1), (8, 15));
     }
 
-    /// Relighting recolors the glass KEY and its dim-text key and nothing else —
-    /// not even a pixel of another key the same colour as the glass — so the glow
-    /// is exactly the screen the art drew, at whatever density.
+    /// Relighting recolors the glass KEY and nothing else — not even a pixel of
+    /// another key the same colour as the glass — so the glow is exactly the
+    /// screen the art drew, at whatever density.
     #[test]
-    fn a_lit_screen_relights_only_the_screen_keys() {
+    fn a_lit_screen_relights_only_the_glass_key() {
+        let glass = crate::pixel_painter::SCREEN_GLASS_KEY;
         let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
-            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
-             \"j\"=\"#1c2a36\"\n\"J\"=\"#304050\"\n\"D\"=\"#8b5a2b\"\n\"x\"=\"#1c2a36\"\n\
-             \".\"=\"transparent\"\n\
-             [animations.desk]\nframes=[\"desk.sprite\"]\nframe_ms=100\n",
-            &[("desk.sprite", "@frame 0\nj J D x .")],
+            &format!(
+                "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
+                 \"{glass}\"=\"#1c2a36\"\n\"D\"=\"#8b5a2b\"\n\"x\"=\"#1c2a36\"\n\
+                 \".\"=\"transparent\"\n\
+                 [animations.desk]\nframes=[\"desk.sprite\"]\nframe_ms=100\n"
+            ),
+            &[("desk.sprite", &format!("@frame 0\n{glass} D x ."))],
         )
         .expect("pack builds");
         let anim = pack.animation("desk").expect("desk");
@@ -1383,15 +1394,251 @@ mod tests {
             lit.as_slice(),
             &[
                 Some(glow.ramp(SCREEN_GLASS_LEVEL)),
-                Some(glow.ramp(SCREEN_TEXT_LEVEL)),
+                original[1],
                 original[2],
-                original[3],
                 None
             ]
         );
         assert_eq!(
-            original[3], original[0],
+            original[2], original[0],
             "the fixture's `x` shares the glass colour"
+        );
+    }
+
+    /// Pins [`SCREEN_GLASS_KEY`](crate::pixel_painter::SCREEN_GLASS_KEY) to the
+    /// bundled art: relighting the raised desk a back-turned sitter works at
+    /// must change its pixels, or the key names no glass and screens never light.
+    #[test]
+    fn the_bundled_back_turned_desk_draws_its_glass_in_the_glass_key() {
+        let pack = pack();
+        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let anim = pack.animation(art).expect("the bundled pack ships it");
+        let sentinel = pixtuoid_core::sprite::Rgb {
+            r: 255,
+            g: 0,
+            b: 255,
+        };
+        let lit = relight_screen(anim.recolorable(0).expect("frame 0"), sentinel);
+        assert!(
+            lit.as_slice()
+                .contains(&Some(sentinel.ramp(SCREEN_GLASS_LEVEL))),
+            "{art} has no pixel in the glass key"
+        );
+        assert_ne!(lit.as_slice(), anim.frames()[0].as_slice());
+    }
+
+    /// The bundled office with one editing agent homed at its first back-turned
+    /// desk, observed through the real sim every tick of their walk there: the
+    /// frames up to and including the first where they sit, and that desk.
+    fn sit_down() -> (Layout, Pack, Vec<SimFrame>, crate::layout::Point) {
+        use crate::floor::{FloorMeta, FloorSession};
+        use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex, ToolKind};
+        use std::time::{Duration, SystemTime};
+        const LOGICAL: (u16, u16) = (160, 96);
+        let pack = pack();
+        let meta = FloorMeta::ground();
+        let layout = Layout::compute_with_seed(LOGICAL.0, LOGICAL.1, None, meta.floor_seed)
+            .expect("lays out");
+        let north = (0..layout.home_desks.len())
+            .find(|&i| layout.desk_facing(FloorLocalDeskIndex(i)) == crate::layout::Facing::North)
+            .expect("the office has a back-turned desk");
+        let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let id = pixtuoid_core::AgentId::from_transcript_path("/cutaway/sit.jsonl");
+        let mut scene = pixtuoid_core::SceneState::uniform(16);
+        scene.agents.insert(
+            id,
+            pixtuoid_core::AgentSlot {
+                agent_id: id,
+                source: std::sync::Arc::from("claude-code"),
+                session_id: std::sync::Arc::from("s"),
+                cwd: std::sync::Arc::from(std::path::Path::new("/w/x")),
+                label: "x".into(),
+                state: ActivityState::Active {
+                    tool_use_id: None,
+                    detail: None,
+                    kind: ToolKind::Edit,
+                },
+                state_started_at: now0,
+                created_at: now0,
+                last_event_at: now0,
+                exiting_at: None,
+                pending_idle_at: None,
+                desk_index: pixtuoid_core::GlobalDeskIndex(north),
+                floor_idx: 0,
+                tool_call_count: 0,
+                active_ms: 0,
+                unknown_cwd: false,
+                parent_id: None,
+                pid: None,
+                model: None,
+                effort: None,
+                tokens_used: 0,
+                last_usage: None,
+            },
+        );
+        let mut session = FloorSession::new();
+        let mut frames = Vec::new();
+        for n in 1..=1200u64 {
+            let frame = session
+                .observe(
+                    &scene,
+                    &pack,
+                    LOGICAL.0,
+                    LOGICAL.1,
+                    meta,
+                    now0 + Duration::from_millis(100 * n),
+                )
+                .expect("lays out");
+            let seated = frame
+                .seated_agents
+                .get(&FloorLocalDeskIndex(north))
+                .copied()
+                .unwrap_or(false);
+            frames.push(frame);
+            if seated {
+                let desk = layout.home_desks[north];
+                return (layout, pack, frames, desk);
+            }
+        }
+        panic!("the agent never sat at their desk");
+    }
+
+    /// A back-turned sitter's badge clears the raised monitor behind their head:
+    /// drawn through the real render, it lands above the desk art's top.
+    #[test]
+    fn a_back_turned_sitters_badge_clears_their_raised_monitor() {
+        let (layout, pack, frames, desk) = sit_down();
+        let seated = frames.last().expect("a seated frame");
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let scale = RenderScale::new(4).expect("nonzero");
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = crate::frame_cache::FrameCache::new();
+        let labels = render_cutaway(
+            seated,
+            &layout,
+            &pack,
+            theme,
+            scale,
+            std::time::SystemTime::UNIX_EPOCH,
+            &mut cache,
+            &mut buf,
+        );
+        let label = labels.first().expect("the sitter has a badge");
+        let art = desk_art(&pack, crate::layout::Facing::North).expect("desk art");
+        let top = desk_span(&pack, art, desk).expect("desk").y0;
+        assert!(
+            label.anchor_px.y < scale.to_buffer(top),
+            "badge at y {} is not above the monitor top at {}",
+            label.anchor_px.y,
+            scale.to_buffer(top)
+        );
+    }
+
+    /// Who carries a chair is ONE decision: a sitter skipped for art the pack
+    /// lacks carries nothing, so their desk still stands its own chair.
+    #[test]
+    fn a_sitter_the_pack_cannot_draw_leaves_their_chair_standing() {
+        let (layout, pack, frames, desk) = sit_down();
+        let seated = frames.last().expect("a seated frame");
+        let mut order = Vec::new();
+        assert_eq!(
+            push_characters(seated, &layout, &pack, &mut order),
+            vec![desk]
+        );
+
+        let chair_only = pixtuoid_core::sprite::format::load_pack_from_strings(
+            &format!(
+                "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\
+                 [animations.{}]\nframes=[\"one.sprite\"]\nframe_ms=100\n",
+                crate::pixel_painter::DESK_CHAIR_SPRITE
+            ),
+            &[("one.sprite", "@frame 0\nA")],
+        )
+        .expect("pack builds");
+        let mut order = Vec::new();
+        let carried = push_characters(seated, &layout, &chair_only, &mut order);
+        assert!(carried.is_empty() && order.is_empty(), "no character art");
+        push_chairs(&layout, &chair_only, &carried, &mut order);
+        assert!(
+            order
+                .iter()
+                .any(|(_, k)| matches!(k, PieceKind::Chair { at } if Some(*at)
+                    == crate::pixel_painter::desk_chair_top_left(&chair_only, desk, crate::layout::Facing::North))),
+            "the undrawn sitter's desk lost its chair"
+        );
+    }
+
+    /// Whether desk `desk`'s chair draws over `frame`'s one person — riding their
+    /// piece once they sit, or as its own piece before — or `None` where the two
+    /// do not overlap, so their order shows nothing.
+    fn chair_over_person(
+        frame: &SimFrame,
+        layout: &Layout,
+        pack: &Pack,
+        desk: crate::layout::Point,
+    ) -> Option<bool> {
+        let mut order = Vec::new();
+        let carried = push_characters(frame, layout, pack, &mut order);
+        push_chairs(layout, pack, &carried, &mut order);
+        let (person, person_span) = order
+            .iter()
+            .enumerate()
+            .find_map(|(i, (s, k))| matches!(k, PieceKind::Character { .. }).then_some((i, *s)))?;
+        if let (_, PieceKind::Character { chair: Some(_), .. }) = &order[person] {
+            return Some(true);
+        }
+        let (at, chair_span) =
+            crate::pixel_painter::desk_chair_top_left(pack, desk, crate::layout::Facing::North)
+                .zip(chair_span(pack, crate::layout::Facing::North, desk).map(|(s, _)| s))?;
+        let chair = order
+            .iter()
+            .position(|(_, k)| matches!(k, PieceKind::Chair { at: a } if *a == at))?;
+        let overlap = person_span.x0 <= chair_span.x1
+            && chair_span.x0 <= person_span.x1
+            && person_span.y0 <= chair_span.y1
+            && chair_span.y0 <= person_span.y1;
+        if !overlap {
+            return None;
+        }
+        let drawn = crate::cutaway::order::depth_sort(
+            order
+                .iter()
+                .enumerate()
+                .map(|(i, (s, _))| (*s, i))
+                .collect(),
+        );
+        let pos = |i: usize| drawn.iter().position(|&j| j == i);
+        Some(pos(chair)? > pos(person)?)
+    }
+
+    /// The chair draws over its occupant the whole way from the aisle into the
+    /// seat, as in the classic painter: were it keyed on the walker's drawn box,
+    /// it would sort behind them through the sit arc and jump in front the frame
+    /// they sat.
+    #[test]
+    fn a_chair_keeps_its_order_to_its_sitter_through_the_sit_down() {
+        let (layout, pack, frames, desk) = sit_down();
+        let orders: Vec<(usize, bool)> = frames
+            .iter()
+            .enumerate()
+            .filter_map(|(n, f)| chair_over_person(f, &layout, &pack, desk).map(|o| (n, o)))
+            .collect();
+        assert!(
+            orders.len() > 1,
+            "the walker never overlapped the chair before sitting"
+        );
+        assert!(
+            orders.iter().all(|&(_, over)| over),
+            "the chair flipped under its sitter at frames {:?}",
+            orders
+                .iter()
+                .filter(|(_, o)| !o)
+                .map(|(n, _)| n)
+                .collect::<Vec<_>>()
         );
     }
 
