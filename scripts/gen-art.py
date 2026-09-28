@@ -287,6 +287,10 @@ DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_R
 # its desk over one floating clear of every head.
 DESK_NORTH_LIFT = 2
 DESK_LEG_W = 2
+# The 8x desk top's grain: a seam between boards this many rows deep, and a few
+# short streaks inside the boards, sparse enough to read as wood, not stripes.
+DESK_BOARD_ROWS = 24
+DESK_SOUTH_STREAKS, DESK_NORTH_STREAKS = 8, 9
 # The monitor box: its columns (half-open), and from the sprite's top the first
 # glass row and the chin row — casing above the glass, glass down to the chin —
 # where the classic painter's glow lands (`pixel_painter::effects`'s `SCREEN_*`).
@@ -371,11 +375,11 @@ def desk_north():
     # top surface, boards running left-right
     rect(g, 0, ty, w, ly, WOOD)
     for y in range(ty, ly):
-        if (y - ty) % 12 == 0:
+        if (y - ty) % DESK_BOARD_ROWS == 0:
             rect(g, 0, y, w, y + 1, WOOD_SH)
-    for _ in range(26):
+    for _ in range(DESK_NORTH_STREAKS):
         y = rng.randrange(ty + 1, ly - 1)
-        if (y - ty) % 12 == 0:
+        if (y - ty) % DESK_BOARD_ROWS == 0:
             continue
         x0 = rng.randrange(0, w - 8)
         rect(g, x0, y, min(w, x0 + rng.randrange(8, 26)), y + 1,
@@ -453,11 +457,11 @@ def desk_south():
     # top surface, boards left-right
     rect(g, 0, ty, w, ly, WOOD)
     for y in range(ty, ly):
-        if (y - ty) % 12 == 0:
+        if (y - ty) % DESK_BOARD_ROWS == 0:
             rect(g, 0, y, w, y + 1, WOOD_SH)
-    for _ in range(22):
+    for _ in range(DESK_SOUTH_STREAKS):
         y = rng.randrange(ty + 1, ly - 1)
-        if (y - ty) % 12 == 0:
+        if (y - ty) % DESK_BOARD_ROWS == 0:
             continue
         x0 = rng.randrange(0, w - 8)
         rect(g, x0, y, min(w, x0 + rng.randrange(8, 24)), y + 1,
