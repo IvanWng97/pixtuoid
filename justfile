@@ -5,14 +5,18 @@
 # CI, and release).
 #
 # Recipes are grouped by intent (see `just --list`):
-#   rust     — compile the workspace + every Rust gate (fmt / clippy / test / …)
+#   rust     — build, test and lint the repo (Rust, shell, workflows), plus the
+#              release builds and the on-demand e2e / capture / fixture recipes
 #   site     — the Astro landing page under site/ (npm, its own CI)
-#   gen      — regenerate committed artifacts, and check the committed copies
-#   release  — the npm package gate release.yml's npm job runs (npm-check)
-#   meta     — tooling setup, the full pre-push / full-stack gates, and the gates' selftests
+#   gen      — regenerate + check committed artifacts
+#   release  — npm-check, the Node gate release.yml runs before npm publish (and
+#              ci-lint on every PR)
+#   meta     — tooling setup, the full pre-push / full-stack gates, the fixture
+#              gates, and the gates' selftests
 
 # Git Bash is preinstalled on GHA windows runners; keeps every recipe
-# single-sourced cross-platform (the windows jobs call recipes, never inline commands).
+# single-sourced cross-platform (ci-tests.yml's windows jobs call recipes, never
+# inline commands).
 set windows-shell := ["bash", "-cu"]
 
 # ── variables ─────────────────────────────────────────────────────
@@ -173,8 +177,7 @@ ci-observability:
 # Every committed JSON Schema, held to the metaschema. These are contracts a
 # consumer reads at runtime — the review schema reaches the Claude CLI, the
 # raycast ones pin the `--json` shape — and nothing else parses them: a broken
-# one is invisible until the consumer refuses to start, which is exactly how the
-# review bots died.
+# one is invisible until the consumer refuses to start.
 [group('rust')]
 [doc('Validate every committed JSON Schema against the metaschema (check-jsonschema)')]
 json-schemas:
@@ -391,9 +394,7 @@ semver:
 # `Into`/`Receiver`; auto-derived `Clone`/`Serialize`/… STAY, since
 # adding/removing a derive IS a public-API change). cargo-public-api takes one
 # crate per call, so a golden file is regenerated per crate. rustdoc JSON is
-# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI runs `api-surface-check`;
-# run `just api-surface` + commit the golden whenever either crate's public
-# surface changes.
+# nightly-only, so both recipes PIN {{API_NIGHTLY}}. CI runs `api-surface-check`.
 [group('rust')]
 [doc('Regenerate the api/<crate>.txt public-API goldens (cargo-public-api + pinned nightly)')]
 api-surface: _api-toolchain
@@ -478,7 +479,7 @@ coverage:
 # pending (un-accepted `.snap.new`) OR unreferenced (orphan `.snap` — e.g. a
 # deleted test's leftover) snapshot. This is the gap plain `cargo test` misses:
 # a CHANGED snapshot already fails its own assertion, but an ORPHAN one rots
-# silently. CI-only in practice (a second full test run, like coverage/semver) —
+# silently. CI-only in practice (a second full test run, like coverage) —
 # NOT in preflight; run it after adding/removing an insta-snapshot test. Needs
 # cargo-insta + cargo-nextest.
 [group('rust')]
@@ -613,10 +614,10 @@ fuzz source dir:
     set -euo pipefail
     source="{{ source }}"
     dir="{{ dir }}"
+    [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
     # Guard the corpus BEFORE fuzzing: a dir with no .jsonl feeds the fuzzer
     # zero lines, and it exits 0 — reporting the never-panic contract verified
     # having tested nothing.
-    [ -d "$dir" ] || { echo "error: corpus dir '$dir' does not exist" >&2; exit 1; }
     [ -n "$(find "$dir" -name '*.jsonl' -print -quit)" ] || { echo "error: no .jsonl files under '$dir' — nothing to fuzz" >&2; exit 1; }
     cargo build --release --example decoder_fuzz -p pixtuoid-core
     find "$dir" -name '*.jsonl' -print0 | xargs -0 cat | ./target/release/examples/decoder_fuzz "$source"
@@ -662,8 +663,7 @@ live-sources *ids:
     scripts/lib/tier-live-sources.sh {{ ids }}
 
 # Replays a captured rollout through the FULL headless path — real watcher, real
-# socket, only the input is fixed. Like `openclaw-backend-e2e`, the recipe exists
-# to give the script an invocation site.
+# socket, only the input is fixed.
 [group('rust')]
 [doc('Replay a captured rollout fixture through a hermetic headless run')]
 replay fixture delay="3":
@@ -826,7 +826,7 @@ gen-readme:
 
 # Regenerate the --json contract chain after changing `SourceStatus` or
 # `OutcomeRow`: re-emit their JSON Schemas from the Rust serde types, then
-# regenerate the Raycast TS types from them. The two freshness gates (the
+# regenerate the Raycast TS types from them. The freshness gates (the
 # `*_schema_matches_the_committed_contract` golden tests in `just test`, and
 # the raycast CI's `gen:contract` diff) FAIL until you run this — so the Rust
 # producer and the TS consumer can't hand-drift. Needs raycast deps installed
@@ -862,11 +862,10 @@ gen-icons:
 
 # The ONE wasm compile step — gen-wasm (below) and ci-builds.yml's wasm-check job both
 # call this, so the package/target/profile CI checks can't drift from what
-# gen-wasm ships. Toolchain gotcha (load-bearing): the
-# PATH cargo/rustc may be Homebrew's, which has NO wasm32 std — and even
-# `rustup run stable cargo` fails because cargo resolves `rustc` via PATH. So
-# the recipe prepends the RUSTUP toolchain bin (via `rustup which`) and invokes
-# that cargo explicitly.
+# gen-wasm ships. Toolchain gotcha: the PATH cargo/rustc may be Homebrew's, which
+# has NO wasm32 std — and even `rustup run stable cargo` fails because cargo
+# resolves `rustc` via PATH. So the recipe prepends the RUSTUP toolchain bin (via
+# `rustup which`) and invokes that cargo explicitly.
 [group('gen')]
 [doc('Compile pixtuoid-web for wasm32 (the size-tuned wasm-release profile) — shared by gen-wasm + CI wasm-check')]
 wasm-build:
@@ -939,9 +938,10 @@ gen-wasm: gen-wasm-tools wasm-build
 # a scene/core/web source, so a merge that skips `just gen-wasm` ships a stale
 # hero with every gate green; the compensating control is CLAUDE.md's build
 # notes ("a core/scene/web change ALSO needs `just gen-wasm`"), not this recipe.
-# Input-hash stamping was considered and rejected: pixtuoid-core's `native`
-# source runtime is code the wasm never links, so the gate would demand a
-# binary regen on changes that cannot alter it.
+# No input-hash stamp: pixtuoid-core's `native` source runtime is code the wasm
+# never links, so a stamp would demand a wasm regen on changes that cannot alter
+# it. That reason does not cover scene or web, where any change can move the
+# wasm (panic locations carry line numbers); gating those is an open owner call.
 [group('gen')]
 [doc('Fail if the committed wasm pair is missing, over the size cap, or hash-mismatched')]
 gen-wasm-check:
@@ -1141,7 +1141,7 @@ compare-selftest:
 # these instead of parsing our Rust, so a rename must be re-emitted or the watch
 # narrows. The gate is the crates' own tests, which fail on a stale file; this is
 # just the writer.
-[group('meta')]
+[group('gen')]
 [doc('Regenerate crates/*/drift-surface.json after changing a decoded/registered name')]
 gen-drift-surface:
     UPDATE_DRIFT_SURFACE=1 cargo test -p pixtuoid-core --lib drift_surface
@@ -1193,10 +1193,10 @@ star-history-selftest:
 # and so already ride `just test` on all three platforms; this recipe is the
 # named entry point for a human who wants only this answer.
 #
-# They stay Rust: GitHub's Windows images ship `python.exe` with no `python3`
-# and no test job installs Python, so a Python rule would red both Windows jobs,
-# and a second-runtime copy would need its own walk kept in step with the Rust
-# one.
+# They stay Rust: a Python rule would need its own copy of the capture walk kept
+# in step with `harness::captures`, and GitHub's Windows images ship `python.exe`
+# with no `python3` while no test job installs Python, so windows-test and
+# coverage-windows would red.
 [group('meta')]
 [doc("Assert every capture declares its provenance and its claims are falsifiable")]
 fixture-metadata:

@@ -8,7 +8,7 @@ MUST be `<area>/main.rs`, because a top-level `<area>.rs` is a crate root whose
 
 ```
 tests/
-├── sources/main.rs      the source/decode layer (1 binary)
+├── sources/main.rs      the source/decode layer
 │   ├── captures.rs      THE walk (`every_capture()`) + every provenance RULE, in Rust
 │   │                    so the rules ride `just test` on all three platforms. ONE
 │   │                    enumeration, no mirror (three populations = a fix landing on
@@ -77,8 +77,8 @@ under `sources/fixtures/` would be mis-scanned.
    instead of shipping two sprites for one session.
 2. **Always:** a case row + `#[test] fn` in `pixtuoid/tests/wire_to_pixels.rs`
    (`wire_matrix_covers_every_registered_source` forces it), and settle
-   `TOOL_ID_KEY_UNPROVEN` in `captures.rs`. The third roster literal is
-   CONTRIBUTING.md checklist step 12, outside this tree.
+   `TOOL_ID_KEY_UNPROVEN` in `captures.rs`. The third, `corpus_check.rs`'s byte
+   pin, is in [CONTRIBUTING's add-a-CLI checklist](../../../docs/CONTRIBUTING.md#adding-a-new-agent-cli).
 3. **Only for unique behavior** (subagent hooks, custom lifecycle): a
    `tests/sources/<cli>/` module registered in `sources/main.rs`. Plain CLIs
    (antigravity, reasonix) need none.
