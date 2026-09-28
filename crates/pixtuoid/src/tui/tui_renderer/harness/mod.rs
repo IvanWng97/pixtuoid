@@ -206,7 +206,12 @@ pub(super) fn hover_agent(
     let layout = r.cached_layout().expect("rendered layout").clone();
     for my in 0..rows {
         for mx in 0..cols {
-            if crate::tui::hit_test::hit_test_from_tui(scene, &layout, mx, my) == Some(id) {
+            if crate::tui::hit_test::hit_test_from_tui(
+                scene,
+                &layout,
+                crate::tui::geometry::CellArea::half_block(mx, my),
+            ) == Some(id)
+            {
                 r.set_mouse_pos(Some((mx, my)));
                 return;
             }

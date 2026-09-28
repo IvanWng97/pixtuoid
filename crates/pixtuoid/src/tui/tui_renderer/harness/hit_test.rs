@@ -8,7 +8,10 @@ fn furniture_hit_test_resolves_against_rendered_layout() {
     let layout = r.cached_layout().expect("layout");
     // hit_test_furniture takes (pixel_x, cell_y) and doubles y internally.
     let desk = layout.home_desks[0];
-    let hit = crate::tui::hit_test::hit_test_furniture(layout, desk.x + 4, desk.y / 2 + 1);
+    let hit = crate::tui::hit_test::hit_test_furniture(
+        layout,
+        crate::tui::geometry::CellArea::half_block(desk.x + 4, desk.y / 2 + 1),
+    );
     assert_eq!(
         hit,
         Some("Desk"),
@@ -35,7 +38,10 @@ fn coffee_machine_hit_test_resolves_on_pantry() {
         for dy in -4i32..=4 {
             let mx = (cx as i32 + dx).max(0) as u16;
             let my = (cy as i32 + dy).max(0) as u16;
-            if crate::tui::hit_test::hit_test_coffee_machine(layout, mx, my) {
+            if crate::tui::hit_test::hit_test_coffee_machine(
+                layout,
+                crate::tui::geometry::CellArea::half_block(mx, my),
+            ) {
                 found = true;
             }
         }
@@ -53,7 +59,12 @@ fn pet_hit_test_resolves_at_pet_position() {
     r.render(&scene, &pack(), t0()).unwrap();
     let PetFrame { pos, anim, kind } = r.cached_pet_pos().expect("pet placed");
     assert!(
-        crate::tui::hit_test::hit_test_pet(kind, pos, anim, pos.x, pos.y / 2),
+        crate::tui::hit_test::hit_test_pet(
+            kind,
+            pos,
+            anim,
+            crate::tui::geometry::CellArea::half_block(pos.x, pos.y / 2)
+        ),
         "clicking the pet's own position should hit it"
     );
 }
@@ -73,7 +84,9 @@ fn furniture_hit_test_covers_every_kind_on_real_layouts() {
         let mut set = HashSet::new();
         for cy in 0..(layout.buf_h / 2) {
             for cx in 0..layout.buf_w {
-                if let Some(l) = hit_test_furniture(layout, cx, cy) {
+                if let Some(l) =
+                    hit_test_furniture(layout, crate::tui::geometry::CellArea::half_block(cx, cy))
+                {
                     set.insert(l);
                 }
             }
@@ -223,7 +236,11 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     assert_eq!(r.hit_test_agent_at(&scene, t0(), dx, dy), Some(id));
     let layout = r.cached_layout().unwrap();
     assert_eq!(
-        crate::tui::hit_test::hit_test_from_tui(&scene, layout, dx, dy),
+        crate::tui::hit_test::hit_test_from_tui(
+            &scene,
+            layout,
+            crate::tui::geometry::CellArea::half_block(dx, dy)
+        ),
         Some(id)
     );
 
@@ -250,7 +267,11 @@ fn click_hit_test_follows_a_walking_sprite_where_from_tui_misses_it() {
     );
     let layout = r.cached_layout().unwrap();
     assert_eq!(
-        crate::tui::hit_test::hit_test_from_tui(&scene, layout, lx, ly),
+        crate::tui::hit_test::hit_test_from_tui(
+            &scene,
+            layout,
+            crate::tui::geometry::CellArea::half_block(lx, ly)
+        ),
         None,
         "hit_test_from_tui (home-desk-only) misses the walked-off sprite — the FIND-22 gap"
     );

@@ -20,9 +20,9 @@ use pixtuoid_scene::layout::Layout;
 use pixtuoid_scene::pet::PetFrame;
 use pixtuoid_scene::pixel_painter::{render_to_rgb_buffer, MascotFrame, PixelCtx};
 
-pub(crate) use crate::tui::hit_test::hit_test_agent;
-pub use crate::tui::hit_test::{
-    hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
+use crate::tui::geometry::CellArea;
+pub(crate) use crate::tui::hit_test::{
+    hit_test_agent, hit_test_coffee_machine, hit_test_furniture, hit_test_mascot, hit_test_pet,
 };
 pub(crate) use crate::tui::widgets::paint_hover_tooltip;
 pub(super) use crate::tui::widgets::{
@@ -372,7 +372,13 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
 
     let mouse_pos = ctx.mouse_pos;
     let hovered = mouse_pos.and_then(|(mx, my)| {
-        hit_test_agent(scene, &layout, now, &mut ctx.store.route_ctx(), mx, my)
+        hit_test_agent(
+            scene,
+            &layout,
+            now,
+            &mut ctx.store.route_ctx(),
+            CellArea::half_block(mx, my),
+        )
     });
 
     // The dim is decoupled from `onboarding.open`, so the office keeps fading back
@@ -428,6 +434,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
         }
         if hovered.is_none() {
             if let Some((mx, my)) = mouse_pos {
+                let cell = CellArea::half_block(mx, my);
                 // `.filter` keeps the pet arm a single branch, so a
                 // present-but-not-hit pet falls through to the next arm.
                 // Coffee before pet here must match the click arms in
@@ -435,8 +442,8 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                 // `hovered.is_none()` skips this block outright.
                 let pet_hit = ctx
                     .last_pet_pos
-                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, mx, my));
-                if hit_test_coffee_machine(&layout, mx, my) {
+                    .filter(|f| hit_test_pet(f.kind, f.pos, f.anim, cell));
+                if hit_test_coffee_machine(&layout, cell) {
                     paint_coffee_tooltip(f, mx, my, actual_scene, theme);
                 } else if let Some(PetFrame { anim, kind, .. }) = pet_hit {
                     let on_cooldown = ctx.active_pet.is_some_and(|p| p.is_active(now));
@@ -471,7 +478,7 @@ pub fn draw_scene<B: Backend<Error: Send + Sync + 'static>>(
                         actual_scene,
                         theme,
                     );
-                } else if let Some(label) = hit_test_furniture(&layout, mx, my) {
+                } else if let Some(label) = hit_test_furniture(&layout, cell) {
                     paint_furniture_tooltip(f, label, mx, my, actual_scene, theme);
                 }
             }
@@ -600,7 +607,7 @@ fn topmost_mascot_at(
 ) -> Option<&pixtuoid_scene::pixel_painter::MascotFrame> {
     mascots
         .iter()
-        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, mx, my))
+        .filter(|m| hit_test_mascot(m.pos, m.w, m.h, CellArea::half_block(mx, my)))
         .max_by_key(|m| m.pos.y)
 }
 
@@ -622,9 +629,10 @@ mod tests {
             degraded: false,
             active_sessions: 0,
         };
-        // `hit_test_mascot` centres the 14x12 box on `pos` and DOUBLES the cell y
-        // (half-block): 18789 covers x[33,47) my[22,28) and 19789 x[37,51) my[25,31)
-        // — overlapping at x[37,47) my[25,28), with 19789 lower and so painted last.
+        // `hit_test_mascot` centres the 14x12 box on `pos`, and a cell hits it when
+        // either of its half-block rows does: 18789 covers x[33,47) my[22,28) and
+        // 19789 x[37,51) my[25,31) — overlapping at x[37,47) my[25,28), with 19789
+        // lower and so painted last.
         let mascots = vec![frame("18789", 40, 50), frame("19789", 44, 56)];
         let hit = |mx, my| {
             topmost_mascot_at(&mascots, mx, my)
