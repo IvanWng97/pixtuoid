@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::Rgb;
 
 use super::epoch_ms;
-use super::{window_columns, WINDOW_W};
+use crate::layout::window_run;
 use crate::sky::{Body, Sky};
 use crate::theme::Theme;
 
@@ -43,7 +43,6 @@ pub(super) const MOON_SHADOW: Rgb = Rgb {
     g: 34,
     b: 52,
 };
-const FIRST_WINDOW_X: f32 = super::FIRST_WINDOW_X as f32;
 // "Real low window": the horizon sits low in the band and the apex climbs off
 // the glass entirely rather than tracking the full window height.
 const HORIZON_FRAC: f32 = 0.55; // horizon_y = top_wall_h * HORIZON_FRAC
@@ -62,15 +61,10 @@ pub(super) fn compute_disc(sky: &Sky, buf_w: u16, top_wall_h: u16, theme: &Theme
     // CENTERS (bit-identical to the mullion columns, so the span bisected the
     // disc at its most visible low-altitude moment and froze `cx` there on a
     // single-window buffer) and NOT a linear `buf_w - WINDOW_W` bound (that only
-    // coincidentally lands inside a window). An empty buffer falls back to the
-    // first pane's nominal right edge.
-    let last_window_right = window_columns(buf_w, None)
-        .last()
-        .map_or(FIRST_WINDOW_X + WINDOW_W as f32, |w| {
-            (w.x_left + WINDOW_W) as f32
-        });
-    let span_left = FIRST_WINDOW_X + DISC_RADIUS_PX;
-    let span_right = (last_window_right - DISC_RADIUS_PX).max(span_left);
+    // coincidentally lands inside a window).
+    let run = window_run(buf_w);
+    let span_left = f32::from(run.start) + DISC_RADIUS_PX;
+    let span_right = (f32::from(run.end) - DISC_RADIUS_PX).max(span_left);
     let cx = span_left + e.azimuth * (span_right - span_left);
     let horizon_y = top_wall_h as f32 * HORIZON_FRAC;
     let cy = horizon_y - e.altitude * (top_wall_h as f32 * ARC_RISE_FRAC);

@@ -1,5 +1,6 @@
 use super::*;
 use crate::atmosphere::Look;
+use crate::layout::{window_bays, window_run};
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
@@ -104,7 +105,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &Sky::at(now),
         &look,
         top_wall_h,
-        None,
+        window_bays(buf_w, None),
         theme,
         0.0,
     );
@@ -155,7 +156,7 @@ fn render_office_themed(
         &Sky::at(now),
         &look,
         top_wall_h,
-        None,
+        window_bays(buf_w, None),
         theme,
         0.0,
     );
@@ -291,8 +292,8 @@ fn disc_clips_above_the_glass_at_the_arc_apex() {
 
 #[test]
 fn short_window_apex_does_not_panic() {
-    // top_wall_h=10 shrinks `window_h`/`glass_h` to their floor while the apex
-    // disc's `cy` is solidly negative.
+    // top_wall_h=10 leaves a short window while the apex disc's `cy` is solidly
+    // negative.
     let _ = render_office_at(12, Weather::Clear, 96, 10);
 }
 
@@ -303,11 +304,8 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
     // appear inside a real window at least once, and NEVER paint past the last
     // painted window (the wall margin, which is the bug this guards).
     let top_wall_h = 40u16;
-    let stride = (WINDOW_W + WINDOW_GAP) as f32;
     for buf_w in [76u16, 96, 120, 150, 192, 220, 300] {
-        // Last painted window's right edge (mirrors compute_disc's tiling).
-        let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride).floor();
-        let last_right = (3.0 + k_max.max(0.0) * stride + WINDOW_W as f32) as u16;
+        let last_right = window_run(buf_w).end;
         let mut seen_in_a_window = false;
         for h in [5u32, 6, 7, 17, 18, 19] {
             let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
@@ -415,7 +413,7 @@ fn disc_never_bleeds_across_a_window_pillar() {
     // sweeping the low-sun hours makes `cx` pass over one.
     let buf_w = 280u16;
     let top_wall_h = 40u16;
-    let stride = (WINDOW_W + WINDOW_GAP) as i32;
+    let bays: Vec<_> = window_bays(buf_w, None).collect();
     for h in [5u32, 6, 7, 17, 18, 19] {
         let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
         let mut wins = std::collections::HashSet::new();
@@ -426,12 +424,8 @@ fn disc_never_bleeds_across_a_window_pillar() {
                 if !(p.r > 240 && p.r as i16 - p.b as i16 > 40) {
                     continue;
                 }
-                let rel = x as i32 - 3;
-                if rel < 0 {
-                    continue;
-                }
-                if rel % stride < WINDOW_W as i32 {
-                    wins.insert(rel / stride);
+                if let Some(b) = bays.iter().find(|b| b.span().contains(&x)) {
+                    wins.insert(b.idx);
                 }
             }
         }
@@ -616,53 +610,18 @@ fn moon_glow_dims_at_new_moon() {
     );
 }
 
-#[test]
-fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
-    let buf_w = FIRST_WINDOW_X + 4 * (WINDOW_W + WINDOW_GAP) + WINDOW_W + WINDOW_EDGE_MARGIN;
-    let all: Vec<_> = window_columns(buf_w, None).collect();
-    assert!(all.len() >= 3, "expected several panes, got {}", all.len());
-    for (k, w) in all.iter().enumerate() {
-        assert_eq!(w.idx as usize, k, "idx is the 0-based absolute position");
-        assert_eq!(
-            w.x_left,
-            FIRST_WINDOW_X + k as u16 * (WINDOW_W + WINDOW_GAP)
-        );
-        assert_eq!(w.center_x, w.x_left + WINDOW_W / 2);
-        assert!(w.x_left + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w);
-    }
-
-    // Skip the SECOND pane's x-range — what the elevator door does to the wall.
-    let doomed = all[1];
-    let skip = Some((doomed.x_left, doomed.x_left + WINDOW_W));
-    let kept: Vec<_> = window_columns(buf_w, skip).collect();
-    assert_eq!(
-        kept.len(),
-        all.len() - 1,
-        "exactly the overlapping pane is skipped"
-    );
-    assert!(
-        kept.iter().all(|w| w.idx != doomed.idx),
-        "the skipped pane's idx never appears"
-    );
-    assert!(
-        kept.iter().any(|w| w.idx == 2),
-        "the pane after the door keeps idx 2"
-    );
-}
-
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
 /// [`Look::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
-    let window_y: u16 = 1;
-    let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
+    let rows = window_rows(top_wall_h);
     let mut sum = 0.0f64;
     let mut n = 0u32;
-    for w in window_columns(buf.width(), None) {
-        for y in (window_y + 1)..(window_y + window_h).saturating_sub(1) {
-            for x in (w.x_left + 1)..(w.x_left + WINDOW_W).saturating_sub(1) {
+    for w in window_bays(buf.width(), None) {
+        for y in (rows.start + 1)..rows.end.saturating_sub(1) {
+            for x in (w.x + 1)..w.span().end.saturating_sub(1) {
                 if x < buf.width() && y < buf.height() {
                     let p = buf.get(x, y);
                     sum += f64::from(p.r) + f64::from(p.g) + f64::from(p.b);
@@ -816,7 +775,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             &Sky::at(now),
             &look,
             top_wall_h,
-            None,
+            window_bays(buf_w, None),
             theme,
             0.0,
         );
@@ -879,7 +838,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             &Sky::at(now),
             &look,
             14,
-            None,
+            window_bays(w, None),
             theme,
             0.0,
         );
