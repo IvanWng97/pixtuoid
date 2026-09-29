@@ -109,6 +109,26 @@ version = "1"
 "Ё" = "#82b4c8"   # printer scanner glass
 "Й" = "#f5f5f0"   # printer paper
 "Ц" = "#b4b4b9"   # printer output tray
+# The fixtures' keys the theme recolours (the classic's FurnitureColors and
+# OfficeColors roles); the values are theme::normal's.
+"Д" = "#2e6f86"   # aquarium water
+"З" = "#9adbe8"   # aquarium surface line and bubbles; the water cooler's glug
+"И" = "#e0862f"   # the aquarium's first fish
+"Л" = "#d94f1f"   # its second
+"Ь" = "#3f8f3a"   # aquarium weed
+"ж" = "#282a36"   # the aquarium's frame
+"б" = "#3c4152"   # the water cooler's cabinet
+"ы" = "#627ab2"   # a magazine's cover
+"э" = "#323c5c"   # a magazine's edge
+"ч" = "#c83c3c"   # the coat rack's first coat
+"ш" = "#5078c8"   # its second
+"щ" = "#f0f0f0"   # its third
+"ф" = "#c8c8d2"   # the wall clock's rim
+"ц" = "#f0f0f0"   # its face
+"з" = "#141419"   # its hands, ticks and centre pin
+# Un-themed, as the classic draws it.
+"χ" = "#64b4e6"   # the water cooler's bottle
+"τ" = "#3c7cae"   # its water, shaded
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -130,6 +150,18 @@ version = "1"
 "ю" = { of = "Ю", level = -2 }   # printer chassis, shaded east side
 "я" = { of = "Я", level = 2 }    # printer lid, lit edge
 "й" = { of = "Й", level = -2 }   # printer paper, the stack's shaded edge
+"д" = { of = "Д", level = -2 }   # aquarium water, deep
+"и" = { of = "И", level = -2 }   # the first fish's belly and tail
+"л" = { of = "Л", level = -2 }   # the second's
+"ь" = { of = "Ь", level = -2 }   # aquarium weed, shaded
+"ν" = { of = "ж", level = 2 }    # the aquarium's frame, lit top
+"в" = { of = "б", level = 2 }    # the water cooler's cabinet, lit top
+"ё" = { of = "б", level = -2 }   # the water cooler's cabinet, shaded east side
+"α" = { of = "ч", level = -2 }   # the first coat, turned from the pole
+"β" = { of = "ш", level = -2 }   # the second
+"γ" = { of = "щ", level = -2 }   # the third
+"η" = { of = "ф", level = 2 }    # the clock's rim, lit upper west
+"ε" = { of = "ц", level = -2 }   # the clock's face, shaded lower east
 
 [animations.seated]
 frames   = ["seated.sprite"]
@@ -269,6 +301,10 @@ frame_ms = 600
 # The renderer picks the frame manually each tick from entry/exit progress, so
 # `frame_ms` is irrelevant — 999999 only stops accidental cycling blinking the door.
 frames   = ["door.sprite", "door_half.sprite", "door_open.sprite"]
+frame_ms = 999999
+
+[animations."door@4x"]
+frames   = ["door@4x.sprite"]
 frame_ms = 999999
 
 [animations.bulletin_board]
@@ -431,6 +467,83 @@ frame_ms = 600
 
 [animations."meeting_table@4x"]
 frames   = ["meeting_table@4x.sprite"]
+frame_ms = 600
+
+# The fixtures the classic drew procedurally until they became pack art.
+[animations.kitchen_island]
+frames   = ["kitchen_island.sprite"]
+frame_ms = 600
+
+[animations."kitchen_island@4x"]
+frames   = ["kitchen_island@4x.sprite"]
+frame_ms = 600
+
+[animations.side_table]
+frames   = ["side_table.sprite"]
+frame_ms = 600
+
+[animations."side_table@4x"]
+frames   = ["side_table@4x.sprite"]
+frame_ms = 600
+
+# The glug: a bubble climbs the bottle, then the water stills.
+[animations.water_cooler]
+frames   = ["water_cooler.sprite"]
+frame_ms = 400
+
+[animations."water_cooler@4x"]
+frames   = ["water_cooler@4x.sprite"]
+frame_ms = 400
+
+[animations.pantry_bin]
+frames   = ["pantry_bin.sprite"]
+frame_ms = 600
+
+[animations."pantry_bin@4x"]
+frames   = ["pantry_bin@4x.sprite"]
+frame_ms = 600
+
+# One lap of the fish patrol.
+[animations.fish_tank]
+frames   = ["fish_tank.sprite"]
+frame_ms = 450
+
+[animations."fish_tank@4x"]
+frames   = ["fish_tank@4x.sprite"]
+frame_ms = 450
+
+[animations.coat_rack]
+frames   = ["coat_rack.sprite"]
+frame_ms = 600
+
+[animations."coat_rack@4x"]
+frames   = ["coat_rack@4x.sprite"]
+frame_ms = 600
+
+[animations.notice_board]
+frames   = ["notice_board.sprite"]
+frame_ms = 600
+
+[animations."notice_board@4x"]
+frames   = ["notice_board@4x.sprite"]
+frame_ms = 600
+
+# The dial; the painter draws the hands from the time.
+[animations.wall_clock]
+frames   = ["wall_clock.sprite"]
+frame_ms = 600
+
+[animations."wall_clock@4x"]
+frames   = ["wall_clock@4x.sprite"]
+frame_ms = 600
+
+# Back to the west; the painter flips it for the chair across the table.
+[animations.meeting_chair]
+frames   = ["meeting_chair.sprite"]
+frame_ms = 600
+
+[animations."meeting_chair@4x"]
+frames   = ["meeting_chair@4x.sprite"]
 frame_ms = 600
 
 [animations.tv_stand]

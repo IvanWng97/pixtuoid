@@ -1622,6 +1622,15 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "vending_machine",
     "printer",
     "meeting_table",
+    "kitchen_island",
+    "side_table",
+    "water_cooler",
+    "pantry_bin",
+    "fish_tank",
+    "coat_rack",
+    "notice_board",
+    "wall_clock",
+    "meeting_chair",
 ];
 
 const MULTI_FRAME_REQUIREMENTS: &[(&str, usize)] = &[
