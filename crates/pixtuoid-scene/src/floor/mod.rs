@@ -23,7 +23,9 @@ use crate::layout::Size;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
-use crate::pixel_painter::{render_to_rgb_buffer, sim_step, PixelCtx, SimFrame, SimStores};
+use crate::pixel_painter::{
+    render_to_rgb_buffer, sim_step, PetInputs, PixelCtx, SimFrame, SimInputs, SimStores,
+};
 use crate::pose::PoseHistory;
 use crate::theme::Theme;
 
@@ -240,8 +242,9 @@ impl FloorCtx {
 pub struct CoffeeState(HashMap<AgentId, SystemTime>);
 
 impl CoffeeState {
-    /// Desk-cup steam window (secs) — ONE source of truth for the pixel pass's
-    /// steam gate and [`record`](CoffeeState::record)'s refetch-refresh.
+    /// Desk-cup steam window (secs) — ONE source of truth for the sim's
+    /// desk-cup steam gate and [`record`](CoffeeState::record)'s
+    /// refetch-refresh.
     pub const STEAM_WINDOW_SECS: u64 = 120;
 
     /// Empty coffee state — no cups held.
@@ -249,7 +252,7 @@ impl CoffeeState {
         Self::default()
     }
 
-    /// The map view the pixel pass borrows: key = carrier, value = fetch time.
+    /// The map view the sim borrows: key = carrier, value = fetch time.
     pub fn map(&self) -> &HashMap<AgentId, SystemTime> {
         &self.0
     }
@@ -427,12 +430,17 @@ pub(crate) fn observe_floor(
             neon: &mut fctx.neon,
             chitchat,
         },
-        scene,
-        &layout,
-        pack,
-        coffee.map(),
-        floor_meta.floor_idx,
-        now,
+        SimInputs {
+            scene,
+            layout: &layout,
+            pack,
+            coffee: coffee.map(),
+            // The pet needs the painter's config and click state, which `observe`
+            // does not take; widen it when an observer draws the pet.
+            pets: PetInputs::default(),
+            floor: floor_meta,
+            now,
+        },
     );
     frame_epilogue(fctx, coffee, frame.new_coffee_carriers.iter().copied(), now);
     Some(ObservedFloor { layout, frame })
@@ -715,8 +723,8 @@ impl FloorSession {
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
-    /// [`render_floor`]'s layout prologue, sim tick and epilogue, minus its paint
-    /// pass. `size` is the layout's logical extent, whatever scale a painter
+    /// [`render_floor`]'s layout prologue, sim tick (with no pet) and epilogue,
+    /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at.
     pub fn observe(
         &mut self,

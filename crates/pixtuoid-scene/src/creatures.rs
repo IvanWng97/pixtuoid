@@ -179,7 +179,7 @@ const MASCOT_WALK_FRAC: f32 = 0.45;
 
 /// Per-source gateway mascot facts: its sprite (walk, rest) + the hover-tooltip
 /// display name. The ONE place a new gateway registers its creature — `None` for
-/// non-gateway sources gates the whole mascot in `enqueue_gateway_mascots`.
+/// non-gateway sources gates the whole mascot in the sim's `mascot_placements`.
 pub(crate) struct GatewayMascotDef {
     pub walk: &'static str,
     pub rest: &'static str,
