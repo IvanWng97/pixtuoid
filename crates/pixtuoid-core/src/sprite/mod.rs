@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use palette::convert::FromColorUnclamped;
-use palette::{FromColor, IsWithinBounds, LinSrgb, Oklab, Srgb};
+use palette::{FromColor, IsWithinBounds, LinSrgb, Mix, Oklab, Srgb};
 
 use crate::grid::Grid;
 
@@ -79,10 +79,8 @@ impl Rgb {
     /// lightness moves evenly with `t` where an sRGB mix of two hues sags
     /// through a darker, muddier middle.
     pub fn mix(self, other: Rgb, t: f32) -> Rgb {
-        let t = t.clamp(0.0, 1.0);
-        let (a, b) = (self.to_oklab(), other.to_oklab());
-        let lerp = |x: f32, y: f32| x + (y - x) * t;
-        Rgb::from_oklab_in_gamut(Oklab::new(lerp(a.l, b.l), lerp(a.a, b.a), lerp(a.b, b.b)))
+        debug_assert!(!t.is_nan(), "a NaN t survives the clamp");
+        Rgb::from_oklab_in_gamut(self.to_oklab().mix(other.to_oklab(), t))
     }
 
     fn to_oklab(self) -> Oklab {
@@ -90,8 +88,8 @@ impl Rgb {
     }
 
     /// The sRGB color at `c`'s lightness and hue with as much of its chroma as
-    /// fits. Clipping each channel instead shifts the hue and can undo the step
-    /// outright: lit yellow clips back to the yellow itself.
+    /// fits. Clipping each channel instead shifts the hue and can undo a ramp
+    /// step outright: lit yellow clips back to the yellow itself.
     fn from_oklab_in_gamut(c: Oklab) -> Rgb {
         let at =
             |share: f32| LinSrgb::from_color_unclamped(Oklab::new(c.l, c.a * share, c.b * share));
@@ -504,6 +502,29 @@ mod tests {
             shaded.b > shaded.r,
             "shaded grey should lean cool: {shaded:?}"
         );
+    }
+
+    /// Blue to yellow leaves the sRGB gamut just past blue: the mix gives up
+    /// chroma and keeps the hue it interpolated, where clipping each channel
+    /// would turn it.
+    #[test]
+    fn a_mix_that_leaves_the_gamut_keeps_its_hue() {
+        let (blue, yellow) = (rgb(0, 0, 255), rgb(255, 255, 0));
+        let (from, to) = (blue.to_oklab(), yellow.to_oklab());
+        let hue = |c: Oklab| c.b.atan2(c.a).to_degrees();
+        for t in [0.05, 0.1] {
+            let lerped = from.mix(to, t);
+            assert!(
+                !LinSrgb::from_color_unclamped(lerped).is_within_bounds(),
+                "t={t} must leave the gamut, or this checks nothing"
+            );
+            let got = hue(blue.mix(yellow, t).to_oklab());
+            assert!(
+                (got - hue(lerped)).abs() < 0.3,
+                "t={t}: hue {got} vs {}",
+                hue(lerped)
+            );
+        }
     }
 
     #[test]

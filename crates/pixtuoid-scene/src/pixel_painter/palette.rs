@@ -438,8 +438,10 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-/// Per-channel sRGB lerp. Cheap; used for low-strength tints where
-/// perceptual error doesn't matter (e.g. agent skin glow).
+/// Per-channel sRGB lerp, the classic's compositing primitive: cheap per pixel,
+/// and channel-separable, so a constant-tint pass tabulates it through an
+/// [`RgbLut`]. A gradient between two hues whose middle must not sag is
+/// [`Rgb::mix`].
 pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
     ((a as f32) * (1.0 - t) + (b as f32) * t)
         .round()
