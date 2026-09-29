@@ -1104,24 +1104,54 @@ fn enqueue_gateway_mascots<'a>(
     frames
 }
 
+/// An area rug's place: centred on `pos`, `w` by `h` logical units. Both
+/// painters lay the office's rugs from these, so neither can drift from the
+/// other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RugPlacement {
+    pub(crate) pos: Point,
+    pub(crate) w: u16,
+    pub(crate) h: u16,
+}
+
+/// The rug under a meeting trio, spanning its table and both sofas.
+pub(crate) fn meeting_rug(layout: &Layout, trio: &crate::layout::MeetingTrio) -> RugPlacement {
+    let [ts, bs] = trio.sofas;
+    RugPlacement {
+        pos: trio.table,
+        w: 18,
+        h: bs
+            .y
+            .saturating_sub(ts.y)
+            .saturating_add(8)
+            .min(layout.buf_h.saturating_sub(trio.table.y).saturating_add(8)),
+    }
+}
+
+/// The rug the lounge couch stands on, reaching out in front of it.
+pub(crate) fn lounge_rug(couch: Point) -> RugPlacement {
+    RugPlacement {
+        pos: Point {
+            x: couch.x,
+            y: couch.y + 3,
+        },
+        w: 22,
+        h: 7,
+    }
+}
+
 /// Meeting-room rugs + sofas + tables. A south-of-table sofa faces away, so it
 /// y-sorts +3 to occlude its sitter; the north sofa stays +2 so insertion order
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        let table = trio.table;
-        let [ts, bs] = trio.sofas;
-        let rug_w = 18u16;
-        let rug_h =
-            bs.y.saturating_sub(ts.y)
-                .saturating_add(8)
-                .min(layout.buf_h.saturating_sub(table.y).saturating_add(8));
+        let rug = meeting_rug(layout, trio);
         drawables.push(Drawable {
-            anchor_y: table.y.saturating_sub(rug_h / 2),
+            anchor_y: rug.pos.y.saturating_sub(rug.h / 2),
             kind: DrawableKind::AreaRug {
-                pos: table,
-                width: rug_w,
-                height: rug_h,
+                pos: rug.pos,
+                width: rug.w,
+                height: rug.h,
             },
         });
     }
@@ -1180,15 +1210,13 @@ fn enqueue_lounge_pantry_appliances<'a>(
     // Pushed before the character loop so the y-sort tie-break keeps the couch
     // behind its sitters; the rug anchors north of it so the couch sits on it.
     if let Some(center) = layout.couch_sprite_center() {
+        let rug = lounge_rug(center);
         drawables.push(Drawable {
             anchor_y: center.y.saturating_sub(2),
             kind: DrawableKind::AreaRug {
-                pos: Point {
-                    x: center.x,
-                    y: center.y + 3,
-                },
-                width: 22,
-                height: 7,
+                pos: rug.pos,
+                width: rug.w,
+                height: rug.h,
             },
         });
         drawables.push(Drawable {

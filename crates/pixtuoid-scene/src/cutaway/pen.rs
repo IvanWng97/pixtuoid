@@ -90,6 +90,22 @@ impl Pen {
         );
     }
 
+    /// Step every pixel of `r` `level` stops along its own ramp
+    /// ([`Rgb::ramp`](pixtuoid_core::sprite::Rgb::ramp)): a line relative to
+    /// whatever lies under it, so a grout line or a bevel reads on a lit floor
+    /// and a dark one alike. The grid holds, as each art pixel is one colour.
+    pub(crate) fn shade(self, buf: &mut RgbBuffer, r: ArtRect, level: i8) {
+        let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
+        let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
+        let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
+        for y in y0..y1 {
+            for x in x0..x1 {
+                let c = buf.get(x, y);
+                buf.put(x, y, c.ramp(level));
+            }
+        }
+    }
+
     /// Dither a full-width band from `light` at its top to `dark` at its
     /// bottom, `y1` exclusive; a band with no height paints nothing.
     ///
@@ -263,6 +279,31 @@ mod tests {
         pen(1, 1).dither_band(&mut buf, ArtPx(3), ArtPx(3), DARK, LIGHT);
         pen(1, 1).dither_band(&mut buf, ArtPx(3), ArtPx(1), DARK, LIGHT);
         assert!(buf.as_slice().iter().all(|&c| c == BG));
+    }
+
+    #[test]
+    fn a_shade_steps_every_pixel_along_its_own_ramp() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        for x in 4..8 {
+            for y in 0..4 {
+                buf.put(x, y, LIGHT);
+            }
+        }
+        let r = ArtRect {
+            x: ArtPx(1),
+            y: ArtPx(0),
+            w: ArtPx(2),
+            h: ArtPx(1),
+        };
+        pen(2, 1).shade(&mut buf, r, -2);
+        assert_eq!(buf.get(2, 1), BG.ramp(-2), "the dark pixel, a step darker");
+        assert_eq!(
+            buf.get(5, 0),
+            LIGHT.ramp(-2),
+            "the light one, relative to itself"
+        );
+        assert_eq!(buf.get(1, 0), BG, "nothing west of the rect");
+        assert_eq!(buf.get(2, 2), BG, "nothing south of it");
     }
 
     #[test]
