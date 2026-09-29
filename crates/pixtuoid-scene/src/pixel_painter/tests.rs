@@ -791,7 +791,17 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         );
         let mut cache = crate::frame_cache::FrameCache::new();
         let labels = crate::cutaway::paint::render_cutaway(
-            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+            &frame,
+            crate::cutaway::paint::Office {
+                layout: &layout,
+                pack,
+                theme,
+                scale,
+            },
+            0.0,
+            now0,
+            &mut cache,
+            &mut buf,
         );
         let anchors: Vec<_> = labels.iter().map(|l| l.anchor_px).collect();
         (buf.as_slice().to_vec(), anchors)
@@ -915,7 +925,17 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         );
         let mut cache = crate::frame_cache::FrameCache::new();
         crate::cutaway::paint::render_cutaway(
-            &frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+            &frame,
+            crate::cutaway::paint::Office {
+                layout: &layout,
+                pack,
+                theme,
+                scale,
+            },
+            0.0,
+            now0,
+            &mut cache,
+            &mut buf,
         );
         buf.as_slice().to_vec()
     };
@@ -1051,7 +1071,17 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         );
         let mut cache = crate::frame_cache::FrameCache::new();
         crate::cutaway::paint::render_cutaway(
-            frame, &layout, pack, theme, scale, now0, &mut cache, &mut buf,
+            frame,
+            crate::cutaway::paint::Office {
+                layout: &layout,
+                pack,
+                theme,
+                scale,
+            },
+            0.0,
+            now0,
+            &mut cache,
+            &mut buf,
         );
         buf.as_slice().to_vec()
     };

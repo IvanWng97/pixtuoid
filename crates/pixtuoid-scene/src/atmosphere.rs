@@ -323,6 +323,16 @@ fn night_star_strength(sky: &Sky, darkness: f32) -> f32 {
     }
 }
 
+/// How far down the glass, as a share of it, the sky reaches its horizon
+/// colour ([`Look::glass_a`]) from its zenith's ([`Look::glass_b`]).
+const HORIZON_AT: f32 = 0.7;
+
+/// How far from its zenith colour toward its horizon's the sky is `gy` rows
+/// down glass `glass_h` tall, 0..=1.
+pub(crate) fn sky_share(gy: f32, glass_h: u16) -> f32 {
+    (gy / (f32::from(glass_h) * HORIZON_AT)).min(1.0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

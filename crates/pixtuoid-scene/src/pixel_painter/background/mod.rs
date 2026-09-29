@@ -30,7 +30,9 @@ use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
 use crate::atmosphere::Look;
-use crate::layout::{wall_trim_row, window_rows, window_run, Layout, WindowBay, WINDOW_W};
+use crate::layout::{
+    glass_rows, wall_trim_row, window_frame, window_rows, window_run, Layout, WindowBay, WINDOW_W,
+};
 use crate::sky::{Sky, Weather};
 use crate::skyline::CityStrip;
 use crate::theme::Theme;
@@ -366,21 +368,16 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
     }
 }
 
-/// The glass rows of a window `window_h` tall: all but its top and bottom
-/// frame rows.
-fn glass_rows(window_h: u16) -> u16 {
-    window_h.saturating_sub(2)
-}
-
 /// The sky's colour on each row of the glass, shared by every window: all panes
 /// in a frame have the same height and `look`.
 fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
     let glass_h = glass_rows(h);
-    let sky_norm = (glass_h as f32) * 0.7;
     (0..glass_h)
         .map(|gy| {
-            let sky_t = (gy as f32 / sky_norm).min(1.0);
-            look.glass_b.mix(look.glass_a, sky_t)
+            look.glass_b.mix(
+                look.glass_a,
+                crate::atmosphere::sky_share(gy as f32, glass_h),
+            )
         })
         .collect()
 }
@@ -415,9 +412,7 @@ fn paint_floor_to_ceiling_window(
             if px >= buf.width() || py >= buf.height() {
                 continue;
             }
-            let on_edge = dx == 0 || dx == w - 1 || dy == 0 || dy == h - 1;
-            let on_mullion = dx == w / 2 || dy == h * 7 / 10;
-            if on_edge || on_mullion {
+            if window_frame(dx, dy, h) {
                 buf.put(px, py, frame);
                 continue;
             }
