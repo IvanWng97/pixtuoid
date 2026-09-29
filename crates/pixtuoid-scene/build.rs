@@ -1,8 +1,9 @@
 //! Embed the default pack: the sprite list is generated from `sprites/default/`
 //! itself, so a sprite committed there is embedded by construction, less,
-//! without the `density-art` feature, what [`density_art::strip_density_art`]
-//! drops from both the manifest and the list. Every embedded file goes in
-//! without its comments ([`comments::strip_comments`]).
+//! without the `density-art` feature, what
+//! [`density_art::embedded_without_density_art`] drops from both the manifest
+//! and the list. Every embedded file goes in without its comments
+//! ([`comments::strip_comments`]).
 
 #[path = "build_support/comments.rs"]
 mod comments;
@@ -20,21 +21,18 @@ fn main() {
     let asset_dir = Path::new(&manifest_dir).join("sprites/default");
 
     // The one rerun trigger: cargo rescans a directory for any change, so an
-    // added, removed or edited sprite regenerates the list and its stripped
-    // copy.
+    // added, removed or edited file there, `pack.toml` included, reruns this
+    // script, which rewrites everything it embeds.
     println!("cargo:rerun-if-changed={}", asset_dir.display());
 
     let pack_toml = std::fs::read_to_string(asset_dir.join("pack.toml")).expect("read pack.toml");
     let (pack_toml, dropped) = if std::env::var_os("CARGO_FEATURE_DENSITY_ART").is_some() {
-        (pack_toml, BTreeSet::new())
+        (comments::strip_comments(&pack_toml), BTreeSet::new())
     } else {
-        density_art::strip_density_art(&pack_toml)
+        density_art::embedded_without_density_art(&pack_toml)
     };
-    std::fs::write(
-        out_dir.join("embedded_pack.toml"),
-        comments::strip_comments(&pack_toml),
-    )
-    .expect("write embedded_pack.toml");
+    std::fs::write(out_dir.join("embedded_pack.toml"), pack_toml)
+        .expect("write embedded_pack.toml");
     let stripped = out_dir.join("sprites");
     std::fs::create_dir_all(&stripped).expect("create the stripped sprite dir");
 

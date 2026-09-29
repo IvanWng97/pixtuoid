@@ -749,7 +749,12 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
 /// `get_src(frame_name)`. The path-traversal guard MUST stay inside
 /// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
 /// untrusted paths to escape.
-fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
+fn build_pack(
+    parsed: PackToml,
+    // `dyn`, not generic, so this body compiles once for both loaders instead
+    // of once per closure.
+    get_src: &mut dyn FnMut(&str) -> Result<String>,
+) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
