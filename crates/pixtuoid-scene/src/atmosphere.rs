@@ -442,6 +442,10 @@ mod tests {
         assert!(noon_lift > 0.0, "a clear noon lifts the floor");
         assert_eq!(night_lift, 0.0, "the moon lifts nothing");
         assert!(night_dim > noon_dim, "midnight dims the floor past noon");
+        assert!(
+            night_dim < NIGHT_FLOOR_DIM,
+            "the dim rides the darkness, which the city's glow keeps short of full"
+        );
     }
 
     /// The veil keeps the weather reading after dark: dimmer than by day, but
