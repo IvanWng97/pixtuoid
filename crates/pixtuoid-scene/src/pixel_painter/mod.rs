@@ -553,7 +553,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         &ctx.sky,
         &look,
         top_wall_h,
-        ctx.layout.door_span(),
+        ctx.layout.window_bays(),
         ctx.theme,
         ctx.floor.altitude,
     );

@@ -1,6 +1,6 @@
 use super::*;
 use crate::atmosphere::Look;
-use crate::layout::WINDOW_GAP;
+use crate::layout::{window_bays, window_run};
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
@@ -105,7 +105,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &Sky::at(now),
         &look,
         top_wall_h,
-        None,
+        window_bays(buf_w, None),
         theme,
         0.0,
     );
@@ -156,7 +156,7 @@ fn render_office_themed(
         &Sky::at(now),
         &look,
         top_wall_h,
-        None,
+        window_bays(buf_w, None),
         theme,
         0.0,
     );
@@ -304,11 +304,8 @@ fn disc_lands_in_a_window_never_on_the_wall_margin() {
     // appear inside a real window at least once, and NEVER paint past the last
     // painted window (the wall margin, which is the bug this guards).
     let top_wall_h = 40u16;
-    let stride = (WINDOW_W + WINDOW_GAP) as f32;
     for buf_w in [76u16, 96, 120, 150, 192, 220, 300] {
-        // Last painted window's right edge (mirrors compute_disc's tiling).
-        let k_max = (((buf_w as f32) - WINDOW_W as f32 - 5.0) / stride).floor();
-        let last_right = (3.0 + k_max.max(0.0) * stride + WINDOW_W as f32) as u16;
+        let last_right = window_run(buf_w).end;
         let mut seen_in_a_window = false;
         for h in [5u32, 6, 7, 17, 18, 19] {
             let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
@@ -416,7 +413,7 @@ fn disc_never_bleeds_across_a_window_pillar() {
     // sweeping the low-sun hours makes `cx` pass over one.
     let buf_w = 280u16;
     let top_wall_h = 40u16;
-    let stride = (WINDOW_W + WINDOW_GAP) as i32;
+    let bays: Vec<_> = window_bays(buf_w, None).collect();
     for h in [5u32, 6, 7, 17, 18, 19] {
         let buf = render_office_at(h, Weather::Clear, buf_w, top_wall_h);
         let mut wins = std::collections::HashSet::new();
@@ -427,12 +424,8 @@ fn disc_never_bleeds_across_a_window_pillar() {
                 if !(p.r > 240 && p.r as i16 - p.b as i16 > 40) {
                     continue;
                 }
-                let rel = x as i32 - 3;
-                if rel < 0 {
-                    continue;
-                }
-                if rel % stride < WINDOW_W as i32 {
-                    wins.insert(rel / stride);
+                if let Some(b) = bays.iter().find(|b| b.span().contains(&x)) {
+                    wins.insert(b.idx);
                 }
             }
         }
@@ -782,7 +775,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             &Sky::at(now),
             &look,
             top_wall_h,
-            None,
+            window_bays(buf_w, None),
             theme,
             0.0,
         );
@@ -845,7 +838,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             &Sky::at(now),
             &look,
             14,
-            None,
+            window_bays(w, None),
             theme,
             0.0,
         );

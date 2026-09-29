@@ -308,17 +308,17 @@ pub(super) fn compute_with_seed(
     let (room_walls, doorways) =
         super::rooms::walls::derive_room_walls(&meeting_rooms, pantry_room);
 
-    // Elevator door — mounted in the back wall's rightmost window position, BOTTOM-aligned
-    // with the windows; above the lounge gate so that gate can check couch↔door clearance.
+    // Elevator door — at the east end of the window wall, taking out any window it
+    // overlaps; above the lounge gate so that gate can check couch↔door clearance.
+    // It needs windows at least as tall as itself.
     let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
-    // The panes' bottom frame row.
-    let window_line = super::window_rows(top_wall_h).end - 1;
-    let door = if buf_w >= ELEVATOR_W + 4 && window_line >= ELEVATOR_H {
+    let windows_h = super::window_rows(top_wall_h).len();
+    let door = if buf_w >= ELEVATOR_W + 4 && windows_h >= usize::from(ELEVATOR_H) {
         Some(Point {
             x: buf_w.saturating_sub(ELEVATOR_W + 2),
-            // +2 drops the elevator bottom 2 px below the window line, resting it on
-            // the floor instead of floating mid-wall.
-            y: window_line - ELEVATOR_H + 2,
+            // Its bottom row is the band's trim row, so it stands on the floor
+            // line instead of floating mid-wall.
+            y: super::wall_trim_row(top_wall_h) + 1 - ELEVATOR_H,
         })
     } else {
         None

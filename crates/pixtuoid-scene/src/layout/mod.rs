@@ -35,9 +35,10 @@ pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // and over the same crossing-wall inputs.
 pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
+// Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
-pub(crate) use windows::WINDOW_GAP;
-pub(crate) use windows::{window_bays, window_rows, window_run, WINDOW_W};
+pub(crate) use windows::window_bays;
+pub(crate) use windows::{wall_trim_row, window_rows, window_run, WindowBay, WINDOW_W};
 // `crate::pathfind`'s A* and `reach`'s BFS both ride these ONE definitions.
 pub(crate) use coarse::{cell_walkable, snap, COARSE_CELL_SIZE, NEIGHBORS_8};
 

@@ -20,7 +20,6 @@ pub(super) use lighting::{
     Ellipse, RadialFalloff,
 };
 
-use std::ops::Range;
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -30,7 +29,7 @@ use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
 use crate::atmosphere::Look;
-use crate::layout::{window_bays, window_rows, Layout, WINDOW_W};
+use crate::layout::{wall_trim_row, window_rows, Layout, WindowBay, WINDOW_W};
 use crate::sky::{Sky, Weather};
 use crate::theme::Theme;
 
@@ -134,7 +133,7 @@ pub(super) fn paint_floor_and_walls(
     sky: &Sky,
     look: &Look,
     top_wall_h: u16,
-    door: Option<Range<u16>>,
+    bays: impl IntoIterator<Item = WindowBay>,
     theme: &Theme,
     altitude: f32,
 ) {
@@ -165,19 +164,18 @@ pub(super) fn paint_floor_and_walls(
         },
     );
 
-    // Window HEIGHT grows with the wall band so taller terminals get dramatic
-    // glass; width stays fixed so the skyline detail reads consistently.
     let rows = window_rows(top_wall_h);
     let (window_y, window_h) = (rows.start, rows.end - rows.start);
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
     let disc = compute_disc(sky, buf_w, top_wall_h, theme);
-    for w in window_bays(buf_w, door) {
+    for w in bays {
         let x = w.x;
         // The disc paints ONLY in the window its centre sits over. Ungated, a
         // disc near an inter-window gap is wide enough (radius+glow) to reach
         // BOTH neighbours' glass and render twice, bleeding through the solid
         // wall pillar between them.
-        let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
+        let span = w.span();
+        let win_disc = disc.filter(|d| d.cx >= f32::from(span.start) && d.cx < f32::from(span.end));
         paint_floor_to_ceiling_window(
             buf,
             x,
@@ -210,7 +208,7 @@ pub(super) fn paint_floor_and_walls(
         }
     }
 
-    let trim_y = top_wall_h.saturating_sub(1);
+    let trim_y = wall_trim_row(top_wall_h);
     if trim_y < buf_h {
         for x in 0..buf_w {
             buf.put(x, trim_y, wall_trim_color);
