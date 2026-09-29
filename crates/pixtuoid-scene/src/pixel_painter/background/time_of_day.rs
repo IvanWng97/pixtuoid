@@ -4,7 +4,7 @@
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::pixel_painter::palette::{blend_rgb, mix_lab, RgbLut};
+use crate::pixel_painter::palette::{blend_rgb, RgbLut};
 use crate::sky::{Body, Sky};
 use crate::theme::Theme;
 
@@ -38,8 +38,8 @@ pub(in crate::pixel_painter) fn time_of_day_look(sky: &Sky, theme: &Theme) -> Ti
     let twilight_b = theme.lighting.twilight_b;
 
     let warm = (e.warmth * interior).clamp(0.0, 1.0);
-    let glass_a = mix_lab(mix_lab(night_a, day_a, exterior), twilight_a, warm * 0.5);
-    let glass_b = mix_lab(mix_lab(night_b, day_b, exterior), twilight_b, warm * 0.5);
+    let glass_a = night_a.mix(day_a, exterior).mix(twilight_a, warm * 0.5);
+    let glass_b = night_b.mix(day_b, exterior).mix(twilight_b, warm * 0.5);
 
     // Leans away from the disc, which `compute_disc` places off this same azimuth;
     // `the_wall_spot_and_the_spill_fall_away_from_the_disc` pins the sign.

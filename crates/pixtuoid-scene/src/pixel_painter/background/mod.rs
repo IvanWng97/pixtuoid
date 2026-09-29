@@ -29,7 +29,7 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, mix_lab, RgbLut, BLACK, WHITE};
+use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, BLACK, WHITE};
 
 use crate::layout::{Layout, ELEVATOR_W};
 use crate::sky::{Emitter, Sky, Weather};
@@ -571,18 +571,18 @@ fn window_glass_invariants(
     // lit at noon.
     let lit_strength = look.darkness.max(0.12).clamp(0.0, 1.0);
     let lit_colors: [Rgb; 3] = [
-        mix_lab(dark_window, cw[0], lit_strength),
-        mix_lab(dark_window, cw[1], lit_strength),
-        mix_lab(dark_window, cw[2], lit_strength),
+        dark_window.mix(cw[0], lit_strength),
+        dark_window.mix(cw[1], lit_strength),
+        dark_window.mix(cw[2], lit_strength),
     ];
-    let building = mix_lab(building_light, building_dark, look.darkness);
+    let building = building_light.mix(building_dark, look.darkness);
 
     let glass_h = h.saturating_sub(2);
     let sky_norm = (glass_h as f32) * 0.7;
     let sky_row: Vec<Rgb> = (0..glass_h)
         .map(|gy| {
             let sky_t = (gy as f32 / sky_norm).min(1.0);
-            mix_lab(look.glass_b, look.glass_a, sky_t)
+            look.glass_b.mix(look.glass_a, sky_t)
         })
         .collect();
 

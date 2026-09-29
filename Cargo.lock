@@ -2746,7 +2746,6 @@ dependencies = [
  "anyhow",
  "chrono",
  "codspeed-criterion-compat",
- "palette",
  "pixtuoid-core",
  "proptest",
  "serde_json",

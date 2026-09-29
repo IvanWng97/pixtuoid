@@ -195,7 +195,7 @@ pub(in crate::pixel_painter) fn neon_look(
 ) -> NeonLook {
     let ms = epoch_ms(now);
     let power = levels.power;
-    let hue = blend_rgb(theme.ui.neon_brand, theme.ui.neon_alert, levels.alert);
+    let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
     let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
     let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
     let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
