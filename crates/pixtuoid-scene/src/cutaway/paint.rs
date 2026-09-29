@@ -702,8 +702,7 @@ fn push_sofa(
     at: crate::layout::Point,
     back_view: bool,
 ) {
-    let north = back_view && pack.piece_or_source(MEETING_SOFA_NORTH) == Some(MEETING_SOFA_NORTH);
-    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| north) {
+    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| back_view) {
         let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
         let split = NORTH_SOFA_SEAT_ROWS.min(h);
         let band = |rows| PieceKind::PropBand {
