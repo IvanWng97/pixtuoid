@@ -1,6 +1,6 @@
 //! Where the office sits under the terminal's cells.
 
-use pixtuoid_scene::layout::Point;
+use pixtuoid_scene::layout::{Bounds, Point};
 
 /// The office pixels one terminal cell shows, inclusive on both ends.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -22,6 +22,16 @@ impl CellArea {
             x1: col,
             y0,
             y1: y0.saturating_add(1),
+        }
+    }
+
+    /// The pixels this cell shows.
+    pub(crate) fn bounds(self) -> Bounds {
+        Bounds {
+            x: self.x0,
+            y: self.y0,
+            width: self.x1 - self.x0 + 1,
+            height: self.y1 - self.y0 + 1,
         }
     }
 

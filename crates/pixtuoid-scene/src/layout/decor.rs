@@ -189,15 +189,6 @@ impl FurnitureDef {
         super::mask::ground_rect(anchor, pos, fp, self.visual, self.ground_x, self.ground_y)
     }
 
-    /// The VISUAL rect — `ground_rect`'s twin on the other geometry axis. A sprite
-    /// legitimately overhangs its ground base, so this is strictly the larger box.
-    pub(super) fn visual_rect(&self, anchor: Anchor, pos: Point) -> (Point, Size) {
-        (
-            super::placement::anchored_top_left(anchor, pos, self.visual.w, self.visual.h),
-            self.visual,
-        )
-    }
-
     /// The blocked ground rect from this def's OWN table footprint, or `None` when
     /// the piece has no ground footprint (wall-hung decor, runtime-sized pantry
     /// counter). THE concentrator the mask stamp / collision checks / placement
@@ -367,6 +358,12 @@ pub enum Furniture {
     /// the cabinet base blocks, the glass tank above it is visual overhang, and
     /// idle fish animate in the paint pass.
     FishTank,
+    /// A home desk's task chair, seen from behind. Decor: its occupant's seat
+    /// is the desk's, so it stamps nothing of its own.
+    DeskChair,
+    /// The filing cabinet beside a home desk. Decor, placed off its desk, so it
+    /// stamps no ground of its own.
+    FilingCabinet,
 }
 
 impl Furniture {
@@ -401,6 +398,8 @@ impl Furniture {
         Furniture::SnackShelf,
         Furniture::Desk,
         Furniture::FishTank,
+        Furniture::DeskChair,
+        Furniture::FilingCabinet,
     ];
 }
 
@@ -441,7 +440,9 @@ pub(crate) const fn repels_plants(kind: Furniture) -> bool {
         | Furniture::MeetingScreen
         | Furniture::IslandStand
         | Furniture::SnackShelf
-        | Furniture::Desk => false,
+        | Furniture::Desk
+        | Furniture::DeskChair
+        | Furniture::FilingCabinet => false,
     }
 }
 
@@ -611,6 +612,14 @@ pub const fn furniture_def(kind: Furniture) -> FurnitureDef {
             visual: Size { w: 5, h: 3 },
             ..DECOR
         },
+        Furniture::DeskChair => FurnitureDef {
+            visual: Size { w: 8, h: 5 },
+            ..DECOR
+        },
+        Furniture::FilingCabinet => FurnitureDef {
+            visual: Size { w: 4, h: 6 },
+            ..DECOR
+        },
         Furniture::MeetingScreen => FurnitureDef {
             footprint: Some(Size { w: 14, h: 3 }),
             visual: Size { w: 14, h: 12 },
@@ -763,6 +772,16 @@ pub const WALKING_Y_OFF: u16 = 12;
 /// The seat's settle cell is `WALKING_Y_OFF - SEAT_RENDER_Y_OFF` px south of `pos`,
 /// where `walking_anchor` lands exactly on `back_couch_anchor`.
 pub const SEAT_RENDER_Y_OFF: u16 = 7;
+
+/// How far south of their seat a sitter on seated furniture (couch, sofa,
+/// meeting chair) sorts.
+const SEATED_Z_OFF: u16 = 2;
+
+/// The depth a sitter on seated furniture at `seat` sorts at, which the
+/// furniture under them keys its own depth from.
+pub(crate) fn seated_z_key(seat: Point) -> u16 {
+    seat.y + SEATED_Z_OFF
+}
 
 /// Y offset from a home desk's top-left to the agent's WALK anchor — how far south
 /// of the desk origin a FAR seat sits (a near one takes `DESK_WALK_Y_OFF_BACK`).
@@ -1181,7 +1200,7 @@ mod tests {
     fn furniture_def_invariants_hold_for_every_row() {
         assert_eq!(
             Furniture::ALL.len(),
-            27,
+            29,
             "Furniture variant added/removed — update ALL (and this count)"
         );
         for &f in Furniture::ALL {

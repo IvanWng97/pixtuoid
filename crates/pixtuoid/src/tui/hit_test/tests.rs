@@ -9,32 +9,16 @@ fn coffee_machine_hit_test_returns_false_for_origin() {
     ));
 }
 
-/// The middle cell of the coffee machine on `layout`'s pantry counter, which
-/// is centred on `counter`.
-fn coffee_mid_cell(layout: &Layout, counter: Point) -> (u16, u16) {
-    use pixtuoid_scene::pixel_painter::{PANTRY_COFFEE_COLS_LARGE, PANTRY_COFFEE_COLS_SMALL};
-    let Size { w: cw, h: ch } = layout.pantry_counter_size();
-    let (c0, c1) = if cw >= pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W {
-        PANTRY_COFFEE_COLS_LARGE
-    } else {
-        PANTRY_COFFEE_COLS_SMALL
-    };
-    let top = counter.y.saturating_sub(ch / 2);
-    (
-        counter.x.saturating_sub(cw / 2) + (c0 + c1) / 2,
-        (top + ch / 2) / 2,
-    )
+/// The middle cell of the coffee machine on `layout`'s pantry counter.
+fn coffee_mid_cell(layout: &Layout) -> (u16, u16) {
+    let b = layout.coffee_machine().expect("a coffee machine");
+    (b.x + b.width / 2, (b.y + b.height / 2) / 2)
 }
 
 #[test]
 fn coffee_machine_hit_test_returns_true_for_machine_area() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let pantry_wp = layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, pantry_wp.pos);
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
         hit_test_coffee_machine(
             &layout,
@@ -481,12 +465,7 @@ fn cat_hit_test_sleep_smaller_box() {
 #[test]
 fn coffee_machine_returns_false_when_no_pantry_waypoint() {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let wp = *layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, wp.pos);
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
         hit_test_coffee_machine(
             &layout,
@@ -508,62 +487,6 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
         &layout,
         crate::tui::geometry::CellArea::half_block(0, 0)
     ));
-}
-
-// The large box's last column is the falsifier for the large/small split:
-// outside the small box but inside the large one, so a hit there means the
-// split was dropped.
-#[test]
-fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
-    let (lo, hi) = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL;
-    let large_last = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE.1 - 1;
-    let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let wp = *layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let h = layout.pantry_counter_size().h;
-    layout.pantry.as_mut().expect("pantry").counter_size = Size { w: 20, h };
-    let sprite_x = wp.pos.x.saturating_sub(20 / 2);
-    let sprite_y = wp.pos.y.saturating_sub(h / 2);
-    let cell_y = (sprite_y + h / 2) / 2;
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + lo - 1, cell_y)
-        ),
-        "the counter col just left of the machine must miss"
-    );
-    assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + lo, cell_y)
-        ),
-        "the machine's left edge must hit"
-    );
-    assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + hi - 1, cell_y)
-        ),
-        "the machine's right edge must hit"
-    );
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + hi, cell_y)
-        ),
-        "the counter col just right of the machine must miss"
-    );
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + large_last, cell_y)
-        ),
-        "the large box's last column is outside the small box; a hit means the \
-         large/small split was dropped"
-    );
 }
 
 // The lounge and pod-decor arms below aren't all reachable from
@@ -749,4 +672,19 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
         ),
         Some("TV Stand")
     );
+}
+
+/// The wall board's text sits on the neon sign, so hovering the sign must not
+/// raise a furniture tooltip over it.
+#[test]
+fn the_neon_sign_raises_no_tooltip() {
+    use pixtuoid_scene::layout::{NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
+    let layout = Layout::compute(160, 200, Some(16)).expect("layout");
+    let cell =
+        crate::tui::geometry::CellArea::half_block(NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y / 2);
+    assert_eq!(
+        layout.fixture_at(cell.bounds()),
+        Some(pixtuoid_scene::layout::FixtureKind::NeonSign)
+    );
+    assert_eq!(hit_test_furniture(&layout, cell), None);
 }

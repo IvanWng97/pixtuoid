@@ -272,12 +272,6 @@ pub(super) struct Seat {
     facing: crate::layout::Facing,
 }
 
-/// How far south of their seat a sitter on seated furniture (couch, sofa,
-/// meeting chair) sorts. The classic painter keys a back-view sofa one row
-/// further south, over its sitter, and a front sofa on this row, where
-/// insertion order puts the sitter on top.
-const SEATED_Z_OFF: u16 = 2;
-
 /// The depth the sitters of a meeting sofa at `sofa` sort at: their seat's own
 /// [`z_key`](Seat::z_key). Both profiles key the sofa by it, so a front sofa,
 /// queued before its sitters, ties them and they sit on it.
@@ -439,7 +433,7 @@ impl Seat {
     /// mid-glide, then jumps behind it.
     pub(super) fn z_key(self) -> u16 {
         if self.seated_furniture() {
-            return self.pos.y + SEATED_Z_OFF;
+            return crate::layout::seated_z_key(self.pos);
         }
         // The plain feet row, which for the bartender sits INSIDE the island
         // body — so the whole arc stays behind the counter.

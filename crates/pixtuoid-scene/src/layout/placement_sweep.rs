@@ -166,281 +166,225 @@ impl Piece {
 
 /// Enumerate EVERY placed piece of a layout, with rects from the SAME
 /// `mask::ground_rect` / `pantry_ground_rect` the walkable mask stamps — the
-/// sweep can never drift from the collision truth. The destructure has NO `..`,
-/// so a new furniture collection fails compilation here until it is swept, or
-/// bound and discarded with the WHY beside it.
+/// sweep can never drift from the collision truth. It maps the roster
+/// exhaustively, so a new fixture kind fails compilation here until it is
+/// swept, or skipped with the WHY beside it.
 fn pieces(l: &SceneLayout) -> Vec<Piece> {
-    let SceneLayout {
-        // Buffer bounds and band containers the invariants read directly, not pieces.
-        buf_w: _,
-        buf_h: _,
-        cubicle_band: _,
-        cubicle_aisle: _,
-        home_desks,
-        // A desk ATTRIBUTE, not a piece; length pinned by `every_desk_has_a_facing`.
-        desk_facings: _,
-        waypoints,
-        plants,
-        wall_decor,
-        pod_decor,
-        lounge,
-        // Architecture, not furniture: the door PUNCHES walkability through the band
-        // and its threshold is a walkable POINT the connectivity guards assert.
-        door: _,
-        door_threshold: _,
-        meeting_rooms,
-        pantry,
-        // The containers' own edges and openings; overlap-vs-walls is its own invariant.
-        room_walls: _,
-        doorways: _,
-        wall_pieces: _,
-        // Wall-band geometry, read via `wall_band_h()`, and the full-width router zone.
-        top_margin: _,
-        corridor: _,
-        // The masks the connectivity and pathfind guards probe directly.
-        walkable: _,
-        reachable: _,
-    } = l;
-
     let mut out = Vec::new();
-    push_desks(home_desks, &mut out);
-    push_pod_decor(pod_decor, &mut out);
-    push_plants(l, plants, &mut out);
-    push_wall_decor(wall_decor, &mut out);
-    push_waypoints(l, waypoints, &mut out);
-    push_meeting_rooms(meeting_rooms, &mut out);
-    push_lounge(lounge.as_ref(), &mut out);
-    push_kitchen_island(pantry.as_ref(), &mut out);
+    for f in l.fixtures() {
+        match f.kind {
+            FixtureKind::Desk(i) => out.push(Piece::table(
+                format!("desk[{}]", i.0),
+                Anchor::TopLeft,
+                l.home_desks[i.0],
+                Furniture::Desk,
+                Container::Band,
+                None,
+            )),
+            FixtureKind::Pod { item, kind } => {
+                let mut piece = Piece::table(
+                    format!("pod_decor[{item}] {kind:?}"),
+                    Anchor::Center,
+                    l.pod_decor[item].pos,
+                    kind.furniture(),
+                    Container::Band,
+                    None,
+                );
+                piece.visual_in_container = true;
+                out.push(piece);
+            }
+            // Per-ITEM container, picked by POSITION: a plant that `settle_plant`
+            // moved beside a corner appliance adopts the blocker's AISLE row.
+            FixtureKind::Plant { item, kind } => {
+                let pos = l.plants[item].pos;
+                let in_meeting = l
+                    .meeting_room_bounds(0)
+                    .is_some_and(|mr| contains_point(mr, pos));
+                let container = if in_meeting {
+                    Container::MeetingRoom(0)
+                } else if contains_point(l.cubicle_aisle, pos) {
+                    Container::Aisle
+                } else {
+                    Container::Band
+                };
+                out.push(Piece::table(
+                    format!("plant[{item}] {kind:?}"),
+                    Anchor::Center,
+                    pos,
+                    kind.furniture(),
+                    container,
+                    None,
+                ));
+            }
+            FixtureKind::Wall { item, kind } => {
+                let container = match kind {
+                    // Free-standing floor furniture despite living in the
+                    // wall_decor vec: the container is keyed on the KIND.
+                    WallDecor::Whiteboard => Container::Band,
+                    // Straddlers: tall sprite on the wall, shallow ground strip
+                    // on the carpet apron at the wall base.
+                    WallDecor::Bookshelf | WallDecor::MeetingScreen => Container::WallApron,
+                    WallDecor::ExitSign | WallDecor::BulletinBoard => Container::WallBand,
+                };
+                out.push(Piece::table(
+                    format!("wall_decor[{item}] {kind:?}"),
+                    Anchor::TopLeft,
+                    l.wall_decor[item].pos,
+                    kind.furniture(),
+                    container,
+                    None,
+                ));
+            }
+            FixtureKind::Station { waypoint, station } => {
+                let wp = l.waypoints[waypoint];
+                let label = format!("waypoint[{waypoint}] {station:?}");
+                out.push(match station {
+                    // Runtime-sized via `pantry_ground_rect` — the table row is
+                    // empty ON PURPOSE.
+                    Station::PantryCounter => {
+                        let counter = l.pantry_counter_size();
+                        Piece {
+                            label,
+                            ground: Some(pantry_ground_rect(wp.pos, counter)),
+                            visual: (
+                                anchored_top_left(Anchor::Center, wp.pos, counter.w, counter.h),
+                                counter,
+                            ),
+                            center_fit: Some((wp.pos, counter)),
+                            container: Container::Pantry,
+                            visual_in_container: false,
+                            overlap_group: None,
+                        }
+                    }
+                    Station::VendingMachine | Station::Printer => Piece::table(
+                        label,
+                        Anchor::Center,
+                        wp.pos,
+                        wp.kind.furniture(),
+                        Container::Aisle,
+                        None,
+                    ),
+                    Station::SnackShelf => Piece::table(
+                        label,
+                        Anchor::Center,
+                        wp.pos,
+                        wp.kind.furniture(),
+                        Container::Pantry,
+                        None,
+                    ),
+                });
+            }
+            // Each seat stamps its own body and their union IS the couch's
+            // blocked ground, so model the seats — the one sprite under-models it.
+            FixtureKind::LoungeCouch => {
+                for (i, wp) in l.waypoints.iter().enumerate() {
+                    if wp.kind == WaypointKind::Couch {
+                        out.push(Piece::table(
+                            format!("waypoint[{i}] Couch seat"),
+                            Anchor::Center,
+                            wp.pos,
+                            Furniture::Couch,
+                            Container::Band,
+                            Some(LOUNGE_GROUP),
+                        ));
+                    }
+                }
+            }
+            FixtureKind::MeetingSofa { room, seat, .. } => {
+                if let Some(trio) = l.meeting_rooms[room].trio {
+                    out.push(Piece::table(
+                        format!("meeting[{room}].sofa[{seat}]"),
+                        Anchor::Center,
+                        trio.sofas[seat],
+                        Furniture::MeetingSofaBody,
+                        Container::MeetingRoom(room),
+                        None,
+                    ));
+                }
+            }
+            FixtureKind::MeetingTable { room } => {
+                if let Some(trio) = l.meeting_rooms[room].trio {
+                    out.push(Piece::table(
+                        format!("meeting[{room}].table"),
+                        Anchor::Center,
+                        trio.table,
+                        Furniture::MeetingTable,
+                        Container::MeetingRoom(room),
+                        None,
+                    ));
+                }
+            }
+            FixtureKind::FloorLamp => {
+                out.extend(
+                    l.floor_lamp()
+                        .map(|p| lounge_piece("floor_lamp", p, Furniture::FloorLamp)),
+                );
+            }
+            FixtureKind::SideTable => out.extend(
+                l.lounge_side_table()
+                    .map(|p| lounge_piece("lounge_side_table", p, Furniture::LoungeSideTable)),
+            ),
+            FixtureKind::FishTank => {
+                out.extend(
+                    l.fish_tank()
+                        .map(|p| lounge_piece("fish_tank", p, Furniture::FishTank)),
+                );
+            }
+            FixtureKind::KitchenIsland => {
+                if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
+                    out.push(Piece::table(
+                        "kitchen_island".into(),
+                        Anchor::Center,
+                        island,
+                        Furniture::KitchenIsland,
+                        Container::Pantry,
+                        None,
+                    ));
+                }
+            }
+            // No obstacle of its own; containment is the pos-in-room check in
+            // `every_meeting_slot_sits_in_its_room`.
+            FixtureKind::MeetingChair { .. } => {}
+            // Stamp no ground: they ride their desk, placed off it by a fixed
+            // offset.
+            FixtureKind::FilingCabinet(_) | FixtureKind::DeskChair(_) => {}
+            // Flat on the floor: nothing to overlap.
+            FixtureKind::MeetingRug { .. }
+            | FixtureKind::LoungeRug
+            | FixtureKind::Doormat { .. }
+            | FixtureKind::PantryMat
+            | FixtureKind::IslandMat
+            | FixtureKind::Runner => {}
+            // Placed by their room's own rect rules, stamping no ground.
+            FixtureKind::CoatRack { .. }
+            | FixtureKind::NoticeBoard { .. }
+            | FixtureKind::WaterCooler
+            | FixtureKind::TrashBin => {}
+            // Architecture, not furniture: the door PUNCHES walkability through
+            // the band, and its threshold is a walkable POINT the connectivity
+            // guards assert.
+            FixtureKind::Door => {}
+            // On the wall band, above every floor.
+            FixtureKind::NeonSign | FixtureKind::Clock => {}
+        }
+    }
     out
 }
 
-fn push_desks(home_desks: &[Point], out: &mut Vec<Piece>) {
-    for (i, &d) in home_desks.iter().enumerate() {
-        out.push(Piece::table(
-            format!("desk[{i}]"),
-            Anchor::TopLeft,
-            d,
-            Furniture::Desk,
-            Container::Band,
-            None,
-        ));
-    }
-}
-
-fn push_pod_decor(pod_decor: &[PodDecorItem], out: &mut Vec<Piece>) {
-    for (i, pd) in pod_decor.iter().enumerate() {
-        let mut piece = Piece::table(
-            format!("pod_decor[{i}] {:?}", pd.kind),
-            Anchor::Center,
-            pd.pos,
-            pd.kind.furniture(),
-            Container::Band,
-            None,
-        );
-        piece.visual_in_container = true;
-        out.push(piece);
-    }
-}
-
-/// Per-ITEM container, picked by POSITION: a plant that `settle_plant` moved
-/// beside a corner appliance adopts the blocker's AISLE row.
-fn push_plants(l: &SceneLayout, plants: &[PlantItem], out: &mut Vec<Piece>) {
-    for (i, p) in plants.iter().enumerate() {
-        let in_meeting = l
-            .meeting_room_bounds(0)
-            .map(|mr| contains_point(mr, p.pos))
-            .unwrap_or(false);
-        let in_aisle = contains_point(l.cubicle_aisle, p.pos);
-        out.push(Piece::table(
-            format!("plant[{i}] {:?}", p.kind),
-            Anchor::Center,
-            p.pos,
-            p.kind.furniture(),
-            if in_meeting {
-                Container::MeetingRoom(0)
-            } else if in_aisle {
-                Container::Aisle
-            } else {
-                Container::Band
-            },
-            None,
-        ));
-    }
-}
-
-fn push_wall_decor(wall_decor: &[WallDecorItem], out: &mut Vec<Piece>) {
-    for (i, wd) in wall_decor.iter().enumerate() {
-        let container = match wd.kind {
-            // Free-standing floor furniture despite living in the wall_decor
-            // vec: the container is keyed on the KIND, not on the Vec.
-            WallDecor::Whiteboard => Container::Band,
-            // Straddlers: tall sprite on the wall, shallow ground strip on the
-            // carpet apron at the wall base.
-            WallDecor::Bookshelf | WallDecor::MeetingScreen => Container::WallApron,
-            WallDecor::ExitSign | WallDecor::BulletinBoard => Container::WallBand,
-        };
-        out.push(Piece::table(
-            format!("wall_decor[{i}] {:?}", wd.kind),
-            Anchor::TopLeft,
-            wd.pos,
-            wd.kind.furniture(),
-            container,
-            None,
-        ));
-    }
-}
-
-fn push_waypoints(l: &SceneLayout, waypoints: &[Waypoint], out: &mut Vec<Piece>) {
-    for (i, wp) in waypoints.iter().enumerate() {
-        match wp.kind {
-            // Each seat stamps its own body and their union IS the couch's blocked
-            // ground, so model the seats — `couch_sprite_center` under-models it.
-            WaypointKind::Couch => {
-                out.push(Piece::table(
-                    format!("waypoint[{i}] Couch seat"),
-                    Anchor::Center,
-                    wp.pos,
-                    Furniture::Couch,
-                    Container::Band,
-                    Some(2),
-                ));
-            }
-            // Promoted pod_decor slots at the same pos — that entry carries the geometry.
-            WaypointKind::PhoneBooth | WaypointKind::StandingDesk => {}
-            // No obstacle of their own; containment is the pos-in-room check in
-            // `every_meeting_slot_sits_in_its_room`.
-            WaypointKind::MeetingSofa | WaypointKind::MeetingChair => {}
-            WaypointKind::Pantry => {
-                // Runtime-sized via `pantry_ground_rect` — the table row is empty ON PURPOSE.
-                let counter = l.pantry_counter_size();
-                out.push(Piece {
-                    label: format!("waypoint[{i}] Pantry counter"),
-                    ground: Some(pantry_ground_rect(wp.pos, counter)),
-                    visual: (
-                        anchored_top_left(Anchor::Center, wp.pos, counter.w, counter.h),
-                        counter,
-                    ),
-                    center_fit: Some((wp.pos, counter)),
-                    container: Container::Pantry,
-                    visual_in_container: false,
-                    overlap_group: None,
-                });
-            }
-            WaypointKind::VendingMachine | WaypointKind::Printer => {
-                out.push(Piece::table(
-                    format!("waypoint[{i}] {:?}", wp.kind),
-                    Anchor::Center,
-                    wp.pos,
-                    wp.kind.furniture(),
-                    Container::Aisle,
-                    None,
-                ));
-            }
-            WaypointKind::SnackShelf => {
-                out.push(Piece::table(
-                    format!("waypoint[{i}] SnackShelf"),
-                    Anchor::Center,
-                    wp.pos,
-                    wp.kind.furniture(),
-                    Container::Pantry,
-                    None,
-                ));
-            }
-            // Stands carry no ground; the island BODY registers in `push_kitchen_island`.
-            WaypointKind::Island => {}
-        }
-    }
-}
-
-fn push_meeting_rooms(meeting_rooms: &[MeetingRoom], out: &mut Vec<Piece>) {
-    for (room, r) in meeting_rooms.iter().enumerate() {
-        // No `..` here either, so a NEW field on either struct is a compile
-        // error until its pieces are registered.
-        let MeetingRoom { bounds: _, trio } = r;
-        let Some(MeetingTrio { sofas, table }) = trio else {
-            continue;
-        };
-        let mf = MeetingTrio {
-            sofas: *sofas,
-            table: *table,
-        };
-        for (s, &sofa) in mf.sofas.iter().enumerate() {
-            out.push(Piece::table(
-                format!("meeting[{room}].sofa[{s}]"),
-                Anchor::Center,
-                sofa,
-                Furniture::MeetingSofaBody,
-                Container::MeetingRoom(room),
-                None,
-            ));
-        }
-        out.push(Piece::table(
-            format!("meeting[{room}].table"),
-            Anchor::Center,
-            mf.table,
-            Furniture::MeetingTable,
-            Container::MeetingRoom(room),
-            None,
-        ));
-    }
-}
-
 /// ONE authored cluster: the table tucks against the couch's west armrest and
-/// the lamp hugs its east side BY DESIGN, so they share overlap group 2 and the
-/// goldens — not the overlap invariant — pin their internal geometry.
-fn push_lounge(lounge: Option<&Lounge>, out: &mut Vec<Piece>) {
-    let Some(lounge) = lounge else {
-        return;
-    };
-    out.push(Piece::table(
-        "floor_lamp".into(),
-        Anchor::Center,
-        lounge.floor_lamp,
-        Furniture::FloorLamp,
-        Container::Band,
-        Some(2),
-    ));
-    out.push(Piece::table(
-        "lounge_side_table".into(),
-        Anchor::Center,
-        lounge.side_table,
-        Furniture::LoungeSideTable,
-        Container::Band,
-        Some(2),
-    ));
-    if let Some(tank) = lounge.fish_tank {
-        out.push(Piece::table(
-            "fish_tank".into(),
-            Anchor::Center,
-            tank,
-            Furniture::FishTank,
-            Container::Band,
-            Some(2),
-        ));
-    }
-    // `lounge.couch_center` contributes no Piece: its geometry comes from the
-    // seat waypoints, the mask's truth.
-}
+/// the lamp hugs its east side BY DESIGN, so they share an overlap group and
+/// the goldens — not the overlap invariant — pin their internal geometry.
+const LOUNGE_GROUP: u8 = 2;
 
-fn push_kitchen_island(pantry: Option<&PantryRoom>, out: &mut Vec<Piece>) {
-    let island = pantry.and_then(|p| {
-        let PantryRoom {
-            bounds: _,       // container, asserted by Container::Pantry below
-            counter_size: _, // its counter piece registers via the Pantry arm above
-            kitchen_island,
-        } = p;
-        kitchen_island.as_ref()
-    });
-    if let Some(p) = island {
-        out.push(Piece::table(
-            "kitchen_island".into(),
-            Anchor::Center,
-            *p,
-            Furniture::KitchenIsland,
-            Container::Pantry,
-            None,
-        ));
-    }
+fn lounge_piece(label: &str, pos: Point, row: Furniture) -> Piece {
+    Piece::table(
+        label.into(),
+        Anchor::Center,
+        pos,
+        row,
+        Container::Band,
+        Some(LOUNGE_GROUP),
+    )
 }
 
 fn contains_point(b: Bounds, p: Point) -> bool {

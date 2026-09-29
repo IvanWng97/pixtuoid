@@ -270,7 +270,7 @@ impl Office {
     /// Colors are RESOLVED against the CURRENT theme. Call right after `step` (it
     /// reads the step's clock).
     pub fn overlay_json(&mut self) -> String {
-        use pixtuoid_scene::pixel_painter::{
+        use pixtuoid_scene::layout::{
             NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
         };
         let Some(now) = self.last_now else {
@@ -906,11 +906,11 @@ mod tests {
         assert!(board["mood"].is_array() && board["context"].is_array());
         assert_eq!(
             board["rect"]["w"].as_u64().unwrap(),
-            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W as u64
+            pixtuoid_scene::layout::NEON_PANEL_INNER_W as u64
         );
         assert_eq!(
             board["rect"]["h"].as_u64().unwrap(),
-            pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_H as u64
+            pixtuoid_scene::layout::NEON_PANEL_INNER_H as u64
         );
         assert!(board["brand"]["color"].as_str().unwrap().starts_with('#'));
 
