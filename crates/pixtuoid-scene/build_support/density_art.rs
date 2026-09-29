@@ -1,9 +1,18 @@
 //! Drop the bundled pack's density art — its `@Nx` animations and the
-//! hairstyles that dress them — for a build without the `density-art` feature. `build.rs` and `the_pack_without_density_art_loads_whole`
-//! both run it, so the manifest a feature-less build embeds is one a test has
-//! loaded.
+//! hairstyles that dress them — for a build without the `density-art` feature.
+//! `build.rs` and `the_pack_without_density_art_loads_whole` both run
+//! [`embedded_without_density_art`], so the manifest a feature-less build embeds
+//! is one a test has loaded.
 
 use std::collections::BTreeSet;
+
+/// `pack_toml` as a build without `density-art` embeds it — without its density
+/// art ([`strip_density_art`]), then without its comments — and the frame files
+/// it no longer draws.
+pub(crate) fn embedded_without_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
+    let (toml, dropped) = strip_density_art(pack_toml);
+    (super::comments::strip_comments(&toml), dropped)
+}
 
 /// `pack_toml` without its density-variant animations and its hairstyles (which
 /// only ever dress density art), and the frame files only those drew.
@@ -12,7 +21,7 @@ use std::collections::BTreeSet;
 /// `embedded_default_pack_animations_are_all_in_the_registry` fails on any
 /// other, so core's `DENSITY_VARIANT_SEP` alone identifies them here, where its
 /// `split_density_variant` is crate-private and core is no build-dependency.
-pub(crate) fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
+fn strip_density_art(pack_toml: &str) -> (String, BTreeSet<String>) {
     let mut doc: toml_edit::DocumentMut = pack_toml.parse().expect("the bundled pack.toml parses");
     let mut hair_files: Vec<String> = Vec::new();
     if let Some(styles) = doc.remove("hairstyles") {
