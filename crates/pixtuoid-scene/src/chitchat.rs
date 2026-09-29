@@ -220,6 +220,7 @@ pub fn supports_chitchat(kind: WaypointKind) -> bool {
 }
 
 /// A single speech bubble ready for the widget layer to render.
+#[derive(Debug, Clone, Copy)]
 pub struct ChitchatBubble {
     /// The quip to render.
     pub text: &'static str,

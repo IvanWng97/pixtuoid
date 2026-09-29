@@ -3331,14 +3331,10 @@ S B B B B B B S
         }
         SimFrame {
             agents,
-            poses: frame.poses.clone(),
-            seated_agents: frame.seated_agents.clone(),
             characters,
-            indoor_scale: frame.indoor_scale,
             chitchat_bubbles: Vec::new(),
             new_coffee_carriers: Vec::new(),
-            occupied_waypoints: frame.occupied_waypoints.clone(),
-            neon: frame.neon,
+            ..frame.clone()
         }
     }
 

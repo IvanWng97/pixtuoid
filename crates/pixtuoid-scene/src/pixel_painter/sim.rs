@@ -16,16 +16,19 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use pixtuoid_core::{AgentId, AgentSlot, SceneState};
 
 use crate::chitchat::{self, ActiveChitchat, ChitchatBubble, VenueKey};
-use crate::floor::LightingState;
+use crate::creatures::{gateway_mascot_def, mascot_position, mascot_seed, pet_position};
+use crate::floor::{CoffeeState, FloorMeta, LightingState};
 use crate::layout::{Anchor, Layout, Point, Size, WALKING_Y_OFF};
 use crate::motion::{walking_position, MotionState};
 use crate::pathfind::Router;
+use crate::pet::{Pet, PetKind, PetState};
 use crate::pose::{self, Pose, PoseHistory};
 
 use super::anchors::{
     keep_sprite_on_canvas, walking_anchor, waypoint_anchor, waypoint_rank_offset_x, with_breath,
     CHARACTER_SPRITE_W,
 };
+use super::desk_occupant;
 use super::seat::{settle_seat, Seat};
 
 /// The mutable world state one `sim_step` advances.
@@ -85,10 +88,78 @@ pub struct CharacterPlacement {
     pub seated: bool,
 }
 
+/// A floor's pet and the live interaction with it, as the sim reads them.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct PetInputs<'a> {
+    /// This floor's configured pet, if any.
+    pub(crate) pet: Option<&'a Pet>,
+    /// The pet's live interaction state, if a pet is being petted.
+    pub(crate) petting: Option<&'a PetState>,
+}
+
+/// The office pet this tick.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PetPlacement {
+    /// Which pet.
+    pub(crate) kind: PetKind,
+    /// Its centre, in layout units, before a painter fits its sprite to the
+    /// canvas.
+    pub(crate) pos: Point,
+    /// Whether to mirror the sprite horizontally.
+    pub(crate) flip: bool,
+    /// The sprite animation to draw.
+    pub(crate) anim_name: &'static str,
+    /// The frame within `anim_name`.
+    pub(crate) frame_idx: usize,
+    /// How long ago it was petted, while the petting plays; it holds still
+    /// meanwhile.
+    pub(crate) petted_ms: Option<u64>,
+}
+
+/// One gateway mascot this tick.
+#[derive(Debug, Clone)]
+pub(crate) struct MascotPlacement {
+    /// Its centre, in layout units, before a painter fits its sprite to the
+    /// canvas.
+    pub(crate) pos: Point,
+    /// The sprite animation to draw.
+    pub(crate) anim_name: &'static str,
+    /// The frame within `anim_name`.
+    pub(crate) frame_idx: usize,
+    /// The gateway's display name.
+    pub(crate) name: &'static str,
+    /// WHICH instance of that gateway this is, when there is one to tell apart.
+    pub(crate) instance: Option<String>,
+    /// An agent run is in flight.
+    pub(crate) busy: bool,
+    /// Up, but its model backend is failing every run.
+    pub(crate) degraded: bool,
+    /// Runs in flight.
+    pub(crate) run_count: u32,
+    /// Sessions the gateway holds.
+    pub(crate) active_sessions: u32,
+}
+
+/// One home desk's live props this tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct DeskProps {
+    /// Its occupant fetched a coffee that still sits on the desk.
+    pub(crate) has_coffee: bool,
+    /// That coffee is fresh enough to steam.
+    pub(crate) coffee_steam: bool,
+    /// 0 = no tower (the plain desk), else the reams up to
+    /// [`MAX_TIER`](crate::token_meter::MAX_TIER).
+    pub(crate) token_tier: u8,
+    /// A falling sheet's distance fallen (px) when a big usage reading is
+    /// mid-drop, else `None`.
+    pub(crate) sheet_fall: Option<u16>,
+}
+
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
 /// Paint consumes it by `&` — rendering the same frame twice is byte-identical
 /// and cannot move the sim. Owned data, so the stores are free again the moment
 /// `sim_step` returns.
+#[derive(Clone)]
 pub struct SimFrame {
     /// The tick's agent snapshot — placements index into it, paint borrows
     /// from it.
@@ -114,24 +185,49 @@ pub struct SimFrame {
     /// Waypoint indices with an occupant this tick — drives the appliance
     /// feedback animations.
     pub occupied_waypoints: std::collections::HashSet<usize>,
+    /// The office pet this tick; `None` without one, or where the caller
+    /// brings no pet.
+    pub(crate) pet: Option<PetPlacement>,
+    /// Each gateway mascot present this tick.
+    pub(crate) mascots: Vec<MascotPlacement>,
+    /// Each home desk's live props, index-parallel to
+    /// [`home_desks`](crate::layout::SceneLayout::home_desks).
+    pub(crate) desks: Vec<DeskProps>,
+}
+
+/// What one `sim_step` reads, besides the stores it advances.
+pub(crate) struct SimInputs<'a> {
+    /// The live scene.
+    pub(crate) scene: &'a SceneState,
+    /// The office the sim walks.
+    pub(crate) layout: &'a Layout,
+    /// A genuine sim input: character anchors center on the pack's sprite
+    /// width, and placement is position.
+    pub(crate) pack: &'a Pack,
+    /// Carrier → fetch time of each desk cup.
+    pub(crate) coffee: &'a HashMap<AgentId, SystemTime>,
+    /// The floor's pet and its live interaction.
+    pub(crate) pets: PetInputs<'a>,
+    /// Which floor this is, and its seed.
+    pub(crate) floor: FloorMeta,
+    /// The tick's time — a parameter, never read from the clock here (wasm).
+    pub(crate) now: SystemTime,
 }
 
 /// Advance the world one tick WITHOUT painting: lighting fade, occupancy
 /// overlay, the authoritative `derive_with_routing` pose pass, character
-/// placement resolution, and the chitchat venue update.
-///
-/// `pack` is a genuine sim input: character anchors center on the pack's
-/// sprite width, and placement is position. Time is a parameter — never read
-/// the clock here (wasm).
-pub(crate) fn sim_step(
-    stores: &mut SimStores<'_>,
-    scene: &SceneState,
-    layout: &Layout,
-    pack: &Pack,
-    coffee: &HashMap<AgentId, SystemTime>,
-    floor_idx: usize,
-    now: SystemTime,
-) -> SimFrame {
+/// placement resolution, the chitchat venue update, and where the pet, the
+/// mascots and each desk's props stand.
+pub(crate) fn sim_step(stores: &mut SimStores<'_>, inputs: SimInputs<'_>) -> SimFrame {
+    let SimInputs {
+        scene,
+        layout,
+        pack,
+        coffee,
+        pets,
+        floor,
+        now,
+    } = inputs;
     let agents: Vec<AgentSlot> = scene.agents.values().cloned().collect();
 
     let indoor_scale = stores.light.tick(scene.agents.is_empty(), now);
@@ -227,7 +323,10 @@ pub(crate) fn sim_step(
         resolve_characters(&agents, &poses, layout, pack, char_w, coffee, now);
 
     let chitchat_bubbles =
-        chitchat::update_and_collect(stores.chitchat, floor_idx, &waypoint_visitors, now);
+        chitchat::update_and_collect(stores.chitchat, floor.floor_idx, &waypoint_visitors, now);
+    let pet = pet_placement(&agents, layout, pack, pets, floor, now);
+    let mascots = mascot_placements(scene, layout, now);
+    let desks = desk_props(&agents, layout, coffee, now);
 
     SimFrame {
         agents,
@@ -239,7 +338,125 @@ pub(crate) fn sim_step(
         chitchat_bubbles,
         new_coffee_carriers,
         occupied_waypoints,
+        pet,
+        mascots,
+        desks,
     }
+}
+
+/// The floor's pet this tick. A pet being petted holds still where it was
+/// clicked; otherwise `pet_position` roams it around the idle desks.
+pub(super) fn pet_placement(
+    agents: &[AgentSlot],
+    layout: &Layout,
+    pack: &Pack,
+    pets: PetInputs<'_>,
+    floor: FloorMeta,
+    now: SystemTime,
+) -> Option<PetPlacement> {
+    let kind = pets.pet.map(|p| p.kind)?;
+    let petting = pets
+        .petting
+        .filter(|p| p.is_active(now) && p.kind == kind && p.floor_idx == floor.floor_idx);
+    if let Some(p) = petting {
+        return Some(PetPlacement {
+            kind,
+            pos: p.pet_pos,
+            flip: false,
+            anim_name: kind.sit_anim(),
+            frame_idx: 0,
+            petted_ms: Some(p.elapsed_ms(now)),
+        });
+    }
+    let idle_desk_indices: Vec<FloorLocalDeskIndex> = agents
+        .iter()
+        .filter(|a| {
+            matches!(a.state, ActivityState::Idle)
+                && layout
+                    .home_desk(a.desk_index.single_floor_local())
+                    .is_some()
+                && a.exiting_at.is_none()
+        })
+        .map(|a| a.desk_index.single_floor_local())
+        .collect();
+    let all_idle = agents
+        .iter()
+        .all(|a| matches!(a.state, ActivityState::Idle));
+    let (pos, flip, anim_name, frame_idx) = pet_position(
+        kind,
+        layout,
+        pack,
+        now,
+        &idle_desk_indices,
+        all_idle,
+        floor.floor_seed,
+    )?;
+    Some(PetPlacement {
+        kind,
+        pos,
+        flip,
+        anim_name,
+        frame_idx,
+        petted_ms: None,
+    })
+}
+
+/// Every gateway mascot present in the scene's daemon roster. The runtime keeps
+/// the roster honest, so "entry present" tracks "connected + alive", not merely
+/// "a hook arrived"; only the ground floor carries it, so each mascot shows once.
+pub(super) fn mascot_placements(
+    scene: &SceneState,
+    layout: &Layout,
+    now: SystemTime,
+) -> Vec<MascotPlacement> {
+    scene
+        .daemons()
+        .filter_map(|(source, instance, presence)| {
+            let def = gateway_mascot_def(source)?;
+            let seed = mascot_seed(source, instance);
+            let (pos, anim_name, frame_idx) =
+                mascot_position(layout, presence, def.walk, def.rest, now, seed)?;
+            Some(MascotPlacement {
+                pos,
+                anim_name,
+                frame_idx,
+                name: def.display_name,
+                // Only worth showing when there is something to disambiguate, and
+                // that is per SOURCE: two gateways of ONE daemon need their ports,
+                // while two daemon sources already read apart by name and sprite.
+                instance: (scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
+                    .then(|| instance.as_str().to_string()),
+                busy: presence.is_busy(),
+                degraded: presence.display_state() == pixtuoid_core::state::DaemonState::Degraded,
+                run_count: presence.in_flight_runs.len() as u32,
+                active_sessions: presence.active_sessions,
+            })
+        })
+        .collect()
+}
+
+/// Each home desk's live props, from its occupant: the coffee it fetched and the
+/// tokens it has spent.
+fn desk_props(
+    agents: &[AgentSlot],
+    layout: &Layout,
+    coffee: &HashMap<AgentId, SystemTime>,
+    now: SystemTime,
+) -> Vec<DeskProps> {
+    (0..layout.home_desks.len())
+        .map(|i| {
+            let occupant = desk_occupant(agents, FloorLocalDeskIndex(i));
+            let fetched_at = occupant.and_then(|a| coffee.get(&a.agent_id));
+            DeskProps {
+                has_coffee: fetched_at.is_some(),
+                coffee_steam: fetched_at
+                    .and_then(|t| now.duration_since(*t).ok())
+                    .is_some_and(|d| d.as_secs() < CoffeeState::STEAM_WINDOW_SECS),
+                token_tier: occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used)),
+                sheet_fall: occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, now)),
+            }
+        })
+        .collect()
 }
 
 /// Resolve every character's placement for this tick from the routed poses

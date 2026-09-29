@@ -23,7 +23,9 @@ use crate::layout::Size;
 use crate::motion::MotionState;
 use crate::pathfind::{AStarRouter, Router};
 use crate::pet::{Pet, PetState};
-use crate::pixel_painter::{render_to_rgb_buffer, sim_step, PixelCtx, SimFrame, SimStores};
+use crate::pixel_painter::{
+    render_to_rgb_buffer, sim_step, PetInputs, PixelCtx, SimFrame, SimInputs, SimStores,
+};
 use crate::pose::PoseHistory;
 use crate::theme::Theme;
 
@@ -427,12 +429,16 @@ pub(crate) fn observe_floor(
             neon: &mut fctx.neon,
             chitchat,
         },
-        scene,
-        &layout,
-        pack,
-        coffee.map(),
-        floor_meta.floor_idx,
-        now,
+        SimInputs {
+            scene,
+            layout: &layout,
+            pack,
+            coffee: coffee.map(),
+            // Nothing that observes a floor draws its pet yet.
+            pets: PetInputs::default(),
+            floor: floor_meta,
+            now,
+        },
     );
     frame_epilogue(fctx, coffee, frame.new_coffee_carriers.iter().copied(), now);
     Some(ObservedFloor { layout, frame })

@@ -5,7 +5,7 @@ use super::seat::{settle_seat, Seat};
 use super::*;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
-use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
+use pixtuoid_core::state::{ActivityState, GlobalDeskIndex, ToolKind};
 use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -721,12 +721,15 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
     let mut owned = OwnedSimStores::new();
     let frame = sim_step(
         &mut owned.stores(),
-        &scene,
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0 + std::time::Duration::from_millis(250),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &bundled,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0 + std::time::Duration::from_millis(250),
+        },
     );
     let anim = frame
         .characters
@@ -849,12 +852,15 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
     let mut owned = OwnedSimStores::new();
     let frame = sim_step(
         &mut owned.stores(),
-        &scene,
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0 + std::time::Duration::from_secs(40),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &bundled,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0 + std::time::Duration::from_secs(40),
+        },
     );
 
     // A desk top over a darker front row, whole-pixel so an upscale by
@@ -957,12 +963,15 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         .map(|n| {
             sim_step(
                 &mut owned.stores(),
-                &scene,
-                &layout,
-                &bundled,
-                &coffee,
-                0,
-                now0 + Duration::from_millis(100 * n),
+                SimInputs {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &bundled,
+                    coffee: &coffee,
+                    pets: PetInputs::default(),
+                    floor: crate::floor::FloorMeta::ground(),
+                    now: now0 + Duration::from_millis(100 * n),
+                },
             )
         })
         .find(|f| {
@@ -974,12 +983,15 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         .expect("the typing agent sits at their desk");
     let unlit = sim_step(
         &mut OwnedSimStores::new().stores(),
-        &SceneState::uniform(16),
-        &layout,
-        &bundled,
-        &coffee,
-        0,
-        now0,
+        SimInputs {
+            scene: &SceneState::uniform(16),
+            layout: &layout,
+            pack: &bundled,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0,
+        },
     );
 
     // A desk top, its screen glass, and a darker front row, whole-pixel so an
@@ -2765,7 +2777,21 @@ fn sim_step_keeps_the_sign_lit_through_a_gap_in_a_room_that_once_dimmed() {
         let mut last = None;
         for _ in 0..ms / frame.as_millis() as u64 {
             now += frame;
-            last = Some(sim_step(&mut owned.stores(), scene, &layout, &pack, &coffee, 0, now).neon);
+            last = Some(
+                sim_step(
+                    &mut owned.stores(),
+                    SimInputs {
+                        scene,
+                        layout: &layout,
+                        pack: &pack,
+                        coffee: &coffee,
+                        pets: PetInputs::default(),
+                        floor: crate::floor::FloorMeta::ground(),
+                        now,
+                    },
+                )
+                .neon,
+            );
         }
         last.expect("at least one frame")
     };
@@ -2848,7 +2874,18 @@ fn sim_step_reserves_the_pack_resolved_char_width_not_the_bundled_const() {
 
     let reserve = |pack: &Pack| {
         let mut owned = OwnedSimStores::new();
-        sim_step(&mut owned.stores(), &scene, &layout, pack, &coffee, 0, now);
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         reserved_bbox_width(&owned.overlay, bw, bh)
     };
     assert_eq!(
@@ -2884,12 +2921,15 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
     for ms in [50u64, 250, 1_000, 4_000, 12_000, 40_000] {
         let f = sim_step(
             &mut stores,
-            &scene,
-            &layout,
-            &pack,
-            &coffee,
-            0,
-            now0 + Duration::from_millis(ms),
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now: now0 + Duration::from_millis(ms),
+            },
         );
         let Some(c) = f.characters.first() else {
             continue;
@@ -2917,6 +2957,140 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
     assert!(seated_seen, "the sweep never observed a seated pose");
 }
 
+/// A desk's props are the sim's call, from its occupant, so every painter
+/// draws the same cup and tower.
+#[test]
+fn sim_step_decides_each_desks_props_from_its_occupant() {
+    use std::time::Duration;
+    let (mut scene, layout, id, now0, pack) = sim_rig();
+    scene
+        .agents
+        .get_mut(&id)
+        .expect("the rig's agent")
+        .tokens_used = crate::token_meter::TIER_BASE_TOKENS;
+    let desk = scene.agents[&id].desk_index.single_floor_local().0;
+    let coffee = HashMap::from([(id, now0)]);
+    let desks_at = |now| {
+        let mut owned = OwnedSimStores::new();
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        )
+        .desks
+    };
+    let fresh = desks_at(now0);
+    assert_eq!(fresh.len(), layout.home_desks.len());
+    assert!(fresh[desk].has_coffee && fresh[desk].coffee_steam);
+    assert_eq!(fresh[desk].token_tier, 1);
+    for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
+        assert_eq!(
+            *props,
+            sim::DeskProps::default(),
+            "desk {i} has no occupant"
+        );
+    }
+    let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
+    assert!(
+        cold[desk].has_coffee && !cold[desk].coffee_steam,
+        "the cup stays after it stops steaming"
+    );
+}
+
+#[test]
+fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
+    let (scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
+    let floor = crate::floor::FloorMeta::ground();
+    let step = |pets| {
+        let mut owned = OwnedSimStores::new();
+        sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets,
+                floor,
+                now: now0,
+            },
+        )
+        .pet
+    };
+    assert!(
+        step(PetInputs::default()).is_none(),
+        "no pet on a floor without one"
+    );
+    let roaming = step(PetInputs {
+        pet: Some(&pet),
+        petting: None,
+    })
+    .expect("the cat roams");
+    assert_eq!(roaming.petted_ms, None);
+
+    let clicked = Point { x: 40, y: 50 };
+    let petting = crate::pet::PetState {
+        petted_at: now0,
+        pet_pos: clicked,
+        kind: pet.kind,
+        floor_idx: floor.floor_idx,
+    };
+    let held = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&petting),
+    })
+    .expect("the petted cat");
+    assert_eq!(held.pos, clicked);
+    assert_eq!(held.anim_name, pet.kind.sit_anim());
+    assert_eq!(held.petted_ms, Some(0));
+}
+
+#[test]
+fn sim_step_walks_a_mascot_in_for_each_gateway_present() {
+    use pixtuoid_core::source::daemon::{apply_presence, DaemonInstanceKey, DaemonPresenceUpdate};
+    use pixtuoid_core::state::DaemonInstanceId;
+    use std::time::Duration;
+    let (mut scene, layout, _, now0, pack) = sim_rig();
+    let coffee = HashMap::new();
+    let key = DaemonInstanceKey::new(
+        pixtuoid_core::source::openclaw::SOURCE_NAME,
+        DaemonInstanceId::new("18789".to_string()).expect("id"),
+    );
+    apply_presence(
+        &mut scene,
+        &key,
+        DaemonPresenceUpdate::GatewayUp { pid: Some(7) },
+        now0,
+    );
+    let mut owned = OwnedSimStores::new();
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0 + Duration::from_secs(6),
+        },
+    );
+    let [mascot] = frame.mascots.as_slice() else {
+        panic!("one gateway, one mascot: {:?}", frame.mascots);
+    };
+    assert_eq!(mascot.name, "OpenClaw");
+    assert_eq!(mascot.instance, None, "a lone instance needs no port");
+}
+
 #[test]
 fn sim_step_advances_motion_without_painting() {
     use crate::pose::Pose;
@@ -2933,21 +3107,27 @@ fn sim_step_advances_motion_without_painting() {
     };
     let f1 = sim_step(
         &mut stores,
-        &scene,
-        &layout,
-        &pack,
-        &coffee,
-        0,
-        now0 + Duration::from_millis(50),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0 + Duration::from_millis(50),
+        },
     );
     let f2 = sim_step(
         &mut stores,
-        &scene,
-        &layout,
-        &pack,
-        &coffee,
-        0,
-        now0 + Duration::from_millis(250),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now: now0 + Duration::from_millis(250),
+        },
     );
     assert!(
         walk_t(&f2) > walk_t(&f1),
@@ -2989,7 +3169,18 @@ fn a_waiting_agent_stays_seated_and_gets_its_bubble_whichever_way_the_desk_faces
         slot.created_at = now0;
         slot.state_started_at = now0;
         let mut owned = OwnedSimStores::new();
-        let f = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+        let f = sim_step(
+            &mut owned.stores(),
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         let p = f
             .characters
             .iter()
@@ -3025,7 +3216,18 @@ fn paint_frame_is_pure_and_byte_identical() {
 
     let mut owned = OwnedSimStores::new();
     let now = now0 + Duration::from_millis(120);
-    let frame = sim_step(&mut owned.stores(), &scene, &layout, &pack, &coffee, 0, now);
+    let frame = sim_step(
+        &mut owned.stores(),
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now,
+        },
+    );
 
     let light_before = owned.light.level();
     let motion_before = format!("{:?}", owned.motion);
@@ -3051,9 +3253,6 @@ fn paint_frame_is_pure_and_byte_identical() {
                 base_fill: &mut base_fill,
                 theme,
                 floor: crate::floor::FloorMeta::ground(),
-                active_pet: None,
-                floor_pet: None,
-                coffee: &coffee,
                 motion: &owned.motion,
                 door_anim_max_ms: 0,
                 debug_walkable: false,
@@ -3529,7 +3728,18 @@ fn sim_reports_occupied_waypoints_and_enqueue_marks_them_busy() {
     let mut pinned = false;
     for step in 0..240u64 {
         let now = now0 + Duration::from_secs(5 * step);
-        let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let f = sim_step(
+            &mut stores,
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         let at_wp: Vec<usize> = f
             .poses
             .values()
@@ -3604,7 +3814,18 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
     let mut seat_visits = 0usize;
     for step in 0..3_600u64 {
         let now = now0 + Duration::from_millis(250 * step);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         let mut occupants: HashMap<usize, usize> = HashMap::new();
         for pose in frame.poses.values().flatten() {
             let Pose::AtWaypoint { wp, kind } = pose else {
@@ -3653,7 +3874,18 @@ fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
     let (mut on_furniture, mut on_foot) = (0usize, 0usize);
     for step in 0..3_600u64 {
         let now = now0 + Duration::from_millis(250 * step);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         for c in &frame.characters {
             let id = frame.agents[c.agent_idx].agent_id;
             let sits = match frame.poses.get(&id) {
@@ -3707,7 +3939,18 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     let mut now = now0;
     for _ in 0..2_000 {
         now += Duration::from_millis(250);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         if let Some(Pose::AtWaypoint { wp, kind }) = frame.poses.get(&id).copied().flatten() {
             if furniture_def(kind.furniture()).occupies_pos {
                 sat_at = Some(wp);
@@ -3732,7 +3975,18 @@ fn an_active_agent_releases_the_seat_it_snapped_back_from() {
     scene.agents.get_mut(&id).expect("slot").state_started_at = now;
     let mut stores = owned.stores();
     now += Duration::from_millis(250);
-    sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+    sim_step(
+        &mut stores,
+        SimInputs {
+            scene: &scene,
+            layout: &layout,
+            pack: &pack,
+            coffee: &coffee,
+            pets: PetInputs::default(),
+            floor: crate::floor::FloorMeta::ground(),
+            now,
+        },
+    );
 
     assert!(
         matches!(owned.motion[&id].wander.target.kind, WanderKind::Aimless),
@@ -3826,7 +4080,18 @@ fn one_meeting_sofa_still_seats_three_agents_at_once() {
     // wander, whose route rides live desk positions.
     for step in 0..60_000u64 {
         let now = now0 + Duration::from_millis(250 * step);
-        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        let frame = sim_step(
+            &mut stores,
+            SimInputs {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                coffee: &coffee,
+                pets: PetInputs::default(),
+                floor: crate::floor::FloorMeta::ground(),
+                now,
+            },
+        );
         let n = frame
             .poses
             .values()
@@ -3871,7 +4136,18 @@ fn character_anchor_meeting_chair_label_tracks_the_seat_sprite_not_5px_high() {
         let now = now0 + Duration::from_millis(250 * step);
         let frame = {
             let mut stores = owned.stores();
-            sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now)
+            sim_step(
+                &mut stores,
+                SimInputs {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    coffee: &coffee,
+                    pets: PetInputs::default(),
+                    floor: crate::floor::FloorMeta::ground(),
+                    now,
+                },
+            )
         };
         let mc = frame.poses.iter().find_map(|(id, p)| match p {
             Some(Pose::AtWaypoint {
@@ -4120,7 +4396,6 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
     let layout = Layout::compute_with_seed(192, 128, None, 0).expect("layout");
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let boot = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let coffee = HashMap::new();
     let motion = HashMap::new();
     let src = pixtuoid_core::source::openclaw::SOURCE_NAME;
     let pet = crate::pet::Pet::defaulted(crate::pet::PetKind::Cat);
@@ -4159,16 +4434,19 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 base_fill: &mut base_fill,
                 theme,
                 floor,
-                active_pet: None,
-                floor_pet: Some(&pet),
-                coffee: &coffee,
                 motion: &motion,
                 door_anim_max_ms: 0,
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
-            let pet_frame = enqueue_pet(&ctx, &[], &mut drawables);
-            for m in enqueue_gateway_mascots(&ctx, &mut drawables) {
+            let pets = sim::PetInputs {
+                pet: Some(&pet),
+                petting: None,
+            };
+            let pet_frame = sim::pet_placement(&[], &layout, &pack, pets, floor, now)
+                .and_then(|p| enqueue_pet(&ctx, p, &mut drawables));
+            let mascots = sim::mascot_placements(&scene, &layout, now);
+            for m in enqueue_gateway_mascots(&ctx, &mascots, &mut drawables) {
                 let (w, h) = (m.w, m.h);
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w
@@ -4299,7 +4577,18 @@ fn a_wandering_character_is_never_sliced_by_the_canvas_edge() {
 
         for secs in 1..=target {
             let now = now0 + Duration::from_secs(secs);
-            let f = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+            let f = sim_step(
+                &mut stores,
+                SimInputs {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    coffee: &coffee,
+                    pets: PetInputs::default(),
+                    floor: crate::floor::FloorMeta::ground(),
+                    now,
+                },
+            );
             if let Some(Some(Pose::AimlessAt { dest })) = f.poses.get(&id) {
                 if waypoint_anchor(*dest, w).x + w > layout.buf_w {
                     hit += 1;
