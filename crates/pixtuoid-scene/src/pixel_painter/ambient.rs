@@ -7,7 +7,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
-use crate::atmosphere::{sun_on_wall, TimeOfDayLook, WallSide};
+use crate::atmosphere::{Look, WallSide};
 use crate::layout::Layout;
 use crate::pixel_painter::background::{paint_radial_falloff, window_spill_columns, RadialFalloff};
 use crate::pixel_painter::palette::{blend_pixel, blend_rgb, WHITE};
@@ -79,7 +79,7 @@ pub(super) fn dust_mote_positions(
 
 pub(super) fn paint_ambient(
     ctx: &mut PaintCtx<'_>,
-    look: &TimeOfDayLook,
+    look: &Look,
     seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
 ) {
     paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, &ctx.sky, look);
@@ -196,19 +196,19 @@ pub(super) fn paint_dust_motes(
     floor_seed: u64,
     now: SystemTime,
     sky: &Sky,
-    look: &TimeOfDayLook,
+    look: &Look,
 ) {
-    if sun_on_wall(sky).is_none() {
+    if look.sun_spot.is_none() {
         return;
     }
     // Motes scatter the DIRECT beam, so density rides [`Sky::beam`] (full
     // under clear sky, faint through haze/snow-glare, zero under thick
-    // overcast/rain); `look.spill_strength` adds the daylight ramp.
+    // overcast/rain); `look.sunlight` adds the daylight ramp.
     let beam = sky.beam();
     if beam <= 0.0 {
         return;
     }
-    let visibility = look.spill_strength * beam;
+    let visibility = look.sunlight * beam;
     if visibility <= 0.0 {
         return;
     }
@@ -226,9 +226,9 @@ pub(super) fn paint_sun_spot(
     theme: &Theme,
     layout: &Layout,
     sky: &Sky,
-    look: &TimeOfDayLook,
+    look: &Look,
 ) {
-    let Some(spot) = sun_on_wall(sky) else {
+    let Some(spot) = look.sun_spot else {
         return;
     };
     // The north wall is the glass: a spot painted on it would ghost-glow over the
@@ -242,7 +242,7 @@ pub(super) fn paint_sun_spot(
     if beam <= 0.0 {
         return;
     }
-    let effective_intensity = spot.intensity * look.spill_strength * beam;
+    let effective_intensity = spot.intensity * look.sunlight * beam;
     if effective_intensity <= 0.0 {
         return;
     }
@@ -311,7 +311,7 @@ pub(super) fn paint_sun_spot(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::atmosphere::time_of_day_look;
+    use crate::atmosphere::Look;
     use crate::sky::Weather;
     use std::time::Duration;
 
@@ -444,13 +444,7 @@ mod tests {
                 },
             );
             let sky = Sky::at(now);
-            paint_sun_spot(
-                &mut buf,
-                theme,
-                &layout,
-                &sky,
-                &time_of_day_look(&sky, theme),
-            );
+            paint_sun_spot(&mut buf, theme, &layout, &sky, &Look::resolve(&sky, theme));
             let mut sum = 0u64;
             for y in 0..buf.height() {
                 for x in 0..buf.width() {
@@ -485,7 +479,8 @@ mod tests {
         let layout = crate::layout::Layout::compute(192, 80, Some(4)).expect("layout fits");
         let sunrise = crate::localclock::at_hour(5);
         let sky = Sky::at(sunrise);
-        let spot = sun_on_wall(&sky).expect("sun is up (just risen) at 05:00");
+        let look = Look::resolve(&sky, theme);
+        let spot = look.sun_spot.expect("sun is up (just risen) at 05:00");
         assert_eq!(spot.intensity, 0.0, "altitude is exactly zero at sunrise");
 
         let fill = Rgb {
@@ -494,13 +489,7 @@ mod tests {
             b: 24,
         };
         let mut buf = RgbBuffer::filled(192, 80, fill);
-        paint_sun_spot(
-            &mut buf,
-            theme,
-            &layout,
-            &sky,
-            &time_of_day_look(&sky, theme),
-        );
+        paint_sun_spot(&mut buf, theme, &layout, &sky, &look);
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(
@@ -550,7 +539,7 @@ mod tests {
             7,
             now,
             &sky,
-            &time_of_day_look(&sky, theme),
+            &Look::resolve(&sky, theme),
         );
     }
 
@@ -573,13 +562,7 @@ mod tests {
         };
         let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, fill);
         let sky = Sky::at(clear_morning);
-        paint_sun_spot(
-            &mut buf,
-            theme,
-            &layout,
-            &sky,
-            &time_of_day_look(&sky, theme),
-        );
+        paint_sun_spot(&mut buf, theme, &layout, &sky, &Look::resolve(&sky, theme));
         for y in 0..buf.height() {
             for x in 0..buf.width() {
                 assert_eq!(buf.get(x, y), fill, "zero wall band → no sun spot");

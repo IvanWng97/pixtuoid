@@ -6,19 +6,19 @@
 //! orchestrator (`pixel_painter/mod.rs`) calls it.
 
 mod celestial;
+mod floor_wash;
 mod lighting;
-mod time_of_day;
 
 use celestial::{
     compute_disc, star_exists, star_twinkle, Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW,
-    STAR_ALPHA_MAX, STAR_COLOR, STAR_MIN, STAR_SKY_BAND_FRAC,
+    STAR_ALPHA_MAX, STAR_COLOR, STAR_SKY_BAND_FRAC,
 };
+pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
     neon_look, paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
     paint_neon_glow, paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo,
     Ellipse, RadialFalloff,
 };
-pub(super) use time_of_day::{daylight_floor_overlay, dim_floor_overlay};
 
 use std::time::SystemTime;
 
@@ -26,11 +26,9 @@ use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
 use super::epoch_ms;
-use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, BLACK, WHITE};
+use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
-use crate::atmosphere::{
-    glass_veil, golden_hour_blaze, night_star_strength, veil_lum, weather_floor_tint, TimeOfDayLook,
-};
+use crate::atmosphere::Look;
 use crate::layout::{Layout, ELEVATOR_W};
 use crate::sky::{Sky, Weather};
 use crate::theme::Theme;
@@ -63,11 +61,6 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     for px in buf.as_mut_slice() {
         *px = lut.apply(*px);
     }
-}
-
-/// A veil colour at the frame's daylight — hue preserved, luminance tracked.
-fn veil_lit(color: Rgb, lum: f32) -> Rgb {
-    blend_rgb(BLACK, color, lum)
 }
 
 /// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
@@ -187,7 +180,7 @@ pub(super) fn paint_floor_and_walls(
     buf_h: u16,
     now: SystemTime,
     sky: &Sky,
-    look: &TimeOfDayLook,
+    look: &Look,
     top_wall_h: u16,
     skip_window_x_range: Option<(u16, u16)>,
     theme: &Theme,
@@ -200,14 +193,14 @@ pub(super) fn paint_floor_and_walls(
     let wall = theme.surface.wall;
     let wall_trim_color = theme.surface.wall_trim;
 
-    let tint = weather_floor_tint(sky.weather());
+    let (tint, share) = look.floor_tint;
 
     // The noise picks one of THREE colours and the tint is fixed for the frame,
     // so resolve the blend once, not per pixel.
     let carpet = [
-        blend_rgb(carpet_light, tint, 0.15),
-        blend_rgb(carpet_dark, tint, 0.15),
-        blend_rgb(carpet_base, tint, 0.15),
+        blend_rgb(carpet_light, tint, share),
+        blend_rgb(carpet_dark, tint, share),
+        blend_rgb(carpet_base, tint, share),
     ];
     base_fill.blit_into(
         buf,
@@ -226,7 +219,6 @@ pub(super) fn paint_floor_and_walls(
     let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
     let disc = compute_disc(sky, buf_w, top_wall_h, theme);
-    let star_strength = night_star_strength(sky, look.darkness);
     for w in window_columns(buf_w, skip_window_x_range) {
         let x = w.x_left;
         // The disc paints ONLY in the window its centre sits over. Ungated, a
@@ -249,17 +241,17 @@ pub(super) fn paint_floor_and_walls(
             building,
             &sky_row,
             win_disc,
-            star_strength,
+            look,
         );
-        // look.spill_strength already includes atmospheric attenuation, so
-        // heavy weather automatically dims the spill below windows.
-        if look.spill_strength > 0.0 {
+        // `look.sunlight` already includes atmospheric attenuation, so heavy
+        // weather automatically dims the spill below windows.
+        if look.sunlight > 0.0 {
             paint_window_light_spill(
                 buf,
                 x,
                 WINDOW_W,
                 top_wall_h,
-                look.spill_strength,
+                look.sunlight,
                 look.spill_slant,
                 theme,
             );
@@ -447,11 +439,7 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
 /// `paint_floor_and_walls` and shared by every window: all panes in a frame have
 /// the same height, `look`, and theme. The per-window skyline-HEIGHT math is NOT
 /// here — it rides `altitude` and stays in `paint_floor_to_ceiling_window`.
-fn window_glass_invariants(
-    h: u16,
-    look: &TimeOfDayLook,
-    theme: &Theme,
-) -> ([Rgb; 3], Rgb, Vec<Rgb>) {
+fn window_glass_invariants(h: u16, look: &Look, theme: &Theme) -> ([Rgb; 3], Rgb, Vec<Rgb>) {
     let building_dark = theme.office.building_dark;
     let building_light = theme.office.building_light;
     let cw = theme.office.city_lit_windows;
@@ -499,7 +487,7 @@ fn paint_floor_to_ceiling_window(
     building: Rgb,
     sky_row: &[Rgb],
     disc: Option<Disc>,
-    star_strength: f32,
+    look: &Look,
 ) {
     // Skyline silhouette as a 0..PATTERN_MAX ratio, not pixels — the height is
     // computed per-window so the skyline auto-scales with the glass.
@@ -553,12 +541,12 @@ fn paint_floor_to_ceiling_window(
                 let mut col = sky_row[glass_dy as usize];
                 // Stars paint into the sky BEFORE the disc, so an overlapping
                 // disc pixel always wins (painted next, below).
-                if star_strength > STAR_MIN
+                if look.star_strength > 0.0
                     && (glass_dy as f32) < glass_h as f32 * STAR_SKY_BAND_FRAC
                     && star_exists(px, py)
                     && star_twinkle(px, py, now)
                 {
-                    col = blend_rgb(col, STAR_COLOR, star_strength * STAR_ALPHA_MAX);
+                    col = blend_rgb(col, STAR_COLOR, look.star_strength * STAR_ALPHA_MAX);
                 }
                 if let Some(d) = disc {
                     let dx = px as f32 - d.cx;
@@ -593,12 +581,11 @@ fn paint_floor_to_ceiling_window(
     }
 
     let weather = sky.weather();
-    let veil = veil_lum(sky.emitter());
 
-    // The veil goes on BEFORE the streak/flash effects, so rain/snow/lightning
+    // The veil goes on BEFORE the streaks and the bolt, so rain and lightning
     // still read on top of the murk.
-    if let Some((color, alpha)) = glass_veil(weather) {
-        wash_glass(buf, x, y, w, h, veil_lit(color, veil), alpha);
+    if let Some((color, alpha)) = look.glass_veil {
+        wash_glass(buf, x, y, w, h, color, alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
@@ -718,7 +705,7 @@ fn paint_floor_to_ceiling_window(
         Weather::Fog | Weather::Overcast | Weather::Smog | Weather::Clear => {}
     }
 
-    let sunset = golden_hour_blaze(sky.emitter(), &sky.atmo());
+    let sunset = look.golden_hour;
     if sunset > 0.05 {
         let min_building_h = (glass_h / 5).max(3);
         for dy in 1..h.saturating_sub(1) {

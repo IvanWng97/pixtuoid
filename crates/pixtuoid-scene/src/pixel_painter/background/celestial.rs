@@ -99,9 +99,6 @@ pub(super) fn compute_disc(sky: &Sky, buf_w: u16, top_wall_h: u16, theme: &Theme
 /// Roughly 1-in-`STAR_SPARSITY` sky pixels host a star — prime so the
 /// hash-modulo grid can't line up into a visible lattice.
 const STAR_SPARSITY: u64 = 47;
-/// Below this `star_strength`, no star paints — the field stays invisible by
-/// day and under thick cloud/fog.
-pub(super) const STAR_MIN: f32 = 0.15;
 /// Stars stay in the top fraction of the glass, clear of any building
 /// silhouette: `paint_floor_to_ceiling_window`'s `max_bh` tops out at 50% of
 /// `glass_h`, so 0.45 leaves comfortable margin above the tallest roofline.

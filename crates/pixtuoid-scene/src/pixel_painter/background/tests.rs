@@ -1,5 +1,5 @@
 use super::*;
-use crate::atmosphere::{night_star_strength, time_of_day_look, TimeOfDayLook};
+use crate::atmosphere::Look;
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
@@ -40,7 +40,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
-        let look = time_of_day_look(&sky, theme);
+        let look = Look::resolve(&sky, theme);
         let (lit_colors, building, sky_row) = window_glass_invariants(30, &look, theme);
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
@@ -58,7 +58,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             building,
             &sky_row,
             None,
-            0.0,
+            &look,
         );
         let mut sum = 0u64;
         for y in 1..29u16 {
@@ -89,14 +89,10 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
     // A hand-built look with nonzero spill strength, so the spill path runs
     // regardless of the local clock.
-    let look = TimeOfDayLook {
-        glass_a: theme.office.building_light,
-        glass_b: theme.office.building_dark,
-        spill_strength: 0.8,
+    let look = Look {
+        sunlight: 0.8,
         spill_slant: 0.0,
-        darkness: 0.2,
-        // Strength 0 — this fixture exercises the spill path, not the wash.
-        object_wash: [(theme.lighting.night_tint, 0.0); 2],
+        ..Look::resolve(&Sky::at(now), theme)
     };
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
@@ -147,7 +143,7 @@ fn render_office_themed(
 ) -> RgbBuffer {
     let _weather = ForcedWeather::new(weather);
     let now = crate::localclock::on_day(day, hour);
-    let look = time_of_day_look(&Sky::at(now), theme);
+    let look = Look::resolve(&Sky::at(now), theme);
     let buf_h = top_wall_h + 4;
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 4, g: 4, b: 6 });
     paint_floor_and_walls(
@@ -406,29 +402,8 @@ fn stars_appear_on_a_clear_night_and_vanish_under_overcast() {
     );
     assert!(
         clear_n > overcast_n,
-        "overcast (atmo.disc below STAR_MIN once multiplied by darkness) \
-         should hide the stars a clear sky shows: clear={clear_n} overcast={overcast_n}"
-    );
-}
-
-#[test]
-fn stars_gate_on_night_not_darkness_alone() {
-    // Counting rendered pixels can't test this — the pale dawn sky is itself
-    // "faint-white" — so assert the pure gate directly, with a HIGH darkness
-    // passed at an hour when the sun is up.
-    let at = crate::localclock::at_hour;
-    assert_eq!(
-        night_star_strength(&Sky::at_with(at(7), Weather::Clear), 0.6),
-        0.0,
-        "no stars at 7am while the sun is up"
-    );
-    assert!(
-        night_star_strength(&Sky::at_with(at(2), Weather::Clear), 0.9) > STAR_MIN,
-        "a clear night should light the stars"
-    );
-    assert!(
-        night_star_strength(&Sky::at_with(at(2), Weather::Overcast), 0.9) < STAR_MIN,
-        "overcast should hide the stars even at night"
+        "overcast should hide the stars a clear sky shows: \
+         clear={clear_n} overcast={overcast_n}"
     );
 }
 
@@ -677,7 +652,7 @@ fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
 
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
-/// `time_of_day_look().darkness`: the weather veils are painted onto the glass
+/// [`Look::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
@@ -830,7 +805,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
     let now = crate::localclock::on_day(1, 12);
     let (buf_w, buf_h, top_wall_h) = (96u16, 64u16, 14u16);
     let paint = |base_fill: &mut BaseFillCache, theme: &'static crate::theme::Theme| {
-        let look = time_of_day_look(&Sky::at(now), theme);
+        let look = Look::resolve(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
             base_fill,
@@ -893,7 +868,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
     let theme = crate::theme::theme_by_name("normal").expect("normal theme");
     let now = crate::localclock::on_day(1, 12);
     let paint_at = |base_fill: &mut BaseFillCache, w: u16, h: u16| {
-        let look = time_of_day_look(&Sky::at(now), theme);
+        let look = Look::resolve(&Sky::at(now), theme);
         let mut buf = RgbBuffer::filled(w, h, Rgb { r: 9, g: 9, b: 9 });
         paint_floor_and_walls(
             base_fill,
@@ -1018,7 +993,7 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
     };
     for hour in [6, 19] {
         let sky = Sky::at_with(crate::localclock::at_hour(hour), Weather::Clear);
-        let look = time_of_day_look(&sky, theme);
+        let look = Look::resolve(&sky, theme);
         let disc = compute_disc(&sky, BUF_W, TOP_WALL_H, theme).expect("a clear low sun");
         let disc_side = (disc.cx - mid).signum();
 

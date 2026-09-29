@@ -1,18 +1,30 @@
-//! The classic's floor overlays for the time of day: the night dim and the
-//! daylight lift, painted over the floor band at the strengths
-//! [`crate::atmosphere`] resolves.
+//! The classic's floor wash: [`Look::floor_wash`]'s blends laid over the floor
+//! band.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
-use crate::atmosphere::SUN_TINT;
+#[cfg(doc)]
+use crate::atmosphere::Look;
 use crate::pixel_painter::palette::{blend_rgb, RgbLut};
-use crate::theme::Theme;
 
-/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at an
-/// ALREADY-CLAMPED strength `s`. `s <= 0.0` early-returns: byte-identical to
-/// blending, but it skips the whole pass every clear frame. Tint and strength
-/// are constant across the band, so the blend runs through an [`RgbLut`] —
-/// byte-identical to per-pixel [`blend_rgb`] (#900).
+/// Lay each of `wash`'s `(tint, strength)` blends over the floor band
+/// `top_y..bottom_y`, in order.
+pub(in crate::pixel_painter) fn paint_floor_wash(
+    buf: &mut RgbBuffer,
+    top_y: u16,
+    bottom_y: u16,
+    wash: [(Rgb, f32); 2],
+) {
+    for (tint, s) in wash {
+        blend_floor_band(buf, top_y, bottom_y, tint, s);
+    }
+}
+
+/// Blend `tint` over every floor pixel in the band `top_y..bottom_y` at
+/// strength `s`. `s <= 0.0` early-returns: byte-identical to blending, but it
+/// skips the whole pass every clear frame. Tint and strength are constant across
+/// the band, so the blend runs through an [`RgbLut`] — byte-identical to
+/// per-pixel [`blend_rgb`] (#900).
 fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s: f32) {
     if s <= 0.0 {
         return;
@@ -29,35 +41,10 @@ fn blend_floor_band(buf: &mut RgbBuffer, top_y: u16, bottom_y: u16, tint: Rgb, s
     }
 }
 
-/// Night dim on the floor band: blends toward the theme's `night_tint` so the
-/// artificial-light pools have something to stand out against.
-pub(in crate::pixel_painter) fn dim_floor_overlay(
-    buf: &mut RgbBuffer,
-    top_y: u16,
-    bottom_y: u16,
-    strength: f32,
-    theme: &Theme,
-) {
-    let s = strength.clamp(0.0, 0.55);
-    blend_floor_band(buf, top_y, bottom_y, theme.lighting.night_tint, s);
-}
-
-/// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
-/// and the lighting's only positive day term (without it a clear noon leaves the
-/// floor at its plain brownish base).
-pub(in crate::pixel_painter) fn daylight_floor_overlay(
-    buf: &mut RgbBuffer,
-    top_y: u16,
-    bottom_y: u16,
-    strength: f32,
-) {
-    let s = strength.clamp(0.0, 0.40);
-    blend_floor_band(buf, top_y, bottom_y, SUN_TINT, s);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::pixel_painter::palette::{BLACK, WHITE};
 
     #[test]
     fn blend_floor_band_tints_only_the_band_and_noops_at_zero() {
@@ -181,51 +168,27 @@ mod tests {
     }
 
     #[test]
-    fn daylight_floor_overlay_brightens_at_positive_strength() {
-        let mut buf = RgbBuffer::filled(
-            4,
-            10,
-            Rgb {
-                r: 50,
-                g: 50,
-                b: 50,
-            },
+    fn a_floor_wash_lays_its_blends_in_order() {
+        let base = Rgb {
+            r: 100,
+            g: 100,
+            b: 100,
+        };
+        let (dark, light) = (BLACK, WHITE);
+        let paint = |wash| {
+            let mut buf = RgbBuffer::filled(3, 4, base);
+            paint_floor_wash(&mut buf, 1, 3, wash);
+            buf
+        };
+        let dim_then_lift = paint([(dark, 0.5), (light, 0.5)]);
+        let mut expected = RgbBuffer::filled(3, 4, base);
+        blend_floor_band(&mut expected, 1, 3, dark, 0.5);
+        blend_floor_band(&mut expected, 1, 3, light, 0.5);
+        assert_eq!(dim_then_lift.as_slice(), expected.as_slice());
+        assert_ne!(
+            dim_then_lift.as_slice(),
+            paint([(light, 0.5), (dark, 0.5)]).as_slice(),
+            "the order is part of the wash"
         );
-        daylight_floor_overlay(&mut buf, 2, 10, 0.30);
-        for y in 2..10u16 {
-            for x in 0..4u16 {
-                assert!(
-                    buf.get(x, y).r > 50,
-                    "floor pixel ({x},{y}) should brighten"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn daylight_floor_overlay_is_noop_at_zero_strength() {
-        let mut buf = RgbBuffer::filled(
-            4,
-            10,
-            Rgb {
-                r: 80,
-                g: 90,
-                b: 100,
-            },
-        );
-        daylight_floor_overlay(&mut buf, 2, 10, 0.0);
-        for y in 2..10u16 {
-            for x in 0..4u16 {
-                assert_eq!(
-                    buf.get(x, y),
-                    Rgb {
-                        r: 80,
-                        g: 90,
-                        b: 100
-                    },
-                    "zero strength must not mutate pixels"
-                );
-            }
-        }
     }
 }

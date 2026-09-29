@@ -202,13 +202,12 @@ pub const NEON_PANEL_INNER_H: u16 = NEON_PANEL_H - 2 * NEON_PANEL_BORDER;
 const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
 const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
-use crate::atmosphere::{time_of_day_look, DAYLIGHT_FLOOR_LIFT, NIGHT_FLOOR_DIM};
+use crate::atmosphere::Look;
 use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
 use anchors::compute_door_frame_idx;
 use background::{
-    daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
-    paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
-    paint_shadow, Ellipse,
+    paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_and_walls,
+    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow, Ellipse,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
@@ -544,7 +543,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    let look = time_of_day_look(&ctx.sky, ctx.theme);
+    let look = Look::resolve(&ctx.sky, ctx.theme);
     let top_wall_h = ctx.layout.wall_band_h();
     // The elevator door replaces the rightmost window, so `paint_floor_and_walls`
     // must skip a window that would otherwise bleed through the elevator frame.
@@ -565,23 +564,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
 
     // An empty floor reads dark because its four artificial lights go out with
     // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
+    paint_floor_wash(ctx.buf, top_wall_h, buf_h, look.floor_wash);
     let indoor_scale = frame.indoor_scale;
-    let dim_strength = NIGHT_FLOOR_DIM;
-    dim_floor_overlay(
-        ctx.buf,
-        top_wall_h,
-        buf_h,
-        look.darkness * dim_strength,
-        ctx.theme,
-    );
-    // The positive mirror of the night dim. Independent of occupancy — sun
-    // enters an empty office too.
-    daylight_floor_overlay(
-        ctx.buf,
-        top_wall_h,
-        buf_h,
-        look.spill_strength * DAYLIGHT_FLOOR_LIFT,
-    );
     const POOL_BASE: f32 = 0.15;
     const POOL_NIGHT_GAIN: f32 = 0.30;
     for pool in ceiling_pool_regions(ctx.layout) {
