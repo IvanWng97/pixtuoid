@@ -2968,6 +2968,14 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
         .get_mut(&id)
         .expect("the rig's agent")
         .tokens_used = crate::token_meter::TIER_BASE_TOKENS;
+    scene
+        .agents
+        .get_mut(&id)
+        .expect("the rig's agent")
+        .last_usage = Some(pixtuoid_core::state::UsageObservation::new(
+        crate::token_meter::SHEET_MIN_DELTA_TOKENS,
+        now0,
+    ));
     let desk = scene.agents[&id].desk_index.single_floor_local().0;
     let coffee = HashMap::from([(id, now0)]);
     let desks_at = |now| {
@@ -2990,6 +2998,11 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     assert_eq!(fresh.len(), layout.home_desks.len());
     assert_eq!(fresh[desk].cup, Some(sim::Cup::Steaming));
     assert_eq!(fresh[desk].token_tier, 1);
+    assert_eq!(
+        fresh[desk].sheet_fall,
+        Some(0),
+        "a big reading drops a sheet"
+    );
     for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
         assert_eq!(
             *props,
@@ -3003,6 +3016,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
         Some(sim::Cup::Cold),
         "the cup stays after it stops steaming"
     );
+    assert_eq!(cold[desk].sheet_fall, None, "and the sheet has landed");
 }
 
 #[test]
@@ -3067,6 +3081,99 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
         elsewhere.petted_ms, None,
         "a petting on another floor leaves this one roaming"
     );
+    let a_dog = crate::pet::PetState {
+        kind: crate::pet::PetKind::Dog,
+        ..petting
+    };
+    let other_kind = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&a_dog),
+    })
+    .expect("the cat roams");
+    assert_eq!(
+        other_kind.petted_ms, None,
+        "petting another kind of pet leaves the cat roaming"
+    );
+}
+
+#[test]
+fn every_other_desk_stands_a_cabinet_starting_with_the_first() {
+    let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let cabinets: Vec<bool> = (0..layout.home_desks.len())
+        .map(|i| layout.desk_has_cabinet(FloorLocalDeskIndex(i)))
+        .collect();
+    assert!(cabinets.len() >= 2);
+    assert!(cabinets.iter().step_by(2).all(|&c| c), "{cabinets:?}");
+    assert!(
+        !cabinets.iter().skip(1).step_by(2).any(|&c| c),
+        "{cabinets:?}"
+    );
+}
+
+/// The painter projects a mascot's one `DaemonState` onto the hover's and the
+/// sprite's flags; each state lights exactly its own.
+#[test]
+fn a_mascots_state_reaches_its_hover_and_its_sprite() {
+    use pixtuoid_core::state::DaemonState;
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute(192, 128, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("fits");
+    let def = crate::creatures::gateway_mascot_def(pixtuoid_core::source::openclaw::SOURCE_NAME)
+        .expect("openclaw has a mascot");
+    let scene = SceneState::uniform(16);
+    let now = SystemTime::UNIX_EPOCH;
+    let motion = HashMap::new();
+    let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
+    let mut cache = FrameCache::new();
+    let mut base_fill = BaseFillCache::new();
+    let ctx = PaintCtx {
+        scene: &scene,
+        layout: &layout,
+        pack: &pack,
+        now,
+        sky: crate::sky::Sky::at(now),
+        buf: &mut buf,
+        cache: &mut cache,
+        base_fill: &mut base_fill,
+        theme: crate::theme::theme_by_name("normal").expect("theme"),
+        floor: crate::floor::FloorMeta::ground(),
+        motion: &motion,
+        door_anim_max_ms: 0,
+        debug_walkable: false,
+    };
+    for (state, busy, degraded) in [
+        (DaemonState::Idle, false, false),
+        (DaemonState::Busy, true, false),
+        (DaemonState::Degraded, false, true),
+        (DaemonState::Down, false, false),
+    ] {
+        let mascot = sim::MascotPlacement {
+            pos: Point { x: 60, y: 60 },
+            anim_name: def.walk,
+            frame_idx: 0,
+            name: def.display_name,
+            instance: None,
+            state,
+            run_count: 0,
+            active_sessions: 0,
+        };
+        let mut drawables = Vec::new();
+        let frames = enqueue_gateway_mascots(&ctx, &[mascot], &mut drawables);
+        assert_eq!(
+            (frames[0].busy, frames[0].degraded),
+            (busy, degraded),
+            "{state:?} hover"
+        );
+        let [Drawable {
+            kind: DrawableKind::GatewayMascot {
+                degraded: drawn, ..
+            },
+            ..
+        }] = drawables.as_slice()
+        else {
+            panic!("{state:?}: one mascot drawable");
+        };
+        assert_eq!(*drawn, degraded, "{state:?} sprite");
+    }
 }
 
 #[test]

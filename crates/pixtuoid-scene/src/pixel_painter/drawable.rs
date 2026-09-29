@@ -710,6 +710,31 @@ mod tests {
     }
 
     #[test]
+    fn only_a_steaming_cup_steams() {
+        let th = theme();
+        let bg = Rgb { r: 1, g: 2, b: 3 };
+        let desk = Point { x: 20, y: 30 };
+        let render = |cup, ms| {
+            let mut buf = RgbBuffer::filled(60, 60, bg);
+            let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_millis(ms);
+            paint_desk_coffee(&mut buf, desk, cup, now, th);
+            buf.as_slice().iter().filter(|&&c| c != bg).count()
+        };
+        let instants = (0..20u64).map(|i| i * 97);
+        assert!(
+            instants.clone().all(|ms| render(Some(Cup::Cold), ms) == 4),
+            "a cold cup paints its four cells and nothing above"
+        );
+        assert!(
+            instants
+                .clone()
+                .any(|ms| render(Some(Cup::Steaming), ms) > 4),
+            "a fresh cup steams"
+        );
+        assert!(instants.clone().all(|ms| render(None, ms) == 0));
+    }
+
+    #[test]
     fn tier_zero_desk_paints_no_paper() {
         let pack = test_pack();
         let mut cache = FrameCache::new();

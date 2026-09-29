@@ -130,7 +130,7 @@ pub(crate) struct MascotPlacement {
     pub(crate) name: &'static str,
     /// The instance id, when its source runs more than one.
     pub(crate) instance: Option<String>,
-    /// Idle, busy, degraded or down.
+    /// Its presence's [`display_state`](pixtuoid_core::state::DaemonPresence::display_state).
     pub(crate) state: DaemonState,
     /// Runs in flight.
     pub(crate) run_count: u32,
@@ -190,9 +190,8 @@ pub struct SimFrame {
     /// Waypoint indices with an occupant this tick — drives the appliance
     /// feedback animations.
     pub occupied_waypoints: std::collections::HashSet<usize>,
-    /// The office pet this tick; `None` on a floor without one, and always
-    /// from [`FloorSession::observe`](crate::floor::FloorSession::observe),
-    /// which takes no pet.
+    /// The office pet this tick; `None` on a floor without one, or where
+    /// [`SimInputs::pets`] brings none.
     pub(crate) pet: Option<PetPlacement>,
     /// Each gateway mascot present this tick.
     pub(crate) mascots: Vec<MascotPlacement>,
@@ -222,7 +221,6 @@ pub(crate) struct SimInputs<'a> {
     pub(crate) pack: &'a Pack,
     /// Carrier → fetch time of each desk cup.
     pub(crate) coffee: &'a HashMap<AgentId, SystemTime>,
-    /// The floor's pet and its live interaction.
     pub(crate) pets: PetInputs<'a>,
     /// Which floor this is, and its seed.
     pub(crate) floor: FloorMeta,

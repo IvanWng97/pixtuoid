@@ -404,9 +404,9 @@ pub struct ObservedFloor {
     pub frame: SimFrame,
 }
 
-/// [`render_floor`] without the classic paint pass: the same layout prologue and
-/// bookkeeping epilogue over the same disjoint per-floor borrows, and its sim
-/// tick with no pet, for a painter that draws the frame some other way. `None` when the size can't lay
+/// [`render_floor`] without the classic paint pass: the same layout prologue, sim
+/// tick and bookkeeping epilogue, over the same disjoint per-floor borrows, for a
+/// painter that draws the frame some other way. `None` when the size can't lay
 /// out; eviction stays the caller's, as there.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn observe_floor(
