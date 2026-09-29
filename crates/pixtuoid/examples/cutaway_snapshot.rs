@@ -94,7 +94,7 @@ fn main() -> Result<()> {
     let mut args = std::env::args().skip(1);
     let out = args
         .next()
-        .ok_or_else(|| anyhow!("usage: cutaway_snapshot <out.png> [--scale N] [--agents N]"))?;
+        .ok_or_else(|| anyhow!("usage: see the `//!` header of examples/cutaway_snapshot.rs"))?;
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
     let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));

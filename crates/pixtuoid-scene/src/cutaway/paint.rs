@@ -73,7 +73,8 @@ pub struct CutawayLabel {
     pub anchor_px: crate::layout::Point,
 }
 
-/// What a cutaway frame is drawn with, none of which changes within it.
+/// What a cutaway frame is drawn with and the next one is too: the office
+/// itself, where [`Moment`] is what moves from frame to frame.
 #[derive(Clone, Copy)]
 pub struct Office<'a> {
     /// Where everything stands, in LOGICAL units.
@@ -86,8 +87,8 @@ pub struct Office<'a> {
     pub scale: RenderScale,
 }
 
-/// The moment a frame shows: the sky's look at `now`, seen from `altitude` (0
-/// at the ground floor, 1 at the top).
+/// The moment a frame shows: the sky's look at `now`, seen from `altitude`
+/// ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
 #[derive(Clone, Copy)]
 pub(crate) struct Moment<'a> {
     pub(crate) look: &'a crate::atmosphere::Look,
@@ -97,7 +98,8 @@ pub(crate) struct Moment<'a> {
 
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
 /// classic painter's sibling, not its successor. The windows look out from
-/// `altitude` (0 at the ground floor, 1 at the top) on the sky at `now`.
+/// `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)) on
+/// the sky at `now`.
 /// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
 pub fn render_cutaway(
     frame: &SimFrame,
@@ -143,7 +145,8 @@ fn paint_backdrop(
     paint_wall(layout, theme, scale, pen, buf);
 }
 
-/// One frame's floor-standing pieces, built and ordered but not painted.
+/// One frame's pieces — the windows' glass, the decor hung on the wall and
+/// everything standing on the floor — built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
 /// other by depth: that order IS the occlusion, and there is no second
@@ -299,7 +302,7 @@ const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
 /// Where a piece meets the floor, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
-/// the chair. A wall is glass.
+/// the chair. Walls, window glass and hung decor meet no floor.
 fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -436,7 +439,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     h.finish()
 }
 
-/// Every floor-standing piece of the office, each with its [`Span`]. The push
+/// Every piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
 fn collect_pieces(
@@ -444,17 +447,12 @@ fn collect_pieces(
     office: Office<'_>,
     moment: Moment<'_>,
 ) -> Vec<(Span, PieceKind)> {
-    let Office {
-        layout,
-        pack,
-        theme,
-        scale,
-    } = office;
+    let Office { layout, pack, .. } = office;
     let mut order: Vec<(Span, PieceKind)> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
     push_windows(office, moment, &mut order);
-    push_hung_decor(layout, pack, scale, &mut order);
-    push_desks(frame, layout, pack, theme, scale, &mut order);
+    push_hung_decor(layout, pack, &mut order);
+    push_desks(frame, office, &mut order);
     push_props(layout, pack, &mut order);
     push_appliances(layout, &mut order);
     push_meeting_trios(layout, pack, &mut order);
@@ -511,14 +509,13 @@ fn paint_piece(
 /// Each desk in its facing's art, its screen lit by the classic painter's own
 /// rule ([`desk_screen_glow`](crate::pixel_painter::desk_screen_glow)) from the
 /// sim's observation, so the profiles never disagree about WHICH screens are lit.
-fn push_desks(
-    frame: &SimFrame,
-    layout: &Layout,
-    pack: &Pack,
-    theme: &Theme,
-    scale: RenderScale,
-    order: &mut Vec<(Span, PieceKind)>,
-) {
+fn push_desks(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let Office {
+        layout,
+        pack,
+        theme,
+        scale,
+    } = office;
     for (i, d) in layout.home_desks.iter().enumerate() {
         let local = pixtuoid_core::state::FloorLocalDeskIndex(i);
         let facing = layout.desk_facing(local);
@@ -991,7 +988,8 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
 
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
-    /// its own: glass.
+    /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
+    /// [`PieceKind::Glass`].
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
@@ -1122,8 +1120,8 @@ fn desk_front_h() -> u16 {
 }
 
 /// Paint the north wall band: the wall, its windows' frames where
-/// [`Layout::window_bays`] tiles them, and its trim. The glass is the view's
-/// ([`paint_view`]).
+/// [`Layout::window_bays`] tiles them, and its trim. The glass is list pieces
+/// ([`push_windows`]).
 ///
 /// Its height is [`Layout::wall_band_h`], not `top_margin`: the rows between
 /// are floor the agents walk on, so a band drawn to `top_margin` would paint
@@ -1168,7 +1166,7 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
 
 /// Queue each window's glass as a piece: what it looks out on — the one city
 /// ([`CityStrip`]) on the pen's art grid over a sky dithered from its zenith
-/// colour to its horizon's — resolved now, at the very back of the order, so
+/// colour to its horizon's — resolved when the list is built, at the very back of the order, so
 /// the view changes with the sky and the city's lights without touching the
 /// backdrop.
 ///
@@ -1210,7 +1208,9 @@ fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, P
                 if crate::layout::window_frame(ax / d, ay / d, window_h) {
                     return None;
                 }
-                // Art pixels from the glass's top-left, one frame row down.
+                // The strip's art pixel: x from the run's west end, so one city
+                // runs on behind every frame and the wall between windows; y from
+                // the glass's top, under its top frame row.
                 let (cx, cy) = ((bay.x - run.start) * d + ax, ay - d);
                 Some(city.at(cx, cy).unwrap_or_else(|| {
                     let share =
@@ -1249,37 +1249,32 @@ pub(crate) struct WindowView {
 
 /// Paint a window's [`WindowView`].
 fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
-    for (i, c) in view.px.iter().enumerate() {
-        let Some(c) = *c else { continue };
-        let i = i as u16;
-        let cell = ArtRect {
-            x: ArtPx(view.x + i % view.w),
-            y: ArtPx(view.y + i / view.w),
-            w: ArtPx(1),
-            h: ArtPx(1),
-        };
-        pen.fill(buf, cell, c);
+    let rows = view.px.chunks(usize::from(view.w).max(1));
+    for (row, dy) in rows.zip(0u16..) {
+        for (c, dx) in row.iter().zip(0u16..) {
+            let Some(c) = *c else { continue };
+            let cell = ArtRect {
+                x: ArtPx(view.x + dx),
+                y: ArtPx(view.y + dy),
+                w: ArtPx(1),
+                h: ArtPx(1),
+            };
+            pen.fill(buf, cell, c);
+        }
     }
 }
 
 /// Queue the decor that only hangs on the north band, after the glass it may
 /// cover; what stands on the floor sorts among the floor's pieces
 /// ([`push_props`]).
-fn push_hung_decor(
-    layout: &Layout,
-    pack: &Pack,
-    scale: RenderScale,
-    order: &mut Vec<(Span, PieceKind)>,
-) {
+fn push_hung_decor(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) {
     for item in layout
         .wall_decor
         .iter()
         .filter(|i| !i.kind.stands_on_floor())
     {
         let sprite = item.kind.sprite_name();
-        let Some((w, h)) =
-            crate::pixel_painter::densest_frame(pack, sprite, 0, scale).map(|d| d.logical)
-        else {
+        let Some((w, h)) = art_size(pack, sprite) else {
             continue;
         };
         order.push((
@@ -3395,8 +3390,9 @@ S B B B B B B S
     /// fingerprint paint the same pixels, so one may stand in for the other.
     /// Walked over every tick of a walk to a desk and a sit, where the figure's
     /// and the desk's fingerprints both change (asserted below). Every piece is
-    /// compared at scale 1; at the densest scale only figures, the one kind
-    /// whose art the scale picks.
+    /// compared at scale 1; at the densest scale only figures, whose art the
+    /// scale picks (the glass's is walked in
+    /// `a_window_s_fingerprint_moves_with_the_moment_it_shows`).
     #[test]
     fn one_span_and_fingerprint_always_paint_the_same_pixels() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -3450,6 +3446,56 @@ S B B B B B B S
             desk_changes > 0,
             "the home desk's screen never changed fingerprint"
         );
+    }
+
+    /// The glass half of the property: a window keeps its span while the sky
+    /// and the city's lights move under it, so only the fingerprint can tell
+    /// noon from midnight, at the densest scale where the view is art pixels.
+    #[test]
+    fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let mut painted = std::collections::HashMap::new();
+        let glass = |now: std::time::SystemTime, painted: &mut _| {
+            let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
+            let list = build_list(
+                &frames[0],
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                },
+                Moment {
+                    look: &look,
+                    altitude: 0.0,
+                    now,
+                },
+            );
+            let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
+            same_fingerprint_same_pixels(painted, &list, &layout, is_glass);
+            list.pieces()
+                .iter()
+                .filter(|p| is_glass(p))
+                .map(|p| (p.span, p.fingerprint))
+                .collect::<Vec<_>>()
+        };
+        let noon = std::time::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
+        let (a, b) = (
+            glass(std::time::UNIX_EPOCH, &mut painted),
+            glass(noon, &mut painted),
+        );
+        assert!(!a.is_empty(), "the office has windows");
+        assert_eq!(a.len(), b.len(), "the same windows at every hour");
+        for ((span_a, fp_a), (span_b, fp_b)) in a.iter().zip(&b) {
+            assert_eq!(span_a, span_b, "a window never moves");
+            assert_ne!(
+                fp_a, fp_b,
+                "a window at {span_a:?} shows midnight and noon alike"
+            );
+        }
+        assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
     }
 
     /// Record each of `list`'s pieces `keep` selects by (scale, span,
