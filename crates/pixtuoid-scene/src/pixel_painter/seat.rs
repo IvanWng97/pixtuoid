@@ -250,9 +250,10 @@ pub(super) struct Seat {
     facing: crate::layout::Facing,
 }
 
-/// How far south of their seat a couch or sofa sitter sorts: behind a couch or
-/// sofa back, tied with a front sofa, where insertion order puts the sitter on
-/// top.
+/// How far south of their seat a sitter on seated furniture (couch, sofa,
+/// meeting chair) sorts. The classic painter keys a back-view sofa one row
+/// further south, over its sitter, and a front sofa on this row, where
+/// insertion order puts the sitter on top.
 pub(crate) const SEATED_Z_OFF: u16 = 2;
 
 impl Seat {

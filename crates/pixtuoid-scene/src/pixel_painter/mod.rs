@@ -1161,7 +1161,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             let mirrored = i % 2 != 0;
             let faces_away = sofa.y >= trio.table.y;
             drawables.push(Drawable {
-                anchor_y: sofa.y + if faces_away { 3 } else { 2 },
+                anchor_y: sofa.y + seat::SEATED_Z_OFF + u16::from(faces_away),
                 kind: DrawableKind::MeetingSofa {
                     pos: sofa,
                     mirrored,
