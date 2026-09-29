@@ -16,7 +16,7 @@ use celestial::{
 pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
     neon_look, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
-    paint_radial_falloff, paint_shadow, RadialFalloff,
+    paint_radial_falloff, paint_shadow, NeonLook, RadialFalloff,
 };
 
 use pixtuoid_core::sprite::format::Pack;

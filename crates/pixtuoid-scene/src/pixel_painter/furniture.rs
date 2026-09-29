@@ -148,16 +148,10 @@ pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &cra
     }
 }
 
-/// Small doormat at the meeting-room entrance. Placement + fit-gate come from
-/// [`MeetingRoom::doormat_rect`] — the ONE authority the hover hit-test shares.
-pub(super) fn paint_doormat(
-    buf: &mut RgbBuffer,
-    room: &crate::layout::MeetingRoom,
-    theme: &crate::theme::Theme,
-) {
-    let Some(mat) = room.doormat_rect() else {
-        return;
-    };
+/// Small doormat filling `mat`, the box
+/// [`MeetingRoom::doormat_rect`](crate::layout::MeetingRoom::doormat_rect)
+/// places and gates.
+pub(super) fn paint_doormat(buf: &mut RgbBuffer, mat: Bounds, theme: &crate::theme::Theme) {
     let mat_color = theme.furniture.rug_trim;
     let mat_accent = theme.furniture.rug_field;
     for dy in 0..mat.height {
@@ -180,17 +174,15 @@ pub(crate) const COOLER_WATER: Rgb = Rgb {
     b: 230,
 };
 
-/// Water cooler; placement + fit-gate come from [`PantryRoom::water_cooler_rect`]
-/// — the ONE authority the hover hit-test shares.
+/// Water cooler filling `cooler`, the box
+/// [`PantryRoom::water_cooler_rect`](crate::layout::PantryRoom::water_cooler_rect)
+/// places and gates.
 pub(super) fn paint_water_cooler(
     buf: &mut RgbBuffer,
-    room: &crate::layout::PantryRoom,
+    cooler: Bounds,
     now: std::time::SystemTime,
     theme: &crate::theme::Theme,
 ) {
-    let Some(cooler) = room.water_cooler_rect() else {
-        return;
-    };
     let cooler_body = theme.office.building_light;
     let cooler_water = COOLER_WATER;
     let (wx, wy) = (cooler.x, cooler.y);
@@ -217,14 +209,11 @@ pub(super) fn paint_water_cooler(
     }
 }
 
-/// Trash bin near the pantry counter. Its colours are intentionally un-themed
-/// neutral greys (a semantic object, like the water bottle's blue), so it takes no
-/// theme; placement + fit-gate come from [`PantryRoom::trash_bin_rect`] — the ONE
-/// authority the hover hit-test shares.
-pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, room: &crate::layout::PantryRoom) {
-    let Some(bin) = room.trash_bin_rect() else {
-        return;
-    };
+/// Trash bin filling `bin`, the box
+/// [`PantryRoom::trash_bin_rect`](crate::layout::PantryRoom::trash_bin_rect)
+/// places and gates. Its colours are intentionally un-themed neutral greys (a
+/// semantic object, like the water bottle's blue), so it takes no theme.
+pub(super) fn paint_trash_bin(buf: &mut RgbBuffer, bin: Bounds) {
     let (tx, ty) = (bin.x, bin.y);
     let bin_outer = Rgb {
         r: 70,

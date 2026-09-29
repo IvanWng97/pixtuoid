@@ -34,9 +34,9 @@ pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 #[cfg(test)]
-pub(crate) use roster::{coffee_machine_cols, Depth, NEON_PANEL_H};
+pub(crate) use roster::{coffee_machine_cols, NEON_PANEL_H};
 pub(crate) use roster::{
-    desk_chair_top_left, desk_chair_z_key, CLOCK, NEON_PANEL, NEON_PANEL_BORDER,
+    desk_chair_top_left, desk_chair_z_key, Depth, Tie, CLOCK, NEON_PANEL, NEON_PANEL_BORDER,
 };
 pub use roster::{
     FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X,

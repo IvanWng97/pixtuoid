@@ -29,8 +29,34 @@ pub(crate) enum Depth {
     /// Painted flat under the sorted scene, in roster order: the mats, the
     /// runner, and wall fixtures nothing stands behind.
     Backdrop,
-    /// Painted in the y-sort at this row, roster order breaking ties.
-    Sorted(u16),
+    /// Painted in the y-sort at `row`, roster order breaking a tie with
+    /// another fixture.
+    Sorted {
+        /// The row it sorts at.
+        row: u16,
+        /// Which paints on top where a figure sorts at `row` too.
+        tie: Tie,
+    },
+}
+
+impl Depth {
+    /// Sorted at `row`, under a figure tied with it.
+    const fn sorted(row: u16) -> Self {
+        Depth::Sorted {
+            row,
+            tie: Tie::FigureOver,
+        }
+    }
+}
+
+/// Which paints on top where a fixture and a figure (a character, a pet, a
+/// mascot) sort at the same row. The derived order is the paint order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub(crate) enum Tie {
+    /// The figure, which sits on the fixture or stands in front of it.
+    FigureOver,
+    /// The fixture: a seat we see the back of hides whoever sits in it.
+    FixtureOver,
 }
 
 /// The waypoint kinds that are furniture in their own right.
@@ -278,7 +304,7 @@ fn centred_row(kind: FixtureKind, pos: Point, row: Furniture) -> Fixture {
     Fixture {
         kind,
         visual: centred(pos, size),
-        depth: Depth::Sorted(z_sort_row(Anchor::Center, pos, size.h)),
+        depth: Depth::sorted(z_sort_row(Anchor::Center, pos, size.h)),
     }
 }
 
@@ -366,7 +392,7 @@ impl SceneLayout {
         let upright = |kind, visual: Bounds| Fixture {
             kind,
             visual,
-            depth: Depth::Sorted(visual.y + visual.height - 1),
+            depth: Depth::sorted(visual.y + visual.height - 1),
         };
         let desk = furniture_def(Furniture::Desk).visual;
 
@@ -395,7 +421,7 @@ impl SceneLayout {
         )
         .chain(home_desks.iter().enumerate().flat_map(move |(i, &at)| {
             let local = FloorLocalDeskIndex(i);
-            let depth = Depth::Sorted(at.y + desk.h);
+            let depth = Depth::sorted(at.y + desk.h);
             self.filing_cabinet_top_left(local)
                 .map(|tl| Fixture {
                     kind: FixtureKind::FilingCabinet(local),
@@ -414,7 +440,7 @@ impl SceneLayout {
             Some(Fixture {
                 kind: FixtureKind::MeetingRug { room },
                 visual: rug,
-                depth: Depth::Sorted(rug.y),
+                depth: Depth::sorted(rug.y),
             })
         }))
         .chain(rooms.clone().flat_map(|(room, _, trio)| {
@@ -428,9 +454,14 @@ impl SceneLayout {
                             faces_away,
                         },
                         visual: centred(sofa, furniture_def(Furniture::MeetingSofaBody).visual),
-                        // A sofa we see the back of sorts past its sitters to
-                        // hide them; a front one ties them, and they sit on it.
-                        depth: Depth::Sorted(super::seated_z_key(sofa) + u16::from(faces_away)),
+                        depth: Depth::Sorted {
+                            row: super::seated_z_key(sofa),
+                            tie: if faces_away {
+                                Tie::FixtureOver
+                            } else {
+                                Tie::FigureOver
+                            },
+                        },
                     }
                 })
             })
@@ -458,7 +489,7 @@ impl SceneLayout {
         .chain(lounge.as_ref().map(|l| Fixture {
             kind: FixtureKind::LoungeRug,
             visual: l.rug(),
-            depth: Depth::Sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+            depth: Depth::sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
         }))
         .chain(
             couch.map(|at| centred_row(FixtureKind::LoungeCouch, at, Furniture::MeetingSofaBody)),
@@ -494,7 +525,7 @@ impl SceneLayout {
                             Fixture {
                                 kind,
                                 visual: centred(wp.pos, size),
-                                depth: Depth::Sorted(z_sort_row(Anchor::Center, wp.pos, size.h)),
+                                depth: Depth::sorted(z_sort_row(Anchor::Center, wp.pos, size.h)),
                             }
                         }
                         Station::VendingMachine | Station::Printer | Station::SnackShelf => {
@@ -532,7 +563,7 @@ impl SceneLayout {
                     },
                     visual: centred(wp.pos, furniture_def(Furniture::MeetingChair).visual),
                     // One row under its sitter, who sits on it.
-                    depth: Depth::Sorted(super::seated_z_key(wp.pos) - 1),
+                    depth: Depth::sorted(super::seated_z_key(wp.pos) - 1),
                 }),
         )
         .chain(tank.map(|at| centred_row(FixtureKind::FishTank, at, Furniture::FishTank)))
@@ -551,7 +582,7 @@ impl SceneLayout {
                     h: ELEVATOR_H,
                 },
             ),
-            depth: Depth::Sorted(at.y + ELEVATOR_H),
+            depth: Depth::sorted(at.y + ELEVATOR_H),
         }))
         .chain(
             wall_decor
@@ -562,18 +593,20 @@ impl SceneLayout {
                     Fixture {
                         kind: FixtureKind::Wall { item, kind },
                         visual: boxed(pos, size),
-                        depth: Depth::Sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
+                        depth: Depth::sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
                     }
                 }),
         )
-        // Last: they tie with their sitters, whom the painters queue before them.
         .chain(home_desks.iter().enumerate().filter_map(move |(i, &at)| {
             let local = FloorLocalDeskIndex(i);
             let facing = self.desk_facing(local);
             desk_chair_top_left(at, facing).map(|tl| Fixture {
                 kind: FixtureKind::DeskChair(local),
                 visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
-                depth: Depth::Sorted(desk_chair_z_key(at, facing)),
+                depth: Depth::Sorted {
+                    row: desk_chair_z_key(at, facing),
+                    tie: Tie::FixtureOver,
+                },
             })
         }))
     }
@@ -722,10 +755,9 @@ pub(crate) fn desk_chair_top_left(desk: Point, facing: Facing) -> Option<Point> 
 }
 
 /// The depth a desk's task chair sorts at: its seat's own z-key, which the sim
-/// gives the occupant arriving at, sitting in and leaving the seat alike. A
-/// painter that draws chairs after people on a tie therefore draws the chair
-/// over its occupant throughout — no flip where the walk ends and the sit
-/// begins.
+/// gives the occupant arriving at, sitting in and leaving the seat alike. Its
+/// [`Tie::FixtureOver`] therefore draws the chair over its occupant throughout —
+/// no flip where the walk ends and the sit begins.
 pub(crate) fn desk_chair_z_key(desk: Point, facing: Facing) -> u16 {
     super::desk_walk_anchor_facing(desk, facing).y
 }

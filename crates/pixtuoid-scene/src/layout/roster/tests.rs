@@ -114,7 +114,7 @@ fn backdrop_fixtures_come_first() {
     let depths: Vec<Depth> = l.fixtures().map(|f| f.depth).collect();
     let first_sorted = depths
         .iter()
-        .position(|d| matches!(d, Depth::Sorted(_)))
+        .position(|d| matches!(d, Depth::Sorted { .. }))
         .expect("a sorted fixture");
     assert!(depths[..first_sorted].iter().all(|&d| d == Depth::Backdrop));
     assert!(depths[first_sorted..].iter().all(|&d| d != Depth::Backdrop));
@@ -134,7 +134,7 @@ fn the_pantry_uprights_sort_at_their_south_row() {
         let rect = rect.expect("fits this pantry");
         let f = l.fixtures().find(|f| f.kind == kind).expect("rostered");
         assert_eq!(f.visual, rect, "{kind:?}");
-        assert_eq!(f.depth, Depth::Sorted(rect.y + rect.height - 1), "{kind:?}");
+        assert_eq!(f.depth, Depth::sorted(rect.y + rect.height - 1), "{kind:?}");
     }
 }
 

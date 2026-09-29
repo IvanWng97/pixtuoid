@@ -8,6 +8,7 @@
 use super::*;
 
 use super::anchors::{back_couch_anchor, waypoint_anchor};
+use pixtuoid_core::state::FloorLocalDeskIndex;
 
 /// Which image of a character's art to draw: the part of its
 /// [`FrameKey`](crate::frame_cache::FrameKey) the sim's placement decides; the
