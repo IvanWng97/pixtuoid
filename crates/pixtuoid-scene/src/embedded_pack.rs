@@ -244,6 +244,10 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
 mod density_art;
 
 #[cfg(test)]
+#[path = "../build_support/comments.rs"]
+mod comments;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::fs;

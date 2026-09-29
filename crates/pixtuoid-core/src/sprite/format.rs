@@ -749,7 +749,7 @@ fn redrawn_pieces(name: &str) -> impl Iterator<Item = &str> {
 /// `get_src(frame_name)`. The path-traversal guard MUST stay inside
 /// [`load_pack`]'s closure: [`load_pack_from_strings`] has no filesystem and no
 /// untrusted paths to escape.
-fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>) -> Result<Pack> {
+fn build_pack(parsed: PackToml, get_src: &mut dyn FnMut(&str) -> Result<String>) -> Result<Pack> {
     let palette = Arc::new(build_palette(&parsed.palette, &parsed.ramps)?);
     let mut animations = HashMap::new();
     for (anim_name, anim) in parsed.animations {
@@ -859,7 +859,7 @@ pub fn load_pack(dir: &Path) -> Result<Pack> {
         .canonicalize()
         .with_context(|| format!("canonicalizing {}", dir.display()))?;
 
-    build_pack(parsed, |fname| {
+    build_pack(parsed, &mut |fname| {
         if Path::new(fname)
             .components()
             .any(|c| c == std::path::Component::ParentDir)
@@ -884,7 +884,7 @@ pub fn load_pack_from_strings(pack_toml: &str, frames: &[(&str, &str)]) -> Resul
     let parsed: PackToml = toml::from_str(pack_toml).context("parsing pack.toml")?;
     let frame_lookup: HashMap<&str, &str> = frames.iter().copied().collect();
 
-    build_pack(parsed, |fname| {
+    build_pack(parsed, &mut |fname| {
         frame_lookup
             .get(fname)
             .map(|s| s.to_string())
