@@ -165,7 +165,7 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
     }
 }
 
-use crate::atmosphere::Look;
+use crate::atmosphere::Moment;
 use crate::ground::Ellipse;
 use crate::lighting::{DeskLights, LightInputs, Lights};
 use anchors::compute_door_frame_idx;
@@ -455,10 +455,11 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    let look = Look::resolve(&ctx.sky, ctx.theme);
+    let moment = Moment::resolve(ctx.sky, ctx.theme, ctx.floor.altitude, ctx.now);
+    let look = &moment.look;
     let lights = Lights::of(
         ctx.layout,
-        &look,
+        look,
         &LightInputs {
             agents,
             seated: &frame.seated_agents,
@@ -469,19 +470,19 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         },
     );
     let top_wall_h = ctx.layout.wall_band_h();
+    assert_eq!(
+        (ctx.buf.width(), ctx.buf.height()),
+        (buf_w, buf_h),
+        "the classic pass draws layout units 1:1"
+    );
     paint_floor_and_walls(
         ctx.base_fill,
         ctx.buf,
-        buf_w,
-        buf_h,
-        ctx.now,
-        &ctx.sky,
-        &look,
         top_wall_h,
         ctx.layout.window_bays(),
+        &moment,
         ctx.pack,
         ctx.theme,
-        ctx.floor.altitude,
     );
     for spill in &lights.spills {
         paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
@@ -550,7 +551,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     }
 
-    ambient::paint_ambient(ctx, &look, &lights.monitor_halos);
+    ambient::paint_ambient(ctx, look, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in

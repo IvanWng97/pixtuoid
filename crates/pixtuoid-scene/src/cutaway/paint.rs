@@ -7,6 +7,7 @@ use pixtuoid_core::sprite::blit::blit_frame_scaled;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 
+use crate::atmosphere::Moment;
 use crate::cutaway::order::{depth_sort, Span};
 use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
 use crate::cutaway::shade::{fill, slab, Ramp};
@@ -88,15 +89,6 @@ pub struct Office<'a> {
     pub scale: RenderScale,
 }
 
-/// The moment a frame shows: the sky's look at `now`, seen from `altitude`
-/// ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)).
-#[derive(Clone, Copy)]
-pub(crate) struct Moment<'a> {
-    pub(crate) look: &'a crate::atmosphere::Look,
-    pub(crate) altitude: f32,
-    pub(crate) now: std::time::SystemTime,
-}
-
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
 /// classic painter's sibling, not its successor. The windows look out from
 /// `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)) on
@@ -117,13 +109,8 @@ pub fn render_cutaway(
         scale,
     } = office;
     paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
-    let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
-    let moment = Moment {
-        look: &look,
-        altitude,
-        now,
-    };
-    let list = build_list(frame, office, moment);
+    let moment = Moment::resolve(crate::sky::Sky::at(now), theme, altitude, now);
+    let list = build_list(frame, office, &moment);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
@@ -245,7 +232,7 @@ impl<'a> DrawList<'a> {
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
     office: Office<'a>,
-    moment: Moment<'_>,
+    moment: &Moment,
 ) -> DrawList<'a> {
     let Office {
         pack, theme, scale, ..
@@ -443,11 +430,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
 /// Every piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
-fn collect_pieces(
-    frame: &SimFrame,
-    office: Office<'_>,
-    moment: Moment<'_>,
-) -> Vec<(Span, PieceKind)> {
+fn collect_pieces(frame: &SimFrame, office: Office<'_>, moment: &Moment) -> Vec<(Span, PieceKind)> {
     let Office { layout, pack, .. } = office;
     let mut order: Vec<(Span, PieceKind)> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
@@ -1172,18 +1155,14 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
 /// backdrop.
 ///
 /// [`CityStrip`]: crate::skyline::CityStrip
-fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, PieceKind)>) {
+fn push_windows(office: Office<'_>, moment: &Moment, order: &mut Vec<(Span, PieceKind)>) {
     let Office {
         layout,
         pack,
         theme,
         scale,
     } = office;
-    let Moment {
-        look,
-        altitude,
-        now,
-    } = moment;
+    let look = &moment.look;
     let pen = Pen::for_pack(scale, pack);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     let window_h = rows.end - rows.start;
@@ -1195,8 +1174,8 @@ fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, P
     let city = crate::skyline::CityStrip::draw(
         pack,
         (run.end - run.start, glass_h),
-        altitude,
-        (look, theme, now),
+        moment,
+        theme,
         density,
     );
     let d = density.get();
@@ -2494,11 +2473,12 @@ mod tests {
                 theme,
                 scale: RenderScale::ONE,
             },
-            Moment {
-                look: &sky(theme),
-                altitude: 0.0,
-                now: std::time::UNIX_EPOCH,
-            },
+            &Moment::resolve(
+                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                theme,
+                0.0,
+                std::time::UNIX_EPOCH,
+            ),
         );
         let (person, person_span) = order
             .iter()
@@ -2948,11 +2928,12 @@ mod tests {
                     theme,
                     scale: RenderScale::ONE,
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now: std::time::UNIX_EPOCH,
-                },
+                &Moment::resolve(
+                    crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                    theme,
+                    0.0,
+                    std::time::UNIX_EPOCH,
+                ),
             ) {
                 let PieceKind::Character {
                     ref figure,
@@ -3027,11 +3008,12 @@ mod tests {
                 theme,
                 scale,
             },
-            Moment {
-                look: &sky(theme),
-                altitude: 0.0,
-                now: std::time::UNIX_EPOCH,
-            },
+            &Moment::resolve(
+                crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                theme,
+                0.0,
+                std::time::UNIX_EPOCH,
+            ),
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -3062,11 +3044,6 @@ mod tests {
             }
         }
         assert!(cast > 0, "the office casts shadows");
-    }
-
-    /// The sky at the tests' fixed `now`, resolved for `theme`.
-    fn sky(theme: &Theme) -> crate::atmosphere::Look {
-        crate::atmosphere::Look::resolve(&crate::sky::Sky::at(std::time::UNIX_EPOCH), theme)
     }
 
     /// The bundled pack.
@@ -3118,11 +3095,7 @@ mod tests {
                 theme,
                 scale,
             },
-            Moment {
-                look: &look,
-                altitude: 0.0,
-                now,
-            },
+            &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
             &mut order,
         );
         assert_eq!(
@@ -3140,11 +3113,12 @@ mod tests {
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let window_h = rows.end - rows.start;
         let run = crate::layout::window_run(layout.buf_w);
+        let sky = crate::sky::Sky::at(now);
         let city = crate::skyline::CityStrip::draw(
             &pack,
             (run.end - run.start, crate::layout::glass_rows(window_h)),
-            0.0,
-            (&look, theme, now),
+            &Moment::resolve(sky, theme, 0.0, now),
+            theme,
             std::num::NonZeroU16::new(d).expect("nonzero"),
         );
         let k = scale.get() / d;
@@ -3253,11 +3227,12 @@ mod tests {
                         theme,
                         scale,
                     },
-                    Moment {
-                        look: &sky(theme),
-                        altitude: 0.0,
-                        now: std::time::UNIX_EPOCH,
-                    },
+                    &Moment::resolve(
+                        crate::sky::Sky::at(std::time::UNIX_EPOCH),
+                        theme,
+                        0.0,
+                        std::time::UNIX_EPOCH,
+                    ),
                 ) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
@@ -3416,11 +3391,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        Moment {
-                            look: &sky(theme),
-                            altitude: 0.0,
-                            now,
-                        },
+                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
@@ -3459,7 +3430,6 @@ S B B B B B B S
         let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
         let mut painted = std::collections::HashMap::new();
         let glass = |now: std::time::SystemTime, painted: &mut _| {
-            let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
             let list = build_list(
                 &frames[0],
                 Office {
@@ -3468,11 +3438,7 @@ S B B B B B B S
                     theme,
                     scale,
                 },
-                Moment {
-                    look: &look,
-                    altitude: 0.0,
-                    now,
-                },
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
             same_fingerprint_same_pixels(painted, &list, &layout, is_glass);
@@ -3584,11 +3550,7 @@ S B B B B B B S
                             theme,
                             scale,
                         },
-                        Moment {
-                            look: &sky(theme),
-                            altitude: 0.0,
-                            now,
-                        },
+                        &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now),
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -3696,11 +3658,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now
-                }
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now)
             )),
             summary(&build_list(
                 frame,
@@ -3710,11 +3668,7 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now
-                }
+                &Moment::resolve(crate::sky::Sky::at(now), theme, 0.0, now)
             )),
         );
     }
@@ -3734,11 +3688,12 @@ S B B B B B B S
                     theme,
                     scale: RenderScale::ONE,
                 },
-                Moment {
-                    look: &sky(theme),
-                    altitude: 0.0,
-                    now: std::time::SystemTime::UNIX_EPOCH,
-                },
+                &Moment::resolve(
+                    crate::sky::Sky::at(std::time::SystemTime::UNIX_EPOCH),
+                    theme,
+                    0.0,
+                    std::time::SystemTime::UNIX_EPOCH,
+                ),
             );
             let pieces: Vec<&Piece> = list
                 .pieces()

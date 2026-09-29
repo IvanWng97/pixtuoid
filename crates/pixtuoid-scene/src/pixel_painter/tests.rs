@@ -1925,7 +1925,7 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
             let mut d = Vec::new();
             let lights = crate::lighting::Lights::of(
                 &layout,
-                &Look::resolve(&ctx.sky, theme),
+                &crate::atmosphere::Look::resolve(&ctx.sky, theme),
                 &crate::lighting::LightInputs {
                     agents: &[],
                     seated: &frame.seated_agents,
