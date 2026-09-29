@@ -2989,13 +2989,13 @@ S B B B B B B S
     }
 
     /// The cutaway paints on ONE grid, the art pixel: at a render scale `k`
-    /// times the art's density, every aligned `k`x`k` block is one colour, and
-    /// the frame is the density render upscaled `k` times. A painter sizing a
-    /// thin feature in buffer pixels, or a band edge that rounds at buffer
-    /// resolution, breaks the second even where the first holds.
+    /// times the art's density, the frame is the density render upscaled `k`
+    /// times, which also makes every aligned `k`x`k` block one colour. A painter
+    /// sizing a thin feature in buffer pixels, or a band edge that rounds at
+    /// buffer resolution, breaks it.
     ///
-    /// Every theme, over a walk and a sit and over an office big enough to gate
-    /// in a pantry and a meeting room.
+    /// Every theme over a walk and a sit; the office, there to gate in a pantry
+    /// and a meeting room, under one theme, since no painter branches on it.
     #[test]
     fn the_cutaway_paints_whole_art_pixels() {
         use crate::floor::{FloorMeta, FloorSession};
@@ -3024,33 +3024,35 @@ S B B B B B B S
         ];
         for theme in crate::theme::ALL_THEMES {
             for (name, layout, frame) in cases {
+                if name == "office" && theme.name != crate::theme::ALL_THEMES[0].name {
+                    continue;
+                }
                 let at_d = render_at(frame, layout, &pack, theme, d);
                 for k in [2u16, 3] {
                     let at_s = render_at(frame, layout, &pack, theme, d * k);
-                    let bad_block = (0..at_s.height())
-                        .step_by(usize::from(k))
-                        .flat_map(|y| {
-                            (0..at_s.width())
-                                .step_by(usize::from(k))
-                                .map(move |x| (x, y))
-                        })
-                        .find(|&(x, y)| {
-                            let c = at_s.get(x, y);
-                            (0..k).any(|dy| (0..k).any(|dx| at_s.get(x + dx, y + dy) != c))
-                        });
-                    assert_eq!(
-                        bad_block, None,
-                        "{} {name} at k={k}: a {k}x{k} art pixel is not one colour",
-                        theme.name
-                    );
                     let off_upscale = (0..at_s.height())
                         .flat_map(|y| (0..at_s.width()).map(move |x| (x, y)))
                         .find(|&(x, y)| at_s.get(x, y) != at_d.get(x / k, y / k));
-                    assert_eq!(
-                        off_upscale, None,
-                        "{} {name} at k={k}: the frame is not the density render upscaled",
-                        theme.name
-                    );
+                    if let Some(at) = off_upscale {
+                        // The first split art pixel, if any, points at the
+                        // painter: one sizing a feature in buffer pixels.
+                        let split = (0..at_s.height())
+                            .step_by(usize::from(k))
+                            .flat_map(|y| {
+                                (0..at_s.width())
+                                    .step_by(usize::from(k))
+                                    .map(move |x| (x, y))
+                            })
+                            .find(|&(x, y)| {
+                                let c = at_s.get(x, y);
+                                (0..k).any(|dy| (0..k).any(|dx| at_s.get(x + dx, y + dy) != c))
+                            });
+                        panic!(
+                            "{} {name} at k={k}: the frame is not the density render upscaled \
+                             (first at {at:?}; first split {k}x{k} art pixel: {split:?})",
+                            theme.name
+                        );
+                    }
                 }
             }
         }

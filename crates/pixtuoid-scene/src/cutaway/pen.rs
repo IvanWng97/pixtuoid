@@ -28,8 +28,8 @@ pub(crate) struct ArtRect {
     pub(crate) h: ArtPx,
 }
 
-/// Paints on a render's art grid: `d` art pixels per logical unit, each `k`
-/// buffer pixels square.
+/// Paints on a render's art grid (the module doc): `k` buffer pixels make one
+/// art pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Pen {
     d: NonZeroU16,
@@ -53,9 +53,10 @@ impl Pen {
     }
 
     /// The pen for `pack` at `scale`: the densest of its variant densities that
-    /// divides `scale`, else the base art's. It is the density
-    /// [`densest_frame`](crate::pixel_painter::densest_frame) draws the pack's
-    /// art at, so the room is painted on the art's own grid.
+    /// divides `scale`, else the base art's. [`densest_frame`](crate::pixel_painter::densest_frame)
+    /// applies the same rule per piece, so the room shares every piece's grid
+    /// only while the pack draws its variants at one common density, as the
+    /// bundled pack does.
     pub(crate) fn for_pack(scale: RenderScale, pack: &Pack) -> Self {
         pack.density_variants()
             .into_iter()
@@ -216,9 +217,9 @@ mod tests {
         let mut b = RgbBuffer::filled(36, 36, BG);
         fine.dither_band(&mut a, ArtPx(1), ArtPx(11), DARK, LIGHT);
         coarse.dither_band(&mut b, ArtPx(1), ArtPx(11), DARK, LIGHT);
-        for y in 0..a.height() {
-            for x in 0..a.width() {
-                assert_eq!(b.get(x * 3, y * 3), a.get(x, y), "art pixel ({x}, {y})");
+        for y in 0..b.height() {
+            for x in 0..b.width() {
+                assert_eq!(b.get(x, y), a.get(x / 3, y / 3), "buffer pixel ({x}, {y})");
             }
         }
     }
