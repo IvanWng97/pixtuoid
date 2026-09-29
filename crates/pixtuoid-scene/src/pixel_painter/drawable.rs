@@ -11,7 +11,6 @@ use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
-use super::background::paint_warm_halo;
 use super::palette::{blend_rgb, BLACK, WHITE};
 use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
@@ -61,8 +60,7 @@ pub(super) enum DrawableKind<'a> {
         facing: crate::layout::Facing,
         has_cabinet: bool,
         screen_glow: Option<Rgb>,
-        lamp: f32,
-        screen_idle: f32,
+        lights: crate::lighting::DeskLights,
         props: DeskProps,
     },
     Character {
@@ -278,8 +276,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             facing,
             has_cabinet,
             screen_glow,
-            lamp,
-            screen_idle,
+            lights,
             props,
         } => {
             if *has_cabinet {
@@ -304,13 +301,13 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 sprite_top = desk_art_top(pack, desk.y, frame.height());
                 blit_frame(frame, desk.x, sprite_top, buf);
             }
-            paint_desk_lamp(buf, *desk, *lamp, theme);
+            paint_desk_lamp(buf, lights, theme);
             paint_screen_idle(
                 buf,
                 desk.x,
                 sprite_top,
                 theme.effects.monitor_idle,
-                *screen_idle,
+                lights.screen_idle,
             );
             paint_desk_coffee(buf, *desk, props.cup, now, theme);
             paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
@@ -533,13 +530,13 @@ pub(super) fn paint_chair_back(buf: &mut RgbBuffer, top_left: Point, pack: &Pack
 }
 
 /// Task lamp on the desk's west wing (the coffee cup and token tower own the other
-/// two), plus its warm pool; `strength` is the interior darkness.
+/// two), plus its warm pool.
 pub(super) fn paint_desk_lamp(
     buf: &mut RgbBuffer,
-    desk: Point,
-    strength: f32,
+    lights: &crate::lighting::DeskLights,
     theme: &crate::theme::Theme,
 ) {
+    let strength = lights.lamp.strength;
     if strength <= 0.0 {
         return;
     }
@@ -549,24 +546,11 @@ pub(super) fn paint_desk_lamp(
     let unlit = blend_rgb(warm, BLACK, OFF);
     let shade = blend_rgb(unlit, blend_rgb(warm, WHITE, 0.45), strength);
     let stem = blend_rgb(unlit, blend_rgb(warm, BLACK, 0.72), strength);
-    let (lx, ly) = (desk.x, desk.y);
-    buf.put_checked(lx, ly, shade);
-    buf.put_checked(lx + 1, ly, shade);
-    buf.put_checked(lx + 1, ly + 1, stem);
-    /// Its diameter stays under the desk's width: a larger pool washes the
-    /// neighbouring workstations.
-    const DESK_LAMP_RADIUS: u16 = 5;
-    const _: () = assert!(2 * DESK_LAMP_RADIUS < crate::layout::desk_furniture_def().visual.w);
-    const DESK_LAMP_MAX: f32 = 0.42;
-    const _: () = assert!(DESK_LAMP_MAX < super::SCREEN_IDLE_MAX);
-    paint_warm_halo(
-        buf,
-        lx + 1,
-        ly + 1,
-        DESK_LAMP_RADIUS,
-        strength * DESK_LAMP_MAX,
-        warm,
-    );
+    let (shade_at, bulb) = (lights.fixture, lights.bulb());
+    buf.put_checked(shade_at.x, shade_at.y, shade);
+    buf.put_checked(shade_at.x + 1, shade_at.y, shade);
+    buf.put_checked(bulb.x, bulb.y, stem);
+    super::background::paint_light(buf, &lights.lamp, warm);
 }
 
 /// Token-meter paper tower: `tier` reams stacked on the desk surface against
@@ -671,8 +655,7 @@ mod tests {
                 facing: crate::layout::Facing::South,
                 has_cabinet: false,
                 screen_glow: None,
-                lamp: 0.0,
-                screen_idle: 0.0,
+                lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps {
                     cup: None,
                     token_tier,
@@ -889,8 +872,7 @@ mod tests {
                 facing: crate::layout::Facing::South,
                 has_cabinet: true,
                 screen_glow: None,
-                lamp: 0.0,
-                screen_idle: 0.0,
+                lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps::default(),
             },
         };

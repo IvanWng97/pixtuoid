@@ -1,6 +1,7 @@
 use super::*;
 use crate::atmosphere::Look;
 use crate::layout::{window_bays, window_run};
+use crate::lighting::SPILL_DEPTH;
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
@@ -88,18 +89,12 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
 fn short_buffer_clamps_spill_and_window_without_panic() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let top_wall_h = 18u16;
-    // buf_h sits just above top_wall_h so the spill (SPILL_DEPTH rows below
-    // the wall band) and the window glass both straddle the bottom edge.
+    // buf_h sits just above top_wall_h so the window glass and the spill
+    // ([`SPILL_DEPTH`] rows below the wall band) both straddle the bottom edge.
     let buf_h = top_wall_h + 2;
     let buf_w = 60u16;
     let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(12 * 3600);
-    // A hand-built look with nonzero spill strength, so the spill path runs
-    // regardless of the local clock.
-    let look = Look {
-        sunlight: 0.8,
-        spill_slant: 0.0,
-        ..Look::resolve(&Sky::at(now), theme)
-    };
+    let look = Look::resolve(&Sky::at(now), theme);
     let mut buf = RgbBuffer::filled(buf_w, buf_h, Rgb { r: 5, g: 5, b: 5 });
     paint_floor_and_walls(
         &mut BaseFillCache::new(),
@@ -115,12 +110,27 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         theme,
         0.0,
     );
+    let spill = crate::lighting::Emitter {
+        light: crate::lighting::Light::Spill {
+            x: 0,
+            w: WINDOW_W,
+            top: top_wall_h,
+            slant: 0.0,
+        },
+        ..spill(0, 0.0)
+    };
+    paint_light(&mut buf, &spill, theme.lighting.sun_spill);
     // Reaching here without a panic IS the primary assertion — `RgbBuffer::put`
     // has no bounds guard.
     assert_ne!(
         buf.get(0, 0),
         Rgb { r: 5, g: 5, b: 5 },
         "the wall band should still paint in the in-bounds rows"
+    );
+    assert_ne!(
+        buf.get(1, buf_h - 1),
+        Rgb { r: 5, g: 5, b: 5 },
+        "the spill should still paint its in-bounds rows"
     );
 }
 
@@ -934,7 +944,7 @@ fn lightning_flash_matches_the_per_pixel_blend_reference() {
 
 /// Light through a window lands across the room from the sun. The disc
 /// (`compute_disc`), the wall spot (`paint_sun_spot`) and the spill
-/// (`paint_window_light_spill`) each map the one azimuth to a side on their own,
+/// (`Light::Spill`) each map the one azimuth to a side on their own,
 /// so this is the only check that sees them disagree, read off the pixels each
 /// paints.
 #[test]
@@ -977,14 +987,10 @@ fn the_wall_spot_and_the_spill_fall_away_from_the_disc() {
         // One centred window, so the lean can run either way unclipped.
         let mut buf = RgbBuffer::filled(BUF_W, BUF_H, FILL);
         let window_x = (BUF_W - WINDOW_W) / 2;
-        paint_window_light_spill(
+        paint_light(
             &mut buf,
-            window_x,
-            WINDOW_W,
-            0,
-            1.0,
-            look.spill_slant,
-            theme,
+            &spill(window_x, look.spill_slant),
+            theme.lighting.sun_spill,
         );
         let top = lit_x(&buf, 0..1).expect("the spill's first row");
         let bottom = lit_x(&buf, SPILL_DEPTH - 1..SPILL_DEPTH).expect("the spill's last row");
@@ -1010,7 +1016,7 @@ fn a_spill_leaning_off_the_left_edge_is_clipped() {
     let buf_w = window_x + WINDOW_W + SPILL_DEPTH;
     let mut buf = RgbBuffer::filled(buf_w, SPILL_DEPTH, FILL);
     // One column left per row: every row past the first leans off the edge.
-    paint_window_light_spill(&mut buf, window_x, WINDOW_W, 0, 1.0, -1.0, theme);
+    paint_light(&mut buf, &spill(window_x, -1.0), theme.lighting.sun_spill);
     for dy in 0..SPILL_DEPTH {
         let widen = i32::from((dy / 2).min(3));
         let left = i32::from(window_x) - i32::from(dy) - widen;
@@ -1020,6 +1026,20 @@ fn a_spill_leaning_off_the_left_edge_is_clipped() {
             .filter(|&x| (left..right).contains(&i32::from(x)))
             .collect();
         assert_eq!(lit, want, "row {dy}");
+    }
+}
+
+/// The sun's spill below a window at `x`, from row 0, leaning `slant`.
+fn spill(x: u16, slant: f32) -> crate::lighting::Emitter {
+    crate::lighting::Emitter {
+        kind: crate::lighting::EmitterKind::WindowSpill,
+        light: crate::lighting::Light::Spill {
+            x,
+            w: WINDOW_W,
+            top: 0,
+            slant,
+        },
+        strength: 0.32,
     }
 }
 
