@@ -4,12 +4,14 @@
 
 use std::time::SystemTime;
 
-use pixtuoid_core::sprite::{Rgb, RgbBuffer};
-use pixtuoid_core::state::FloorLocalDeskIndex;
+use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::atmosphere::{Look, WallSide};
 use crate::layout::Layout;
-use crate::pixel_painter::background::{paint_radial_falloff, window_spill_columns, RadialFalloff};
+use crate::lighting::{Emitter, EmitterKind};
+use crate::pixel_painter::background::{
+    paint_light, paint_radial_falloff, window_spill_columns, RadialFalloff,
+};
 use crate::pixel_painter::palette::{blend_pixel, blend_rgb, WHITE};
 use crate::pixel_painter::PaintCtx;
 use crate::sky::Sky;
@@ -77,11 +79,7 @@ pub(super) fn dust_mote_positions(
     out
 }
 
-pub(super) fn paint_ambient(
-    ctx: &mut PaintCtx<'_>,
-    look: &Look,
-    seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
-) {
+pub(super) fn paint_ambient(ctx: &mut PaintCtx<'_>, look: &Look, monitor_halos: &[Emitter]) {
     paint_sun_spot(ctx.buf, ctx.theme, ctx.layout, &ctx.sky, look);
     paint_dust_motes(
         ctx.buf,
@@ -92,100 +90,22 @@ pub(super) fn paint_ambient(
         &ctx.sky,
         look,
     );
-    let halos = collect_ceiling_halos(ctx, seated_agents);
-    paint_ceiling_halos(ctx.buf, ctx.theme, &halos);
+    paint_ceiling_halos(ctx.buf, ctx.theme, monitor_halos);
 }
 
-#[derive(Debug, Clone, Copy)]
-pub(super) struct CeilingHalo {
-    pub x: u16,
-    pub y: u16,
-    pub color: Rgb,
-    pub intensity: f32,
-}
-
-/// Base brightness of a ceiling halo before distance falloff.
-const CEILING_HALO_INTENSITY: f32 = 0.8;
-/// Peak additive glow at a halo's center (caps the composited strength).
-const CEILING_HALO_MAX_STRENGTH: f32 = 0.4;
-
-/// Soft 5×2 halo above each lit monitor, tinted by the active tool's glow
-/// color. Dark themes only — on a light theme the warm tint reads as grime.
-pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[CeilingHalo]) {
+/// Each halo over a lit monitor, tinted by its tool. Dark themes only — on a
+/// light theme the warm tint reads as grime.
+pub(super) fn paint_ceiling_halos(buf: &mut RgbBuffer, theme: &Theme, halos: &[Emitter]) {
     use crate::theme::ThemeKind;
     if theme.kind != ThemeKind::Dark {
         return;
     }
     for halo in halos {
-        for dy in 0..2u16 {
-            for dx in 0..5u16 {
-                let x = halo.x.saturating_sub(2).saturating_add(dx);
-                let y = halo.y.saturating_sub(dy);
-                if x >= buf.width() || y >= buf.height() {
-                    continue;
-                }
-                let dist = ((dx as i32 - 2).abs() as f32 + dy as f32) / 3.0;
-                let strength = (halo.intensity * (1.0 - dist).max(0.0) * CEILING_HALO_MAX_STRENGTH)
-                    .clamp(0.0, 1.0);
-                let cur = buf.get(x, y);
-                buf.put(x, y, blend_rgb(cur, halo.color, strength));
-            }
+        if let EmitterKind::MonitorHalo(tool) = halo.kind {
+            let color = crate::pixel_painter::palette::tool_glow_for_kind(tool, &theme.tool_glow);
+            paint_light(buf, halo, color);
         }
     }
-}
-
-/// Gather one halo per agent currently mid-tool-call. `desk.x + 6` is the
-/// centre of the lit screen column band `paint_screen_glow` uses; y sits one
-/// row above the desk so the halo lands in the wall band, not on the monitor.
-fn collect_ceiling_halos(
-    ctx: &PaintCtx<'_>,
-    seated_agents: &std::collections::HashMap<FloorLocalDeskIndex, bool>,
-) -> Vec<CeilingHalo> {
-    use pixtuoid_core::state::ActivityState;
-    let mut halos = Vec::new();
-    for agent in ctx.scene.agents.values() {
-        if !matches!(
-            agent.state,
-            ActivityState::Active {
-                detail: Some(_),
-                ..
-            }
-        ) {
-            continue;
-        }
-        if agent.exiting_at.is_some() {
-            continue;
-        }
-        if agent.floor_idx != ctx.floor.floor_idx {
-            continue;
-        }
-        // Only halo a desk whose occupant is actually SEATED right now — not
-        // mid-walk (entry / snap-back) during the Active grace window.
-        if !seated_agents
-            .get(&agent.desk_index.single_floor_local())
-            .copied()
-            .unwrap_or(false)
-        {
-            continue;
-        }
-        let Some(desk) = ctx.layout.home_desk(agent.desk_index.single_floor_local()) else {
-            continue;
-        };
-        // Unreachable given the `Active { detail: Some(_) }` guard above — a
-        // total binding, not a missing-coverage target.
-        let Some(color) =
-            crate::pixel_painter::palette::tool_glow_tint(agent, &ctx.theme.tool_glow)
-        else {
-            continue;
-        };
-        halos.push(CeilingHalo {
-            x: desk.x + 6,
-            y: desk.y.saturating_sub(1),
-            color,
-            intensity: CEILING_HALO_INTENSITY,
-        });
-    }
-    halos
 }
 
 /// Drift 1-pixel warm specks through each window's sunbeam spill column.
@@ -313,6 +233,7 @@ mod tests {
     use super::*;
     use crate::atmosphere::Look;
     use crate::sky::Weather;
+    use pixtuoid_core::sprite::Rgb;
     use std::time::Duration;
 
     #[test]
@@ -357,20 +278,22 @@ mod tests {
         assert_ne!(a, b, "positions should advance over time at wall-clock ms");
     }
 
+    /// One monitor halo centred at `(x, y)`, over an edit.
+    fn one_halo(x: u16, y: u16) -> Vec<Emitter> {
+        vec![Emitter {
+            kind: EmitterKind::MonitorHalo(pixtuoid_core::state::ToolKind::Edit),
+            light: crate::lighting::Light::Patch {
+                centre: crate::layout::Point { x, y },
+            },
+            strength: 0.8,
+        }]
+    }
+
     #[test]
     fn ceiling_halo_painted_on_dark_theme() {
         let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::theme::CYBERPUNK;
-        let halos = vec![CeilingHalo {
-            x: 50,
-            y: 10,
-            color: Rgb {
-                r: 0,
-                g: 200,
-                b: 255,
-            },
-            intensity: 0.8,
-        }];
+        let halos = one_halo(50, 10);
         let baseline = buf.get(50, 10);
         paint_ceiling_halos(&mut buf, theme, &halos);
         assert_ne!(baseline, buf.get(50, 10), "halo should brighten the pixel");
@@ -380,16 +303,7 @@ mod tests {
     fn ceiling_halo_skipped_on_light_theme() {
         let mut buf = RgbBuffer::filled(160, 90, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::theme::NORMAL;
-        let halos = vec![CeilingHalo {
-            x: 50,
-            y: 10,
-            color: Rgb {
-                r: 0,
-                g: 200,
-                b: 255,
-            },
-            intensity: 0.8,
-        }];
+        let halos = one_halo(50, 10);
         let baseline = buf.get(50, 10);
         paint_ceiling_halos(&mut buf, theme, &halos);
         assert_eq!(baseline, buf.get(50, 10), "no halo on light themes");
@@ -505,16 +419,7 @@ mod tests {
     fn ceiling_halo_near_edge_does_not_panic() {
         let mut buf = RgbBuffer::filled(6, 4, Rgb { r: 0, g: 0, b: 0 });
         let theme = &crate::theme::CYBERPUNK; // Dark theme so halos paint.
-        let halos = vec![CeilingHalo {
-            x: 5,
-            y: 0,
-            color: Rgb {
-                r: 0,
-                g: 200,
-                b: 255,
-            },
-            intensity: 0.8,
-        }];
+        let halos = one_halo(5, 0);
         paint_ceiling_halos(&mut buf, theme, &halos);
     }
 

@@ -15,9 +15,8 @@ use celestial::{
 };
 pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
-    neon_look, paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
-    paint_neon_glow, paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo,
-    RadialFalloff,
+    neon_look, paint_clock, paint_corridor_runner, paint_light, paint_neon_panel,
+    paint_radial_falloff, paint_shadow, RadialFalloff,
 };
 
 use std::time::SystemTime;
@@ -37,9 +36,6 @@ use crate::sky::{Sky, Weather};
 use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
-/// Vertical depth of the warm spill band below each window.
-const SPILL_DEPTH: u16 = 12;
-
 /// Room-wide ambient bounce from a Storm lightning strike, at [`Sky::flash`].
 pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     if sky.weather() != Weather::Storm {
@@ -57,8 +53,8 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
 }
 
 /// Returns one `SunbeamColumn` per painted window, centred on the pane and
-/// starting at the floor row, so the motes drift through the same warm spill
-/// the floor pass paints.
+/// starting at the floor row, so the motes drift through the window's
+/// [`Light::Spill`](crate::lighting::Light::Spill).
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
     layout
@@ -66,7 +62,7 @@ pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<Sun
         .map(|w| SunbeamColumn {
             x: w.center_x(),
             top_y: top_wall_h,
-            depth: SPILL_DEPTH,
+            depth: crate::lighting::SPILL_DEPTH,
         })
         .collect()
 }
@@ -204,60 +200,12 @@ pub(super) fn paint_floor_and_walls(
             win_disc,
             look,
         );
-        // `look.sunlight` already includes atmospheric attenuation, so heavy
-        // weather automatically dims the spill below windows.
-        if look.sunlight > 0.0 {
-            paint_window_light_spill(
-                buf,
-                x,
-                WINDOW_W,
-                top_wall_h,
-                look.sunlight,
-                look.spill_slant,
-                theme,
-            );
-        }
     }
 
     let trim_y = wall_trim_row(top_wall_h);
     if trim_y < buf_h {
         for x in 0..buf_w {
             buf.put(x, trim_y, wall_trim_color);
-        }
-    }
-}
-
-/// Warm sunlight tint spilling onto the floor below a window — a trapezoid
-/// blended with the existing floor so it reads as "light through window", not
-/// "yellow rectangle". `slant_per_row` shifts the band +x per row going down.
-fn paint_window_light_spill(
-    buf: &mut RgbBuffer,
-    window_x: u16,
-    window_w: u16,
-    top_y: u16,
-    intensity: f32,
-    slant_per_row: f32,
-    theme: &Theme,
-) {
-    let warm = theme.lighting.sun_spill;
-    let fade_start = 0.32 * intensity;
-    for dy in 0..SPILL_DEPTH {
-        let widen = i32::from((dy / 2).min(3));
-        let shift = (slant_per_row * dy as f32).round() as i32;
-        let base_x = i32::from(window_x) + shift;
-        // Both edges clip to the canvas, so a band leaning off either side is
-        // trimmed there rather than pushed back on whole.
-        let clip = |x: i32| x.clamp(0, i32::from(buf.width())) as u16;
-        let start_x = clip(base_x - widen);
-        let end_x = clip(base_x + i32::from(window_w) + widen);
-        let y = top_y + dy;
-        if y >= buf.height() {
-            break;
-        }
-        let strength = fade_start * (1.0 - dy as f32 / SPILL_DEPTH as f32);
-        for x in start_x..end_x {
-            let cur = buf.get(x, y);
-            buf.put(x, y, blend_rgb(cur, warm, strength));
         }
     }
 }
