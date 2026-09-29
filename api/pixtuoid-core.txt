@@ -770,7 +770,6 @@ pub pixtuoid_core::sprite::format::Material::Shade
 pub pixtuoid_core::sprite::format::Material::Sign
 impl pixtuoid_core::sprite::format::Material
 pub const pixtuoid_core::sprite::format::Material::ALL: [pixtuoid_core::sprite::format::Material; 7]
-pub fn pixtuoid_core::sprite::format::Material::name(self) -> &'static str
 impl core::clone::Clone for pixtuoid_core::sprite::format::Material
 pub fn pixtuoid_core::sprite::format::Material::clone(&self) -> pixtuoid_core::sprite::format::Material
 impl core::cmp::Eq for pixtuoid_core::sprite::format::Material
@@ -815,7 +814,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::StandIn
 pub struct pixtuoid_core::sprite::format::Building
 impl pixtuoid_core::sprite::format::Building
-pub fn pixtuoid_core::sprite::format::Building::art(&self, u16) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
+pub fn pixtuoid_core::sprite::format::Building::art(&self, core::num::nonzero::NonZeroU16) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
 pub fn pixtuoid_core::sprite::format::Building::name(&self) -> &str
 pub fn pixtuoid_core::sprite::format::Building::size(&self) -> (u16, u16)
 pub fn pixtuoid_core::sprite::format::Building::stands_in(&self, pixtuoid_core::sprite::format::CityPlane) -> bool
