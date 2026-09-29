@@ -28,6 +28,32 @@ pub(crate) struct ArtRect {
     pub(crate) h: ArtPx,
 }
 
+/// Colours already stepped `level` stops: a shade crosses a handful of tones
+/// and [`Rgb::ramp`] is an OKLab round trip, so each is stepped once, not once
+/// per pixel.
+struct Stepped {
+    level: i8,
+    seen: Vec<(Rgb, Rgb)>,
+}
+
+impl Stepped {
+    fn new(level: i8) -> Self {
+        Self {
+            level,
+            seen: Vec::new(),
+        }
+    }
+
+    fn of(&mut self, c: Rgb) -> Rgb {
+        if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
+            return stepped;
+        }
+        let stepped = c.ramp(self.level);
+        self.seen.push((c, stepped));
+        stepped
+    }
+}
+
 /// Paints on a render's art grid (the module doc): `k` buffer pixels make one
 /// art pixel.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,18 +116,46 @@ impl Pen {
         );
     }
 
-    /// Step every pixel of `r` `level` stops along its own ramp
-    /// ([`Rgb::ramp`](pixtuoid_core::sprite::Rgb::ramp)): a line relative to
-    /// whatever lies under it, so a grout line or a bevel reads on a lit floor
-    /// and a dark one alike. The grid holds, as each art pixel is one colour.
-    pub(crate) fn shade(self, buf: &mut RgbBuffer, r: ArtRect, level: i8) {
+    /// [`shade`](Self::shade) the lines of a `pitch` grid laid from `r`'s top
+    /// left corner, within `r`: each art pixel once, so a crossing is no darker
+    /// than the lines through it.
+    pub(crate) fn shade_grid(self, buf: &mut RgbBuffer, r: ArtRect, pitch: ArtPx, level: i8) {
+        let p = pitch.0.max(1);
+        let (x1, y1) = (r.x.0.saturating_add(r.w.0), r.y.0.saturating_add(r.h.0));
+        let mut stepped = Stepped::new(level);
+        for y in (r.y.0..y1).step_by(usize::from(p)) {
+            let row = ArtRect {
+                y: ArtPx(y),
+                h: ArtPx(1),
+                ..r
+            };
+            self.shade(buf, row, &mut stepped);
+            // The columns run from under this row to the next one.
+            let run = ArtPx((p - 1).min(y1 - y - 1));
+            for x in (r.x.0..x1).step_by(usize::from(p)) {
+                let col = ArtRect {
+                    x: ArtPx(x),
+                    y: ArtPx(y + 1),
+                    w: ArtPx(1),
+                    h: run,
+                };
+                self.shade(buf, col, &mut stepped);
+            }
+        }
+    }
+
+    /// Step every pixel of `r` `stepped`'s level stops along its own ramp
+    /// ([`Rgb::ramp`](pixtuoid_core::sprite::Rgb::ramp)), clipped to the
+    /// buffer: a tone relative to what is already painted there, not a colour
+    /// of its own. An art pixel that was one colour stays one.
+    fn shade(self, buf: &mut RgbBuffer, r: ArtRect, stepped: &mut Stepped) {
         let (x0, y0) = (self.buffer(r.x), self.buffer(r.y));
         let x1 = x0.saturating_add(self.buffer(r.w)).min(buf.width());
         let y1 = y0.saturating_add(self.buffer(r.h)).min(buf.height());
         for y in y0..y1 {
             for x in x0..x1 {
-                let c = buf.get(x, y);
-                buf.put(x, y, c.ramp(level));
+                let c = stepped.of(buf.get(x, y));
+                buf.put(x, y, c);
             }
         }
     }
@@ -295,8 +349,12 @@ mod tests {
             w: ArtPx(2),
             h: ArtPx(1),
         };
-        pen(2, 1).shade(&mut buf, r, -2);
-        assert_eq!(buf.get(2, 1), BG.ramp(-2), "the dark pixel, a step darker");
+        pen(2, 1).shade(&mut buf, r, &mut Stepped::new(-2));
+        assert_eq!(
+            buf.get(2, 1),
+            BG.ramp(-2),
+            "the dark pixel, two stops darker"
+        );
         assert_eq!(
             buf.get(5, 0),
             LIGHT.ramp(-2),
@@ -304,6 +362,38 @@ mod tests {
         );
         assert_eq!(buf.get(1, 0), BG, "nothing west of the rect");
         assert_eq!(buf.get(2, 2), BG, "nothing south of it");
+    }
+
+    #[test]
+    fn a_shade_past_the_edge_clips_rather_than_wrapping() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        let r = ArtRect {
+            x: ArtPx(3),
+            y: ArtPx(0),
+            w: ArtPx(2),
+            h: ArtPx(1),
+        };
+        pen(2, 1).shade(&mut buf, r, &mut Stepped::new(-2));
+        assert_eq!(buf.get(7, 1), BG.ramp(-2), "the part on the buffer");
+        assert_eq!(buf.get(0, 1), BG, "nothing wraps into the next row");
+        assert_eq!(buf.get(1, 2), BG, "nor the one after");
+    }
+
+    #[test]
+    fn a_grid_shades_each_line_pixel_once() {
+        let mut buf = RgbBuffer::filled(8, 8, BG);
+        let r = ArtRect {
+            x: ArtPx(0),
+            y: ArtPx(0),
+            w: ArtPx(4),
+            h: ArtPx(4),
+        };
+        pen(2, 1).shade_grid(&mut buf, r, ArtPx(2), -2);
+        let line = BG.ramp(-2);
+        assert_eq!(buf.get(0, 0), line, "a crossing, shaded once");
+        assert_eq!(buf.get(4, 5), line, "a row");
+        assert_eq!(buf.get(5, 3), line, "a column");
+        assert_eq!(buf.get(3, 3), BG, "inside a cell");
     }
 
     #[test]

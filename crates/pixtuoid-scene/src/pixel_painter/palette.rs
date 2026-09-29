@@ -438,8 +438,10 @@ pub(super) fn degraded_frame(frame: &Frame) -> Frame {
     Frame::from_pixels(frame.width(), frame.height(), pixels)
 }
 
-/// Per-channel sRGB lerp. Cheap; used for low-strength tints where
-/// perceptual error doesn't matter (e.g. agent skin glow).
+/// Per-channel sRGB lerp, the classic's compositing primitive: cheap per pixel,
+/// and channel-separable, so a constant-tint pass tabulates it through an
+/// [`RgbLut`]. A gradient between two hues whose middle must not sag is
+/// [`Rgb::mix`].
 pub(super) fn blend(a: u8, b: u8, t: f32) -> u8 {
     ((a as f32) * (1.0 - t) + (b as f32) * t)
         .round()
@@ -517,23 +519,6 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
     if x < buf.width() && y < buf.height() {
         let blended = blend_over(buf, x, y, tint, t);
         buf.put(x, y, blended);
-    }
-}
-
-/// Perceptually-correct Lab-space mix between two sRGB colors — twilight
-/// (orange → navy) and dim overlays travel through Lab without the muddy
-/// desaturated midpoint naive sRGB lerp produces. Slower than [`blend`].
-pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    use palette::{FromColor, IntoColor, Lab, Mix, Srgb};
-    let sa = Srgb::new(a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0);
-    let sb = Srgb::new(b.r as f32 / 255.0, b.g as f32 / 255.0, b.b as f32 / 255.0);
-    let la = Lab::from_color(sa);
-    let lb = Lab::from_color(sb);
-    let mixed: Srgb = la.mix(lb, t.clamp(0.0, 1.0)).into_color();
-    Rgb {
-        r: (mixed.red.clamp(0.0, 1.0) * 255.0).round() as u8,
-        g: (mixed.green.clamp(0.0, 1.0) * 255.0).round() as u8,
-        b: (mixed.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
     }
 }
 

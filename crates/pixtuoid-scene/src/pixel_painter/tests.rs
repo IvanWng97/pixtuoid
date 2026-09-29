@@ -2376,7 +2376,14 @@ fn furniture_corner_clip_does_not_panic() {
     // Centre each piece near the (0,0) corner so part of the sprite has a
     // negative px/py, exercising the `< 0` / out-of-range `continue` clamps.
     let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_area_rug(&mut buf, 1, 1, 10, 8, theme);
+    // A rug's box can't reach west of the buffer, only past its far corner.
+    let rug = crate::layout::Bounds {
+        x: 35,
+        y: 36,
+        width: 10,
+        height: 8,
+    };
+    paint_area_rug(&mut buf, rug, theme);
     paint_side_table(&mut buf, 1, 1, theme);
     super::furniture::paint_kitchen_island(&mut buf, 1, 1, theme);
     // No panic reaching here is the assertion (negative coords are clipped).

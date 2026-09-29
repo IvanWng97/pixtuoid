@@ -145,7 +145,7 @@ fn wash_object(painted: Rgb, wash: [(Rgb, f32); 2]) -> Rgb {
 pub(crate) use background::BaseFillCache;
 pub(crate) use dense::densest_frame;
 #[cfg(test)]
-pub(crate) use furniture::COOLER_WATER;
+pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
@@ -203,12 +203,12 @@ pub const NEON_PANEL_INNER_H: u16 = NEON_PANEL_H - 2 * NEON_PANEL_BORDER;
 const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
 const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
+use crate::atmosphere::Look;
 use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
 use anchors::compute_door_frame_idx;
 use background::{
-    daylight_floor_overlay, dim_floor_overlay, paint_ceiling_pool, paint_clock,
-    paint_corridor_runner, paint_floor_and_walls, paint_floor_lamp_halo, paint_neon_panel,
-    paint_shadow, time_of_day_look, Ellipse,
+    paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_and_walls,
+    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow, Ellipse,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
@@ -544,7 +544,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_w = ctx.layout.buf_w;
     let buf_h = ctx.layout.buf_h;
 
-    let look = time_of_day_look(&ctx.sky, ctx.theme);
+    let look = Look::resolve(&ctx.sky, ctx.theme);
     let top_wall_h = ctx.layout.wall_band_h();
     // The elevator door replaces the rightmost window, so `paint_floor_and_walls`
     // must skip a window that would otherwise bleed through the elevator frame.
@@ -565,23 +565,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
 
     // An empty floor reads dark because its four artificial lights go out with
     // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
+    paint_floor_wash(ctx.buf, top_wall_h, buf_h, look.floor_wash);
     let indoor_scale = frame.indoor_scale;
-    let dim_strength = background::NIGHT_FLOOR_DIM;
-    dim_floor_overlay(
-        ctx.buf,
-        top_wall_h,
-        buf_h,
-        look.darkness * dim_strength,
-        ctx.theme,
-    );
-    // The positive mirror of the night dim. Independent of occupancy — sun
-    // enters an empty office too.
-    daylight_floor_overlay(
-        ctx.buf,
-        top_wall_h,
-        buf_h,
-        look.spill_strength * background::DAYLIGHT_FLOOR_LIFT,
-    );
     const POOL_BASE: f32 = 0.15;
     const POOL_NIGHT_GAIN: f32 = 0.30;
     for pool in ceiling_pool_regions(ctx.layout) {
@@ -1105,55 +1090,15 @@ fn enqueue_gateway_mascots<'a>(
     frames
 }
 
-/// An area rug's place: centred on `pos`, `w` by `h` logical units. Both
-/// painters lay the office's rugs from these, so neither can drift from the
-/// other.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct RugPlacement {
-    pub(crate) pos: Point,
-    pub(crate) w: u16,
-    pub(crate) h: u16,
-}
-
-/// The rug under a meeting trio, spanning its table and both sofas.
-pub(crate) fn meeting_rug(layout: &Layout, trio: &crate::layout::MeetingTrio) -> RugPlacement {
-    let [ts, bs] = trio.sofas;
-    RugPlacement {
-        pos: trio.table,
-        w: 18,
-        h: bs
-            .y
-            .saturating_sub(ts.y)
-            .saturating_add(8)
-            .min(layout.buf_h.saturating_sub(trio.table.y).saturating_add(8)),
-    }
-}
-
-/// The rug the lounge couch stands on, reaching out in front of it.
-pub(crate) fn lounge_rug(couch: Point) -> RugPlacement {
-    RugPlacement {
-        pos: Point {
-            x: couch.x,
-            y: couch.y + 3,
-        },
-        w: 22,
-        h: 7,
-    }
-}
-
 /// Meeting-room rugs + sofas + tables. A south-of-table sofa faces away, so it
 /// y-sorts +3 to occlude its sitter; the north sofa stays +2 so insertion order
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        let rug = meeting_rug(layout, trio);
+        let rug = trio.rug(layout.buf_h);
         drawables.push(Drawable {
-            anchor_y: rug.pos.y.saturating_sub(rug.h / 2),
-            kind: DrawableKind::AreaRug {
-                pos: rug.pos,
-                width: rug.w,
-                height: rug.h,
-            },
+            anchor_y: rug.y,
+            kind: DrawableKind::AreaRug(rug),
         });
     }
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
@@ -1210,15 +1155,11 @@ fn enqueue_lounge_pantry_appliances<'a>(
 
     // Pushed before the character loop so the y-sort tie-break keeps the couch
     // behind its sitters; the rug anchors north of it so the couch sits on it.
-    if let Some(center) = layout.couch_sprite_center() {
-        let rug = lounge_rug(center);
+    if let Some(lounge) = layout.lounge {
+        let center = lounge.couch_center;
         drawables.push(Drawable {
             anchor_y: center.y.saturating_sub(2),
-            kind: DrawableKind::AreaRug {
-                pos: rug.pos,
-                width: rug.w,
-                height: rug.h,
-            },
+            kind: DrawableKind::AreaRug(lounge.rug()),
         });
         drawables.push(Drawable {
             anchor_y: z_sort_row(

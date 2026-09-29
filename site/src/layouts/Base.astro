@@ -90,7 +90,7 @@ const jsonLdSafe = jsonLd ? JSON.stringify(jsonLd).replace(/</g, '\\u003c') : nu
     >
       // THE site clock boundary (7/19) — one source of truth for this init, the
       // Escape fallback and the statusline clock, approximating the engine's own
-      // dawn/dusk ramp (time_of_day.rs).
+      // dawn/dusk ramp (pixtuoid-scene's `sky` model).
       window.__pixNight = function () {
         const h = new Date().getHours();
         return h >= 19 || h < 7;
