@@ -74,7 +74,8 @@ pub struct CutawayLabel {
 }
 
 /// What a cutaway frame is drawn with and the next one is too: the office
-/// itself, where [`Moment`] is what moves from frame to frame.
+/// itself, where the sky's look, `altitude` and `now` are what move from frame
+/// to frame.
 #[derive(Clone, Copy)]
 pub struct Office<'a> {
     /// Where everything stands, in LOGICAL units.
@@ -3450,7 +3451,7 @@ S B B B B B B S
 
     /// The glass half of the property: a window keeps its span while the sky
     /// and the city's lights move under it, so only the fingerprint can tell
-    /// noon from midnight, at the densest scale where the view is art pixels.
+    /// two moments twelve hours apart, at the densest scale where the view is art pixels.
     #[test]
     fn a_window_s_fingerprint_moves_with_the_moment_it_shows() {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
@@ -3492,7 +3493,7 @@ S B B B B B B S
             assert_eq!(span_a, span_b, "a window never moves");
             assert_ne!(
                 fp_a, fp_b,
-                "a window at {span_a:?} shows midnight and noon alike"
+                "a window at {span_a:?} looks the same twelve hours apart"
             );
         }
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
