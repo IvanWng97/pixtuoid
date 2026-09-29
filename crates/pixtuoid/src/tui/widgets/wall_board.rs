@@ -15,14 +15,14 @@ use crate::tui::renderer::clip_widget_rect;
 /// (laying text to the full outer `NEON_PANEL_W` overran it). Only the
 /// horizontal derives — the vertical is a half-block 2:1 coordinate system, so
 /// the 3-row height and the `+1` cell row stay literal.
-pub(super) const BOARD_W: u16 = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W;
+pub(super) const BOARD_W: u16 = pixtuoid_scene::layout::NEON_PANEL_INNER_W;
 
 /// The board text's top-left terminal cell = the neon panel's dark interior
 /// origin. BOTH `paint_wall_display` and `star_hit_rect` read THIS one helper,
 /// so the painted text and the click target share an origin.
 fn board_cell_origin(scene_rect: Rect) -> (u16, u16) {
     (
-        scene_rect.x + pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X,
+        scene_rect.x + pixtuoid_scene::layout::NEON_PANEL_INNER_X,
         scene_rect.y + 1,
     )
 }
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn star_hit_rect_fits_and_truncates() {
         let star_w = display_width(pixtuoid_scene::board::BOARD_STAR) as u16;
-        let inner_x = pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_X;
+        let inner_x = pixtuoid_scene::layout::NEON_PANEL_INNER_X;
         let star_x = inner_x + BOARD_W - star_w;
         let wide = star_hit_rect(full_bounds(120, 44)).expect("star fits");
         assert_eq!(

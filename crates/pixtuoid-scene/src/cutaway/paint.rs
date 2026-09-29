@@ -697,19 +697,19 @@ fn push_chairs(
 }
 
 /// The chair's box and top-left at a desk facing `facing`, placed and keyed by
-/// the classic painter's own rules
-/// ([`desk_chair_top_left`](crate::pixel_painter::desk_chair_top_left),
-/// [`desk_chair_z_key`](crate::pixel_painter::desk_chair_z_key)); `None` where
-/// those stand no chair.
+/// the layout's rules
+/// ([`desk_chair_top_left`](crate::layout::desk_chair_top_left),
+/// [`desk_chair_z_key`](crate::layout::desk_chair_z_key)); `None` where
+/// those stand no chair or the pack has none.
 fn chair_span(
     pack: &Pack,
     facing: crate::layout::Facing,
     desk: crate::layout::Point,
 ) -> Option<(Span, crate::layout::Point)> {
-    let at = crate::pixel_painter::desk_chair_top_left(pack, desk, facing)?;
+    let at = crate::layout::desk_chair_top_left(desk, facing)?;
     let (w, h) = art_size(pack, crate::pixel_painter::DESK_CHAIR_SPRITE)?;
     let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
-        .with_depth(crate::pixel_painter::desk_chair_z_key(desk, facing));
+        .with_depth(crate::layout::desk_chair_z_key(desk, facing));
     Some((span, at))
 }
 
@@ -2123,7 +2123,7 @@ mod tests {
             .expect("a back-turned desk stands a chair");
         assert_eq!(
             span.depth,
-            crate::pixel_painter::desk_chair_z_key(desk, crate::layout::Facing::North)
+            crate::layout::desk_chair_z_key(desk, crate::layout::Facing::North)
         );
     }
 
@@ -2467,7 +2467,7 @@ mod tests {
             order
                 .iter()
                 .any(|(_, k)| matches!(k, PieceKind::Chair { at } if Some(*at)
-                    == crate::pixel_painter::desk_chair_top_left(&chair_only, desk, crate::layout::Facing::North))),
+                    == crate::layout::desk_chair_top_left(desk, crate::layout::Facing::North))),
             "the undrawn sitter's desk lost its chair"
         );
     }
@@ -2504,7 +2504,7 @@ mod tests {
             return Some(true);
         }
         let (at, chair_span) =
-            crate::pixel_painter::desk_chair_top_left(pack, desk, crate::layout::Facing::North)
+            crate::layout::desk_chair_top_left(desk, crate::layout::Facing::North)
                 .zip(chair_span(pack, crate::layout::Facing::North, desk).map(|(s, _)| s))?;
         let chair = order
             .iter()
@@ -2535,7 +2535,7 @@ mod tests {
     fn a_chair_keeps_its_order_to_its_sitter_through_the_settle() {
         use crate::layout::Facing;
         let (layout, pack, frames, desk) = sit_down(Facing::North, 0);
-        let seat_key = crate::pixel_painter::desk_chair_z_key(desk, Facing::North);
+        let seat_key = crate::layout::desk_chair_z_key(desk, Facing::North);
         let orders: Vec<(usize, bool)> = frames
             .iter()
             .enumerate()

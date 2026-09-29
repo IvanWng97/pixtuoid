@@ -795,7 +795,7 @@ fn footer_cross_floor_alarm_points_at_waiting_floor() {
 fn board_width_pins_to_neon_panel_interior() {
     assert_eq!(
         BOARD_W,
-        pixtuoid_scene::pixel_painter::NEON_PANEL_INNER_W,
+        pixtuoid_scene::layout::NEON_PANEL_INNER_W,
         "board width must equal the painted panel's dark interior width"
     );
 }

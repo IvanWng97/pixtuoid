@@ -31,8 +31,8 @@ use crate::layout::{Point, Size};
 use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
-/// size — hand-tuned to the sprite art so the steam sits within
-/// [`super::PANTRY_COFFEE_COLS_LARGE`] / [`super::PANTRY_COFFEE_COLS_SMALL`].
+/// size — hand-tuned to the sprite art so the steam sits within the coffee
+/// machine ([`SceneLayout::coffee_machine`](crate::layout::SceneLayout::coffee_machine)).
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
@@ -69,7 +69,8 @@ pub(super) enum DrawableKind<'a> {
         desk: Point,
         /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
         facing: crate::layout::Facing,
-        has_cabinet: bool,
+        /// Where its filing cabinet stands, if it has one.
+        cabinet: Option<Point>,
         screen_glow: Option<Rgb>,
         lights: crate::lighting::DeskLights,
         props: DeskProps,
@@ -175,8 +176,8 @@ pub(super) enum DrawableKind<'a> {
         piece: crate::layout::WallPiece,
         rows: std::ops::Range<u16>,
     },
-    /// Meeting-room coat rack, y-sorted at its base row (the bottom of its
-    /// `MeetingRoom::coat_rack_rect`). `pos` is the pole top.
+    /// Meeting-room coat rack, y-sorted at its base row (the bottom of
+    /// `coat_rack_rect_at` its pole top). `pos` is the pole top.
     CoatRack {
         pos: Point,
     },
@@ -282,22 +283,16 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         DrawableKind::DeskCubicle {
             desk,
             facing,
-            has_cabinet,
+            cabinet,
             screen_glow,
             lights,
             props,
         } => {
-            if *has_cabinet {
-                if let Some(cab) = pack
-                    .animation("filing_cabinet")
-                    .and_then(|a| a.frames().first())
-                {
-                    let cab_x = desk.x.saturating_sub(cab.width() + 1);
-                    let cab_y = desk.y;
-                    if cab_y + cab.height() <= buf.height() {
-                        blit_frame(cab, cab_x, cab_y, buf);
-                    }
-                }
+            if let Some((at, cab)) = cabinet.zip(
+                pack.animation("filing_cabinet")
+                    .and_then(|a| a.frames().first()),
+            ) {
+                blit_frame(cab, at.x, at.y, buf);
             }
             let art = pack
                 .animation_or_source(desk_sprite_name(*facing))
@@ -627,10 +622,8 @@ mod tests {
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
-        for (counter_w, (lo, hi)) in [
-            (large_w, crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE),
-            (large_w - 1, crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL),
-        ] {
+        for counter_w in [large_w, large_w - 1] {
+            let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
             let anim = crate::pixel_painter::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
@@ -657,7 +650,7 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                has_cabinet: false,
+                cabinet: None,
                 screen_glow: None,
                 lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps {
@@ -859,13 +852,18 @@ mod tests {
         assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
-        let desk = Point { x: 40, y: 30 };
+        let layout = crate::layout::Layout::compute(160, 120, None).expect("fits");
+        let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
+        let desk = layout.home_desks[first.0];
+        let cabinet = layout
+            .filing_cabinet_top_left(first)
+            .expect("desk 0 stands a cabinet");
         let cab = pack
             .animation("filing_cabinet")
             .and_then(|a| a.frames().first())
             .expect("filing_cabinet anim");
         let bg = Rgb { r: 1, g: 2, b: 3 };
-        let mut buf = RgbBuffer::filled(120, 80, bg);
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, bg);
         let d = Drawable {
             anchor_y: desk.y
                 + crate::layout::furniture_def(crate::layout::Furniture::Desk)
@@ -874,7 +872,7 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                has_cabinet: true,
+                cabinet: Some(cabinet),
                 screen_glow: None,
                 lights: crate::lighting::DeskLights::new(desk, 0.0, 0.0),
                 props: DeskProps::default(),
@@ -890,12 +888,10 @@ mod tests {
                 theme: theme(),
             },
         );
-        // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
-        let cab_x = desk.x.saturating_sub(cab.width() + 1);
         let mut cab_painted = false;
         for dy in 0..cab.height() {
             for dx in 0..cab.width() {
-                if buf.get(cab_x + dx, desk.y + dy) != bg {
+                if buf.get(cabinet.x + dx, cabinet.y + dy) != bg {
                     cab_painted = true;
                 }
             }
