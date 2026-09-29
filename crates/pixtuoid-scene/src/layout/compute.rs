@@ -162,8 +162,9 @@ fn room_fits_furniture(mr: &Bounds) -> bool {
     mr.width >= MEETING_FURNITURE_MIN_W && mr.height >= MeetingRoom::trio_fit_h()
 }
 
-/// The floor's zones, fixed before anything is placed in them: the side rooms
-/// west of the divider, and the cubicle band with its aisle east of it.
+/// The floor's zones, fixed before the free-standing furniture, plants and decor
+/// are placed in them: the side rooms west of the divider, and the cubicle band
+/// with its aisle east of it.
 struct FloorPlan {
     buf_w: u16,
     top_margin: u16,
@@ -178,7 +179,7 @@ struct FloorPlan {
     pod_grid: PodGrid,
     pantry: Option<Bounds>,
     pantry_counter_size: Size,
-    /// Indexed by room id.
+    /// Indexed by room id; room 0 is the top room.
     meeting_rooms: Vec<MeetingRoom>,
 }
 
@@ -223,6 +224,8 @@ impl FloorPlan {
             top_margin + half_split
         };
 
+        // The second room only ever joins a first, so room 0 is always the top one.
+        debug_assert!(!has_dual_meeting || has_meeting);
         let meeting_room = if has_meeting {
             debug_assert!(
                 has_pantry || has_dual_meeting,
@@ -303,8 +306,8 @@ impl FloorPlan {
             couch_to_desk_extra,
         };
 
-        // Vec index IS the room_id: a room too small for its trio still occupies its slot
-        // with `trio: None`, so bounds and furniture can't mis-join. Room 0 is the apron room.
+        // A room too small for its trio still occupies its slot with `trio: None`, so
+        // bounds and furniture can't mis-join.
         let mut meeting_rooms: Vec<MeetingRoom> = Vec::new();
         for (room_idx, room) in [meeting_room, meeting_room_2].into_iter().enumerate() {
             let Some(mr) = room else { continue };
@@ -326,17 +329,22 @@ impl FloorPlan {
         }
     }
 
-    /// Room 0, the meeting room whose apron the wall decor drains around; a
-    /// second room only ever joins a first.
-    fn apron_room(&self) -> Option<Bounds> {
-        self.meeting_rooms.first().map(|r| r.bounds)
-    }
-
-    /// Whether anything stands west of the divider.
-    fn has_side_rooms(&self) -> bool {
-        !self.meeting_rooms.is_empty() || self.pantry.is_some()
+    /// Room 0, the top meeting room.
+    fn first_meeting_room(&self) -> Option<&MeetingRoom> {
+        self.meeting_rooms.first()
     }
 }
+
+// Every variant stands a side room west of the divider, so the whiteboard, which
+// hangs by it, needs no gate of its own.
+const _: () = {
+    let mut i = 0;
+    while i < FloorVariant::ALL.len() {
+        let v = FloorVariant::ALL[i];
+        assert!(v.has_meeting() || v.has_pantry_base());
+        i += 1;
+    }
+};
 
 pub(super) fn compute_with_seed(
     buf_w: u16,
@@ -423,28 +431,33 @@ pub(super) fn compute_with_seed(
     .into_iter()
     // West wall only — clear of the east-wall door and the central sofa/table column;
     // the size gate keeps plant + pad from squeezing the strip below routable width.
-    .chain(plan.apron_room().into_iter().flat_map(|mr| {
-        if mr.width < 30 || mr.height < 30 {
-            Vec::new()
-        } else {
-            vec![
-                PlantItem {
-                    kind: PlantKind::Tall,
-                    pos: Point {
-                        x: mr.x + 5,
-                        y: mr.y + 6,
-                    },
-                },
-                PlantItem {
-                    kind: PlantKind::Flower,
-                    pos: Point {
-                        x: mr.x + 5,
-                        y: mr.y + mr.height.saturating_sub(7),
-                    },
-                },
-            ]
-        }
-    }))
+    .chain(
+        plan.first_meeting_room()
+            .map(|r| r.bounds)
+            .into_iter()
+            .flat_map(|mr| {
+                if mr.width < 30 || mr.height < 30 {
+                    Vec::new()
+                } else {
+                    vec![
+                        PlantItem {
+                            kind: PlantKind::Tall,
+                            pos: Point {
+                                x: mr.x + 5,
+                                y: mr.y + 6,
+                            },
+                        },
+                        PlantItem {
+                            kind: PlantKind::Flower,
+                            pos: Point {
+                                x: mr.x + 5,
+                                y: mr.y + mr.height.saturating_sub(7),
+                            },
+                        },
+                    ]
+                }
+            }),
+    )
     .collect();
 
     // AFTER `door`: the tank prices its east limit against the elevator column.
@@ -701,7 +714,7 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
         pod_grid,
         ..
     } = *plan;
-    let meeting_room = plan.meeting_rooms.first();
+    let meeting_room = plan.first_meeting_room();
     let bookshelf_w = furniture_def(WallDecor::Bookshelf.furniture()).visual.w;
     let screen_w = furniture_def(WallDecor::MeetingScreen.furniture()).visual.w;
     // A room narrower than the screen would hang it ACROSS the east wall — dropping it
@@ -735,29 +748,27 @@ fn place_wall_decor(plan: &FloorPlan, door: Option<Point>) -> Vec<WallDecorItem>
             y: top_margin.saturating_sub(13),
         },
     });
-    if plan.has_side_rooms() {
-        // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
-        // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
-        let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
-        let hint = Point {
-            x: mid_x + 3,
-            y: top_margin + usable_h / 3,
-        };
-        let snapped = wb_def
-            .ground_rect(Anchor::TopLeft, hint)
-            .and_then(|(ground, size)| {
-                let y = pod_grid.snap_inter_pod_ground_y(cubicle_band, ground.y, size.h)?;
-                Some(Point {
-                    x: hint.x,
-                    y: y.saturating_sub(ground.y - hint.y),
-                })
-            });
-        if let Some(pos) = snapped {
-            wall_decor.push(WallDecorItem {
-                kind: WallDecor::Whiteboard,
-                pos,
-            });
-        }
+    // `usable_h / 3` is a hint, not a slot: unsnapped it drops the board on a desk row
+    // or in the intra-pod gap, where the wheel strip plugs the pod's own west lane.
+    let wb_def = furniture_def(WallDecor::Whiteboard.furniture());
+    let hint = Point {
+        x: mid_x + 3,
+        y: top_margin + usable_h / 3,
+    };
+    let snapped = wb_def
+        .ground_rect(Anchor::TopLeft, hint)
+        .and_then(|(ground, size)| {
+            let y = pod_grid.snap_inter_pod_ground_y(cubicle_band, ground.y, size.h)?;
+            Some(Point {
+                x: hint.x,
+                y: y.saturating_sub(ground.y - hint.y),
+            })
+        });
+    if let Some(pos) = snapped {
+        wall_decor.push(WallDecorItem {
+            kind: WallDecor::Whiteboard,
+            pos,
+        });
     }
     if let (Some(_), Some(sx)) = (meeting_room, meeting_screen_x) {
         wall_decor.push(WallDecorItem {
