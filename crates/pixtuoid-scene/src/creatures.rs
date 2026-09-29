@@ -459,6 +459,7 @@ mod tests {
         let reachable = ReachSet::from_mask(&mask, Point { x: 20, y: 20 });
         let mut layout = crate::layout::Layout::compute(w, h, Some(4)).expect("layout fits");
         layout.home_desks = vec![Point { x: 20, y: 30 }];
+        layout.desk_facings = vec![crate::layout::Facing::South];
         layout.waypoints.clear();
         layout.meeting_rooms.clear();
         layout.corridor = Some(Bounds {

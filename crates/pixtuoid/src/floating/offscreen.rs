@@ -346,7 +346,7 @@ pub fn paint_wall_board_into_surface(
     scale: i32,
     theme: &Theme,
 ) {
-    use pixtuoid_scene::pixel_painter::{
+    use pixtuoid_scene::layout::{
         NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y,
     };
     if scale <= 0 {

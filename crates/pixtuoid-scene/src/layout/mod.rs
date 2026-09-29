@@ -13,18 +13,19 @@ mod mask;
 mod placement;
 mod reach;
 mod rooms;
+mod roster;
 mod windows;
 
 // The deep interface is `SceneLayout::{stand_point,approach_point}`; these free
 // fns stay for this crate's own synthetic-mask unit tests.
 pub(crate) use approach::{approach_point, first_reachable_on_side, stand_point};
 pub use compute::{min_layout_size, PANTRY_COUNTER_LARGE_W};
-pub(crate) use decor::repels_plants;
 pub use decor::{
     desk_ceiling_pool_center, desk_furniture_def, desk_walk_anchor_facing, furniture_def,
     seated_foot_cell, ApproachSides, DwellWindow, Facing, Furniture, FurnitureDef, PlantKind,
     PodDecor, WallDecor, WaypointKind, DESK_APPROACH, SEAT_RENDER_Y_OFF, WALKING_Y_OFF,
 };
+pub(crate) use decor::{repels_plants, seated_z_key};
 pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
@@ -32,6 +33,15 @@ pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
 pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
+#[cfg(test)]
+pub(crate) use roster::{coffee_machine_cols, Depth, NEON_PANEL_H};
+pub(crate) use roster::{
+    desk_chair_top_left, desk_chair_z_key, CLOCK, NEON_PANEL, NEON_PANEL_BORDER,
+};
+pub use roster::{
+    FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X,
+    NEON_PANEL_INNER_Y, NEON_PANEL_W,
+};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
@@ -398,87 +408,50 @@ impl SceneLayout {
     /// Is `p` clear of the furniture sprites that PAINT OVER it? Walkable is the
     /// GROUND rule (invariant #6), so the cell in front of a desk is legitimately
     /// walkable AND legitimately covered — fine to walk THROUGH, wrong to park in.
-    ///
-    /// Destructured with NO `..`, the same guarantee `placement_sweep::pieces`
-    /// takes: a new collection is a compile error HERE, not a finding two review
-    /// rounds later. Three kinds carry a `0x0` table `visual` — the pantry's
-    /// sprite is runtime-sized, and a meeting-sofa seat's or island stand's is
-    /// another row's — so each is read from its own authority below.
     pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
-        let SceneLayout {
-            home_desks,
-            waypoints,
-            plants,
-            pod_decor,
-            wall_decor,
-            lounge,
-            meeting_rooms,
-            pantry,
-            desk_facings: _, // a desk ATTRIBUTE, not a sprite
-            room_walls: _,   // translucent glass; a creature behind it still reads
-            door: _,         // architecture, and the band it punches is not walkable
-            door_threshold: _,
-            doorways: _,
-            wall_pieces: _,
-            corridor: _,     // a zone, not a sprite
-            cubicle_band: _, // containers
-            cubicle_aisle: _,
-            buf_w: _,
-            buf_h: _,
-            top_margin: _,
-            walkable: _,
-            reachable: _,
-        } = self;
-        let inside = |tl: Point, sz: Size| {
-            p.x >= tl.x && p.x < tl.x + sz.w && p.y >= tl.y && p.y < tl.y + sz.h
-        };
-        let covered = |anchor: Anchor, pos: Point, kind: Furniture| {
-            let (tl, sz) = furniture_def(kind).visual_rect(anchor, pos);
-            inside(tl, sz)
-        };
-        let table = home_desks
-            .iter()
-            .any(|&d| covered(Anchor::TopLeft, d, Furniture::Desk))
-            || waypoints
-                .iter()
-                .any(|w| covered(Anchor::Center, w.pos, w.kind.furniture()))
-            || plants
-                .iter()
-                .any(|pl| covered(Anchor::Center, pl.pos, pl.kind.furniture()))
-            || pod_decor
-                .iter()
-                .any(|d| covered(Anchor::Center, d.pos, d.kind.furniture()))
-            // Wall decor is NOT out as a class: the whiteboard is free-standing
-            // floor furniture standing in an inter-pod aisle.
-            || wall_decor
-                .iter()
-                .any(|d| covered(Anchor::TopLeft, d.pos, d.kind.furniture()));
-        let lounge = lounge.is_some_and(|l| {
-            covered(Anchor::Center, l.couch_center, Furniture::Couch)
-                || covered(Anchor::Center, l.floor_lamp, Furniture::FloorLamp)
-                || covered(Anchor::Center, l.side_table, Furniture::LoungeSideTable)
-                || l.fish_tank
-                    .is_some_and(|t| covered(Anchor::Center, t, Furniture::FishTank))
-        });
-        let runtime = waypoints.iter().any(|w| {
-            w.kind == WaypointKind::Pantry && {
-                let sz = self.pantry_counter_size();
-                inside(
-                    placement::anchored_top_left(Anchor::Center, w.pos, sz.w, sz.h),
-                    sz,
-                )
-            }
-        }) || meeting_rooms.iter().any(|r| {
-            r.trio.is_some_and(|tr| {
-                tr.sofas
-                    .iter()
-                    .any(|&s| covered(Anchor::Center, s, Furniture::MeetingSofaBody))
-                    || covered(Anchor::Center, tr.table, Furniture::MeetingTable)
-            })
-        }) || pantry
-            .and_then(|pa| pa.kitchen_island)
-            .is_some_and(|i| covered(Anchor::Center, i, Furniture::KitchenIsland));
-        !(table || lounge || runtime)
+        let inside =
+            |b: Bounds| p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+        !self.fixtures().any(|f| {
+            let covers = match f.kind {
+                FixtureKind::Desk(_)
+                | FixtureKind::Station { .. }
+                | FixtureKind::Plant { .. }
+                | FixtureKind::Pod { .. }
+                // Not out as a class: the whiteboard is free-standing floor
+                // furniture standing in an inter-pod aisle.
+                | FixtureKind::Wall { .. }
+                | FixtureKind::MeetingSofa { .. }
+                | FixtureKind::MeetingTable { .. }
+                | FixtureKind::MeetingChair { .. }
+                | FixtureKind::LoungeCouch
+                | FixtureKind::SideTable
+                | FixtureKind::FloorLamp
+                | FixtureKind::FishTank
+                | FixtureKind::KitchenIsland => true,
+                // Flat on the floor: whatever stands on them paints over them.
+                FixtureKind::MeetingRug { .. }
+                | FixtureKind::LoungeRug
+                | FixtureKind::Doormat { .. }
+                | FixtureKind::PantryMat
+                | FixtureKind::IslandMat
+                | FixtureKind::Runner => false,
+                // Hung in the backdrop, under the whole sorted scene.
+                FixtureKind::NoticeBoard { .. } | FixtureKind::NeonSign | FixtureKind::Clock => {
+                    false
+                }
+                // Architecture, and the band it punches is not walkable.
+                FixtureKind::Door => false,
+                // They do paint over what stands behind them, but covering them
+                // moves where the pet and the mascots rest: a look change, left
+                // to its own decision.
+                FixtureKind::CoatRack { .. }
+                | FixtureKind::FilingCabinet(_)
+                | FixtureKind::DeskChair(_)
+                | FixtureKind::WaterCooler
+                | FixtureKind::TrashBin => false,
+            };
+            covers && inside(f.visual)
+        })
     }
 
     /// Which way the desk AT `pos` seats its occupant (an O(desks) scan).
@@ -498,11 +471,6 @@ impl SceneLayout {
             "desk_facings is index-parallel to home_desks; a short one seats the tail viewer-facing and passes every geometry invariant"
         );
         self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
-    }
-
-    /// Whether desk `i` stands a filing cabinet beside it.
-    pub(crate) fn desk_has_cabinet(&self, i: FloorLocalDeskIndex) -> bool {
-        i.0.is_multiple_of(2)
     }
 
     /// The visible top window-wall band height in px (`compute` names the same
