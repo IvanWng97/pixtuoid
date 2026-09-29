@@ -500,6 +500,11 @@ impl SceneLayout {
         self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }
 
+    /// Whether desk `i` stands a filing cabinet beside it.
+    pub(crate) fn desk_has_cabinet(&self, i: FloorLocalDeskIndex) -> bool {
+        i.0.is_multiple_of(2)
+    }
+
     /// The visible top window-wall band height in px (`compute` names the same
     /// quantity `top_wall_h`). Post-construction render sites read it here so
     /// the derivation lives once.

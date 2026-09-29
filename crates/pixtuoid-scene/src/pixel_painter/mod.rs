@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer, Sprite};
-use pixtuoid_core::state::{ActivityState, FloorLocalDeskIndex};
+use pixtuoid_core::state::{DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
@@ -147,7 +147,7 @@ pub(crate) use dense::densest_frame;
 pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-pub(crate) use sim::{sim_step, SimStores};
+pub(crate) use sim::{desk_occupant, sim_step, PetInputs, SimInputs, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub(crate) use wall::paint_wall;
 
@@ -204,7 +204,6 @@ const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_
 const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
 use crate::atmosphere::Look;
-use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
 use crate::ground::Ellipse;
 use anchors::compute_door_frame_idx;
 use background::{
@@ -261,9 +260,6 @@ pub fn hour_is_day(hour: f32) -> bool {
 pub fn is_day_at(now: std::time::SystemTime) -> bool {
     crate::sky::hour_is_day(crate::sky::local_hour_frac(now))
 }
-
-// A reference to the window `CoffeeState::record` refreshes on, not a copy.
-const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;
 
 /// Z-sort offset from a center-pinned sprite's center to its SOUTH (front) row.
 /// A sprite blitted at `py = center - h/2` souths at `center + (h - 1) / 2` —
@@ -338,9 +334,6 @@ struct PaintCtx<'a> {
     base_fill: &'a mut background::BaseFillCache,
     theme: &'a crate::theme::Theme,
     floor: crate::floor::FloorMeta,
-    active_pet: Option<&'a crate::pet::PetState>,
-    floor_pet: Option<&'a crate::pet::Pet>,
-    coffee: &'a HashMap<pixtuoid_core::AgentId, SystemTime>,
     motion: &'a HashMap<pixtuoid_core::AgentId, MotionState>,
     door_anim_max_ms: u64,
     debug_walkable: bool,
@@ -359,12 +352,18 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             neon: &mut ctx.store.neon,
             chitchat: &mut *ctx.chitchat_state,
         },
-        ctx.scene,
-        ctx.layout,
-        ctx.pack,
-        ctx.coffee,
-        ctx.floor.floor_idx,
-        ctx.now,
+        SimInputs {
+            scene: ctx.scene,
+            layout: ctx.layout,
+            pack: ctx.pack,
+            coffee: ctx.coffee,
+            pets: PetInputs {
+                pet: ctx.floor_pet,
+                petting: ctx.active_pet,
+            },
+            floor: ctx.floor,
+            now: ctx.now,
+        },
     );
     let (pet_pos, mascots) = paint_frame(
         &mut PaintCtx {
@@ -378,9 +377,6 @@ pub fn render_to_rgb_buffer(ctx: &mut PixelCtx<'_>) -> PixelPassResult {
             base_fill: &mut ctx.store.base_fill,
             theme: ctx.theme,
             floor: ctx.floor,
-            active_pet: ctx.active_pet,
-            floor_pet: ctx.floor_pet,
-            coffee: ctx.coffee,
             motion: &ctx.store.motion,
             door_anim_max_ms: ctx.store.door_anim_max_ms,
             debug_walkable: ctx.debug_walkable,
@@ -649,14 +645,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
             + agents.len(),
     );
 
-    enqueue_desk_cubicles(
-        ctx,
-        agents,
-        &frame.seated_agents,
-        look.darkness,
-        indoor_scale,
-        &mut drawables,
-    );
+    enqueue_desk_cubicles(ctx, frame, look.darkness, indoor_scale, &mut drawables);
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
@@ -666,8 +655,8 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     enqueue_floor_fixtures(ctx, agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
-    let resolved_pet_pos = enqueue_pet(ctx, agents, &mut drawables);
-    let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
+    let resolved_pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
+    let resolved_mascots = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_desk_chairs(ctx.layout, ctx.pack, &mut drawables);
@@ -848,16 +837,6 @@ fn desk_light(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> Desk
     }
 }
 
-/// The agent whose home desk is `local`, while they have not begun to leave.
-pub(crate) fn desk_occupant(
-    agents: &[AgentSlot],
-    local: FloorLocalDeskIndex,
-) -> Option<&AgentSlot> {
-    agents
-        .iter()
-        .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none())
-}
-
 /// The glow of a desk's screen: its seated occupant's tool, on a desk that
 /// faces north. A far-seated desk shows the monitor's BACK — a glow there would
 /// be light leaking out of a case. Both profiles light screens from this.
@@ -872,14 +851,14 @@ pub(crate) fn desk_screen_glow(
         .and_then(|a| palette::tool_glow_tint(a, &theme.tool_glow))
 }
 
-/// Desk cubicles — each carries its cabinet + lamp + screens. The desk
-/// sorts one row past its visual south row, just past the seated worker's feet,
-/// so the sitter stays visually behind it. Z is a VISUAL property: it tracks
-/// the sprite, not the blocked ground.
+/// Desk cubicles — each one z-unit: the desk, its lamp, screens and props, and a
+/// filing cabinet where [`desk_has_cabinet`](crate::layout::SceneLayout::desk_has_cabinet)
+/// stands one. The desk sorts one row past its visual south row, just past the
+/// seated worker's feet, so the sitter stays visually behind it. Z is a VISUAL
+/// property: it tracks the sprite, not the blocked ground.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
-    agents: &[AgentSlot],
-    seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
+    frame: &SimFrame,
     darkness: f32,
     indoor_scale: f32,
     drawables: &mut Vec<Drawable<'a>>,
@@ -887,107 +866,52 @@ fn enqueue_desk_cubicles<'a>(
     for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
-        let occupant = desk_occupant(agents, local);
+        let occupant = desk_occupant(&frame.agents, local);
         let facing = ctx.layout.desk_facing(local);
         let light = desk_light(facing, darkness, indoor_scale);
         let screen_glow = desk_screen_glow(
             occupant,
             facing,
-            seated_agents.get(&local).copied().unwrap_or(false),
+            frame.seated_agents.get(&local).copied().unwrap_or(false),
             ctx.theme,
         );
-        let has_coffee = occupant.is_some_and(|a| ctx.coffee.contains_key(&a.agent_id));
-        let coffee_steam = has_coffee
-            && occupant.is_some_and(|a| {
-                ctx.coffee
-                    .get(&a.agent_id)
-                    .and_then(|t| ctx.now.duration_since(*t).ok())
-                    .is_some_and(|d| d.as_secs() < COFFEE_STEAM_WINDOW_SECS)
-            });
-        let token_tier = occupant.map_or(0, |a| crate::token_meter::token_tier(a.tokens_used));
-        let sheet_fall = occupant.and_then(|a| crate::token_meter::sheet_fall_dist(a, ctx.now));
         drawables.push(Drawable {
             anchor_y: desk.y + desk_def.visual.h,
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing,
-                has_cabinet: i % 2 == 0,
+                has_cabinet: ctx.layout.desk_has_cabinet(local),
                 screen_glow,
                 lamp: light.lamp,
                 screen_idle: light.screen_idle,
-                has_coffee,
-                coffee_steam,
-                token_tier,
-                sheet_fall,
+                props: frame.desk(local),
             },
         });
     }
 }
 
-/// The office pet (one per floor). An `active_pet` (mid heart-animation) is
-/// pinned in place; otherwise `pet_position` roams it around the idle desks.
-/// y-sorted at the CHOSEN anim's south row, since the anims differ in height —
-/// a hardcoded offset once painted a sleeping pet over a character in front.
+/// The office pet, y-sorted at its anim's south row, since the anims differ in
+/// height — a hardcoded offset once painted a sleeping pet over a character in
+/// front.
 fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
-    agents: &[AgentSlot],
+    pet: sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
-) -> Option<PetFrame> {
-    let kind = ctx.floor_pet.map(|p| p.kind)?;
-    let idle_desk_indices: Vec<FloorLocalDeskIndex> = agents
-        .iter()
-        .filter(|a| {
-            matches!(a.state, ActivityState::Idle)
-                && ctx
-                    .layout
-                    .home_desk(a.desk_index.single_floor_local())
-                    .is_some()
-                && a.exiting_at.is_none()
-        })
-        .map(|a| a.desk_index.single_floor_local())
-        .collect();
-    let all_idle = agents
-        .iter()
-        .all(|a| matches!(a.state, ActivityState::Idle));
-
-    let active_pet = ctx
-        .active_pet
-        .filter(|p| p.is_active(ctx.now) && p.kind == kind && p.floor_idx == ctx.floor.floor_idx);
-    let pet_data = if let Some(pet) = active_pet {
-        Some((
-            pet.pet_pos,
-            false,
-            kind.sit_anim(),
-            0usize,
-            Some(pet.elapsed_ms(ctx.now)),
-        ))
-    } else {
-        pet_position(
-            kind,
-            ctx.layout,
-            ctx.pack,
-            ctx.now,
-            &idle_desk_indices,
-            all_idle,
-            ctx.floor.floor_seed,
-        )
-        .map(|(pos, flip, anim, frame)| (pos, flip, anim, frame, None))
-    };
-    let (pos, flip, anim_name, frame_idx, pet_elapsed) = pet_data?;
+) -> PetFrame {
     /// Fallback when a custom pack lacks the resolved pet anim: the bundled
     /// cat's size, so the z-sort row and the canvas clamp stay sane — the blit
     /// itself no-ops, `paint_drawable` bails.
     const PET_FALLBACK: Size = Size { w: 8, h: 6 };
     let (pet_w, pet_h) = ctx
         .pack
-        .animation(anim_name)
+        .animation(pet.anim_name)
         .and_then(|a| a.frames().first())
         .map_or((PET_FALLBACK.w, PET_FALLBACK.h), |f| {
             (f.width(), f.height())
         });
     let pos = anchors::keep_sprite_on_canvas(
         Anchor::Center,
-        pos,
+        pet.pos,
         Size { w: pet_w, h: pet_h },
         Size {
             w: ctx.layout.buf_w,
@@ -997,91 +921,75 @@ fn enqueue_pet<'a>(
     drawables.push(Drawable {
         anchor_y: z_sort_row(Anchor::Center, pos, pet_h),
         kind: DrawableKind::Pet {
-            kind,
+            kind: pet.kind,
             pos,
-            flip,
-            anim_name,
-            frame_idx,
-            pet_elapsed_ms: pet_elapsed,
+            flip: pet.flip,
+            anim_name: pet.anim_name,
+            frame_idx: pet.frame_idx,
+            pet_elapsed_ms: pet.petted_ms,
         },
     });
-    Some(PetFrame {
+    PetFrame {
         pos,
-        anim: anim_name,
-        kind,
-    })
+        anim: pet.anim_name,
+        kind: pet.kind,
+    }
 }
 
-/// Enqueue every gateway mascot present in `daemons` (only the ground floor
-/// carries the roster, so each mascot shows once). The runtime is responsible
-/// for KEEPING the roster honest, so "entry present" tracks "connected +
-/// alive", not merely "a hook arrived".
+/// Enqueue the gateway mascots, each fitted to the canvas.
 fn enqueue_gateway_mascots<'a>(
     ctx: &PaintCtx<'_>,
+    mascots: &[sim::MascotPlacement],
     drawables: &mut Vec<Drawable<'a>>,
 ) -> Vec<MascotFrame> {
-    let mut frames = Vec::new();
-    for (source, instance, presence) in ctx.scene.daemons() {
-        let Some(def) = gateway_mascot_def(source) else {
-            continue;
-        };
-        let seed = crate::creatures::mascot_seed(source, instance);
-        let Some((pos, anim_name, frame_idx)) =
-            mascot_position(ctx.layout, presence, def.walk, def.rest, ctx.now, seed)
-        else {
-            continue;
-        };
-        /// Fallback when a custom pack lacks the mascot anim: the bundled
-        /// lobster's size, so the z-sort row and the canvas clamp stay sane —
-        /// the blit itself no-ops.
-        const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
-        let (mascot_w, mascot_h) = ctx
-            .pack
-            .animation(anim_name)
-            .and_then(|a| a.frames().first())
-            .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
-                (f.width(), f.height())
+    mascots
+        .iter()
+        .map(|m| {
+            /// Fallback when a custom pack lacks the mascot anim: the bundled
+            /// lobster's size, so the z-sort row and the canvas clamp stay sane —
+            /// the blit itself no-ops.
+            const MASCOT_FALLBACK: Size = Size { w: 14, h: 12 };
+            let (mascot_w, mascot_h) = ctx
+                .pack
+                .animation(m.anim_name)
+                .and_then(|a| a.frames().first())
+                .map_or((MASCOT_FALLBACK.w, MASCOT_FALLBACK.h), |f| {
+                    (f.width(), f.height())
+                });
+            let pos = anchors::keep_sprite_on_canvas(
+                Anchor::Center,
+                m.pos,
+                Size {
+                    w: mascot_w,
+                    h: mascot_h,
+                },
+                Size {
+                    w: ctx.layout.buf_w,
+                    h: ctx.layout.buf_h,
+                },
+            );
+            drawables.push(Drawable {
+                anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
+                kind: DrawableKind::GatewayMascot {
+                    pos,
+                    anim_name: m.anim_name,
+                    frame_idx: m.frame_idx,
+                    run_count: m.run_count,
+                    degraded: m.state == DaemonState::Degraded,
+                },
             });
-        let pos = anchors::keep_sprite_on_canvas(
-            Anchor::Center,
-            pos,
-            Size {
+            MascotFrame {
+                pos,
                 w: mascot_w,
                 h: mascot_h,
-            },
-            Size {
-                w: ctx.layout.buf_w,
-                h: ctx.layout.buf_h,
-            },
-        );
-        let run_count = presence.in_flight_runs.len() as u32;
-        let degraded = presence.display_state() == pixtuoid_core::state::DaemonState::Degraded;
-        drawables.push(Drawable {
-            anchor_y: z_sort_row(Anchor::Center, pos, mascot_h),
-            kind: DrawableKind::GatewayMascot {
-                pos,
-                anim_name,
-                frame_idx,
-                run_count,
-                degraded,
-            },
-        });
-        frames.push(MascotFrame {
-            pos,
-            w: mascot_w,
-            h: mascot_h,
-            name: def.display_name,
-            // Only worth showing when there is something to disambiguate, and
-            // that is per SOURCE: two gateways of ONE daemon need their ports,
-            // while two daemon sources already read apart by name and sprite.
-            instance: (ctx.scene.daemons().filter(|(s, _, _)| *s == source).count() > 1)
-                .then(|| instance.as_str().to_string()),
-            busy: presence.is_busy(),
-            degraded,
-            active_sessions: presence.active_sessions,
-        });
-    }
-    frames
+                name: m.name,
+                instance: m.instance.clone(),
+                busy: m.state == DaemonState::Busy,
+                degraded: m.state == DaemonState::Degraded,
+                active_sessions: m.active_sessions,
+            }
+        })
+        .collect()
 }
 
 /// Meeting-room rugs + sofas + tables. A south-of-table sofa faces away, so it
