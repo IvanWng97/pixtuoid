@@ -898,6 +898,37 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::FrameCountMismatch
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::FrameCountMismatch
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::FrameCountMismatch
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::FrameCountMismatch
+pub struct pixtuoid_core::sprite::format::HairLayers
+impl pixtuoid_core::sprite::format::HairLayers
+pub fn pixtuoid_core::sprite::format::HairLayers::behind(&self) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
+pub fn pixtuoid_core::sprite::format::HairLayers::over(&self) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
+impl core::clone::Clone for pixtuoid_core::sprite::format::HairLayers
+pub fn pixtuoid_core::sprite::format::HairLayers::clone(&self) -> pixtuoid_core::sprite::format::HairLayers
+impl core::fmt::Debug for pixtuoid_core::sprite::format::HairLayers
+pub fn pixtuoid_core::sprite::format::HairLayers::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::HairLayers
+impl core::marker::Send for pixtuoid_core::sprite::format::HairLayers
+impl core::marker::Sync for pixtuoid_core::sprite::format::HairLayers
+impl core::marker::Unpin for pixtuoid_core::sprite::format::HairLayers
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::HairLayers
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::HairLayers
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::HairLayers
+pub struct pixtuoid_core::sprite::format::Hairstyle
+impl pixtuoid_core::sprite::format::Hairstyle
+pub fn pixtuoid_core::sprite::format::Hairstyle::density(&self) -> core::num::nonzero::NonZeroU16
+pub fn pixtuoid_core::sprite::format::Hairstyle::layers(&self, pixtuoid_core::sprite::HeadView) -> core::option::Option<&pixtuoid_core::sprite::format::HairLayers>
+pub fn pixtuoid_core::sprite::format::Hairstyle::name(&self) -> &str
+impl core::clone::Clone for pixtuoid_core::sprite::format::Hairstyle
+pub fn pixtuoid_core::sprite::format::Hairstyle::clone(&self) -> pixtuoid_core::sprite::format::Hairstyle
+impl core::fmt::Debug for pixtuoid_core::sprite::format::Hairstyle
+pub fn pixtuoid_core::sprite::format::Hairstyle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::Hairstyle
+impl core::marker::Send for pixtuoid_core::sprite::format::Hairstyle
+impl core::marker::Sync for pixtuoid_core::sprite::format::Hairstyle
+impl core::marker::Unpin for pixtuoid_core::sprite::format::Hairstyle
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Hairstyle
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Hairstyle
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Hairstyle
 pub struct pixtuoid_core::sprite::format::MissingOptional
 pub pixtuoid_core::sprite::format::MissingOptional::name: &'static str
 pub pixtuoid_core::sprite::format::MissingOptional::stand_in: pixtuoid_core::sprite::format::StandIn
@@ -942,8 +973,11 @@ pub fn pixtuoid_core::sprite::format::Pack::animation(&self, &str) -> core::opti
 pub fn pixtuoid_core::sprite::format::Pack::animation_names(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::buildings(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Building>
+pub fn pixtuoid_core::sprite::format::Pack::character_outline(&self) -> core::option::Option<pixtuoid_core::sprite::Rgb>
 pub fn pixtuoid_core::sprite::format::Pack::city_materials(&self) -> core::option::Option<&pixtuoid_core::sprite::format::CityMaterials>
 pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> alloc::vec::Vec<u16>
+pub fn pixtuoid_core::sprite::format::Pack::hairstyle(&self, &str, core::num::nonzero::NonZeroU16) -> core::option::Option<&pixtuoid_core::sprite::format::Hairstyle>
+pub fn pixtuoid_core::sprite::format::Pack::hairstyles(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Hairstyle>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)
 pub fn pixtuoid_core::sprite::format::Pack::palette(&self) -> &pixtuoid_core::sprite::Palette
@@ -1014,6 +1048,38 @@ pub fn pixtuoid_core::sprite::format::load_pack_from_strings(&str, &[(&str, &str
 pub fn pixtuoid_core::sprite::format::validate_pack_animations(&pixtuoid_core::sprite::format::Pack, &[alloc::vec::Vec<&'static str>]) -> pixtuoid_core::sprite::format::ValidationReport
 pub fn pixtuoid_core::sprite::format::variant_fits(&pixtuoid_core::sprite::Frame, u16, &pixtuoid_core::sprite::Frame) -> bool
 pub fn pixtuoid_core::sprite::format::variant_redraws(&pixtuoid_core::sprite::Sprite, u16, &pixtuoid_core::sprite::Sprite) -> bool
+#[non_exhaustive] pub enum pixtuoid_core::sprite::HeadView
+pub pixtuoid_core::sprite::HeadView::Back
+pub pixtuoid_core::sprite::HeadView::Crown
+pub pixtuoid_core::sprite::HeadView::Front
+pub pixtuoid_core::sprite::HeadView::Side
+impl pixtuoid_core::sprite::HeadView
+pub const pixtuoid_core::sprite::HeadView::ALL: [pixtuoid_core::sprite::HeadView; 4]
+pub fn pixtuoid_core::sprite::HeadView::from_name(&str) -> core::option::Option<Self>
+pub fn pixtuoid_core::sprite::HeadView::index(self) -> usize
+pub fn pixtuoid_core::sprite::HeadView::name(self) -> &'static str
+impl core::clone::Clone for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::clone(&self) -> pixtuoid_core::sprite::HeadView
+impl core::cmp::Eq for pixtuoid_core::sprite::HeadView
+impl core::cmp::Ord for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::cmp(&self, &pixtuoid_core::sprite::HeadView) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::eq(&self, &pixtuoid_core::sprite::HeadView) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::partial_cmp(&self, &pixtuoid_core::sprite::HeadView) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::HeadView
+pub fn pixtuoid_core::sprite::HeadView::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::HeadView
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::HeadView
+impl core::marker::Freeze for pixtuoid_core::sprite::HeadView
+impl core::marker::Send for pixtuoid_core::sprite::HeadView
+impl core::marker::Sync for pixtuoid_core::sprite::HeadView
+impl core::marker::Unpin for pixtuoid_core::sprite::HeadView
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::HeadView
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::HeadView
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::HeadView
 pub struct pixtuoid_core::sprite::Frame(_)
 impl pixtuoid_core::sprite::Frame
 pub fn pixtuoid_core::sprite::Frame::from_pixels(u16, u16, alloc::vec::Vec<pixtuoid_core::sprite::Pixel>) -> Self
@@ -1037,6 +1103,52 @@ impl core::marker::Unpin for pixtuoid_core::sprite::Frame
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Frame
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Frame
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Frame
+#[non_exhaustive] pub struct pixtuoid_core::sprite::HeadMark
+pub pixtuoid_core::sprite::HeadMark::view: pixtuoid_core::sprite::HeadView
+pub pixtuoid_core::sprite::HeadMark::x: u16
+pub pixtuoid_core::sprite::HeadMark::y: u16
+impl pixtuoid_core::sprite::HeadMark
+pub fn pixtuoid_core::sprite::HeadMark::of(&pixtuoid_core::sprite::Mark) -> core::option::Option<Self>
+impl core::clone::Clone for pixtuoid_core::sprite::HeadMark
+pub fn pixtuoid_core::sprite::HeadMark::clone(&self) -> pixtuoid_core::sprite::HeadMark
+impl core::cmp::Eq for pixtuoid_core::sprite::HeadMark
+impl core::cmp::PartialEq for pixtuoid_core::sprite::HeadMark
+pub fn pixtuoid_core::sprite::HeadMark::eq(&self, &pixtuoid_core::sprite::HeadMark) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::HeadMark
+pub fn pixtuoid_core::sprite::HeadMark::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::HeadMark
+pub fn pixtuoid_core::sprite::HeadMark::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::HeadMark
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::HeadMark
+impl core::marker::Freeze for pixtuoid_core::sprite::HeadMark
+impl core::marker::Send for pixtuoid_core::sprite::HeadMark
+impl core::marker::Sync for pixtuoid_core::sprite::HeadMark
+impl core::marker::Unpin for pixtuoid_core::sprite::HeadMark
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::HeadMark
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::HeadMark
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::HeadMark
+pub struct pixtuoid_core::sprite::Mark
+impl pixtuoid_core::sprite::Mark
+pub fn pixtuoid_core::sprite::Mark::name(&self) -> &str
+pub fn pixtuoid_core::sprite::Mark::x(&self) -> u16
+pub fn pixtuoid_core::sprite::Mark::y(&self) -> u16
+impl core::clone::Clone for pixtuoid_core::sprite::Mark
+pub fn pixtuoid_core::sprite::Mark::clone(&self) -> pixtuoid_core::sprite::Mark
+impl core::cmp::Eq for pixtuoid_core::sprite::Mark
+impl core::cmp::PartialEq for pixtuoid_core::sprite::Mark
+pub fn pixtuoid_core::sprite::Mark::eq(&self, &pixtuoid_core::sprite::Mark) -> bool
+impl core::fmt::Debug for pixtuoid_core::sprite::Mark
+pub fn pixtuoid_core::sprite::Mark::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::Mark
+pub fn pixtuoid_core::sprite::Mark::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::Mark
+impl core::marker::Freeze for pixtuoid_core::sprite::Mark
+impl core::marker::Send for pixtuoid_core::sprite::Mark
+impl core::marker::Sync for pixtuoid_core::sprite::Mark
+impl core::marker::Unpin for pixtuoid_core::sprite::Mark
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::Mark
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::Mark
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::Mark
 pub struct pixtuoid_core::sprite::Palette
 impl pixtuoid_core::sprite::Palette
 pub fn pixtuoid_core::sprite::Palette::get(&self, char) -> core::option::Option<pixtuoid_core::sprite::Pixel>
@@ -1123,6 +1235,8 @@ pub struct pixtuoid_core::sprite::Sprite
 impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
+pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite
@@ -2063,6 +2177,8 @@ pub struct pixtuoid_core::Sprite
 impl pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::frame_ms(&self) -> u32
 pub fn pixtuoid_core::sprite::Sprite::frames(&self) -> &[pixtuoid_core::sprite::Frame]
+pub fn pixtuoid_core::sprite::Sprite::head(&self, usize) -> core::option::Option<pixtuoid_core::sprite::HeadMark>
+pub fn pixtuoid_core::sprite::Sprite::marks(&self, usize) -> &[pixtuoid_core::sprite::Mark]
 pub fn pixtuoid_core::sprite::Sprite::recolorable(&self, usize) -> core::option::Option<pixtuoid_core::sprite::RecolorableFrame<'_>>
 impl core::clone::Clone for pixtuoid_core::sprite::Sprite
 pub fn pixtuoid_core::sprite::Sprite::clone(&self) -> pixtuoid_core::sprite::Sprite

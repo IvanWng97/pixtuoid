@@ -23,6 +23,9 @@ pub(crate) struct DenseFrame<'a> {
     pub(crate) density: NonZeroU16,
     /// The factor still left to blit at: the scale divided by `density`.
     pub(crate) blit_at: NonZeroU16,
+    /// Where the frame's head is, if the art marks it: where a hairstyle
+    /// dresses it (`pixel_painter::hair`).
+    pub(crate) head: Option<pixtuoid_core::sprite::HeadMark>,
 }
 
 /// Frame `frame_idx` of `name` from the densest `<name>@<N>x` variant whose `N`
@@ -80,6 +83,7 @@ pub(crate) fn densest_frame<'a>(
                 logical,
                 density,
                 blit_at,
+                head: anim.head(idx),
             });
         }
     }
@@ -89,6 +93,7 @@ pub(crate) fn densest_frame<'a>(
         logical,
         density: NonZeroU16::MIN,
         blit_at: scale.factor(),
+        head: base_anim.head(idx),
     })
 }
 
@@ -98,7 +103,7 @@ mod tests {
 
     /// `typing@4x` claims 4x but is drawn at 2x; `walking@2x` has one frame
     /// against its base's two; `seated@2x`'s second frame is drawn at 3x;
-    /// `holding_coffee` has honest variants at both 2x and 4x.
+    /// `holding_coffee` has honest variants at both 2x and 4x; `desk` has none.
     fn variant_pack() -> Pack {
         pixtuoid_core::sprite::format::load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\

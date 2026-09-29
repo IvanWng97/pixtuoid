@@ -331,20 +331,20 @@ mod tests {
         assert_eq!(report.warning_count(), 0, "{report:?}");
     }
 
-    /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation
-    /// registers — a generated `@Nx` whose `pack.toml` entry was never written —
-    /// ships as dead bytes and draws nothing. A sprite the pack still loads
-    /// without is exactly that.
+    /// `build.rs` embeds every sprite in `sprites/default/`, so one neither an
+    /// animation nor a hairstyle registers — a generated file whose `pack.toml`
+    /// entry was never written — ships as dead bytes and draws nothing. A sprite
+    /// the pack still loads without is exactly that.
     #[test]
     fn every_embedded_sprite_is_a_frame_the_pack_loads() {
         let unregistered = undrawn(EMBEDDED_PACK_TOML, &embedded_sprite_srcs());
         assert!(
             unregistered.is_empty(),
-            "sprites no animation registers: {unregistered:?}"
+            "sprites pack.toml never registers: {unregistered:?}"
         );
     }
 
-    /// The sprites `toml` loads without: the ones no animation draws.
+    /// The sprites `toml` loads without: the ones nothing it registers draws.
     fn undrawn<'a>(toml: &str, srcs: &[(&'a str, &'a str)]) -> Vec<&'a str> {
         // Every leave-one-out load below errors when the whole set does, which
         // would report nothing undrawn.
