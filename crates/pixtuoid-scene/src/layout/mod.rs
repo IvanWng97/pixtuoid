@@ -495,7 +495,7 @@ impl SceneLayout {
         self.meeting_rooms
             .iter()
             .filter_map(|r| r.trio.as_ref())
-            .map(MeetingTrio::rug)
+            .map(|t| t.rug(self.buf_h))
             .chain(self.lounge.as_ref().map(Lounge::rug))
     }
 

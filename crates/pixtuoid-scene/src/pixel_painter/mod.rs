@@ -1109,7 +1109,7 @@ fn enqueue_gateway_mascots<'a>(
 /// breaks the tie in its sitter's favor.
 fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
     for trio in layout.meeting_rooms.iter().filter_map(|r| r.trio.as_ref()) {
-        let rug = trio.rug();
+        let rug = trio.rug(layout.buf_h);
         drawables.push(Drawable {
             anchor_y: rug.y,
             kind: DrawableKind::AreaRug(rug),
