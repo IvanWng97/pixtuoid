@@ -8,7 +8,7 @@
 //!
 //! Usage:
 //!   cargo run --release --example cutaway_snapshot -- <out.png> [--scale N]
-//!                                                    [--agents N] [--theme T]
+//!       [--agents N] [--theme T] [--logical WxH] [--now-hour H] [--floor I/N]
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -97,6 +97,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow!("usage: cutaway_snapshot <out.png> [--scale N] [--agents N]"))?;
 
     let (mut scale_n, mut agents, mut theme_name) = (None, 10usize, "tokyo-night".to_string());
+    let (mut now_hour, mut floor) = (None::<u32>, (0usize, 1usize));
     let (mut lw, mut lh) = DEFAULT_LOGICAL;
     let rest: Vec<String> = args.collect();
     let mut i = 0;
@@ -118,6 +119,17 @@ fn main() -> Result<()> {
                 lw = w.parse().context("bad --logical width")?;
                 lh = h.parse().context("bad --logical height")?;
             }
+            "--now-hour" => now_hour = Some(val("--now-hour")?.parse().context("bad --now-hour")?),
+            "--floor" => {
+                let v = val("--floor")?;
+                let (f, n) = v
+                    .split_once('/')
+                    .ok_or_else(|| anyhow!("--floor wants I/N"))?;
+                floor = (
+                    f.parse().context("bad --floor index")?,
+                    n.parse().context("bad --floor count")?,
+                );
+            }
             other => return Err(anyhow!("unexpected arg: {other}")),
         }
         i += 2;
@@ -130,8 +142,18 @@ fn main() -> Result<()> {
     // Defaults to the pack's densest art, the density it was drawn for.
     let scale_n = scale_n.unwrap_or_else(|| pack.max_density_variant());
     let scale = RenderScale::new(scale_n).ok_or_else(|| anyhow!("--scale must be nonzero"))?;
-    let now = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
-    let meta = FloorMeta::ground();
+    let now = match now_hour {
+        Some(h) => {
+            use chrono::TimeZone;
+            chrono::Local
+                .with_ymd_and_hms(2026, 1, 1, h, 0, 0)
+                .single()
+                .ok_or_else(|| anyhow!("invalid --now-hour {h}"))?
+                .into()
+        }
+        None => SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000),
+    };
+    let meta = FloorMeta::for_floor(floor.0, floor.1);
 
     let mut scene = SceneState::uniform(64);
     populate(&mut scene, now, agents);
@@ -149,7 +171,15 @@ fn main() -> Result<()> {
     // twelve characters afresh every frame.
     let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
     let labels = render_cutaway(
-        &frame, &layout, &pack, theme, scale, now, &mut cache, &mut buf,
+        &frame,
+        &layout,
+        &pack,
+        theme,
+        scale,
+        meta.altitude,
+        now,
+        &mut cache,
+        &mut buf,
     );
 
     // Name badges: the engine reports WHERE, the binary owns the font. Drawn

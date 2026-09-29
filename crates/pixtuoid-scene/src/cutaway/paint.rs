@@ -48,13 +48,6 @@ const RUG_MOTIF_LEVEL: i8 = -1;
 /// the light the bound edge doesn't.
 const RUG_FRINGE_LEVEL: i8 = 2;
 
-/// Narrowest skyline building, in logical units.
-const SKYLINE_MIN_W: u16 = 3;
-/// How much wider than [`SKYLINE_MIN_W`] a building may be.
-const SKYLINE_W_SPREAD: u16 = 6;
-/// Shortest skyline building — below this the city reads as a jagged floor.
-const SKYLINE_MIN_H: u16 = 2;
-
 /// Logical rows between a head and its name badge.
 const LABEL_GAP_PX: u16 = 2;
 
@@ -82,8 +75,9 @@ pub struct CutawayLabel {
 
 /// Paint `frame`'s office into `buf` as an orthographic cutaway — the classic
 /// painter's sibling, not its successor. `layout` is in LOGICAL units and `buf`
-/// in buffer pixels; `scale` converts. Returns where each visible agent's badge
-/// belongs; see [`CutawayLabel`].
+/// in buffer pixels; `scale` converts. The windows look out from `altitude` (0
+/// at the ground floor, 1 at the top) on the sky at `now`. Returns where each
+/// visible agent's badge belongs; see [`CutawayLabel`].
 #[allow(clippy::too_many_arguments)]
 pub fn render_cutaway(
     frame: &SimFrame,
@@ -91,36 +85,44 @@ pub fn render_cutaway(
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    altitude: f32,
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
-    paint_backdrop(layout, pack, theme, scale, buf);
+    let pen = Pen::for_pack(scale, pack);
+    paint_backdrop(layout, theme, scale, pen, buf);
+    let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
+    paint_view(layout, pack, (&look, theme, now), altitude, pen, buf);
+    paint_hung_decor(layout, pack, scale, buf);
     let list = build_list(frame, layout, pack, theme, scale, now);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
 
-/// Everything under the floor-standing pieces but their shadows: floor, its
-/// rugs, north wall band and the decor hung on it. None of it moves within a
-/// layout, theme, pack and scale.
+/// Everything under the floor-standing pieces but their shadows, the windows'
+/// view and the decor hung on the wall: floor, its rugs, and the north wall
+/// band with its window frames. None of it moves within a layout, theme, pack
+/// and scale.
 fn paint_backdrop(
     layout: &Layout,
-    pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let pen = Pen::for_pack(scale, pack);
     paint_floor(layout, theme, pen, buf);
     // Rugs lie flat on the floor, under everything that stands on it.
     for rug in layout.rugs() {
         paint_rug(rug, theme, pen, buf);
     }
-    paint_wall(layout, theme, scale, buf);
-    // Decor that only hangs on the north band paints with the wall, before
-    // anything standing on the floor can occlude it; what stands on the floor
-    // sorts among the floor's pieces ([`push_props`]).
+    paint_wall(layout, theme, scale, pen, buf);
+}
+
+/// Decor that only hangs on the north band, over the windows' view and before
+/// anything standing on the floor can occlude it; what stands on the floor
+/// sorts among the floor's pieces ([`push_props`]).
+fn paint_hung_decor(layout: &Layout, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
     for item in layout
         .wall_decor
         .iter()
@@ -1087,21 +1089,14 @@ fn desk_front_h() -> u16 {
     (DESK_H * DESK_FRONT_NUMER / DESK_FRONT_DENOM).max(1)
 }
 
-/// The wall rows inset above and below the glass run, as a fraction of the band:
-/// the inset leaves the middle of the band as glass. The windows are the
-/// cutaway's only light SOURCE on screen, so the band has to read as glass and
-/// not as a stripe — that is what makes the north-to-south floor falloff legible
-/// as light instead of as a gradient someone chose.
-const WINDOW_INSET_NUMER: u16 = 1;
-/// Denominator of [`WINDOW_INSET_NUMER`].
-const WINDOW_INSET_DENOM: u16 = 4;
-
-/// Paint the north wall band: wall, glass, skyline and sill.
+/// Paint the north wall band: the wall, its windows' frames where
+/// [`Layout::window_bays`] tiles them, and its trim. The glass is the view's
+/// ([`paint_view`]).
 ///
 /// Its height is [`Layout::wall_band_h`], not `top_margin`: the rows between
 /// are floor the agents walk on, so a band drawn to `top_margin` would paint
 /// over them.
-fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf: &mut RgbBuffer) {
     let band_h = layout.wall_band_h();
     if band_h == 0 {
         return;
@@ -1110,102 +1105,98 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbB
     let w = scale.to_buffer(layout.buf_w);
     let wall = Ramp::from_base(theme.surface.wall);
     slab(buf, 0, 0, w, scale.to_buffer(band_h), &wall, scale);
-
-    // One glass run inset inside the band, with a lit sill under it — the sill
-    // is what sells the light as coming THROUGH rather than being painted on.
-    let inset = (band_h * WINDOW_INSET_NUMER / WINDOW_INSET_DENOM).max(1);
-    let glass_h = band_h.saturating_sub(inset * 2);
-    if glass_h > 0 {
-        let glass = Ramp::from_base(theme.lighting.night_sky_a);
-        slab(
-            buf,
-            0,
-            scale.to_buffer(inset),
-            w,
-            scale.to_buffer(glass_h),
-            &glass,
-            scale,
-        );
-        paint_skyline(layout, theme, scale, inset, glass_h, buf);
-        fill(
-            buf,
-            0,
-            scale.to_buffer(inset + glass_h),
-            w,
-            s,
-            theme.surface.wall_trim,
-        );
+    let rows = crate::layout::window_rows(band_h);
+    let window_h = rows.end - rows.start;
+    for bay in layout.window_bays() {
+        for dy in 0..window_h {
+            for dx in 0..crate::layout::WINDOW_W {
+                if crate::layout::window_frame(dx, dy, window_h) {
+                    let cell = ArtRect {
+                        x: pen.art(bay.x + dx),
+                        y: pen.art(rows.start + dy),
+                        w: pen.art(1),
+                        h: pen.art(1),
+                    };
+                    pen.fill(buf, cell, theme.surface.window_frame);
+                }
+            }
+        }
     }
+    fill(
+        buf,
+        0,
+        scale.to_buffer(crate::layout::wall_trim_row(band_h)),
+        w,
+        s,
+        theme.surface.wall_trim,
+    );
     // The wall's own contact line with the floor.
     fill(buf, 0, scale.to_buffer(band_h), w, s, contact_tone(theme));
 }
 
-/// A city skyline on the window sill, lit windows scattered through it. Flat
-/// glass reads as a painted stripe; a skyline is what makes the band a WINDOW,
-/// and the lit windows are what make it night. Deterministic from the layout
-/// width so the same office always gets the same city — a per-frame reshuffle
-/// would flicker.
-fn paint_skyline(
+/// Paint what the windows look out on: the one city ([`CityStrip`]) on the
+/// pen's art grid, over a sky dithered from its zenith colour to its
+/// horizon's. It changes with the sky and the city's lights, so it is painted
+/// apart from the backdrop.
+///
+/// [`CityStrip`]: crate::skyline::CityStrip
+fn paint_view(
     layout: &Layout,
-    theme: &Theme,
-    scale: RenderScale,
-    glass_top: u16,
-    glass_h: u16,
+    pack: &Pack,
+    (look, theme, now): (&crate::atmosphere::Look, &Theme, std::time::SystemTime),
+    altitude: f32,
+    pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let s = scale.get();
-    let sill = glass_top + glass_h;
-    // A local mix, per this crate's convention: each noise site owns its own
-    // finaliser over a disjoint domain.
-    let mix = |n: u32| -> u32 {
-        let mut v = n.wrapping_mul(0x9E37_79B9);
-        v ^= v >> 15;
-        v = v.wrapping_mul(0x85EB_CA6B);
-        v ^ (v >> 13)
+    let rows = crate::layout::window_rows(layout.wall_band_h());
+    let window_h = rows.end - rows.start;
+    let glass_h = crate::layout::glass_rows(window_h);
+    let Some(density) = std::num::NonZeroU16::new(pen.art(1).0) else {
+        return;
     };
-
-    let mut x = 0u16;
-    let mut i = 0u32;
-    while x < layout.buf_w {
-        let bw = SKYLINE_MIN_W + (mix(i) % u32::from(SKYLINE_W_SPREAD)) as u16;
-        let bh = SKYLINE_MIN_H + (mix(i ^ 0x5A5A) % u32::from(glass_h.max(1))) as u16;
-        let bh = bh.min(glass_h);
-        let dark = mix(i ^ 0x1234) % 3 != 0;
-        let tone = if dark {
-            theme.office.building_dark
-        } else {
-            theme.office.building_light
-        };
-        let top = sill.saturating_sub(bh);
-        fill(
-            buf,
-            scale.to_buffer(x),
-            scale.to_buffer(top),
-            scale.to_buffer(bw),
-            scale.to_buffer(bh),
-            tone,
-        );
-        // Lit windows — the thing that says "night", not just "dark".
-        let mut wy = top + 1;
-        while wy + 1 < sill {
-            let mut wx = x + 1;
-            while wx + 1 < x + bw {
-                if mix(u32::from(wx) ^ (u32::from(wy) << 8)) % 5 == 0 {
-                    fill(
-                        buf,
-                        scale.to_buffer(wx),
-                        scale.to_buffer(wy),
-                        s,
-                        s,
-                        theme.lighting.twilight_a,
-                    );
+    let run = crate::layout::window_run(layout.buf_w);
+    let city = crate::skyline::CityStrip::draw(
+        pack,
+        (run.end - run.start, glass_h),
+        altitude,
+        (look, theme, now),
+        density,
+    );
+    let d = density.get();
+    for bay in layout.window_bays() {
+        for dy in 0..window_h {
+            for dx in 0..crate::layout::WINDOW_W {
+                if crate::layout::window_frame(dx, dy, window_h) {
+                    continue;
                 }
-                wx += 2;
+                let (gx, gy) = (bay.x + dx - run.start, dy - 1);
+                for sy in 0..d {
+                    for sx in 0..d {
+                        let (ax, ay) =
+                            (pen.art(bay.x + dx).0 + sx, pen.art(rows.start + dy).0 + sy);
+                        let (cx, cy) = (gx * d + sx, gy * d + sy);
+                        let colour = city.at(cx, cy).unwrap_or_else(|| {
+                            let share = crate::atmosphere::sky_share(
+                                (f32::from(cy) + 0.5) / f32::from(d),
+                                glass_h,
+                            );
+                            if crate::cutaway::pen::dithered(ArtPx(ax), ArtPx(ay), share) {
+                                look.glass_a
+                            } else {
+                                look.glass_b
+                            }
+                        });
+                        let px = ArtRect {
+                            x: ArtPx(ax),
+                            y: ArtPx(ay),
+                            w: ArtPx(1),
+                            h: ArtPx(1),
+                        };
+                        pen.fill(buf, px, colour);
+                    }
+                }
             }
-            wy += 2;
         }
-        x = x.saturating_add(bw + 1);
-        i += 1;
     }
 }
 
@@ -2321,6 +2312,7 @@ mod tests {
             &pack,
             theme,
             scale,
+            0.0,
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,
             &mut buf,
@@ -2664,7 +2656,7 @@ mod tests {
                     scale.to_buffer(layout.buf_h),
                     pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 },
                 );
-                paint_backdrop(&layout, &pack, theme, scale, &mut buf);
+                paint_backdrop(&layout, theme, scale, Pen::for_pack(scale, &pack), &mut buf);
                 for rug in layout.rugs() {
                     let c = buf.get(
                         scale.to_buffer(rug.x + rug.width / 2),
@@ -2976,6 +2968,69 @@ mod tests {
             .and_then(|a| a.frames().first())
             .expect("the bundled pack has this piece");
         (f.width(), f.height())
+    }
+
+    /// The windows stand where the layout tiles them, as the classic painter's
+    /// do, and their glass shows the one city over the sky, art pixel for art
+    /// pixel.
+    #[test]
+    fn the_windows_look_out_on_the_one_city_where_the_layout_tiles_them() {
+        let pack = pack();
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let layout = Layout::compute_with_seed(160, 96, None, 0).expect("lays out");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let pen = Pen::for_pack(scale, &pack);
+        let d = pen.art(1).0;
+        let now = std::time::UNIX_EPOCH;
+        let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        paint_backdrop(&layout, theme, scale, pen, &mut buf);
+        paint_view(&layout, &pack, (&look, theme, now), 0.0, pen, &mut buf);
+        let rows = crate::layout::window_rows(layout.wall_band_h());
+        let window_h = rows.end - rows.start;
+        let run = crate::layout::window_run(layout.buf_w);
+        let city = crate::skyline::CityStrip::draw(
+            &pack,
+            (run.end - run.start, crate::layout::glass_rows(window_h)),
+            0.0,
+            (&look, theme, now),
+            std::num::NonZeroU16::new(d).expect("nonzero"),
+        );
+        let k = scale.get() / d;
+        let at = |ax: u16, ay: u16| buf.get(ax * k, ay * k);
+        let (mut glass, mut buildings) = (0, 0);
+        for bay in layout.window_bays() {
+            for dy in 0..window_h {
+                for dx in 0..crate::layout::WINDOW_W {
+                    let (ax, ay) = (pen.art(bay.x + dx).0, pen.art(rows.start + dy).0);
+                    if crate::layout::window_frame(dx, dy, window_h) {
+                        assert_eq!(
+                            at(ax, ay),
+                            theme.surface.window_frame,
+                            "frame at ({dx}, {dy})"
+                        );
+                        continue;
+                    }
+                    glass += 1;
+                    let (cx, cy) = ((bay.x + dx - run.start) * d, (dy - 1) * d);
+                    match city.at(cx, cy) {
+                        Some(c) => {
+                            buildings += 1;
+                            assert_eq!(at(ax, ay), c, "the city at ({dx}, {dy})");
+                        }
+                        None => assert!(
+                            at(ax, ay) == look.glass_a || at(ax, ay) == look.glass_b,
+                            "sky at ({dx}, {dy})"
+                        ),
+                    }
+                }
+            }
+        }
+        assert!(glass > 0 && buildings > 0, "windows, and a city in them");
     }
 
     /// The whole draw list of a REAL office, checked against every pairwise
@@ -3993,6 +4048,7 @@ S B B B B B B S
             pack,
             theme,
             scale,
+            0.0,
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,
             &mut buf,
