@@ -177,8 +177,7 @@ pub(crate) fn test_default_pack() -> Pack {
     load_sprite_pack(PackSource::Bundled).expect("default pack loads")
 }
 
-/// The default pack's manifest, as `build.rs` embeds it: without its density
-/// variants when the `density-art` feature is off.
+/// The default pack's manifest, as `build.rs` embeds it.
 const EMBEDDED_PACK_TOML: &str = include_str!(concat!(env!("OUT_DIR"), "/embedded_pack.toml"));
 
 fn load_embedded_pack() -> Result<Pack> {
@@ -242,6 +241,10 @@ pub(crate) fn test_pack_with(overrides: &[(&str, &'static str)]) -> Pack {
 #[cfg(test)]
 #[path = "../build_support/density_art.rs"]
 mod density_art;
+
+#[cfg(test)]
+#[path = "../build_support/comments.rs"]
+mod comments;
 
 #[cfg(test)]
 mod tests {
@@ -363,7 +366,7 @@ mod tests {
     #[test]
     fn the_pack_without_density_art_loads_whole() {
         let (toml, dropped) =
-            density_art::strip_density_art(include_str!("../sprites/default/pack.toml"));
+            density_art::embedded_without_density_art(include_str!("../sprites/default/pack.toml"));
         assert!(!dropped.is_empty(), "the bundled pack ships density art");
         let srcs: Vec<_> = embedded_sprite_srcs()
             .into_iter()
