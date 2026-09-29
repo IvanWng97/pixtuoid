@@ -78,13 +78,8 @@ pub(super) enum DrawableKind<'a> {
     },
     Character {
         agent: &'a AgentSlot,
-        anim_name: &'static str,
-        frame_idx: usize,
+        pose: super::seat::SpritePose,
         anchor: Point,
-        flip_x: bool,
-        /// Tool-derived monitor glow color; tints the skin so a row of typing
-        /// agents shows tool type at a glance. `None` for non-desk poses.
-        glow_tint: Option<Rgb>,
         sleep_z_seed: Option<u64>,
         waiting_bubble: bool,
         walking_dust_frame: Option<usize>,
@@ -333,11 +328,8 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         }
         DrawableKind::Character {
             agent,
-            anim_name,
-            frame_idx,
+            pose,
             anchor,
-            flip_x,
-            glow_tint,
             sleep_z_seed,
             waiting_bubble,
             walking_dust_frame,
@@ -345,9 +337,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             if let Some(dust_frame) = walking_dust_frame {
                 paint_walking_dust(buf, *anchor, *dust_frame, theme);
             }
-            paint_character_at(
-                buf, anim_name, *frame_idx, *anchor, agent, pack, *flip_x, *glow_tint, cache, now,
-            );
+            paint_character_at(buf, *pose, *anchor, agent, pack, cache, now);
             if let Some(seed) = sleep_z_seed {
                 paint_sleep_z(buf, *anchor, now, *seed, theme);
             }

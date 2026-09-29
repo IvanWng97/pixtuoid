@@ -676,7 +676,17 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     let scale = crate::render_scale::RenderScale::new(4).expect("nonzero");
 
     let dense = seat::character_frame(
-        "typing", 0, &slot, &pack, false, None, scale, &mut cache, now,
+        seat::SpritePose {
+            anim_name: "typing",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        &slot,
+        &pack,
+        scale,
+        &mut cache,
+        now,
     )
     .expect("art");
     let got = (dense.frame.width(), dense.blit_at.get());
@@ -684,12 +694,14 @@ fn character_frame_takes_a_density_variant_recolored_like_the_base() {
     assert_eq!(got, (2, 2));
 
     let classic = seat::character_frame(
-        "typing",
-        0,
+        seat::SpritePose {
+            anim_name: "typing",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         &slot,
         &pack,
-        false,
-        None,
         crate::render_scale::RenderScale::ONE,
         &mut cache,
         now,
@@ -2201,13 +2213,15 @@ fn top_tier_slot_paints_ember_hair_and_a_flame_crown() {
         let mut buf = RgbBuffer::filled(32, 32, black);
         paint_character_at(
             &mut buf,
-            "seated",
-            0,
+            seat::SpritePose {
+                anim_name: "seated",
+                frame_idx: 0,
+                flip_x: false,
+                glow_tint: None,
+            },
             anchor,
             slot,
             &pack,
-            false,
-            None,
             &mut FrameCache::new(),
             now,
         );
@@ -2256,13 +2270,15 @@ fn paint_character_at_missing_anim_is_a_noop() {
     let mut buf = RgbBuffer::filled(40, 40, bg);
     paint_character_at(
         &mut buf,
-        "does_not_exist",
-        0,
+        seat::SpritePose {
+            anim_name: "does_not_exist",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         Point { x: 20, y: 20 },
         &slot,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2671,13 +2687,15 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut before = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut before,
-        "seated",
-        0,
+        seat::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         anchor,
         &unknown,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2685,13 +2703,15 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut after = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut after,
-        "seated",
-        0,
+        seat::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         anchor,
         &healed,
         &pack,
-        false,
-        None,
         &mut cache,
         SystemTime::UNIX_EPOCH,
     );
@@ -2699,13 +2719,15 @@ fn cwd_backfill_invalidates_cached_outfit_frames() {
     let mut fresh = RgbBuffer::filled(24, 24, black);
     paint_character_at(
         &mut fresh,
-        "seated",
-        0,
+        seat::SpritePose {
+            anim_name: "seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
         anchor,
         &healed,
         &pack,
-        false,
-        None,
         &mut FrameCache::new(),
         SystemTime::UNIX_EPOCH,
     );
@@ -5257,6 +5279,87 @@ fn wash_since_washes_exactly_the_diff_set_and_matches_the_naive_reference() {
     }
 }
 
+/// A pose is the placement's own frame, facing and resolved glow — the one
+/// mapping both profiles draw through.
+#[test]
+fn a_pose_is_its_placements_frame_facing_and_glow() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let id = pixtuoid_core::AgentId::from_transcript_path("/pose.jsonl");
+    let typing = make_slot(
+        id,
+        ActivityState::Active {
+            tool_use_id: None,
+            detail: Some(Arc::from("Edit src/main.rs")),
+            kind: ToolKind::Edit,
+        },
+    );
+    let placement = |glow| CharacterPlacement {
+        agent_idx: 0,
+        anchor_y: 0,
+        anim_name: "typing",
+        frame_idx: 3,
+        anchor: Point { x: 0, y: 0 },
+        flip_x: true,
+        glow,
+        sleep_z_seed: None,
+        waiting_bubble: false,
+        walking_dust_frame: None,
+        seat_desk: None,
+        seated: true,
+    };
+    let pose = seat::SpritePose::of(&placement(CharacterGlow::Tool), &typing, theme);
+    assert_eq!(
+        (pose.anim_name, pose.frame_idx, pose.flip_x),
+        ("typing", 3, true)
+    );
+    assert_eq!(
+        pose.glow_tint,
+        palette::tool_glow_tint(&typing, &theme.tool_glow)
+    );
+    let thinking = seat::SpritePose::of(&placement(CharacterGlow::Thinking), &typing, theme);
+    assert_eq!(thinking.glow_tint, Some(theme.tool_glow.default));
+    let unlit = seat::SpritePose::of(&placement(CharacterGlow::None), &typing, theme);
+    assert_eq!(unlit.glow_tint, None);
+}
+
+/// Unflipped, a character is drawn as its art faces; `flip_x` alone mirrors it.
+#[test]
+fn an_unflipped_character_faces_the_way_its_art_does() {
+    let pack = crate::embedded_pack::test_default_pack();
+    let slot = make_slot(
+        pixtuoid_core::AgentId::from_transcript_path("/face.jsonl"),
+        ActivityState::Idle,
+    );
+    let mut cache = FrameCache::new();
+    let opaque = |f: &Frame| -> Vec<bool> { f.as_slice().iter().map(Option::is_some).collect() };
+    let art = pack
+        .animation("side_seated")
+        .and_then(|a| a.frames().first().cloned())
+        .expect("the side view");
+    let drawn = seat::character_frame(
+        seat::SpritePose {
+            anim_name: "side_seated",
+            frame_idx: 0,
+            flip_x: false,
+            glow_tint: None,
+        },
+        &slot,
+        &pack,
+        crate::render_scale::RenderScale::ONE,
+        &mut cache,
+        SystemTime::UNIX_EPOCH,
+    )
+    .expect("the side view")
+    .frame
+    .clone();
+    assert_eq!(opaque(&drawn), opaque(&art));
+    assert_ne!(
+        opaque(&art),
+        opaque(&art.mirror_horizontal()),
+        "the side view must be asymmetric for this to see a flip"
+    );
+}
+
 /// A facing flip mirrors the dressed frame; it never dresses a mirrored one. A
 /// style's layers are drawn for the art as authored, so profile hair laid on a
 /// flipped body would land on the face side.
@@ -5274,12 +5377,14 @@ fn a_facing_flip_mirrors_the_dressed_frame() {
         let slot = make_slot(id, ActivityState::Idle);
         let mut look = |flip| {
             seat::character_frame(
-                "side_seated",
-                0,
+                seat::SpritePose {
+                    anim_name: "side_seated",
+                    frame_idx: 0,
+                    flip_x: flip,
+                    glow_tint: None,
+                },
                 &slot,
                 &pack,
-                flip,
-                None,
                 scale,
                 &mut cache,
                 now,
