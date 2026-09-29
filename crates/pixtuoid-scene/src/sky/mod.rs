@@ -2,9 +2,8 @@
 //! the light they let into the office.
 //!
 //! Painters read it through one [`Sky`] sampled per frame, so no two of them can
-//! disagree about the hour, the weather or whether lightning is striking. The
-//! presentation — glass colours, spill, haze, particles — stays with each
-//! painter; nothing here knows a theme or a pixel.
+//! disagree about the hour, the weather or whether lightning is striking.
+//! Nothing here knows a theme or a pixel.
 
 use std::cell::Cell;
 use std::time::SystemTime;
