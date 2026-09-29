@@ -62,7 +62,9 @@ pub(crate) fn rise(head: HeadMark, style: &Hairstyle, outlined: bool) -> u16 {
 
 /// `body` dressed in `style`'s layers for its head's view: the behind layer,
 /// the body, the over layer, then one `outline` round the union, so no line
-/// runs between hair and face. The layers take the body's own recolor
+/// runs between hair and face. A gap the line closes to one pixel takes the
+/// line too: a style laid on a body it was not drawn against can leave one
+/// between chin and hair, and no author can see it to close it. The layers take the body's own recolor
 /// `overrides`, so the hair wears the agent's colour. The frame grows [`rise`]
 /// rows upward; its width is the body's.
 pub(crate) fn dress(
@@ -111,22 +113,34 @@ pub(crate) fn dress(
         lay(&f, dx, dy);
     }
     if let Some(line) = outline {
-        let at = |x: i32, y: i32| {
-            (0..i32::from(w)).contains(&x)
-                && (0..i32::from(h)).contains(&y)
-                && px[y as usize * usize::from(w) + x as usize].is_some()
+        let (w_i, h_i) = (i32::from(w), i32::from(h));
+        let idx = |x: i32, y: i32| y as usize * usize::from(w) + x as usize;
+        let opaque = |px: &[Pixel], x: i32, y: i32| {
+            (0..w_i).contains(&x) && (0..h_i).contains(&y) && px[idx(x, y)].is_some()
         };
-        let edge: Vec<usize> = (0..i32::from(h))
-            .flat_map(|y| (0..i32::from(w)).map(move |x| (x, y)))
+        let cells = || (0..h_i).flat_map(move |y| (0..w_i).map(move |x| (x, y)));
+        let edge: Vec<usize> = cells()
             .filter(|&(x, y)| {
-                !at(x, y)
+                !opaque(&px, x, y)
                     && [(1, 0), (-1, 0), (0, 1), (0, -1)]
                         .iter()
-                        .any(|(dx, dy)| at(x + dx, y + dy))
+                        .any(|(dx, dy)| opaque(&px, x + dx, y + dy))
             })
-            .map(|(x, y)| y as usize * usize::from(w) + x as usize)
+            .map(|(x, y)| idx(x, y))
             .collect();
         for i in edge {
+            px[i] = Some(line);
+        }
+        let holes: Vec<usize> = cells()
+            .filter(|&(x, y)| {
+                !opaque(&px, x, y)
+                    && [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                        .iter()
+                        .all(|(dx, dy)| opaque(&px, x + dx, y + dy))
+            })
+            .map(|(x, y)| idx(x, y))
+            .collect();
+        for i in holes {
             px[i] = Some(line);
         }
     }
@@ -235,5 +249,91 @@ mod tests {
             Some(LINE),
             "one outline round hair and body alike"
         );
+    }
+
+    #[test]
+    fn a_gap_the_outline_closes_to_one_pixel_takes_the_line() {
+        let pack = load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\"H\"=\"#c86432\"\n\"S\"=\"#f0c0a0\"\n\
+             \"k\"=\"#010101\"\n[hair]\noutline=\"k\"\n\
+             [animations.seated]\nframes=[\"b.sprite\"]\nframe_ms=100\n\
+             [hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n",
+            &[
+                // Four pixels two apart round a centre none of them touches:
+                // the line round each walls the centre in.
+                (
+                    "b.sprite",
+                    "@frame 0\n. . S . .\n. . . . .\nS . . . S\n. . . . .\n. . S . .\n",
+                ),
+                ("o.sprite", "@frame 0\n@head front 0 0\nH\n"),
+            ],
+        )
+        .expect("the test pack loads");
+        let style = pack.hairstyles().next().expect("the style");
+        let body = pack.animation("seated").expect("the body").frames()[0].clone();
+        let head = HeadMark {
+            view: HeadView::Front,
+            x: 2,
+            y: 4,
+        };
+        let dressed = dress(&body, head, style, &[], Some(LINE));
+        assert_eq!(dressed.get(2, 2).copied().flatten(), Some(LINE));
+    }
+
+    /// Every bundled character frame, dressed in every bundled style, keeps its
+    /// one outline whole: nothing but the line on a side edge, where the line
+    /// has no column left to run in, and no pinhole inside it. `gen-art` gates
+    /// the pieces it outlines itself; a dressed frame first exists here.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn every_bundled_character_dressed_in_every_style_keeps_its_outline_whole() {
+        let pack =
+            crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+                .expect("the embedded pack loads");
+        let line = pack.hair_outline().flatten();
+        assert!(
+            line.is_some(),
+            "the bundled pack outlines its dressed frames"
+        );
+        let (mut dressed, mut flaws) = (0, Vec::new());
+        for name in pack.animation_names() {
+            let sprite = pack.animation(&name).expect("a listed animation");
+            for (i, body) in sprite.frames().iter().enumerate() {
+                let Some(head) = sprite.head(i) else {
+                    continue;
+                };
+                for style in pack.hairstyles() {
+                    let f = dress(body, head, style, &[], line);
+                    let (w, h) = (f.width(), f.height());
+                    let at = |x: u16, y: u16| f.get(x, y).copied().flatten();
+                    let mut flaw = |what: &str, x: u16, y: u16| {
+                        flaws.push(format!(
+                            "{name}[{i}] in {}: {what} at ({x}, {y})",
+                            style.name()
+                        ));
+                    };
+                    for y in 0..h {
+                        for x in [0, w - 1] {
+                            if at(x, y).is_some() && at(x, y) != line {
+                                flaw("unoutlined on the edge", x, y);
+                            }
+                        }
+                    }
+                    for y in 1..h - 1 {
+                        for x in 1..w - 1 {
+                            let walled = [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
+                                .iter()
+                                .all(|&(nx, ny)| at(nx, ny).is_some());
+                            if at(x, y).is_none() && walled {
+                                flaw("a pinhole", x, y);
+                            }
+                        }
+                    }
+                    dressed += 1;
+                }
+            }
+        }
+        assert!(flaws.is_empty(), "{flaws:#?}");
+        assert!(dressed > 0, "the bundled pack dresses its characters");
     }
 }
