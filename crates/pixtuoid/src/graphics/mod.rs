@@ -118,9 +118,10 @@ pub(crate) enum ClassicReason {
     /// and redraws.
     TmuxNeedsKitty(ImageProtocol),
     /// The terminal has a protocol, but its cell is too small for any scale the
-    /// pack's art lands on: a small font against dense art (a 2-px-wide cell
-    /// cannot reach 4x art within [`RenderScale::fit`]'s bound), or a 1-px
-    /// cell, where one pixel per logical unit IS the classic density.
+    /// pack's art lands on: a cell whose natural scale lies further than
+    /// [`RenderScale::fit`]'s bound from every multiple of the pack's least
+    /// density, or a 1-px cell, where one pixel per logical unit IS the classic
+    /// density.
     CellTooSmall {
         /// The cell the terminal reported.
         cell: CellSize,
@@ -214,7 +215,7 @@ fn raw_scale_for_cell(cell: CellSize) -> u16 {
 /// that lands.
 ///
 /// The densest that lands, not the densest alone: one outlier `@16x` sprite
-/// must not switch the cutaway off on a terminal its 4x art lands on. A pack
+/// must not switch the cutaway off on a terminal the rest of its art lands on. A pack
 /// with no variants lands its base art at the natural scale.
 pub(crate) fn render_scale_for_cell(cell: CellSize, densities: &[u16]) -> Option<RenderScale> {
     let natural = raw_scale_for_cell(cell);
