@@ -32,8 +32,8 @@ use crate::layout::{Point, Size};
 use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
-/// size — hand-tuned to the sprite art so the steam sits within
-/// [`coffee_machine_cols`](crate::layout::coffee_machine_cols).
+/// size — hand-tuned to the sprite art so the steam sits within the coffee
+/// machine ([`SceneLayout::coffee_machine`](crate::layout::SceneLayout::coffee_machine)).
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
@@ -183,8 +183,8 @@ pub(super) enum DrawableKind<'a> {
         piece: crate::layout::WallPiece,
         rows: std::ops::Range<u16>,
     },
-    /// Meeting-room coat rack, y-sorted at its base row (the bottom of its
-    /// `MeetingRoom::coat_rack_rect`). `pos` is the pole top.
+    /// Meeting-room coat rack, y-sorted at its base row (the bottom of
+    /// `coat_rack_rect_at` its pole top). `pos` is the pole top.
     CoatRack {
         pos: Point,
     },
@@ -879,13 +879,18 @@ mod tests {
         assert!(pack.animation("trash_bin").is_none());
         let mut cache = FrameCache::new();
         let now = SystemTime::UNIX_EPOCH;
-        let desk = Point { x: 40, y: 30 };
+        let layout = crate::layout::Layout::compute(160, 120, None).expect("fits");
+        let first = pixtuoid_core::state::FloorLocalDeskIndex(0);
+        let desk = layout.home_desks[first.0];
+        let cabinet = layout
+            .filing_cabinet_top_left(first)
+            .expect("desk 0 stands a cabinet");
         let cab = pack
             .animation("filing_cabinet")
             .and_then(|a| a.frames().first())
             .expect("filing_cabinet anim");
         let bg = Rgb { r: 1, g: 2, b: 3 };
-        let mut buf = RgbBuffer::filled(120, 80, bg);
+        let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, bg);
         let d = Drawable {
             anchor_y: desk.y
                 + crate::layout::furniture_def(crate::layout::Furniture::Desk)
@@ -894,10 +899,7 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                cabinet: Some(Point {
-                    x: desk.x.saturating_sub(cab.width() + 1),
-                    y: desk.y,
-                }),
+                cabinet: Some(cabinet),
                 screen_glow: None,
                 lamp: 0.0,
                 screen_idle: 0.0,
@@ -914,12 +916,10 @@ mod tests {
                 theme: theme(),
             },
         );
-        // Cabinet lands at desk.x - cab.width - 1 .. ; sample a pixel inside it.
-        let cab_x = desk.x.saturating_sub(cab.width() + 1);
         let mut cab_painted = false;
         for dy in 0..cab.height() {
             for dx in 0..cab.width() {
-                if buf.get(cab_x + dx, desk.y + dy) != bg {
+                if buf.get(cabinet.x + dx, cabinet.y + dy) != bg {
                     cab_painted = true;
                 }
             }

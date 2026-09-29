@@ -1755,42 +1755,126 @@ fn every_hover_size_is_its_painted_sprite_size() {
     }
 }
 
+/// How the classic painter draws a roster kind until R2 moves it onto roster
+/// depth.
+enum ClassicQueue {
+    /// Queued into the y-sort under this tag.
+    Sorted(&'static str),
+    /// Painted in the background pass, before the y-sort.
+    Backdrop,
+    /// Sorted by the roster, but still painted in the classic's background
+    /// pass: the one divergence, which R2 closes as a look fix.
+    BackdropUntilR2,
+}
+
+fn classic_queue(kind: crate::layout::FixtureKind) -> ClassicQueue {
+    use crate::layout::FixtureKind;
+    use ClassicQueue::{Backdrop, BackdropUntilR2, Sorted};
+    match kind {
+        FixtureKind::Desk(_) => Sorted("desk"),
+        FixtureKind::FilingCabinet(_) => Sorted("cabinet"),
+        FixtureKind::DeskChair(_) => Sorted("desk chair"),
+        FixtureKind::Station { .. } => Sorted("station"),
+        FixtureKind::Plant { .. } => Sorted("plant"),
+        FixtureKind::Pod { .. } => Sorted("pod"),
+        FixtureKind::Wall { .. } => Sorted("wall"),
+        FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug => Sorted("rug"),
+        FixtureKind::MeetingSofa { .. } | FixtureKind::LoungeCouch => Sorted("sofa"),
+        FixtureKind::MeetingTable { .. } => Sorted("table"),
+        FixtureKind::MeetingChair { .. } => Sorted("chair"),
+        FixtureKind::CoatRack { .. } => Sorted("rack"),
+        FixtureKind::SideTable => Sorted("side table"),
+        FixtureKind::FloorLamp => Sorted("lamp"),
+        FixtureKind::FishTank => Sorted("tank"),
+        FixtureKind::KitchenIsland => Sorted("island"),
+        FixtureKind::Door => Sorted("door"),
+        FixtureKind::Doormat { .. }
+        | FixtureKind::NoticeBoard { .. }
+        | FixtureKind::PantryMat
+        | FixtureKind::IslandMat
+        | FixtureKind::Runner
+        | FixtureKind::NeonSign
+        | FixtureKind::Clock => Backdrop,
+        FixtureKind::WaterCooler | FixtureKind::TrashBin => BackdropUntilR2,
+    }
+}
+
+/// The classic's background-pass call that paints a backdrop roster kind.
+fn classic_backdrop_call(kind: crate::layout::FixtureKind) -> Option<&'static str> {
+    use crate::layout::FixtureKind;
+    match kind {
+        FixtureKind::NeonSign => Some("paint_neon_panel("),
+        FixtureKind::Clock => Some("paint_clock("),
+        FixtureKind::Runner => Some("paint_corridor_runner("),
+        FixtureKind::NoticeBoard { .. } => Some("furniture::paint_notice_board("),
+        FixtureKind::Doormat { .. } => Some("furniture::paint_doormat("),
+        FixtureKind::PantryMat => Some("ctx.layout.pantry_entry_mat()"),
+        FixtureKind::IslandMat => Some("ctx.layout.island_bar_mat()"),
+        FixtureKind::WaterCooler => Some("furniture::paint_water_cooler("),
+        FixtureKind::TrashBin => Some("furniture::paint_trash_bin("),
+        FixtureKind::Desk(_)
+        | FixtureKind::FilingCabinet(_)
+        | FixtureKind::DeskChair(_)
+        | FixtureKind::Station { .. }
+        | FixtureKind::Plant { .. }
+        | FixtureKind::Pod { .. }
+        | FixtureKind::Wall { .. }
+        | FixtureKind::MeetingRug { .. }
+        | FixtureKind::LoungeRug
+        | FixtureKind::MeetingSofa { .. }
+        | FixtureKind::LoungeCouch
+        | FixtureKind::MeetingTable { .. }
+        | FixtureKind::MeetingChair { .. }
+        | FixtureKind::CoatRack { .. }
+        | FixtureKind::SideTable
+        | FixtureKind::FloorLamp
+        | FixtureKind::FishTank
+        | FixtureKind::KitchenIsland
+        | FixtureKind::Door => None,
+    }
+}
+
+/// The roster lists its backdrop in the order the classic's background pass
+/// paints it, then the two uprights that pass still paints after the mats.
+#[test]
+fn the_roster_backdrop_is_the_classic_background_order() {
+    use crate::layout::Depth;
+    let src = include_str!("mod.rs");
+    let layout = Layout::compute(192, 158, None).expect("fits");
+    let mut calls: Vec<&str> = Vec::new();
+    for f in layout.fixtures() {
+        let painted_in_background = match classic_queue(f.kind) {
+            ClassicQueue::Backdrop => {
+                assert_eq!(f.depth, Depth::Backdrop, "{:?}", f.kind);
+                true
+            }
+            ClassicQueue::BackdropUntilR2 => true,
+            ClassicQueue::Sorted(_) => false,
+        };
+        if painted_in_background {
+            let call = classic_backdrop_call(f.kind).expect("a background call");
+            if !calls.contains(&call) {
+                calls.push(call);
+            }
+        }
+    }
+    assert_eq!(calls.len(), 9, "every background kind placed: {calls:?}");
+    let at: Vec<usize> = calls
+        .iter()
+        .map(|c| src.find(c).unwrap_or_else(|| panic!("{c} is gone")))
+        .collect();
+    assert!(
+        at.windows(2).all(|w| w[0] < w[1]),
+        "the background pass paints in another order: {calls:?} at {at:?}"
+    );
+}
+
 /// The classic painter still queues its furniture itself, so the roster's
 /// depths and tie order must be the ones it queues by — or the hover names a
 /// piece the painter drew underneath.
 #[test]
 fn the_roster_sorts_as_the_classic_painter_queues() {
-    use crate::layout::{Depth, FixtureKind};
-    fn roster_tag(kind: FixtureKind) -> &'static str {
-        match kind {
-            FixtureKind::Desk(_) => "desk",
-            FixtureKind::FilingCabinet(_) => "cabinet",
-            FixtureKind::DeskChair(_) => "desk chair",
-            FixtureKind::Station { .. } => "station",
-            FixtureKind::Plant { .. } => "plant",
-            FixtureKind::Pod { .. } => "pod",
-            FixtureKind::Wall { .. } => "wall",
-            FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug => "rug",
-            FixtureKind::MeetingSofa { .. } | FixtureKind::LoungeCouch => "sofa",
-            FixtureKind::MeetingTable { .. } => "table",
-            FixtureKind::MeetingChair { .. } => "chair",
-            FixtureKind::CoatRack { .. } => "rack",
-            FixtureKind::SideTable => "side table",
-            FixtureKind::FloorLamp => "lamp",
-            FixtureKind::FishTank => "tank",
-            FixtureKind::KitchenIsland => "island",
-            FixtureKind::Door => "door",
-            FixtureKind::Doormat { .. }
-            | FixtureKind::NoticeBoard { .. }
-            | FixtureKind::PantryMat
-            | FixtureKind::IslandMat
-            | FixtureKind::WaterCooler
-            | FixtureKind::TrashBin
-            | FixtureKind::Runner
-            | FixtureKind::NeonSign
-            | FixtureKind::Clock => "backdrop",
-        }
-    }
+    use crate::layout::Depth;
     let pack = crate::embedded_pack::test_default_pack();
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let motion = HashMap::new();
@@ -1872,17 +1956,24 @@ fn the_roster_sorts_as_the_classic_painter_queues() {
                         DrawableKind::CoatRack { .. } => &["rack"],
                         DrawableKind::Door { .. } => &["door"],
                         DrawableKind::WallDecor { .. } => &["wall"],
-                        _ => panic!("the enqueue fns above queue only furniture"),
+                        DrawableKind::Character { .. }
+                        | DrawableKind::Pet { .. }
+                        | DrawableKind::GatewayMascot { .. }
+                        | DrawableKind::RoomWall { .. } => {
+                            panic!("the enqueue fns above queue only furniture")
+                        }
                     };
                     tags.iter().map(move |&t| (dr.anchor_y, t))
                 })
                 .collect();
             let rostered: Vec<(u16, &str)> = layout
                 .fixtures()
-                .into_iter()
-                .filter_map(|f| match f.depth {
-                    Depth::Sorted(row) => Some((row, roster_tag(f.kind))),
-                    Depth::Backdrop => None,
+                .filter_map(|f| match (classic_queue(f.kind), f.depth) {
+                    (ClassicQueue::Sorted(tag), Depth::Sorted(row)) => Some((row, tag)),
+                    (ClassicQueue::Backdrop | ClassicQueue::BackdropUntilR2, _) => None,
+                    (ClassicQueue::Sorted(_), Depth::Backdrop) => {
+                        panic!("{:?} queues sorted but rosters as backdrop", f.kind)
+                    }
                 })
                 .collect();
             assert_eq!(rostered, queued, "{w}x{h} seed {seed}");

@@ -110,11 +110,6 @@ impl MeetingRoom {
         Some(pos)
     }
 
-    /// The box the coat rack is drawn in (`coat_rack_rect_at` its pole top).
-    pub fn coat_rack_rect(&self) -> Option<Bounds> {
-        self.coat_rack_pos().map(coat_rack_rect_at)
-    }
-
     /// Minimum room height that fits the sofa/table trio — the fit gate AND the
     /// floor of `compute_with_seed`'s meeting/pantry split negotiation. Prices
     /// the TABLE between the sofas, not just the two sofa bodies: with both sofa
@@ -168,13 +163,13 @@ impl MeetingRoom {
         })
     }
 
-    /// The notice board's box, low on the room's west side — `None` on a room
-    /// too small to hang it.
+    /// The notice board's box, in the room's south-west corner — `None` on a
+    /// room too small to hang it.
     pub(crate) fn notice_board_rect(&self) -> Option<Bounds> {
         const BOARD: crate::layout::Size = crate::layout::Size { w: 8, h: 5 };
         /// Columns from the room's west edge to the board.
         const BOARD_DX: u16 = 4;
-        /// Rows from the board's top up from the room's south edge.
+        /// Rows from the room's south edge up to the board's top.
         const BOARD_RISE: u16 = 8;
         let b = self.bounds;
         (b.height > 20 && b.width > 15).then(|| Bounds {

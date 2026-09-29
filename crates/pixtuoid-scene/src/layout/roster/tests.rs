@@ -1,80 +1,214 @@
 use super::*;
+use std::collections::BTreeSet;
 
-/// Every roster kind, numbered by an exhaustive match: a new kind fails to
-/// compile here until it has a number, and then fails the census below until
-/// some office places it.
-const KINDS: usize = 28;
-fn kind_number(kind: FixtureKind) -> usize {
+/// Every roster kind's census key, by an exhaustive match: a new kind fails to
+/// compile here until it has one.
+fn kind_key(kind: FixtureKind) -> &'static str {
     match kind {
-        FixtureKind::Desk(_) => 0,
-        FixtureKind::FilingCabinet(_) => 1,
-        FixtureKind::DeskChair(_) => 2,
-        FixtureKind::Station { .. } => 3,
-        FixtureKind::Plant { .. } => 4,
-        FixtureKind::Pod { .. } => 5,
-        FixtureKind::Wall { .. } => 6,
-        FixtureKind::MeetingRug { .. } => 7,
-        FixtureKind::MeetingSofa { .. } => 8,
-        FixtureKind::MeetingTable { .. } => 9,
-        FixtureKind::MeetingChair { .. } => 10,
-        FixtureKind::CoatRack { .. } => 11,
-        FixtureKind::Doormat { .. } => 12,
-        FixtureKind::NoticeBoard { .. } => 13,
-        FixtureKind::LoungeRug => 14,
-        FixtureKind::LoungeCouch => 15,
-        FixtureKind::SideTable => 16,
-        FixtureKind::FloorLamp => 17,
-        FixtureKind::FishTank => 18,
-        FixtureKind::KitchenIsland => 19,
-        FixtureKind::PantryMat => 20,
-        FixtureKind::IslandMat => 21,
-        FixtureKind::WaterCooler => 22,
-        FixtureKind::TrashBin => 23,
-        FixtureKind::Door => 24,
-        FixtureKind::Runner => 25,
-        FixtureKind::NeonSign => 26,
-        FixtureKind::Clock => 27,
+        FixtureKind::Desk(_) => "Desk",
+        FixtureKind::FilingCabinet(_) => "FilingCabinet",
+        FixtureKind::DeskChair(_) => "DeskChair",
+        FixtureKind::Station { .. } => "Station",
+        FixtureKind::Plant { .. } => "Plant",
+        FixtureKind::Pod { .. } => "Pod",
+        FixtureKind::Wall { .. } => "Wall",
+        FixtureKind::MeetingRug { .. } => "MeetingRug",
+        FixtureKind::MeetingSofa { .. } => "MeetingSofa",
+        FixtureKind::MeetingTable { .. } => "MeetingTable",
+        FixtureKind::MeetingChair { .. } => "MeetingChair",
+        FixtureKind::CoatRack { .. } => "CoatRack",
+        FixtureKind::Doormat { .. } => "Doormat",
+        FixtureKind::NoticeBoard { .. } => "NoticeBoard",
+        FixtureKind::LoungeRug => "LoungeRug",
+        FixtureKind::LoungeCouch => "LoungeCouch",
+        FixtureKind::SideTable => "SideTable",
+        FixtureKind::FloorLamp => "FloorLamp",
+        FixtureKind::FishTank => "FishTank",
+        FixtureKind::KitchenIsland => "KitchenIsland",
+        FixtureKind::PantryMat => "PantryMat",
+        FixtureKind::IslandMat => "IslandMat",
+        FixtureKind::WaterCooler => "WaterCooler",
+        FixtureKind::TrashBin => "TrashBin",
+        FixtureKind::Door => "Door",
+        FixtureKind::Runner => "Runner",
+        FixtureKind::NeonSign => "NeonSign",
+        FixtureKind::Clock => "Clock",
     }
 }
 
-#[test]
-fn every_fixture_kind_is_placed_on_some_office() {
-    let mut seen = [false; KINDS];
-    let mut stations = std::collections::HashSet::new();
-    for (w, h) in [
+/// The offices the census and the hover sweep lay out.
+fn offices() -> impl Iterator<Item = SceneLayout> {
+    [
         (96u16, 60u16),
         (160, 120),
         (192, 158),
         (240, 160),
         (320, 180),
-    ] {
-        for seed in 0..12 {
-            let Some(l) = SceneLayout::compute_with_seed(w, h, None, seed) else {
-                continue;
-            };
-            for f in l.fixtures() {
-                seen[kind_number(f.kind)] = true;
-                if let FixtureKind::Station { station, .. } = f.kind {
-                    stations.insert(station);
-                }
+    ]
+    .into_iter()
+    .flat_map(|(w, h)| {
+        (0..12).filter_map(move |seed| SceneLayout::compute_with_seed(w, h, None, seed))
+    })
+}
+
+#[test]
+fn every_fixture_kind_is_placed_on_some_office() {
+    let mut seen = BTreeSet::new();
+    let mut stations = std::collections::HashSet::new();
+    for l in offices() {
+        for f in l.fixtures() {
+            seen.insert(kind_key(f.kind));
+            if let FixtureKind::Station { station, .. } = f.kind {
+                stations.insert(station);
             }
         }
     }
-    let missing: Vec<usize> = (0..seen.len()).filter(|&i| !seen[i]).collect();
-    assert!(missing.is_empty(), "kinds no office places: {missing:?}");
+    let all: BTreeSet<&str> = [
+        "Desk",
+        "FilingCabinet",
+        "DeskChair",
+        "Station",
+        "Plant",
+        "Pod",
+        "Wall",
+        "MeetingRug",
+        "MeetingSofa",
+        "MeetingTable",
+        "MeetingChair",
+        "CoatRack",
+        "Doormat",
+        "NoticeBoard",
+        "LoungeRug",
+        "LoungeCouch",
+        "SideTable",
+        "FloorLamp",
+        "FishTank",
+        "KitchenIsland",
+        "PantryMat",
+        "IslandMat",
+        "WaterCooler",
+        "TrashBin",
+        "Door",
+        "Runner",
+        "NeonSign",
+        "Clock",
+    ]
+    .into_iter()
+    .collect();
+    assert_eq!(
+        seen.difference(&all).collect::<Vec<_>>(),
+        Vec::<&&str>::new(),
+        "kinds placed but missing from this census's list: add them to it"
+    );
+    assert_eq!(
+        all.difference(&seen).collect::<Vec<_>>(),
+        Vec::<&&str>::new(),
+        "kinds no office places"
+    );
     assert_eq!(stations.len(), 4, "every station kind: {stations:?}");
 }
 
 #[test]
 fn backdrop_fixtures_come_first() {
     let l = SceneLayout::compute(192, 158, None).expect("fits");
-    let depths: Vec<Depth> = l.fixtures().iter().map(|f| f.depth).collect();
+    let depths: Vec<Depth> = l.fixtures().map(|f| f.depth).collect();
     let first_sorted = depths
         .iter()
         .position(|d| matches!(d, Depth::Sorted(_)))
         .expect("a sorted fixture");
     assert!(depths[..first_sorted].iter().all(|&d| d == Depth::Backdrop));
     assert!(depths[first_sorted..].iter().all(|&d| d != Depth::Backdrop));
+}
+
+/// The cooler and the bin stand on the floor, so a walker in front of one
+/// paints over it and one behind it is hidden.
+#[test]
+fn the_pantry_uprights_sort_at_their_south_row() {
+    let l = SceneLayout::compute(192, 158, None).expect("fits");
+    let p = l.pantry.expect("a pantry");
+    let expect = [
+        (FixtureKind::WaterCooler, p.water_cooler_rect()),
+        (FixtureKind::TrashBin, p.trash_bin_rect()),
+    ];
+    for (kind, rect) in expect {
+        let rect = rect.expect("fits this pantry");
+        let f = l.fixtures().find(|f| f.kind == kind).expect("rostered");
+        assert_eq!(f.visual, rect, "{kind:?}");
+        assert_eq!(f.depth, Depth::Sorted(rect.y + rect.height - 1), "{kind:?}");
+    }
+}
+
+/// Where two fixtures overlap, the one painted over the other answers: a
+/// back-turned desk's chair sorts past the desk and covers its front edge.
+#[test]
+fn fixture_at_names_the_topmost() {
+    let l = SceneLayout::compute(160, 200, Some(16)).expect("fits");
+    let chair = l
+        .fixtures()
+        .find(|f| matches!(f.kind, FixtureKind::DeskChair(_)))
+        .expect("a back-turned desk");
+    let FixtureKind::DeskChair(i) = chair.kind else {
+        unreachable!()
+    };
+    let desk = l
+        .fixtures()
+        .find(|f| f.kind == FixtureKind::Desk(i))
+        .expect("its desk");
+    assert!(chair.depth > desk.depth, "the chair paints over the desk");
+    let cell = Bounds {
+        x: chair.visual.x + chair.visual.width / 2,
+        y: chair.visual.y,
+        width: 1,
+        height: 1,
+    };
+    assert!(
+        cell.y < desk.visual.y + desk.visual.height,
+        "inside the desk too"
+    );
+    assert_eq!(l.fixture_at(cell), Some(chair.kind));
+}
+
+/// Hover reaches every fixture that shows anywhere: all but those a
+/// later-painted fixture's box covers whole.
+#[test]
+fn fixture_at_reaches_every_fixture_not_painted_over() {
+    let within = |inner: Bounds, outer: Bounds| {
+        inner.x >= outer.x
+            && inner.y >= outer.y
+            && inner.x + inner.width <= outer.x + outer.width
+            && inner.y + inner.height <= outer.y + outer.height
+    };
+    for l in [(160u16, 200u16, 0u64), (160, 200, 3), (240, 160, 5)]
+        .into_iter()
+        .filter_map(|(w, h, seed)| SceneLayout::compute_with_seed(w, h, Some(16), seed))
+    {
+        let mut reached = std::collections::HashSet::new();
+        for y in (0..l.buf_h).step_by(2) {
+            for x in 0..l.buf_w {
+                let cell = Bounds {
+                    x,
+                    y,
+                    width: 1,
+                    height: 2,
+                };
+                reached.extend(l.fixture_at(cell));
+            }
+        }
+        let fixtures: Vec<Fixture> = l.fixtures().collect();
+        for (i, f) in fixtures.iter().enumerate() {
+            let painted_over = fixtures
+                .iter()
+                .enumerate()
+                .any(|(j, g)| (g.depth, j) > (f.depth, i) && within(f.visual, g.visual));
+            assert!(
+                painted_over || reached.contains(&f.kind),
+                "{}x{}: {:?} is never reached",
+                l.buf_w,
+                l.buf_h,
+                f.kind
+            );
+        }
+    }
 }
 
 #[test]

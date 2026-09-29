@@ -154,8 +154,9 @@ pub(super) fn paint_kitchen_island(
     putxy(buf, w - 5, 0, accents[2]);
 }
 
-/// Notice board on the meeting room's south wall; placement and fit-gate come
-/// from `MeetingRoom::notice_board_rect`.
+/// Notice board filling `board`, the box
+/// [`MeetingRoom::notice_board_rect`](crate::layout::MeetingRoom::notice_board_rect)
+/// places and gates.
 pub(super) fn paint_notice_board(buf: &mut RgbBuffer, board: Bounds, theme: &crate::theme::Theme) {
     let wall_color = theme.office.room_wall_trim_dark;
     let accent = theme.furniture.rug_accent;

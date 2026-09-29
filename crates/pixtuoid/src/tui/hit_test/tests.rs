@@ -674,41 +674,17 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
     );
 }
 
-/// Where two fixtures overlap, hover names the one painted over the other:
-/// a back-turned desk's chair sorts past the desk and covers its front edge.
+/// The wall board's text sits on the neon sign, so hovering the sign must not
+/// raise a furniture tooltip over it.
 #[test]
-fn hover_names_the_topmost_fixture() {
-    use pixtuoid_scene::layout::{Depth, Facing, FixtureKind};
+fn the_neon_sign_raises_no_tooltip() {
+    use pixtuoid_scene::layout::{NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y};
     let layout = Layout::compute(160, 200, Some(16)).expect("layout");
-    let fixtures = layout.fixtures();
-    let chair = fixtures
-        .iter()
-        .find(|f| {
-            matches!(f.kind, FixtureKind::DeskChair(i) if layout.desk_facing(i) == Facing::North)
-        })
-        .expect("a back-turned desk");
-    let FixtureKind::DeskChair(i) = chair.kind else {
-        unreachable!()
-    };
-    let desk = fixtures
-        .iter()
-        .find(|f| f.kind == FixtureKind::Desk(i))
-        .expect("its desk");
-    let (Depth::Sorted(chair_row), Depth::Sorted(desk_row)) = (chair.depth, desk.depth) else {
-        panic!("both stand in the sort")
-    };
-    assert!(chair_row > desk_row, "the chair paints over the desk");
-    let cell = crate::tui::geometry::CellArea::half_block(
-        chair.visual.x + chair.visual.width / 2,
-        chair.visual.y / 2,
+    let cell =
+        crate::tui::geometry::CellArea::half_block(NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y / 2);
+    assert_eq!(
+        layout.fixture_at(cell.bounds()),
+        Some(pixtuoid_scene::layout::FixtureKind::NeonSign)
     );
-    assert!(cell.overlaps(
-        Point {
-            x: desk.visual.x,
-            y: desk.visual.y
-        },
-        desk.visual.width,
-        desk.visual.height
-    ));
-    assert_eq!(hit_test_furniture(&layout, cell), Some("Desk Chair"));
+    assert_eq!(hit_test_furniture(&layout, cell), None);
 }

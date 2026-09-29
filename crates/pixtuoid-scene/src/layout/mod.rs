@@ -34,13 +34,13 @@ pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
 pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 #[cfg(test)]
-pub(crate) use roster::{coffee_machine_cols, NEON_PANEL_H};
+pub(crate) use roster::{coffee_machine_cols, Depth, NEON_PANEL_H};
 pub(crate) use roster::{
     desk_chair_top_left, desk_chair_z_key, CLOCK, NEON_PANEL, NEON_PANEL_BORDER,
 };
 pub use roster::{
-    Depth, Fixture, FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W,
-    NEON_PANEL_INNER_X, NEON_PANEL_INNER_Y, NEON_PANEL_W,
+    FixtureKind, Station, NEON_PANEL_INNER_H, NEON_PANEL_INNER_W, NEON_PANEL_INNER_X,
+    NEON_PANEL_INNER_Y, NEON_PANEL_W,
 };
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
@@ -411,7 +411,7 @@ impl SceneLayout {
     pub(crate) fn is_visually_clear(&self, p: Point) -> bool {
         let inside =
             |b: Bounds| p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
-        !self.fixtures().into_iter().any(|f| {
+        !self.fixtures().any(|f| {
             let covers = match f.kind {
                 FixtureKind::Desk(_)
                 | FixtureKind::Station { .. }
@@ -435,12 +435,10 @@ impl SceneLayout {
                 | FixtureKind::PantryMat
                 | FixtureKind::IslandMat
                 | FixtureKind::Runner => false,
-                // Backdrop: painted under the whole sorted scene.
-                FixtureKind::NoticeBoard { .. }
-                | FixtureKind::WaterCooler
-                | FixtureKind::TrashBin
-                | FixtureKind::NeonSign
-                | FixtureKind::Clock => false,
+                // Hung in the backdrop, under the whole sorted scene.
+                FixtureKind::NoticeBoard { .. } | FixtureKind::NeonSign | FixtureKind::Clock => {
+                    false
+                }
                 // Architecture, and the band it punches is not walkable.
                 FixtureKind::Door => false,
                 // They do paint over what stands behind them, but covering them
@@ -448,7 +446,9 @@ impl SceneLayout {
                 // to its own decision.
                 FixtureKind::CoatRack { .. }
                 | FixtureKind::FilingCabinet(_)
-                | FixtureKind::DeskChair(_) => false,
+                | FixtureKind::DeskChair(_)
+                | FixtureKind::WaterCooler
+                | FixtureKind::TrashBin => false,
             };
             covers && inside(f.visual)
         })

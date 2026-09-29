@@ -69,46 +69,6 @@ fn pet_hit_test_resolves_at_pet_position() {
 }
 
 #[test]
-fn furniture_hit_test_names_every_fixture_not_painted_over() {
-    use crate::tui::hit_test::hit_test_furniture;
-    use pixtuoid_scene::layout::{Bounds, Layout, TEST_DEFAULT_DESKS};
-    use std::collections::HashSet;
-
-    let within = |inner: Bounds, outer: Bounds| {
-        inner.x >= outer.x
-            && inner.y >= outer.y
-            && inner.x + inner.width <= outer.x + outer.width
-            && inner.y + inner.height <= outer.y + outer.height
-    };
-    // Seeds 0 and 3 between them place every kind the roster has at this size.
-    for seed in [0u64, 3] {
-        let layout = Layout::compute_with_seed(160, 200, Some(TEST_DEFAULT_DESKS), seed)
-            .unwrap_or_else(|| panic!("layout for seed {seed}"));
-        let mut labels = HashSet::new();
-        for cy in 0..(layout.buf_h / 2) {
-            for cx in 0..layout.buf_w {
-                labels.extend(hit_test_furniture(
-                    &layout,
-                    crate::tui::geometry::CellArea::half_block(cx, cy),
-                ));
-            }
-        }
-        let fixtures = layout.fixtures();
-        for (i, f) in fixtures.iter().enumerate() {
-            let painted_over = fixtures
-                .iter()
-                .enumerate()
-                .any(|(j, g)| (g.depth, j) > (f.depth, i) && within(f.visual, g.visual));
-            assert!(
-                painted_over || labels.contains(f.kind.name()),
-                "seed {seed}: {:?} never resolves",
-                f.kind
-            );
-        }
-    }
-}
-
-#[test]
 fn hovering_an_agent_marks_its_label() {
     let mut s = idle("/hov/0.jsonl", 0, t0() - Duration::from_secs(300));
     s.label = "HOVERME".into();

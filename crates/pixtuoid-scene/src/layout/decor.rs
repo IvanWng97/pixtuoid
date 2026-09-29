@@ -361,8 +361,8 @@ pub enum Furniture {
     /// A home desk's task chair, seen from behind. Decor: its occupant's seat
     /// is the desk's, so it stamps nothing of its own.
     DeskChair,
-    /// The filing cabinet beside a home desk, inside the desk's own blocked
-    /// ground.
+    /// The filing cabinet beside a home desk. Decor, placed off its desk, so it
+    /// stamps no ground of its own.
     FilingCabinet,
 }
 

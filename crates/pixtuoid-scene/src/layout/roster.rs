@@ -1,40 +1,39 @@
 //! The furniture roster: every physical thing the office stands on its floor
-//! or hangs on its walls, placed and depth-keyed once, for every consumer —
-//! the painters, the hover hit-test, the visual-clearance probe and the
-//! placement sweep all map over [`SceneLayout::fixtures`].
+//! or hangs on its walls, placed and depth-keyed once. The hover hit-test, the
+//! visual-clearance probe and the placement sweep map over
+//! [`SceneLayout::fixtures`].
 
 use super::{
     anchored_top_left, coat_rack_rect_at, furniture_def, z_sort_row, Anchor, Bounds, Facing,
-    Furniture, PlantItem, PlantKind, PodDecor, PodDecorItem, Point, SceneLayout, Size, WallDecor,
-    WallDecorItem, WaypointKind, ELEVATOR_H, ELEVATOR_W,
+    Furniture, Lounge, MeetingRoom, MeetingTrio, PantryRoom, PlantItem, PlantKind, PodDecor,
+    PodDecorItem, Point, SceneLayout, Size, WallDecor, WallDecorItem, WaypointKind, ELEVATOR_H,
+    ELEVATOR_W,
 };
 use pixtuoid_core::state::FloorLocalDeskIndex;
 
 /// One placed fixture.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Fixture {
+pub(crate) struct Fixture {
     /// What it is, carrying the ids a painter joins live state on.
-    pub kind: FixtureKind,
+    pub(crate) kind: FixtureKind,
     /// The box its art covers, in logical px.
-    pub visual: Bounds,
+    pub(crate) visual: Bounds,
     /// Where it sorts among everything else painted.
-    pub depth: Depth,
+    pub(crate) depth: Depth,
 }
 
 /// Where a fixture sorts. The derived order is the paint order: every
 /// [`Depth::Backdrop`] fixture paints under every [`Depth::Sorted`] one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub enum Depth {
-    /// Painted flat under the sorted scene, in roster order: floor coverings
-    /// and wall fixtures nothing stands behind.
+pub(crate) enum Depth {
+    /// Painted flat under the sorted scene, in roster order: the mats, the
+    /// runner, and wall fixtures nothing stands behind.
     Backdrop,
     /// Painted in the y-sort at this row, roster order breaking ties.
     Sorted(u16),
 }
 
-/// The waypoint kinds that are furniture in their own right. The others ride
-/// a piece placed elsewhere — a seat on its sofa or chair, an island stand on
-/// the island, a promoted pod-decor slot on its decor.
+/// The waypoint kinds that are furniture in their own right.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Station {
     /// The pantry counter.
@@ -48,7 +47,7 @@ pub enum Station {
 }
 
 /// Every kind of fixture. Consumers match it exhaustively, so a new kind is a
-/// compile error in each until it decides how to draw, hover and clear it.
+/// compile error in each until it decides how to hover and clear it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FixtureKind {
     /// A home desk.
@@ -157,9 +156,9 @@ pub enum FixtureKind {
 }
 
 impl FixtureKind {
-    /// Its hover label.
-    pub fn name(self) -> &'static str {
-        match self {
+    /// What hovering it says, or `None` where a tooltip would be noise.
+    pub fn hover_label(self) -> Option<&'static str> {
+        Some(match self {
             FixtureKind::Desk(_) => "Desk",
             FixtureKind::FilingCabinet(_) => "Filing Cabinet",
             FixtureKind::DeskChair(_) => "Desk Chair",
@@ -205,10 +204,13 @@ impl FixtureKind {
             FixtureKind::WaterCooler => "Water Cooler",
             FixtureKind::TrashBin => "Trash Bin",
             FixtureKind::Door => "Elevator",
-            FixtureKind::Runner => "Runner",
-            FixtureKind::NeonSign => "Neon Sign",
             FixtureKind::Clock => "Clock",
-        }
+            // The whole corridor: a tooltip wherever the pointer crosses it.
+            FixtureKind::Runner => return None,
+            // The wall board's text and star link sit on it, and hover there
+            // belongs to them.
+            FixtureKind::NeonSign => return None,
+        })
     }
 }
 
@@ -217,11 +219,12 @@ pub(crate) const CLOCK: Size = Size { w: 7, h: 7 };
 /// The wall clock's top row.
 const CLOCK_Y: u16 = 1;
 
-/// The neon sign's outer box, frame included. A pixel column is a terminal
-/// cell column in the half-block flush, so these widths are cell widths too.
+/// The neon sign's outer box: its origin, then its size with the frame
+/// included.
 pub(crate) const NEON_PANEL_X: u16 = 1;
 pub(crate) const NEON_PANEL_Y: u16 = 1;
-/// The neon sign's OUTER width in pixels (frame included).
+/// The neon sign's outer width in pixels. A pixel column is a terminal cell
+/// column in the half-block flush, so it is a cell width too.
 pub const NEON_PANEL_W: u16 = 30;
 pub(crate) const NEON_PANEL_H: u16 = 8;
 /// The frame thickness `paint_neon_panel` lights on every side — it reads THIS,
@@ -283,10 +286,11 @@ impl SceneLayout {
     /// Every fixture of this office, backdrop first and then in the order that
     /// breaks the y-sort's ties.
     ///
-    /// The ONE destructure of the layout with no `..`: a new collection is a
-    /// compile error here until it is rostered or bound away with its reason,
-    /// and every consumer then meets its kinds in an exhaustive match.
-    pub fn fixtures(&self) -> Vec<Fixture> {
+    /// The ONE destructure of the layout and its aggregates with no `..`: a new
+    /// field is a compile error here until it is rostered or bound away with
+    /// its reason, and every consumer then meets its kinds in an exhaustive
+    /// match. Lazy, so a probe that stops at its first hit builds nothing.
+    pub(crate) fn fixtures(&self) -> impl Iterator<Item = Fixture> + '_ {
         let SceneLayout {
             // Read through `clock_pos`.
             buf_w: _,
@@ -312,252 +316,284 @@ impl SceneLayout {
             room_walls: _,
             doorways: _,
             wall_pieces: _,
-            // Wall-band geometry, read through `wall_band_h`.
+            // Wall-band geometry, not a piece.
             top_margin: _,
             corridor,
             // What the fixtures stamp, not fixtures.
             walkable: _,
             reachable: _,
         } = self;
-
+        let rooms = meeting_rooms.iter().enumerate().map(|(room, r)| {
+            // Its bounds place its pieces through the rect methods.
+            let MeetingRoom { bounds: _, trio } = r;
+            let trio = trio.map(|t| {
+                let MeetingTrio { sofas, table } = t;
+                (t, sofas, table)
+            });
+            (room, r, trio)
+        });
+        let (island, pantry_uprights) = match pantry {
+            Some(
+                p @ PantryRoom {
+                    // Place the cooler and the bin through their rect methods.
+                    bounds: _,
+                    // Sizes its counter, which rosters as a waypoint station.
+                    counter_size: _,
+                    kitchen_island,
+                },
+            ) => (*kitchen_island, Some(p)),
+            None => (None, None),
+        };
+        let (couch, lamp, side_table, tank) = match lounge {
+            Some(Lounge {
+                couch_center,
+                floor_lamp,
+                side_table,
+                fish_tank,
+            }) => (
+                Some(*couch_center),
+                Some(*floor_lamp),
+                Some(*side_table),
+                *fish_tank,
+            ),
+            None => (None, None, None, None),
+        };
         let backdrop = |kind, visual| Fixture {
             kind,
             visual,
             depth: Depth::Backdrop,
         };
-        let mut out = vec![
+        let upright = |kind, visual: Bounds| Fixture {
+            kind,
+            visual,
+            depth: Depth::Sorted(visual.y + visual.height - 1),
+        };
+        let desk = furniture_def(Furniture::Desk).visual;
+
+        [
             backdrop(FixtureKind::NeonSign, NEON_PANEL),
             backdrop(FixtureKind::Clock, boxed(self.clock_pos(), CLOCK)),
-        ];
-        out.extend(corridor.map(|b| backdrop(FixtureKind::Runner, b)));
-        for (room, r) in meeting_rooms.iter().enumerate() {
-            out.extend(
-                r.notice_board_rect()
-                    .map(|b| backdrop(FixtureKind::NoticeBoard { room }, b)),
-            );
-            out.extend(
-                r.doormat_rect()
-                    .map(|b| backdrop(FixtureKind::Doormat { room }, b)),
-            );
-        }
-        // Mats before the upright pantry fixtures: on a narrow pantry the entry
-        // mat reaches the water cooler's column.
-        out.extend(
+        ]
+        .into_iter()
+        .chain(corridor.map(|b| backdrop(FixtureKind::Runner, b)))
+        .chain(rooms.clone().flat_map(move |(room, r, _)| {
+            r.notice_board_rect()
+                .map(|b| backdrop(FixtureKind::NoticeBoard { room }, b))
+                .into_iter()
+                .chain(
+                    r.doormat_rect()
+                        .map(|b| backdrop(FixtureKind::Doormat { room }, b)),
+                )
+        }))
+        .chain(
             self.pantry_entry_mat()
                 .map(|b| backdrop(FixtureKind::PantryMat, b)),
-        );
-        out.extend(
+        )
+        .chain(
             self.island_bar_mat()
                 .map(|b| backdrop(FixtureKind::IslandMat, b)),
-        );
-        if let Some(p) = pantry {
-            out.extend(
-                p.water_cooler_rect()
-                    .map(|b| backdrop(FixtureKind::WaterCooler, b)),
-            );
-            out.extend(
-                p.trash_bin_rect()
-                    .map(|b| backdrop(FixtureKind::TrashBin, b)),
-            );
-        }
-
-        let desk = furniture_def(Furniture::Desk).visual;
-        for (i, &at) in home_desks.iter().enumerate() {
+        )
+        .chain(home_desks.iter().enumerate().flat_map(move |(i, &at)| {
             let local = FloorLocalDeskIndex(i);
             let depth = Depth::Sorted(at.y + desk.h);
-            if let Some(tl) = self.filing_cabinet_top_left(local) {
-                out.push(Fixture {
+            self.filing_cabinet_top_left(local)
+                .map(|tl| Fixture {
                     kind: FixtureKind::FilingCabinet(local),
                     visual: boxed(tl, furniture_def(Furniture::FilingCabinet).visual),
                     depth,
-                });
-            }
-            out.push(Fixture {
-                kind: FixtureKind::Desk(local),
-                visual: boxed(at, desk),
-                depth,
-            });
-        }
-
-        let trios = || {
-            meeting_rooms
-                .iter()
-                .enumerate()
-                .filter_map(|(room, r)| r.trio.map(|t| (room, t)))
-        };
-        for (room, trio) in trios() {
-            let rug = trio.rug(*buf_h);
-            out.push(Fixture {
+                })
+                .into_iter()
+                .chain(std::iter::once(Fixture {
+                    kind: FixtureKind::Desk(local),
+                    visual: boxed(at, desk),
+                    depth,
+                }))
+        }))
+        .chain(rooms.clone().filter_map(move |(room, _, trio)| {
+            let rug = trio?.0.rug(*buf_h);
+            Some(Fixture {
                 kind: FixtureKind::MeetingRug { room },
                 visual: rug,
                 depth: Depth::Sorted(rug.y),
-            });
-        }
-        for (room, trio) in trios() {
-            for (seat, sofa) in trio.sofas.into_iter().enumerate() {
-                let faces_away = sofa.y >= trio.table.y;
-                out.push(Fixture {
-                    kind: FixtureKind::MeetingSofa {
-                        room,
-                        seat,
-                        faces_away,
-                    },
-                    visual: centred(sofa, furniture_def(Furniture::MeetingSofaBody).visual),
-                    // A sofa we see the back of sorts past its sitters to hide
-                    // them; a front one ties them, and they sit on it.
-                    depth: Depth::Sorted(super::seated_z_key(sofa) + u16::from(faces_away)),
-                });
-            }
-        }
-        for (room, trio) in trios() {
-            out.push(centred_row(
-                FixtureKind::MeetingTable { room },
-                trio.table,
-                Furniture::MeetingTable,
-            ));
-        }
-
-        if let Some(island) = pantry.and_then(|p| p.kitchen_island) {
-            out.push(centred_row(
-                FixtureKind::KitchenIsland,
-                island,
-                Furniture::KitchenIsland,
-            ));
-        }
-        if let Some(l) = lounge {
-            out.push(Fixture {
-                kind: FixtureKind::LoungeRug,
-                visual: l.rug(),
-                depth: Depth::Sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
-            });
-            out.push(centred_row(
-                FixtureKind::LoungeCouch,
-                l.couch_center,
-                Furniture::MeetingSofaBody,
-            ));
-            out.push(centred_row(
-                FixtureKind::SideTable,
-                l.side_table,
-                Furniture::LoungeSideTable,
-            ));
-        }
-
-        for (waypoint, wp) in waypoints.iter().enumerate() {
-            let station = match wp.kind {
-                WaypointKind::Pantry => Station::PantryCounter,
-                WaypointKind::VendingMachine => Station::VendingMachine,
-                WaypointKind::Printer => Station::Printer,
-                WaypointKind::SnackShelf => Station::SnackShelf,
-                // Seats on the lounge couch, a meeting sofa, a meeting chair
-                // (rostered below, after the lamp) or the island.
-                WaypointKind::Couch
-                | WaypointKind::MeetingSofa
-                | WaypointKind::MeetingChair
-                | WaypointKind::Island => continue,
-                // Promoted pod-decor slots: their decor is the fixture.
-                WaypointKind::PhoneBooth | WaypointKind::StandingDesk => continue,
-            };
-            let kind = FixtureKind::Station { waypoint, station };
-            out.push(match station {
-                // Runtime-sized: the furniture row is empty on purpose.
-                Station::PantryCounter => {
-                    let size = self.pantry_counter_size();
+            })
+        }))
+        .chain(rooms.clone().flat_map(|(room, _, trio)| {
+            trio.into_iter().flat_map(move |(_, sofas, table)| {
+                sofas.into_iter().enumerate().map(move |(seat, sofa)| {
+                    let faces_away = sofa.y >= table.y;
                     Fixture {
-                        kind,
-                        visual: centred(wp.pos, size),
-                        depth: Depth::Sorted(z_sort_row(Anchor::Center, wp.pos, size.h)),
+                        kind: FixtureKind::MeetingSofa {
+                            room,
+                            seat,
+                            faces_away,
+                        },
+                        visual: centred(sofa, furniture_def(Furniture::MeetingSofaBody).visual),
+                        // A sofa we see the back of sorts past its sitters to
+                        // hide them; a front one ties them, and they sit on it.
+                        depth: Depth::Sorted(super::seated_z_key(sofa) + u16::from(faces_away)),
                     }
-                }
-                Station::VendingMachine | Station::Printer | Station::SnackShelf => {
-                    centred_row(kind, wp.pos, wp.kind.furniture())
-                }
-            });
-        }
-
-        for (item, &PodDecorItem { kind, pos }) in pod_decor.iter().enumerate() {
-            out.push(centred_row(
-                FixtureKind::Pod { item, kind },
-                pos,
-                kind.furniture(),
-            ));
-        }
-        for (item, &PlantItem { kind, pos }) in plants.iter().enumerate() {
-            out.push(centred_row(
-                FixtureKind::Plant { item, kind },
-                pos,
-                kind.furniture(),
-            ));
-        }
-
-        if let Some(l) = lounge {
-            out.push(centred_row(
-                FixtureKind::FloorLamp,
-                l.floor_lamp,
-                Furniture::FloorLamp,
-            ));
-        }
-        for (waypoint, wp) in waypoints.iter().enumerate() {
-            if wp.kind != WaypointKind::MeetingChair {
-                continue;
-            }
-            out.push(Fixture {
-                kind: FixtureKind::MeetingChair {
-                    waypoint,
-                    facing: wp.facing,
+                })
+            })
+        }))
+        .chain(rooms.clone().filter_map(|(room, _, trio)| {
+            let (_, _, table) = trio?;
+            Some(centred_row(
+                FixtureKind::MeetingTable { room },
+                table,
+                Furniture::MeetingTable,
+            ))
+        }))
+        .chain(
+            island.map(|at| centred_row(FixtureKind::KitchenIsland, at, Furniture::KitchenIsland)),
+        )
+        .chain(pantry_uprights.into_iter().flat_map(move |p| {
+            p.water_cooler_rect()
+                .map(|b| upright(FixtureKind::WaterCooler, b))
+                .into_iter()
+                .chain(
+                    p.trash_bin_rect()
+                        .map(|b| upright(FixtureKind::TrashBin, b)),
+                )
+        }))
+        .chain(lounge.as_ref().map(|l| Fixture {
+            kind: FixtureKind::LoungeRug,
+            visual: l.rug(),
+            depth: Depth::Sorted(l.couch_center.y.saturating_sub(LOUNGE_RUG_Z_LEAD)),
+        }))
+        .chain(
+            couch.map(|at| centred_row(FixtureKind::LoungeCouch, at, Furniture::MeetingSofaBody)),
+        )
+        .chain(
+            side_table
+                .map(|at| centred_row(FixtureKind::SideTable, at, Furniture::LoungeSideTable)),
+        )
+        .chain(
+            waypoints
+                .iter()
+                .enumerate()
+                .filter_map(move |(waypoint, wp)| {
+                    let station = match wp.kind {
+                        WaypointKind::Pantry => Station::PantryCounter,
+                        WaypointKind::VendingMachine => Station::VendingMachine,
+                        WaypointKind::Printer => Station::Printer,
+                        WaypointKind::SnackShelf => Station::SnackShelf,
+                        // Seats on the lounge couch, a meeting sofa, a meeting chair
+                        // (rostered below, after the lamp) or the island.
+                        WaypointKind::Couch
+                        | WaypointKind::MeetingSofa
+                        | WaypointKind::MeetingChair
+                        | WaypointKind::Island => return None,
+                        // Promoted pod-decor slots: their decor is the fixture.
+                        WaypointKind::PhoneBooth | WaypointKind::StandingDesk => return None,
+                    };
+                    let kind = FixtureKind::Station { waypoint, station };
+                    Some(match station {
+                        // Runtime-sized: the furniture row is empty on purpose.
+                        Station::PantryCounter => {
+                            let size = self.pantry_counter_size();
+                            Fixture {
+                                kind,
+                                visual: centred(wp.pos, size),
+                                depth: Depth::Sorted(z_sort_row(Anchor::Center, wp.pos, size.h)),
+                            }
+                        }
+                        Station::VendingMachine | Station::Printer | Station::SnackShelf => {
+                            centred_row(kind, wp.pos, wp.kind.furniture())
+                        }
+                    })
+                }),
+        )
+        .chain(
+            pod_decor
+                .iter()
+                .enumerate()
+                .map(|(item, &PodDecorItem { kind, pos })| {
+                    centred_row(FixtureKind::Pod { item, kind }, pos, kind.furniture())
+                }),
+        )
+        .chain(
+            plants
+                .iter()
+                .enumerate()
+                .map(|(item, &PlantItem { kind, pos })| {
+                    centred_row(FixtureKind::Plant { item, kind }, pos, kind.furniture())
+                }),
+        )
+        .chain(lamp.map(|at| centred_row(FixtureKind::FloorLamp, at, Furniture::FloorLamp)))
+        .chain(
+            waypoints
+                .iter()
+                .enumerate()
+                .filter(|(_, wp)| wp.kind == WaypointKind::MeetingChair)
+                .map(|(waypoint, wp)| Fixture {
+                    kind: FixtureKind::MeetingChair {
+                        waypoint,
+                        facing: wp.facing,
+                    },
+                    visual: centred(wp.pos, furniture_def(Furniture::MeetingChair).visual),
+                    // One row under its sitter, who sits on it.
+                    depth: Depth::Sorted(super::seated_z_key(wp.pos) - 1),
+                }),
+        )
+        .chain(tank.map(|at| centred_row(FixtureKind::FishTank, at, Furniture::FishTank)))
+        .chain(rooms.filter_map(move |(room, r, _)| {
+            Some(upright(
+                FixtureKind::CoatRack { room },
+                coat_rack_rect_at(r.coat_rack_pos()?),
+            ))
+        }))
+        .chain(door.map(|at| Fixture {
+            kind: FixtureKind::Door,
+            visual: boxed(
+                at,
+                Size {
+                    w: ELEVATOR_W,
+                    h: ELEVATOR_H,
                 },
-                visual: centred(wp.pos, furniture_def(Furniture::MeetingChair).visual),
-                // One row under its sitter, who sits on it.
-                depth: Depth::Sorted(super::seated_z_key(wp.pos) - 1),
-            });
-        }
-        if let Some(tank) = lounge.and_then(|l| l.fish_tank) {
-            out.push(centred_row(
-                FixtureKind::FishTank,
-                tank,
-                Furniture::FishTank,
-            ));
-        }
-        for (room, r) in meeting_rooms.iter().enumerate() {
-            if let Some(visual) = r.coat_rack_pos().map(coat_rack_rect_at) {
-                out.push(Fixture {
-                    kind: FixtureKind::CoatRack { room },
-                    visual,
-                    depth: Depth::Sorted(visual.y + visual.height - 1),
-                });
-            }
-        }
-        if let Some(at) = door {
-            let size = Size {
-                w: ELEVATOR_W,
-                h: ELEVATOR_H,
-            };
-            out.push(Fixture {
-                kind: FixtureKind::Door,
-                visual: boxed(*at, size),
-                depth: Depth::Sorted(at.y + ELEVATOR_H),
-            });
-        }
-        for (item, &WallDecorItem { kind, pos }) in wall_decor.iter().enumerate() {
-            let size = furniture_def(kind.furniture()).visual;
-            out.push(Fixture {
-                kind: FixtureKind::Wall { item, kind },
-                visual: boxed(pos, size),
-                depth: Depth::Sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
-            });
-        }
+            ),
+            depth: Depth::Sorted(at.y + ELEVATOR_H),
+        }))
+        .chain(
+            wall_decor
+                .iter()
+                .enumerate()
+                .map(|(item, &WallDecorItem { kind, pos })| {
+                    let size = furniture_def(kind.furniture()).visual;
+                    Fixture {
+                        kind: FixtureKind::Wall { item, kind },
+                        visual: boxed(pos, size),
+                        depth: Depth::Sorted(z_sort_row(Anchor::TopLeft, pos, size.h)),
+                    }
+                }),
+        )
         // Last: they tie with their sitters, whom the painters queue before them.
-        for (i, &at) in home_desks.iter().enumerate() {
+        .chain(home_desks.iter().enumerate().filter_map(move |(i, &at)| {
             let local = FloorLocalDeskIndex(i);
             let facing = self.desk_facing(local);
-            if let Some(tl) = desk_chair_top_left(at, facing) {
-                out.push(Fixture {
-                    kind: FixtureKind::DeskChair(local),
-                    visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
-                    depth: Depth::Sorted(desk_chair_z_key(at, facing)),
-                });
-            }
-        }
-        out
+            desk_chair_top_left(at, facing).map(|tl| Fixture {
+                kind: FixtureKind::DeskChair(local),
+                visual: boxed(tl, furniture_def(Furniture::DeskChair).visual),
+                depth: Depth::Sorted(desk_chair_z_key(at, facing)),
+            })
+        }))
+    }
+
+    /// The fixture hovering `cell` points at: the topmost whose art covers any
+    /// of it — the one painted last there, by depth and then roster order.
+    pub fn fixture_at(&self, cell: Bounds) -> Option<FixtureKind> {
+        let overlaps = |b: Bounds| {
+            b.width > 0
+                && b.height > 0
+                && cell.x < b.x + b.width
+                && b.x < cell.x + cell.width
+                && cell.y < b.y + b.height
+                && b.y < cell.y + cell.height
+        };
+        self.fixtures()
+            .enumerate()
+            .filter(|(_, f)| overlaps(f.visual))
+            .max_by_key(|&(i, f)| (f.depth, i))
+            .map(|(_, f)| f.kind)
     }
 
     /// Whether desk `i` stands a filing cabinet beside it.

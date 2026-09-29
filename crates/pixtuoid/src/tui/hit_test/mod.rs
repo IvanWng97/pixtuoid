@@ -79,16 +79,10 @@ pub(crate) fn hit_test_coffee_machine(layout: &Layout, cell: CellArea) -> bool {
     layout.coffee_machine().is_some_and(|b| on_rect(b, cell))
 }
 
-/// The label of the topmost fixture `cell` shows — the one painted last there.
-/// The coffee machine is handled separately for its click-to-open behavior.
+/// The label of the fixture hovering `cell` points at, if it carries one. The
+/// coffee machine is handled separately for its click-to-open behavior.
 pub(crate) fn hit_test_furniture(layout: &Layout, cell: CellArea) -> Option<&'static str> {
-    layout
-        .fixtures()
-        .into_iter()
-        .enumerate()
-        .filter(|(_, f)| on_rect(f.visual, cell))
-        .max_by_key(|&(i, f)| (f.depth, i))
-        .map(|(_, f)| f.kind.name())
+    layout.fixture_at(cell.bounds())?.hover_label()
 }
 
 fn on_rect(b: Bounds, cell: CellArea) -> bool {
