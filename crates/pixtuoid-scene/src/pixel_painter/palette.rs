@@ -520,23 +520,6 @@ pub(super) fn blend_pixel(buf: &mut RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32
     }
 }
 
-/// Perceptually-correct Lab-space mix between two sRGB colors — twilight
-/// (orange → navy) and dim overlays travel through Lab without the muddy
-/// desaturated midpoint naive sRGB lerp produces. Slower than [`blend`].
-pub(super) fn mix_lab(a: Rgb, b: Rgb, t: f32) -> Rgb {
-    use palette::{FromColor, IntoColor, Lab, Mix, Srgb};
-    let sa = Srgb::new(a.r as f32 / 255.0, a.g as f32 / 255.0, a.b as f32 / 255.0);
-    let sb = Srgb::new(b.r as f32 / 255.0, b.g as f32 / 255.0, b.b as f32 / 255.0);
-    let la = Lab::from_color(sa);
-    let lb = Lab::from_color(sb);
-    let mixed: Srgb = la.mix(lb, t.clamp(0.0, 1.0)).into_color();
-    Rgb {
-        r: (mixed.red.clamp(0.0, 1.0) * 255.0).round() as u8,
-        g: (mixed.green.clamp(0.0, 1.0) * 255.0).round() as u8,
-        b: (mixed.blue.clamp(0.0, 1.0) * 255.0).round() as u8,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

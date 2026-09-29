@@ -72,6 +72,19 @@ impl Rgb {
         Rgb::from_oklab_in_gamut(Oklab::new(l, base.a + pull * cos, base.b + pull * sin))
     }
 
+    /// The color `t` of the way from this one to `other`, `t` clamped to
+    /// `0..=1`.
+    ///
+    /// Interpolated in OKLab, the space [`Rgb::ramp`] steps in, so a mix's
+    /// lightness moves evenly with `t` where an sRGB mix of two hues sags
+    /// through a darker, muddier middle.
+    pub fn mix(self, other: Rgb, t: f32) -> Rgb {
+        let t = t.clamp(0.0, 1.0);
+        let (a, b) = (self.to_oklab(), other.to_oklab());
+        let lerp = |x: f32, y: f32| x + (y - x) * t;
+        Rgb::from_oklab_in_gamut(Oklab::new(lerp(a.l, b.l), lerp(a.a, b.a), lerp(a.b, b.b)))
+    }
+
     fn to_oklab(self) -> Oklab {
         Oklab::from_color(Srgb::new(self.r, self.g, self.b).into_format::<f32>())
     }
@@ -464,6 +477,21 @@ mod tests {
                 lightness.windows(2).all(|w| w[0] < w[1]),
                 "{base:?}: {lightness:?}"
             );
+        }
+    }
+
+    #[test]
+    fn a_mix_runs_from_one_color_to_the_other_evenly_in_lightness() {
+        let (navy, amber) = (rgb(18, 26, 52), rgb(252, 215, 110));
+        assert_eq!(navy.mix(amber, 0.0), navy);
+        assert_eq!(navy.mix(amber, 1.0), amber);
+        assert_eq!(navy.mix(amber, -1.0), navy, "t clamps below");
+        assert_eq!(navy.mix(amber, 2.0), amber, "t clamps above");
+        let l = |t: f32| navy.mix(amber, t).to_oklab().l;
+        let (l0, l1) = (l(0.0), l(1.0));
+        for t in [0.25, 0.5, 0.75] {
+            let even = l0 + (l1 - l0) * t;
+            assert!((l(t) - even).abs() < 0.01, "t={t}: {} vs {even}", l(t));
         }
     }
 
