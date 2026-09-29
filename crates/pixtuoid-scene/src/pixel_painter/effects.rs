@@ -30,7 +30,7 @@ pub(super) fn paint_screen_idle(
 }
 
 /// Glass columns offset from the desk sprite's left edge — shared so idle and glow can't diverge.
-const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
+pub(crate) const SCREEN_GLASS_COLS: std::ops::RangeInclusive<u16> = 4..=9;
 
 /// Casing rows offset from the sprite TOP; lighting only the lower one leaves a black bar capping the glow.
 const SCREEN_CASING_ROWS: std::ops::RangeInclusive<u16> = 0..=1;
