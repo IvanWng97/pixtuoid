@@ -41,7 +41,7 @@ crates/   DAG: pixtuoid-core ← pixtuoid-scene ← {pixtuoid, pixtuoid-web}  (+
 ├── pixtuoid-web/    third painter — wasm canvas, publish=false; a SITE BUILD INPUT
 │                    (`just gen-wasm` → committed site/public/wasm/)
 └── pixtuoid-hook/   tiny shim CC invokes — stdin JSON → socket/named pipe
-scripts/  gen-media.py (the ONE driver for committed media), gen-art.py (the generated sprites: every @4x + the 1x pieces it owns), e2e tiers (lib/), drift watch
+scripts/  gen-media.py (the ONE driver for committed media), gen-art.py (the generated sprites: every @Nx + the 1x pieces it owns), e2e tiers (lib/), drift watch
 policy/   CI contracts no linter sees (jq over yq) + behavior tests of workflow shell
 site/     Astro landing page; integrations/raycast/  Raycast extension
 ```

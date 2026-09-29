@@ -3212,25 +3212,6 @@ S B B B B B B S
         }
     }
 
-    /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
-    /// pin a variant winning): a piece with no variant that lands at the scale
-    /// must be untouched by the lookup, or adding one `@Nx` sprite would be a
-    /// flag day for all of them.
-    #[test]
-    fn a_piece_with_no_variant_at_the_scale_renders_exactly_as_it_did_before() {
-        let pack = pack();
-        let s = 3;
-        assert!(
-            pack.density_variants().iter().all(|d| s % d != 0),
-            "this test is only meaningful while no bundled variant divides {s}"
-        );
-        let (bw, _) = base_size(&pack, "plant");
-        let scale = RenderScale::new(s).expect("nonzero");
-        let d = crate::pixel_painter::densest_frame(&pack, "plant", 0, scale)
-            .expect("plant is in the pack");
-        assert_eq!((d.frame.width(), d.blit_at.get()), (bw, s));
-    }
-
     /// A back-view sofa sits its sitter between its two bands: the seat under
     /// them, the backrest, nearest the viewer, over their lap.
     #[test]
