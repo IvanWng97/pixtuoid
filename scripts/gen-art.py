@@ -641,10 +641,13 @@ def style_long():
               [(10, 3 + o), (11, 3 + o)])
     back = layer()
     ellipse(back, FIG_CX, 12.2 + o, 11.2, 11.0)
+    # The fall narrows below the head so the shoulders show either side of it:
+    # the shirt is how a viewer tells one long-haired back from another.
     for y in range(12 + o, 37 + o):
         spread = (y - 12 - o) / 25
-        rect(back, int(4 - spread * 2), y, int(28 + spread * 2), y + 1, HAIR)
-    for x0 in (4, 9, 14, 19, 24, 28):
+        narrow = min(1.0, (y - 12 - o) / 10) * 4
+        rect(back, int(4 + narrow - spread), y, int(28 - narrow + spread), y + 1, HAIR)
+    for x0 in (9, 13, 17, 21, 25):
         for i in range(3):
             rect(back, max(1, x0 - 2 + i), 37 + o + i, min(FIG_W - 1, x0 + 2 - i), 38 + o + i, HAIR)
     rim_light(back, [], [(10, 3 + o), (11, 3 + o)])
@@ -857,6 +860,23 @@ def mitt(g, x, y):
     g[y + S - 1][x + S - 1] = T
 
 
+def ears_front(g, dy):
+    for x, inner in ((5, 6), (25, 25)):
+        rect(g, x, FACE_TOP + 5 + dy, x + 2, FACE_TOP + 9 + dy, SKIN)
+        rect(g, inner, FACE_TOP + 6 + dy, inner + 1, FACE_TOP + 8 + dy, SKIN_SH)
+
+
+def ears_back(g, dy):
+    for x in (5, 25):
+        rect(g, x, 17 + dy, x + 2, 21 + dy, SKIN)
+        rect(g, x + (1 if x < 16 else 0), 18 + dy, x + (2 if x < 16 else 1), 20 + dy, SKIN_SH)
+
+
+def ear_side(g, dy):
+    rect(g, 12, 16 + dy, 15, 20 + dy, SKIN)
+    rect(g, 13, 17 + dy, 14, 19 + dy, SKIN_SH)
+
+
 def face_front(g, dy, ears):
     """The face: round, shaded east and along the chin, two tall eyes and a
     small mouth; the ears where a style leaves them bare."""
@@ -867,9 +887,7 @@ def face_front(g, dy, ears):
             if nx * nx + ny * ny <= 1.0:
                 g[y + dy][x] = SKIN_SH if (x >= 21 or y >= FACE_BOTTOM - 2) else SKIN
     if ears:
-        for x, inner in ((5, 6), (25, 25)):
-            rect(g, x, FACE_TOP + 5 + dy, x + 2, FACE_TOP + 9 + dy, SKIN)
-            rect(g, inner, FACE_TOP + 6 + dy, inner + 1, FACE_TOP + 8 + dy, SKIN_SH)
+        ears_front(g, dy)
     eye_y = FACE_TOP + 5 + dy
     rect(g, 11, eye_y, 13, eye_y + 4, EYE)
     rect(g, 19, eye_y, 21, eye_y + 4, EYE)
@@ -882,9 +900,7 @@ def nape(g, dy, ears):
     rect(g, 12, 23 + dy, 20, 27 + dy, SKIN_DK)
     rect(g, 13, 23 + dy, 19, 26 + dy, SKIN_SH)
     if ears:
-        for x in (5, 25):
-            rect(g, x, 17 + dy, x + 2, 21 + dy, SKIN)
-            rect(g, x + (1 if x < 16 else 0), 18 + dy, x + (2 if x < 16 else 1), 20 + dy, SKIN_SH)
+        ears_back(g, dy)
 
 
 def side_face(g, dy, ears):
@@ -900,8 +916,7 @@ def side_face(g, dy, ears):
     rect(g, 23, 22 + dy, 25, 23 + dy, SKIN_DK)
     rect(g, 13, 24 + dy, 19, 28 + dy, SKIN_DK)  # the neck
     if ears:
-        rect(g, 12, 16 + dy, 15, 20 + dy, SKIN)
-        rect(g, 13, 17 + dy, 14, 19 + dy, SKIN_SH)
+        ear_side(g, dy)
 
 
 def shirt(g, dy, bottom, back=False, sleeves=True):
@@ -1099,9 +1114,6 @@ CHARACTER_HEADERS = {
     "seated_sleeping": "Asleep face-down on folded arms.",
     "seated_sleeping_alt": "Dozed off, slumped east.",
 }
-# The hairstyle every baked character wears until the renderer dresses each
-# agent in its own.
-BAKED_STYLE = "mop"
 # Where a face-down head lies, as an offset from the crown's rest.
 CROWN_SHIFT = {"seated_sleeping": (0, 0), "seated_sleeping_alt": (4, 1)}
 
@@ -1125,34 +1137,75 @@ def shifted(layer_, dx, dy_):
     return out
 
 
-def dressed(pose, style):
-    """`pose` dressed in `style`, the hair's headroom cut off: the frame the
-    bundled pack bakes until the renderer composes hair itself."""
-    rows, view, body = POSES[pose]
-    look = HAIRSTYLES[style]()
-    h = rows * S
-    g = canvas(FIG_W, h + o)
-    if view in ("front", "side"):
-        behind, over = look[view]
-    else:
-        behind, over = None, look[view]
-    if view == "crown":
-        over = shifted(over, *CROWN_SHIFT[pose])
-    if behind is not None:
-        paste(g, behind[:h + o])
-    body(g, o)
+# Where every view's hair is laid: this point on a body, and the same point on
+# a layer, whose canvas stands HAIR_HEADROOM rows taller.
+HEAD_MARK = (16, FACE_TOP)
+EARS = {"front": ears_front, "back": ears_back, "side": ear_side}
+
+
+def bald_head(view, g, dy):
+    """The head a view's body shows under the hair: the face, the back of the
+    head, or the profile. The ears are the hairstyle's to show or cover."""
     if view == "front":
-        face_front(g, o, look["ears"])
+        face_front(g, dy, False)
     elif view == "back":
-        nape(g, o, look["ears"])
+        nape(g, dy, False)
     elif view == "side":
-        side_face(g, o, look["ears"])
-    paste(g, over[:h + o])
-    shade_by_skin(g)
-    for y in range(o + 1):  # the headroom, and the outline's row at the top
-        g[y] = [T] * FIG_W
-    union_outline(g)
-    return g[o:]
+        side_face(g, dy, False)
+
+
+def body_frame(pose):
+    """`pose`'s bald body, unoutlined (the renderer outlines the dressed union),
+    and its head mark `(view, x, y)`."""
+    rows, view, body = POSES[pose]
+    g = canvas(FIG_W, rows * S)
+    body(g, 0)
+    bald_head(view, g, 0)
+    dx, dy = CROWN_SHIFT.get(pose, (0, 0))
+    return g, (view, HEAD_MARK[0] + dx, HEAD_MARK[1] + dy)
+
+
+def finished(lyr, skin, cover):
+    """`lyr` shaded where it meets bare skin in the dressed frame: `skin` holds
+    the view's bald head, `cover` the layer that will lie over this one."""
+    out = [row[:] for row in lyr]
+    for y in range(LAYER_H):
+        for x in range(1, FIG_W - 1):
+            if lyr[y][x] not in (HAIR, HAIR_LT):
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1)):
+                nx, ny = x + dx, y + dy
+                if ny < LAYER_H and skin[ny][nx] in SKIN_KEYS and (cover is None or cover[ny][nx] == T):
+                    out[y][x] = HAIR_SH
+                    break
+    return out
+
+
+def hair_layers(style):
+    """`style`'s layers per view as the renderer lays them: `(behind, over)`,
+    each shaded where it meets bare skin, the ears added under the hair when
+    the style leaves them bare."""
+    look = HAIRSTYLES[style]()
+    views = {}
+    for view in ("front", "back", "side", "crown"):
+        behind, over = look[view] if view in ("front", "side") else (None, look[view])
+        if look["ears"] and view in EARS:
+            ears = layer()
+            EARS[view](ears, o)
+            if behind is not None:
+                paste(ears, behind)
+                EARS[view](ears, o)
+            behind = ears
+        skin = layer()
+        if view == "crown":
+            asleep_body(skin, o, 0)
+        else:
+            bald_head(view, skin, o)
+        views[view] = (
+            finished(behind, skin, over) if behind is not None else None,
+            finished(over, skin, None),
+        )
+    return views
 
 
 def desk_chair():
@@ -1849,14 +1902,23 @@ PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
-def render_sprite(header, frames):
+def render_sprite(header, frames, heads=()):
+    """A .sprite file: the header as comments, then each frame, marked with its
+    `heads` entry `(view, x, y)` where it has one."""
     text = header.strip("\n") + "\n" + PROVENANCE
     lines = [f"# {l}" if l else "#" for l in text.split("\n")]
     body = []
     for i, g in enumerate(frames):
         body.append(f"@frame {i}")
+        if i < len(heads) and heads[i] is not None:
+            body.append("@head {} {} {}".format(*heads[i]))
         body.extend(" ".join(r) for r in g)
     return "\n".join(lines + body) + "\n"
+
+
+def hair_file(style, view, part):
+    """The sprite a hairstyle's layer is written to, named as `[hairstyles]` lists it."""
+    return f"hair_{style}_{view}_{part}@{S}x.sprite"
 
 
 def orphans(pack, sprites):
@@ -1929,7 +1991,6 @@ def main():
     if args.pack is not None and not args.pack.is_dir():
         parser.error(f"not a directory: {args.pack}")
     pieces = {
-        **{pose: (CHARACTER_HEADERS[pose], [dressed(pose, BAKED_STYLE)]) for pose in POSES},
         "plant": ("A leafy bush in terracotta: long pointed leaves fanning out.", [plant_bush()]),
         "plant_tall": ("A tall palm in a dark pot.", [plant_tall()]),
         "plant_flower": ("Potted flowers: red and gold blooms over two leaves.", [plant_flower()]),
@@ -1962,6 +2023,18 @@ def main():
         f"{base}@{S}x.sprite": render_sprite(header, frames)
         for base, (header, frames) in pieces.items()
     }
+    for pose, header in CHARACTER_HEADERS.items():
+        body, head = body_frame(pose)
+        sprites[f"{pose}@{S}x.sprite"] = render_sprite(header + "\nBald: the pack's [hairstyles] dress it.", [body], [head])
+    for style in HAIRSTYLES:
+        for view, parts in hair_layers(style).items():
+            for part, lyr in zip(("behind", "over"), parts):
+                if lyr is not None and any(c != T for row in lyr for c in row):
+                    sprites[hair_file(style, view, part)] = render_sprite(
+                        f"The {style} hairstyle, {view} view: the layer {part} the body.",
+                        [lyr],
+                        [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
+                    )
     sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
     if args.selftest:
         selftest(sprites)

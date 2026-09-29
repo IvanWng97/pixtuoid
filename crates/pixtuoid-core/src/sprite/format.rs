@@ -7,14 +7,37 @@ use serde::Deserialize;
 
 use crate::grid::Grid;
 use crate::sprite::{
-    Frame, IndexedFrame, Palette, PaletteIndex, Pixel, Rgb, Sprite, PALETTE_CAPACITY,
+    Frame, HeadMark, HeadView, IndexedFrame, Palette, PaletteIndex, Pixel, Rgb, Sprite,
+    PALETTE_CAPACITY,
 };
 
-/// Parse a `.sprite` text file: one indexed frame per `@frame N` block.
-fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<IndexedFrame>> {
-    let mut frames: Vec<IndexedFrame> = Vec::new();
-    let mut current: Option<Vec<Vec<PaletteIndex>>> = None;
+/// A frame's rows as parsed, and its `@head` mark if it has one.
+type MarkedRows = (Vec<Vec<PaletteIndex>>, Option<HeadMark>);
+
+/// Parse a `.sprite` text file: one indexed frame per `@frame N` block, each
+/// with the `@head <view> <x> <y>` mark its block may carry.
+fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<(IndexedFrame, Option<HeadMark>)>> {
+    let mut frames = Vec::new();
+    let mut current: Option<MarkedRows> = None;
     let mut last_lineno = 0;
+    let finish =
+        |(rows, head): MarkedRows, lineno: usize| -> Result<(IndexedFrame, Option<HeadMark>)> {
+            let frame = rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?;
+            if let Some(h) = head {
+                let grid = &frame.0;
+                if h.x >= grid.width() || h.y >= grid.height() {
+                    bail!(
+                        "@head {} {} lies outside its {}x{} frame (line {})",
+                        h.x,
+                        h.y,
+                        grid.width(),
+                        grid.height(),
+                        lineno + 1
+                    );
+                }
+            }
+            Ok((frame, head))
+        };
 
     for (lineno, raw) in src.lines().enumerate() {
         let line = strip_comment_and_trim(raw);
@@ -24,33 +47,64 @@ fn parse_indexed(src: &str, palette: &Palette) -> Result<Vec<IndexedFrame>> {
         last_lineno = lineno;
 
         if let Some(rest) = line.strip_prefix("@frame") {
-            if let Some(rows) = current.take() {
-                frames.push(rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?);
+            if let Some(block) = current.take() {
+                frames.push(finish(block, lineno)?);
             }
             let _ = rest
                 .trim()
                 .parse::<u32>()
                 .map_err(|_| anyhow!("@frame requires a number (line {})", lineno + 1))?;
-            current = Some(Vec::new());
+            current = Some((Vec::new(), None));
             continue;
         }
 
-        let rows = current
+        let (rows, head) = current
             .as_mut()
             .ok_or_else(|| anyhow!("pixel data before any @frame (line {})", lineno + 1))?;
+
+        if let Some(rest) = line.strip_prefix("@head") {
+            if head.is_some() {
+                bail!("a frame carries one @head (line {})", lineno + 1);
+            }
+            *head = Some(parse_head(rest).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?);
+            continue;
+        }
 
         let row = parse_row(line, palette).map_err(|e| anyhow!("{e} (line {})", lineno + 1))?;
         rows.push(row);
     }
 
-    if let Some(rows) = current.take() {
-        frames.push(rows_to_frame(rows).map_err(|e| anyhow!("{e} (line {})", last_lineno + 1))?);
+    if let Some(block) = current.take() {
+        frames.push(finish(block, last_lineno)?);
     }
 
     if frames.is_empty() {
         bail!("sprite file contains no frames");
     }
     Ok(frames)
+}
+
+/// The fields of an `@head <view> <x> <y>` line after its keyword.
+fn parse_head(fields: &str) -> Result<HeadMark> {
+    let mut it = fields.split_whitespace();
+    let (Some(view), Some(x), Some(y), None) = (it.next(), it.next(), it.next(), it.next()) else {
+        bail!("@head takes a view and a column and a row");
+    };
+    let view = HeadView::from_name(view).ok_or_else(|| {
+        anyhow!(
+            "@head view {view:?} is none of {:?}",
+            HeadView::ALL.map(HeadView::name)
+        )
+    })?;
+    let coord = |v: &str| {
+        v.parse::<u16>()
+            .map_err(|_| anyhow!("@head {v:?} is not a pixel coordinate"))
+    };
+    Ok(HeadMark {
+        view,
+        x: coord(x)?,
+        y: coord(y)?,
+    })
 }
 
 fn strip_comment_and_trim(line: &str) -> &str {
@@ -84,6 +138,107 @@ mod tests {
         assert!(
             msg.contains("line"),
             "final-frame parse error needs line context: {msg}"
+        );
+    }
+
+    /// A pack of one two-frame animation whose files are `frames`, plus any
+    /// `extra` tables.
+    fn hair_pack(extra: &str, frames: &[(&str, &str)]) -> Result<Pack> {
+        let toml = format!(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"H\"=\"#28140a\"\n\"k\"=\"#101010\"\n\
+             [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n{extra}"
+        );
+        load_pack_from_strings(&toml, frames)
+    }
+
+    #[test]
+    fn a_head_line_marks_its_own_frame() {
+        let pack = hair_pack(
+            "",
+            &[(
+                "f.sprite",
+                "@frame 0\n@head front 1 0\nH H\n@frame 1\nH H\n",
+            )],
+        )
+        .expect("loads");
+        let seated = pack.animation("seated").expect("the animation");
+        assert_eq!(
+            seated.head(0),
+            Some(HeadMark {
+                view: HeadView::Front,
+                x: 1,
+                y: 0
+            })
+        );
+        assert_eq!(seated.head(1), None, "an unmarked frame has no head");
+    }
+
+    #[test]
+    fn a_head_outside_its_frame_or_facing_nowhere_is_rejected() {
+        for bad in [
+            "@head front 2 0",
+            "@head up 0 0",
+            "@head front 0",
+            "@head front 0 0\n@head back 0 0",
+        ] {
+            let err =
+                hair_pack("", &[("f.sprite", &format!("@frame 0\n{bad}\nH H\n"))]).expect_err(bad);
+            assert!(format!("{err:#}").contains("@head"), "{bad}: {err:#}");
+        }
+    }
+
+    #[test]
+    fn a_hairstyle_loads_its_layers_per_view_at_its_density() {
+        let pack = hair_pack(
+            "[hair]\noutline=\"k\"\n\
+             [hairstyles.\"mop@2x\"]\nfront={ behind=\"b.sprite\", over=\"o.sprite\" }\nback={ over=\"o2.sprite\" }\n",
+            &[
+                ("f.sprite", "@frame 0\nH\n"),
+                ("b.sprite", "@frame 0\n@head front 0 1\nH\nH\n"),
+                ("o.sprite", "@frame 0\n@head front 0 0\nH\n"),
+                ("o2.sprite", "@frame 0\n@head back 0 0\nH\n"),
+            ],
+        )
+        .expect("loads");
+        let styles: Vec<_> = pack.hairstyles().collect();
+        assert_eq!(styles.len(), 1);
+        let mop = styles[0];
+        assert_eq!((mop.name(), mop.density()), ("mop", 2));
+        let front = mop.layers(HeadView::Front).expect("a front view");
+        assert_eq!(front.behind().and_then(|l| l.head(0)).map(|h| h.y), Some(1));
+        assert!(front.over().is_some());
+        assert!(mop
+            .layers(HeadView::Back)
+            .is_some_and(|l| l.behind().is_none()));
+        assert!(mop.layers(HeadView::Side).is_none());
+        assert_eq!(
+            pack.hair_outline(),
+            Some(Some(Rgb {
+                r: 16,
+                g: 16,
+                b: 16
+            }))
+        );
+    }
+
+    #[test]
+    fn a_hair_layer_marks_its_head_in_its_own_view() {
+        let err = hair_pack(
+            "[hairstyles.\"mop@2x\"]\nfront={ over=\"o.sprite\" }\n",
+            &[
+                ("f.sprite", "@frame 0\nH\n"),
+                ("o.sprite", "@frame 0\n@head back 0 0\nH\n"),
+            ],
+        )
+        .expect_err("a back mark on a front layer");
+        assert!(format!("{err:#}").contains("@head front"), "{err:#}");
+        assert!(
+            hair_pack(
+                "[hairstyles.mop]\nfront={ over=\"f.sprite\" }\n",
+                &[("f.sprite", "@frame 0\nH\n")]
+            )
+            .is_err(),
+            "a hairstyle without a density dresses nothing a painter draws"
         );
     }
 
@@ -290,6 +445,35 @@ struct PackToml {
     #[serde(default)]
     ramps: BTreeMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
+    #[serde(default)]
+    hair: Option<HairToml>,
+    #[serde(default)]
+    hairstyles: BTreeMap<String, HairstyleToml>,
+}
+
+/// The `[hair]` table: what a dressed frame is finished with.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HairToml {
+    /// The palette key of the one line a dressed frame's union is outlined in.
+    outline: String,
+}
+
+/// One `[hairstyles."<name>@<N>x"]` table: a pair of layers per view.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HairstyleToml {
+    front: Option<HairLayersToml>,
+    back: Option<HairLayersToml>,
+    side: Option<HairLayersToml>,
+    crown: Option<HairLayersToml>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HairLayersToml {
+    behind: Option<String>,
+    over: Option<String>,
 }
 
 /// One `[ramps]` entry, loaded by [`Palette::insert_ramp`].
@@ -321,9 +505,70 @@ pub struct Pack {
     pub version: String,
     palette: Arc<Palette>,
     animations: HashMap<String, Sprite>,
+    hairstyles: BTreeMap<String, Hairstyle>,
+    hair_outline: Option<Pixel>,
+}
+
+/// A hairstyle: per view, the layers that dress a character frame whose head
+/// faces that way, laid mark on mark. Loaded from `[hairstyles."<name>@<N>x"]`,
+/// so it only ever dresses art at its own density: the classic `1x` art is
+/// never dressed.
+#[derive(Debug, Clone)]
+pub struct Hairstyle {
+    name: String,
+    density: u16,
+    views: BTreeMap<HeadView, HairLayers>,
+}
+
+impl Hairstyle {
+    /// The style's name, without its density.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The density of the art it dresses.
+    pub fn density(&self) -> u16 {
+        self.density
+    }
+
+    /// Its layers for a head facing `view`.
+    pub fn layers(&self, view: HeadView) -> Option<&HairLayers> {
+        self.views.get(&view)
+    }
+}
+
+/// One view's layers: `behind` goes under the body, `over` on top. Each is a
+/// one-frame sprite whose `@head` mark lands on the body's.
+#[derive(Debug, Clone, Default)]
+pub struct HairLayers {
+    behind: Option<Sprite>,
+    over: Option<Sprite>,
+}
+
+impl HairLayers {
+    /// The layer under the body.
+    pub fn behind(&self) -> Option<&Sprite> {
+        self.behind.as_ref()
+    }
+
+    /// The layer over the body.
+    pub fn over(&self) -> Option<&Sprite> {
+        self.over.as_ref()
+    }
 }
 
 impl Pack {
+    /// The pack's hairstyles, in name order. [`merge_from`](Self::merge_from)
+    /// never inherits one: a pack's characters are dressed only in its own.
+    pub fn hairstyles(&self) -> impl Iterator<Item = &Hairstyle> {
+        self.hairstyles.values()
+    }
+
+    /// The colour a dressed frame's union is outlined in, from `[hair]`.
+    pub fn hair_outline(&self) -> Option<Pixel> {
+        self.hair_outline
+    }
+
     /// The palette the pack's own frames were drawn with. An animation
     /// inherited by [`merge_from`](Self::merge_from) keeps its own.
     pub fn palette(&self) -> &Palette {
@@ -454,11 +699,66 @@ fn build_pack(parsed: PackToml, mut get_src: impl FnMut(&str) -> Result<String>)
         );
     }
 
+    let hair_outline = parsed
+        .hair
+        .map(|h| -> Result<Pixel> {
+            let key = single_char(&h.outline, "[hair] outline")?;
+            palette
+                .get(key)
+                .ok_or_else(|| anyhow!("[hair] outline {key:?} is not in the palette"))
+        })
+        .transpose()?;
+    let mut hairstyles = BTreeMap::new();
+    for (key, style) in parsed.hairstyles {
+        let Some((name, density)) = split_density_variant(&key) else {
+            bail!("hairstyle {key:?} must be `<name>@<N>x`: only art of 2x and up is dressed");
+        };
+        let mut layer = |view: HeadView, fname: &str| -> Result<Sprite> {
+            let src = get_src(fname)?;
+            let marked =
+                parse_indexed(&src, &palette).with_context(|| format!("decoding {fname}"))?;
+            match marked.as_slice() {
+                [(_, Some(h))] if h.view == view => {}
+                _ => bail!(
+                    "hair layer {fname} must be one frame with an `@head {}` mark",
+                    view.name()
+                ),
+            }
+            Ok(Sprite::new(marked, Arc::clone(&palette), 0))
+        };
+        let mut views = BTreeMap::new();
+        for (view, layers) in [
+            (HeadView::Front, style.front),
+            (HeadView::Back, style.back),
+            (HeadView::Side, style.side),
+            (HeadView::Crown, style.crown),
+        ] {
+            let Some(l) = layers else { continue };
+            views.insert(
+                view,
+                HairLayers {
+                    behind: l.behind.as_deref().map(|f| layer(view, f)).transpose()?,
+                    over: l.over.as_deref().map(|f| layer(view, f)).transpose()?,
+                },
+            );
+        }
+        hairstyles.insert(
+            key.clone(),
+            Hairstyle {
+                name: name.to_owned(),
+                density,
+                views,
+            },
+        );
+    }
+
     Ok(Pack {
         name: parsed.pack.name,
         version: parsed.pack.version,
         palette,
         animations,
+        hairstyles,
+        hair_outline,
     })
 }
 

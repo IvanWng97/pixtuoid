@@ -79,6 +79,7 @@ mod dense;
 mod drawable;
 mod effects;
 mod furniture;
+pub(crate) mod hair;
 mod palette;
 pub(crate) mod seat;
 mod sim;

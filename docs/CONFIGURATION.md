@@ -81,6 +81,17 @@ densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
 
+A pack can dress its variant characters in hairstyles. A frame marks its head
+with `@head <view> <x> <y>` in its `@frame` block, `view` being `front`, `back`,
+`side` or `crown`. A `[hairstyles."<name>@<N>x"]` table gives each view a
+`behind` layer, drawn under the body, and an `over` layer, drawn on top: each a
+one-frame sprite whose own `@head` mark in that view is laid on the frame's.
+Every agent wears one of the pack's styles at the frame's density, picked from
+its id, and the hair takes the agent's `H` recolor. `[hair] outline = "<key>"`
+draws one line round the dressed union, so a pack that sets it draws its bodies
+unoutlined and no line runs between hair and face. Base art is never dressed,
+and a custom pack never wears the default pack's styles.
+
 ## Logging & troubleshooting
 
 The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
