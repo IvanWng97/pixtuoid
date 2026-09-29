@@ -81,15 +81,16 @@ fn vertical_wall_is_impassable_except_through_the_door() {
     // THROUGH — which is why `WALL_ROUTING_MARGIN_X` widens the stamp.
     let l = make_layout();
     let overlay = OccupancyOverlay::new();
-    let WallSegment { start, end } = l
+    let (wall_x, north) = l
         .room_walls
         .iter()
-        .copied()
-        .find(|w| w.start.x == w.end.x)
+        .find_map(|w| match *w {
+            WallSegment::Vertical { x, y0, .. } => Some((x, y0)),
+            WallSegment::Horizontal { .. } => None,
+        })
         .expect("layout has a vertical wall");
-    let wall_x = start.x;
     // A y inside the wall body, near its top — clear of the mid door gap.
-    let y = start.y.min(end.y) + 3;
+    let y = north + 3;
     let from = Point {
         x: wall_x.saturating_sub(12),
         y,

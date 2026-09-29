@@ -149,6 +149,7 @@ pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
+pub(crate) use wall::paint_wall;
 
 /// The coffee-machine sub-region within the large pantry counter sprite, as a
 /// sprite-local column range `[start, end)`. THE single source of truth shared
@@ -212,10 +213,7 @@ use background::{
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
-use wall::{
-    enqueue_room_walls_h, enqueue_room_walls_v, paint_door_jamb_h, paint_door_jamb_v,
-    paint_glass_wall_h, paint_glass_wall_v, DOOR_JAMB_PX,
-};
+use wall::enqueue_room_walls;
 
 /// The weather names accepted by [`force_weather`], canonical order.
 pub fn weather_names() -> Vec<&'static str> {
@@ -670,11 +668,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     enqueue_characters(ctx, frame, &mut drawables);
     enqueue_desk_chairs(ctx.layout, ctx.pack, &mut drawables);
 
-    // V before H: at an inside corner the vertical's stitched `y_bot` ties the
-    // horizontal's south-base anchor, and inserting V first keeps H winning
-    // that tie under the stable sort.
-    enqueue_room_walls_v(ctx.layout, top_wall_h, &mut drawables);
-    enqueue_room_walls_h(ctx.layout, &mut drawables);
+    enqueue_room_walls(ctx.layout, &mut drawables);
 
     // `sort_by_key` is stable, so ties preserve the insertion order above —
     // decor first, characters last — and a character tied with a piece of
@@ -1103,7 +1097,7 @@ fn enqueue_meeting_furniture<'a>(layout: &'a Layout, drawables: &mut Vec<Drawabl
             let mirrored = i % 2 != 0;
             let faces_away = sofa.y >= trio.table.y;
             drawables.push(Drawable {
-                anchor_y: sofa.y + seat::SEATED_Z_OFF + u16::from(faces_away),
+                anchor_y: seat::sofa_sitter_z_key(sofa) + u16::from(faces_away),
                 kind: DrawableKind::MeetingSofa {
                     pos: sofa,
                     mirrored,

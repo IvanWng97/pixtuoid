@@ -4,8 +4,8 @@
 use super::decor::{FurnitureDef, GroundAlign};
 use super::{
     anchored_top_left, furniture_def, Anchor, Furniture, MeetingRoom, PlantItem, PodDecorItem,
-    Point, Size, WallDecorItem, WallSegment, Waypoint, WaypointKind, OBSTACLE_PAD_PX,
-    PANTRY_FOOTPRINT_DEPTH, WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX,
+    Point, Size, WallDecorItem, Waypoint, WaypointKind, OBSTACLE_PAD_PX, PANTRY_FOOTPRINT_DEPTH,
+    WALL_BAND_TO_TOP_MARGIN, WAYPOINT_STAMP_PAD_PX,
 };
 use pixtuoid_core::walkable::WalkableMask;
 
@@ -61,7 +61,7 @@ pub(super) fn pantry_ground_rect(pos: Point, counter: Size) -> (Point, Size) {
     )
 }
 
-use super::rooms::walls::wall_segment_rect;
+use super::rooms::walls::WallPiece;
 
 /// WEST-only routing clearance stamped onto a vertical wall's footprint (NOT
 /// part of the physical footprint — the placement sweep reads the un-margined
@@ -90,7 +90,7 @@ pub(super) struct MaskObstacles<'a> {
     pub(super) fish_tank: Option<Point>,
     pub(super) wall_decor: &'a [WallDecorItem],
     pub(super) pod_decor: &'a [PodDecorItem],
-    pub(super) room_walls: &'a [WallSegment],
+    pub(super) wall_pieces: &'a [WallPiece],
     pub(super) pantry_counter_size: Size,
 }
 
@@ -109,7 +109,7 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
         fish_tank,
         wall_decor,
         pod_decor,
-        room_walls,
+        wall_pieces,
         pantry_counter_size,
     } = obs;
 
@@ -133,12 +133,11 @@ pub(super) fn build_walkable_mask(obs: &MaskObstacles) -> WalkableMask {
     // Both block their FULL visual footprint (invariant #6); only the router
     // clearance is asymmetric — horizontal faces already fill a routing cell, while
     // vertical walls are thinner and take `WALL_ROUTING_MARGIN_X` westward.
-    for seg in room_walls {
-        let (origin, size) = wall_segment_rect(seg, top_margin, room_walls);
-        let mx = if seg.start.x == seg.end.x {
-            WALL_ROUTING_MARGIN_X
-        } else {
-            0
+    for piece in wall_pieces {
+        let (origin, size) = piece.footprint();
+        let mx = match piece {
+            WallPiece::Vertical { .. } => WALL_ROUTING_MARGIN_X,
+            WallPiece::Horizontal { .. } => 0,
         };
         mask.mark_blocked(
             origin.x.saturating_sub(mx),
@@ -253,19 +252,19 @@ mod tests {
     #[test]
     fn vertical_wall_blocks_its_whole_visual_width_in_the_mask() {
         let l = crate::layout::SceneLayout::compute_with_seed(200, 130, Some(8), 0).unwrap();
-        let seg = l
-            .room_walls
+        let piece = l
+            .wall_pieces
             .iter()
-            .find(|w| w.start.x == w.end.x)
+            .find(|p| matches!(p, WallPiece::Vertical { .. }))
             .copied()
             .expect("a vertical wall");
-        let (o, s) = wall_segment_rect(&seg, l.top_margin, &l.room_walls);
+        let (o, s) = piece.footprint();
         let y = o.y + s.h / 2; // deep in the wall body, clear of any north overhang
         for dx in 0..WALL_THICK_V {
             assert!(
-                !l.is_walkable(seg.start.x + dx, y),
+                !l.is_walkable(o.x + dx, y),
                 "visual column {} must be blocked (no feet-in-wall)",
-                seg.start.x + dx
+                o.x + dx
             );
         }
     }
@@ -390,7 +389,7 @@ mod tests {
             fish_tank: None,
             wall_decor: &wall_decor,
             pod_decor: &[],
-            room_walls: &[],
+            wall_pieces: &[],
             pantry_counter_size: Size { w: 20, h: 8 },
         });
         let def = furniture_def(Furniture::Whiteboard);

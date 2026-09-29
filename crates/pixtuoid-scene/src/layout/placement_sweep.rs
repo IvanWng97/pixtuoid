@@ -193,6 +193,7 @@ fn pieces(l: &SceneLayout) -> Vec<Piece> {
         // The containers' own edges and openings; overlap-vs-walls is its own invariant.
         room_walls: _,
         doorways: _,
+        wall_pieces: _,
         // Wall-band geometry, read via `wall_band_h()`, and the full-width router zone.
         top_margin: _,
         corridor: _,
@@ -637,11 +638,7 @@ fn no_two_furniture_grounds_overlap() {
 fn no_furniture_ground_overlaps_a_wall() {
     let mut v = Vec::new();
     sweep(|w, h, seed, l| {
-        let walls: Vec<(Point, Size)> = l
-            .room_walls
-            .iter()
-            .map(|seg| super::rooms::walls::wall_segment_rect(seg, l.top_margin, &l.room_walls))
-            .collect();
+        let walls: Vec<(Point, Size)> = l.wall_pieces.iter().map(|p| p.footprint()).collect();
         for p in pieces(l) {
             let Some(g) = p.ground else { continue };
             for &wrect in &walls {
@@ -845,25 +842,29 @@ fn no_walkable_hole_where_a_vertical_wall_meets_a_horizontal_one() {
         let h_walls: Vec<_> = l
             .room_walls
             .iter()
-            .filter(|s| s.start.y == s.end.y)
+            .filter_map(|s| match *s {
+                WallSegment::Horizontal { y, x0, x1 } => Some((y, x0, x1)),
+                WallSegment::Vertical { .. } => None,
+            })
             .collect();
-        for v in l.room_walls.iter().filter(|s| s.start.x == s.end.x) {
-            let vtop = v.start.y.min(v.end.y);
-            for hw in &h_walls {
-                let (hx0, hx1) = (hw.start.x.min(hw.end.x), hw.start.x.max(hw.end.x));
-                let hr = hw.start.y;
+        let v_walls = l.room_walls.iter().filter_map(|s| match *s {
+            WallSegment::Vertical { x, y0, .. } => Some((x, y0)),
+            WallSegment::Horizontal { .. } => None,
+        });
+        for (vx, vtop) in v_walls {
+            for &(hr, hx0, hx1) in &h_walls {
                 // Only the crossing that actually trims this segment's north end.
                 if hr < vtop
                     && vtop - hr <= super::WALL_THICK_H + super::rooms::walls::WALL_BRIDGE_SLACK_PX
-                    && (hx0..=hx1).contains(&v.start.x)
+                    && (hx0..=hx1).contains(&vx)
                 {
                     for y in hr..vtop {
                         for dx in 0..super::WALL_THICK_V {
                             assert!(
-                                !l.is_walkable(v.start.x + dx, y),
+                                !l.is_walkable(vx + dx, y),
                                 "{w}x{h} seed {seed}: walkable HOLE at ({},{y}) in the \
                                  divider corner between H wall @{hr} and V wall @{vtop}",
-                                v.start.x + dx,
+                                vx + dx,
                             );
                         }
                     }

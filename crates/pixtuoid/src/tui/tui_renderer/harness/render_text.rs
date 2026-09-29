@@ -1,5 +1,5 @@
 use super::*;
-use pixtuoid_scene::layout::Point;
+use pixtuoid_scene::layout::{Point, WallSegment};
 
 #[test]
 fn footer_shows_floor_indicator_on_multi_floor() {
@@ -274,14 +274,18 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
     let v_x = layout
         .room_walls
         .iter()
-        .find(|w| w.start.x == w.end.x)
-        .map(|w| w.start.x)
+        .find_map(|w| match *w {
+            WallSegment::Vertical { x, .. } => Some(x),
+            WallSegment::Horizontal { .. } => None,
+        })
         .expect("standard floor has a vertical divider");
     let h_y = layout
         .room_walls
         .iter()
-        .find(|w| w.start.y == w.end.y)
-        .map(|w| w.start.y)
+        .find_map(|w| match *w {
+            WallSegment::Horizontal { y, .. } => Some(y),
+            WallSegment::Vertical { .. } => None,
+        })
         .expect("standard floor has a horizontal divider");
     let top_wall_h = layout.top_margin - 4;
 
@@ -291,14 +295,14 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
             + (a.g as i32 - b.g as i32).abs()
             + (a.b as i32 - b.b as i32).abs()
     };
-    // The frosted glass is a translucent gradient with no single colour, so
-    // reference BOTH its lit (dx0) and soft (dx2) edges — sampled high on the
-    // wall where it's unambiguously glass — plus a floor sample.
-    let glass_lit = buf.get(v_x, layout.top_margin + 2);
-    let glass_soft = buf.get(v_x + 2, layout.top_margin + 2);
+    // The glass has no single colour — a rim, and panes that show what is
+    // behind them — so reference BOTH its rim (dx0) and a pane (dx2), sampled
+    // high on the wall where it's unambiguously glass, plus a floor sample.
+    let glass_rim = buf.get(v_x, layout.top_margin + 2);
+    let glass_pane = buf.get(v_x + 2, layout.top_margin + 2);
     let floor_ref = buf.get(v_x.saturating_sub(8), top_wall_h + 6);
     let is_glass = |p: pixtuoid_core::sprite::Rgb| {
-        dist(p, glass_lit).min(dist(p, glass_soft)) < dist(p, floor_ref)
+        dist(p, glass_rim).min(dist(p, glass_pane)) < dist(p, floor_ref)
     };
 
     assert!(

@@ -29,12 +29,9 @@ pub use placement::{anchored_top_left, z_sort_row, Anchor};
 pub use reach::ReachSet;
 pub(crate) use rooms::meeting::{coat_rack_rect_at, COAT_HOOK_DX, COAT_RACK_BASE_DY, COAT_W};
 pub(crate) use rooms::pantry::{COMPACT_COUNTER, LARGE_COUNTER};
-pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
-// Both SHARED with the pixel painter's `enqueue_room_walls_v`, so the blocked
-// ground and the drawn glass meet the band / crossing walls at the same joints
-// and over the same crossing-wall inputs.
-pub(crate) use rooms::walls::{crossing_h_rows, stitch_vertical_wall};
+pub(crate) use rooms::walls::WallPiece;
 pub use rooms::walls::{Doorway, WALL_THICK_H, WALL_THICK_V};
+pub use rooms::{MeetingRoom, MeetingTrio, PantryRoom};
 // Painter tests tile walls no `SceneLayout` has.
 #[cfg(test)]
 pub(crate) use windows::window_bays;
@@ -79,14 +76,29 @@ pub struct Size {
     pub h: u16,
 }
 
-/// An interior room-wall segment — the two endpoints of a straight (horizontal
-/// or vertical) wall run.
+/// An interior room wall's straight run, both ends inclusive and in order. It
+/// names its axis because a one-cell run, the post a door flush with its run's
+/// end leaves, could not say it with its ends alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct WallSegment {
-    /// One endpoint of the straight wall run (pixel-space).
-    pub start: Point,
-    /// The other endpoint (pixel-space).
-    pub end: Point,
+pub enum WallSegment {
+    /// An E-W run.
+    Horizontal {
+        /// Its row.
+        y: u16,
+        /// Its west end.
+        x0: u16,
+        /// Its east end.
+        x1: u16,
+    },
+    /// A N-S run.
+    Vertical {
+        /// Its column.
+        x: u16,
+        /// Its north end.
+        y0: u16,
+        /// Its south end.
+        y1: u16,
+    },
 }
 
 /// A placed plant: its kind paired with its centre position.
@@ -224,6 +236,9 @@ pub struct SceneLayout {
     /// draws door frames from these instead of re-inferring gaps from
     /// segment adjacency.
     pub doorways: Vec<Doorway>,
+    /// `room_walls` as the mask stamps them and the painters draw them, their
+    /// doorways framed: built once, here.
+    pub(crate) wall_pieces: Vec<WallPiece>,
     /// Top offset in px reserved above the floor for the north wall+window
     /// band (and its carpet apron).
     pub top_margin: u16,
@@ -402,6 +417,7 @@ impl SceneLayout {
             door: _,         // architecture, and the band it punches is not walkable
             door_threshold: _,
             doorways: _,
+            wall_pieces: _,
             corridor: _,     // a zone, not a sprite
             cubicle_band: _, // containers
             cubicle_aisle: _,
