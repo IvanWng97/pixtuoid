@@ -66,6 +66,8 @@ version = "1"
 "%" = "#968c78"   # mug, shaded side
 "/" = "#1e1f25"   # task-chair seat edge and base
 "^" = "#e89a8a"   # cheek blush
+"κ" = "#16121a"   # a character's outline: one near-black line round hair, face and clothes
+"ρ" = "#4a2c18"   # coffee in a mug
 "¤" = "#d2d4d8"   # off-white: a night office has no pure white
 ";" = "#2a2226"   # shoe leather
 ":" = "#4a3e40"   # shoe, lit toe
@@ -123,20 +125,40 @@ frame_ms = 600
 frames   = ["side_seated.sprite"]
 frame_ms = 600
 
+[animations."side_seated@4x"]
+frames   = ["side_seated@4x.sprite"]
+frame_ms = 600
+
 [animations.typing]
 frames   = ["typing_0.sprite", "typing_1.sprite"]
+frame_ms = 140
+
+[animations."typing@4x"]
+frames   = ["typing_0@4x.sprite", "typing_1@4x.sprite"]
 frame_ms = 140
 
 [animations.standing]
 frames   = ["standing.sprite"]
 frame_ms = 600
 
+[animations."standing@4x"]
+frames   = ["standing@4x.sprite"]
+frame_ms = 600
+
 [animations.walking]
 frames   = ["walking_0.sprite", "walking_1.sprite"]
 frame_ms = 220
 
+[animations."walking@4x"]
+frames   = ["walking_0@4x.sprite", "walking_1@4x.sprite"]
+frame_ms = 220
+
 [animations.walking_back]
 frames   = ["walking_back_0.sprite", "walking_back_1.sprite"]
+frame_ms = 220
+
+[animations."walking_back@4x"]
+frames   = ["walking_back_0@4x.sprite", "walking_back_1@4x.sprite"]
 frame_ms = 220
 
 [animations.walking_coffee]
@@ -145,8 +167,17 @@ frame_ms = 220
 
 # BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
 # still `seated_back`.
+
+[animations."walking_coffee@4x"]
+frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite"]
+frame_ms = 220
+
 [animations.typing_back]
 frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
+frame_ms = 220
+
+[animations."typing_back@4x"]
+frames   = ["typing_back_0@4x.sprite", "typing_back_1@4x.sprite"]
 frame_ms = 220
 
 [animations.desk]
@@ -208,6 +239,10 @@ frame_ms = 600
 
 [animations.desk_chair]
 frames   = ["desk_chair.sprite"]
+frame_ms = 600
+
+[animations."desk_chair@4x"]
+frames   = ["desk_chair@4x.sprite"]
 frame_ms = 600
 
 [animations.filing_cabinet]
@@ -306,15 +341,31 @@ frame_ms = 600
 frames   = ["back_couch.sprite"]
 frame_ms = 600
 
+[animations."back_couch@4x"]
+frames   = ["back_couch@4x.sprite"]
+frame_ms = 600
+
 [animations.seated_sleeping]
 frames   = ["seated_sleeping.sprite"]
+frame_ms = 600
+
+[animations."seated_sleeping@4x"]
+frames   = ["seated_sleeping@4x.sprite"]
 frame_ms = 600
 
 [animations.seated_sleeping_alt]
 frames   = ["seated_sleeping_alt.sprite"]
 frame_ms = 600
 
+[animations."seated_sleeping_alt@4x"]
+frames   = ["seated_sleeping_alt@4x.sprite"]
+frame_ms = 600
+
 [animations.holding_coffee]
 frames   = ["holding_coffee.sprite"]
+frame_ms = 600
+
+[animations."holding_coffee@4x"]
+frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
 
