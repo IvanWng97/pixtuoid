@@ -101,8 +101,9 @@ pub fn render_cutaway(
     list.labels().collect()
 }
 
-/// Everything under the floor-standing pieces: floor, its rugs, north wall band
-/// and the decor hung on it. None of it moves within a layout, theme, pack and scale.
+/// Everything under the floor-standing pieces but their shadows: floor, its
+/// rugs, north wall band and the decor hung on it. None of it moves within a
+/// layout, theme, pack and scale.
 fn paint_backdrop(
     layout: &Layout,
     pack: &Pack,
@@ -132,7 +133,8 @@ fn paint_backdrop(
 /// One frame's floor-standing pieces, built and ordered but not painted.
 ///
 /// ONE ordered list, so a character and the desk it sits at resolve against each
-/// other by depth: that order IS the occlusion, and there is no second pass.
+/// other by depth: that order IS the occlusion, and there is no second
+/// occlusion pass.
 pub(crate) struct DrawList<'a> {
     pieces: Vec<Piece>,
     // What it was built with, so painting it cannot use anything else: a
@@ -153,6 +155,10 @@ pub(crate) struct DrawList<'a> {
 pub(crate) struct Piece {
     pub(crate) span: Span,
     pub(crate) kind: PieceKind,
+    /// The shadow it casts on the floor ([`ground_shadow`]). Every shadow is
+    /// painted before any piece, so it lies under them all; it may reach past
+    /// `span`, but never past [`reach`](Self::reach).
+    pub(crate) shadow: Option<crate::ground::Contact>,
     /// Two pieces with one span and one fingerprint paint the same pixels over
     /// the same pixels under them, so a caller can keep a piece whose pair did
     /// not change without painting it. One that
@@ -160,6 +166,28 @@ pub(crate) struct Piece {
     /// so repainting it starts from a repaint of that. Compare it only within
     /// one layout, theme, pack and scale: it does not capture a change to those.
     pub(crate) fingerprint: u64,
+}
+
+impl Piece {
+    /// Every logical cell painting it touches: its span, and the floor its
+    /// shadow falls on. A repaint of a damaged rect is complete only over the
+    /// pieces whose reach meets it.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the incremental canvas damages by reach")
+    )]
+    pub(crate) fn reach(&self) -> Span {
+        let Some(((x0, y0), (x1, y1))) = self.shadow.map(|c| c.bounds()) else {
+            return self.span;
+        };
+        Span {
+            x0: self.span.x0.min(x0),
+            x1: self.span.x1.max(x1.saturating_sub(1)),
+            y0: self.span.y0.min(y0),
+            y1: self.span.y1.max(y1.saturating_sub(1)),
+            ..self.span
+        }
+    }
 }
 
 impl<'a> DrawList<'a> {
@@ -215,6 +243,7 @@ pub(crate) fn build_list<'a>(
     .map(|(span, kind)| Piece {
         span,
         fingerprint: fingerprint(&kind),
+        shadow: ground_shadow(span, &kind, pack),
         kind,
     })
     .collect();
@@ -226,20 +255,136 @@ pub(crate) fn build_list<'a>(
     }
 }
 
-/// Paint every piece of `list` over what `buf` already holds, back to front.
+/// Paint `list` over what `buf` already holds: every piece's shadow
+/// ([`ground_shadow`]) first, then the pieces back to front.
 pub(crate) fn paint_list(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) {
+    paint_ground_shadows(
+        list.pieces.iter().filter_map(|p| p.shadow),
+        crate::ground::shadow_strength(CUTAWAY_DARKNESS),
+        Pen::for_pack(list.scale, list.pack),
+        buf,
+    );
     for piece in &list.pieces {
         paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
     }
 }
 
-/// A hash of every input `paint_piece` draws `kind` from beyond the layout,
-/// theme, pack and scale. Each arm destructures every field, so a field added to
-/// a kind fails to compile here until it is hashed or named `_`.
+/// The darkness the cutaway is lit at: noon, until it takes the time of day.
+const CUTAWAY_DARKNESS: f32 = 0.0;
+
+/// Ramp stops a shadow steps the floor at its centre, per unit of
+/// [`shadow_strength`].
+///
+/// [`shadow_strength`]: crate::ground::shadow_strength
+const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
+
+/// Where a piece meets the floor, as the shadow it casts there: on the row under
+/// its south edge, a standing figure's under its feet. A sitter is grounded by
+/// what they sit on, which casts its own: a desk chair a sitter carries, under
+/// the chair. A wall is glass.
+fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
+    let under = |s: Span| {
+        Some(crate::ground::Contact::under(
+            s.x0,
+            s.x1 - s.x0 + 1,
+            s.y1 + 1,
+        ))
+    };
+    match *kind {
+        PieceKind::WallSeg { .. } => None,
+        PieceKind::Character {
+            ref figure,
+            body,
+            chair,
+            ..
+        } => {
+            if figure.shadow {
+                under(body)
+            } else {
+                let at = chair?;
+                let (w, h) = art_size(pack, crate::pixel_painter::DESK_CHAIR_SPRITE)?;
+                under(Span::new(at.x, at.y, w, h, 0))
+            }
+        }
+        // Only the band that reaches the prop's foot meets the floor.
+        PieceKind::PropBand { sprite, rows, .. } => art_size(pack, sprite)
+            .filter(|&(_, h)| rows.1 == h)
+            .and_then(|_| under(span)),
+        _ => under(span),
+    }
+}
+
+/// Step the floor darker under `shadows`, toward each one's centre: its falloff
+/// at `strength` in whole ramp stops, dithered between them on the art grid. A
+/// shadow is the ground it falls on, darker, never a colour of its own, and where
+/// two overlap the deeper one wins rather than the two compounding.
+fn paint_ground_shadows(
+    shadows: impl Iterator<Item = crate::ground::Contact> + Clone,
+    strength: f32,
+    pen: Pen,
+    buf: &mut RgbBuffer,
+) {
+    // One level per art pixel over the shadows' joint bounds, row-major.
+    let Some(((x0, y0), (x1, y1))) = shadows.clone().map(|c| c.bounds()).reduce(|a, b| {
+        (
+            (a.0 .0.min(b.0 .0), a.0 .1.min(b.0 .1)),
+            (a.1 .0.max(b.1 .0), a.1 .1.max(b.1 .1)),
+        )
+    }) else {
+        return;
+    };
+    let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
+    let w = usize::from(pen.art(x1).0 - ax0);
+    let h = usize::from(pen.art(y1).0 - ay0);
+    let mut depth = vec![0i8; w * h];
+    let d = f32::from(pen.art(1).0);
+    let at = |a: u16| (f32::from(a) + 0.5) / d;
+    for c in shadows {
+        let ((cx0, cy0), (cx1, cy1)) = c.bounds();
+        for ay in pen.art(cy0).0..pen.art(cy1).0 {
+            for ax in pen.art(cx0).0..pen.art(cx1).0 {
+                let Some(f) = c.falloff(at(ax), at(ay)) else {
+                    continue;
+                };
+                let stops = f * strength * SHADOW_STOPS_PER_STRENGTH;
+                let whole = stops.floor();
+                let level = whole as i8
+                    + i8::from(crate::cutaway::pen::dithered(
+                        ArtPx(ax),
+                        ArtPx(ay),
+                        stops - whole,
+                    ));
+                let slot = &mut depth[usize::from(ay - ay0) * w + usize::from(ax - ax0)];
+                *slot = (*slot).max(level);
+            }
+        }
+    }
+    let mut stepped: Vec<crate::cutaway::pen::Stepped> = Vec::new();
+    for (i, &level) in depth.iter().enumerate().filter(|&(_, &l)| l > 0) {
+        while stepped.len() < level as usize {
+            stepped.push(crate::cutaway::pen::Stepped::new(
+                -(stepped.len() as i8 + 1),
+            ));
+        }
+        let r = ArtRect {
+            x: ArtPx(ax0 + (i % w) as u16),
+            y: ArtPx(ay0 + (i / w) as u16),
+            w: ArtPx(1),
+            h: ArtPx(1),
+        };
+        let memo = &mut stepped[level as usize - 1];
+        pen.recolour(buf, r, |_, _, under| memo.of(under));
+    }
+}
+
+/// A hash of every input `paint_piece` and [`ground_shadow`] draw `kind` from
+/// beyond the layout, theme, pack and scale. Each arm destructures every field,
+/// so a field added to a kind fails to compile here until it is hashed or named
+/// `_`.
 fn fingerprint(kind: &PieceKind) -> u64 {
     use std::hash::{Hash, Hasher};
     // `DefaultHasher::new` starts from the same keys on every call, so one frame
@@ -259,7 +404,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
         PieceKind::Appliance { at, kind } => (at, kind).hash(&mut h),
-        // `paint_piece` never reads the label or body: they are the caller's.
+        // The label is the caller's, and the body follows from `at` and `key`.
         PieceKind::Character {
             figure:
                 Figure {
@@ -309,25 +454,25 @@ fn paint_piece(
     buf: &mut RgbBuffer,
 ) {
     match *kind {
-        PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, theme, scale, buf),
-        PieceKind::Chair { at } => paint_chair(at, pack, theme, scale, buf),
+        PieceKind::Desk { at, art, screen } => paint_desk(at, art, screen, pack, scale, buf),
+        PieceKind::Chair { at } => paint_chair(at, pack, scale, buf),
         PieceKind::Character {
             ref figure, chair, ..
         } => {
-            paint_figure(figure, pack, theme, scale, cache, buf);
+            paint_figure(figure, pack, scale, cache, buf);
             // The sitter's own chair, straight after them: one piece, so
             // nothing can sort between a person and the chair they sit in.
             if let Some(at) = chair {
-                paint_chair(at, pack, theme, scale, buf);
+                paint_chair(at, pack, scale, buf);
             }
         }
         PieceKind::Prop {
             at,
             sprite,
             mirrored,
-        } => paint_prop(at, sprite, mirrored, pack, theme, scale, buf),
+        } => paint_prop(at, sprite, mirrored, pack, scale, buf),
         PieceKind::PropBand { at, sprite, rows } => {
-            paint_prop_band(at, sprite, rows, pack, theme, scale, buf);
+            paint_prop_band(at, sprite, rows, pack, scale, buf);
         }
         PieceKind::Table { at } => paint_table(at, theme, scale, buf),
         PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
@@ -382,10 +527,9 @@ fn desk_art(pack: &Pack, facing: crate::layout::Facing) -> Option<&'static str> 
     pack.piece_or_source(crate::pixel_painter::desk_sprite_name(facing))
 }
 
-/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art, the
-/// face rows [`desk_face_rows`] derives under it, and the contact row
-/// `paint_desk` stamps under those. It sorts on the row just above that contact
-/// row. A taller art grows upward from the same bottom row
+/// The box a desk drawn with `art` at `desk` occupies at `scale`: the art and
+/// the face rows [`desk_face_rows`] derives under it, sorted on the last of
+/// those. A taller art grows upward from the same bottom row
 /// ([`desk_art_top`](crate::pixel_painter::desk_art_top)), so its depth never moves.
 fn desk_span(
     pack: &Pack,
@@ -404,7 +548,7 @@ fn desk_span(
         h,
         desk_face_rows(pack, art, scale),
     );
-    Some(span.painting_below(1))
+    Some(span)
 }
 
 /// The rows of front face the cutaway derives under desk `art` at `scale`.
@@ -420,13 +564,18 @@ fn desk_face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
     }
 }
 
+/// The deepest a noon shadow steps the floor.
+#[cfg(test)]
+fn deepest_shadow_stop() -> i8 {
+    (crate::ground::shadow_strength(CUTAWAY_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).ceil() as i8
+}
+
 /// Compares `variant`, a cutaway render of a pack whose desks ship density
 /// variants, against `base`, one of `base_pack`, on the two things the cutaway
 /// promises: the art
 /// lands exactly where the base's does (every pixel outside each desk's foot — its
-/// face band and contact row — is identical), and a variant, which draws its own
-/// front, gets its contact row right under the art with bare floor below it, while
-/// the base gets a derived face first and its contact row one face band lower.
+/// face band and the shadows under it — is identical), and a variant, which draws
+/// its own front, has floor under its art where the base gets a derived face.
 #[cfg(test)]
 pub(crate) fn assert_variant_desk_foot(
     variant: &[pixtuoid_core::sprite::Rgb],
@@ -461,9 +610,19 @@ pub(crate) fn assert_variant_desk_foot(
         })
         .collect();
     assert!(!feet.is_empty(), "the office must have a desk");
+    // A desk's foot: its face band, and where a variant's shadow and the base's
+    // fall, one face band apart.
     let in_foot = |x: u16, y: u16| {
-        feet.iter()
-            .any(|&(x0, x1, below)| (x0..=x1).contains(&x) && (below..=below + face).contains(&y))
+        feet.iter().any(|&(x0, x1, below)| {
+            let shadow = |base: u16| {
+                let ((sx0, sy0), (sx1, sy1)) =
+                    crate::ground::Contact::under(x0, x1 - x0 + 1, base).bounds();
+                (sx0..sx1).contains(&x) && (sy0..sy1).contains(&y)
+            };
+            ((x0..=x1).contains(&x) && (below..=below + face).contains(&y))
+                || shadow(below)
+                || shadow(below + face)
+        })
     };
     let differs_outside = (0..variant.len()).find(|&i| {
         let (x, y) = ((i % buf_w) as u16, (i / buf_w) as u16);
@@ -476,31 +635,22 @@ pub(crate) fn assert_variant_desk_foot(
     let at = |px: &[pixtuoid_core::sprite::Rgb], x: u16, y: u16| {
         px[usize::from(scale.to_buffer(y)) * buf_w + usize::from(scale.to_buffer(x))]
     };
-    let contact = contact_tone(theme);
+    let deepest = deepest_shadow_stop();
+    let floor_or_its_shadow = |c: pixtuoid_core::sprite::Rgb, floor: pixtuoid_core::sprite::Rgb| {
+        c == floor || (1..=deepest).any(|k| c == floor.ramp(-k))
+    };
     // The desk's own edge column: a sitter and their chair stand centred on it.
     for &(x0, _, below) in &feet {
         let x = x0 + 1;
-        assert_eq!(
-            at(variant, x, below),
-            contact,
-            "a variant's contact row is right under its art"
-        );
-        for y in below + 1..=below + face {
-            assert_eq!(
-                at(variant, x, y),
-                at(floor.as_slice(), x, y),
-                "the band a variant's foot vacates is bare floor"
+        for y in below..=below + face {
+            assert!(
+                floor_or_its_shadow(at(variant, x, y), at(floor.as_slice(), x, y)),
+                "a variant draws its own front: under its art lies floor or its shadow"
             );
         }
-        assert_ne!(
-            at(base, x, below),
-            contact,
+        assert!(
+            !floor_or_its_shadow(at(base, x, below), at(floor.as_slice(), x, below)),
             "the base gets a derived face under its art"
-        );
-        assert_eq!(
-            at(base, x, below + face),
-            contact,
-            "the base's contact row is one face band lower"
         );
     }
 }
@@ -537,8 +687,7 @@ fn chair_span(
 ) -> Option<(Span, crate::layout::Point)> {
     let at = crate::pixel_painter::desk_chair_top_left(pack, desk, facing)?;
     let (w, h) = art_size(pack, crate::pixel_painter::DESK_CHAIR_SPRITE)?;
-    // +1 for the contact shadow `paint_chair` stamps under the box.
-    let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 1)
+    let span = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0)
         .with_depth(crate::pixel_painter::desk_chair_z_key(desk, facing));
     Some((span, at))
 }
@@ -550,8 +699,7 @@ fn push_props(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, PieceKind)>) 
         |order: &mut Vec<(Span, PieceKind)>, at: crate::layout::Point, sprite: &'static str| {
             if let Some((w, h)) = art_size(pack, sprite) {
                 order.push((
-                    // +1 for the contact shadow `paint_prop` stamps under the box.
-                    piece_span(crate::layout::Anchor::Center, at, w, h, 1),
+                    piece_span(crate::layout::Anchor::Center, at, w, h, 0),
                     PieceKind::Prop {
                         at,
                         sprite,
@@ -604,13 +752,12 @@ fn push_appliances(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
     }) {
         let def = crate::layout::furniture_def(wp.kind.furniture());
         order.push((
-            // +1 for `paint_appliance`'s contact shadow.
             piece_span(
                 crate::layout::Anchor::Center,
                 wp.pos,
                 def.visual.w,
                 def.visual.h,
-                1,
+                0,
             ),
             PieceKind::Appliance {
                 at: wp.pos,
@@ -631,13 +778,13 @@ fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piece
             push_sofa(order, pack, *sofa, i % 2 != 0);
         }
         order.push((
-            // A front face below, and a contact shadow under that.
+            // A front face below.
             piece_span(
                 crate::layout::Anchor::Center,
                 t.table,
                 table.w,
                 table.h,
-                desk_front_h() + 1,
+                desk_front_h(),
             ),
             PieceKind::Table { at: t.table },
         ));
@@ -702,14 +849,7 @@ fn push_characters(
         };
         order.push((
             occupant_span(
-                // +1 for the contact shadow `paint_figure` stamps under it.
-                piece_span(
-                    crate::layout::Anchor::TopLeft,
-                    top,
-                    w,
-                    h + hair,
-                    u16::from(shadow),
-                ),
+                piece_span(crate::layout::Anchor::TopLeft, top, w, h + hair, 0),
                 c.anchor_y,
                 chair.map(|(span, _)| span),
             ),
@@ -781,24 +921,21 @@ fn push_sofa(
         let seat = Span::new(tl.x, tl.y, w, split, 0)
             .with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at));
         order.push((seat, band((0, split))));
-        // +1 for the contact shadow `paint_prop_band` stamps under the foot.
         order.push((
-            Span::new(tl.x, tl.y + split, w, h - split, 1),
+            Span::new(tl.x, tl.y + split, w, h - split, 0),
             band((split, h)),
         ));
         return;
     }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
-        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 1);
         // The front view sorts WITH its sitters, who are pushed after the
         // furniture and so land on it; on its own south edge its backrest
-        // would paint over their bodies. The flipped back view keeps that
-        // edge: it stands in front of the sitters it faces away from.
-        let span = if back_view {
-            span
-        } else {
-            span.with_depth(crate::pixel_painter::seat::sofa_sitter_z_key(at))
-        };
+        // would paint over their bodies. The flipped back view sorts a row
+        // south of them, as the classic painter keys it: it stands in front of
+        // the sitters it faces away from.
+        let sitters = crate::pixel_painter::seat::sofa_sitter_z_key(at);
+        let span = piece_span(crate::layout::Anchor::Center, at, w, h, 0)
+            .with_depth(sitters + u16::from(back_view));
         order.push((
             span,
             PieceKind::Prop {
@@ -894,11 +1031,8 @@ pub(crate) enum PieceKind {
         chair: Option<crate::layout::Point>,
         /// Where their badge belongs.
         label: CutawayLabel,
-        /// The box their art lands in: the span without its shadow or chair.
-        #[cfg_attr(
-            not(test),
-            expect(dead_code, reason = "the cutaway's hit tests read it")
-        )]
+        /// The box their art lands in: the span without their chair. A standing
+        /// figure's shadow falls under it.
         body: Span,
     },
 }
@@ -1100,7 +1234,7 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
         return;
     };
     order.push((
-        piece_span(crate::layout::Anchor::Center, at, w, h, 1),
+        piece_span(crate::layout::Anchor::Center, at, w, h, 0),
         PieceKind::Prop {
             at,
             sprite,
@@ -1219,11 +1353,9 @@ fn paint_desk(
     art_name: &str,
     screen: Option<pixtuoid_core::sprite::Rgb>,
     pack: &Pack,
-    theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    let s = scale.get();
     let (Some(span), Some(desk)) = (
         desk_span(pack, art_name, at, scale),
         crate::pixel_painter::densest_frame(pack, art_name, 0, scale),
@@ -1242,8 +1374,8 @@ fn paint_desk(
     blit_frame_scaled(art, x, top_y, desk.blit_at, buf);
 
     // The drawn size, from the logical size: variant art blits at `blit_at`, so
-    // its own pixel size times the scale would drop the contact row (and a base's
-    // face) a whole desk low.
+    // its own pixel size times the scale would drop a base's face a whole desk
+    // low.
     let (drawn_w, drawn_h) = (
         scale.to_buffer(desk.logical.0),
         scale.to_buffer(desk.logical.1),
@@ -1265,9 +1397,6 @@ fn paint_desk(
             scale,
         );
     }
-
-    // The contact row, as [`contact_shadow`] draws one for the other solids.
-    fill(buf, x, base_y + face_h, drawn_w, s, contact_tone(theme));
 }
 
 /// The desk art with its screen lit in `glow`: the glass takes a dark step of
@@ -1318,11 +1447,10 @@ fn dominant_opaque_row(
     best.map(|(c, _)| c)
 }
 
-/// Wall-hung decor: blitted at its own `pos`, with NO ground shadow — two things
-/// [`paint_prop`] would get wrong here. `WallDecorItem.pos` is TOP-LEFT, like the
-/// classic painter's `Anchor::TopLeft` z-sort rather than the centre-pinned
-/// furniture, so centring would hang every board up and west of where it
-/// belongs; and touching no floor, a contact shadow would land up the wall.
+/// Wall-hung decor, blitted at its own `pos`: [`paint_prop`] would centre it, but
+/// `WallDecorItem.pos` is TOP-LEFT, like the classic painter's `Anchor::TopLeft`
+/// z-sort rather than the centre-pinned furniture, so centring would hang every
+/// board up and west of where it belongs.
 fn paint_wall_decor(
     pos: crate::layout::Point,
     sprite: &str,
@@ -1352,27 +1480,17 @@ fn cutaway_anchor(c: &crate::pixel_painter::CharacterPlacement) -> crate::layout
 fn paint_figure(
     figure: &Figure,
     pack: &Pack,
-    theme: &Theme,
     scale: RenderScale,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) {
-    let Figure {
-        at,
-        shadow,
-        ref key,
-    } = *figure;
+    let Figure { at, ref key, .. } = *figure;
     // The classic painter's own recolor + facing-flip path, through the same
     // cache: a raw pack blit clones one placeholder-palette person per agent.
     let Some(art) = crate::pixel_painter::seat::keyed_character_frame(key, pack, scale, cache)
     else {
         return;
     };
-    let (art_w, art_h) = art.logical;
-
-    if shadow {
-        contact_shadow(at, art_w, art_h, theme, scale, buf);
-    }
     // A dressed frame reaches up over its hair, its art's top staying at `at`:
     // whatever rows would start above the buffer are cut, not the whole figure
     // pushed down.
@@ -1477,25 +1595,11 @@ fn paint_table(at: crate::layout::Point, theme: &Theme, scale: RenderScale, buf:
         &Ramp::from_base(theme.furniture.wood_trim),
         scale,
     );
-    // ...and the ground contact the other floor-standing pieces get: without it
-    // the table would be the one piece with no weight, floating beside the
-    // seated sofas.
-    contact_shadow(
-        crate::layout::Point {
-            x,
-            y: y + desk_front_h(),
-        },
-        w,
-        h,
-        theme,
-        scale,
-        buf,
-    );
 }
 
 /// A corridor appliance as a cutaway solid. Vending machine and printer have no
-/// sprite — classic paints them per-pixel — so this gives them a lit body and a
-/// contact shadow. Its box is [`furniture_def`](crate::layout::furniture_def)'s
+/// sprite — classic paints them per-pixel — so this gives them a lit body; its
+/// shadow is [`ground_shadow`]'s. Its box is [`furniture_def`](crate::layout::furniture_def)'s
 /// `visual`, the box the classic painter draws it at, not a second set of numbers.
 fn paint_appliance(
     at: crate::layout::Point,
@@ -1534,19 +1638,15 @@ fn paint_appliance(
             panel,
         );
     }
-    contact_shadow(crate::layout::Point { x, y }, w, h, theme, scale, buf);
 }
 
-/// Blit a floor-standing prop from the pack, centred on its layout point.
-///
-/// The layout already places these and the pack already draws them; the cutaway
-/// only adds the ground contact a top-down view never needed.
+/// Blit a floor-standing prop from the pack, centred on its layout point; its
+/// shadow is [`ground_shadow`]'s.
 fn paint_prop(
     at: crate::layout::Point,
     sprite: &str,
     mirrored: bool,
     pack: &Pack,
-    theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
@@ -1565,7 +1665,6 @@ fn paint_prop(
     let (w, h) = dense.logical;
     let crate::layout::Point { x, y } =
         crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
-    contact_shadow(crate::layout::Point { x, y }, w, h, theme, scale, buf);
     blit_frame_scaled(
         art,
         scale.to_buffer(x),
@@ -1575,14 +1674,12 @@ fn paint_prop(
     );
 }
 
-/// Blit rows `rows` of a centred prop ([`PieceKind::PropBand`]), with the ground
-/// contact under the band that holds the art's foot.
+/// Blit rows `rows` of a centred prop ([`PieceKind::PropBand`]).
 fn paint_prop_band(
     at: crate::layout::Point,
     sprite: &str,
     rows: (u16, u16),
     pack: &Pack,
-    theme: &Theme,
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
@@ -1600,9 +1697,6 @@ fn paint_prop_band(
         (r1 - r0).saturating_mul(d),
         px[usize::from(r0) * usize::from(d) * fw..usize::from(r1) * usize::from(d) * fw].to_vec(),
     );
-    if r1 == h {
-        contact_shadow(tl, w, h, theme, scale, buf);
-    }
     blit_frame_scaled(
         &band,
         scale.to_buffer(tl.x),
@@ -1612,43 +1706,14 @@ fn paint_prop_band(
     );
 }
 
-/// The tone where a solid meets the floor: the carpet's own shade under the key
-/// light, so contact reads as weight rather than as a colour of its own.
+/// The tone of the line where the wall meets the floor: the carpet's own shade
+/// under the key light, so contact reads as weight rather than as a colour.
 fn contact_tone(theme: &Theme) -> pixtuoid_core::sprite::Rgb {
     Ramp::from_base(theme.surface.carpet_dark).shade
 }
 
-/// A tight dark band where a solid meets the floor — one row, not an ellipse: a
-/// wide soft pool reads as a stain on a dark carpet, while a band the width of
-/// the sprite reads as weight.
-fn contact_shadow(
-    at: crate::layout::Point,
-    sprite_w: u16,
-    sprite_h: u16,
-    theme: &Theme,
-    scale: RenderScale,
-    buf: &mut RgbBuffer,
-) {
-    let shade = contact_tone(theme);
-    let s = scale.get();
-    fill(
-        buf,
-        scale.to_buffer(at.x),
-        scale.to_buffer(at.y + sprite_h),
-        scale.to_buffer(sprite_w),
-        s,
-        shade,
-    );
-}
-
-/// A task chair from the pack's art, with the contact shadow its base casts.
-fn paint_chair(
-    at: crate::layout::Point,
-    pack: &Pack,
-    theme: &Theme,
-    scale: RenderScale,
-    buf: &mut RgbBuffer,
-) {
+/// A task chair from the pack's art.
+fn paint_chair(at: crate::layout::Point, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
     let Some(art) = crate::pixel_painter::densest_frame(
         pack,
         crate::pixel_painter::DESK_CHAIR_SPRITE,
@@ -1657,8 +1722,6 @@ fn paint_chair(
     ) else {
         return;
     };
-    let (w, h) = art.logical;
-    contact_shadow(at, w, h, theme, scale, buf);
     blit_frame_scaled(
         art.frame,
         scale.to_buffer(at.x),
@@ -1768,7 +1831,7 @@ mod tests {
                 y: desk.y - body_h,
             },
             body_h,
-            1,
+            0,
         );
         assert!(behind_z < desk_z, "desk {desk_z}, walker {behind_z}");
     }
@@ -1796,7 +1859,7 @@ mod tests {
             plant_centre,
             plant_w,
             plant_h,
-            1,
+            0,
         );
         assert!(
             desk_box.depth < plant.depth && plant.depth < seated.depth,
@@ -1952,34 +2015,26 @@ mod tests {
         assert_eq!((piece.x0, piece.x1), (8, 15));
     }
 
-    /// The desk sorts on the row just above the contact row it paints. Pinned to
-    /// the paint itself: the ordering tests compare depths by inequality, which a
-    /// one-row shift passes.
+    /// A desk's shadow centres on the row just under the one it sorts on: the
+    /// row it meets the floor on. Pinned exactly, as the ordering tests compare
+    /// depths by inequality, which a one-row shift passes.
     #[test]
-    fn a_desk_sorts_on_the_row_above_the_contact_row_it_paints() {
+    fn a_desks_shadow_centres_on_the_row_under_where_it_sorts() {
         let pack = pack();
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
         let desk = crate::layout::Point { x: 20, y: 30 };
         for facing in [crate::layout::Facing::North, crate::layout::Facing::South] {
             let art = desk_art(&pack, facing).expect("desk art");
             for s in [1, pack.max_density_variant()] {
                 let scale = RenderScale::new(s).expect("nonzero");
                 let span = desk_span(&pack, art, desk, scale).expect("desk");
-                let (w, h) = (scale.to_buffer(64), scale.to_buffer(64));
-                let mut buf = RgbBuffer::filled(w, h, theme.surface.bg_fallback);
-                paint_desk(desk, art, None, &pack, theme, scale, &mut buf);
-                let contact = contact_tone(theme);
-                let contact_row = (0..h)
-                    .rev()
-                    .find(|&y| {
-                        (0..w).any(|x| {
-                            buf.as_slice()[usize::from(y) * usize::from(w) + usize::from(x)]
-                                == contact
-                        })
-                    })
-                    .map(|y| scale.logical(y))
-                    .expect("the desk paints a contact row");
-                assert_eq!(span.depth + 1, contact_row, "{art} at scale {s}");
+                let kind = PieceKind::Desk {
+                    at: desk,
+                    art,
+                    screen: None,
+                };
+                let shadow = ground_shadow(span, &kind, &pack).expect("a desk casts a shadow");
+                let ((_, top), (_, past)) = shadow.bounds();
+                assert_eq!((top + past) / 2, span.depth + 1, "{art} at scale {s}");
             }
         }
     }
@@ -2028,11 +2083,11 @@ mod tests {
     #[test]
     fn an_occupant_span_bounds_a_chair_taller_than_its_sitter() {
         let body = Span::new(10, 20, 8, 12, 0);
-        let chair = Span::new(9, 15, 10, 20, 1).with_depth(40);
+        let chair = Span::new(9, 15, 10, 20, 0).with_depth(40);
         let piece = occupant_span(body, 31, Some(chair));
         assert_eq!(
             (piece.x0, piece.x1, piece.y0, piece.y1, piece.depth),
-            (9, 18, 15, 35, 40)
+            (9, 18, 15, 34, 40)
         );
     }
 
@@ -2653,6 +2708,254 @@ mod tests {
         }
     }
 
+    /// A 12x12 floor, its west half one tone and its east half another, under
+    /// `shadows` at noon, drawn at scale `s` from art at density `d`.
+    fn shadowed(s: u16, d: u16, shadows: &[crate::ground::Contact]) -> RgbBuffer {
+        let scale = RenderScale::new(s).expect("nonzero");
+        let pen = Pen::new(scale, d).expect("d divides s");
+        let mut buf = RgbBuffer::filled(scale.to_buffer(12), scale.to_buffer(12), WEST);
+        for y in 0..buf.height() {
+            for x in buf.width() / 2..buf.width() {
+                buf.put(x, y, EAST);
+            }
+        }
+        paint_ground_shadows(
+            shadows.iter().copied(),
+            crate::ground::shadow_strength(CUTAWAY_DARKNESS),
+            pen,
+            &mut buf,
+        );
+        buf
+    }
+
+    const WEST: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    const EAST: pixtuoid_core::sprite::Rgb = pixtuoid_core::sprite::Rgb {
+        r: 70,
+        g: 90,
+        b: 140,
+    };
+    /// A shadow centred on the seam at `(6, 6)`.
+    fn seam_shadow() -> crate::ground::Contact {
+        crate::ground::Contact::under(2, 8, 6)
+    }
+
+    /// A shadow is the floor it falls on, darker toward its centre: whole ramp
+    /// stops of that floor's own colour, never a colour of its own.
+    #[test]
+    fn a_shadow_steps_the_floor_it_falls_on_darker_toward_its_centre() {
+        let buf = shadowed(8, 4, &[seam_shadow()]);
+        let deepest = deepest_shadow_stop();
+        let (cx, cy) = (6 * 8, 6 * 8);
+        assert_eq!(buf.get(cx - 2, cy), WEST.ramp(-deepest), "west of the seam");
+        assert_eq!(
+            buf.get(cx + 2, cy),
+            EAST.ramp(-deepest),
+            "east of it, its own tone"
+        );
+        assert_eq!(buf.get(0, 0), WEST, "nothing past the rim");
+        let stepped =
+            |c, floor: pixtuoid_core::sprite::Rgb| (0..=deepest).any(|k| c == floor.ramp(-k));
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
+                let floor = if x < buf.width() / 2 { WEST } else { EAST };
+                assert!(
+                    stepped(buf.get(x, y), floor),
+                    "({x}, {y}) is its floor, stepped"
+                );
+            }
+        }
+    }
+
+    /// Two shadows over one spot are as deep as the deeper, not their sum, in
+    /// either order.
+    #[test]
+    fn overlapping_shadows_take_the_deeper_not_the_sum() {
+        let (narrow, wide) = (
+            crate::ground::Contact::under(4, 3, 6),
+            crate::ground::Contact::under(1, 10, 7),
+        );
+        let (a, b) = (shadowed(8, 4, &[narrow]), shadowed(8, 4, &[wide]));
+        let (ab, ba) = (
+            shadowed(8, 4, &[narrow, wide]),
+            shadowed(8, 4, &[wide, narrow]),
+        );
+        assert!(ab.as_slice() == ba.as_slice(), "order-free");
+        let lum = |c: pixtuoid_core::sprite::Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
+        let mut mixed = false;
+        for ((&both, &a), &b) in ab.as_slice().iter().zip(a.as_slice()).zip(b.as_slice()) {
+            let deeper = if lum(a) <= lum(b) { a } else { b };
+            assert_eq!(both, deeper, "the deeper of the two, not their sum");
+            mixed |= a != b && both == a;
+        }
+        assert!(mixed, "each shadow wins somewhere");
+    }
+
+    /// Every step of a shadow covers whole art pixels.
+    #[test]
+    fn a_shadow_lands_on_the_art_grid() {
+        let buf = shadowed(8, 4, &[seam_shadow()]);
+        let k = 8 / 4;
+        for y in 0..buf.height() {
+            for x in 0..buf.width() {
+                assert_eq!(buf.get(x, y), buf.get(x - x % k, y - y % k), "({x}, {y})");
+            }
+        }
+    }
+
+    /// A solid casts its shadow under its south edge; a prop's upper band does
+    /// not.
+    #[test]
+    fn what_meets_the_floor_casts_a_shadow() {
+        let pack = pack();
+        let span = Span::new(10, 10, 8, 12, 0);
+        let chair = PieceKind::Chair {
+            at: crate::layout::Point { x: 10, y: 10 },
+        };
+        assert_eq!(
+            ground_shadow(span, &chair, &pack),
+            Some(crate::ground::Contact::under(10, 8, span.y1 + 1)),
+            "centred under it, on the floor row under its south edge"
+        );
+        let (_, h) = art_size(&pack, MEETING_SOFA_NORTH).expect("sofa art");
+        let band = |rows| PieceKind::PropBand {
+            at: crate::layout::Point { x: 10, y: 10 },
+            sprite: MEETING_SOFA_NORTH,
+            rows,
+        };
+        assert!(
+            ground_shadow(span, &band((0, NORTH_SOFA_SEAT_ROWS)), &pack).is_none(),
+            "the seat band"
+        );
+        assert!(
+            ground_shadow(span, &band((NORTH_SOFA_SEAT_ROWS, h)), &pack).is_some(),
+            "the foot band"
+        );
+    }
+
+    /// A figure standing casts its own shadow; sitting, the chair they carry
+    /// casts one under itself, so a chair's shadow stays put as they sit down.
+    #[test]
+    fn a_sitters_chair_casts_the_shadow_they_do_not() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let (mut standing, mut sitting) = (false, false);
+        for frame in &frames {
+            for (span, kind) in collect_pieces(
+                frame,
+                &layout,
+                &pack,
+                theme,
+                RenderScale::ONE,
+                std::time::UNIX_EPOCH,
+            ) {
+                let PieceKind::Character {
+                    ref figure,
+                    body,
+                    chair,
+                    ..
+                } = kind
+                else {
+                    continue;
+                };
+                let cast = ground_shadow(span, &kind, &pack).expect("every figure grounds");
+                if figure.shadow {
+                    standing = true;
+                    assert_eq!(
+                        cast,
+                        crate::ground::Contact::under(body.x0, body.x1 - body.x0 + 1, body.y1 + 1)
+                    );
+                } else {
+                    sitting = true;
+                    let at = chair.expect("a desk sitter carries their chair");
+                    let (w, h) = art_size(&pack, crate::pixel_painter::DESK_CHAIR_SPRITE)
+                        .expect("chair art");
+                    let empty = piece_span(crate::layout::Anchor::TopLeft, at, w, h, 0);
+                    assert_eq!(
+                        Some(cast),
+                        ground_shadow(empty, &PieceKind::Chair { at }, &pack),
+                        "the chair casts the shadow it cast empty"
+                    );
+                }
+            }
+        }
+        assert!(standing && sitting, "the walk in and the sit");
+    }
+
+    /// A pack drawing no back view of its own gets the front view flipped,
+    /// sorted a row south of its sitters: it stands in front of those it faces
+    /// away from.
+    #[test]
+    fn a_flipped_sofa_sorts_in_front_of_its_sitters() {
+        let pack = pixtuoid_core::sprite::format::load_pack_from_strings(
+            "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
+             \"F\"=\"#202020\"\n[animations.meeting_sofa]\nframes=[\"s.sprite\"]\nframe_ms=100\n",
+            &[("s.sprite", "@frame 0\nF F F\nF F F\n")],
+        )
+        .expect("a pack of one sofa loads");
+        let at = crate::layout::Point { x: 40, y: 30 };
+        let mut order = Vec::new();
+        push_sofa(&mut order, &pack, at, true);
+        let [(span, PieceKind::Prop { mirrored: true, .. })] = order.as_slice() else {
+            panic!("a flipped sofa is one mirrored prop: {order:?}");
+        };
+        assert!(span.depth > crate::pixel_painter::seat::sofa_sitter_z_key(at));
+    }
+
+    /// Every piece's shadow falls inside its [`Piece::reach`], so a repaint of
+    /// the pieces whose reach meets a damaged rect leaves no stale shadow.
+    #[test]
+    fn a_shadow_falls_inside_its_pieces_reach() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::South, 2);
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let floor = pixtuoid_core::sprite::Rgb {
+            r: 150,
+            g: 110,
+            b: 72,
+        };
+        let list = build_list(
+            frames.last().expect("a frame"),
+            &layout,
+            &pack,
+            theme,
+            scale,
+            std::time::UNIX_EPOCH,
+        );
+        let mut cast = 0;
+        for piece in list.pieces() {
+            let Some(shadow) = piece.shadow else { continue };
+            cast += 1;
+            let mut buf = RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                floor,
+            );
+            paint_ground_shadows(
+                std::iter::once(shadow),
+                crate::ground::shadow_strength(CUTAWAY_DARKNESS),
+                Pen::for_pack(scale, &pack),
+                &mut buf,
+            );
+            let reach = piece.reach();
+            for (i, &c) in buf.as_slice().iter().enumerate() {
+                if c != floor {
+                    let w = usize::from(buf.width());
+                    let (x, y) = (scale.logical((i % w) as u16), scale.logical((i / w) as u16));
+                    assert!(
+                        (reach.x0..=reach.x1).contains(&x) && (reach.y0..=reach.y1).contains(&y),
+                        "{:?}'s shadow reaches ({x}, {y}) past {reach:?}",
+                        kind_name(&piece.kind)
+                    );
+                }
+            }
+        }
+        assert!(cast > 0, "the office casts shadows");
+    }
+
     /// The bundled pack.
     fn pack() -> Pack {
         crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
@@ -2689,7 +2992,7 @@ mod tests {
             for pl in &layout.plants {
                 if let Some((pw, ph)) = art_size(&pack, pl.kind.sprite_name()) {
                     order.push((
-                        piece_span(crate::layout::Anchor::Center, pl.pos, pw, ph, 1),
+                        piece_span(crate::layout::Anchor::Center, pl.pos, pw, ph, 0),
                         PieceKind::Prop {
                             at: pl.pos,
                             sprite: pl.kind.sprite_name(),
@@ -3258,8 +3561,8 @@ S B B B B B B S
     /// THE property the whole mixed-density contract rests on: a density variant
     /// changes how a piece is DRAWN, never how big it is. `densest_frame`'s
     /// variant and base arms return different (frame, factor) pairs whose
-    /// PRODUCT has to agree with the logical size the desk's foot (face or
-    /// contact row) is placed by, and getting it wrong is silent — the desk
+    /// PRODUCT has to agree with the logical size the desk's foot (its face) is
+    /// placed by, and getting it wrong is silent — the desk
     /// still renders, with its foot a whole desk below the surface.
     #[test]
     fn the_drawn_size_is_the_same_whichever_density_the_art_came_from() {
@@ -3540,7 +3843,6 @@ S B B B B B B S
     #[test]
     fn a_sofas_bands_paint_its_art_whole() {
         let pack = pack();
-        let theme = &crate::theme::NORMAL;
         let sofa = crate::layout::Point { x: 20, y: 10 };
         let (w, h) = base_size(&pack, MEETING_SOFA_NORTH);
         for s in [1, pack.max_density_variant()] {
@@ -3549,26 +3851,10 @@ S B B B B B B S
             let blank =
                 || RgbBuffer::filled(scale.to_buffer(w + 40), scale.to_buffer(h + 20), floor);
             let (mut whole, mut split) = (blank(), blank());
-            paint_prop(
-                sofa,
-                MEETING_SOFA_NORTH,
-                false,
-                &pack,
-                theme,
-                scale,
-                &mut whole,
-            );
+            paint_prop(sofa, MEETING_SOFA_NORTH, false, &pack, scale, &mut whole);
             let top = NORTH_SOFA_SEAT_ROWS;
             for rows in [(0, top), (top, h)] {
-                paint_prop_band(
-                    sofa,
-                    MEETING_SOFA_NORTH,
-                    rows,
-                    &pack,
-                    theme,
-                    scale,
-                    &mut split,
-                );
+                paint_prop_band(sofa, MEETING_SOFA_NORTH, rows, &pack, scale, &mut split);
             }
             assert!(
                 whole.as_slice() == split.as_slice(),
@@ -3614,7 +3900,6 @@ S B B B B B B S
     #[cfg(feature = "density-art")]
     fn only_the_top_down_base_desk_gets_a_derived_front_face() {
         let pack = pack();
-        let theme = &crate::theme::NORMAL;
         let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
         let at = crate::layout::Point { x: 1, y: 1 };
         let (bw, bh) = base_size(&pack, "desk");
@@ -3626,19 +3911,19 @@ S B B B B B B S
                 scale.to_buffer(span.y0 + bh + desk_front_h() + 1),
                 floor,
             );
-            paint_desk(at, "desk", None, &pack, theme, scale, &mut buf);
+            paint_desk(at, "desk", None, &pack, scale, &mut buf);
             let (x, below) = (
                 scale.to_buffer(at.x + bw / 2),
                 scale.to_buffer(span.y0 + bh),
             );
             assert_eq!(
-                buf.get(x, below) != contact_tone(theme),
+                buf.get(x, below) != floor,
                 face,
                 "scale {s}: the row under the art is {}",
                 if face {
                     "the derived face"
                 } else {
-                    "the contact shadow"
+                    "bare floor"
                 }
             );
         }
@@ -3669,22 +3954,21 @@ S B B B B B B S
             b: 0xc0,
         };
         let scale = RenderScale::new(2).expect("nonzero");
-        let theme = crate::theme::theme_by_name("normal").expect("theme");
         let at = crate::layout::Point { x: 3, y: 3 };
         let blank = || RgbBuffer::filled(16, 16, pixtuoid_core::sprite::Rgb { r: 0, g: 0, b: 0 });
         let drawn = |buf: &RgbBuffer| buf.get(scale.to_buffer(at.x), scale.to_buffer(at.y));
 
         let mut buf = blank();
-        paint_prop(at, "plant", false, &pack, theme, scale, &mut buf);
+        paint_prop(at, "plant", false, &pack, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "prop");
         let mut buf = blank();
-        paint_prop(at, "plant", true, &pack, theme, scale, &mut buf);
+        paint_prop(at, "plant", true, &pack, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "mirrored prop");
         let mut buf = blank();
         paint_wall_decor(at, "whiteboard", &pack, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "wall decor");
         let mut buf = blank();
-        paint_chair(at, &pack, theme, scale, &mut buf);
+        paint_chair(at, &pack, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "chair");
     }
 
