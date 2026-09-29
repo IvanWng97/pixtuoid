@@ -505,6 +505,7 @@ pub(super) fn compute_with_seed(
         }
     }
 
+    let wall_pieces = rooms::walls::wall_pieces(&room_walls, &doorways, top_margin);
     let build_mask = |plants: &[PlantItem], wall_decor: &[WallDecorItem]| {
         mask::build_walkable_mask(&mask::MaskObstacles {
             buf_w,
@@ -520,7 +521,7 @@ pub(super) fn compute_with_seed(
             fish_tank,
             wall_decor,
             pod_decor: &pod_decor,
-            room_walls: &room_walls,
+            wall_pieces: &wall_pieces,
             pantry_counter_size,
         })
     };
@@ -566,7 +567,7 @@ pub(super) fn compute_with_seed(
         // Next rung — only a wall decor that TOUCHES THE FLOOR can seal a lane, so drop
         // those (by footprint, not by kind) before the drastic clear-all-plants.
         if severed(&walkable) {
-            wall_decor.retain(|d| furniture_def(d.kind.furniture()).footprint.is_none());
+            wall_decor.retain(|d| !d.kind.stands_on_floor());
             walkable = build_mask(&plants, &wall_decor);
         }
         if severed(&walkable) {
@@ -644,6 +645,7 @@ pub(super) fn compute_with_seed(
         }),
         room_walls,
         doorways,
+        wall_pieces,
         top_margin,
         corridor,
         walkable,

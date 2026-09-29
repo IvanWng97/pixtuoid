@@ -182,10 +182,12 @@ pub(super) enum DrawableKind<'a> {
         /// Gateway up but model-broken → render the lobster sickly red.
         degraded: bool,
     },
-    /// A frosted-glass room wall, y-sorted on its
-    /// [`sort_row`](crate::layout::WallPiece::sort_row) so it composites over a
-    /// character standing behind it.
-    RoomWall(crate::layout::WallPiece),
+    /// One [sort band](crate::layout::WallPiece::sort_bands) of a frosted-glass
+    /// room wall, so it composites over a character standing behind it.
+    RoomWall {
+        piece: crate::layout::WallPiece,
+        rows: std::ops::Range<u16>,
+    },
     /// Meeting-room coat rack, y-sorted at its base row (the bottom of its
     /// `MeetingRoom::coat_rack_rect`). `pos` is the pole top.
     CoatRack {
@@ -491,7 +493,15 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
             }
         }
-        DrawableKind::RoomWall(piece) => super::paint_partition(buf, theme, *piece),
+        DrawableKind::RoomWall { piece, rows } => {
+            super::paint_wall(
+                buf,
+                theme,
+                *piece,
+                rows.clone(),
+                crate::cutaway::pen::Pen::UNIT,
+            );
+        }
         DrawableKind::FishTank { pos } => {
             paint_fish_tank(buf, *pos, now, theme);
         }

@@ -459,7 +459,7 @@ pub(super) const WHITE: Rgb = Rgb {
 pub(super) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
 
 /// [`blend`] on each channel of an `Rgb` triple, with one shared `t`.
-pub(crate) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
+pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     Rgb {
         r: blend(a.r, b.r, t),
         g: blend(a.g, b.g, t),
@@ -506,7 +506,7 @@ impl RgbLut {
 }
 
 /// Composite `tint` over the existing buffer pixel at `(x, y)` by `t` — the
-/// frosted-glass / haze / overlay primitive.
+/// haze / overlay primitive.
 pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {
     blend_rgb(buf.get(x, y), tint, t)
 }

@@ -10,6 +10,22 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+/// Paint all of `piece`, as the classic does band by band.
+fn paint_whole_wall(
+    buf: &mut RgbBuffer,
+    theme: &crate::theme::Theme,
+    piece: crate::layout::WallPiece,
+) {
+    let (at, size) = piece.visual();
+    paint_wall(
+        buf,
+        theme,
+        piece,
+        at.y..at.y + size.h,
+        crate::cutaway::pen::Pen::UNIT,
+    );
+}
+
 #[test]
 fn v_door_jambs_sit_flush_on_both_cut_ends() {
     // The glass painters are endpoint-INCLUSIVE, so each jamb must COVER its
@@ -21,24 +37,26 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(20, 60, floor);
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Vertical {
             x: 5,
             y_top: 10,
+            north: 10,
             y_bot: 24,
             south: 24,
             jamb_north: false,
             jamb_south: true,
         },
     );
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Vertical {
             x: 5,
             y_top: 38,
+            north: 38,
             y_bot: 52,
             south: 52,
             jamb_north: true,
@@ -68,17 +86,21 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
         .find(|d| d.start.y == d.end.y)
         .expect("the meeting-pantry 60% door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_h(&l, &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWall(crate::layout::WallPiece::Horizontal {
-                x0,
-                x1,
-                jamb_west,
-                jamb_east,
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Horizontal {
+                        x0,
+                        x1,
+                        jamb_west,
+                        jamb_east,
+                        ..
+                    },
                 ..
-            }) => Some((x0, x1, jamb_west, jamb_east)),
+            } => Some((x0, x1, jamb_west, jamb_east)),
             _ => None,
         })
         .collect();
@@ -110,18 +132,25 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
         .find(|d| d.start.x == d.end.x)
         .expect("the meeting room's centered vertical door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_v(&l, &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
+    // Each wall's southmost band: the one that sorts on the wall's own end.
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWall(crate::layout::WallPiece::Vertical {
-                x,
-                y_top,
-                y_bot,
-                jamb_north,
-                jamb_south,
-                ..
-            }) if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Vertical {
+                        x,
+                        y_top,
+                        y_bot,
+                        jamb_north,
+                        jamb_south,
+                        ..
+                    },
+                ref rows,
+            } if x == dw.start.x && rows.end == y_bot + 1 => {
+                Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south))
+            }
             _ => None,
         })
         .collect();
@@ -169,7 +198,7 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     for x in 4..20 {
         buf.put(x, cap_row, character);
     }
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Horizontal {
@@ -183,8 +212,8 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     let after = buf.get(8, cap_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -192,9 +221,9 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
 fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (x_left, y_top, y_bot) = (10u16, 20u16, 40u16);
-    // Row `y_top` is a seam glint (bright specular), so probe the NEXT cap row
-    // at the soft east edge — the coolest column of the strip.
-    let probe_col = x_left + crate::layout::WALL_THICK_V - 1;
+    // Row `y_top` is a seam glint and the outer columns are frame, so probe a
+    // pane cell of the next row.
+    let probe_col = x_left + 1;
     let probe_row = y_top + 1;
     let character = Rgb {
         r: 220,
@@ -211,13 +240,14 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
         },
     );
     buf.put(probe_col, probe_row, character);
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Vertical {
             x: x_left,
             y_top,
             y_bot,
+            north: y_top,
             south: y_bot,
             jamb_north: false,
             jamb_south: false,
@@ -226,8 +256,8 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
     let after = buf.get(probe_col, probe_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -2168,12 +2198,12 @@ fn paint_character_at_missing_anim_is_a_noop() {
 
 #[test]
 fn glass_wall_h_clamps_below_buffer_bottom() {
-    // y_top near the buffer bottom makes the cap+face span exceed the height,
-    // firing the per-row `y >= bh continue`.
+    // `y_face` at the buffer's last row runs the face past it, so the pen's
+    // clip drops the rows below.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bh = 16u16;
     let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Horizontal {
@@ -2197,17 +2227,18 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
 
 #[test]
 fn glass_wall_v_clamps_past_right_edge() {
-    // x_left == bw-1 → x_left+dx for dx>=1 exceeds the width, exercising the
-    // `x >= bw continue`. Must not panic.
+    // `x` at the last column runs the strip past the width, so the pen's clip
+    // drops the columns beyond. Must not panic.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bw = 12u16;
     let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_partition(
+    paint_whole_wall(
         &mut buf,
         theme,
         crate::layout::WallPiece::Vertical {
             x: bw - 1,
             y_top: 5,
+            north: 5,
             y_bot: 20,
             south: 20,
             jamb_north: false,
@@ -3553,6 +3584,62 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
         }
     }
     assert!(seat_visits > 100, "agents barely sat down ({seat_visits})");
+}
+
+/// The cutaway grounds a figure with a shadow unless `seated`, so a sofa
+/// sitter flagged standing lays a shadow slab across the sofa's front.
+#[test]
+fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
+    use crate::layout::{WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::pose::Pose;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = SceneState::uniform(64);
+    for i in 0..TEST_DEFAULT_DESKS {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/sit{i}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        slot.created_at = started;
+        slot.state_started_at = started;
+        slot.last_event_at = started;
+        slot.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(id, slot);
+    }
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
+    let (mut on_furniture, mut on_foot) = (0usize, 0usize);
+    for step in 0..3_600u64 {
+        let now = now0 + Duration::from_millis(250 * step);
+        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        for c in &frame.characters {
+            let id = frame.agents[c.agent_idx].agent_id;
+            let sits = match frame.poses.get(&id) {
+                Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
+                    true
+                }
+                Some(Some(Pose::AtWaypoint { kind, .. })) => matches!(
+                    kind,
+                    WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
+                ),
+                _ => false,
+            };
+            if sits && c.seat_desk.is_none() {
+                on_furniture += 1;
+            } else if !sits {
+                on_foot += 1;
+            }
+            assert_eq!(c.seated, sits, "{:?} at step {step}", frame.poses.get(&id));
+        }
+    }
+    assert!(
+        on_furniture > 0,
+        "nobody sat on a couch, sofa or meeting chair"
+    );
+    assert!(on_foot > 0, "nobody stood or walked");
 }
 
 #[test]

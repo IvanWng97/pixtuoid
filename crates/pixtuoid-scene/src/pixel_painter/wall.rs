@@ -1,59 +1,60 @@
-//! The classic painter's room walls: each of the layout's
-//! [`wall_pieces`](crate::layout::wall_pieces) queued into the y-sort, and
-//! painted through the frosted [`Glass`] the cutaway draws too.
+//! The room walls: each of the layout's
+//! [`wall_pieces`](crate::layout::SceneLayout::wall_pieces), sorted in its
+//! [bands](WallPiece::sort_bands) and painted through the frosted [`Glass`] by
+//! both painters, each on its own [`Pen`].
+
+use std::ops::Range;
 
 use pixtuoid_core::sprite::RgbBuffer;
 
 use super::drawable::{Drawable, DrawableKind};
+use crate::cutaway::pen::{ArtRect, Pen};
 use crate::glass::Glass;
-use crate::layout::{wall_pieces, Layout, WallPiece};
+use crate::layout::{Layout, WallPiece};
+use crate::theme::Theme;
 
-/// Paint one room wall: its glass over what is already drawn behind it, then
-/// the jamb posts where a doorway cuts it.
-pub(super) fn paint_partition(buf: &mut RgbBuffer, theme: &crate::theme::Theme, piece: WallPiece) {
+/// Paint the logical `rows` of one room wall: its glass over what is already
+/// drawn behind them, then the jamb posts where a doorway cuts it. The glass is
+/// laid from the wall's own top, so its rhythm runs on across the bands.
+pub(crate) fn paint_wall(
+    buf: &mut RgbBuffer,
+    theme: &Theme,
+    piece: WallPiece,
+    rows: Range<u16>,
+    pen: Pen,
+) {
     let (at, size) = piece.visual();
-    let glass = Glass::of(theme, piece, 1);
-    for dy in 0..size.h {
-        for dx in 0..size.w {
-            let (x, y) = (at.x + dx, at.y + dy);
-            if x < buf.width() && y < buf.height() {
-                buf.put(x, y, glass.over(buf.get(x, y), dx, dy));
-            }
-        }
-    }
-    let post = theme.office.room_wall_trim_dark;
-    for (p, s) in piece.jambs() {
-        for y in p.y..(p.y + s.h).min(buf.height()) {
-            for x in p.x..(p.x + s.w).min(buf.width()) {
-                buf.put(x, y, post);
-            }
-        }
-    }
-}
-
-/// Horizontal (E-W) room dividers join the y-sort on [`WallPiece::sort_row`],
-/// so a character standing north of the wall is composited over by the frosted
-/// glass rather than painting on top of it. Emitted LAST so a character tied
-/// with a wall row still paints behind it.
-pub(super) fn enqueue_room_walls_h<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for piece in wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin) {
-        if let WallPiece::Horizontal { .. } = piece {
-            drawables.push(Drawable {
-                anchor_y: piece.sort_row(),
-                kind: DrawableKind::RoomWall(piece),
-            });
+    let mut glass = Glass::of(theme, piece, pen.art(1).0);
+    let band = ArtRect {
+        x: pen.art(at.x),
+        y: pen.art(rows.start),
+        w: pen.art(size.w),
+        h: pen.art(rows.end - rows.start),
+    };
+    let top = pen.art(rows.start - at.y).0;
+    pen.recolour(buf, band, |dx, dy, under| glass.over(under, dx, top + dy));
+    for (post, s) in piece.jambs() {
+        let (from, to) = (post.y.max(rows.start), (post.y + s.h).min(rows.end));
+        if from < to {
+            let r = ArtRect {
+                x: pen.art(post.x),
+                y: pen.art(from),
+                w: pen.art(s.w),
+                h: pen.art(to - from),
+            };
+            pen.fill(buf, r, theme.office.room_wall_trim_dark);
         }
     }
 }
 
-/// Vertical (N-S, edge-on) room dividers join the y-sort on
-/// [`WallPiece::sort_row`], each painted over its stitched `[y_top, y_bot]`.
-pub(super) fn enqueue_room_walls_v<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
-    for piece in wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin) {
-        if let WallPiece::Vertical { .. } = piece {
+/// Queue every room wall's bands into the y-sort, emitted LAST so a character
+/// tied with a band's row still paints behind the glass.
+pub(super) fn enqueue_room_walls<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>) {
+    for &piece in &layout.wall_pieces {
+        for (rows, depth) in piece.sort_bands() {
             drawables.push(Drawable {
-                anchor_y: piece.sort_row(),
-                kind: DrawableKind::RoomWall(piece),
+                anchor_y: depth,
+                kind: DrawableKind::RoomWall { piece, rows },
             });
         }
     }

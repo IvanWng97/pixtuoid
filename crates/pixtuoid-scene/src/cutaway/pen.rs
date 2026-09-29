@@ -31,20 +31,20 @@ pub(crate) struct ArtRect {
 /// Colours already stepped `level` stops: a shade crosses a handful of tones
 /// and [`Rgb::ramp`] is an OKLab round trip, so each is stepped once, not once
 /// per pixel.
-struct Stepped {
+pub(crate) struct Stepped {
     level: i8,
     seen: Vec<(Rgb, Rgb)>,
 }
 
 impl Stepped {
-    fn new(level: i8) -> Self {
+    pub(crate) fn new(level: i8) -> Self {
         Self {
             level,
             seen: Vec::new(),
         }
     }
 
-    fn of(&mut self, c: Rgb) -> Rgb {
+    pub(crate) fn of(&mut self, c: Rgb) -> Rgb {
         if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
             return stepped;
         }
@@ -63,6 +63,12 @@ pub(crate) struct Pen {
 }
 
 impl Pen {
+    /// The classic painter's grid: one buffer pixel per logical unit.
+    pub(crate) const UNIT: Self = Self {
+        d: NonZeroU16::MIN,
+        k: NonZeroU16::MIN,
+    };
+
     /// The pen for art authored at density `d`, painted at `scale`; `None` when
     /// `d` does not divide it, since an art pixel would then straddle buffer
     /// pixels.

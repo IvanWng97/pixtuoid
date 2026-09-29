@@ -3,72 +3,52 @@
 //! walk their own grid over that box and ask it, so the glass is one design
 //! drawn at two densities.
 //!
-//! Glass recolours what already lies behind it, one cell at a time: a
-//! translucency, not a gradient, so a cell that was one colour stays one.
+//! The panes are see-through: a pane cell is what lies behind it, stepped up
+//! its own ramp ([`Rgb::ramp`]), so a figure behind the glass keeps its colours
+//! and a cell that was one colour stays one. Only the frame — the rim, posts
+//! and sill — and a face-on pane's glint are colours of their own, the
+//! theme's.
 
 use pixtuoid_core::sprite::Rgb;
 
+use crate::cutaway::pen::Stepped;
 use crate::layout::WallPiece;
 use crate::theme::Theme;
 
-/// Seam-glint spacing along a run, in logical units.
-const SEAM_STRIDE: u16 = 16;
-/// Mullion (partition post) spacing along a run, in logical units: a darker post
-/// this often reads as panelled partitions instead of one unbroken sheet.
-/// Offset from [`SEAM_STRIDE`] so the two rhythms interleave.
+/// Mullion (partition post) spacing along a run, in logical units: a post this
+/// often reads as panelled partitions instead of one unbroken sheet.
 const MULLION_STRIDE: u16 = 10;
 
-/// What the theme's trim is lifted by, per channel, for the glass's highlight,
-/// body and shadow tones.
-const HI_LIFT: [u8; 3] = [125, 135, 124];
-/// See [`HI_LIFT`].
-const MID_LIFT: [u8; 3] = [70, 100, 116];
-/// See [`HI_LIFT`].
-const LO_LIFT: [u8; 3] = [18, 52, 86];
+/// How far into a pane, in logical units along plus across, its glint runs:
+/// the diagonal shine a pane catches in its top corner.
+const GLINT_AT: u16 = 5;
+/// Cells between a glint's two strokes.
+const GLINT_GAP: u16 = 2;
 
-/// How much of a tone a mullion lays over what is behind it.
-const MULLION_OPACITY: f32 = 0.8;
-/// How much of the shadow tone the far edge lays over what is behind it.
-const FAR_EDGE_OPACITY: f32 = 0.72;
+/// Ramp stops a pane lifts what is behind it: the haze that makes it glass.
+const PANE_LIFT: i8 = 3;
+
+/// What the theme's trim is lifted by, per channel, for the frame's rim.
+const RIM_LIFT: [u8; 3] = [125, 135, 124];
+/// What the theme's trim is lifted by, per channel, for the frame's posts and
+/// sill.
+const POST_LIFT: [u8; 3] = [18, 52, 86];
 
 /// How a partition is seen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum View {
     /// An E-W run, showing its face.
     Face,
-    /// A N-S run, seen edge-on through more glass, so its tones sit denser.
+    /// A N-S run, seen edge-on through more glass, so its haze sits a stop
+    /// denser.
     EdgeOn,
-}
-
-/// The opacities that depend on the [`View`].
-struct Opacity {
-    seam: f32,
-    near_edge: f32,
-    pane: f32,
-}
-
-impl View {
-    fn opacity(self) -> Opacity {
-        match self {
-            View::Face => Opacity {
-                seam: 0.55,
-                near_edge: 0.82,
-                pane: 0.58,
-            },
-            View::EdgeOn => Opacity {
-                seam: 0.6,
-                near_edge: 0.85,
-                pane: 0.6,
-            },
-        }
-    }
 }
 
 /// One partition's glass on one painter's grid.
 pub(crate) struct Glass {
-    hi: Rgb,
-    mid: Rgb,
-    lo: Rgb,
+    rim: Rgb,
+    post: Rgb,
+    pane: Stepped,
     view: View,
     run: u16,
     depth: u16,
@@ -90,10 +70,14 @@ impl Glass {
             g: trim.g.saturating_add(g),
             b: trim.b.saturating_add(b),
         };
+        let denser = match view {
+            View::Face => 0,
+            View::EdgeOn => 1,
+        };
         Self {
-            hi: lift(HI_LIFT),
-            mid: lift(MID_LIFT),
-            lo: lift(LO_LIFT),
+            rim: lift(RIM_LIFT),
+            post: lift(POST_LIFT),
+            pane: Stepped::new(PANE_LIFT + denser),
             view,
             run: run.saturating_mul(per_unit),
             depth: depth.saturating_mul(per_unit),
@@ -103,32 +87,28 @@ impl Glass {
 
     /// `under` seen through the cell `dx` across and `dy` down the wall's
     /// [`visual`](WallPiece::visual) box.
-    pub(crate) fn over(&self, under: Rgb, dx: u16, dy: u16) -> Rgb {
+    pub(crate) fn over(&mut self, under: Rgb, dx: u16, dy: u16) -> Rgb {
         let (along, across) = match self.view {
             View::Face => (dx, dy),
             View::EdgeOn => (dy, dx),
         };
-        let (tone, opacity) = self.tint(along, across);
-        crate::pixel_painter::blend_rgb(under, tone, opacity)
-    }
-
-    fn tint(&self, along: u16, across: u16) -> (Rgb, f32) {
-        let o = self.view.opacity();
-        // Interior posts only: one AT a run's end would double its door frame
-        // or corner joint.
+        // Interior posts only: one in a run's last unit would double its door
+        // frame or corner joint.
         let mullion = along > 0
-            && along + 1 < self.run
+            && along + self.per_unit < self.run
             && along.is_multiple_of(MULLION_STRIDE * self.per_unit);
-        if mullion {
-            (self.lo, MULLION_OPACITY)
-        } else if along.is_multiple_of(SEAM_STRIDE * self.per_unit) {
-            (self.hi, o.seam)
-        } else if across == 0 {
-            (self.hi, o.near_edge)
-        } else if across + 1 == self.depth {
-            (self.lo, FAR_EDGE_OPACITY)
+        // Only a pane seen face-on catches one; edge-on, the glass shows only
+        // its thickness.
+        let glint = self.view == View::Face
+            && (along % (MULLION_STRIDE * self.per_unit) + across)
+                .checked_sub(GLINT_AT * self.per_unit)
+                .is_some_and(|c| c == 0 || c == GLINT_GAP);
+        if mullion || across + 1 == self.depth {
+            self.post
+        } else if across == 0 || glint {
+            self.rim
         } else {
-            (self.mid, o.pane)
+            self.pane.of(under)
         }
     }
 }
@@ -143,41 +123,108 @@ mod tests {
         b: 40,
     };
 
-    /// A 40-unit E-W wall.
-    const RUN: WallPiece = WallPiece::Horizontal {
-        x0: 0,
-        x1: 39,
-        y_face: 20,
-        jamb_west: false,
-        jamb_east: false,
-    };
+    /// An E-W wall `units` long.
+    const fn run(units: u16) -> WallPiece {
+        WallPiece::Horizontal {
+            x0: 0,
+            x1: units - 1,
+            y_face: 20,
+            jamb_west: false,
+            jamb_east: false,
+        }
+    }
 
     #[test]
-    fn glass_cools_what_is_behind_it() {
-        let seen = Glass::of(&crate::theme::NORMAL, RUN, 1).over(BEHIND, 3, 5);
-        assert!(
-            seen.r < BEHIND.r && seen.b > BEHIND.b,
-            "frosted glass cools the pixel behind it (red down, blue up): {seen:?}"
-        );
+    fn a_pane_is_what_is_behind_it_a_few_stops_lighter() {
+        let mut glass = Glass::of(&crate::theme::NORMAL, run(40), 1);
+        assert_eq!(glass.over(BEHIND, 3, 5), BEHIND.ramp(PANE_LIFT));
+    }
+
+    #[test]
+    fn the_frame_is_the_themes_whatever_is_behind_it() {
+        let mut glass = Glass::of(&crate::theme::NORMAL, run(40), 1);
+        let other = Rgb {
+            r: 10,
+            g: 200,
+            b: 90,
+        };
+        let depth = WallPiece::visual(run(40)).1.h;
+        for (dx, dy) in [(3, 0), (MULLION_STRIDE, 5), (3, depth - 1)] {
+            assert_eq!(
+                glass.over(BEHIND, dx, dy),
+                glass.over(other, dx, dy),
+                "cell ({dx}, {dy}) is frame, not glass"
+            );
+        }
     }
 
     #[test]
     fn a_denser_grid_keeps_the_rhythm_in_logical_units() {
-        let (one, four) = (
-            Glass::of(&crate::theme::NORMAL, RUN, 1),
-            Glass::of(&crate::theme::NORMAL, RUN, 4),
+        let (mut one, mut four) = (
+            Glass::of(&crate::theme::NORMAL, run(40), 1),
+            Glass::of(&crate::theme::NORMAL, run(40), 4),
         );
+        // A row below the glints, whose strokes stay one cell wide.
+        let row = 10;
         for x in 0..40 {
             assert_eq!(
-                one.over(BEHIND, x, 5),
-                four.over(BEHIND, x * 4, 20),
+                one.over(BEHIND, x, row),
+                four.over(BEHIND, x * 4, row * 4),
                 "cell {x} lands on the same part of the pane at 4x"
             );
         }
         assert_ne!(
-            four.over(BEHIND, MULLION_STRIDE * 4, 20),
-            four.over(BEHIND, MULLION_STRIDE * 4 + 1, 20),
+            four.over(BEHIND, MULLION_STRIDE * 4, row * 4),
+            four.over(BEHIND, MULLION_STRIDE * 4 + 1, row * 4),
             "a mullion is one cell wide at any density"
         );
+    }
+
+    #[test]
+    fn a_face_on_pane_catches_a_glint_in_its_top_corner_at_any_density() {
+        for per_unit in [1, 4] {
+            let mut glass = Glass::of(&crate::theme::NORMAL, run(40), per_unit);
+            let (x, y) = (GLINT_AT * per_unit - per_unit, per_unit);
+            assert_eq!(glass.over(BEHIND, x, y), glass.rim, "at {per_unit}x");
+            assert_eq!(
+                glass.over(BEHIND, x + 1, y),
+                BEHIND.ramp(PANE_LIFT),
+                "at {per_unit}x a stroke is one cell wide"
+            );
+        }
+    }
+
+    #[test]
+    fn an_edge_on_run_catches_no_glint() {
+        let piece = WallPiece::Vertical {
+            x: 0,
+            y_top: 0,
+            y_bot: 39,
+            north: 0,
+            south: 39,
+            jamb_north: false,
+            jamb_south: false,
+        };
+        let mut glass = Glass::of(&crate::theme::NORMAL, piece, 1);
+        let depth = piece.visual().1.w;
+        for along in 0..40 {
+            for across in 1..depth {
+                assert_ne!(glass.over(BEHIND, across, along), glass.rim);
+            }
+        }
+    }
+
+    #[test]
+    fn no_mullion_stands_in_a_runs_last_unit_at_any_density() {
+        let units = MULLION_STRIDE * 4 + 1;
+        for per_unit in [1, 4] {
+            let mut glass = Glass::of(&crate::theme::NORMAL, run(units), per_unit);
+            let last = (units - 1) * per_unit;
+            assert_eq!(
+                glass.over(BEHIND, last, 2 * per_unit),
+                BEHIND.ramp(PANE_LIFT),
+                "at {per_unit}x the last unit is pane, not a post against the run's end"
+            );
+        }
     }
 }
