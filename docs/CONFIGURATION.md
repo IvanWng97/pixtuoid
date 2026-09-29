@@ -101,6 +101,20 @@ unoutlined, so no line runs between hair and face. A dressed frame may rise
 above its body's box, by the hair and the line over it. Base art is never
 dressed or outlined, and a custom pack never wears the default pack's styles.
 
+A pack can also ship the city seen through the office's windows. `[city]` names
+the palette key of each of its seven materials — `facade`, `shade`, `roof`,
+`glass`, `mullion`, `detail` and `sign` — and a building is drawn in those keys
+alone, since its colours come from its depth and the sky rather than the pack.
+`[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
+(`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
+sprite at exactly `N` times the size. A building that breaks these rules fails
+the pack's load. Each connected run of `glass` is one window, and more of them
+burn as night falls. How tall the city stands is a share of the window, so a
+short window shows the tops of the towers and a tall one shows them whole. Every window
+looks out on one city, the pack's buildings standing in front of plain blocks
+on the horizon. A pack with no `[buildings]` of its own takes the bundled city
+whole, materials and all.
+
 ## Logging & troubleshooting
 
 The TUI owns your terminal (alternate screen), so runtime diagnostics go to a

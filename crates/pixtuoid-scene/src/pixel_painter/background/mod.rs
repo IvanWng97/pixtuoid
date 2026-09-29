@@ -11,7 +11,7 @@ mod lighting;
 
 use celestial::{
     compute_disc, star_exists, star_twinkle, Disc, GLOW_ALPHA, GLOW_PX, MOON_SHADOW,
-    STAR_ALPHA_MAX, STAR_COLOR, STAR_SKY_BAND_FRAC,
+    STAR_ALPHA_MAX, STAR_COLOR,
 };
 pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
@@ -22,6 +22,7 @@ pub(super) use lighting::{
 
 use std::time::SystemTime;
 
+use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use super::ambient::SunbeamColumn;
@@ -29,8 +30,9 @@ use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
 use crate::atmosphere::Look;
-use crate::layout::{wall_trim_row, window_rows, Layout, WindowBay, WINDOW_W};
+use crate::layout::{wall_trim_row, window_rows, window_run, Layout, WindowBay, WINDOW_W};
 use crate::sky::{Sky, Weather};
+use crate::skyline::CityStrip;
 use crate::theme::Theme;
 
 /// Vertical depth of the warm spill band below each window.
@@ -134,6 +136,7 @@ pub(super) fn paint_floor_and_walls(
     look: &Look,
     top_wall_h: u16,
     bays: impl IntoIterator<Item = WindowBay>,
+    pack: &Pack,
     theme: &Theme,
     altitude: f32,
 ) {
@@ -166,7 +169,15 @@ pub(super) fn paint_floor_and_walls(
 
     let rows = window_rows(top_wall_h);
     let (window_y, window_h) = (rows.start, rows.end - rows.start);
-    let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
+    let sky_row = sky_rows(window_h, look);
+    let run = window_run(buf_w);
+    let city = CityStrip::draw(
+        pack,
+        (run.end - run.start, glass_rows(window_h)),
+        altitude,
+        (look, theme, now),
+        std::num::NonZeroU16::MIN,
+    );
     let disc = compute_disc(sky, buf_w, top_wall_h, theme);
     for w in bays {
         let x = w.x;
@@ -186,9 +197,7 @@ pub(super) fn paint_floor_and_walls(
             w.idx,
             now,
             sky,
-            altitude,
-            &lit_colors,
-            building,
+            (&city, run.start),
             &sky_row,
             win_disc,
             look,
@@ -214,34 +223,6 @@ pub(super) fn paint_floor_and_walls(
             buf.put(x, trim_y, wall_trim_color);
         }
     }
-}
-
-/// Static "is this building window lit?" decision — a time-independent hash of
-/// (window_idx, dx, dy) so each building's pattern is stable across frames;
-/// only `city_dot_twinkle` animates on top.
-fn city_dot_lit(window_idx: u16, dx: u16, dy: u16) -> bool {
-    let mut h = (window_idx as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    h ^= (dx as u64).wrapping_mul(0xc6a4_a793_5bd1_e995);
-    h ^= (dy as u64).wrapping_mul(0x1656_67b1_9e37_79b9);
-    h ^= h >> 17;
-    // Enough of the grid lit that the skyline reads as alive at night.
-    const CITY_WINDOW_LIT_PERCENT: u64 = 75;
-    (h % 100) < CITY_WINDOW_LIT_PERCENT
-}
-
-/// Per-dot twinkle: each city-window dot rerolls on/off on its own cycle,
-/// biased toward "on" so only the occasional dot blinks off.
-fn city_dot_twinkle(window_idx: u16, dx: u16, dy: u16, now: SystemTime) -> bool {
-    let now_ms = epoch_ms(now);
-    let dot_seed = (window_idx as u64).wrapping_mul(31)
-        ^ (dx as u64).wrapping_mul(131)
-        ^ (dy as u64).wrapping_mul(521);
-    let cycle_ms = 6000 + (dot_seed % 8000);
-    let phase = now_ms / cycle_ms;
-    let hash = dot_seed
-        .wrapping_add(phase)
-        .wrapping_mul(0x9e37_79b9_7f4a_7c15);
-    (hash % 10) < 7
 }
 
 /// Warm sunlight tint spilling onto the floor below a window — a trapezoid
@@ -385,42 +366,28 @@ fn wash_glass(buf: &mut RgbBuffer, x0: u16, y0: u16, w: u16, h: u16, color: Rgb,
     }
 }
 
-/// Window-invariant glass colors, computed ONCE per frame in
-/// `paint_floor_and_walls` and shared by every window: all panes in a frame have
-/// the same height, `look`, and theme. The per-window skyline-HEIGHT math is NOT
-/// here — it rides `altitude` and stays in `paint_floor_to_ceiling_window`.
-fn window_glass_invariants(h: u16, look: &Look, theme: &Theme) -> ([Rgb; 3], Rgb, Vec<Rgb>) {
-    let building_dark = theme.office.building_dark;
-    let building_light = theme.office.building_light;
-    let cw = theme.office.city_lit_windows;
-    let dark_window = theme.office.city_dark_window;
+/// The glass rows of a window `window_h` tall: all but its top and bottom
+/// frame rows.
+fn glass_rows(window_h: u16) -> u16 {
+    window_h.saturating_sub(2)
+}
 
-    // A floor this LOW keeps only a faint window structure visible by day and
-    // lets the city windows glow toward dusk; a 0.5 floor left buildings ~50%
-    // lit at noon.
-    let lit_strength = look.darkness.max(0.12).clamp(0.0, 1.0);
-    let lit_colors: [Rgb; 3] = [
-        dark_window.mix(cw[0], lit_strength),
-        dark_window.mix(cw[1], lit_strength),
-        dark_window.mix(cw[2], lit_strength),
-    ];
-    let building = building_light.mix(building_dark, look.darkness);
-
-    let glass_h = h.saturating_sub(2);
+/// The sky's colour on each row of the glass, shared by every window: all panes
+/// in a frame have the same height and `look`.
+fn sky_rows(h: u16, look: &Look) -> Vec<Rgb> {
+    let glass_h = glass_rows(h);
     let sky_norm = (glass_h as f32) * 0.7;
-    let sky_row: Vec<Rgb> = (0..glass_h)
+    (0..glass_h)
         .map(|gy| {
             let sky_t = (gy as f32 / sky_norm).min(1.0);
             look.glass_b.mix(look.glass_a, sky_t)
         })
-        .collect();
-
-    (lit_colors, building, sky_row)
+        .collect()
 }
 
-/// Floor-to-ceiling window with frame, mullion, and a procedural city view
-/// inside the glass. `lit_colors` / `building` / `sky_row` are window-invariant
-/// (see `window_glass_invariants`) and passed in by reference.
+/// Floor-to-ceiling window with frame, mullion, and the city behind its glass:
+/// its part of `city`, a strip whose west end stands at column `run_x0`, over
+/// the sky's rows (`sky_rows`).
 #[allow(clippy::too_many_arguments)]
 fn paint_floor_to_ceiling_window(
     buf: &mut RgbBuffer,
@@ -432,24 +399,14 @@ fn paint_floor_to_ceiling_window(
     window_idx: u16,
     now: SystemTime,
     sky: &Sky,
-    altitude: f32,
-    lit_colors: &[Rgb; 3],
-    building: Rgb,
+    (city, run_x0): (&CityStrip, u16),
     sky_row: &[Rgb],
     disc: Option<Disc>,
     look: &Look,
 ) {
-    // Skyline silhouette as a 0..PATTERN_MAX ratio, not pixels — the height is
-    // computed per-window so the skyline auto-scales with the glass.
-    const SKYLINE_PATTERN: &[u8] = &[8, 14, 11, 15, 6, 13, 9, 12, 7, 15, 10, 13];
-    const PATTERN_MAX: u16 = 15;
-    let glass_h = h.saturating_sub(2);
-    let alt_shrink = (glass_h as f32 * 0.3 * altitude) as u16;
-    let min_bh = (glass_h / 5).saturating_sub(alt_shrink).max(2);
-    let max_bh = (glass_h * 50 / 100)
-        .saturating_sub(alt_shrink)
-        .max(min_bh + 3);
-    let bh_range = max_bh.saturating_sub(min_bh);
+    let glass_h = glass_rows(h);
+    let clear_sky = crate::skyline::clear_sky_rows(glass_h);
+    let building_at = |px: u16, glass_dy: u16| city.at(px.wrapping_sub(run_x0), glass_dy);
 
     for dy in 0..h {
         for dx in 0..w {
@@ -464,35 +421,15 @@ fn paint_floor_to_ceiling_window(
                 buf.put(px, py, frame);
                 continue;
             }
-            let glass_dx = dx - 1;
             let glass_dy = dy - 1;
-            let pat_idx = ((glass_dx + window_idx * 3) % SKYLINE_PATTERN.len() as u16) as usize;
-            let pat = SKYLINE_PATTERN[pat_idx] as u16;
-            let building_h = min_bh + (pat * bh_range) / PATTERN_MAX;
-            let in_building = glass_dy >= glass_h.saturating_sub(building_h);
-
-            if in_building {
-                let bldg_y = glass_dy - (glass_h - building_h);
-                // Lit-window dots sit on a 2-px grid — every other column and
-                // every other row of the building.
-                let on_grid = glass_dx % 2 == 1 && bldg_y % 2 == 1;
-                let lit_base = on_grid && city_dot_lit(window_idx, glass_dx, bldg_y);
-                if lit_base && city_dot_twinkle(window_idx, glass_dx, bldg_y, now) {
-                    let dot_color = match (glass_dx.wrapping_add(bldg_y)) % 5 {
-                        0 => lit_colors[1],
-                        1 => lit_colors[2],
-                        _ => lit_colors[0],
-                    };
-                    buf.put(px, py, dot_color);
-                } else {
-                    buf.put(px, py, building);
-                }
+            if let Some(building) = building_at(px, glass_dy) {
+                buf.put(px, py, building);
             } else {
                 let mut col = sky_row[glass_dy as usize];
                 // Stars paint into the sky BEFORE the disc, so an overlapping
                 // disc pixel always wins (painted next, below).
                 if look.star_strength > 0.0
-                    && (glass_dy as f32) < glass_h as f32 * STAR_SKY_BAND_FRAC
+                    && glass_dy < clear_sky
                     && star_exists(px, py)
                     && star_twinkle(px, py, now)
                 {
@@ -657,16 +594,12 @@ fn paint_floor_to_ceiling_window(
 
     let sunset = look.golden_hour;
     if sunset > 0.05 {
-        let min_building_h = (glass_h / 5).max(3);
         for dy in 1..h.saturating_sub(1) {
             let glass_dy = dy.saturating_sub(1);
-            if glass_dy >= glass_h.saturating_sub(min_building_h) {
-                continue;
-            }
             for dx in 1..w.saturating_sub(1) {
                 let px = x + dx;
                 let py = y + dy;
-                if px < buf.width() && py < buf.height() {
+                if px < buf.width() && py < buf.height() && building_at(px, glass_dy).is_none() {
                     let cur = buf.get(px, py);
                     let s = sunset * 0.35;
                     buf.put(

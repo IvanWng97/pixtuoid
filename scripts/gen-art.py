@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Author the bundled pack's generated sprite art: the cutaway profile's `@Nx`
 pieces (N = `S`), and the 1x pieces drawn from the same layout: the classic
-profile's desks and the cutaway's base-density back-view sofa.
+profile's desks, the cutaway's base-density back-view sofa, and the city's
+building bases.
 
 Draws in PALETTE-KEY space, so the output is .sprite text and the recolor keys
 (H/B/S/P and their [ramps] shades) survive per-agent recoloring. The .sprite
@@ -28,6 +29,7 @@ import pathlib
 import random
 import sys
 import tempfile
+import tomllib
 
 S = 4  # the cutaway art's density
 
@@ -1850,6 +1852,215 @@ def standing_desk():
     return g
 
 
+# ---- the city behind the windows: its buildings ------------------------------------
+# Drawn only in the [city] materials: a painter colours each by its depth and the
+# sky, so no drawing here carries a colour of its own. Each is drawn at `S`; its base
+# is that drawing read at 1x, block by block (`city_base`).
+CITY_FACADE, CITY_SHADE, CITY_ROOF, CITY_GLASS, CITY_MULLION, CITY_DETAIL, CITY_SIGN = (
+    "+", "-", "~", "0", "|", "*", "=")
+# pack.toml's `[city]` names these keys; `--check` fails where the two differ.
+CITY = {
+    "facade": CITY_FACADE, "shade": CITY_SHADE, "roof": CITY_ROOF, "glass": CITY_GLASS,
+    "mullion": CITY_MULLION, "detail": CITY_DETAIL, "sign": CITY_SIGN,
+}
+
+
+def panes(g, x0, y0, x1, y1, w, h, px, py):
+    """A grid of `w`x`h` windows at pitch `px`,`py` inside the rect."""
+    for y in range(y0, y1 - h + 1, py):
+        for x in range(x0, x1 - w + 1, px):
+            rect(g, x, y, x + w, y + h, CITY_GLASS)
+
+
+def shade_east(g):
+    """The east third of each mass on each row turned from the light."""
+    for row in g:
+        x = 0
+        while x < len(row):
+            if row[x] == T:
+                x += 1
+                continue
+            end = x
+            while end < len(row) and row[end] != T:
+                end += 1
+            for i in range(x + (end - x) * 2 // 3, end):
+                if row[i] == CITY_FACADE:
+                    row[i] = CITY_SHADE
+            x = end
+
+
+def building_setback():
+    """A slim tower stepping in twice toward a mast."""
+    w, h = 6 * S, 16 * S
+    g = canvas(w, h)
+    for x0, y0 in ((0, 7 * S), (S, 4 * S), (2 * S, 2 * S)):
+        rect(g, x0, y0, w - x0, h, CITY_FACADE)
+        rect(g, x0, y0, w - x0, y0 + 1, CITY_ROOF)
+    rect(g, w // 2 - 1, 0, w // 2 + 1, 2 * S, CITY_DETAIL)
+    panes(g, 2, 7 * S + 2, w - 2, h - 2, 2, 2, 3, 4)
+    panes(g, S + 2, 4 * S + 2, w - S - 2, 7 * S - 1, 2, 2, 3, 4)
+    panes(g, 2 * S + 2, 2 * S + 2, w - 2 * S - 2, 4 * S - 1, 2, 2, 3, 4)
+    shade_east(g)
+    return g
+
+
+def building_curtain():
+    """A glass curtain wall: bands of glass between thin spandrels."""
+    w, h = 6 * S, 15 * S
+    g = canvas(w, h)
+    rect(g, 0, S, w, h, CITY_FACADE)
+    rect(g, 0, S, w, S + 2, CITY_ROOF)
+    for y in range(S + 4, h - 1, 3):
+        rect(g, 1, y, w - 1, y + 2, CITY_GLASS)
+        for x in range(1, w - 1, 4):
+            rect(g, x, y, x + 1, y + 2, CITY_MULLION)
+    shade_east(g)
+    return g
+
+
+def building_walkup():
+    """An old walk-up, its water tank on legs on the roof."""
+    w, h = 5 * S, 10 * S
+    g = canvas(w, h)
+    rect(g, 0, 3 * S, w, h, CITY_FACADE)
+    rect(g, 0, 3 * S, w, 3 * S + 2, CITY_ROOF)
+    rect(g, 11, 2, 18, 8, CITY_DETAIL)
+    rect(g, 11, 1, 18, 2, CITY_ROOF)
+    for x in (12, 16):
+        rect(g, x, 8, x + 1, 3 * S, CITY_DETAIL)
+    panes(g, 2, 3 * S + 4, w - 2, h - 2, 3, 3, 5, 5)
+    shade_east(g)
+    return g
+
+
+def building_dome():
+    """A civic block under a dome, tall windows between its piers."""
+    w, h = 7 * S, 11 * S
+    g = canvas(w, h)
+    base = 5 * S
+    rect(g, 0, base, w, h, CITY_FACADE)
+    rect(g, 0, base, w, base + 2, CITY_ROOF)
+    for y in range(2 * S, base):
+        for x in range(w):
+            if (x + 0.5 - w / 2) ** 2 + ((y + 0.5 - base) * 1.1) ** 2 <= 9.5 ** 2:
+                g[y][x] = CITY_ROOF if y < base - 7 else CITY_FACADE
+    rect(g, w // 2 - 1, S + 2, w // 2 + 1, 2 * S + 3, CITY_DETAIL)
+    for x in range(3, w - 3, 5):
+        rect(g, x, base + 4, x + 2, h - 3, CITY_GLASS)
+    shade_east(g)
+    return g
+
+
+def building_sign():
+    """A wide mid-rise carrying a sign on its roof, lit after dark."""
+    w, h = 7 * S, 9 * S
+    g = canvas(w, h)
+    rect(g, 0, 3 * S, w, h, CITY_FACADE)
+    rect(g, 0, 3 * S, w, 3 * S + 2, CITY_ROOF)
+    rect(g, S, S, w - S, 2 * S + 2, CITY_SIGN)
+    rect(g, S, S, w - S, S + 1, CITY_MULLION)
+    for x in (S + 3, w - S - 4):
+        rect(g, x, 2 * S + 2, x + 1, 3 * S, CITY_DETAIL)
+    panes(g, 2, 3 * S + 4, w - 2, h - 2, 4, 2, 6, 4)
+    shade_east(g)
+    return g
+
+
+def building_spire():
+    """A tower crowned by a stepped spire and a mast."""
+    w, h = 4 * S, 18 * S
+    g = canvas(w, h)
+    rect(g, 0, 8 * S, w, h, CITY_FACADE)
+    for i, y in enumerate(range(7 * S, 3 * S, -S)):  # tiers narrowing upward
+        rect(g, 1 + i, y, w - 1 - i, y + S, CITY_FACADE)
+        rect(g, 1 + i, y, w - 1 - i, y + 1, CITY_ROOF)
+    rect(g, w // 2 - 1, 0, w // 2 + 1, 4 * S, CITY_DETAIL)  # down onto the top tier
+    panes(g, 2, 8 * S + 3, w - 2, h - 2, 1, 3, 3, 5)
+    shade_east(g)
+    return g
+
+
+def building_low():
+    """A low block, its roof crowded with plant."""
+    w, h = 6 * S, 6 * S
+    g = canvas(w, h)
+    rect(g, 0, 2 * S, w, h, CITY_FACADE)
+    rect(g, 0, 2 * S, w, 2 * S + 2, CITY_ROOF)
+    for x0, y0, x1 in ((3, 3, 8), (12, 4, 15), (18, 2, 20)):
+        rect(g, x0, y0, x1, 2 * S, CITY_DETAIL)
+    panes(g, 2, 2 * S + 4, w - 2, h - 2, 3, 2, 5, 4)
+    shade_east(g)
+    return g
+
+
+def building_twin():
+    """Twin towers joined by a skybridge, each crowned by a short mast."""
+    w, h = 6 * S, 17 * S
+    g = canvas(w, h)
+    for x0 in (0, 4 * S):
+        rect(g, x0, 2 * S, x0 + 2 * S, h, CITY_FACADE)
+        rect(g, x0, 2 * S, x0 + 2 * S, 2 * S + 2, CITY_ROOF)
+        rect(g, x0 + S - 1, 0, x0 + S + 1, 2 * S, CITY_DETAIL)
+        panes(g, x0 + 1, 2 * S + 4, x0 + 2 * S - 1, h - 2, 2, 2, 3, 4)
+    rect(g, 2 * S, 8 * S, 4 * S, 9 * S, CITY_FACADE)  # the skybridge
+    rect(g, 2 * S, 8 * S + 1, 4 * S, 9 * S - 1, CITY_GLASS)
+    shade_east(g)
+    return g
+
+
+def building_slab():
+    """A wide slab tower in bands of glass, a lit crown along its top."""
+    w, h = 8 * S, 15 * S
+    g = canvas(w, h)
+    rect(g, 0, S, w, h, CITY_FACADE)
+    rect(g, 0, S, w, S + 2, CITY_ROOF)
+    rect(g, 2, S + 3, w - 2, S + 5, CITY_SIGN)  # the crown's light strip
+    for y in range(3 * S, h - 1, 4):
+        rect(g, 1, y, w - 1, y + 2, CITY_GLASS)
+        for x in range(5, w - 1, 6):
+            rect(g, x, y, x + 1, y + 2, CITY_MULLION)
+    shade_east(g)
+    return g
+
+
+def city_base(g):
+    """A building drawn at `S`, read at 1x, `S`x`S` block by block: a thin part
+    running through a block (a sign, then plant or a mast, then a roof line) wins it; a block
+    less than half drawn is sky; one holding glass on an odd row and column is glass,
+    the lit-dot grid a 1x city is read by (the scene's `skyline::block_window`);
+    any other takes whichever of facade and shade it holds more of."""
+    h, w = len(g) // S, len(g[0]) // S
+    out = canvas(w, h)
+    for by in range(h):
+        for bx in range(w):
+            cells = [g[by * S + y][bx * S + x] for y in range(S) for x in range(S)]
+            thin = next((k for k in (CITY_SIGN, CITY_DETAIL, CITY_ROOF) if cells.count(k) >= S), None)
+            if thin:
+                out[by][bx] = thin
+            elif (S * S - cells.count(T)) * 2 < S * S:
+                continue
+            elif CITY_GLASS in cells and bx % 2 == 1 and by % 2 == 1:
+                out[by][bx] = CITY_GLASS
+            else:
+                out[by][bx] = max((CITY_FACADE, CITY_SHADE), key=cells.count)
+    return out
+
+
+# Each building, registered in pack.toml's `[buildings]` by hand with the planes it
+# stands in (`every_embedded_sprite_is_a_frame_the_pack_loads` fails on one left out).
+BUILDINGS = {
+    "setback": building_setback,
+    "curtain": building_curtain,
+    "spire": building_spire,
+    "twin": building_twin,
+    "slab": building_slab,
+    "walkup": building_walkup,
+    "dome": building_dome,
+    "sign": building_sign,
+    "low": building_low,
+}
+
+
 # ---- output -----------------------------------------------------------------
 PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file."
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
@@ -1884,8 +2095,22 @@ def orphans(pack, sprites):
     )
 
 
+def city_drift(pack):
+    """Why pack.toml's `[city]` names other keys than `CITY` draws in, or None."""
+    manifest = pack / "pack.toml"
+    if not manifest.is_file():
+        return None
+    named = tomllib.loads(manifest.read_text(encoding=ENCODING)).get("city")
+    if named is not None and named != CITY:
+        return f"gen-art --check: pack.toml [city] {named} is not the keys drawn in, {CITY}"
+    return None
+
+
 def check(pack, sprites):
     """Why the committed pack is not what `sprites` draws, or None when it is."""
+    city = city_drift(pack)
+    if city:
+        return city
     stale = sorted(
         name
         for name, text in sprites.items()
@@ -1990,6 +2215,12 @@ def main():
                         [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
                     )
     sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
+    for name, draw in BUILDINGS.items():
+        art = draw()
+        sprites[f"building_{name}@{S}x.sprite"] = render_sprite(draw.__doc__, [art])
+        sprites[f"building_{name}.sprite"] = render_sprite(
+            draw.__doc__ + "\n\nIts base: the drawing read at 1x.", [city_base(art)]
+        )
     if args.selftest:
         selftest(sprites)
     elif args.check:

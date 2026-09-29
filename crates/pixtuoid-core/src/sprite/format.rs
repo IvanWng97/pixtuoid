@@ -154,6 +154,157 @@ mod tests {
         );
     }
 
+    /// A pack of one animation plus `extra` tables, over a palette of the seven
+    /// material keys and a stray `x`; `files` holds the buildings' sprites.
+    fn city_pack(extra: &str, files: &[(&str, &str)]) -> Result<Pack> {
+        let mut all = vec![("f.sprite", "@frame 0\nF\n")];
+        all.extend_from_slice(files);
+        load_pack_from_strings(
+            &format!(
+                "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\".\"=\"transparent\"\n\
+                 \"F\"=\"#202020\"\n\"f\"=\"#181818\"\n\"R\"=\"#303030\"\n\"W\"=\"#404040\"\n\
+                 \"M\"=\"#101010\"\n\"D\"=\"#282828\"\n\"L\"=\"#d08050\"\n\"x\"=\"#ffffff\"\n\
+                 [animations.seated]\nframes=[\"f.sprite\"]\nframe_ms=100\n{extra}"
+            ),
+            &all,
+        )
+    }
+
+    const CITY: &str = "[city]\nfacade=\"F\"\nshade=\"f\"\nroof=\"R\"\nglass=\"W\"\n\
+                        mullion=\"M\"\ndetail=\"D\"\nsign=\"L\"\n";
+    /// A 2x3 tower: one window of two glass pixels over a wall.
+    const TOWER: &str = "@frame 0\nR R\nW W\nF f\n";
+    /// The tower at 2x, drawn with a mullion splitting its window in two.
+    const TOWER_2X: &str = "@frame 0\nR R R R\nR R R R\nW M W W\nW M W W\nF F f f\nF F f f\n";
+
+    #[test]
+    fn a_building_is_its_base_and_its_density_variants() {
+        let pack = city_pack(
+            &format!(
+                "{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"mid\", \"near\"]\n\
+                 [buildings.\"tower@2x\"]\nsprite=\"t2.sprite\"\n"
+            ),
+            &[("t.sprite", TOWER), ("t2.sprite", TOWER_2X)],
+        )
+        .expect("the city pack loads");
+        let tower = pack.buildings().next().expect("the tower");
+        assert_eq!((tower.name(), tower.size()), ("tower", (2, 3)));
+        assert!(tower.stands_in(CityPlane::Mid) && tower.stands_in(CityPlane::Near));
+        let d = |n| std::num::NonZeroU16::new(n).expect("nonzero");
+        let base = tower.art(d(1)).expect("every building has its base");
+        assert_eq!(
+            base.windows(),
+            [vec![(0, 1), (1, 1)]],
+            "one run of glass, one window"
+        );
+        let dense = tower.art(d(2)).expect("the 2x variant");
+        assert_eq!(
+            dense.windows().len(),
+            2,
+            "each density finds its own windows: the mullion splits this one"
+        );
+        assert!(tower.art(d(4)).is_none());
+        let materials = pack.city_materials().expect("[city]");
+        assert_eq!(materials.key(Material::Glass), 'W');
+    }
+
+    #[test]
+    fn every_material_has_its_own_place() {
+        for (i, m) in Material::ALL.into_iter().enumerate() {
+            assert_eq!(m.index(), i, "{m:?}");
+        }
+    }
+
+    #[test]
+    fn a_building_outside_its_rules_is_rejected() {
+        let base = "[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n";
+        let load = |extra: &str, art: &str, dense: &str| {
+            city_pack(extra, &[("t.sprite", art), ("t2.sprite", dense)])
+        };
+        let ok = format!("{CITY}{base}[buildings.\"tower@2x\"]\nsprite=\"t2.sprite\"\n");
+        assert!(load(&ok, TOWER, TOWER_2X).is_ok());
+        let rejected = [
+            (
+                format!("{CITY}{base}"),
+                "@frame 0\nF x\n",
+                "a key no material names",
+            ),
+            (base.to_owned(), TOWER, "no [city] to name the materials"),
+            (
+                format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"far\"]\n"),
+                TOWER,
+                "the far plane is the painter's own",
+            ),
+            (
+                format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\n"),
+                TOWER,
+                "a base naming no planes",
+            ),
+            (
+                format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[]\n"),
+                TOWER,
+                "a base standing in no plane",
+            ),
+            (
+                format!("{CITY}[buildings.\"tower@1x\"]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"),
+                TOWER,
+                "a base named like a variant",
+            ),
+            (
+                format!(
+                    "{CITY}[buildings.\"tower@big\"]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"
+                ),
+                TOWER,
+                "a base named with a variant's mark",
+            ),
+            (
+                format!("{CITY}{base}"),
+                "@frame 0\nR R\nW W\nF f\n@frame 1\nR R\nW W\nF f\n",
+                "a building of two frames",
+            ),
+            (
+                format!("{}{base}", CITY.replace("sign=\"L\"", "sign=\".\"")),
+                TOWER,
+                "a material drawn in a transparent key",
+            ),
+            (
+                format!("{CITY}[buildings.\"tower@2x\"]\nsprite=\"t2.sprite\"\n"),
+                TOWER,
+                "a variant with no base",
+            ),
+            (
+                format!(
+                    "{CITY}{base}[buildings.\"tower@2x\"]\nsprite=\"t2.sprite\"\nplanes=[\"mid\"]\n"
+                ),
+                TOWER,
+                "a variant naming its own planes",
+            ),
+            (
+                format!("{CITY}{base}[buildings.\"tower@2x\"]\nsprite=\"t.sprite\"\n"),
+                TOWER,
+                "a variant not twice its base",
+            ),
+            (
+                format!("{}{base}", CITY.replace("sign=\"L\"", "sign=\"F\"")),
+                TOWER,
+                "two materials in one key",
+            ),
+            (
+                format!("{}{base}", CITY.replace("sign=\"L\"\n", "")),
+                TOWER,
+                "a material with no key",
+            ),
+            (
+                format!("{CITY}neon=\"L\"\n{base}"),
+                TOWER,
+                "a key naming no material",
+            ),
+        ];
+        for (extra, art, why) in rejected {
+            assert!(load(&extra, art, TOWER_2X).is_err(), "{why}");
+        }
+    }
+
     /// A pack whose one animation, `seated`, draws `f.sprite`, plus `extra`
     /// tables; `frames` holds every file by name.
     fn hair_pack(extra: &str, frames: &[(&str, &str)]) -> Result<Pack> {
@@ -198,6 +349,31 @@ mod tests {
                 hair_pack("", &[("f.sprite", &format!("@frame 0\n{bad}\nH H\n"))]).expect_err(bad);
             assert!(format!("{err:#}").contains("mark"), "{bad}: {err:#}");
         }
+    }
+
+    #[test]
+    fn a_pack_without_a_city_inherits_the_whole_city() {
+        let city = city_pack(
+            &format!("{CITY}[buildings.tower]\nsprite=\"t.sprite\"\nplanes=[\"near\"]\n"),
+            &[("t.sprite", TOWER)],
+        )
+        .expect("the city pack loads");
+        let mut bare = city_pack("", &[]).expect("a pack with no city loads");
+        bare.merge_from(&city);
+        assert_eq!(bare.buildings().count(), 1, "its buildings");
+        assert!(
+            bare.city_materials().is_some(),
+            "with the materials they are drawn in"
+        );
+
+        let mut own = city_pack(
+            &format!("{CITY}[buildings.walkup]\nsprite=\"t.sprite\"\nplanes=[\"mid\"]\n"),
+            &[("t.sprite", TOWER)],
+        )
+        .expect("a pack with its own city loads");
+        own.merge_from(&city);
+        let names: Vec<_> = own.buildings().map(Building::name).collect();
+        assert_eq!(names, ["walkup"], "a city of its own is kept whole");
     }
 
     #[test]
@@ -501,9 +677,22 @@ struct PackToml {
     ramps: BTreeMap<String, RampToml>,
     animations: HashMap<String, AnimationToml>,
     #[serde(default)]
+    city: Option<BTreeMap<String, String>>,
+    #[serde(default)]
+    buildings: BTreeMap<String, BuildingToml>,
+    #[serde(default)]
     characters: Option<CharactersToml>,
     #[serde(default)]
     hairstyles: BTreeMap<String, HairstyleToml>,
+}
+
+/// One `[buildings.<name>]` table (the base art, with the planes the building
+/// stands in) or `[buildings."<name>@<N>x"]` (a density variant of it).
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct BuildingToml {
+    sprite: String,
+    planes: Option<Vec<String>>,
 }
 
 /// The `[characters]` table: what every marked character frame is finished with.
@@ -551,8 +740,8 @@ struct AnimationToml {
     frame_ms: u32,
 }
 
-/// A loaded sprite pack: a named, versioned palette, its animations, and the
-/// hairstyles that dress them.
+/// A loaded sprite pack: a named, versioned palette, its animations, the
+/// hairstyles that dress them, and the city behind the windows.
 #[derive(Debug, Clone)]
 pub struct Pack {
     /// Pack name from the `[pack]` table in `pack.toml`.
@@ -561,8 +750,162 @@ pub struct Pack {
     pub version: String,
     palette: Arc<Palette>,
     animations: HashMap<String, Sprite>,
+    buildings: BTreeMap<String, Building>,
+    city_materials: Option<CityMaterials>,
     hairstyles: BTreeMap<String, Hairstyle>,
     character_outline: Option<Rgb>,
+}
+
+/// A material a `[buildings]` sprite is drawn in. A painter gives each its
+/// colour from the sky, the theme and the building's depth, so one drawing
+/// serves day and night alike.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Material {
+    /// The lit face of a wall.
+    Facade,
+    /// The face turned from the light.
+    Shade,
+    /// A roof line or cornice.
+    Roof,
+    /// A window's glass: each connected run of it is one window, lit or not.
+    Glass,
+    /// The frame between panes.
+    Mullion,
+    /// Rooftop plant: a tank, a mast, a unit.
+    Detail,
+    /// A sign's panel, lit after dark.
+    Sign,
+}
+
+impl Material {
+    /// Its name as `[city]` keys it.
+    fn name(self) -> &'static str {
+        match self {
+            Material::Facade => "facade",
+            Material::Shade => "shade",
+            Material::Roof => "roof",
+            Material::Glass => "glass",
+            Material::Mullion => "mullion",
+            Material::Detail => "detail",
+            Material::Sign => "sign",
+        }
+    }
+
+    fn from_name(name: &str) -> Option<Self> {
+        Material::ALL.into_iter().find(|m| m.name() == name)
+    }
+
+    /// Its place in [`Material::ALL`]; a new material fails to compile here
+    /// until it has one.
+    fn index(self) -> usize {
+        match self {
+            Material::Facade => 0,
+            Material::Shade => 1,
+            Material::Roof => 2,
+            Material::Glass => 3,
+            Material::Mullion => 4,
+            Material::Detail => 5,
+            Material::Sign => 6,
+        }
+    }
+
+    /// Every material, in declaration order.
+    pub const ALL: [Material; 7] = [
+        Material::Facade,
+        Material::Shade,
+        Material::Roof,
+        Material::Glass,
+        Material::Mullion,
+        Material::Detail,
+        Material::Sign,
+    ];
+}
+
+/// The palette key each [`Material`] is drawn in, from `[city]`.
+#[derive(Debug, Clone)]
+pub struct CityMaterials([char; Material::ALL.len()]);
+
+impl CityMaterials {
+    /// The key `material` is drawn in.
+    pub fn key(&self, material: Material) -> char {
+        self.0[material.index()]
+    }
+}
+
+/// A depth plane of the city a building may stand in: the far plane is the
+/// painter's own silhouettes, so a pack draws only these two.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum CityPlane {
+    /// The middle distance.
+    Mid,
+    /// The nearest buildings, their feet below the sill.
+    Near,
+}
+
+impl CityPlane {
+    fn from_name(name: &str) -> Option<Self> {
+        match name {
+            "mid" => Some(CityPlane::Mid),
+            "near" => Some(CityPlane::Near),
+            _ => None,
+        }
+    }
+}
+
+/// One building of the city behind the office's windows, loaded from
+/// `[buildings.<name>]` and its `[buildings."<name>@<N>x"]` variants: drawn
+/// only in the `[city]` materials, and the planes it stands in.
+#[derive(Debug, Clone)]
+pub struct Building {
+    name: String,
+    planes: Vec<CityPlane>,
+    art: BTreeMap<u16, BuildingArt>,
+}
+
+impl Building {
+    /// The building's name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Whether it may stand in `plane`.
+    pub fn stands_in(&self, plane: CityPlane) -> bool {
+        self.planes.contains(&plane)
+    }
+
+    /// Its size in logical units: its base art's.
+    pub fn size(&self) -> (u16, u16) {
+        self.art
+            .get(&1)
+            .and_then(|a| a.sprite.frames().first())
+            .map_or((0, 0), |f| (f.width(), f.height()))
+    }
+
+    /// Its art at `density`, where it is drawn at that density; `1` is the
+    /// base, which every building has.
+    pub fn art(&self, density: std::num::NonZeroU16) -> Option<&BuildingArt> {
+        self.art.get(&density.get())
+    }
+}
+
+/// A building drawn at one density: its one-frame sprite, and its windows.
+#[derive(Debug, Clone)]
+pub struct BuildingArt {
+    sprite: Sprite,
+    windows: Vec<Vec<(u16, u16)>>,
+}
+
+impl BuildingArt {
+    /// The one-frame drawing, in the `[city]` materials.
+    pub fn sprite(&self) -> &Sprite {
+        &self.sprite
+    }
+
+    /// Its windows: each a connected run of [`Material::Glass`] pixels, which
+    /// lights as one.
+    pub fn windows(&self) -> &[Vec<(u16, u16)>] {
+        &self.windows
+    }
 }
 
 /// A hairstyle: per view, the layers that dress a character frame whose head
@@ -614,6 +957,19 @@ impl HairLayers {
 }
 
 impl Pack {
+    /// The buildings of the city behind the windows, in name order.
+    /// [`merge_from`](Self::merge_from) inherits them only with their
+    /// [`city_materials`](Self::city_materials), into a pack with no city of
+    /// its own.
+    pub fn buildings(&self) -> impl Iterator<Item = &Building> {
+        self.buildings.values()
+    }
+
+    /// The keys the buildings are drawn in, from `[city]`.
+    pub fn city_materials(&self) -> Option<&CityMaterials> {
+        self.city_materials.as_ref()
+    }
+
     /// The pack's hairstyles, every density of each, in name order.
     /// [`merge_from`](Self::merge_from) never inherits one: a pack's characters
     /// are dressed only in its own.
@@ -693,7 +1049,9 @@ impl Pack {
     }
 
     /// Merge [`OPTIONAL_FURNITURE_ANIMATIONS`] — and their density variants —
-    /// from `base` into self: the keys `RegisteredKey::is_inherited` passes.
+    /// from `base` into self: the keys `RegisteredKey::is_inherited` passes;
+    /// and `base`'s whole city, its buildings and `[city]`, when self has no
+    /// buildings.
     ///
     /// Driven by what `base` HAS rather than by the registry: the registry names
     /// PIECES, not the densities each is drawn at, so enumerating from it would
@@ -709,6 +1067,12 @@ impl Pack {
             .map(|(name, sprite)| (name.clone(), sprite.clone()))
             .collect();
         self.animations.extend(inherited);
+        // A city comes whole or not at all: its buildings are drawn in its own
+        // `[city]` materials, which a pack with a city of its own renames.
+        if self.buildings.is_empty() {
+            self.buildings = base.buildings.clone();
+            self.city_materials = base.city_materials.clone();
+        }
     }
 
     /// The piece of this pack's own that `name` redraws, if it ships one. Art
@@ -769,6 +1133,83 @@ fn build_pack(
             anim_name,
             Sprite::new(frames, Arc::clone(&palette), anim.frame_ms),
         );
+    }
+
+    let city_materials = parsed
+        .city
+        .map(|c| -> Result<CityMaterials> {
+            if let Some(other) = c.keys().find(|k| Material::from_name(k).is_none()) {
+                bail!("[city] names {other:?}, which is no material");
+            }
+            let mut keys = [' '; Material::ALL.len()];
+            for material in Material::ALL {
+                let Some(key) = c.get(material.name()) else {
+                    bail!("[city] names no key for {:?}", material.name());
+                };
+                let key = single_char(key, "[city] material")?;
+                if !matches!(palette.get(key), Some(Some(_))) {
+                    bail!("[city] material {key:?} is not an opaque key of the palette");
+                }
+                if keys[..material.index()].contains(&key) {
+                    bail!("[city] draws two materials in {key:?}");
+                }
+                keys[material.index()] = key;
+            }
+            Ok(CityMaterials(keys))
+        })
+        .transpose()?;
+    let mut buildings: BTreeMap<String, Building> = BTreeMap::new();
+    let (variants, bases): (Vec<_>, Vec<_>) = parsed
+        .buildings
+        .into_iter()
+        .partition(|(key, _)| split_density_variant(key).is_some());
+    for (key, building) in bases.into_iter().chain(variants) {
+        let Some(materials) = city_materials.as_ref() else {
+            bail!("building {key:?} needs a [city] table naming its materials");
+        };
+        let (name, density) = split_density_variant(&key).unwrap_or((&key, 1));
+        if density == 1 && key.contains(DENSITY_VARIANT_SEP) {
+            bail!(
+                "building {key:?}: `{DENSITY_VARIANT_SEP}` marks a density variant, \
+                 `<name>{DENSITY_VARIANT_SEP}<N>x` with N from 2 to {MAX_DENSITY_VARIANT}"
+            );
+        }
+        let art = building_art(&building.sprite, &palette, materials, get_src)?;
+        match (density, building.planes) {
+            (1, Some(planes)) if !planes.is_empty() => {
+                let planes = planes
+                    .iter()
+                    .map(|p| {
+                        CityPlane::from_name(p).ok_or_else(|| {
+                            anyhow!("building {key:?} stands in {p:?}: the planes are \"mid\" and \"near\"")
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?;
+                buildings.insert(
+                    key.clone(),
+                    Building {
+                        name: key.clone(),
+                        planes,
+                        art: BTreeMap::from([(1, art)]),
+                    },
+                );
+            }
+            (1, _) => bail!("building {key:?} names no planes to stand in"),
+            (_, Some(_)) => bail!("building variant {key:?} names planes: its base's are its own"),
+            (_, None) => {
+                let Some(base) = buildings.get_mut(name) else {
+                    bail!("building variant {key:?} has no base `[buildings.{name}]`");
+                };
+                let Some(base_art) = base.art.get(&1) else {
+                    bail!("building variant {key:?} has no base art");
+                };
+                if !variant_redraws(&base_art.sprite, density, &art.sprite) {
+                    let (bw, bh) = base.size();
+                    bail!("building variant {key:?} is not {density} times its base's {bw}x{bh}");
+                }
+                base.art.insert(density, art);
+            }
+        }
     }
 
     let character_outline = parsed
@@ -846,9 +1287,89 @@ fn build_pack(
         version: parsed.pack.version,
         palette,
         animations,
+        buildings,
+        city_materials,
         hairstyles,
         character_outline,
     })
+}
+
+/// A building's one-frame sprite `fname`, checked to draw only in the
+/// `[city]` materials, with its windows found.
+fn building_art(
+    fname: &str,
+    palette: &Arc<Palette>,
+    materials: &CityMaterials,
+    get_src: &mut dyn FnMut(&str) -> Result<String>,
+) -> Result<BuildingArt> {
+    let src = get_src(fname)?;
+    let marked = parse_indexed(&src, palette).with_context(|| format!("decoding {fname}"))?;
+    let [(frame, _)] = marked.as_slice() else {
+        bail!("building {fname} must be one frame");
+    };
+    let pixels = palette.resolved();
+    let index = |m: Material| palette.index_of(materials.key(m));
+    let drawn: Vec<_> = Material::ALL.into_iter().filter_map(index).collect();
+    let grid = &frame.0;
+    for (i, &p) in grid.as_slice().iter().enumerate() {
+        let p = usize::from(p);
+        if pixels.get(p).copied().flatten().is_some() && !drawn.contains(&p) {
+            let w = usize::from(grid.width());
+            bail!(
+                "building {fname} draws ({}, {}) outside its [city] materials",
+                i % w,
+                i / w
+            );
+        }
+    }
+    let glass = index(Material::Glass).and_then(|i| PaletteIndex::try_from(i).ok());
+    let windows = glass.map_or_else(Vec::new, |g| runs_of(grid, g));
+    Ok(BuildingArt {
+        sprite: Sprite::new(marked, Arc::clone(palette), 0),
+        windows,
+    })
+}
+
+/// Each 4-connected run of `index` in `grid`, as its pixels.
+fn runs_of(grid: &Grid<PaletteIndex>, index: PaletteIndex) -> Vec<Vec<(u16, u16)>> {
+    let (w, h) = (grid.width(), grid.height());
+    let mut seen = vec![false; usize::from(w) * usize::from(h)];
+    let mut runs = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let at = usize::from(y) * usize::from(w) + usize::from(x);
+            if seen[at] || grid.get(x, y) != Some(&index) {
+                continue;
+            }
+            seen[at] = true;
+            let (mut run, mut stack) = (Vec::new(), vec![(x, y)]);
+            while let Some((cx, cy)) = stack.pop() {
+                run.push((cx, cy));
+                let steps = [
+                    (cx.checked_add(1), Some(cy)),
+                    (cx.checked_sub(1), Some(cy)),
+                    (Some(cx), cy.checked_add(1)),
+                    (Some(cx), cy.checked_sub(1)),
+                ];
+                for (nx, ny) in steps {
+                    let (Some(nx), Some(ny)) = (nx, ny) else {
+                        continue;
+                    };
+                    if nx >= w || ny >= h {
+                        continue;
+                    }
+                    let n = usize::from(ny) * usize::from(w) + usize::from(nx);
+                    if !seen[n] && grid.get(nx, ny) == Some(&index) {
+                        seen[n] = true;
+                        stack.push((nx, ny));
+                    }
+                }
+            }
+            run.sort_unstable();
+            runs.push(run);
+        }
+    }
+    runs
 }
 
 /// Load a `Pack` from `dir/pack.toml` and its on-disk frame files, guarding
