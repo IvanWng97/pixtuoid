@@ -371,6 +371,15 @@ mod tests {
             .collect();
         let pack = load_pack_from_strings(&toml, &srcs).expect("loads without density art");
         assert_eq!(pack.max_density_variant(), 1);
+        assert!(
+            pack.buildings().next().is_some(),
+            "the city keeps its buildings"
+        );
+        assert!(
+            pack.buildings()
+                .all(|b| b.art(1).is_some() && b.art(4).is_none()),
+            "at their base alone"
+        );
         let report = validate_pack(&pack);
         assert!(!report.has_errors(), "{report:?}");
         assert_eq!(report.warning_count(), 0, "{report:?}");
@@ -384,6 +393,21 @@ mod tests {
     #[cfg(feature = "density-art")]
     fn the_bundled_pack_is_drawn_at_most_at_4x() {
         assert_eq!(test_default_pack().max_density_variant(), 4);
+    }
+
+    /// The cutaway draws the city at the bundled art's density, so each building
+    /// ships one there beside the base the classic painter draws.
+    #[test]
+    #[cfg(feature = "density-art")]
+    fn every_bundled_building_is_drawn_at_1x_and_4x() {
+        let pack = test_default_pack();
+        assert!(
+            pack.buildings().next().is_some(),
+            "the bundled pack draws a city"
+        );
+        for b in pack.buildings() {
+            assert!(b.art(1).is_some() && b.art(4).is_some(), "{}", b.name());
+        }
     }
 
     #[test]

@@ -65,6 +65,15 @@ version = "1"
 "/" = "#1e1f25"   # task-chair seat edge and base
 "κ" = "#16121a"   # the @Nx art's outline: one near-black line round each piece's whole silhouette (the 1x art outlines in n)
 "ρ" = "#4a2c18"   # coffee in a mug
+# The city's materials ([city]): a painter colours each by depth and sky, so
+# these are only what a painter that does not resolve them shows.
+"+" = "#2a2e3c"   # a building's facade
+"-" = "#1e212c"   # a facade turned from the light
+"~" = "#3a3f50"   # a roof line or cornice
+"0" = "#3c4152"   # a building's window glass
+"|" = "#16181f"   # a mullion between panes
+"*" = "#242733"   # rooftop plant: a tank, a mast, a unit
+"=" = "#dc8250"   # a rooftop sign's panel
 "¤" = "#d2d4d8"   # off-white: a night office has no pure white
 ";" = "#2a2226"   # shoe leather
 ":" = "#4a3e40"   # shoe, lit toe
@@ -431,3 +440,77 @@ frame_ms = 600
 [animations."holding_coffee@4x"]
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
+
+# The city behind the windows: scripts/gen-art.py's BUILDINGS, each a base
+# standing in the planes it names, far to near, and its variant at 4x.
+[city]
+facade = "+"
+shade = "-"
+roof = "~"
+glass = "0"
+mullion = "|"
+detail = "*"
+sign = "="
+
+[buildings.curtain]
+sprite = "building_curtain.sprite"
+planes = ["mid", "near"]
+
+[buildings."curtain@4x"]
+sprite = "building_curtain@4x.sprite"
+
+[buildings.dome]
+sprite = "building_dome.sprite"
+planes = ["mid"]
+
+[buildings."dome@4x"]
+sprite = "building_dome@4x.sprite"
+
+[buildings.low]
+sprite = "building_low.sprite"
+planes = ["mid"]
+
+[buildings."low@4x"]
+sprite = "building_low@4x.sprite"
+
+[buildings.setback]
+sprite = "building_setback.sprite"
+planes = ["mid", "near"]
+
+[buildings."setback@4x"]
+sprite = "building_setback@4x.sprite"
+
+[buildings.sign]
+sprite = "building_sign.sprite"
+planes = ["mid"]
+
+[buildings."sign@4x"]
+sprite = "building_sign@4x.sprite"
+
+[buildings.slab]
+sprite = "building_slab.sprite"
+planes = ["mid", "near"]
+
+[buildings."slab@4x"]
+sprite = "building_slab@4x.sprite"
+
+[buildings.spire]
+sprite = "building_spire.sprite"
+planes = ["near"]
+
+[buildings."spire@4x"]
+sprite = "building_spire@4x.sprite"
+
+[buildings.twin]
+sprite = "building_twin.sprite"
+planes = ["near"]
+
+[buildings."twin@4x"]
+sprite = "building_twin@4x.sprite"
+
+[buildings.walkup]
+sprite = "building_walkup.sprite"
+planes = ["mid"]
+
+[buildings."walkup@4x"]
+sprite = "building_walkup@4x.sprite"

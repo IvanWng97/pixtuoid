@@ -735,6 +735,63 @@ pub mod pixtuoid_core::sprite::blit
 pub fn pixtuoid_core::sprite::blit::blit_frame(&pixtuoid_core::sprite::Frame, u16, u16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub fn pixtuoid_core::sprite::blit::blit_frame_scaled(&pixtuoid_core::sprite::Frame, u16, u16, core::num::nonzero::NonZeroU16, &mut pixtuoid_core::sprite::RgbBuffer)
 pub mod pixtuoid_core::sprite::format
+pub enum pixtuoid_core::sprite::format::CityPlane
+pub pixtuoid_core::sprite::format::CityPlane::Mid
+pub pixtuoid_core::sprite::format::CityPlane::Near
+impl core::clone::Clone for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::clone(&self) -> pixtuoid_core::sprite::format::CityPlane
+impl core::cmp::Eq for pixtuoid_core::sprite::format::CityPlane
+impl core::cmp::Ord for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::cmp(&self, &pixtuoid_core::sprite::format::CityPlane) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::eq(&self, &pixtuoid_core::sprite::format::CityPlane) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::partial_cmp(&self, &pixtuoid_core::sprite::format::CityPlane) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::format::CityPlane
+pub fn pixtuoid_core::sprite::format::CityPlane::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::Freeze for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::Send for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::Sync for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::Unpin for pixtuoid_core::sprite::format::CityPlane
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::CityPlane
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::CityPlane
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::CityPlane
+pub enum pixtuoid_core::sprite::format::Material
+pub pixtuoid_core::sprite::format::Material::Detail
+pub pixtuoid_core::sprite::format::Material::Facade
+pub pixtuoid_core::sprite::format::Material::Glass
+pub pixtuoid_core::sprite::format::Material::Mullion
+pub pixtuoid_core::sprite::format::Material::Roof
+pub pixtuoid_core::sprite::format::Material::Shade
+pub pixtuoid_core::sprite::format::Material::Sign
+impl pixtuoid_core::sprite::format::Material
+pub const pixtuoid_core::sprite::format::Material::ALL: [pixtuoid_core::sprite::format::Material; 7]
+impl core::clone::Clone for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::clone(&self) -> pixtuoid_core::sprite::format::Material
+impl core::cmp::Eq for pixtuoid_core::sprite::format::Material
+impl core::cmp::Ord for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::cmp(&self, &pixtuoid_core::sprite::format::Material) -> core::cmp::Ordering
+impl core::cmp::PartialEq for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::eq(&self, &pixtuoid_core::sprite::format::Material) -> bool
+impl core::cmp::PartialOrd for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::partial_cmp(&self, &pixtuoid_core::sprite::format::Material) -> core::option::Option<core::cmp::Ordering>
+impl core::fmt::Debug for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for pixtuoid_core::sprite::format::Material
+pub fn pixtuoid_core::sprite::format::Material::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for pixtuoid_core::sprite::format::Material
+impl core::marker::StructuralPartialEq for pixtuoid_core::sprite::format::Material
+impl core::marker::Freeze for pixtuoid_core::sprite::format::Material
+impl core::marker::Send for pixtuoid_core::sprite::format::Material
+impl core::marker::Sync for pixtuoid_core::sprite::format::Material
+impl core::marker::Unpin for pixtuoid_core::sprite::format::Material
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Material
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Material
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Material
 pub enum pixtuoid_core::sprite::format::StandIn
 pub pixtuoid_core::sprite::format::StandIn::DefaultPack
 pub pixtuoid_core::sprite::format::StandIn::OwnPiece(&'static str)
@@ -755,6 +812,52 @@ impl core::marker::Unpin for pixtuoid_core::sprite::format::StandIn
 impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::StandIn
 impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::StandIn
 impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::StandIn
+pub struct pixtuoid_core::sprite::format::Building
+impl pixtuoid_core::sprite::format::Building
+pub fn pixtuoid_core::sprite::format::Building::art(&self, u16) -> core::option::Option<&pixtuoid_core::sprite::format::BuildingArt>
+pub fn pixtuoid_core::sprite::format::Building::name(&self) -> &str
+pub fn pixtuoid_core::sprite::format::Building::size(&self) -> (u16, u16)
+pub fn pixtuoid_core::sprite::format::Building::stands_in(&self, pixtuoid_core::sprite::format::CityPlane) -> bool
+impl core::clone::Clone for pixtuoid_core::sprite::format::Building
+pub fn pixtuoid_core::sprite::format::Building::clone(&self) -> pixtuoid_core::sprite::format::Building
+impl core::fmt::Debug for pixtuoid_core::sprite::format::Building
+pub fn pixtuoid_core::sprite::format::Building::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::Building
+impl core::marker::Send for pixtuoid_core::sprite::format::Building
+impl core::marker::Sync for pixtuoid_core::sprite::format::Building
+impl core::marker::Unpin for pixtuoid_core::sprite::format::Building
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::Building
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::Building
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::Building
+pub struct pixtuoid_core::sprite::format::BuildingArt
+impl pixtuoid_core::sprite::format::BuildingArt
+pub fn pixtuoid_core::sprite::format::BuildingArt::sprite(&self) -> &pixtuoid_core::sprite::Sprite
+pub fn pixtuoid_core::sprite::format::BuildingArt::windows(&self) -> &[alloc::vec::Vec<(u16, u16)>]
+impl core::clone::Clone for pixtuoid_core::sprite::format::BuildingArt
+pub fn pixtuoid_core::sprite::format::BuildingArt::clone(&self) -> pixtuoid_core::sprite::format::BuildingArt
+impl core::fmt::Debug for pixtuoid_core::sprite::format::BuildingArt
+pub fn pixtuoid_core::sprite::format::BuildingArt::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::BuildingArt
+impl core::marker::Send for pixtuoid_core::sprite::format::BuildingArt
+impl core::marker::Sync for pixtuoid_core::sprite::format::BuildingArt
+impl core::marker::Unpin for pixtuoid_core::sprite::format::BuildingArt
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::BuildingArt
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::BuildingArt
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::BuildingArt
+pub struct pixtuoid_core::sprite::format::CityMaterials(_)
+impl pixtuoid_core::sprite::format::CityMaterials
+pub fn pixtuoid_core::sprite::format::CityMaterials::key(&self, pixtuoid_core::sprite::format::Material) -> char
+impl core::clone::Clone for pixtuoid_core::sprite::format::CityMaterials
+pub fn pixtuoid_core::sprite::format::CityMaterials::clone(&self) -> pixtuoid_core::sprite::format::CityMaterials
+impl core::fmt::Debug for pixtuoid_core::sprite::format::CityMaterials
+pub fn pixtuoid_core::sprite::format::CityMaterials::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for pixtuoid_core::sprite::format::CityMaterials
+impl core::marker::Send for pixtuoid_core::sprite::format::CityMaterials
+impl core::marker::Sync for pixtuoid_core::sprite::format::CityMaterials
+impl core::marker::Unpin for pixtuoid_core::sprite::format::CityMaterials
+impl core::marker::UnsafeUnpin for pixtuoid_core::sprite::format::CityMaterials
+impl core::panic::unwind_safe::RefUnwindSafe for pixtuoid_core::sprite::format::CityMaterials
+impl core::panic::unwind_safe::UnwindSafe for pixtuoid_core::sprite::format::CityMaterials
 pub struct pixtuoid_core::sprite::format::DensityMismatch
 pub pixtuoid_core::sprite::format::DensityMismatch::claimed: (u32, u32)
 pub pixtuoid_core::sprite::format::DensityMismatch::found: (u16, u16)
@@ -837,6 +940,8 @@ impl pixtuoid_core::sprite::format::Pack
 pub fn pixtuoid_core::sprite::format::Pack::animation(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
 pub fn pixtuoid_core::sprite::format::Pack::animation_names(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn pixtuoid_core::sprite::format::Pack::animation_or_source(&self, &str) -> core::option::Option<&pixtuoid_core::sprite::Sprite>
+pub fn pixtuoid_core::sprite::format::Pack::buildings(&self) -> impl core::iter::traits::iterator::Iterator<Item = &pixtuoid_core::sprite::format::Building>
+pub fn pixtuoid_core::sprite::format::Pack::city_materials(&self) -> core::option::Option<&pixtuoid_core::sprite::format::CityMaterials>
 pub fn pixtuoid_core::sprite::format::Pack::density_variants(&self) -> alloc::vec::Vec<u16>
 pub fn pixtuoid_core::sprite::format::Pack::max_density_variant(&self) -> u16
 pub fn pixtuoid_core::sprite::format::Pack::merge_from(&mut self, &pixtuoid_core::sprite::format::Pack)

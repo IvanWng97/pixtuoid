@@ -81,6 +81,16 @@ densest variant whose `N` divides its render scale and draws it as it is — a
 variant carries its own front, where a desk's top-down base art gets a front
 face derived under it. The recolor keys and `[ramps]` apply at every density.
 
+A pack can also ship the city seen through the office's windows. `[city]` names
+the palette key of each of its seven materials — `facade`, `shade`, `roof`,
+`glass`, `mullion`, `detail` and `sign` — and a building is drawn in those keys
+alone, since its colours come from its depth and the sky rather than the pack.
+`[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
+(`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
+sprite at `N` times the size, as an animation's variant does. Each connected run
+of `glass` is one window. A pack with no `[buildings]` of its own takes the
+bundled city whole, materials and all.
+
 ## Logging & troubleshooting
 
 The TUI owns your terminal (alternate screen), so runtime diagnostics go to a
