@@ -182,8 +182,8 @@ pub(super) enum DrawableKind<'a> {
         /// Gateway up but model-broken → render the lobster sickly red.
         degraded: bool,
     },
-    /// One [sort band](crate::layout::WallPiece::sort_bands) of a frosted-glass
-    /// room wall, so it composites over a character standing behind it.
+    /// One [sort band](crate::layout::WallPiece::sort_bands) of a glass room
+    /// wall, so it composites over a character standing behind it.
     RoomWall {
         piece: crate::layout::WallPiece,
         rows: std::ops::Range<u16>,

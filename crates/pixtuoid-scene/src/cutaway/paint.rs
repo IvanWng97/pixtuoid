@@ -3431,10 +3431,21 @@ S B B B B B B S
             let jambs: std::collections::HashSet<_> = order
                 .iter()
                 .filter_map(|(_, k)| match k {
-                    PieceKind::WallSeg { piece, .. } => Some(piece.jambs()),
+                    PieceKind::WallSeg { piece, .. } => Some(*piece),
                     _ => None,
                 })
-                .flatten()
+                .flat_map(|piece| {
+                    let (at, size) = piece.visual();
+                    piece.jambs().inspect(move |&(p, s)| {
+                        assert!(
+                            p.x >= at.x
+                                && p.y >= at.y
+                                && p.x + s.w <= at.x + size.w
+                                && p.y + s.h <= at.y + size.h,
+                            "a jamb {p:?}+{s:?} reaches past its wall {piece:?}"
+                        );
+                    })
+                })
                 .collect();
             assert_eq!(
                 jambs.len(),

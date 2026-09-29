@@ -298,11 +298,11 @@ fn meeting_glass_partition_connects_at_window_and_corner() {
     // The glass has no single colour — a rim, and panes that show what is
     // behind them — so reference BOTH its rim (dx0) and a pane (dx2), sampled
     // high on the wall where it's unambiguously glass, plus a floor sample.
-    let glass_lit = buf.get(v_x, layout.top_margin + 2);
-    let glass_soft = buf.get(v_x + 2, layout.top_margin + 2);
+    let glass_rim = buf.get(v_x, layout.top_margin + 2);
+    let glass_pane = buf.get(v_x + 2, layout.top_margin + 2);
     let floor_ref = buf.get(v_x.saturating_sub(8), top_wall_h + 6);
     let is_glass = |p: pixtuoid_core::sprite::Rgb| {
-        dist(p, glass_lit).min(dist(p, glass_soft)) < dist(p, floor_ref)
+        dist(p, glass_rim).min(dist(p, glass_pane)) < dist(p, floor_ref)
     };
 
     assert!(

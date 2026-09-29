@@ -1,13 +1,13 @@
-//! The frosted-glass room partition's look, pixel-free: what the glass does to
+//! The glass room partition's look, pixel-free: what the glass does to
 //! each cell of a [`WallPiece`](crate::layout::WallPiece)'s box. Both painters
 //! walk their own grid over that box and ask it, so the glass is one design
 //! drawn at two densities.
 //!
 //! The panes are see-through: a pane cell is what lies behind it, stepped up
-//! its own ramp ([`Rgb::ramp`]), so a figure behind the glass keeps its colours
+//! its own ramp ([`Rgb::ramp`]), so a figure behind the glass keeps its hues
 //! and a cell that was one colour stays one. Only the frame — the rim, posts
-//! and sill — and a face-on pane's glint are colours of their own, the
-//! theme's.
+//! and sill — and a face-on pane's glint are colours of their own, drawn from
+//! the theme's trim.
 
 use pixtuoid_core::sprite::Rgb;
 
@@ -22,7 +22,7 @@ const MULLION_STRIDE: u16 = 10;
 /// How far into a pane, in logical units along plus across, its glint runs:
 /// the diagonal shine a pane catches in its top corner.
 const GLINT_AT: u16 = 5;
-/// Cells between a glint's two strokes.
+/// How many cells a glint's second stroke runs beyond its first.
 const GLINT_GAP: u16 = 2;
 
 /// Ramp stops a pane lifts what is behind it: the haze that makes it glass.

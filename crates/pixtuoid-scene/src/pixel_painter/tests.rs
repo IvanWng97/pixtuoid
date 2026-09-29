@@ -10,7 +10,7 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-/// Paint all of `piece`, as the classic does band by band.
+/// Paint all of `piece` in one call, which the classic's bands add up to.
 fn paint_whole_wall(
     buf: &mut RgbBuffer,
     theme: &crate::theme::Theme,
@@ -261,8 +261,7 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
 fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (x_left, y_top, y_bot) = (10u16, 20u16, 40u16);
-    // Row `y_top` is a seam glint and the outer columns are frame, so probe a
-    // pane cell of the next row.
+    // The outer columns are frame (rim, post), so probe a pane cell.
     let probe_col = x_left + 1;
     let probe_row = y_top + 1;
     let character = Rgb {

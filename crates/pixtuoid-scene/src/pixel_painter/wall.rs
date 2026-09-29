@@ -1,6 +1,6 @@
 //! The room walls: each of the layout's
 //! [`wall_pieces`](crate::layout::SceneLayout::wall_pieces), sorted in its
-//! [bands](WallPiece::sort_bands) and painted through the frosted [`Glass`] by
+//! [bands](WallPiece::sort_bands) and painted through the [`Glass`] by
 //! both painters, each on its own [`Pen`].
 
 use std::ops::Range;

@@ -122,7 +122,7 @@ pub(crate) fn stitch_vertical_wall(
 }
 
 /// One room wall as every painter draws it: where its glass stands, which of
-/// its ends a doorway frames, and the row it sorts on. Built once from
+/// its ends a doorway frames, and the bands it sorts in. Built once from
 /// [`Layout::room_walls`](crate::layout::Layout::room_walls) and
 /// [`Layout::doorways`](crate::layout::Layout::doorways), so no painter
 /// re-derives a room's perimeter, closes a doorway, or stands a wall the
@@ -141,13 +141,15 @@ pub(crate) enum WallPiece {
         jamb_east: bool,
     },
     /// A N-S wall seen edge-on, [`WALL_THICK_V`] wide, its glass stitched to
-    /// its joints `[y_top, y_bot]`. It sorts on its RAW south end, `south`: a
-    /// stitch that runs down into a crossing E-W wall must not carry the sort
-    /// row with it, or the edge-on glass paints over that wall.
+    /// its joints `[y_top, y_bot]`. No band of it sorts south of its RAW south
+    /// end, `south`: a stitch that runs down into a crossing E-W wall must not
+    /// carry the sort row with it, or the edge-on glass paints over that wall.
     Vertical {
         x: u16,
         y_top: u16,
         y_bot: u16,
+        /// Its raw north end: the footprint keeps its cap only where the
+        /// stitch left `y_top` there.
         north: u16,
         south: u16,
         jamb_north: bool,
@@ -640,7 +642,7 @@ mod tests {
             y1: 100,
         };
         let (o, s) = footprint(seg, &[], top_margin);
-        assert_eq!(o.x, 56, "west edge sits at start.x (no west bleed)");
+        assert_eq!(o.x, 56, "west edge sits at the wall's x (no west bleed)");
         assert_eq!(s.w, WALL_THICK_V, "footprint width == the drawn width");
         assert_eq!(
             o.y,
