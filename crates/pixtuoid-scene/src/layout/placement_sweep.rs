@@ -583,6 +583,23 @@ fn every_piece_ground_is_blocked_in_the_mask() {
     assert_no_violations("mask-parity", v);
 }
 
+#[test]
+fn every_rug_lies_whole_on_the_floor() {
+    let mut v = Vec::new();
+    sweep(|w, h, seed, l| {
+        for rug in l.rugs() {
+            let on_floor = rug.x > 0
+                && rug.y >= l.wall_band_h()
+                && rug.x + rug.width <= l.buf_w
+                && rug.y + rug.height <= l.buf_h;
+            if !on_floor {
+                v.push(format!("{w}x{h} seed {seed}: rug {rug:?} leaves the floor"));
+            }
+        }
+    });
+    assert_no_violations("rug-on-floor", v);
+}
+
 /// Only the BLOCKED grounds: sprite overhangs may overlap freely — that is
 /// occlusion, not placement.
 #[test]

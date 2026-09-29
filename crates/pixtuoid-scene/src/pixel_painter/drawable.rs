@@ -118,11 +118,7 @@ pub(super) enum DrawableKind<'a> {
     },
     /// Area rug, painted BEFORE the furniture in z-order (`anchor_y` at the top
     /// of the rug) so chairs / couches sit on top.
-    AreaRug {
-        pos: Point,
-        width: u16,
-        height: u16,
-    },
+    AreaRug(crate::layout::Bounds),
     /// Lounge side table (wood + magazine), centred at `pos`.
     LoungeSideTable {
         pos: Point,
@@ -421,9 +417,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 crate::layout::furniture_def(crate::layout::Furniture::MeetingTable).visual;
             paint_meeting_table(buf, pos.x, pos.y, w, h, theme);
         }
-        DrawableKind::AreaRug { pos, width, height } => {
-            paint_area_rug(buf, pos.x, pos.y, *width, *height, theme);
-        }
+        DrawableKind::AreaRug(rug) => paint_area_rug(buf, *rug, theme),
         DrawableKind::LoungeSideTable { pos } => {
             paint_side_table(buf, pos.x, pos.y, theme);
         }
