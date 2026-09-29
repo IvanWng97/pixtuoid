@@ -332,7 +332,7 @@ mod tests {
     }
 
     /// `build.rs` embeds every sprite in `sprites/default/`, so one no animation
-    /// registers — a generated `@4x` whose `pack.toml` entry was never written —
+    /// registers — a generated `@Nx` whose `pack.toml` entry was never written —
     /// ships as dead bytes and draws nothing. A sprite the pack still loads
     /// without is exactly that.
     #[test]
