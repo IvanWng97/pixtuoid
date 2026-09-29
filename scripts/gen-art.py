@@ -1873,8 +1873,7 @@ def panes(g, x0, y0, x1, y1, w, h, px, py):
 
 
 def shade_east(g):
-    """The east third of each mass on each row turned from the light, so twin
-    towers and a stepped crown each keep a lit and a shaded face."""
+    """The east third of each mass on each row turned from the light."""
     for row in g:
         x = 0
         while x < len(row):
@@ -2026,7 +2025,7 @@ def building_slab():
 
 def city_base(g):
     """A building drawn at `S`, read at 1x, `S`x`S` block by block: a thin part
-    running through a block (a sign, then plant, then a roof line) wins it; a block
+    running through a block (a sign, then plant or a mast, then a roof line) wins it; a block
     less than half drawn is sky; one holding glass on an odd row and column is glass,
     the lit-dot grid a 1x city is read by (the scene's `skyline::block_window`);
     any other takes whichever of facade and shade it holds more of."""

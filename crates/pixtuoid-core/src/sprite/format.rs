@@ -809,7 +809,7 @@ impl Material {
         }
     }
 
-    /// Every material, in [`index`](Self::index) order.
+    /// Every material, in declaration order.
     pub const ALL: [Material; 7] = [
         Material::Facade,
         Material::Shade,

@@ -29,7 +29,8 @@ pub(crate) enum Plane {
     Far,
     /// The pack's middle distance.
     Mid,
-    /// The pack's nearest buildings, their feet below the sill.
+    /// The pack's nearest buildings, standing tallest: a short window shows
+    /// only their tops.
     Near,
 }
 
@@ -124,8 +125,9 @@ const NEAR: Depth = Depth {
 const BLOCK_W: RangeInclusive<u16> = 2..=5;
 /// A plain block's height, in percent of its plane's band.
 const BLOCK_H_PCT: RangeInclusive<u16> = 40..=100;
-/// How many logical units west of the run each plane's first building may
-/// start, so the planes' edges do not line up at the run's west end.
+/// One more than the most logical units west of the run each plane's first
+/// building may start, so the planes' edges do not line up at the run's west
+/// end.
 const WEST_JITTER: u32 = 4;
 
 /// The percent of windows lit at noon: some offices keep their lights on by day.
@@ -199,8 +201,8 @@ impl<'p> Skyline<'p> {
                 pack.buildings().filter(|b| b.stands_in(p)).collect()
             })
         });
-        // Near to far, each plane's band is held to what the plane in front of
-        // it stands, so a far stand never tops a nearer one.
+        // Near to far, each plane's band is held to the tallest the plane in
+        // front of it stands, so no plane rises above the one in front.
         let mut bands = [0; Plane::ALL.len()];
         let mut in_front = u16::MAX;
         for plane in Plane::ALL.into_iter().rev() {
@@ -588,6 +590,10 @@ mod tests {
         let pack = pack();
         for glass_h in [12, 16, 21, 38, 60] {
             for altitude in [0.0, 1.0] {
+                assert!(
+                    clear_sky_rows(glass_h) > 0,
+                    "{glass_h}-row glass keeps some sky"
+                );
                 let city = Skyline::of(&pack, 120, glass_h, altitude);
                 for plane in Plane::ALL {
                     let rises: Vec<_> = city
@@ -664,15 +670,40 @@ mod tests {
                 NonZeroU16::new(d).expect("nonzero"),
             )
         };
-        let (one, four) = (strip(1), strip(4));
+        let (one, three, four) = (strip(1), strip(3), strip(4));
         assert_eq!((four.w, four.h), (one.w * 4, one.h * 4));
-        let cell_is_one_colour = |x: u16, y: u16| {
-            (0..4)
-                .all(|dy| (0..4).all(|dx| four.at(x * 4 + dx, y * 4 + dy) == four.at(x * 4, y * 4)))
+        // The near plane's cells: drawn last, so nothing else stands over them.
+        let near: Vec<(u16, u16)> = Skyline::of(&pack, 60, 20, 0.0)
+            .stands()
+            .filter_map(|(plane, s)| match (plane, s) {
+                (
+                    Plane::Near,
+                    Stand::Kit {
+                        building, x, top, ..
+                    },
+                ) => Some((building, x, top)),
+                _ => None,
+            })
+            .flat_map(|(b, x, top)| {
+                let (w, h) = b.size();
+                (0..w).flat_map(move |dx| {
+                    (0..h).map(move |dy| (x + i32::from(dx), top + i32::from(dy)))
+                })
+            })
+            .filter_map(|(x, y)| Some((u16::try_from(x).ok()?, u16::try_from(y).ok()?)))
+            .filter(|&(x, y)| one.at(x, y).is_some())
+            .collect();
+        assert!(!near.is_empty(), "the near plane stands in the strip");
+        let uniform = |s: &CityStrip, d: u16, (x, y): (u16, u16)| {
+            (0..d).all(|dy| (0..d).all(|dx| s.at(x * d + dx, y * d + dy) == s.at(x * d, y * d)))
         };
         assert!(
-            (0..one.w).any(|x| (0..one.h).any(|y| !cell_is_one_colour(x, y))),
-            "the 4x art draws detail finer than a logical cell"
+            near.iter().any(|&c| !uniform(&four, 4, c)),
+            "the buildings' 4x art draws detail finer than a logical cell"
+        );
+        assert!(
+            near.iter().all(|&(x, y)| uniform(&three, 3, (x, y)) && three.at(x * 3, y * 3) == one.at(x, y)),
+            "with no 3x art, a building is its base grown to the cell"
         );
         let stands_at = |s: &CityStrip, d: u16, x: u16| {
             (0..s.h).find(|&y| s.at(x * d, y).is_some()).map(|y| y / d)
