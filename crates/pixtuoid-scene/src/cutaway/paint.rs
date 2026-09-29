@@ -3616,22 +3616,11 @@ S B B B B B B S
 
     /// `frame` with `edit` applied to its first figure and that figure's agent.
     fn varied(frame: &SimFrame, edit: &FigureEdit) -> SimFrame {
-        let mut characters = frame.characters.clone();
-        let mut agents = frame.agents.clone();
-        if let Some(c) = characters.first_mut() {
-            edit(c, &mut agents[c.agent_idx]);
+        let mut varied = frame.clone();
+        if let Some(c) = varied.characters.first_mut() {
+            edit(c, &mut varied.agents[c.agent_idx]);
         }
-        SimFrame {
-            agents,
-            poses: frame.poses.clone(),
-            seated_agents: frame.seated_agents.clone(),
-            characters,
-            indoor_scale: frame.indoor_scale,
-            chitchat_bubbles: Vec::new(),
-            new_coffee_carriers: Vec::new(),
-            occupied_waypoints: frame.occupied_waypoints.clone(),
-            neon: frame.neon,
-        }
+        varied
     }
 
     /// The two fills a piece is painted over to tell what it writes.
