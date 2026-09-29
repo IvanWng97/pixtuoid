@@ -93,7 +93,7 @@ def outline(g, inside, out):
 
 # ---- the desk: one skeleton, drawn at 1x (classic) and at `S` (cutaway) -----
 # Logical units. Both drawings scale every row and column below by their own
-# density, so the `@4x` art cannot drift from the 1x it redraws.
+# density, so the `@Nx` art cannot drift from the 1x it redraws.
 #
 # Rust owns these facts; the copies here are pinned against the generated art
 # by `embedded_pack`'s `a_desks_rows_follow_the_layout` and `effects`'s
@@ -403,7 +403,7 @@ LAYER_H = STANDING_ROWS * S + HAIR_HEADROOM
 o = HAIR_HEADROOM
 # The skull in profile, and the head seen from above as it lies on the arms.
 SIDE_CX, SIDE_CY = 14.0, 12.5
-CROWN_CX, CROWN_CY, CROWN_R = 15.5, 16.5, 10.0
+CROWN_CX, CROWN_CY, CROWN_R = FIG_CX, 16.5, 10.0
 
 
 def layer():
@@ -880,9 +880,9 @@ def hands_typing(frame):
 
 
 def elbows_typing(frame):
-    """Typing seen from behind, where the chair back and its arm pads hide the
-    hands: the reaching arm's elbow juts out past the chair, swapping sides
-    each frame as the hands do."""
+    """Typing seen from behind, where the chair's arm pads hide most of the
+    hands' press: the reaching arm's elbow juts out past the chair, swapping
+    sides each frame as the hands do."""
     hands = hands_typing(frame)
 
     def draw(g, dy):

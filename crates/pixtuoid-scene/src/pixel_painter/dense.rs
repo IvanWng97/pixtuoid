@@ -103,7 +103,7 @@ mod tests {
 
     /// `typing@4x` claims 4x but is drawn at 2x; `walking@2x` has one frame
     /// against its base's two; `seated@2x`'s second frame is drawn at 3x;
-    /// `holding_coffee` has honest variants at both 2x and 4x.
+    /// `holding_coffee` has honest variants at both 2x and 4x; `desk` has none.
     fn variant_pack() -> Pack {
         pixtuoid_core::sprite::format::load_pack_from_strings(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\"A\"=\"#010203\"\n\"B\"=\"#040506\"\n\
