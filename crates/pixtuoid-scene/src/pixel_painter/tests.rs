@@ -77,6 +77,46 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
 }
 
 #[test]
+fn h_door_jambs_sit_flush_on_both_cut_ends() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(60, 30, floor);
+    let y_face = 20;
+    for (x0, x1, jamb_west, jamb_east) in [(5, 19, false, true), (33, 47, true, false)] {
+        paint_whole_wall(
+            &mut buf,
+            theme,
+            crate::layout::WallPiece::Horizontal {
+                x0,
+                x1,
+                y_face,
+                jamb_west,
+                jamb_east,
+            },
+        );
+    }
+    let dark = theme.office.room_wall_trim_dark;
+    for x in [18, 19, 33, 34] {
+        assert_eq!(
+            buf.get(x, y_face),
+            dark,
+            "column {x} must be jamb (posts cover BOTH inclusive cut ends)"
+        );
+    }
+    for x in 20..33 {
+        assert_eq!(
+            buf.get(x, y_face),
+            floor,
+            "column {x} is the OPENING — untouched"
+        );
+    }
+}
+
+#[test]
 fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
     let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
