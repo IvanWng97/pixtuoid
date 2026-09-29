@@ -386,12 +386,22 @@ impl Lights {
 /// and not just the hour — and by `indoor`, which is what an emptied floor
 /// switches off.
 fn desk_lights(desk: Point, facing: Facing, darkness: f32, indoor: f32) -> DeskLights {
-    let screen_idle = if facing == Facing::North {
-        SCREEN_IDLE_MAX * darkness * indoor
+    DeskLights::new(
+        desk,
+        darkness * indoor,
+        SCREEN_IDLE_MAX * standby(facing, darkness, indoor),
+    )
+}
+
+/// How far toward its standby glow a desk's idle screen is, 0..=1: the dark and
+/// the room's own level both wake it, and only a desk that shows the viewer its
+/// screen shows it.
+pub(crate) fn standby(facing: Facing, darkness: f32, indoor: f32) -> f32 {
+    if facing == Facing::North {
+        darkness * indoor
     } else {
         0.0
-    };
-    DeskLights::new(desk, darkness * indoor, screen_idle)
+    }
 }
 
 impl DeskLights {

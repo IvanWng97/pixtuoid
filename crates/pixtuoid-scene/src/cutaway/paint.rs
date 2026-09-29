@@ -58,6 +58,61 @@ const SCREEN_GLASS_LEVEL: i8 = -3;
 /// lines on the dark glass.
 const SCREEN_TEXT_LEVEL: i8 = 9;
 
+/// How many tones a standby screen's glass steps through as the room darkens:
+/// a stepped glow, where a blend would put a colour of its own on every level.
+const STANDBY_STOPS: u8 = 2;
+/// Ramp levels a standby glass sits under the theme's idle tint per stop short
+/// of past the last: even the brightest standby is a step under the tint, which
+/// on the glass would read as a screen switched on.
+const STANDBY_LEVEL_PER_STOP: i8 = -2;
+
+/// What a desk's screen shows. A screen is its own light: whatever the room's
+/// lights do, they leave its glass alone ([`paint_list`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Screen {
+    /// Dark glass.
+    Off,
+    /// The standby glow of an idle screen at night, its glass in this colour.
+    Standby(pixtuoid_core::sprite::Rgb),
+    /// Lit by its occupant's tool, in this glow.
+    Lit(pixtuoid_core::sprite::Rgb),
+}
+
+impl Screen {
+    /// A desk's screen: lit by `glow`, else standing by at `standby`
+    /// ([`crate::lighting::standby`]) in `theme`'s idle tint, else dark.
+    fn of(glow: Option<pixtuoid_core::sprite::Rgb>, standby: f32, theme: &Theme) -> Self {
+        if let Some(glow) = glow {
+            return Self::Lit(glow);
+        }
+        let stops = (standby.clamp(0.0, 1.0) * f32::from(STANDBY_STOPS)).round() as u8;
+        if stops == 0 {
+            return Self::Off;
+        }
+        let lacking = (STANDBY_STOPS + 1 - stops) as i8;
+        Self::Standby(
+            theme
+                .effects
+                .monitor_idle
+                .ramp(lacking * STANDBY_LEVEL_PER_STOP),
+        )
+    }
+
+    /// `art` with its screen keys showing this screen.
+    fn on(
+        self,
+        art: pixtuoid_core::sprite::RecolorableFrame<'_>,
+    ) -> Option<pixtuoid_core::sprite::Frame> {
+        match self {
+            Self::Off => None,
+            Self::Standby(glass) => {
+                Some(art.recolored(&[(crate::pixel_painter::SCREEN_GLASS_KEY, Some(glass))]))
+            }
+            Self::Lit(glow) => Some(relight_screen(art, glow)),
+        }
+    }
+}
+
 /// Where a painter should hang one agent's name badge, in BUFFER pixels.
 ///
 /// The engine cannot draw text — the font lives in the binary — so the profile
@@ -334,7 +389,8 @@ fn lights(
 
 /// Paint `list` over the backdrop `buf` holds: every piece's shadow
 /// ([`ground_shadow`]) first, the room darkened to the hour, then the pieces back
-/// to front, each darkened with it, and last the lights on all of it.
+/// to front, each darkened with it, the lights on all of it, and last the
+/// screens, which light themselves.
 ///
 /// The glass paints before the rest, undarkened: it is the sky, which the look
 /// already resolved for the hour, and it lies behind everything that meets it,
@@ -379,6 +435,11 @@ pub(crate) fn paint_list(
         pen,
         buf,
     );
+    for piece in &list.pieces {
+        if let PieceKind::Desk { at, art, screen } = piece.kind {
+            paint_screen(at, art, screen, list.ambient, list.pack, list.scale, buf);
+        }
+    }
 }
 
 /// Ramp stops a shadow steps the floor at its centre, per unit of
@@ -544,7 +605,7 @@ fn collect_pieces(
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
     push_windows(office, moment, &mut order);
     push_hung_decor(layout, pack, &mut order);
-    push_desks(frame, office, &mut order);
+    push_desks(frame, office, moment.look.darkness, &mut order);
     push_props(layout, pack, &mut order);
     push_appliances(layout, &mut order);
     push_meeting_trios(layout, pack, &mut order);
@@ -607,7 +668,12 @@ fn paint_piece(
 /// Each desk in its facing's art, its screen lit by the classic painter's own
 /// rule ([`desk_screen_glow`](crate::pixel_painter::desk_screen_glow)) from the
 /// sim's observation, so the profiles never disagree about WHICH screens are lit.
-fn push_desks(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, PieceKind)>) {
+fn push_desks(
+    frame: &SimFrame,
+    office: Office<'_>,
+    darkness: f32,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
     let Office {
         layout,
         pack,
@@ -620,10 +686,14 @@ fn push_desks(frame: &SimFrame, office: Office<'_>, order: &mut Vec<(Span, Piece
         let Some(art) = desk_art(pack, facing) else {
             continue;
         };
-        let screen = crate::pixel_painter::desk_screen_glow(
-            crate::pixel_painter::desk_occupant(&frame.agents, local),
-            facing,
-            frame.seated_agents.get(&local).copied().unwrap_or(false),
+        let screen = Screen::of(
+            crate::pixel_painter::desk_screen_glow(
+                crate::pixel_painter::desk_occupant(&frame.agents, local),
+                facing,
+                frame.seated_agents.get(&local).copied().unwrap_or(false),
+                theme,
+            ),
+            crate::lighting::standby(facing, darkness, frame.indoor_scale),
             theme,
         );
         if let Some(span) = desk_span(pack, art, *d, scale) {
@@ -1160,8 +1230,7 @@ pub(crate) enum PieceKind {
         at: crate::layout::Point,
         /// The facing's art (see [`desk_art`]).
         art: &'static str,
-        /// The glow of a lit screen, or `None` for a dark one.
-        screen: Option<pixtuoid_core::sprite::Rgb>,
+        screen: Screen,
     },
     Chair {
         at: crate::layout::Point,
@@ -1576,7 +1645,7 @@ fn paint_rug(rug: crate::layout::Bounds, theme: &Theme, pen: Pen, buf: &mut RgbB
 fn paint_desk(
     at: crate::layout::Point,
     art_name: &str,
-    screen: Option<pixtuoid_core::sprite::Rgb>,
+    screen: Screen,
     pack: &Pack,
     scale: RenderScale,
     buf: &mut RgbBuffer,
@@ -1588,15 +1657,14 @@ fn paint_desk(
         return;
     };
     let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
-    let relit;
-    let art = match screen {
-        Some(glow) => {
-            relit = relight_screen(desk.recolorable, glow);
-            &relit
-        }
-        None => desk.frame,
-    };
-    blit_frame_scaled(art, x, top_y, desk.blit_at, buf);
+    let relit = screen.on(desk.recolorable);
+    blit_frame_scaled(
+        relit.as_ref().unwrap_or(desk.frame),
+        x,
+        top_y,
+        desk.blit_at,
+        buf,
+    );
 
     // The drawn size, from the logical size: variant art blits at `blit_at`, so
     // its own pixel size times the scale would drop a base's face a whole desk
@@ -1622,6 +1690,51 @@ fn paint_desk(
             scale,
         );
     }
+}
+
+/// Paint only the screen of a desk [`paint_desk`] drew, over the room's darkness
+/// and its lights: a glowing screen as it shows, a dark one darkened with the
+/// room, but never lit by a lamp. The screen is where the art draws its screen
+/// keys, found by painting them transparent, so it is the art's own at any
+/// density.
+fn paint_screen(
+    at: crate::layout::Point,
+    art_name: &str,
+    screen: Screen,
+    ambient: crate::cutaway::light::Ambient,
+    pack: &Pack,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let (Some(span), Some(desk)) = (
+        desk_span(pack, art_name, at, scale),
+        crate::pixel_painter::densest_frame(pack, art_name, 0, scale),
+    ) else {
+        return;
+    };
+    let bare = desk.recolorable.recolored(&[
+        (crate::pixel_painter::SCREEN_GLASS_KEY, None),
+        (crate::pixel_painter::SCREEN_TEXT_KEY, None),
+    ]);
+    let relit = screen.on(desk.recolorable);
+    let shown = relit.as_ref().unwrap_or(desk.frame);
+    let (w, h) = (shown.width(), shown.height());
+    let pixels = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .map(|(x, y)| {
+            let c = shown.get(x, y).and_then(|p| *p)?;
+            bare.get(x, y)
+                .and_then(|p| *p)
+                .is_none()
+                .then(|| match screen {
+                    Screen::Off => ambient.on(c),
+                    Screen::Standby(_) | Screen::Lit(_) => c,
+                })
+        })
+        .collect();
+    let only_screen = pixtuoid_core::sprite::Frame::from_pixels(w, h, pixels);
+    let (x, top_y) = (scale.to_buffer(span.x0), scale.to_buffer(span.y0));
+    blit_frame_scaled(&only_screen, x, top_y, desk.blit_at, buf);
 }
 
 /// The desk art with its screen lit in `glow`: the glass takes a dark step of
@@ -2255,7 +2368,7 @@ mod tests {
                 let kind = PieceKind::Desk {
                     at: desk,
                     art,
-                    screen: None,
+                    screen: Screen::Off,
                 };
                 let shadow = ground_shadow(span, &kind, &pack).expect("a desk casts a shadow");
                 let ((_, top), (_, past)) = shadow.bounds();
@@ -3359,7 +3472,7 @@ mod tests {
                     PieceKind::Desk {
                         at: *d,
                         art,
-                        screen: None,
+                        screen: Screen::Off,
                     },
                 ));
             }
@@ -3713,6 +3826,51 @@ S B B B B B B S
             };
             assert_ne!(lit(&noon), lit(&night), "the lights keep their noon levels");
         }
+    }
+
+    /// The light half of the fingerprint property: a light keeps its span while
+    /// its bands move with the hour and the walker, so two sharing a span and a
+    /// fingerprint must paint alike, at scale 1 and the densest.
+    #[test]
+    fn one_light_fingerprint_one_set_of_pixels() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let mut painted = std::collections::HashMap::new();
+        let mut seen: std::collections::HashMap<(u16, Span), std::collections::BTreeSet<u64>> =
+            std::collections::HashMap::new();
+        let mut repeats = 0;
+        for s in [1, pack.max_density_variant()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            for hour in [18, 20, 23] {
+                let look = look_at(theme, hour);
+                for frame in frames.iter().step_by(4) {
+                    let list = list_at(
+                        frame,
+                        Office {
+                            layout: &layout,
+                            pack: &pack,
+                            theme,
+                            scale,
+                        },
+                        &look,
+                        hour,
+                    );
+                    repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
+                        matches!(p.kind, PieceKind::Light { .. })
+                    });
+                    for p in list.pieces() {
+                        if matches!(p.kind, PieceKind::Light { .. }) {
+                            seen.entry((s, p.span)).or_default().insert(p.fingerprint);
+                        }
+                    }
+                }
+            }
+        }
+        assert!(repeats > 0, "no light recurred, so nothing was compared");
+        assert!(
+            seen.values().any(|fps| fps.len() > 1),
+            "no light changed its bands in place"
+        );
     }
 
     /// Every light's lift lies inside its span, at every scale.
@@ -4510,7 +4668,7 @@ S B B B B B B S
                 scale.to_buffer(span.y0 + bh + desk_front_h() + 1),
                 floor,
             );
-            paint_desk(at, "desk", None, &pack, scale, &mut buf);
+            paint_desk(at, "desk", Screen::Off, &pack, scale, &mut buf);
             let (x, below) = (
                 scale.to_buffer(at.x + bw / 2),
                 scale.to_buffer(span.y0 + bh),

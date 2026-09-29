@@ -26,6 +26,19 @@ const LIFT_STOPS_PER_LEVEL: f32 = 7.0;
 /// lifts at most back to its daylight tone, never past.
 const DAYLIGHT_LIFT: u8 = 1;
 
+/// The share of a step, at its top, over which a light dithers into the next:
+/// below it the band is solid, the pixel-art way of lighting, and a whole band
+/// of dither reads as grain.
+const SEAM: f32 = 0.3;
+
+/// The whole steps a light `stops` strong lifts the art pixel at `(x, y)`:
+/// solid through each band, dithered into the next only across its [`SEAM`].
+fn step_at(stops: f32, x: ArtPx, y: ArtPx) -> u8 {
+    let whole = stops.max(0.0).floor();
+    let into_seam = (stops - whole - (1.0 - SEAM)) / SEAM;
+    whole as u8 + u8::from(into_seam > 0.0 && dithered(x, y, into_seam))
+}
+
 /// The share of the way to its light's colour a pixel is tinted per step of
 /// lift: the brightest cells take the most colour, as they would.
 const TINT_PER_STEP: f32 = 0.05;
@@ -124,10 +137,7 @@ impl LightView {
                 let Some(level) = emitter.level_at_f(at(ax), at(ay)) else {
                     return 0;
                 };
-                let stops = level.max(0.0) * LIFT_STOPS_PER_LEVEL;
-                let whole = stops.floor();
-                let steps = whole as u8 + u8::from(dithered(ArtPx(ax), ArtPx(ay), stops - whole));
-                steps.min(ceiling)
+                step_at(level * LIFT_STOPS_PER_LEVEL, ArtPx(ax), ArtPx(ay)).min(ceiling)
             })
             .collect();
         lift.iter().any(|&l| l > 0).then(|| {
@@ -319,6 +329,32 @@ mod tests {
             "off-stop colours: {:?}",
             seen.difference(&allowed)
         );
+    }
+
+    /// A band is one step through its middle; only the seam at its top mixes
+    /// in the next.
+    #[test]
+    fn a_light_band_is_solid_but_for_its_seam() {
+        for band in 0..4u8 {
+            for tenth in 0..10 {
+                let stops = f32::from(band) + tenth as f32 / 10.0;
+                let steps: std::collections::BTreeSet<u8> = (0..8)
+                    .flat_map(|y| (0..8).map(move |x| step_at(stops, ArtPx(x), ArtPx(y))))
+                    .collect();
+                if (tenth as f32 / 10.0) < 1.0 - SEAM {
+                    assert_eq!(
+                        steps,
+                        [band].into(),
+                        "{stops} stops is dithered off its seam"
+                    );
+                } else {
+                    assert!(
+                        steps.is_subset(&[band, band + 1].into()),
+                        "{stops}: {steps:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// Noon keeps the room's own tone, a light lifts it at most a step, and
