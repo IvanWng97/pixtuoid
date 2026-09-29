@@ -73,26 +73,54 @@ pub struct CutawayLabel {
     pub anchor_px: crate::layout::Point,
 }
 
-/// Paint `frame`'s office into `buf` as an orthographic cutaway — the classic
-/// painter's sibling, not its successor. `layout` is in LOGICAL units and `buf`
-/// in buffer pixels; `scale` converts. The windows look out from `altitude` (0
-/// at the ground floor, 1 at the top) on the sky at `now`. Returns where each
-/// visible agent's badge belongs; see [`CutawayLabel`].
-#[allow(clippy::too_many_arguments)]
+/// What a cutaway frame is drawn with, none of which changes within it.
+#[derive(Clone, Copy)]
+pub struct Office<'a> {
+    /// Where everything stands, in LOGICAL units.
+    pub layout: &'a Layout,
+    /// The art that draws it.
+    pub pack: &'a Pack,
+    /// Its colours.
+    pub theme: &'a Theme,
+    /// Buffer pixels per logical unit.
+    pub scale: RenderScale,
+}
+
+/// The moment a frame shows: the sky's look at `now`, seen from `altitude` (0
+/// at the ground floor, 1 at the top).
+#[derive(Clone, Copy)]
+pub(crate) struct Moment<'a> {
+    pub(crate) look: &'a crate::atmosphere::Look,
+    pub(crate) altitude: f32,
+    pub(crate) now: std::time::SystemTime,
+}
+
+/// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
+/// classic painter's sibling, not its successor. The windows look out from
+/// `altitude` (0 at the ground floor, 1 at the top) on the sky at `now`.
+/// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
 pub fn render_cutaway(
     frame: &SimFrame,
-    layout: &Layout,
-    pack: &Pack,
-    theme: &Theme,
-    scale: RenderScale,
+    office: Office<'_>,
     altitude: f32,
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
+    let Office {
+        layout,
+        pack,
+        theme,
+        scale,
+    } = office;
     paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
     let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
-    let list = build_list(frame, layout, pack, theme, scale, (&look, altitude), now);
+    let moment = Moment {
+        look: &look,
+        altitude,
+        now,
+    };
+    let list = build_list(frame, office, moment);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
@@ -207,19 +235,18 @@ impl<'a> DrawList<'a> {
     }
 }
 
-/// Build `frame`'s [`DrawList`] as of `now`, its windows looking out under
-/// `look` from `altitude`. Every figure and every window's view is resolved
-/// here, so painting the list reads neither `frame`, `look` nor `now` again.
+/// Build `frame`'s [`DrawList`] at `moment`. Every figure and every window's
+/// view is resolved here, so painting the list reads neither `frame` nor the
+/// moment again.
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
-    layout: &Layout,
-    pack: &'a Pack,
-    theme: &'a Theme,
-    scale: RenderScale,
-    (look, altitude): (&crate::atmosphere::Look, f32),
-    now: std::time::SystemTime,
+    office: Office<'a>,
+    moment: Moment<'_>,
 ) -> DrawList<'a> {
-    let collected = collect_pieces(frame, layout, pack, theme, scale, (look, altitude), now);
+    let Office {
+        pack, theme, scale, ..
+    } = office;
+    let collected = collect_pieces(frame, office, moment);
     let pieces = depth_sort(
         collected
             .into_iter()
@@ -412,32 +439,26 @@ fn fingerprint(kind: &PieceKind) -> u64 {
 /// Every floor-standing piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
-#[allow(clippy::too_many_arguments)]
 fn collect_pieces(
     frame: &SimFrame,
-    layout: &Layout,
-    pack: &Pack,
-    theme: &Theme,
-    scale: RenderScale,
-    (look, altitude): (&crate::atmosphere::Look, f32),
-    now: std::time::SystemTime,
+    office: Office<'_>,
+    moment: Moment<'_>,
 ) -> Vec<(Span, PieceKind)> {
-    let mut order: Vec<(Span, PieceKind)> =
-        Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
-    push_windows(
+    let Office {
         layout,
         pack,
-        (look, theme, now),
-        altitude,
+        theme,
         scale,
-        &mut order,
-    );
+    } = office;
+    let mut order: Vec<(Span, PieceKind)> =
+        Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
+    push_windows(office, moment, &mut order);
     push_hung_decor(layout, pack, scale, &mut order);
     push_desks(frame, layout, pack, theme, scale, &mut order);
     push_props(layout, pack, &mut order);
     push_appliances(layout, &mut order);
     push_meeting_trios(layout, pack, &mut order);
-    let carried = push_characters(frame, layout, pack, theme, scale, now, &mut order);
+    let carried = push_characters(frame, office, moment.now, &mut order);
     push_chairs(layout, pack, &carried, &mut order);
     wall_segments(layout, &mut order);
     push_pantry_counter(layout, pack, &mut order);
@@ -795,16 +816,18 @@ fn push_meeting_trios(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piece
 
 /// Queue every character, and return the desks whose chairs they carry, so
 /// [`push_chairs`] stands none of those again.
-#[allow(clippy::too_many_arguments)]
 fn push_characters(
     frame: &SimFrame,
-    layout: &Layout,
-    pack: &Pack,
-    theme: &Theme,
-    scale: RenderScale,
+    office: Office<'_>,
     now: std::time::SystemTime,
     order: &mut Vec<(Span, PieceKind)>,
 ) -> Vec<crate::layout::Point> {
+    let Office {
+        layout,
+        pack,
+        theme,
+        scale,
+    } = office;
     let mut carried = Vec::new();
     for c in &frame.characters {
         let Some(agent) = frame.agents.get(c.agent_idx) else {
@@ -1150,14 +1173,18 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
 /// backdrop.
 ///
 /// [`CityStrip`]: crate::skyline::CityStrip
-fn push_windows(
-    layout: &Layout,
-    pack: &Pack,
-    (look, theme, now): (&crate::atmosphere::Look, &Theme, std::time::SystemTime),
-    altitude: f32,
-    scale: RenderScale,
-    order: &mut Vec<(Span, PieceKind)>,
-) {
+fn push_windows(office: Office<'_>, moment: Moment<'_>, order: &mut Vec<(Span, PieceKind)>) {
+    let Office {
+        layout,
+        pack,
+        theme,
+        scale,
+    } = office;
+    let Moment {
+        look,
+        altitude,
+        now,
+    } = moment;
     let pen = Pen::for_pack(scale, pack);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     let window_h = rows.end - rows.start;
@@ -2120,10 +2147,12 @@ mod tests {
             let mut order = Vec::new();
             push_characters(
                 frame,
-                &layout,
-                &pack,
-                &crate::theme::NORMAL,
-                RenderScale::ONE,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme: &crate::theme::NORMAL,
+                    scale: RenderScale::ONE,
+                },
                 std::time::UNIX_EPOCH,
                 &mut order,
             );
@@ -2373,10 +2402,12 @@ mod tests {
         let mut cache = crate::frame_cache::FrameCache::new();
         let labels = render_cutaway(
             seated,
-            &layout,
-            &pack,
-            theme,
-            scale,
+            Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            },
             0.0,
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,
@@ -2405,10 +2436,12 @@ mod tests {
         assert_eq!(
             push_characters(
                 seated,
-                &layout,
-                &pack,
-                &crate::theme::NORMAL,
-                RenderScale::ONE,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme: &crate::theme::NORMAL,
+                    scale: RenderScale::ONE
+                },
                 std::time::UNIX_EPOCH,
                 &mut order
             ),
@@ -2427,10 +2460,12 @@ mod tests {
         let mut order = Vec::new();
         let carried = push_characters(
             seated,
-            &layout,
-            &chair_only,
-            &crate::theme::NORMAL,
-            RenderScale::ONE,
+            Office {
+                layout: &layout,
+                pack: &chair_only,
+                theme: &crate::theme::NORMAL,
+                scale: RenderScale::ONE,
+            },
             std::time::UNIX_EPOCH,
             &mut order,
         );
@@ -2457,12 +2492,17 @@ mod tests {
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let order = collect_pieces(
             frame,
-            layout,
-            pack,
-            theme,
-            RenderScale::ONE,
-            (&sky(theme), 0.0),
-            std::time::UNIX_EPOCH,
+            Office {
+                layout,
+                pack,
+                theme,
+                scale: RenderScale::ONE,
+            },
+            Moment {
+                look: &sky(theme),
+                altitude: 0.0,
+                now: std::time::UNIX_EPOCH,
+            },
         );
         let (person, person_span) = order
             .iter()
@@ -2542,10 +2582,12 @@ mod tests {
             let mut order = Vec::new();
             push_characters(
                 frame,
-                &layout,
-                &pack,
-                &crate::theme::NORMAL,
-                RenderScale::ONE,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme: &crate::theme::NORMAL,
+                    scale: RenderScale::ONE,
+                },
                 std::time::UNIX_EPOCH,
                 &mut order,
             );
@@ -2904,12 +2946,17 @@ mod tests {
         for frame in &frames {
             for (span, kind) in collect_pieces(
                 frame,
-                &layout,
-                &pack,
-                theme,
-                RenderScale::ONE,
-                (&sky(theme), 0.0),
-                std::time::UNIX_EPOCH,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale: RenderScale::ONE,
+                },
+                Moment {
+                    look: &sky(theme),
+                    altitude: 0.0,
+                    now: std::time::UNIX_EPOCH,
+                },
             ) {
                 let PieceKind::Character {
                     ref figure,
@@ -2978,12 +3025,17 @@ mod tests {
         };
         let list = build_list(
             frames.last().expect("a frame"),
-            &layout,
-            &pack,
-            theme,
-            scale,
-            (&sky(theme), 0.0),
-            std::time::UNIX_EPOCH,
+            Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            },
+            Moment {
+                look: &sky(theme),
+                altitude: 0.0,
+                now: std::time::UNIX_EPOCH,
+            },
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -3063,7 +3115,20 @@ mod tests {
         );
         paint_backdrop(&layout, theme, scale, pen, &mut buf);
         let mut order = Vec::new();
-        push_windows(&layout, &pack, (&look, theme, now), 0.0, scale, &mut order);
+        push_windows(
+            Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale,
+            },
+            Moment {
+                look: &look,
+                altitude: 0.0,
+                now,
+            },
+            &mut order,
+        );
         assert_eq!(
             order.len(),
             layout.window_bays().count(),
@@ -3186,12 +3251,17 @@ mod tests {
                 let scale = RenderScale::new(s).expect("nonzero");
                 for (span, kind) in collect_pieces(
                     frame,
-                    layout,
-                    pack,
-                    theme,
-                    scale,
-                    (&sky(theme), 0.0),
-                    std::time::UNIX_EPOCH,
+                    Office {
+                        layout,
+                        pack,
+                        theme,
+                        scale,
+                    },
+                    Moment {
+                        look: &sky(theme),
+                        altitude: 0.0,
+                        now: std::time::UNIX_EPOCH,
+                    },
                 ) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
@@ -3341,8 +3411,20 @@ S B B B B B B S
                 let scale = RenderScale::new(s).expect("nonzero");
                 let mut last: Option<(u64, u64)> = None;
                 for frame in &frames {
-                    let list =
-                        build_list(frame, &layout, &pack, theme, scale, (&sky(theme), 0.0), now);
+                    let list = build_list(
+                        frame,
+                        Office {
+                            layout: &layout,
+                            pack: &pack,
+                            theme,
+                            scale,
+                        },
+                        Moment {
+                            look: &sky(theme),
+                            altitude: 0.0,
+                            now,
+                        },
+                    );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
                     });
@@ -3449,12 +3531,17 @@ S B B B B B B S
                     let frame = varied(seated, edit);
                     let list = build_list(
                         &frame,
-                        &layout,
-                        &pack,
-                        theme,
-                        scale,
-                        (&sky(theme), 0.0),
-                        now,
+                        Office {
+                            layout: &layout,
+                            pack: &pack,
+                            theme,
+                            scale,
+                        },
+                        Moment {
+                            look: &sky(theme),
+                            altitude: 0.0,
+                            now,
+                        },
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -3567,21 +3654,31 @@ S B B B B B B S
         assert_eq!(
             summary(&build_list(
                 frame,
-                &layout,
-                &pack,
-                theme,
-                RenderScale::ONE,
-                (&sky(theme), 0.0),
-                now
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale: RenderScale::ONE
+                },
+                Moment {
+                    look: &sky(theme),
+                    altitude: 0.0,
+                    now
+                }
             )),
             summary(&build_list(
                 frame,
-                &layout,
-                &pack,
-                theme,
-                RenderScale::ONE,
-                (&sky(theme), 0.0),
-                now
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale: RenderScale::ONE
+                },
+                Moment {
+                    look: &sky(theme),
+                    altitude: 0.0,
+                    now
+                }
             )),
         );
     }
@@ -3595,12 +3692,17 @@ S B B B B B B S
         for frame in &frames {
             let list = build_list(
                 frame,
-                &layout,
-                &pack,
-                theme,
-                RenderScale::ONE,
-                (&sky(theme), 0.0),
-                std::time::SystemTime::UNIX_EPOCH,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale: RenderScale::ONE,
+                },
+                Moment {
+                    look: &sky(theme),
+                    altitude: 0.0,
+                    now: std::time::SystemTime::UNIX_EPOCH,
+                },
             );
             let pieces: Vec<&Piece> = list
                 .pieces()
@@ -4152,10 +4254,12 @@ S B B B B B B S
         let mut cache = crate::frame_cache::FrameCache::new();
         render_cutaway(
             frame,
-            layout,
-            pack,
-            theme,
-            scale,
+            Office {
+                layout,
+                pack,
+                theme,
+                scale,
+            },
             0.0,
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,

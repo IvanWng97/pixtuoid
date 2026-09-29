@@ -19,7 +19,7 @@ use image::{Rgb as ImgRgb, RgbImage};
 use pixtuoid_core::sprite::RgbBuffer;
 use pixtuoid_core::state::{ActivityState, SceneState, ToolKind};
 use pixtuoid_core::{AgentId, AgentSlot, GlobalDeskIndex};
-use pixtuoid_scene::cutaway::paint::render_cutaway;
+use pixtuoid_scene::cutaway::paint::{render_cutaway, Office};
 use pixtuoid_scene::floor::{FloorMeta, FloorSession, ObservedFloor};
 use pixtuoid_scene::layout::Size;
 use pixtuoid_scene::render_scale::RenderScale;
@@ -172,10 +172,12 @@ fn main() -> Result<()> {
     let mut cache = pixtuoid_scene::frame_cache::FrameCache::new();
     let labels = render_cutaway(
         &frame,
-        &layout,
-        &pack,
-        theme,
-        scale,
+        Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        },
         meta.altitude,
         now,
         &mut cache,
