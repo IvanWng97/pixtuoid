@@ -405,7 +405,7 @@ impl Pack {
 
     /// The piece of this pack's own that `name` redraws, if it ships one. Art
     /// that redraws another piece only comes along with that piece: over this
-    /// pack's own `desk`, the default's `desk@8x` or `desk_north` would draw the
+    /// pack's own `desk`, the default's `desk@4x` or `desk_north` would draw the
     /// default's desk wherever it is picked, so [`Pack::merge_from`] inherits
     /// nothing a piece of this pack's own answers for.
     fn own_redrawn_piece<'n>(&self, name: &'n str) -> Option<&'n str> {

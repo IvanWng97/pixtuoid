@@ -71,7 +71,7 @@ follows whatever color replaces `H`. `of` must name a key with an opaque color i
 `[palette]`, and a key is declared in one table, never both.
 
 A pack can also redraw an animation on a denser grid, registered as
-`<name>@<N>x` (`desk@8x` is `desk` drawn on an 8x grid). Each frame is exactly
+`<name>@<N>x` (`desk@4x` is `desk` drawn on a 4x grid). Each frame is exactly
 `N` times the size of the matching base frame, and the frame counts match;
 `validate-pack` reports a variant that breaks either rule, and it is never
 drawn. Every renderer pixtuoid ships today — the terminal office, the

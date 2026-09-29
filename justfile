@@ -803,7 +803,7 @@ site-e2e:
 gen: gen-art gen-icons gen-media gen-readme
 
 [group('gen')]
-[doc("Regenerate the bundled pack's generated sprites (all @8x art + the 1x pieces it owns) from scripts/gen-art.py")]
+[doc("Regenerate the bundled pack's generated sprites (all @4x art + the 1x pieces it owns) from scripts/gen-art.py")]
 gen-art:
     python3 scripts/gen-art.py crates/pixtuoid-scene/sprites/default
 
