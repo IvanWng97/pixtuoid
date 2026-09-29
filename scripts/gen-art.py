@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Author the bundled pack's generated sprite art: the cutaway profile's `@4x`
-pieces, and the classic profile's 1x pieces drawn from the same layout.
+"""Author the bundled pack's generated sprite art: the cutaway profile's `@Nx`
+pieces (N = `S`), and the classic profile's 1x pieces drawn from the same
+layout.
 
 Draws in PALETTE-KEY space, so the output is .sprite text and the recolor keys
 (H/B/S/P and their [ramps] shades) survive per-agent recoloring. The .sprite
@@ -14,12 +15,13 @@ drawn here (a write deletes those).
 
 It resolves no colour itself: the engine owns the palette and its ramps, so look
 at the result through the real renderer: `cargo run --release --example
-cutaway_snapshot -- <out.png> --scale 8` for the `@4x` art, `cargo run --release
---example snapshot -- --crop-furniture desk <out.png>` for the 1x desk.
+cutaway_snapshot -- <out.png>` for the `@Nx` art, `cargo run --release --example
+snapshot -- --crop-furniture desk <out.png>` for the 1x desk.
 """
 
 import argparse
 import difflib
+import inspect
 import math
 import pathlib
 import random
@@ -30,31 +32,27 @@ S = 4  # the cutaway art's density
 
 # ---- palette keys ---------------------------------------------------------
 # recolor bases and their shades (bases in [palette], shades in [ramps])
-HAIR, HAIR_SH, HAIR_LT, HAIR_HI, HAIR_OUT = "H", "h", "Y", "Z", "X"
+HAIR, HAIR_SH, HAIR_LT, HAIR_HI = "H", "h", "Y", "Z"
 SKIN, SKIN_SH, SKIN_DK = "S", "s", "i"
 SHIRT, SHIRT_SH, SHIRT_LT, SHIRT_OUT = "B", "v", "W", "U"
-PANTS, PANTS_SH, PANTS_LT, PANTS_OUT = "P", "p", "(", ")"
+PANTS, PANTS_SH, PANTS_LT = "P", "p", "("
 # fixed colours, named by role
-OUTLINE, WHITE, WHITE_SH, BRIGHT = "n", "&", "*", "w"
-EYE, MOUTH, BLUSH = "e", "m", "^"
+EYE = "e"
 SHOE, SHOE_HI = ";", ":"
 WOOD, WOOD_SH, WOOD_LT, WOOD_HI, WOOD_DK, POOL = "D", "d", "O", "σ", "ψ", "ω"
 BEZEL, SLATE, SHADOW = "M", "3", "4"
 # The desk monitor's screen: the cutaway relights these keys, so only desk art
 # draws them.
 GLASS, GLASS_TXT = "j", "J"
-# Any other screen's glass.
-DISPLAY, DISPLAY_SHEEN = "Ξ", "Ж"
 KEY_DK, KEYCAP, GREY = "k", "φ", "6"
 LAMP, LAMP_HI, BULB = "7", "Θ", "9"
 OFFWHITE, OFFWHITE_SH, PRINT = "¤", "!", "$"
 MUG, MUG_SH = "V", "%"
 CHAIR, CHAIR_RIM, CHAIR_BASE = "T", "I", "/"
-# A character's one outline round hair, face and clothes alike.
+# The @Nx art's one outline, round each piece's whole silhouette whatever its
+# material.
 SILHOUETTE = "κ"
 COFFEE = "ρ"
-INK, CYAN, RED, DARK_RED, ORANGE, BLUE, GOLD, TAN, BROWN = (
-    "q", "c", "r", "N", "o", "b", "y", "x", "z")
 T = "."
 
 
@@ -71,42 +69,6 @@ def rect(g, x0, y0, x1, y1, k):
     for y in range(max(0, y0), min(len(g), y1)):
         for x in range(max(0, x0), min(len(g[0]), x1)):
             g[y][x] = k
-
-
-def despeckle(g, keys):
-    """A pixel of `keys` with no 4-neighbour of its own key takes its most common
-    opaque neighbour: a lone highlight reads as noise."""
-    h, w = len(g), len(g[0])
-    fixes = []
-    for y in range(h):
-        for x in range(w):
-            k = g[y][x]
-            if k not in keys:
-                continue
-            nbrs = [g[y + dy][x + dx] for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
-                    if 0 <= x + dx < w and 0 <= y + dy < h]
-            if k in nbrs:
-                continue
-            opaque = [n for n in nbrs if n != T]
-            if opaque:
-                fixes.append((x, y, max(sorted(set(opaque)), key=opaque.count)))
-    for x, y, k in fixes:
-        g[y][x] = k
-
-
-def fill_pinholes(g):
-    """A transparent pixel walled in on all four sides is a hole in a solid."""
-    h, w = len(g), len(g[0])
-    fixes = []
-    for y in range(1, h - 1):
-        for x in range(1, w - 1):
-            if g[y][x] != T:
-                continue
-            nbrs = [g[y + dy][x + dx] for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))]
-            if T not in nbrs:
-                fixes.append((x, y, max(sorted(set(nbrs)), key=nbrs.count)))
-    for x, y, k in fixes:
-        g[y][x] = k
 
 
 def outline(g, inside, out):
@@ -146,12 +108,6 @@ DESK_ART_H = DESK_BEZEL_RAISE + DESK_SURFACE_ROWS + DESK_FRONT_ROWS + DESK_LEG_R
 # its desk over one floating clear of every head.
 DESK_NORTH_LIFT = 2
 DESK_LEG_W = 2
-# The desk top's grain: a seam between boards this many rows deep, and a few
-# short streaks inside the boards, sparse enough to read as wood, not stripes.
-DESK_BOARD_ROWS = 12
-DESK_STREAKS = 3
-# The drawer pedestal under the desk's east end.
-DESK_PEDESTAL_W = 16
 # The monitor box: its columns (half-open), and from the sprite's top the first
 # glass row and the chin row — casing above the glass, glass down to the chin —
 # where the classic painter's glow lands (`pixel_painter::effects`'s `SCREEN_*`).
@@ -224,29 +180,6 @@ def desk_north_1x():
     return g
 
 
-# ---- shared strokes ----------------------------------------------------------
-def capsule(g, pts, r, key, only_empty=False):
-    """Stroke a polyline of radius `r` — an arm or a leg."""
-    for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
-        steps = int(max(abs(x1 - x0), abs(y1 - y0)) * 2) + 1
-        for i in range(steps + 1):
-            t = i / steps
-            px, py = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t
-            for y in range(int(py - r) - 1, int(py + r) + 2):
-                for x in range(int(px - r) - 1, int(px + r) + 2):
-                    if (x + 0.5 - px) ** 2 + (y + 0.5 - py) ** 2 <= r * r:
-                        if not only_empty or (0 <= y < len(g) and 0 <= x < len(g[0]) and g[y][x] == T):
-                            put(g, x, y, key)
-
-
-# ---- furniture: plants, whiteboard, bookshelf, meeting sofa ------------------------
-LEAF, LEAF_SH, LEAF_HI, LEAF_DK = "l", "L", "Φ", "Ψ"
-POT, POT_SH, POT_HI, SOIL = "g", "Γ", "δ", "Σ"
-PETAL_R, PETAL_Y, PETAL_HI = RED, GOLD, "ζ"
-ALU, ALU_DK = "Π", "θ"
-FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM = "C", "G", "Λ", "Ω"
-
-
 # ---- the characters ----------------------------------------------------------
 # A chibi figure: a big head over a small body, one near-black line round the
 # whole silhouette. Every pose is a bald BODY, the face or the back of the head
@@ -254,14 +187,17 @@ FABRIC, FABRIC_HI, FABRIC_SH, FABRIC_SEAM = "C", "G", "Λ", "Ω"
 # the body, `over` on top. The union is outlined last, so no line runs between
 # hair and face.
 FIG_W = 8 * S
-FIG_CX = 15.5
+FIG_CX = (FIG_W - 1) / 2
+# Each pose's height in logical rows, the frame height its 1x base shares.
+STANDING_ROWS, TYPING_ROWS, SEATED_ROWS, COUCH_ROWS = 12, 11, 10, 9
 # Rows every standing and front- or back-view seated pose shares: the face
 # (the eyes and mouth hang off it) and the shoulders.
 FACE_TOP, FACE_BOTTOM, SHOULDER_Y = 12, 26, 26
 # A seated shirt ends on the seat, where the base's hand row starts; a
 # standing one on the belt.
 SEAT_Y, BELT_Y = 36, 38
-HAIR_KEYS = {HAIR, HAIR_SH, HAIR_LT, HAIR_HI}
+# Where a sleeve ends and a hanging hand begins.
+CUFF_Y = 34
 SKIN_KEYS = {SKIN, SKIN_SH}
 
 
@@ -270,18 +206,15 @@ def union_outline(g, k=SILHOUETTE):
     outline(g, {c for row in g for c in row} - {T, k}, k)
 
 
-def disc(g, cx, cy, r, k=HAIR):
-    for y in range(max(0, int(cy - r) - 1), min(len(g), int(cy + r) + 2)):
-        for x in range(1, len(g[0]) - 1):
-            if (x + 0.5 - cx) ** 2 + (y + 0.5 - cy) ** 2 <= r * r:
-                g[y][x] = k
-
-
 def ellipse(g, cx, cy, rx, ry, k=HAIR):
     for y in range(max(0, int(cy - ry) - 1), min(len(g), int(cy + ry) + 2)):
         for x in range(1, len(g[0]) - 1):
             if ((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1:
                 g[y][x] = k
+
+
+def disc(g, cx, cy, r, k=HAIR):
+    ellipse(g, cx, cy, r, r, k)
 
 
 def rim_light(g, strands=(), sparkle=(), lit_top=True):
@@ -301,6 +234,7 @@ def rim_light(g, strands=(), sparkle=(), lit_top=True):
     for x, y in sparkle:
         if (x, y) in mop:
             g[y][x] = HAIR_HI
+    return g
 
 
 def terminator(g, cx, cy, r, from_y=0):
@@ -314,7 +248,7 @@ def terminator(g, cx, cy, r, from_y=0):
 
 
 def comb(g, lines, dy=0):
-    """Comb lines in hair shade, the way the hair is drawn."""
+    """Comb lines in hair shade."""
     for pts in lines:
         for (x0, y0), (x1, y1) in zip(pts, pts[1:]):
             n = max(abs(x1 - x0), abs(y1 - y0))
@@ -343,20 +277,21 @@ def fringe_locks(g, locks, top, dy=0):
                     g[y][x] = HAIR
 
 
-def paste(dst, src):
-    for y in range(min(len(dst), len(src))):
-        for x in range(len(dst[0])):
-            if src[y][x] != T:
-                dst[y][x] = src[y][x]
+def paste(dst, src, dx=0, dy=0):
+    """`src`'s opaque pixels onto `dst`, moved `dx` columns and `dy` rows."""
+    for y in range(len(src)):
+        for x in range(len(src[0])):
+            if src[y][x] != T and 0 <= y + dy < len(dst) and 0 <= x + dx < len(dst[0]):
+                dst[y + dy][x + dx] = src[y][x]
 
 
 # ---- hairstyles ----------------------------------------------------------------
 # Each style draws four views on its own layer canvas, the tallest pose's rows
-# plus HAIR_HEADROOM above for a bun or a tuft: `front` and `side` as
+# plus HAIR_HEADROOM above for the hair rising over the head: `front` and `side` as
 # (behind, over) pairs, `back` and `crown` as one layer over the body. Every
 # coordinate below is on the pose grid; `o` shifts it onto the layer.
 HAIR_HEADROOM = 6
-LAYER_H = 12 * S + HAIR_HEADROOM
+LAYER_H = STANDING_ROWS * S + HAIR_HEADROOM
 o = HAIR_HEADROOM
 # The skull in profile, and the head seen from above as it lies on the arms.
 SIDE_CX, SIDE_CY = 14.0, 12.5
@@ -367,21 +302,16 @@ def layer():
     return canvas(FIG_W, LAYER_H)
 
 
-def lit(g, *a, **k):
-    rim_light(g, *a, **k)
-    return g
-
-
 def front_fringe(tips):
     f = layer()
     fringe(f, tips, FACE_TOP - 4, o)
-    return lit(f, lit_top=False)
+    return rim_light(f, lit_top=False)
 
 
 def side_locks(locks, top=8):
     f = layer()
     fringe_locks(f, locks, top, o)
-    return lit(f, lit_top=False)
+    return rim_light(f, lit_top=False)
 
 
 def crown_base(r_extra=0.0):
@@ -402,7 +332,7 @@ MOP_PUFFS = [(FIG_CX, 12.0, 10.8), (6.8, 6.0, 3.6), (10.6, 3.8, 3.4), (15.2, 2.9
 
 
 def style_mop():
-    """A round cloud of a mop (the reference's elder)."""
+    """A round cloud of a mop."""
     b = layer()
     for px, py, r in MOP_PUFFS:
         disc(b, px, py + o, r)
@@ -429,53 +359,65 @@ def style_mop():
             "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
 
 
-# Per-agent hairstyles, by the name a pack registers them under.
+# Hairstyles by name; every bundled character is baked in `BAKED_STYLE`.
 HAIRSTYLES = {"mop": style_mop}
 
 
 # ---- bodies ------------------------------------------------------------------------
 # Drawn on the pose grid, shifted down `dy` rows onto a dressing canvas.
-def mitt(g, x, y):
-    """A hand: a skin block, shaded along its foot, rounded at the bottom."""
+def mitt(g, x, y, wrist_west=False):
+    """A hand: a skin block, shaded along its foot, rounded at the bottom but
+    for a corner its wrist joins: rounded there, it leaves a notch against the
+    sleeve that the outline closes over a pinhole."""
     rect(g, x, y, x + S, y + S, SKIN)
     rect(g, x, y + S - 1, x + S, y + S, SKIN_SH)
-    g[y + S - 1][x] = T
+    if not wrist_west:
+        g[y + S - 1][x] = T
     g[y + S - 1][x + S - 1] = T
 
 
-def face_front(g, dy, ears):
+def ears_front(g, dy):
+    for x, inner in ((5, 6), (25, 25)):
+        rect(g, x, FACE_TOP + 5 + dy, x + 2, FACE_TOP + 9 + dy, SKIN)
+        rect(g, inner, FACE_TOP + 6 + dy, inner + 1, FACE_TOP + 8 + dy, SKIN_SH)
+
+
+def ears_back(g, dy):
+    for x in (5, 25):
+        rect(g, x, 17 + dy, x + 2, 21 + dy, SKIN)
+        rect(g, x + (1 if x < 16 else 0), 18 + dy, x + (2 if x < 16 else 1), 20 + dy, SKIN_SH)
+
+
+def ear_side(g, dy):
+    rect(g, 12, 16 + dy, 15, 20 + dy, SKIN)
+    rect(g, 13, 17 + dy, 14, 19 + dy, SKIN_SH)
+
+
+def face_front(g, dy):
     """The face: round, shaded east and along the chin, two tall eyes and a
-    small mouth; the ears where a style leaves them bare."""
+    small mouth."""
     for y in range(FACE_TOP - 2, FACE_BOTTOM):
         for x in range(7, 25):
             nx = (x + 0.5 - FIG_CX) / 9.0
             ny = max(0.0, (y + 0.5 - (FACE_TOP + 6)) / (FACE_BOTTOM - FACE_TOP - 6))
             if nx * nx + ny * ny <= 1.0:
                 g[y + dy][x] = SKIN_SH if (x >= 21 or y >= FACE_BOTTOM - 2) else SKIN
-    if ears:
-        for x, inner in ((5, 6), (25, 25)):
-            rect(g, x, FACE_TOP + 5 + dy, x + 2, FACE_TOP + 9 + dy, SKIN)
-            rect(g, inner, FACE_TOP + 6 + dy, inner + 1, FACE_TOP + 8 + dy, SKIN_SH)
     eye_y = FACE_TOP + 5 + dy
     rect(g, 11, eye_y, 13, eye_y + 4, EYE)
     rect(g, 19, eye_y, 21, eye_y + 4, EYE)
     rect(g, 15, FACE_BOTTOM - 4 + dy, 17, FACE_BOTTOM - 3 + dy, SKIN_DK)
 
 
-def nape(g, dy, ears):
-    """The back of the head under the hair: its round, the neck, the ears."""
+def nape(g, dy):
+    """The back of the head under the hair: its round and the neck."""
     ellipse(g, FIG_CX, 17.0 + dy, 9.0, 8.6, SKIN_SH)
     rect(g, 12, 23 + dy, 20, 27 + dy, SKIN_DK)
     rect(g, 13, 23 + dy, 19, 26 + dy, SKIN_SH)
-    if ears:
-        for x in (5, 25):
-            rect(g, x, 17 + dy, x + 2, 21 + dy, SKIN)
-            rect(g, x + (1 if x < 16 else 0), 18 + dy, x + (2 if x < 16 else 1), 20 + dy, SKIN_SH)
 
 
-def side_face(g, dy, ears):
+def side_face(g, dy):
     """The profile, facing east: brow, a nose bump, the mouth, a chin rounding
-    back to the jaw, one eye; the ear mid-head."""
+    back to the jaw, one eye."""
     rows = {10: (15, 24), 11: (14, 25), 12: (13, 25), 13: (13, 25), 14: (13, 25), 15: (13, 26),
             16: (13, 27), 17: (13, 27), 18: (13, 26), 19: (13, 25), 20: (13, 25), 21: (13, 25),
             22: (14, 25), 23: (15, 24), 24: (16, 23), 25: (17, 21)}
@@ -485,29 +427,31 @@ def side_face(g, dy, ears):
     rect(g, 21, 15 + dy, 23, 19 + dy, EYE)
     rect(g, 23, 22 + dy, 25, 23 + dy, SKIN_DK)
     rect(g, 13, 24 + dy, 19, 28 + dy, SKIN_DK)  # the neck
-    if ears:
-        rect(g, 12, 16 + dy, 15, 20 + dy, SKIN)
-        rect(g, 13, 17 + dy, 14, 19 + dy, SKIN_SH)
+
+
+def neck_shadow(g, dy):
+    """The neck's shadow above the collar, where the shoulders begin."""
+    rect(g, 12, SHOULDER_Y + dy, 20, SHOULDER_Y + 1 + dy, SKIN_DK)
 
 
 def shirt(g, dy, bottom, back=False, sleeves=True):
     """The shirt from the shoulders to `bottom`, lit on the west, with sleeves
-    hanging at the sides; the collar in the chin's shadow, or, from behind, a
-    fold at the foot of the back."""
+    hanging at the sides; the neck's shadow above the collar, and the collar's
+    V in front or a fold at the foot of the back."""
     rect(g, 9, SHOULDER_Y + dy, 23, SHOULDER_Y + 1 + dy, SHIRT)
     rect(g, 6, SHOULDER_Y + 1 + dy, 26, bottom + dy, SHIRT)
     rect(g, 20, SHOULDER_Y + 1 + dy, 26, bottom + dy, SHIRT_SH)
     rect(g, 6, SHOULDER_Y + 1 + dy, 7, bottom + dy, SHIRT_LT)
     if sleeves:
-        rect(g, 5, SHOULDER_Y + 2 + dy, 27, 34 + dy, SHIRT)
-        rect(g, 22, SHOULDER_Y + 2 + dy, 27, 34 + dy, SHIRT_SH)
-        rect(g, 5, SHOULDER_Y + 2 + dy, 6, 34 + dy, SHIRT_LT)
+        rect(g, 5, SHOULDER_Y + 2 + dy, 27, CUFF_Y + dy, SHIRT)
+        rect(g, 22, SHOULDER_Y + 2 + dy, 27, CUFF_Y + dy, SHIRT_SH)
+        rect(g, 5, SHOULDER_Y + 2 + dy, 6, CUFF_Y + dy, SHIRT_LT)
         rect(g, 8, SHOULDER_Y + 3 + dy, 9, bottom + dy, SHIRT_SH)
         rect(g, 23, SHOULDER_Y + 3 + dy, 24, bottom + dy, SHIRT_OUT)
+    neck_shadow(g, dy)
     if back:
         rect(g, 15, bottom - 5 + dy, 17, bottom + dy, SHIRT_SH)
     else:
-        rect(g, 12, SHOULDER_Y + dy, 20, SHOULDER_Y + 1 + dy, SKIN_DK)
         rect(g, 13, SHOULDER_Y + 1 + dy, 19, SHOULDER_Y + 2 + dy, SKIN_DK)
 
 
@@ -527,13 +471,29 @@ def hands_typing(frame):
     return draw
 
 
+def elbows_typing(frame):
+    """Typing seen from behind, where the chair back and its arm pads hide the
+    hands: the reaching arm's elbow juts out past the chair, swapping sides
+    each frame as the hands do."""
+    hands = hands_typing(frame)
+
+    def draw(g, dy):
+        hands(g, dy)
+        west = frame == 0
+        x0 = 2 if west else FIG_W - 5
+        rect(g, x0, SHOULDER_Y + 3 + dy, x0 + 3, CUFF_Y + dy, SHIRT if west else SHIRT_SH)
+        if west:
+            rect(g, x0, SHOULDER_Y + 3 + dy, x0 + 1, CUFF_Y + dy, SHIRT_LT)
+    return draw
+
+
 def legs(g, dy, stride, view):
     """Hips, two legs and shoes: the stepping foot reaches the canvas foot a
     little outward, the other lifts its heel."""
     rect(g, 8, BELT_Y + dy, 24, BELT_Y + 2 + dy, PANTS)
     for side, x0 in ((-1, 8), (1, 17)):
         out = stride == side
-        foot = 12 * S - (2 if stride != 0 and not out else 0)
+        foot = STANDING_ROWS * S - (2 if stride != 0 and not out else 0)
         dx = side if out else 0
         rect(g, x0 + dx, BELT_Y + 2 + dy, x0 + 7 + dx, foot - 3 + dy, PANTS)
         rect(g, x0 + 5 + dx, BELT_Y + dy, x0 + 7 + dx, foot - 3 + dy, PANTS_SH)
@@ -547,11 +507,11 @@ def arms_hanging(g, dy, stride):
     forward hand hangs lower."""
     for side, x0 in ((-1, 4), (1, 24)):
         drop = 0 if stride == 0 else (2 if side != stride else -1)
-        rect(g, x0 + (1 if side < 0 else 0), SHOULDER_Y + 2 + dy, x0 + (4 if side < 0 else 3), 34 + drop + dy,
+        rect(g, x0 + (1 if side < 0 else 0), SHOULDER_Y + 2 + dy, x0 + (4 if side < 0 else 3), CUFF_Y + drop + dy,
              SHIRT if side < 0 else SHIRT_SH)
         if side < 0:
-            rect(g, x0 + 1, SHOULDER_Y + 2 + dy, x0 + 2, 34 + drop + dy, SHIRT_LT)
-        mitt(g, x0, 34 + drop + dy)
+            rect(g, x0 + 1, SHOULDER_Y + 2 + dy, x0 + 2, CUFF_Y + drop + dy, SHIRT_LT)
+        mitt(g, x0, CUFF_Y + drop + dy)
 
 
 def mug(g, x, y):
@@ -577,9 +537,9 @@ def arms_mug_both(g, dy, stride):
 
 def arms_mug_east(g, dy, stride):
     drop = 2 if stride == 1 else -1
-    rect(g, 5, SHOULDER_Y + 2 + dy, 8, 34 + drop + dy, SHIRT)
-    rect(g, 5, SHOULDER_Y + 2 + dy, 6, 34 + drop + dy, SHIRT_LT)
-    mitt(g, 4, 34 + drop + dy)
+    rect(g, 5, SHOULDER_Y + 2 + dy, 8, CUFF_Y + drop + dy, SHIRT)
+    rect(g, 5, SHOULDER_Y + 2 + dy, 6, CUFF_Y + drop + dy, SHIRT_LT)
+    mitt(g, 4, CUFF_Y + drop + dy)
     rect(g, 24, SHOULDER_Y + 2 + dy, 27, 32 + dy, SHIRT_SH)
     rect(g, 21, 29 + dy, 26, 33 + dy, SHIRT_SH)
     mug(g, 16, 27 + dy)
@@ -590,24 +550,25 @@ def side_body(g, dy):
     """Seated in profile: a narrow torso, the near arm reaching forward, the lap
     to the knee."""
     rect(g, 9, 27 + dy, 22, SEAT_Y + dy, SHIRT)
+    rect(g, 13, 27 + dy, 19, 28 + dy, SKIN_DK)  # the neck above the collar
     rect(g, 9, 27 + dy, 11, SEAT_Y + dy, SHIRT_LT)
     rect(g, 19, 28 + dy, 22, SEAT_Y + dy, SHIRT_SH)
     rect(g, 12, 28 + dy, 17, 32 + dy, SHIRT_SH)
     rect(g, 16, 30 + dy, 24, 34 + dy, SHIRT)
     rect(g, 16, 33 + dy, 24, 34 + dy, SHIRT_SH)
-    mitt(g, 24, 30 + dy)
-    rect(g, 9, SEAT_Y + dy, 28, 10 * S + dy, PANTS)
+    mitt(g, 24, 30 + dy, wrist_west=True)
+    rect(g, 9, SEAT_Y + dy, 28, SEATED_ROWS * S + dy, PANTS)
     rect(g, 9, SEAT_Y + dy, 28, SEAT_Y + 1 + dy, PANTS_LT)
-    rect(g, 25, SEAT_Y + 1 + dy, 28, 10 * S + dy, PANTS_SH)
+    rect(g, 25, SEAT_Y + 1 + dy, 28, SEATED_ROWS * S + dy, PANTS_SH)
 
 
 def asleep_body(g, dy, lean):
     """Face down on folded arms: shoulders rising behind the head, forearms
     crossed under it on the desk, hands tucked at the elbows, the torso behind
     the arms, the thighs at the chair's edge."""
-    rect(g, 4 + lean, 12 + dy, 28 + lean, 26 + dy, SHIRT)
-    rect(g, 22 + lean, 12 + dy, 28 + lean, 26 + dy, SHIRT_SH)
-    rect(g, 4 + lean, 12 + dy, 6 + lean, 26 + dy, SHIRT_LT)
+    rect(g, 4 + lean, 18 + dy, 28 + lean, 26 + dy, SHIRT)
+    rect(g, 22 + lean, 18 + dy, 28 + lean, 26 + dy, SHIRT_SH)
+    rect(g, 4 + lean, 18 + dy, 6 + lean, 26 + dy, SHIRT_LT)
     rect(g, 1, 23 + dy, 10, 31 + dy, SHIRT)
     rect(g, 22, 23 + dy, 31, 31 + dy, SHIRT_SH)
     rect(g, 1, 23 + dy, 10, 24 + dy, SHIRT_LT)
@@ -623,8 +584,6 @@ def asleep_body(g, dy, lean):
 
 
 # ---- poses -------------------------------------------------------------------------
-# name: (height in logical rows, view, body). A `crown` pose's body also takes
-# where its head lies: the crown layer is drawn there instead of at rest.
 def seated_front(hands):
     return lambda g, dy: (shirt(g, dy, SEAT_Y), hands(g, dy))
 
@@ -640,56 +599,58 @@ def standing_body(stride, view, arms=arms_hanging):
 
 def couch_back(g, dy):
     rect(g, 9, SHOULDER_Y + dy, 23, SHOULDER_Y + 1 + dy, SHIRT)
-    rect(g, 5, SHOULDER_Y + 1 + dy, 27, 9 * S + dy, SHIRT)
-    rect(g, 21, SHOULDER_Y + 1 + dy, 27, 9 * S + dy, SHIRT_SH)
-    rect(g, 5, SHOULDER_Y + 1 + dy, 7, 9 * S + dy, SHIRT_LT)
+    rect(g, 5, SHOULDER_Y + 1 + dy, 27, COUCH_ROWS * S + dy, SHIRT)
+    rect(g, 21, SHOULDER_Y + 1 + dy, 27, COUCH_ROWS * S + dy, SHIRT_SH)
+    rect(g, 5, SHOULDER_Y + 1 + dy, 7, COUCH_ROWS * S + dy, SHIRT_LT)
+    neck_shadow(g, dy)
 
 
+# name: (height in logical rows, view, body, the sprite's header).
 POSES = {
-    "seated": (10, "front", seated_front(hands_level)),
-    "typing_0": (11, "front", seated_front(hands_typing(0))),
-    "typing_1": (11, "front", seated_front(hands_typing(1))),
-    "seated_back": (10, "back", seated_rear(hands_level)),
-    "typing_back_0": (11, "back", seated_rear(hands_typing(0))),
-    "typing_back_1": (11, "back", seated_rear(hands_typing(1))),
-    "back_couch": (9, "back", couch_back),
-    "standing": (12, "front", standing_body(0, "front")),
-    "walking_0": (12, "front", standing_body(-1, "front")),
-    "walking_1": (12, "front", standing_body(1, "front")),
-    "walking_back_0": (12, "back", standing_body(-1, "back")),
-    "walking_back_1": (12, "back", standing_body(1, "back")),
-    "holding_coffee": (12, "front", standing_body(0, "front", arms_mug_both)),
-    "walking_coffee_0": (12, "front", standing_body(-1, "front", arms_mug_east)),
-    "walking_coffee_1": (12, "front", standing_body(1, "front", arms_mug_east)),
-    "side_seated": (10, "side", lambda g, dy: side_body(g, dy)),
-    "seated_sleeping": (10, "crown", lambda g, dy: asleep_body(g, dy, 0)),
-    "seated_sleeping_alt": (10, "crown", lambda g, dy: asleep_body(g, dy, 3)),
-}
-CHARACTER_HEADERS = {
-    "seated": "Front view at rest, both hands level.",
-    "typing_0": "Front view, typing, frame 0: the west hand level, the east pressing.",
-    "typing_1": "Front view, typing, frame 1: the hands swap.",
-    "seated_back": "Back view at rest, both hands level.",
-    "typing_back_0": "Back view, typing, frame 0.",
-    "typing_back_1": "Back view, typing, frame 1.",
-    "back_couch": "On the couch, facing the windows: shoulders square over the seat back.",
-    "standing": "Standing: arms at the sides.",
-    "walking_0": "Walking, frame 0: the west foot out.",
-    "walking_1": "Walking, frame 1: the east foot out.",
-    "walking_back_0": "Walking away, frame 0.",
-    "walking_back_1": "Walking away, frame 1.",
-    "holding_coffee": "Standing with a steaming mug in both hands.",
-    "walking_coffee_0": "Walking with a mug, frame 0.",
-    "walking_coffee_1": "Walking with a mug, frame 1.",
-    "side_seated": "Seated in profile, facing east, one arm reaching forward.",
-    "seated_sleeping": "Asleep face-down on folded arms.",
-    "seated_sleeping_alt": "Dozed off, slumped east.",
+    "seated": (SEATED_ROWS, "front", seated_front(hands_level),
+        "Front view at rest, both hands level."),
+    "typing_0": (TYPING_ROWS, "front", seated_front(hands_typing(0)),
+        "Front view, typing, frame 0: the west hand level, the east pressing."),
+    "typing_1": (TYPING_ROWS, "front", seated_front(hands_typing(1)),
+        "Front view, typing, frame 1: the hands swap."),
+    "seated_back": (SEATED_ROWS, "back", seated_rear(hands_level),
+        "Back view at rest, both hands level."),
+    "typing_back_0": (TYPING_ROWS, "back", seated_rear(elbows_typing(0)),
+        "Back view, typing, frame 0."),
+    "typing_back_1": (TYPING_ROWS, "back", seated_rear(elbows_typing(1)),
+        "Back view, typing, frame 1."),
+    "back_couch": (COUCH_ROWS, "back", couch_back,
+        "On the couch, facing the windows: shoulders square over the seat back."),
+    "standing": (STANDING_ROWS, "front", standing_body(0, "front"),
+        "Standing: arms at the sides."),
+    "walking_0": (STANDING_ROWS, "front", standing_body(-1, "front"),
+        "Walking, frame 0: the west foot out."),
+    "walking_1": (STANDING_ROWS, "front", standing_body(1, "front"),
+        "Walking, frame 1: the east foot out."),
+    "walking_back_0": (STANDING_ROWS, "back", standing_body(-1, "back"),
+        "Walking away, frame 0."),
+    "walking_back_1": (STANDING_ROWS, "back", standing_body(1, "back"),
+        "Walking away, frame 1."),
+    "holding_coffee": (STANDING_ROWS, "front", standing_body(0, "front", arms_mug_both),
+        "Standing with a steaming mug in both hands."),
+    "walking_coffee_0": (STANDING_ROWS, "front", standing_body(-1, "front", arms_mug_east),
+        "Walking with a mug, frame 0."),
+    "walking_coffee_1": (STANDING_ROWS, "front", standing_body(1, "front", arms_mug_east),
+        "Walking with a mug, frame 1."),
+    "side_seated": (SEATED_ROWS, "side", lambda g, dy: side_body(g, dy),
+        "Seated in profile, facing east, one arm reaching forward."),
+    "seated_sleeping": (SEATED_ROWS, "crown", lambda g, dy: asleep_body(g, dy, 0),
+        "Asleep face-down on folded arms."),
+    "seated_sleeping_alt": (SEATED_ROWS, "crown", lambda g, dy: asleep_body(g, dy, 3),
+        "Dozed off, slumped east."),
 }
 # The hairstyle every baked character wears until the renderer dresses each
 # agent in its own.
 BAKED_STYLE = "mop"
+# The ears a style leaves bare, per view.
+EARS = {"front": ears_front, "back": ears_back, "side": ear_side}
 # Where a face-down head lies, as an offset from the crown's rest.
-CROWN_SHIFT = {"seated_sleeping": (0, 0), "seated_sleeping_alt": (4, 1)}
+CROWN_SHIFT = {"seated_sleeping": (0, 0), "seated_sleeping_alt": (1, 1)}
 
 
 def shade_by_skin(g):
@@ -702,19 +663,10 @@ def shade_by_skin(g):
                 g[y][x] = HAIR_SH
 
 
-def shifted(layer_, dx, dy_):
-    out = layer()
-    for y in range(LAYER_H):
-        for x in range(FIG_W):
-            if layer_[y][x] != T and 0 <= y + dy_ < LAYER_H and 0 <= x + dx < FIG_W:
-                out[y + dy_][x + dx] = layer_[y][x]
-    return out
-
-
 def dressed(pose, style):
     """`pose` dressed in `style`, the hair's headroom cut off: the frame the
     bundled pack bakes until the renderer composes hair itself."""
-    rows, view, body = POSES[pose]
+    rows, view, body, _ = POSES[pose]
     look = HAIRSTYLES[style]()
     h = rows * S
     g = canvas(FIG_W, h + o)
@@ -722,18 +674,20 @@ def dressed(pose, style):
         behind, over = look[view]
     else:
         behind, over = None, look[view]
-    if view == "crown":
-        over = shifted(over, *CROWN_SHIFT[pose])
     if behind is not None:
-        paste(g, behind[:h + o])
-    body(g, o)
+        paste(g, behind)
+    # The head, then the body in front of it: a collar over the neck, a raised
+    # mug and its steam over the chin.
     if view == "front":
-        face_front(g, o, look["ears"])
+        face_front(g, o)
     elif view == "back":
-        nape(g, o, look["ears"])
+        nape(g, o)
     elif view == "side":
-        side_face(g, o, look["ears"])
-    paste(g, over[:h + o])
+        side_face(g, o)
+    if look["ears"] and view in EARS:
+        EARS[view](g, o)
+    body(g, o)
+    paste(g, over, *CROWN_SHIFT.get(pose, (0, 0)))
     shade_by_skin(g)
     for y in range(o + 1):  # the headroom, and the outline's row at the top
         g[y] = [T] * FIG_W
@@ -767,6 +721,16 @@ def desk_chair():
 
 
 # ---- the desks ---------------------------------------------------------------
+# The @Nx desk's own detail, in art pixels: the 1x desk has none of it.
+#
+# The top's grain: a seam between boards this many rows deep, and a few short
+# streaks inside the boards, sparse enough to read as wood, not stripes.
+DESK_BOARD_ROWS = 12
+DESK_STREAKS = 3
+# The drawer pedestal under the east end, and the one slim leg west of the open
+# floor: a leg as wide as the 1x desk's would read as a second pedestal.
+DESK_PEDESTAL_W = 16
+DESK_WEST_LEG_W = 4
 
 
 def desk_wood(lift, seed):
@@ -800,7 +764,7 @@ def desk_wood(lift, seed):
     rect(g, ped + 1, mid, x1, mid + 1, WOOD_DK)  # between the drawers
     for y0 in (ly + 1, mid + 1):  # a pull on each drawer
         rect(g, ped + 5, y0 + 2, ped + 9, y0 + 3, GREY)
-    rect(g, x0, gy, x0 + DESK_LEG_W * 2, h - 1, WOOD_DK)  # the west leg
+    rect(g, x0, gy, x0 + DESK_WEST_LEG_W, h - 1, WOOD_DK)
     rect(g, x0, gy, x0 + 1, h - 1, WOOD_SH)
     return g, (w, h, ty, ly, gy)
 
@@ -906,12 +870,25 @@ def desk_north():
 
 
 # ---- output -----------------------------------------------------------------
+def outline_flaws(g):
+    """Where `g`'s one outline breaks: an opaque pixel other than the outline
+    on the frame's west or east edge, where the line has no column left to run
+    in, and a transparent pixel walled in on all four sides, a pinhole the eye
+    reads as a flaw."""
+    h, w = len(g), len(g[0])
+    flaws = [(x, y) for y in range(h) for x in (0, w - 1) if g[y][x] not in (T, SILHOUETTE)]
+    flaws += [(x, y) for y in range(1, h - 1) for x in range(1, w - 1)
+              if g[y][x] == T and T not in (g[y - 1][x], g[y + 1][x], g[y][x - 1], g[y][x + 1])]
+    return flaws
+
+
+
 PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file."
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
 def render_sprite(header, frames):
-    text = header.strip("\n") + "\n" + PROVENANCE
+    text = inspect.cleandoc(header) + "\n" + PROVENANCE
     lines = [f"# {l}" if l else "#" for l in text.split("\n")]
     body = []
     for i, g in enumerate(frames):
@@ -975,6 +952,10 @@ def selftest(sprites):
         assert check(pack, sprites) is None, "a write must delete the orphan"
         (pack / "hand.sprite").write_text(f"# copied from {first}: {PROVENANCE}\n@frame 0\n.\n", encoding=ENCODING)
         assert check(pack, sprites) is None, "hand art quoting the provenance is not an orphan"
+    whole = [[T, SILHOUETTE, T], [SILHOUETTE, T, SILHOUETTE], [T, SILHOUETTE, T]]
+    assert outline_flaws(whole) == [(1, 1)], "a pinhole must fail"
+    assert outline_flaws([[HAIR, T], [T, T]]) == [(0, 0)], "hair on the edge must fail"
+    assert outline_flaws([[SILHOUETTE, T], [T, T]]) == [], "the line on the edge is whole"
     print(f"gen-art --selftest: OK ({len(sprites)} sprites)")
 
 
@@ -990,15 +971,19 @@ def main():
     if args.pack is not None and not args.pack.is_dir():
         parser.error(f"not a directory: {args.pack}")
     pieces = {
-        **{pose: (CHARACTER_HEADERS[pose], [dressed(pose, BAKED_STYLE)]) for pose in POSES},
-        "desk_chair": ("The task chair from behind: a padded back, arm pads, a five-star base on\ncasters.", [desk_chair()]),
-        "desk": ("The viewer-facing desk: the monitor turns its BACK to us (casing, vents,\nbadge), a lamp west, papers and a mug east.", [desk_south()]),
-        "desk_north": ("The back-turned desk: the raised monitor's glass, a keyboard band, a\nlamp east, papers and a mug west.", [desk_north()]),
+        **{pose: (POSES[pose][3], [dressed(pose, BAKED_STYLE)]) for pose in POSES},
+        "desk_chair": (desk_chair.__doc__, [desk_chair()]),
+        "desk": (desk_south.__doc__, [desk_south()]),
+        "desk_north": (desk_north.__doc__, [desk_north()]),
     }
     classic = {
-        "desk": ("The viewer-facing desk: the monitor's back on its stand, the wood lit\nalong its back edge and front lip.", [desk_south_1x()]),
-        "desk_north": ("The back-turned desk: its raised monitor outlined in grey, dim text on\nthe glass, a keyboard a row clear of the stand.", [desk_north_1x()]),
+        "desk": (desk_south_1x.__doc__, [desk_south_1x()]),
+        "desk_north": (desk_north_1x.__doc__, [desk_north_1x()]),
     }
+    for base, (_, frames) in pieces.items():
+        for i, g in enumerate(frames):
+            if flaws := outline_flaws(g):
+                sys.exit(f"gen-art: {base}@{S}x frame {i} breaks its outline at {flaws[:8]}")
     sprites = {
         f"{base}@{S}x.sprite": render_sprite(header, frames)
         for base, (header, frames) in pieces.items()

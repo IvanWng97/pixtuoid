@@ -48,8 +48,6 @@ version = "1"
 "I" = "#67676b"   # desk task-chair lit top edge (a flat shell reads as a hole in the floor)
 # --- the generator's materials (scripts/gen-art.py): every @Nx piece and the
 # 1x pieces it owns
-"&" = "#e2e8f0"   # white
-"*" = "#aab2c4"   # white, shaded
 "O" = "#b07a42"   # wood, lit
 "σ" = "#c89058"   # wood, brightest edge
 "ψ" = "#3e2710"   # wood, darkest
@@ -60,33 +58,16 @@ version = "1"
 "6" = "#626470"   # mid grey
 "7" = "#2e3038"   # desk lamp body
 "Θ" = "#5c606c"   # desk lamp, lit edge
-"9" = "#ffe6a0"   # warm light: a bulb or a lit glyph
+"9" = "#ffe6a0"   # warm light: a lamp's bulb
 "!" = "#b8b2a4"   # off-white, shaded
-"$" = "#969288"   # print: lines on paper, grain
+"$" = "#969288"   # print: lines on paper
 "%" = "#968c78"   # mug, shaded side
 "/" = "#1e1f25"   # task-chair seat edge and base
-"^" = "#e89a8a"   # cheek blush
-"κ" = "#16121a"   # a character's outline: one near-black line round hair, face and clothes
+"κ" = "#16121a"   # the @Nx art's outline: one near-black line round each piece's whole silhouette (the 1x art outlines in n)
 "ρ" = "#4a2c18"   # coffee in a mug
 "¤" = "#d2d4d8"   # off-white: a night office has no pure white
 ";" = "#2a2226"   # shoe leather
 ":" = "#4a3e40"   # shoe, lit toe
-"Φ" = "#76b85c"   # leaf, lit
-"Ψ" = "#1f4a1a"   # leaf midrib / darkest
-"Γ" = "#8f4f33"   # terracotta pot, shaded
-"δ" = "#de946c"   # terracotta pot, lit rim
-"Σ" = "#3a2618"   # potting soil
-"ζ" = "#ff9f8a"   # petal highlight
-"Π" = "#a4aab4"   # aluminium frame
-"θ" = "#5e646e"   # aluminium, shaded
-"Λ" = "#3a5058"   # sofa fabric, shaded
-"Ω" = "#2a3a40"   # sofa seam and tufting
-"λ" = "#5a8a4e"   # book spine, green
-"Δ" = "#b8895a"   # cork
-"π" = "#8a6440"   # cork grain
-"ξ" = "#7c7c86"   # steel, shaded
-"Ξ" = "#1c2a36"   # a display's dark glass (slides, TVs)
-"Ж" = "#34424e"   # a display's sheen or dim content
 
 # Shades of a recolor key, derived from it: `level` steps along the key's ramp
 # (`Rgb::ramp`). They carry no colour of their own, so a per-agent recolor
@@ -95,20 +76,19 @@ version = "1"
 "h" = { of = "H", level = -2 }   # hair, turned from the light
 "Y" = { of = "H", level = 2 }    # hair, catching the light
 "Z" = { of = "H", level = 5 }    # hair, curl highlight
-"X" = { of = "H", level = -4 }   # hair outline
 "s" = { of = "S", level = -1 }   # skin, shaded
-"i" = { of = "S", level = -3 }   # skin, deep shade under the hair
+"i" = { of = "S", level = -3 }   # skin, deepest shade: the neck, the mouth, the collar
 "v" = { of = "B", level = -2 }   # shirt, shaded
 "W" = { of = "B", level = 2 }    # shirt, lit shoulder
-"U" = { of = "B", level = -5 }   # shirt outline
+"U" = { of = "B", level = -5 }   # shirt, deepest shade: a sleeve's crease
 "p" = { of = "P", level = -2 }   # pants, shaded
 "(" = { of = "P", level = 2 }    # pants, lit thigh
-")" = { of = "P", level = -4 }   # pants outline
 
 [animations.seated]
 frames   = ["seated.sprite"]
 frame_ms = 600
 
+# Density variants (`@Nx`): docs/CONFIGURATION.md#custom-sprite-packs.
 [animations."seated@4x"]
 frames   = ["seated@4x.sprite"]
 frame_ms = 600
@@ -165,13 +145,12 @@ frame_ms = 220
 frames   = ["walking_coffee_0.sprite", "walking_coffee_1.sprite"]
 frame_ms = 220
 
-# BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
-# still `seated_back`.
-
 [animations."walking_coffee@4x"]
 frames   = ["walking_coffee_0@4x.sprite", "walking_coffee_1@4x.sprite"]
 frame_ms = 220
 
+# BACK view of the typing pose. OPTIONAL: a pack without it falls back to the
+# still `seated_back`.
 [animations.typing_back]
 frames   = ["typing_back_0.sprite", "typing_back_1.sprite"]
 frame_ms = 220
@@ -184,10 +163,6 @@ frame_ms = 220
 frames   = ["desk.sprite"]
 frame_ms = 600
 
-# The cutaway's desk, drawn at 4x. A density variant is OPTIONAL: a pack
-# without it draws the upscaled `desk`. The `@4x` is a CLAIM validate-pack
-# proves against `desk`'s own size, and a renderer uses it only at a scale 4
-# divides.
 [animations."desk@4x"]
 frames   = ["desk@4x.sprite"]
 frame_ms = 600
@@ -354,4 +329,3 @@ frame_ms = 600
 [animations."holding_coffee@4x"]
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
-
