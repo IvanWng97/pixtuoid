@@ -29,21 +29,10 @@ use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, WHITE};
 
 use crate::atmosphere::Look;
-use crate::layout::{Layout, ELEVATOR_W};
+use crate::layout::{wall_trim_row, window_rows, Layout, WindowBay, WINDOW_W};
 use crate::sky::{Sky, Weather};
 use crate::theme::Theme;
 
-/// Floor-to-ceiling window width + inter-pane gap. [`window_columns`] owns the
-/// tiling LAW (start / stride / edge-margin / door-skip) both the spill pass and
-/// the floor pass ride, so the pane x-positions can't drift between them.
-const WINDOW_W: u16 = 22;
-const WINDOW_GAP: u16 = 3;
-/// Left edge of the first window — the ONE start [`window_columns`] begins at,
-/// and the source `celestial::FIRST_WINDOW_X` derives its f32 form from.
-const FIRST_WINDOW_X: u16 = 3;
-/// The tiling stops when the next pane wouldn't leave this many px before the
-/// right buffer edge (`x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w`).
-const WINDOW_EDGE_MARGIN: u16 = 2;
 /// Vertical depth of the warm spill band below each window.
 const SPILL_DEPTH: u16 = 12;
 
@@ -63,53 +52,15 @@ pub(super) fn paint_lightning_flash(buf: &mut RgbBuffer, sky: &Sky) {
     }
 }
 
-/// One PAINTED floor-to-ceiling window: its left edge, its centre column, and
-/// its ABSOLUTE position `idx` (counted across the whole wall — door-skipped
-/// panes still advance it, so a pane after the elevator keeps its true index).
-#[derive(Clone, Copy)]
-pub(super) struct WindowColumn {
-    pub x_left: u16,
-    pub center_x: u16,
-    pub idx: u16,
-}
-
-/// THE window-tiling law, single-sourced: panes start at [`FIRST_WINDOW_X`],
-/// stride `WINDOW_W + WINDOW_GAP`, and stop once the next pane wouldn't clear
-/// [`WINDOW_EDGE_MARGIN`] before `buf_w`. Yields only panes whose x-range does
-/// NOT overlap `skip` (the elevator-door range `(dx0, dx1)`) — but `idx` still
-/// counts the skipped ones, so the floor pass's per-window index is stable.
-pub(super) fn window_columns(
-    buf_w: u16,
-    skip: Option<(u16, u16)>,
-) -> impl Iterator<Item = WindowColumn> {
-    let mut x = FIRST_WINDOW_X;
-    let mut idx: u16 = 0;
-    std::iter::from_fn(move || {
-        while x + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w {
-            let (this_x, this_idx) = (x, idx);
-            x += WINDOW_W + WINDOW_GAP;
-            idx += 1;
-            if !skip.is_some_and(|(dx0, dx1)| this_x < dx1 && this_x + WINDOW_W > dx0) {
-                return Some(WindowColumn {
-                    x_left: this_x,
-                    center_x: this_x + WINDOW_W / 2,
-                    idx: this_idx,
-                });
-            }
-        }
-        None
-    })
-}
-
-/// Returns one `SunbeamColumn` per PAINTED floor-to-ceiling window, centred on
-/// the window and starting at the floor row. Rides [`window_columns`] so the
-/// motes drift through the same warm spill the floor pass paints.
+/// Returns one `SunbeamColumn` per painted window, centred on the pane and
+/// starting at the floor row, so the motes drift through the same warm spill
+/// the floor pass paints.
 pub(in crate::pixel_painter) fn window_spill_columns(layout: &Layout) -> Vec<SunbeamColumn> {
     let top_wall_h = layout.wall_band_h();
-    let skip = layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
-    window_columns(layout.buf_w, skip)
+    layout
+        .window_bays()
         .map(|w| SunbeamColumn {
-            x: w.center_x,
+            x: w.center_x(),
             top_y: top_wall_h,
             depth: SPILL_DEPTH,
         })
@@ -182,7 +133,7 @@ pub(super) fn paint_floor_and_walls(
     sky: &Sky,
     look: &Look,
     top_wall_h: u16,
-    skip_window_x_range: Option<(u16, u16)>,
+    bays: impl IntoIterator<Item = WindowBay>,
     theme: &Theme,
     altitude: f32,
 ) {
@@ -213,19 +164,18 @@ pub(super) fn paint_floor_and_walls(
         },
     );
 
-    // Window HEIGHT grows with the wall band so taller terminals get dramatic
-    // glass; width stays fixed so the skyline detail reads consistently.
-    let window_y: u16 = 1;
-    let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
+    let rows = window_rows(top_wall_h);
+    let (window_y, window_h) = (rows.start, rows.end - rows.start);
     let (lit_colors, building, sky_row) = window_glass_invariants(window_h, look, theme);
     let disc = compute_disc(sky, buf_w, top_wall_h, theme);
-    for w in window_columns(buf_w, skip_window_x_range) {
-        let x = w.x_left;
+    for w in bays {
+        let x = w.x;
         // The disc paints ONLY in the window its centre sits over. Ungated, a
         // disc near an inter-window gap is wide enough (radius+glow) to reach
         // BOTH neighbours' glass and render twice, bleeding through the solid
         // wall pillar between them.
-        let win_disc = disc.filter(|d| d.cx >= x as f32 && d.cx < (x + WINDOW_W) as f32);
+        let span = w.span();
+        let win_disc = disc.filter(|d| d.cx >= f32::from(span.start) && d.cx < f32::from(span.end));
         paint_floor_to_ceiling_window(
             buf,
             x,
@@ -258,7 +208,7 @@ pub(super) fn paint_floor_and_walls(
         }
     }
 
-    let trim_y = top_wall_h.saturating_sub(1);
+    let trim_y = wall_trim_row(top_wall_h);
     if trim_y < buf_h {
         for x in 0..buf_w {
             buf.put(x, trim_y, wall_trim_color);

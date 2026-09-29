@@ -21,7 +21,6 @@ use crate::floor::LightingState;
 use crate::frame_cache::FrameCache;
 use crate::layout::{
     z_sort_row, Anchor, Layout, PlantItem, PodDecorItem, Point, Size, WallDecorItem, ELEVATOR_H,
-    ELEVATOR_W,
 };
 use crate::motion::MotionState;
 use crate::pet::PetFrame;
@@ -546,9 +545,6 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
 
     let look = Look::resolve(&ctx.sky, ctx.theme);
     let top_wall_h = ctx.layout.wall_band_h();
-    // The elevator door replaces the rightmost window, so `paint_floor_and_walls`
-    // must skip a window that would otherwise bleed through the elevator frame.
-    let door_x_range = ctx.layout.door.map(|d| (d.x, d.x + ELEVATOR_W));
     paint_floor_and_walls(
         ctx.base_fill,
         ctx.buf,
@@ -558,7 +554,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         &ctx.sky,
         &look,
         top_wall_h,
-        door_x_range,
+        ctx.layout.window_bays(),
         ctx.theme,
         ctx.floor.altitude,
     );
