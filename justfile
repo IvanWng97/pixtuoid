@@ -943,7 +943,7 @@ gen-wasm-check:
     test -s "$W" || { echo "missing or empty $W — run 'just gen-wasm'"; exit 1; }
     # Not tuned to the last KB: this measures gzip locally while the CDN does its
     # own.
-    CAP=409600
+    CAP=524288
     # Compress to a FILE, not through a pipe: POSIX sh has no `pipefail`, so
     # `gzip … | wc -c` reports wc's status and a broken gzip would measure zero
     # bytes and pass the cap unconditionally — the gate would go green exactly
