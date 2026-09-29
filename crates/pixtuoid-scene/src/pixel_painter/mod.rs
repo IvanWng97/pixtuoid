@@ -448,7 +448,7 @@ fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
     desks.chain(pantry).chain(corridor)
 }
 
-/// THE authority for the soft floor shadows, in PAINT ORDER — the overlaps
+/// The classic painter's soft floor shadows, in PAINT ORDER — the overlaps
 /// blend, so the order is load-bearing. The per-piece `half_w`/`half_h` are
 /// owner-tuned taste literals.
 fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
@@ -474,7 +474,11 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
             // Fit the ellipse to the sprite width — a flat 7 half-width doubles
             // a narrow shelf's shadow; `.min(7)` caps a future wide piece.
             let vis_w = furniture_def(wp.kind.furniture()).visual.w;
-            let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
+            let half_w = if vis_w > 0 {
+                (vis_w / 2 + crate::ground::CONTACT_REACH).min(7)
+            } else {
+                7
+            };
             Ellipse {
                 cx: wp.pos.x,
                 cy: wp.pos.y + 2,
@@ -487,7 +491,7 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
         Ellipse {
             cx: island.x,
             cy: island.y + center_pin_south_offset(vis.h),
-            half_w: vis.w / 2 + 1,
+            half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
             half_h: 2,
         }
     });

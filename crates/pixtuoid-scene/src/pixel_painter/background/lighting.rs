@@ -43,9 +43,8 @@ fn blend_falloff(
     }
 }
 
-/// Blend `color` over the region with a quadratic radial falloff from the centre
-/// (full `strength`) to the ellipse edge (`r² > 1` skipped), so it reads as a
-/// soft round patch rather than a stamped oval.
+/// Blend `color` over the region by [`crate::ground::falloff`] at `strength`,
+/// so it reads as a soft round patch rather than a stamped oval.
 pub(in crate::pixel_painter) fn paint_radial_falloff(
     buf: &mut RgbBuffer,
     g: RadialFalloff,
@@ -64,10 +63,8 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
     if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
         return;
     }
-    let min_x = e.cx.saturating_sub(e.half_w);
-    let max_x = (e.cx + e.half_w).min(buf.width());
-    let min_y = e.cy.saturating_sub(e.half_h);
-    let max_y = (e.cy + e.half_h).min(buf.height());
+    let ((min_x, min_y), (max_x, max_y)) = e.bounds();
+    let (max_x, max_y) = (max_x.min(buf.width()), max_y.min(buf.height()));
     paint_radial_falloff(
         buf,
         RadialFalloff {

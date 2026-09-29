@@ -4026,7 +4026,6 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
     use crate::layout::WaypointKind;
     let l =
         Layout::compute(192, 160, Some(crate::layout::TEST_DEFAULT_DESKS)).expect("192x160 fits");
-    // Ellipse is Copy, not PartialEq — compare by field tuple.
     let e = |el: &Ellipse| (el.cx, el.cy, el.half_w, el.half_h);
 
     let mut expected: Vec<(u16, u16, u16, u16)> = Vec::new();
