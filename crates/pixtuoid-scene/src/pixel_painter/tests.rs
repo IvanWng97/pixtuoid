@@ -477,14 +477,51 @@ fn agent_overrides_are_deterministic_per_id() {
     );
 }
 
+/// Every look of frame `i` of `anim` a viewer could see under `overrides`:
+/// recolored and, where the art marks its head, dressed in each of the pack's
+/// hairstyles.
+fn looks(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    overrides: &[(char, pixtuoid_core::sprite::Pixel)],
+) -> Vec<pixtuoid_core::sprite::Frame> {
+    let bare = anim.recolorable(i).expect("frame").recolored(overrides);
+    let line = pack.character_outline();
+    match anim.head(i) {
+        None => vec![bare],
+        Some(head) => pack
+            .hairstyles()
+            .map(|s| {
+                let dress = super::hair::Dress::of(&bare, head, Some(s), line.is_some());
+                super::hair::dress(&bare, &dress, Some(s), overrides, line)
+            })
+            .collect(),
+    }
+}
+
+/// Whether recoloring `key` changes some pixel of every look of frame `i`.
+fn recolors(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    key: char,
+) -> bool {
+    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    looks(pack, anim, i, &[])
+        .iter()
+        .zip(looks(pack, anim, i, &[(key, sentinel)]))
+        .all(|(own, recolored)| own.as_slice() != recolored.as_slice())
+}
+
 /// A key no character frame draws recolors nothing, so every agent would wear
-/// the pack's own color there: `standing` shows all four, at every density.
+/// the pack's own color there: `standing` shows all four, at every density,
+/// dressed in whichever hairstyle.
 #[test]
 #[cfg(feature = "density-art")]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::density_variant_name;
     let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
     let names = std::iter::once("standing".to_string())
         .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
     let mut drawn = 0;
@@ -492,17 +529,14 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
         let Some(standing) = pack.animation(&name) else {
             continue;
         };
-        let own = &standing.frames()[0];
-        let frame = standing.recolorable(0).expect("frame 0");
         for key in [
             palette::SHIRT_KEY,
             palette::HAIR_KEY,
             palette::SKIN_KEY,
             palette::PANTS_KEY,
         ] {
-            assert_ne!(
-                frame.recolored(&[(key, sentinel)]).as_slice(),
-                own.as_slice(),
+            assert!(
+                recolors(&pack, standing, 0, key),
                 "no {name} pixel is drawn in {key:?}"
             );
         }
@@ -516,9 +550,9 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 
 /// Hair and shirt show in every pose, even face-down asleep, and they are how a
 /// viewer tells two agents apart: every frame, base or `@Nx` variant, draws
-/// them in a key the agent's recolor reaches (the key itself or one of its
-/// `[ramps]` shades), or it shows every agent in the pack's own colours. Skin
-/// and pants may be out of sight.
+/// them, dressed in whichever hairstyle, in a key the agent's recolor reaches
+/// (the key itself or one of its `[ramps]` shades), or it shows every agent in
+/// the pack's own colours. Skin and pants may be out of sight.
 #[test]
 #[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
@@ -526,7 +560,6 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
         density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
     };
     let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
     let mut variants = 0;
     for &base in REQUIRED_CHARACTER_ANIMATIONS
         .iter()
@@ -539,12 +572,10 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
                 continue;
             };
             variants += usize::from(density.is_some());
-            for (i, own) in anim.frames().iter().enumerate() {
-                let frame = anim.recolorable(i).expect("frame");
+            for i in 0..anim.frames().len() {
                 for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
-                    assert_ne!(
-                        frame.recolored(&[(key, sentinel)]).as_slice(),
-                        own.as_slice(),
+                    assert!(
+                        recolors(&pack, anim, i, key),
                         "{name} frame {i} draws nothing the {key:?} recolor reaches"
                     );
                 }
@@ -4633,4 +4664,43 @@ fn wash_since_washes_exactly_the_diff_set_and_matches_the_naive_reference() {
             }
         }
     }
+}
+
+/// A facing flip mirrors the dressed frame; it never dresses a mirrored one. A
+/// style's layers are drawn for the art as authored, so profile hair laid on a
+/// flipped body would land on the face side.
+#[test]
+#[cfg(feature = "density-art")]
+fn a_facing_flip_mirrors_the_dressed_frame() {
+    let pack = crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("the embedded pack loads");
+    let scale = crate::render_scale::RenderScale::new(pack.max_density_variant()).expect("nonzero");
+    let mut cache = crate::frame_cache::FrameCache::new();
+    let now = SystemTime::UNIX_EPOCH;
+    let mut asymmetric = 0;
+    for i in 0..12 {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/flip/{i}.jsonl"));
+        let slot = make_slot(id, ActivityState::Idle);
+        let mut look = |flip| {
+            seat::character_frame(
+                "side_seated",
+                0,
+                &slot,
+                &pack,
+                flip,
+                None,
+                scale,
+                &mut cache,
+                now,
+            )
+            .expect("the side view")
+            .frame
+            .clone()
+        };
+        let (east, west) = (look(false), look(true));
+        let mirrored = east.mirror_horizontal();
+        assert_eq!(west.as_slice(), mirrored.as_slice(), "agent {i}");
+        asymmetric += usize::from(east.as_slice() != mirrored.as_slice());
+    }
+    assert!(asymmetric > 0, "a profile is not its own mirror");
 }

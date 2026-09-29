@@ -300,14 +300,114 @@ impl Frame {
     }
 }
 
+/// A named point on one frame, from a `.sprite` frame's `@mark <name> <x> <y>`:
+/// where a painter lays something over the art, in the frame's own pixels.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Mark {
+    name: String,
+    x: u16,
+    y: u16,
+}
+
+impl Mark {
+    pub(crate) fn new(name: String, x: u16, y: u16) -> Self {
+        Self { name, x, y }
+    }
+
+    /// Its name: `head.<view>` is where a hairstyle is laid ([`Sprite::head`]).
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// Its column.
+    pub fn x(&self) -> u16 {
+        self.x
+    }
+
+    /// Its row.
+    pub fn y(&self) -> u16 {
+        self.y
+    }
+}
+
+/// Which way a character frame's head faces the viewer: the view a hairstyle
+/// draws its layers for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
+pub enum HeadView {
+    /// The face toward the viewer.
+    Front,
+    /// The back of the head toward the viewer.
+    Back,
+    /// In profile.
+    Side,
+    /// Seen from above, face down.
+    Crown,
+}
+
+impl HeadView {
+    /// Every view.
+    pub const ALL: [HeadView; 4] = [Self::Front, Self::Back, Self::Side, Self::Crown];
+
+    /// The name a head mark (`head.<name>`) and a `[hairstyles]` table call it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Front => "front",
+            Self::Back => "back",
+            Self::Side => "side",
+            Self::Crown => "crown",
+        }
+    }
+
+    /// The view called `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.name() == name)
+    }
+
+    /// Its place in [`HeadView::ALL`].
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+/// A frame's head: which way it faces and the point a hairstyle layer's own
+/// head is laid on, read from the frame's one `head.<view>` [`Mark`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct HeadMark {
+    /// Which way the head faces.
+    pub view: HeadView,
+    /// The mark's column.
+    pub x: u16,
+    /// The mark's row.
+    pub y: u16,
+}
+
+impl HeadMark {
+    /// The head `mark` places, where it is a `head.<view>` mark.
+    pub fn of(mark: &Mark) -> Option<Self> {
+        let view = HeadView::from_name(mark.name().strip_prefix(HEAD_MARK)?)?;
+        Some(Self {
+            view,
+            x: mark.x,
+            y: mark.y,
+        })
+    }
+}
+
+/// What a head mark's name starts with, before its view.
+pub(crate) const HEAD_MARK: &str = "head.";
+
 /// An animation: its frames in order, the palette indices they were drawn
-/// with, and the per-frame hold time.
+/// with, each frame's marks, and the per-frame hold time.
 #[derive(Debug, Clone)]
 pub struct Sprite {
     /// The frames in their own palette's colors.
     frames: Vec<Frame>,
     /// The same frames as indices into `palette`, for a recolor to resolve again.
     indexed: Vec<IndexedFrame>,
+    /// Each frame's `@mark`s.
+    marks: Vec<Vec<Mark>>,
     /// The palette `indexed` refers to: the sprite's own pack's, which it keeps
     /// when a custom pack inherits it, so a recolor never reads its indices
     /// through another pack's keys.
@@ -316,15 +416,27 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    fn new(indexed: Vec<IndexedFrame>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+    fn new(marked: Vec<(IndexedFrame, Vec<Mark>)>, palette: Arc<Palette>, frame_ms: u32) -> Self {
         let pixels = palette.resolved();
+        let (indexed, marks): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
         let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
         Sprite {
             frames,
             indexed,
+            marks,
             palette,
             frame_ms,
         }
+    }
+
+    /// Frame `idx`'s marks, in the order the file names them.
+    pub fn marks(&self, idx: usize) -> &[Mark] {
+        self.marks.get(idx).map_or(&[], Vec::as_slice)
+    }
+
+    /// Frame `idx`'s head: where a hairstyle dresses it.
+    pub fn head(&self, idx: usize) -> Option<HeadMark> {
+        self.marks(idx).iter().find_map(HeadMark::of)
     }
 
     /// The frames, played in order.

@@ -9,7 +9,8 @@ use super::*;
 
 use super::anchors::{back_couch_anchor, waypoint_anchor};
 
-/// The per-agent RECOLORED sprite for one character, from the cache.
+/// The per-agent RECOLORED sprite for one character, and where the art marks a
+/// head, DRESSED, from the cache.
 ///
 /// Split out of [`paint_character_at`] so a second profile gets the identical
 /// palette without a second copy of the rule. The ART and the BLIT differ
@@ -34,15 +35,9 @@ pub(crate) fn character_frame<'c>(
 ) -> Option<CharacterFrame<'c>> {
     let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
     let key = character_key_at(
-        dense.density,
-        anim_name,
-        frame_idx,
-        agent,
-        flip_x,
-        glow_tint,
-        now,
+        &dense, pack, anim_name, frame_idx, agent, flip_x, glow_tint, now,
     );
-    Some(recolor(dense, &key, cache))
+    Some(recolor(dense, &key, pack, cache))
 }
 
 /// [`character_frame`] for a [`CharacterKey`] resolved at `scale`.
@@ -53,12 +48,13 @@ pub(crate) fn keyed_character_frame<'c>(
     cache: &'c mut FrameCache,
 ) -> Option<CharacterFrame<'c>> {
     let dense = super::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
-    Some(recolor(dense, key, cache))
+    Some(recolor(dense, key, pack, cache))
 }
 
 fn recolor<'c>(
     dense: super::dense::DenseFrame<'_>,
     key: &CharacterKey,
+    pack: &Pack,
     cache: &'c mut FrameCache,
 ) -> CharacterFrame<'c> {
     let (burn, flip_x) = (key.frame.burn, key.frame.flip_x);
@@ -66,7 +62,23 @@ fn recolor<'c>(
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(key.frame.agent_id, key.outfit);
     let frame = cache.get_or_make(key.frame.clone(), || {
-        let recolored = dense.recolorable.recolored(&key.palette);
+        let bare = dense.recolorable.recolored(&key.palette);
+        // Dressed before the facing flip: a style's layers are drawn for the
+        // art as authored. The agent id and the art's density pick the style,
+        // and the cache's key carries both.
+        let recolored = match &key.dress {
+            Some(dress) => super::hair::dress(
+                &bare,
+                dress,
+                dress
+                    .style
+                    .as_deref()
+                    .and_then(|name| pack.hairstyle(name, dense.density)),
+                &key.palette,
+                pack.character_outline(),
+            ),
+            None => bare,
+        };
         if flip_x {
             // HORIZONTAL: `flip_x` is which way the character FACES.
             recolored.mirror_horizontal()
@@ -74,11 +86,13 @@ fn recolor<'c>(
             recolored
         }
     });
+    let rise = key.dress.as_ref().map_or(0, |d| d.rise);
     CharacterFrame {
         frame,
         burn,
         logical: dense.logical,
         blit_at: dense.blit_at,
+        rise,
     }
 }
 
@@ -92,6 +106,9 @@ pub(crate) struct CharacterKey {
     /// The agent's colours, resolved: the recolor reads nothing of the agent
     /// beyond what this and `frame` carry.
     palette: [(char, pixtuoid_core::sprite::Pixel); 4],
+    /// How the frame is dressed, resolved once for every reader: the recolor
+    /// and the cutaway's figure box.
+    pub(crate) dress: Option<super::hair::Dress>,
 }
 
 /// [`character_frame`]'s [`CharacterKey`], without the recolor; `None` where it
@@ -107,14 +124,16 @@ pub(crate) fn character_key(
     scale: crate::render_scale::RenderScale,
     now: SystemTime,
 ) -> Option<CharacterKey> {
-    let density = super::densest_frame(pack, anim_name, frame_idx, scale)?.density;
+    let dense = super::densest_frame(pack, anim_name, frame_idx, scale)?;
     Some(character_key_at(
-        density, anim_name, frame_idx, agent, flip_x, glow_tint, now,
+        &dense, pack, anim_name, frame_idx, agent, flip_x, glow_tint, now,
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn character_key_at(
-    density: std::num::NonZeroU16,
+    dense: &super::dense::DenseFrame<'_>,
+    pack: &Pack,
     anim_name: &'static str,
     frame_idx: usize,
     agent: &AgentSlot,
@@ -123,6 +142,7 @@ fn character_key_at(
     now: SystemTime,
 ) -> CharacterKey {
     let burn = crate::burn::slot_burn_tier(agent, now);
+    let density = dense.density;
     CharacterKey {
         frame: crate::frame_cache::FrameKey {
             agent_id: agent.agent_id,
@@ -135,6 +155,7 @@ fn character_key_at(
         },
         outfit: outfit_seed_for(agent),
         palette: agent_overrides(agent, glow_tint, burn),
+        dress: super::hair::dress_for(pack, agent.agent_id, dense.frame, dense.head, density),
     }
 }
 
@@ -146,6 +167,9 @@ pub(crate) struct CharacterFrame<'c> {
     pub(crate) burn: crate::burn::BurnTier,
     pub(crate) logical: (u16, u16),
     pub(crate) blit_at: std::num::NonZeroU16,
+    /// Art rows the frame reaches above its logical top: its
+    /// [`Dress::rise`](super::hair::Dress::rise).
+    pub(crate) rise: u16,
 }
 
 /// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
@@ -169,6 +193,7 @@ pub(crate) fn paint_character_at(
         burn,
         logical: _,
         blit_at: _,
+        rise: _,
     }) = character_frame(
         anim_name,
         frame_idx,

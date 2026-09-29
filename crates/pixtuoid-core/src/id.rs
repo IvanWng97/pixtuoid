@@ -18,8 +18,17 @@ pub fn splitmix64(z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-pub(crate) const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-pub(crate) const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+/// FNV-1a over `words`, each folded in whole: the bytes of a string, or wider
+/// words where a caller hashes numbers.
+#[doc(hidden)]
+pub fn fnv1a(words: impl IntoIterator<Item = u64>) -> u64 {
+    words
+        .into_iter()
+        .fold(FNV_OFFSET_BASIS, |h, w| (h ^ w).wrapping_mul(FNV_PRIME))
+}
 
 /// Canonical form of a path STRING before it is used as an identity key
 /// (an `AgentId` transcript-path key, or the palette's cwd outfit key).
@@ -69,19 +78,12 @@ impl AgentId {
     /// is whatever that source uses to uniquely identify a session. The pair is
     /// hashed, so two sources sharing an `opaque_id` still produce distinct ids.
     pub fn from_parts(source: &str, opaque_id: &str) -> Self {
-        let mut hash: u64 = FNV_OFFSET_BASIS;
-        for b in source.as_bytes() {
-            hash ^= *b as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        // Domain separator, so ("a", "bc") can't collide with ("ab", "c").
-        hash ^= 0xff;
-        hash = hash.wrapping_mul(FNV_PRIME);
-        for b in opaque_id.as_bytes() {
-            hash ^= *b as u64;
-            hash = hash.wrapping_mul(FNV_PRIME);
-        }
-        AgentId(hash)
+        let bytes = source
+            .bytes()
+            // Domain separator, so ("a", "bc") can't collide with ("ab", "c").
+            .chain([0xff])
+            .chain(opaque_id.bytes());
+        AgentId(fnv1a(bytes.map(u64::from)))
     }
 
     /// The underlying 64-bit hash (finalize through [`splitmix64`] before

@@ -431,3 +431,64 @@ frame_ms = 600
 [animations."holding_coffee@4x"]
 frames   = ["holding_coffee@4x.sprite"]
 frame_ms = 600
+
+# Hairstyles and the line round every marked @Nx character:
+# docs/CONFIGURATION.md#custom-sprite-packs. The layers are scripts/gen-art.py's
+# HAIRSTYLES, registered here by hand (`every_embedded_sprite_is_a_frame_the_pack_loads`
+# fails on one left out).
+[characters]
+outline = "κ"
+
+[hairstyles."bun@4x"]
+front = { behind = "hair_bun_front_behind@4x.sprite", over = "hair_bun_front_over@4x.sprite" }
+back = { behind = "hair_bun_back_behind@4x.sprite", over = "hair_bun_back_over@4x.sprite" }
+side = { behind = "hair_bun_side_behind@4x.sprite", over = "hair_bun_side_over@4x.sprite" }
+crown = { over = "hair_bun_crown_over@4x.sprite" }
+
+[hairstyles."crop@4x"]
+front = { behind = "hair_crop_front_behind@4x.sprite", over = "hair_crop_front_over@4x.sprite" }
+back = { behind = "hair_crop_back_behind@4x.sprite", over = "hair_crop_back_over@4x.sprite" }
+side = { behind = "hair_crop_side_behind@4x.sprite", over = "hair_crop_side_over@4x.sprite" }
+crown = { over = "hair_crop_crown_over@4x.sprite" }
+
+[hairstyles."curls@4x"]
+front = { behind = "hair_curls_front_behind@4x.sprite", over = "hair_curls_front_over@4x.sprite" }
+back = { over = "hair_curls_back_over@4x.sprite" }
+side = { behind = "hair_curls_side_behind@4x.sprite", over = "hair_curls_side_over@4x.sprite" }
+crown = { over = "hair_curls_crown_over@4x.sprite" }
+
+[hairstyles."long@4x"]
+front = { behind = "hair_long_front_behind@4x.sprite", over = "hair_long_front_over@4x.sprite" }
+back = { over = "hair_long_back_over@4x.sprite" }
+side = { behind = "hair_long_side_behind@4x.sprite", over = "hair_long_side_over@4x.sprite" }
+crown = { over = "hair_long_crown_over@4x.sprite" }
+
+[hairstyles."messy@4x"]
+front = { behind = "hair_messy_front_behind@4x.sprite", over = "hair_messy_front_over@4x.sprite" }
+back = { over = "hair_messy_back_over@4x.sprite" }
+side = { behind = "hair_messy_side_behind@4x.sprite", over = "hair_messy_side_over@4x.sprite" }
+crown = { over = "hair_messy_crown_over@4x.sprite" }
+
+[hairstyles."mop@4x"]
+front = { behind = "hair_mop_front_behind@4x.sprite", over = "hair_mop_front_over@4x.sprite" }
+back = { over = "hair_mop_back_over@4x.sprite" }
+side = { behind = "hair_mop_side_behind@4x.sprite", over = "hair_mop_side_over@4x.sprite" }
+crown = { over = "hair_mop_crown_over@4x.sprite" }
+
+[hairstyles."ponytail@4x"]
+front = { behind = "hair_ponytail_front_behind@4x.sprite", over = "hair_ponytail_front_over@4x.sprite" }
+back = { over = "hair_ponytail_back_over@4x.sprite" }
+side = { behind = "hair_ponytail_side_behind@4x.sprite", over = "hair_ponytail_side_over@4x.sprite" }
+crown = { over = "hair_ponytail_crown_over@4x.sprite" }
+
+[hairstyles."shaggy@4x"]
+front = { behind = "hair_shaggy_front_behind@4x.sprite", over = "hair_shaggy_front_over@4x.sprite" }
+back = { over = "hair_shaggy_back_over@4x.sprite" }
+side = { behind = "hair_shaggy_side_behind@4x.sprite", over = "hair_shaggy_side_over@4x.sprite" }
+crown = { over = "hair_shaggy_crown_over@4x.sprite" }
+
+[hairstyles."side_part@4x"]
+front = { behind = "hair_side_part_front_behind@4x.sprite", over = "hair_side_part_front_over@4x.sprite" }
+back = { over = "hair_side_part_back_over@4x.sprite" }
+side = { behind = "hair_side_part_side_behind@4x.sprite", over = "hair_side_part_side_over@4x.sprite" }
+crown = { over = "hair_side_part_crown_over@4x.sprite" }

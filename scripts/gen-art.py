@@ -54,7 +54,8 @@ OFFWHITE, OFFWHITE_SH, PRINT = "¤", "!", "$"
 MUG, MUG_SH = "V", "%"
 CHAIR, CHAIR_RIM, CHAIR_BASE = "T", "I", "/"
 # The @Nx art's one outline, round each piece's whole silhouette whatever its
-# material.
+# material, and a bun's rim where it sits on the head (`ball`); pack.toml's
+# `[characters] outline` names it for the renderer.
 SILHOUETTE = "κ"
 COFFEE = "ρ"
 # furniture materials
@@ -232,14 +233,15 @@ def meeting_sofa_north_1x():
     return g
 
 
+
 # ---- the characters ----------------------------------------------------------
 # A chibi figure: a big head over a small body, one near-black line round the
 # whole silhouette. Every pose is a bald BODY, the face or the back of the head
 # but never a scalp, that a hairstyle's layers dress per view: `behind` under
-# the body, `over` on top. The union is outlined last, so no line runs between
-# hair and face.
+# the body, `over` on top. Neither is outlined here: the renderer outlines the
+# dressed union, so no line runs between hair and face.
 FIG_W = 8 * S
-FIG_CX = (FIG_W - 1) / 2
+FIG_CX = FIG_W / 2  # sampled at pixel centres (x + 0.5): x mirrors to FIG_W - 1 - x
 # Each pose's height in logical rows, the frame height its 1x base shares.
 STANDING_ROWS, TYPING_ROWS, SEATED_ROWS, COUCH_ROWS = 12, 11, 10, 9
 # Rows every standing and front- or back-view seated pose shares: the face
@@ -267,6 +269,42 @@ def ellipse(g, cx, cy, rx, ry, k=HAIR):
 
 def disc(g, cx, cy, r, k=HAIR):
     ellipse(g, cx, cy, r, r, k)
+
+
+def tuft(g, bx, by, ang, length, half):
+    """A tapered tuft from (bx, by) along `ang` degrees (screen: -90 is up)."""
+    ux, uy = math.cos(math.radians(ang)), math.sin(math.radians(ang))
+    for y in range(len(g)):
+        for x in range(1, len(g[0]) - 1):
+            dx, dy = x + 0.5 - bx, y + 0.5 - by
+            u, v = dx * ux + dy * uy, -dx * uy + dy * ux
+            if 0 <= u <= length and abs(v) <= half * (1 - u / length) + 0.35:
+                g[y][x] = HAIR
+
+
+def lock(g, x0, y0, x1, y1, w0, w1):
+    """A lock from (x0, y0) to (x1, y1), `w0` wide at the root tapering to `w1`:
+    long hair's fall and a ponytail's tail."""
+    n = int(max(abs(x1 - x0), abs(y1 - y0)) * 2) + 1
+    for i in range(n + 1):
+        t = i / n
+        cx, cy, hw = x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, (w0 + (w1 - w0) * t) / 2
+        for y in range(int(cy) - 1, int(cy) + 2):
+            for x in range(int(cx - hw) - 1, int(cx + hw) + 2):
+                if 1 <= x < len(g[0]) - 1 and 0 <= y < len(g) and abs(x + 0.5 - cx) <= hw and abs(y + 0.5 - cy) <= 0.8:
+                    g[y][x] = HAIR
+
+
+def curl(g, cx, cy, r):
+    """One round curl lit on its own top-left, its lower-right rim in shade:
+    drawn back to front, each stands apart from the one behind it."""
+    for y in range(max(0, int(cy - r) - 1), min(len(g), int(cy + r) + 2)):
+        for x in range(max(1, int(cx - r) - 1), min(len(g[0]) - 1, int(cx + r) + 2)):
+            dx, dy = x + 0.5 - cx, y + 0.5 - cy
+            d = math.hypot(dx, dy)
+            if d <= r:
+                t = (dx + dy) / r
+                g[y][x] = HAIR_SH if (d > r - 1.1 and t > -0.1) else HAIR_LT if t < -0.5 else HAIR
 
 
 def rim_light(g, strands=(), sparkle=(), lit_top=True):
@@ -329,6 +367,16 @@ def fringe_locks(g, locks, top, dy=0):
                     g[y][x] = HAIR
 
 
+def ball(g, cx, cy, r):
+    """A bun: a round of its own, its rim dark where it sits on the head."""
+    for y in range(len(g)):
+        for x in range(1, len(g[0]) - 1):
+            d = math.hypot(x + 0.5 - cx, y + 0.5 - cy)
+            if r <= d < r + 1.0 and g[y][x] != T and (y + 0.5 > cy + 1 or x + 0.5 > cx + 1 and cy > 8):
+                g[y][x] = SILHOUETTE
+    curl(g, cx, cy, r)
+
+
 def paste(dst, src, dx=0, dy=0):
     """`src`'s opaque pixels onto `dst`, moved `dx` columns and `dy` rows."""
     for y in range(len(src)):
@@ -339,7 +387,7 @@ def paste(dst, src, dx=0, dy=0):
 
 # ---- hairstyles ----------------------------------------------------------------
 # Each style draws four views on its own layer canvas, the tallest pose's rows
-# plus HAIR_HEADROOM above for the hair rising over the head: `front` and `side` as
+# plus HAIR_HEADROOM above for a bun or a tuft: `front` and `side` as
 # (behind, over) pairs, `back` and `crown` as one layer over the body. Every
 # coordinate below is on the pose grid; `o` shifts it onto the layer.
 HAIR_HEADROOM = 6
@@ -347,7 +395,7 @@ LAYER_H = STANDING_ROWS * S + HAIR_HEADROOM
 o = HAIR_HEADROOM
 # The skull in profile, and the head seen from above as it lies on the arms.
 SIDE_CX, SIDE_CY = 14.0, 12.5
-CROWN_CX, CROWN_CY, CROWN_R = 15.5, 16.5, 10.0
+CROWN_CX, CROWN_CY, CROWN_R = FIG_CX, 16.5, 10.0
 
 
 def layer():
@@ -360,10 +408,24 @@ def front_fringe(tips):
     return rim_light(f, lit_top=False)
 
 
+def front_locks(locks):
+    f = layer()
+    fringe_locks(f, locks, FACE_TOP - 4, o)
+    return rim_light(f, lit_top=False)
+
+
 def side_locks(locks, top=8):
     f = layer()
     fringe_locks(f, locks, top, o)
     return rim_light(f, lit_top=False)
+
+
+def nape_cut(g, half=6, rows=(20, 23)):
+    """Hair gathered up leaves the nape bare: clear its middle so the neck shows."""
+    for y in range(rows[0] + o, rows[1] + o):
+        for x in range(1, FIG_W - 1):
+            if g[y][x] != T and abs(x + 0.5 - FIG_CX) < half:
+                g[y][x] = T
 
 
 def crown_base(r_extra=0.0):
@@ -411,12 +473,296 @@ def style_mop():
             "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
 
 
-# Hairstyles by name; every bundled character is baked in `BAKED_STYLE`.
-HAIRSTYLES = {"mop": style_mop}
+MESSY_TUFTS = ((8.5, 5.0, -125, 3.2, 2.8), (12.0, 2.8, -100, 2.8, 2.6), (16.0, 2.4, -80, 2.8, 2.6),
+               (20.0, 3.2, -60, 3.2, 2.8), (23.5, 6.0, -35, 3.0, 2.6), (6.0, 8.5, -150, 2.6, 2.4),
+               (26.0, 9.8, -8, 2.4, 2.2))
+
+
+def style_messy():
+    """The mop with short tufts breaking its top and sides."""
+    b = layer()
+    for px, py, r in ((FIG_CX, 12.5, 10.6), (5.4, 13.0, 3.9), (26.0, 13.0, 3.9), (5.8, 17.4, 3.0), (25.6, 17.4, 3.0)):
+        disc(b, px, py + o, r)
+    for t in MESSY_TUFTS:
+        tuft(b, t[0], t[1] + o, *t[2:])
+    back = [row[:] for row in b]
+    for t in ((10.0, 21.0, 100, 3.0, 2.2), (14.0, 22.0, 85, 3.4, 2.4), (18.0, 22.0, 95, 3.2, 2.4), (22.0, 21.0, 80, 3.0, 2.2)):
+        tuft(back, t[0], t[1] + o, *t[2:])
+    for px, py, r in ((6.0, 17.6, 3.0), (25.4, 17.6, 3.0)):
+        disc(back, px, py + o, r)
+    strands = [(12, 6 + o), (13, 7 + o), (18, 5 + o), (18, 6 + o), (21, 7 + o), (9, 8 + o)]
+    rim_light(b, strands, [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
+    rim_light(back, strands + [(10, 12 + o), (16, 15 + o)], [(10, 3 + o), (11, 3 + o), (15, 2 + o), (16, 2 + o)])
+    sb = layer()
+    for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13, 3.8), (6.2, 18.5, 3.2)):
+        disc(sb, px, py + o, r)
+    for t in ((9, 4, -135, 3.4, 2.8), (13.5, 2.4, -105, 3.0, 2.6), (18.5, 2.8, -75, 3.0, 2.6),
+              (22.5, 5.5, -40, 3.0, 2.4), (4.5, 8.5, -165, 3.0, 2.4), (5.5, 19.5, 160, 3.0, 2.2)):
+        tuft(sb, t[0], t[1] + o, *t[2:])
+    rim_light(sb, [(11, 7 + o), (17, 6 + o)], [(12, 2 + o), (13, 2 + o)])
+    c = crown_base(1.2)
+    for a in range(200, 350, 30):
+        tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
+             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
+    return {"front": (b, front_fringe({7: 16, 8: 15, 9: 13, 10: 13, 11: 14, 12: 16, 13: 13, 14: 12, 15: 12, 16: 13,
+                                       17: 13, 18: 15, 19: 13, 20: 12, 21: 13, 22: 14, 23: 15, 24: 16})),
+            "back": back,
+            "side": (sb, side_locks([(19.5, 13.5, 2.2), (22.5, 12, 2.2), (25, 13, 1.6)])),
+            "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
+
+
+def style_side_part():
+    """Less volume, parted west of centre, the fringe swept east in one sheet."""
+    b = layer()
+    for px, py, r in ((FIG_CX, 12.5, 10.2), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (6.4, 18.0, 2.6), (24.8, 18.2, 2.8)):
+        disc(b, px, py + o, r)
+    rim_light(b, [(11, 2 + o), (11, 3 + o), (11, 4 + o), (10, 5 + o), (10, 6 + o)], [(15, 3 + o), (16, 3 + o)])
+    back = layer()
+    for px, py, r in ((FIG_CX, 12.8, 10.4), (6.0, 14.0, 3.6), (25.0, 14.0, 3.8), (7.0, 18.4, 3.0), (24.2, 18.4, 3.2)):
+        disc(back, px, py + o, r)
+    rect(back, 9, 18 + o, 23, 22 + o, HAIR)
+    rim_light(back, [], [(15, 3 + o), (16, 3 + o)])
+    terminator(back, FIG_CX, 12.8 + o, 12.0, 8 + o)
+    comb(back, [((12, 4), (10, 9), (9, 14)), ((17, 4), (19, 9), (21, 13))], o)
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + o, 10.8)
+    ellipse(sb, 7, 17 + o, 4, 5)
+    rim_light(sb, [(10, 5 + o), (8, 9 + o), (7, 13 + o)], [(15, 2 + o), (16, 2 + o)])
+    c = crown_finish(crown_base())
+    for y in range(int(CROWN_CY - CROWN_R) + 1 + o, int(CROWN_CY) + 2 + o):  # the part
+        if c[y][int(CROWN_CX) - 2] != T:
+            c[y][int(CROWN_CX) - 2] = HAIR_SH
+    return {"front": (b, front_fringe({7: 14, 8: 13, 9: 12, 10: 12, 11: 12, 12: 12, 13: 13, 14: 13, 15: 13, 16: 14,
+                                       17: 14, 18: 14, 19: 15, 20: 15, 21: 15, 22: 16, 23: 16, 24: 17})),
+            "back": back,
+            "side": (sb, side_locks([(18.5, 11.5, 2.4), (21.5, 12.5, 2.6), (24.5, 13.5, 2.2)], top=7)),
+            "crown": c, "ears": False}
+
+
+def style_long():
+    """Long and parted in the middle, falling behind the shoulders to the
+    chest in pointed ends."""
+    b = layer()
+    ellipse(b, FIG_CX, 12.0 + o, 11.2, 11.0)
+    for y in range(12 + o, 35 + o):
+        spread = (y - 12 - o) / 23
+        rect(b, int(3 - spread * 1.5), y, int(29 + spread * 1.5), y + 1, HAIR)
+    for x0 in (1, 5, 9, 22, 26, 30):
+        for i in range(3):
+            rect(b, max(1, x0 - 2 + i), 35 + o + i, min(FIG_W - 1, x0 + 2 - i), 36 + o + i, HAIR)
+    rim_light(b, [(9, 6 + o), (10, 7 + o), (21, 6 + o), (22, 7 + o), (4, 22 + o), (4, 26 + o), (27, 22 + o), (27, 26 + o)],
+              [(10, 3 + o), (11, 3 + o)])
+    back = layer()
+    ellipse(back, FIG_CX, 12.2 + o, 11.2, 11.0)
+    # The fall narrows below the head so the shoulders show either side of it:
+    # the shirt is how a viewer tells one long-haired back from another.
+    for y in range(12 + o, 37 + o):
+        spread = (y - 12 - o) / 25
+        narrow = min(1.0, (y - 12 - o) / 10) * 4
+        rect(back, int(4 + narrow - spread), y, int(28 - narrow + spread), y + 1, HAIR)
+    for x0 in (9, 13, 17, 21, 25):
+        for i in range(3):
+            rect(back, max(1, x0 - 2 + i), 37 + o + i, min(FIG_W - 1, x0 + 2 - i), 38 + o + i, HAIR)
+    rim_light(back, [], [(10, 3 + o), (11, 3 + o)])
+    terminator(back, FIG_CX, 20.0 + o, 19.0, 20 + o)
+    for x in range(7, 25):  # a band of sheen across the crown
+        y = 7 + o + abs(x - 15) // 4
+        if back[y][x] == HAIR:
+            back[y][x] = HAIR_LT
+    comb(back, [((9, 12), (8, 22), (7, 33)), ((15, 14), (15, 24), (14, 35)), ((21, 12), (22, 22), (23, 33)),
+                ((12, 26), (11, 34)), ((19, 26), (20, 34))], o)
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + o, 11.0)
+    lock(sb, 8.5, 12 + o, 6.0, 38 + o, 11, 6)  # full enough to meet the neck
+    rim_light(sb, [(9, 18 + o), (8, 24 + o), (7, 30 + o), (11, 7 + o)], [(14, 2 + o), (15, 2 + o)])
+    so = side_locks([(19.5, 13, 2.2), (22.5, 12.5, 2.2), (24.5, 12, 1.6)])
+    strand = layer()
+    lock(strand, 14.5, 14 + o, 15.0, 24 + o, 3, 2)  # its west edge on the face's
+    paste(so, rim_light(strand))
+    c = layer()
+    ellipse(c, CROWN_CX, CROWN_CY + 4 + o, 12.5, 13.5)
+    disc(c, CROWN_CX, CROWN_CY + o, CROWN_R)
+    crown_finish(c)
+    for x0 in (6, 11, 16, 21, 26):
+        for y in range(int(CROWN_CY + 4) + o, int(CROWN_CY + 16) + o):
+            if c[y][x0] in (HAIR, HAIR_LT):
+                c[y][x0] = HAIR_SH
+    return {"front": (b, front_fringe({7: 20, 8: 17, 9: 15, 10: 14, 11: 13, 12: 12, 13: 12, 14: 11, 17: 11, 18: 12,
+                                       19: 12, 20: 13, 21: 14, 22: 15, 23: 17, 24: 20})),
+            "back": back, "side": (sb, so), "crown": c, "ears": False}
+
+
+def style_bun():
+    """Pulled back tight into a bun on the crown: combed lines run up to it, the ears show, the bun rises into the headroom."""
+    b = layer()
+    ellipse(b, FIG_CX, 13.0 + o, 10.4, 9.6)
+    rim_light(b, [(11, 6 + o), (11, 8 + o), (20, 6 + o), (20, 8 + o)])
+    ball(b, FIG_CX, 2.6 + o, 4.0)
+    back = layer()
+    ellipse(back, FIG_CX, 13.0 + o, 10.2, 9.6)
+    nape_cut(back)
+    rim_light(back)
+    terminator(back, FIG_CX, 13.0 + o, 11.5, 8 + o)
+    comb(back, [((8, 17), (10, 12), (13, 8)), ((15, 19), (15, 13), (15, 8)), ((23, 17), (21, 12), (18, 8))], o)
+    ball(back, FIG_CX, 2.6 + o, 4.0)
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + 0.5 + o, 10.2)
+    rim_light(sb, [(10, 6 + o), (8, 10 + o), (16, 5 + o)])
+    ball(sb, 5.0, 5.5 + o, 4.0)
+    c = crown_finish(crown_base())
+    curl(c, CROWN_CX, CROWN_CY - CROWN_R + 3.5 + o, 3.8)
+    return {"front": (b, front_fringe({7: 12, 8: 11, 9: 11, 10: 10, 11: 10, 12: 10, 13: 10, 14: 10, 15: 10, 16: 10,
+                                       17: 10, 18: 10, 19: 10, 20: 10, 21: 10, 22: 11, 23: 11, 24: 12})),
+            "back": back, "side": (sb, side_locks([(20.5, 11, 2.6), (23.5, 11, 2.2)], top=7)),
+            "crown": c, "ears": True}
+
+
+def style_crop():
+    """Short and close to the skull, the fringe cut in points, the ears
+    showing."""
+    b = layer()
+    ellipse(b, FIG_CX, 13.0 + o, 10.2, 9.6)
+    rim_light(b, [(12, 6 + o), (19, 6 + o)], [(12, 5 + o), (13, 5 + o)])
+    back = layer()
+    ellipse(back, FIG_CX, 13.2 + o, 10.2, 9.4)
+    for y in range(20 + o, 24 + o):  # the nape tapers
+        for x in range(1, FIG_W - 1):
+            if back[y][x] == HAIR and abs(x + 0.5 - FIG_CX) > 7 - (y - 20 - o):
+                back[y][x] = T
+    rim_light(back, [(12, 7 + o), (19, 7 + o), (15, 12 + o)], [(12, 5 + o), (13, 5 + o)])
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + 0.6 + o, 10.0)
+    for y in range(18 + o, 24 + o):
+        for x in range(1, FIG_W - 1):
+            if sb[y][x] == HAIR and x > 11 - (y - 18 - o):
+                sb[y][x] = T
+    rim_light(sb, [(10, 7 + o), (16, 5 + o)], [(13, 3 + o), (14, 3 + o)])
+    return {"front": (b, front_locks([(8.5, 13, 1.8), (11.5, 13.5, 2.0), (14.5, 12.5, 2.0), (17.5, 13.5, 2.0),
+                                      (20.5, 12.5, 2.0), (23.0, 13, 1.6)])),
+            "back": back, "side": (sb, side_locks([(20.5, 11.5, 2.0), (23.5, 11.5, 1.8)])),
+            "crown": crown_finish(crown_base()), "ears": True}
+
+
+def style_curls():
+    """Tight curls in a close cap: rows of small rounds, each lit on its own."""
+    b = layer()
+    ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.0)
+    rim_light(b)
+    for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
+                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 26.4)), (14.4, (4.6, 26.4))):
+        for cx in xs:
+            curl(b, cx, cy + o, 2.3)
+    f = layer()
+    for cx in (8.4, 11.6, 14.8, 18.0, 21.2, 23.8):
+        curl(f, cx, 11.0 + o, 2.0)
+    back = layer()
+    ellipse(back, FIG_CX, 13.2 + o, 10.4, 9.8)
+    rim_light(back)
+    for cy, xs in ((2.8, (10.0, 13.5, 17.0, 20.5)), (5.2, (7.2, 10.6, 14.0, 17.4, 20.8, 24.0)),
+                   (8.0, (5.4, 8.6, 12.0, 15.5, 19.0, 22.4, 25.6)), (11.2, (4.6, 7.8, 11.2, 14.6, 18.0, 21.4, 24.6)),
+                   (14.4, (4.8, 8.2, 11.6, 15.0, 18.4, 21.8, 25.2)), (17.6, (6.4, 9.8, 13.2, 16.6, 20.0, 23.6)),
+                   (20.4, (9.6, 13.0, 16.4, 19.8))):
+        for cx in xs:
+            curl(back, cx, cy + o, 2.3)
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + o, 10.8)
+    rim_light(sb)
+    for cy, xs in ((3.0, (9.5, 13, 16.5, 20)), (5.8, (6.5, 10, 13.5, 17, 20.5, 23.5)),
+                   (8.8, (4.5, 7.8, 11.2, 14.6, 18, 21.4)), (12, (4, 7.2, 10.6)), (15.2, (4.2, 7.6, 11)),
+                   (18.4, (5.4, 8.8)), (21, (8, 11.2))):
+        for cx in xs:
+            curl(sb, cx, cy + o, 2.3)
+    so = layer()
+    for cx in (20.5, 23.5):
+        curl(so, cx, 10.5 + o, 2.0)
+    c = crown_finish(crown_base())
+    for rr, n in ((0, 1), (4.5, 6), (8.2, 10)):
+        for i in range(n):
+            a = 2 * math.pi * i / n
+            curl(c, CROWN_CX + math.cos(a) * rr, CROWN_CY + o + math.sin(a) * rr, 2.3)
+    return {"front": (b, f), "back": back, "side": (sb, so), "crown": c, "ears": False}
+
+
+def style_shaggy():
+    """A shaggy mop whose fringe falls in locks to the eyes."""
+    b = layer()
+    for px, py, r in ((FIG_CX, 12.0, 10.8), (5.2, 14.5, 3.8), (26.2, 14.5, 3.8), (5.6, 19.0, 2.8), (25.8, 19.0, 2.8)):
+        disc(b, px, py + o, r)
+    for t in ((9, 4.5, -120, 2.6, 2.6), (14.5, 2.4, -95, 2.4, 2.6), (20, 3.2, -65, 2.6, 2.6)):
+        tuft(b, t[0], t[1] + o, *t[2:])
+    back = [row[:] for row in b]
+    for px, py, r in ((FIG_CX, 12.4, 10.8), (5.8, 19.0, 3.0), (25.6, 19.0, 3.0)):
+        disc(back, px, py + o, r)
+    for t in ((8.0, 20.5, 105, 4.0, 2.4), (12.0, 21.5, 92, 4.4, 2.6), (16.0, 22.0, 88, 4.6, 2.6),
+              (20.0, 21.5, 85, 4.4, 2.6), (24.0, 20.5, 75, 4.0, 2.4)):
+        tuft(back, t[0], t[1] + o, *t[2:])
+    rim_light(b, [(12, 5 + o), (18, 5 + o)], [(12, 3 + o), (13, 3 + o)])
+    rim_light(back, [(12, 6 + o), (18, 6 + o), (10, 18 + o), (14, 19 + o), (18, 19 + o), (22, 18 + o)],
+              [(12, 3 + o), (13, 3 + o)])
+    sb = layer()
+    for px, py, r in ((SIDE_CX, SIDE_CY, 11.0), (4.8, 13.5, 3.8), (6, 19, 3.2), (10, 21.5, 2.8)):
+        disc(sb, px, py + o, r)
+    for t in ((10, 3.5, -125, 2.8, 2.6), (15, 2.2, -95, 2.6, 2.6), (20, 3.4, -65, 2.6, 2.4)):
+        tuft(sb, t[0], t[1] + o, *t[2:])
+    rim_light(sb, [(11, 7 + o), (17, 6 + o), (8, 14 + o)], [(13, 2 + o), (14, 2 + o)])
+    c = crown_base(1.2)
+    for a in range(200, 350, 30):
+        tuft(c, CROWN_CX + math.cos(math.radians(a)) * CROWN_R * 0.9,
+             CROWN_CY + o + math.sin(math.radians(a)) * CROWN_R * 0.9, a, 3.2, 2.6)
+    return {"front": (b, front_locks([(7.5, 18, 1.8), (10.0, 16.5, 2.2), (13.0, 17.5, 2.4), (16.2, 16.5, 2.4),
+                                      (19.2, 17.5, 2.4), (22.0, 16.5, 2.2), (24.4, 18, 1.8)])),
+            "back": back,
+            "side": (sb, side_locks([(17.5, 16, 2.2), (20.5, 17.5, 2.4), (23.5, 16.5, 2.2), (25.5, 15, 1.4)])),
+            "crown": crown_finish(c, CROWN_R + 1.2), "ears": False}
+
+
+def style_ponytail():
+    """Gathered into a ponytail swept over the east shoulder."""
+    b = layer()
+    ellipse(b, FIG_CX, 12.5 + o, 10.6, 10.2)
+    rim_light(b, [(12, 5 + o), (13, 6 + o)], [(11, 3 + o), (12, 3 + o)])
+    f = front_fringe({7: 15, 8: 14, 9: 13, 10: 12, 11: 12, 12: 12, 13: 12, 14: 12, 15: 12, 16: 12, 17: 12,
+                      18: 12, 19: 13, 20: 13, 21: 14, 22: 15, 23: 16, 24: 17})
+    paste(f, tail(25, 17, 27, 33, 18))
+    back = layer()
+    ellipse(back, FIG_CX, 12.8 + o, 10.6, 10.0)
+    nape_cut(back)
+    rim_light(back)
+    terminator(back, FIG_CX, 12.8 + o, 12.0, 8 + o)
+    comb(back, [((8, 9), (14, 12), (22, 16)), ((10, 16), (16, 17), (22, 17)), ((13, 5), (18, 9), (23, 15))], o)
+    paste(back, tail(24, 16, 27, 30, 17))
+    sb = layer()
+    disc(sb, SIDE_CX, SIDE_CY + 0.4 + o, 10.4)
+    rim_light(sb, [(10, 6 + o), (8, 10 + o), (13, 9 + o), (16, 12 + o)])
+    so = side_locks([(20.5, 11.5, 2.4), (23.5, 12, 2.0)])
+    paste(so, tail(9, 17, 10, 33, 18))
+    c = crown_finish(crown_base())
+    paste(c, tail(CROWN_CX + 8, CROWN_CY + 2, CROWN_CX + 13, CROWN_CY + 12, CROWN_CY + 3))
+    return {"front": (b, f), "back": back, "side": (sb, so), "crown": c, "ears": False}
+
+
+def tail(x0, y0, x1, y1, tie_y):
+    """A ponytail's tail, lit on its own, with its tie."""
+    t = layer()
+    lock(t, x0, y0 + o, x1, y1 + o, 5, 2)
+    rim_light(t, [(round(x0 + (x1 - x0) * f), round(y0 + (y1 - y0) * f) + o) for f in (0.4, 0.7)])
+    for x in range(int(min(x0, x1)) - 2, int(max(x0, x1)) + 3):
+        if 0 <= x < FIG_W and t[int(tie_y) + o][x] != T:
+            t[int(tie_y) + o][x] = HAIR_SH
+    return t
+
+
+# Per-agent hairstyles, by the name a pack registers them under.
+HAIRSTYLES = {
+    "mop": style_mop, "messy": style_messy, "side_part": style_side_part, "long": style_long,
+    "bun": style_bun, "crop": style_crop, "curls": style_curls, "shaggy": style_shaggy,
+    "ponytail": style_ponytail,
+}
 
 
 # ---- bodies ------------------------------------------------------------------------
-# Drawn on the pose grid, shifted down `dy` rows onto a dressing canvas.
+# Drawn on the pose grid, shifted down `dy` rows onto a taller canvas (a hair
+# layer's).
 def mitt(g, x, y, wrist_west=False):
     """A hand: a skin block, shaded along its foot, rounded at the bottom but
     for a corner its wrist joins: rounded there, it leaves a notch against the
@@ -524,9 +870,9 @@ def hands_typing(frame):
 
 
 def elbows_typing(frame):
-    """Typing seen from behind, where the chair back and its arm pads hide the
-    hands: the reaching arm's elbow juts out past the chair, swapping sides
-    each frame as the hands do."""
+    """Typing seen from behind, where the chair's arm pads hide most of the
+    hands' press: the reaching arm's elbow juts out past the chair, swapping
+    sides each frame as the hands do."""
     hands = hands_typing(frame)
 
     def draw(g, dy):
@@ -696,55 +1042,90 @@ POSES = {
     "seated_sleeping_alt": (SEATED_ROWS, "crown", lambda g, dy: asleep_body(g, dy, 3),
         "Dozed off, slumped east."),
 }
-# The hairstyle every baked character wears until the renderer dresses each
-# agent in its own.
-BAKED_STYLE = "mop"
-# The ears a style leaves bare, per view.
-EARS = {"front": ears_front, "back": ears_back, "side": ear_side}
 # Where a face-down head lies, as an offset from the crown's rest.
 CROWN_SHIFT = {"seated_sleeping": (0, 0), "seated_sleeping_alt": (1, 1)}
 
 
-def shade_by_skin(g):
-    """Hair touching skin sits in the fringe's shadow."""
-    for y in range(len(g)):
-        for x in range(1, FIG_W - 1):
-            if g[y][x] in (HAIR, HAIR_LT) and any(
-                    0 <= y + ddy < len(g) and g[y + ddy][x + ddx] in SKIN_KEYS
-                    for ddx, ddy in ((1, 0), (-1, 0), (0, 1))):
-                g[y][x] = HAIR_SH
+# Where every view's hair is laid: this point on a body, and the same point on
+# a layer, whose canvas stands HAIR_HEADROOM rows taller.
+HEAD_MARK = (16, FACE_TOP)
+EARS = {"front": ears_front, "back": ears_back, "side": ear_side}
 
 
-def dressed(pose, style):
-    """`pose` dressed in `style`, the hair's headroom cut off: the frame the
-    bundled pack bakes until the renderer composes hair itself."""
+def bald_head(view, g, dy):
+    """The head a view's body shows under the hair: the face, the back of the
+    head, or the profile. The ears are the hairstyle's to show or cover."""
+    if view == "front":
+        face_front(g, dy)
+    elif view == "back":
+        nape(g, dy)
+    elif view == "side":
+        side_face(g, dy)
+
+
+def body_frame(pose):
+    """`pose`'s bald body, unoutlined (the renderer outlines the dressed union),
+    and its head mark `(view, x, y)`."""
     rows, view, body, _ = POSES[pose]
-    look = HAIRSTYLES[style]()
-    h = rows * S
-    g = canvas(FIG_W, h + o)
-    if view in ("front", "side"):
-        behind, over = look[view]
-    else:
-        behind, over = None, look[view]
-    if behind is not None:
-        paste(g, behind)
+    g = canvas(FIG_W, rows * S)
     # The head, then the body in front of it: a collar over the neck, a raised
     # mug and its steam over the chin.
-    if view == "front":
-        face_front(g, o)
-    elif view == "back":
-        nape(g, o)
-    elif view == "side":
-        side_face(g, o)
-    if look["ears"] and view in EARS:
-        EARS[view](g, o)
-    body(g, o)
-    paste(g, over, *CROWN_SHIFT.get(pose, (0, 0)))
-    shade_by_skin(g)
-    for y in range(o + 1):  # the headroom, and the outline's row at the top
-        g[y] = [T] * FIG_W
-    union_outline(g)
-    return g[o:]
+    bald_head(view, g, 0)
+    body(g, 0)
+    dx, dy = CROWN_SHIFT.get(pose, (0, 0))
+    return g, (view, HEAD_MARK[0] + dx, HEAD_MARK[1] + dy)
+
+
+def finished(lyr, skin, cover):
+    """`lyr` shaded where it meets bare skin in the dressed frame: `skin` holds
+    the view's bald head, `cover` the layer that will lie over this one. Skin
+    is bare where nothing lies over it: for the over layer, where the layer
+    itself does not; for the behind layer, which the body lies over, where the
+    over layer does not."""
+    out = [row[:] for row in lyr]
+    top = lyr if cover is None else cover
+    for y in range(LAYER_H):
+        for x in range(1, FIG_W - 1):
+            if lyr[y][x] not in (HAIR, HAIR_LT):
+                continue
+            for dx, dy in ((1, 0), (-1, 0), (0, 1)):
+                nx, ny = x + dx, y + dy
+                if ny < LAYER_H and skin[ny][nx] in SKIN_KEYS and top[ny][nx] == T:
+                    out[y][x] = HAIR_SH
+                    break
+    return out
+
+
+def hair_layers(style):
+    """`style`'s layers per view as the renderer lays them: `(behind, over)`,
+    each shaded where it meets bare skin, and the ears where the style leaves
+    them bare: drawn over the behind layer, or in profile, where the ear lies on
+    the face, under the over layer's hair."""
+    look = HAIRSTYLES[style]()
+    views = {}
+    for view in ("front", "back", "side", "crown"):
+        behind, over = look[view] if view in ("front", "side") else (None, look[view])
+        if look["ears"] and view in EARS:
+            ears = layer()
+            EARS[view](ears, o)
+            if view == "side":
+                paste(ears, over)
+                over = ears
+            else:
+                if behind is not None:
+                    paste(ears, behind)
+                    EARS[view](ears, o)
+                behind = ears
+        skin = layer()
+        if view == "crown":
+            asleep_body(skin, o, 0)
+        else:
+            bald_head(view, skin, o)
+        views[view] = (
+            finished(behind, skin, over) if behind is not None else None,
+            finished(over, skin, None),
+        )
+    return views
 
 
 def desk_chair():
@@ -1474,14 +1855,24 @@ PROVENANCE = "Generated by scripts/gen-art.py: edit the generator, not this file
 ENCODING = "utf-8"  # the keys include σ/ψ/Θ, and the locale's encoding need not be the file's
 
 
-def render_sprite(header, frames):
+def render_sprite(header, frames, heads=()):
+    """A .sprite file: the header as comments, then each frame, marked with its
+    `heads` entry `(view, x, y)` where it has one."""
     text = inspect.cleandoc(header) + "\n" + PROVENANCE
     lines = [f"# {l}" if l else "#" for l in text.split("\n")]
     body = []
     for i, g in enumerate(frames):
         body.append(f"@frame {i}")
+        if i < len(heads) and heads[i] is not None:
+            view, x, y = heads[i]
+            body.append(f"@mark head.{view} {x} {y}")
         body.extend(" ".join(r) for r in g)
     return "\n".join(lines + body) + "\n"
+
+
+def hair_file(style, view, part):
+    """The sprite a hairstyle's layer is written to, named as `[hairstyles]` lists it."""
+    return f"hair_{style}_{view}_{part}@{S}x.sprite"
 
 
 def orphans(pack, sprites):
@@ -1554,7 +1945,6 @@ def main():
     if args.pack is not None and not args.pack.is_dir():
         parser.error(f"not a directory: {args.pack}")
     pieces = {
-        **{pose: (POSES[pose][3], [dressed(pose, BAKED_STYLE)]) for pose in POSES},
         "plant": (plant_bush.__doc__, [plant_bush()]),
         "plant_tall": (plant_tall.__doc__, [plant_tall()]),
         "plant_flower": (plant_flower.__doc__, [plant_flower()]),
@@ -1587,6 +1977,18 @@ def main():
         f"{base}@{S}x.sprite": render_sprite(header, frames)
         for base, (header, frames) in pieces.items()
     }
+    for pose, (*_, header) in POSES.items():
+        body, head = body_frame(pose)
+        sprites[f"{pose}@{S}x.sprite"] = render_sprite(header + "\nBald: the pack's [hairstyles] dress it.", [body], [head])
+    for style in HAIRSTYLES:
+        for view, parts in hair_layers(style).items():
+            for part, lyr in zip(("behind", "over"), parts):
+                if lyr is not None and any(c != T for row in lyr for c in row):
+                    sprites[hair_file(style, view, part)] = render_sprite(
+                        f"The {style} hairstyle, {view} view: the layer {part} the body.",
+                        [lyr],
+                        [(view, HEAD_MARK[0], HEAD_MARK[1] + o)],
+                    )
     sprites |= {f"{base}.sprite": render_sprite(header, frames) for base, (header, frames) in classic.items()}
     if args.selftest:
         selftest(sprites)
