@@ -554,6 +554,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         &look,
         top_wall_h,
         ctx.layout.window_bays(),
+        ctx.pack,
         ctx.theme,
         ctx.floor.altitude,
     );

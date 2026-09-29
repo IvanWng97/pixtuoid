@@ -42,7 +42,8 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
     let render_lum = |flash: f32| -> u64 {
         let sky = Sky::at_with(now, Weather::Storm).with_flash(flash);
         let look = Look::resolve(&sky, theme);
-        let (lit_colors, building, sky_row) = window_glass_invariants(30, &look, theme);
+        let sky_row = sky_rows(30, &look);
+        let city = CityStrip::draw(&pack(), (WINDOW_W, 28), 0.0, &look, theme, now);
         let mut buf = RgbBuffer::filled(40, 40, Rgb { r: 8, g: 8, b: 10 });
         paint_floor_to_ceiling_window(
             &mut buf,
@@ -54,9 +55,7 @@ fn storm_window_bolt_brightens_glass_during_the_flash() {
             0,
             now,
             &sky,
-            0.0,
-            &lit_colors,
-            building,
+            (&city, 0),
             &sky_row,
             None,
             &look,
@@ -106,6 +105,7 @@ fn short_buffer_clamps_spill_and_window_without_panic() {
         &look,
         top_wall_h,
         window_bays(buf_w, None),
+        &pack(),
         theme,
         0.0,
     );
@@ -157,6 +157,7 @@ fn render_office_themed(
         &look,
         top_wall_h,
         window_bays(buf_w, None),
+        &pack(),
         theme,
         0.0,
     );
@@ -776,6 +777,7 @@ fn base_fill_cache_hit_is_byte_identical_and_a_key_change_repaints() {
             &look,
             top_wall_h,
             window_bays(buf_w, None),
+            &pack(),
             theme,
             0.0,
         );
@@ -839,6 +841,7 @@ fn base_fill_cache_resize_on_a_warm_cache_recomputes() {
             &look,
             14,
             window_bays(w, None),
+            &pack(),
             theme,
             0.0,
         );
@@ -1012,4 +1015,10 @@ fn a_spill_leaning_off_the_left_edge_is_clipped() {
             .collect();
         assert_eq!(lit, want, "row {dy}");
     }
+}
+
+/// The bundled pack, whose city the windows show.
+fn pack() -> Pack {
+    crate::embedded_pack::load_sprite_pack(crate::embedded_pack::PackSource::Bundled)
+        .expect("the embedded pack loads")
 }

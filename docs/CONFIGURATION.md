@@ -88,8 +88,10 @@ alone, since its colours come from its depth and the sky rather than the pack.
 `[buildings.<name>]` is one building: a one-frame `sprite` and the `planes`
 (`"mid"`, `"near"`) it may stand in. `[buildings."<name>@<N>x"]` redraws its
 sprite at `N` times the size, as an animation's variant does. Each connected run
-of `glass` is one window. A pack with no `[buildings]` of its own takes the
-bundled city whole, materials and all.
+of `glass` is one window, and more of them burn as night falls. Every window
+looks out on one city, the pack's buildings standing in front of plain blocks
+on the horizon. A pack with no `[buildings]` of its own takes the bundled city
+whole, materials and all.
 
 ## Logging & troubleshooting
 
