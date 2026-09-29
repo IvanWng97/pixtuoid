@@ -177,14 +177,23 @@ impl Emitter {
     /// The blend strength it lights cell `(x, y)` with, or `None` where it
     /// doesn't reach.
     pub(crate) fn level_at(&self, x: u16, y: u16) -> Option<f32> {
+        self.level_at_f(f32::from(x), f32::from(y))
+    }
+
+    /// [`Self::level_at`] at any point, in layout units: a painter whose grid is
+    /// finer than a layout cell samples each of its pixels where it lies, so a
+    /// light's falloff steps with the art rather than in blocks a cell wide. A
+    /// spill's rows and a patch's footprint stay whole cells, the shapes they
+    /// are.
+    pub(crate) fn level_at_f(&self, x: f32, y: f32) -> Option<f32> {
         let strength = self.strength;
         match self.light {
             Light::Pool(e) => {
                 if e.half_w == 0 || e.half_h == 0 {
                     return None;
                 }
-                let nx = (x as f32 - e.cx as f32) / e.half_w as f32;
-                let ny = (y as f32 - e.cy as f32) / e.half_h as f32;
+                let nx = (x - e.cx as f32) / e.half_w as f32;
+                let ny = (y - e.cy as f32) / e.half_h as f32;
                 crate::ground::falloff(nx, ny).map(|f| f * strength)
             }
             Light::Halo {
@@ -194,16 +203,16 @@ impl Emitter {
             } => {
                 let peak = strength * share;
                 let r2max = (radius as f32) * (radius as f32);
-                let dx = x as f32 - centre.x as f32;
-                let dy = y as f32 - centre.y as f32;
+                let dx = x - centre.x as f32;
+                let dy = y - centre.y as f32;
                 let r2 = dx * dx + dy * dy;
                 (r2 <= r2max).then(|| (1.0 - (r2 / r2max).sqrt()) * peak)
             }
             Light::Glow { at, w, h, reach } => {
                 let (left, right) = (at.x as f32, (at.x + w - 1) as f32);
                 let (top, bottom) = (at.y as f32, (at.y + h - 1) as f32);
-                let dx = (left - x as f32).max(x as f32 - right).max(0.0);
-                let dy = (top - y as f32).max(y as f32 - bottom).max(0.0);
+                let dx = (left - x).max(x - right).max(0.0);
+                let dy = (top - y).max(y - bottom).max(0.0);
                 let left_of_reach = 1.0 - (dx * dx + dy * dy).sqrt() / reach as f32;
                 let outside = dx > 0.0 || dy > 0.0;
                 (outside && left_of_reach > 0.0).then_some(strength * left_of_reach * left_of_reach)
@@ -214,19 +223,31 @@ impl Emitter {
                 top,
                 slant,
             } => {
-                let dy = y.checked_sub(top).filter(|&dy| dy < SPILL_DEPTH)?;
+                let below = y - f32::from(top);
+                if below < 0.0 {
+                    return None;
+                }
+                let dy = below.floor() as u16;
+                if dy >= SPILL_DEPTH {
+                    return None;
+                }
                 let row = spill_rows(wx, w, slant).nth(usize::from(dy))?;
-                row.contains(&i32::from(x))
+                row.contains(&(x.floor() as i32))
                     .then(|| strength * (1.0 - dy as f32 / SPILL_DEPTH as f32))
             }
             Light::Patch { centre } => {
                 let ((x0, y0), (x1, y1)) = self.bounds();
-                if !(x0..x1).contains(&x) || !(y0..y1).contains(&y) {
+                if x < f32::from(x0)
+                    || x >= f32::from(x1)
+                    || y < f32::from(y0)
+                    || y >= f32::from(y1)
+                {
                     return None;
                 }
-                let (dx, dy) = (x - x0, centre.y - y);
-                let dist = ((dx as i32 - i32::from(MONITOR_HALO_W / 2)).abs() as f32 + dy as f32)
-                    / MONITOR_HALO_REACH;
+                let dx = x - f32::from(x0);
+                // Under the centre's row but within its cell: as lit as the row.
+                let dy = (f32::from(centre.y) - y).max(0.0);
+                let dist = ((dx - f32::from(MONITOR_HALO_W / 2)).abs() + dy) / MONITOR_HALO_REACH;
                 Some((strength * (1.0 - dist).max(0.0) * MONITOR_HALO_SHARE).clamp(0.0, 1.0))
             }
         }

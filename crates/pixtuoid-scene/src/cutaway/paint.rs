@@ -98,14 +98,14 @@ pub(crate) struct Moment<'a> {
 }
 
 /// Paint `frame`'s `office` into `buf` as an orthographic cutaway — the
-/// classic painter's sibling, not its successor. The windows look out from
-/// `altitude` ([`FloorMeta::altitude`](crate::floor::FloorMeta::altitude)) on
-/// the sky at `now`.
+/// classic painter's sibling, not its successor — as `floor` of the building
+/// looks at `now`: its windows on the sky from its altitude, its room lit for
+/// the hour.
 /// Returns where each visible agent's badge belongs; see [`CutawayLabel`].
 pub fn render_cutaway(
     frame: &SimFrame,
     office: Office<'_>,
-    altitude: f32,
+    floor: crate::floor::FloorMeta,
     now: std::time::SystemTime,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
@@ -120,10 +120,10 @@ pub fn render_cutaway(
     let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
     let moment = Moment {
         look: &look,
-        altitude,
+        altitude: floor.altitude,
         now,
     };
-    let list = build_list(frame, office, moment);
+    let list = build_list(frame, office, moment, floor.floor_idx);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
@@ -154,6 +154,9 @@ fn paint_backdrop(
 /// occlusion pass.
 pub(crate) struct DrawList<'a> {
     pieces: Vec<Piece>,
+    /// How dark the room is: every piece is painted under it, so a change
+    /// repaints the whole frame.
+    ambient: crate::cutaway::light::Ambient,
     // What it was built with, so painting it cannot use anything else: a
     // figure's key names its density, which only the build's scale picks.
     pack: &'a Pack,
@@ -181,7 +184,8 @@ pub(crate) struct Piece {
     /// not change without painting it. One that
     /// [`reads_under`](PieceKind::reads_under) changes with what lies under it,
     /// so repainting it starts from a repaint of that. Compare it only within
-    /// one layout, theme, pack and scale: it does not capture a change to those.
+    /// one layout, theme, pack, scale and ambient: it does not capture a change
+    /// to those.
     pub(crate) fingerprint: u64,
 }
 
@@ -239,60 +243,143 @@ impl<'a> DrawList<'a> {
     }
 }
 
-/// Build `frame`'s [`DrawList`] at `moment`. Every figure and every window's
-/// view is resolved here, so painting the list reads neither `frame` nor the
-/// moment again.
+/// Build `frame`'s [`DrawList`] at `moment`, on floor `floor_idx`. Every
+/// figure, window view and light is resolved here, so painting the list reads
+/// neither `frame` nor the moment again.
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
     office: Office<'a>,
     moment: Moment<'_>,
+    floor_idx: usize,
 ) -> DrawList<'a> {
     let Office {
         pack, theme, scale, ..
     } = office;
+    let ambient = crate::cutaway::light::Ambient::of(moment.look);
     let collected = collect_pieces(frame, office, moment);
-    let pieces = depth_sort(
+    let sorted = depth_sort(
         collected
             .into_iter()
             .map(|(span, kind)| (span, (span, kind)))
             .collect(),
-    )
-    .into_iter()
-    .map(|(span, kind)| Piece {
-        span,
-        fingerprint: fingerprint(&kind),
-        shadow: ground_shadow(span, &kind, pack),
-        kind,
-    })
-    .collect();
+    );
+    // The lights come last: they lift whatever lies under them, piece or floor.
+    let pieces = sorted
+        .into_iter()
+        .chain(lights(frame, office, moment, floor_idx, ambient))
+        .map(|(span, kind)| Piece {
+            span,
+            fingerprint: fingerprint(&kind),
+            shadow: ground_shadow(span, &kind, pack),
+            kind,
+        })
+        .collect();
     DrawList {
         pieces,
+        ambient,
         pack,
         theme,
         scale,
     }
 }
 
-/// Paint `list` over what `buf` already holds: every piece's shadow
-/// ([`ground_shadow`]) first, then the pieces back to front.
+/// The room's own lights (`crate::lighting`) this frame, as the cutaway paints
+/// them. The neon sign's glow waits for the sign: the cutaway does not draw it
+/// yet, and a glow with no tube in it reads as a stain on the wall.
+fn lights(
+    frame: &SimFrame,
+    office: Office<'_>,
+    moment: Moment<'_>,
+    floor_idx: usize,
+    ambient: crate::cutaway::light::Ambient,
+) -> Vec<(Span, PieceKind)> {
+    let Office {
+        layout,
+        pack,
+        theme,
+        scale,
+    } = office;
+    let lights = crate::lighting::Lights::of(
+        layout,
+        moment.look,
+        &crate::lighting::LightInputs {
+            agents: &frame.agents,
+            seated: &frame.seated_agents,
+            floor_idx,
+            indoor_scale: frame.indoor_scale,
+            neon: frame.neon,
+            now: moment.now,
+        },
+    );
+    let pen = Pen::for_pack(scale, pack);
+    lights
+        .spills
+        .iter()
+        .chain(&lights.pools)
+        .chain(&lights.floor_lamp)
+        .chain(lights.desks.iter().map(|d| &d.lamp))
+        .chain(&lights.monitor_halos)
+        .filter_map(|e| {
+            crate::cutaway::light::LightView::of(
+                e,
+                crate::cutaway::light::tint_of(e.kind, theme),
+                ambient,
+                pen,
+                (layout.buf_w, layout.buf_h),
+            )
+        })
+        .map(|(span, view)| (span, PieceKind::Light { view }))
+        .collect()
+}
+
+/// Paint `list` over the backdrop `buf` holds: every piece's shadow
+/// ([`ground_shadow`]) first, the room darkened to the hour, then the pieces back
+/// to front, each darkened with it, and last the lights on all of it.
+///
+/// The glass paints before the rest, undarkened: it is the sky, which the look
+/// already resolved for the hour, and it lies behind everything that meets it,
+/// so painting it early changes no occlusion.
 pub(crate) fn paint_list(
     list: &DrawList<'_>,
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) {
+    use crate::cutaway::light::{paint_lights, wash};
+    let pen = Pen::for_pack(list.scale, list.pack);
     paint_ground_shadows(
         list.pieces.iter().filter_map(|p| p.shadow),
-        crate::ground::shadow_strength(CUTAWAY_DARKNESS),
-        Pen::for_pack(list.scale, list.pack),
+        crate::ground::shadow_strength(list.ambient.darkness()),
+        pen,
         buf,
     );
+    wash(buf, None, list.ambient);
+    let mut glass = Vec::new();
     for piece in &list.pieces {
-        paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
+        if let PieceKind::Glass { ref view } = piece.kind {
+            paint_glass(view, pen, buf);
+            glass.push(view.rect());
+        }
     }
+    let since = buf.clone();
+    for piece in &list.pieces {
+        if !matches!(
+            piece.kind,
+            PieceKind::Glass { .. } | PieceKind::Light { .. }
+        ) {
+            paint_piece(&piece.kind, list.pack, list.theme, list.scale, cache, buf);
+        }
+    }
+    wash(buf, Some(&since), list.ambient);
+    paint_lights(
+        list.pieces.iter().filter_map(|p| match p.kind {
+            PieceKind::Light { ref view } => Some(view),
+            _ => None,
+        }),
+        &glass,
+        pen,
+        buf,
+    );
 }
-
-/// The darkness the cutaway is lit at: noon, until it takes the time of day.
-const CUTAWAY_DARKNESS: f32 = 0.0;
 
 /// Ramp stops a shadow steps the floor at its centre, per unit of
 /// [`shadow_strength`].
@@ -303,7 +390,7 @@ const SHADOW_STOPS_PER_STRENGTH: f32 = 6.0;
 /// Where a piece meets the floor, as the shadow it casts there: on the row under
 /// its south edge, a standing figure's under its feet. A sitter is grounded by
 /// what they sit on, which casts its own: a desk chair a sitter carries, under
-/// the chair. Walls, window glass and hung decor meet no floor.
+/// the chair. Walls, window glass, hung decor and light meet no floor.
 fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::ground::Contact> {
     let under = |s: Span| {
         Some(crate::ground::Contact::under(
@@ -313,7 +400,10 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         ))
     };
     match *kind {
-        PieceKind::WallSeg { .. } | PieceKind::Glass { .. } | PieceKind::Hung { .. } => None,
+        PieceKind::WallSeg { .. }
+        | PieceKind::Glass { .. }
+        | PieceKind::Hung { .. }
+        | PieceKind::Light { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -436,6 +526,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
         } => (at, shadow, key, chair).hash(&mut h),
         PieceKind::Glass { ref view } => view.hash(&mut h),
         PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
+        PieceKind::Light { ref view } => view.hash(&mut h),
     }
     h.finish()
 }
@@ -504,6 +595,12 @@ fn paint_piece(
         }
         PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
         PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
+        PieceKind::Light { ref view } => crate::cutaway::light::paint_lights(
+            std::iter::once(view),
+            &[],
+            Pen::for_pack(scale, pack),
+            buf,
+        ),
     }
 }
 
@@ -588,8 +685,12 @@ fn desk_face_rows(pack: &Pack, art: &str, scale: RenderScale) -> u16 {
 /// The deepest a noon shadow steps the floor.
 #[cfg(test)]
 fn deepest_shadow_stop() -> i8 {
-    (crate::ground::shadow_strength(CUTAWAY_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).ceil() as i8
+    (crate::ground::shadow_strength(NOON_DARKNESS) * SHADOW_STOPS_PER_STRENGTH).ceil() as i8
 }
+
+/// A clear noon's darkness, the hour the shadow tests pin.
+#[cfg(test)]
+const NOON_DARKNESS: f32 = 0.0;
 
 /// Compares `variant`, a cutaway render of a pack whose desks ship density
 /// variants, against `base`, one of `base_pack`, on the two things the cutaway
@@ -605,7 +706,13 @@ pub(crate) fn assert_variant_desk_foot(
     base_pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    now: std::time::SystemTime,
 ) {
+    // The room darkens every pixel by the hour's steps; its lights must be off.
+    let ambient = crate::cutaway::light::Ambient::of(&crate::atmosphere::Look::resolve(
+        &crate::sky::Sky::at(now),
+        theme,
+    ));
     let mut floor = RgbBuffer::filled(
         scale.to_buffer(layout.buf_w),
         scale.to_buffer(layout.buf_h),
@@ -658,7 +765,7 @@ pub(crate) fn assert_variant_desk_foot(
     };
     let deepest = deepest_shadow_stop();
     let floor_or_its_shadow = |c: pixtuoid_core::sprite::Rgb, floor: pixtuoid_core::sprite::Rgb| {
-        c == floor || (1..=deepest).any(|k| c == floor.ramp(-k))
+        (0..=deepest).any(|k| c == ambient.on(floor.ramp(-k)))
     };
     // The desk's own edge column: a sitter and their chair stand centred on it.
     for &(x0, _, below) in &feet {
@@ -990,13 +1097,36 @@ fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
 impl PieceKind {
     /// Whether it recolours what lies under it rather than painting colours of
     /// its own: a room wall's glass ([`PieceKind::WallSeg`]), not a window's
-    /// [`PieceKind::Glass`].
+    /// [`PieceKind::Glass`], and a light.
     #[cfg_attr(
         not(test),
         expect(dead_code, reason = "the incremental canvas repaints under it")
     )]
     pub(crate) fn reads_under(&self) -> bool {
-        matches!(self, PieceKind::WallSeg { .. })
+        matches!(self, PieceKind::WallSeg { .. } | PieceKind::Light { .. })
+    }
+
+    /// Whether two builds of one office always give it one fingerprint: what a
+    /// cache of the room at rest may hold. The rest change with the sky, the
+    /// hour's lights or the people.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the incremental canvas caches the room at rest")
+    )]
+    pub(crate) fn is_static(&self) -> bool {
+        match self {
+            PieceKind::WallSeg { .. }
+            | PieceKind::Hung { .. }
+            | PieceKind::Chair { .. }
+            | PieceKind::Prop { .. }
+            | PieceKind::PropBand { .. }
+            | PieceKind::Table { .. }
+            | PieceKind::Appliance { .. } => true,
+            PieceKind::Glass { .. }
+            | PieceKind::Light { .. }
+            | PieceKind::Desk { .. }
+            | PieceKind::Character { .. } => false,
+        }
     }
 }
 
@@ -1057,6 +1187,10 @@ pub(crate) enum PieceKind {
     Appliance {
         at: crate::layout::Point,
         kind: crate::layout::WaypointKind,
+    },
+    /// One of the room's lights and the steps it lifts what it falls on.
+    Light {
+        view: crate::cutaway::light::LightView,
     },
     Character {
         figure: Figure,
@@ -1246,6 +1380,18 @@ pub(crate) struct WindowView {
     y: u16,
     w: u16,
     px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
+}
+
+impl WindowView {
+    /// Its box on the art grid, frame included.
+    fn rect(&self) -> ArtRect {
+        ArtRect {
+            x: ArtPx(self.x),
+            y: ArtPx(self.y),
+            w: ArtPx(self.w),
+            h: ArtPx((self.px.len() / usize::from(self.w.max(1))) as u16),
+        }
+    }
 }
 
 /// Paint a window's [`WindowView`].
@@ -2404,7 +2550,7 @@ mod tests {
                 theme,
                 scale,
             },
-            0.0,
+            crate::floor::FloorMeta::ground(),
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,
             &mut buf,
@@ -2817,7 +2963,7 @@ mod tests {
         }
         paint_ground_shadows(
             shadows.iter().copied(),
-            crate::ground::shadow_strength(CUTAWAY_DARKNESS),
+            crate::ground::shadow_strength(NOON_DARKNESS),
             pen,
             &mut buf,
         );
@@ -3032,6 +3178,7 @@ mod tests {
                 altitude: 0.0,
                 now: std::time::UNIX_EPOCH,
             },
+            0,
         );
         let mut cast = 0;
         for piece in list.pieces() {
@@ -3044,7 +3191,7 @@ mod tests {
             );
             paint_ground_shadows(
                 std::iter::once(shadow),
-                crate::ground::shadow_strength(CUTAWAY_DARKNESS),
+                crate::ground::shadow_strength(NOON_DARKNESS),
                 Pen::for_pack(scale, &pack),
                 &mut buf,
             );
@@ -3421,6 +3568,7 @@ S B B B B B B S
                             altitude: 0.0,
                             now,
                         },
+                        0,
                     );
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
@@ -3473,6 +3621,7 @@ S B B B B B B S
                     altitude: 0.0,
                     now,
                 },
+                0,
             );
             let is_glass = |p: &Piece| matches!(p.kind, PieceKind::Glass { .. });
             same_fingerprint_same_pixels(painted, &list, &layout, is_glass);
@@ -3497,6 +3646,150 @@ S B B B B B B S
             );
         }
         assert_eq!(glass(noon, &mut painted), b, "one moment, one fingerprint");
+    }
+
+    /// The look of a clear sky at local `hour`.
+    fn look_at(theme: &Theme, hour: u32) -> crate::atmosphere::Look {
+        crate::atmosphere::Look::resolve(
+            &crate::sky::Sky::at_with(crate::localclock::at_hour(hour), crate::sky::Weather::Clear),
+            theme,
+        )
+    }
+
+    /// `frame`'s list at local `hour`, under a clear sky.
+    fn list_at<'a>(
+        frame: &SimFrame,
+        office: Office<'a>,
+        look: &crate::atmosphere::Look,
+        hour: u32,
+    ) -> DrawList<'a> {
+        build_list(
+            frame,
+            office,
+            Moment {
+                look,
+                altitude: 0.0,
+                now: crate::localclock::at_hour(hour),
+            },
+            0,
+        )
+    }
+
+    /// What the rest cache relies on: between noon and midnight a static
+    /// piece keeps its span and fingerprint, while the room's tone and its
+    /// lights move.
+    #[test]
+    fn noon_and_midnight_differ_only_in_dynamic_pieces() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        for s in [1, pack.max_density_variant()] {
+            let office = Office {
+                layout: &layout,
+                pack: &pack,
+                theme,
+                scale: RenderScale::new(s).expect("nonzero"),
+            };
+            let (noon_look, night_look) = (look_at(theme, 12), look_at(theme, 23));
+            let (noon, night) = (
+                list_at(frame, office, &noon_look, 12),
+                list_at(frame, office, &night_look, 23),
+            );
+            let at_rest = |list: &DrawList| -> Vec<(Span, u64)> {
+                list.pieces()
+                    .iter()
+                    .filter(|p| p.kind.is_static())
+                    .map(|p| (p.span, p.fingerprint))
+                    .collect()
+            };
+            assert_eq!(at_rest(&noon), at_rest(&night), "a static piece moved");
+            assert_ne!(noon.ambient, night.ambient, "the room keeps its noon tone");
+            let lit = |list: &DrawList| -> Vec<u64> {
+                list.pieces()
+                    .iter()
+                    .filter(|p| matches!(p.kind, PieceKind::Light { .. }))
+                    .map(|p| p.fingerprint)
+                    .collect()
+            };
+            assert_ne!(lit(&noon), lit(&night), "the lights keep their noon levels");
+        }
+    }
+
+    /// Every light's lift lies inside its span, at every scale.
+    #[test]
+    fn a_light_stays_inside_its_span() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let mut lights = 0;
+        for s in [1, 3, pack.max_density_variant()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let pen = Pen::for_pack(scale, &pack);
+            let look = look_at(theme, 23);
+            let list = list_at(
+                frame,
+                Office {
+                    layout: &layout,
+                    pack: &pack,
+                    theme,
+                    scale,
+                },
+                &look,
+                23,
+            );
+            for piece in list.pieces() {
+                let PieceKind::Light { ref view } = piece.kind else {
+                    continue;
+                };
+                lights += 1;
+                let (r, span) = (view.rect(), piece.span);
+                assert!(
+                    r.x >= pen.art(span.x0)
+                        && r.y >= pen.art(span.y0)
+                        && r.x.0 + r.w.0 <= pen.art(span.x1 + 1).0
+                        && r.y.0 + r.h.0 <= pen.art(span.y1 + 1).0,
+                    "a light at {r:?} leaves its span {span:?} at scale {s}"
+                );
+            }
+        }
+        assert!(lights > 0, "the night office has no lights");
+    }
+
+    /// The hour reaches the room: away from its lights, the night floor is
+    /// darker than the noon one.
+    #[test]
+    fn the_night_room_is_darker_than_the_noon_room() {
+        let theme = crate::theme::theme_by_name("normal").expect("theme");
+        let (layout, pack, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let frame = frames.last().expect("a seated frame");
+        let scale = RenderScale::new(pack.max_density_variant()).expect("nonzero");
+        let office = Office {
+            layout: &layout,
+            pack: &pack,
+            theme,
+            scale,
+        };
+        let luma = |hour: u32| -> u64 {
+            let mut buf = RgbBuffer::filled(
+                scale.to_buffer(layout.buf_w),
+                scale.to_buffer(layout.buf_h),
+                theme.surface.bg_fallback,
+            );
+            let mut cache = crate::frame_cache::FrameCache::new();
+            render_cutaway(
+                frame,
+                office,
+                crate::floor::FloorMeta::ground(),
+                crate::localclock::at_hour(hour),
+                &mut cache,
+                &mut buf,
+            );
+            // The floor's south-west corner, clear of every light the office hangs.
+            let (x, y) = (0, buf.height() - 1);
+            let c = buf.get(x, y);
+            u64::from(c.r) + u64::from(c.g) + u64::from(c.b)
+        };
+        assert!(luma(23) < luma(12), "midnight lights the floor like noon");
     }
 
     /// Record each of `list`'s pieces `keep` selects by (scale, span,
@@ -3589,6 +3882,7 @@ S B B B B B B S
                             altitude: 0.0,
                             now,
                         },
+                        0,
                     );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
@@ -3700,7 +3994,8 @@ S B B B B B B S
                     look: &sky(theme),
                     altitude: 0.0,
                     now
-                }
+                },
+                0
             )),
             summary(&build_list(
                 frame,
@@ -3714,7 +4009,8 @@ S B B B B B B S
                     look: &sky(theme),
                     altitude: 0.0,
                     now
-                }
+                },
+                0
             )),
         );
     }
@@ -3739,6 +4035,7 @@ S B B B B B B S
                     altitude: 0.0,
                     now: std::time::SystemTime::UNIX_EPOCH,
                 },
+                0,
             );
             let pieces: Vec<&Piece> = list
                 .pieces()
@@ -3786,6 +4083,7 @@ S B B B B B B S
             PieceKind::Character { .. } => "character",
             PieceKind::Glass { .. } => "glass",
             PieceKind::Hung { .. } => "hung decor",
+            PieceKind::Light { .. } => "light",
         }
     }
 
@@ -4296,7 +4594,7 @@ S B B B B B B S
                 theme,
                 scale,
             },
-            0.0,
+            crate::floor::FloorMeta::ground(),
             std::time::SystemTime::UNIX_EPOCH,
             &mut cache,
             &mut buf,
