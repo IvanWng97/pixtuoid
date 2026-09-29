@@ -38,7 +38,7 @@
         ],
         "user-timings:pixtuoid-revealed": [
           "error",
-          { "maxNumericValue": 7100, "aggregationMethod": "pessimistic" }
+          { "maxNumericValue": 6500, "aggregationMethod": "pessimistic" }
         ]
       }
     },

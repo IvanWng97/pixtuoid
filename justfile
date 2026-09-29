@@ -914,9 +914,9 @@ gen-wasm: gen-wasm-tools wasm-build
 # user-timings:pixtuoid-revealed, `error`-level; site.yml fires on site/**, where
 # the wasm lives). WIRE cost is gated twice on purpose — here, naming the wasm,
 # and there via `interactive`/`largest-contentful-paint`, byte budgets under
-# simulated throttling sized to admit a wasm AT this cap. The cap sits a margin
-# above the committed payload, so its headroom is regression sensitivity; the
-# recipe prints the gap. Pair (#424): the
+# simulated throttling sized to admit a wasm AT this cap. The cap is growth
+# budget for the scene the hero runs, not a margin over today's payload, so a
+# regression shows as the printed gap shrinking, not as a red. Pair (#424): the
 # wasm-bindgen JS glue's ABI must match the exact .wasm it was generated with;
 # a one-sided merge resolution or partial regen ships a silent runtime throw,
 # so every committed file must match gen-wasm's sha256 manifest AND every file
