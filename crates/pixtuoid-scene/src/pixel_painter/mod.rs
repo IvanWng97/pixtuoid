@@ -167,12 +167,14 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
 
 use crate::atmosphere::Look;
 use crate::ground::Ellipse;
+use crate::lighting::{DeskLights, LightInputs, Lights};
 use anchors::compute_door_frame_idx;
 use background::{
-    paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_and_walls,
-    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow,
+    paint_clock, paint_corridor_runner, paint_floor_and_walls, paint_floor_wash, paint_light,
+    paint_neon_panel, paint_shadow,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
+pub(crate) use effects::SCREEN_GLASS_COLS;
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
 use wall::enqueue_room_walls;
@@ -351,42 +353,6 @@ fn desk_shadow_ellipse(desk: Point) -> Ellipse {
     }
 }
 
-/// The ceiling-fluorescent light pools, in paint order. The floor-lamp halo is
-/// deliberately NOT here — it is a different painter with its own strength +
-/// anchor, and the order (pools THEN halo) is load-bearing for byte-identity.
-fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
-    // Half-extents (a fluorescent tube's lit footprint) per pool kind.
-    const DESK_POOL_HALF: (u16, u16) = (10, 5);
-    const PANTRY_POOL_HALF: (u16, u16) = (12, 6);
-    const CORRIDOR_POOL_HALF: (u16, u16) = (14, 5);
-    // Centre from the SEAT so the light tracks the occupant; a hardcoded lift left it over empty floor.
-    let desks = layout.home_desks.iter().enumerate().map(|(i, desk)| {
-        let c = crate::layout::desk_ceiling_pool_center(
-            *desk,
-            layout.desk_facing(FloorLocalDeskIndex(i)),
-        );
-        Ellipse {
-            cx: c.x,
-            cy: c.y,
-            half_w: DESK_POOL_HALF.0,
-            half_h: DESK_POOL_HALF.1,
-        }
-    });
-    let pantry = layout.pantry.map(|p| p.bounds).map(|pr| Ellipse {
-        cx: pr.x + pr.width / 2,
-        cy: pr.y + pr.height / 2,
-        half_w: PANTRY_POOL_HALF.0,
-        half_h: PANTRY_POOL_HALF.1,
-    });
-    let corridor = layout.corridor.map(|c| Ellipse {
-        cx: c.x + c.width / 2,
-        cy: c.y + c.height / 2,
-        half_w: CORRIDOR_POOL_HALF.0,
-        half_h: CORRIDOR_POOL_HALF.1,
-    });
-    desks.chain(pantry).chain(corridor)
-}
-
 /// The classic painter's soft floor shadows, in PAINT ORDER — the overlaps
 /// blend, so the order is load-bearing. The per-piece `half_w`/`half_h` are
 /// owner-tuned taste literals.
@@ -490,6 +456,18 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let buf_h = ctx.layout.buf_h;
 
     let look = Look::resolve(&ctx.sky, ctx.theme);
+    let lights = Lights::of(
+        ctx.layout,
+        &look,
+        &LightInputs {
+            agents,
+            seated: &frame.seated_agents,
+            floor_idx: ctx.floor.floor_idx,
+            indoor_scale: frame.indoor_scale,
+            neon: frame.neon,
+            now: ctx.now,
+        },
+    );
     let top_wall_h = ctx.layout.wall_band_h();
     paint_floor_and_walls(
         ctx.base_fill,
@@ -505,28 +483,21 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         ctx.theme,
         ctx.floor.altitude,
     );
+    for spill in &lights.spills {
+        paint_light(ctx.buf, spill, ctx.theme.lighting.sun_spill);
+    }
 
     // An empty floor reads dark because its four artificial lights go out with
     // `indoor_scale`, not because the FLOOR takes a second darkening of its own.
     paint_floor_wash(ctx.buf, top_wall_h, buf_h, look.floor_wash);
-    let indoor_scale = frame.indoor_scale;
-    const POOL_BASE: f32 = 0.15;
-    const POOL_NIGHT_GAIN: f32 = 0.30;
-    for pool in ceiling_pool_regions(ctx.layout) {
-        let strength = (POOL_BASE + POOL_NIGHT_GAIN * look.darkness) * indoor_scale;
-        paint_ceiling_pool(ctx.buf, pool, strength, ctx.theme);
+    for pool in &lights.pools {
+        paint_light(ctx.buf, pool, ctx.theme.lighting.ceiling_pool);
     }
-    if let Some(base) = ctx.layout.floor_lamp_base() {
-        paint_floor_lamp_halo(
-            ctx.buf,
-            base.x,
-            base.y,
-            look.darkness * 0.55 * indoor_scale,
-            ctx.theme,
-        );
+    if let Some(lamp) = &lights.floor_lamp {
+        paint_light(ctx.buf, lamp, ctx.theme.lighting.floor_lamp_halo);
     }
 
-    let neon = background::neon_look(frame.neon, ctx.now, look.darkness, ctx.theme);
+    let neon = background::neon_look(frame.neon, ctx.theme);
     paint_neon_panel(
         ctx.buf,
         crate::layout::NEON_PANEL.x,
@@ -579,9 +550,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     }
 
-    // Ceiling halos gate on the sim's `seated_agents` so a tool-glow halo never
-    // floats above an empty desk while its Active occupant is mid-walk.
-    ambient::paint_ambient(ctx, &look, &frame.seated_agents);
+    ambient::paint_ambient(ctx, &look, &lights.monitor_halos);
 
     // Every entity gets an `anchor_y` — its floor-touching row — so sorting
     // ascending and painting in order puts things closer to the camera in
@@ -595,7 +564,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
             + agents.len(),
     );
 
-    enqueue_desk_cubicles(ctx, frame, look.darkness, indoor_scale, &mut drawables);
+    enqueue_desk_cubicles(ctx, frame, &lights.desks, &mut drawables);
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
@@ -638,16 +607,10 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // before any drawable exists, so nothing painted carries a time-of-day term.
     wash_since(ctx.buf, &pre_foreground, look.object_wash);
 
-    // After the wash: the sign is an emitter, so its light isn't dimmed with the
-    // room it falls on.
-    background::paint_neon_glow(
-        ctx.buf,
-        crate::layout::NEON_PANEL.x,
-        crate::layout::NEON_PANEL.y,
-        crate::layout::NEON_PANEL.width,
-        crate::layout::NEON_PANEL.height,
-        &neon,
-    );
+    // LATE, so the light lands ON the shelf and the clock instead of hiding
+    // behind them; after the wash, since the sign is an emitter and its light
+    // isn't dimmed with the room it falls on.
+    paint_light(ctx.buf, &lights.neon, neon.halo);
 
     // LAST, so a Storm strike briefly flares the whole interior (floor, walls,
     // furniture, characters), not just the window strip.
@@ -737,30 +700,6 @@ fn enqueue_desk_chairs<'a>(layout: &Layout, drawables: &mut Vec<Drawable<'a>>) {
     }
 }
 
-pub(super) struct DeskLight {
-    /// Facing-BLIND: the lamp stands on the desk's west wing, visible from either side.
-    pub(super) lamp: f32,
-    /// Facing-GATED: a viewer-facing desk shows the monitor's back, not its screen.
-    pub(super) screen_idle: f32,
-}
-
-/// The standby screen's ceiling. `drawable`'s `DESK_LAMP_MAX` is held under it by
-/// a `const` assert there — at parity the lamp pool washes the desk's west half out.
-pub(super) const SCREEN_IDLE_MAX: f32 = 0.55;
-
-/// Scaled by `darkness` — `1 − exterior`, so weather counts and not just the hour
-/// — and by `indoor`, which is what an emptied floor switches off.
-fn desk_light(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> DeskLight {
-    DeskLight {
-        lamp: darkness * indoor,
-        screen_idle: if facing == crate::layout::Facing::North {
-            SCREEN_IDLE_MAX * darkness * indoor
-        } else {
-            0.0
-        },
-    }
-}
-
 /// The glow of a desk's screen: its seated occupant's tool, on a desk that
 /// faces north. A far-seated desk shows the monitor's BACK — a glow there would
 /// be light leaking out of a case. Both profiles light screens from this.
@@ -783,16 +722,19 @@ pub(crate) fn desk_screen_glow(
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
     frame: &SimFrame,
-    darkness: f32,
-    indoor_scale: f32,
+    lights: &[DeskLights],
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
+    debug_assert_eq!(
+        lights.len(),
+        ctx.layout.home_desks.len(),
+        "desk lights are index-parallel to the home desks"
+    );
+    for ((i, &desk), light) in ctx.layout.home_desks.iter().enumerate().zip(lights) {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
         let occupant = desk_occupant(&frame.agents, local);
         let facing = ctx.layout.desk_facing(local);
-        let light = desk_light(facing, darkness, indoor_scale);
         let screen_glow = desk_screen_glow(
             occupant,
             facing,
@@ -806,8 +748,7 @@ fn enqueue_desk_cubicles<'a>(
                 facing,
                 cabinet: ctx.layout.filing_cabinet_top_left(local),
                 screen_glow,
-                lamp: light.lamp,
-                screen_idle: light.screen_idle,
+                lights: *light,
                 props: frame.desk(local),
             },
         });
@@ -1167,4 +1108,4 @@ fn enqueue_wall_decor<'a>(layout: &'a Layout, drawables: &mut Vec<Drawable<'a>>)
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

@@ -1,12 +1,12 @@
-//! Lighting effects — ceiling pools, lamp halos, shadows, corridor runner
-//! texture, the neon sign (panel, per-frame look, halo), and wall clock.
+//! Paints the room's lights ([`crate::lighting`]) and the shadows, the corridor
+//! runner's texture, the neon sign's panel, and the wall clock.
 
 use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
 use crate::ground::Ellipse;
-use crate::pixel_painter::epoch_ms;
+use crate::lighting::Emitter;
 use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
 use crate::theme::Theme;
 
@@ -23,7 +23,7 @@ pub(in crate::pixel_painter) struct RadialFalloff {
     pub ry_norm: f32,
 }
 
-/// The composite the pools, the lamp halos and the neon glow share: blend `color`
+/// The composite every light and the shadows share: blend `color`
 /// over the caller-clipped `xs` × `ys` at each pixel's `t(x, y)`; `None` leaves
 /// the pixel alone. A light owns its falloff SHAPE and its clip, never the blend.
 fn blend_falloff(
@@ -82,57 +82,15 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
     );
 }
 
-/// Elliptical "ceiling fluorescent" pool of pale warm light on the floor.
-pub(in crate::pixel_painter) fn paint_ceiling_pool(
-    buf: &mut RgbBuffer,
-    ellipse: Ellipse,
-    strength: f32,
-    theme: &Theme,
-) {
-    paint_ellipse_blend(buf, ellipse, strength, theme.lighting.ceiling_pool);
-}
-
-/// Warm radial halo around the floor lamp — only visible at night.
-pub(in crate::pixel_painter) fn paint_floor_lamp_halo(
-    buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    strength: f32,
-    theme: &Theme,
-) {
-    /// A room-corner fixture, so much wider than a desk lamp's pool.
-    const RADIUS: u16 = 11;
-    paint_warm_halo(
-        buf,
-        cx,
-        cy,
-        RADIUS,
-        strength,
-        theme.lighting.floor_lamp_halo,
-    );
-}
-
-/// Shared so the floor lamp and the desk lamps cannot drift to different falloffs.
-pub(in crate::pixel_painter) fn paint_warm_halo(
-    buf: &mut RgbBuffer,
-    cx: u16,
-    cy: u16,
-    radius: u16,
-    strength: f32,
-    warm: Rgb,
-) {
-    if strength <= 0.0 {
+/// Blend `emitter`'s light in `color` over what is already painted, at the
+/// level the model gives each cell.
+pub(in crate::pixel_painter) fn paint_light(buf: &mut RgbBuffer, emitter: &Emitter, color: Rgb) {
+    if emitter.strength <= 0.0 {
         return;
     }
-    let xs = cx.saturating_sub(radius)..(cx + radius).min(buf.width());
-    let ys = cy.saturating_sub(radius)..(cy + radius).min(buf.height());
-    let r2max = (radius as f32) * (radius as f32);
-    blend_falloff(buf, xs, ys, warm, |x, y| {
-        let dx = x as f32 - cx as f32;
-        let dy = y as f32 - cy as f32;
-        let r2 = dx * dx + dy * dy;
-        (r2 <= r2max).then(|| (1.0 - (r2 / r2max).sqrt()) * strength)
-    });
+    let ((x0, y0), (x1, y1)) = emitter.bounds();
+    let (xs, ys) = (x0..x1.min(buf.width()), y0..y1.min(buf.height()));
+    blend_falloff(buf, xs, ys, color, |x, y| emitter.level_at(x, y));
 }
 
 /// The neon sign's colors for one frame: a bright TUBE, a colored HALO that
@@ -142,60 +100,25 @@ pub(in crate::pixel_painter) struct NeonLook {
     pub tube: Rgb,
     pub interior: Rgb,
     pub halo: Rgb,
-    /// Blend strength AT the tube; [`paint_neon_glow`] falls it off to the radius.
-    pub halo_strength: f32,
 }
 
-/// How far the halo reaches past the panel (px).
-pub(in crate::pixel_painter) const NEON_HALO_RADIUS: u16 = 7;
 /// A lit tube is its hue pushed this far toward white — the core of a real neon
 /// reads near-white, the COLOR lives in the halo.
 const NEON_TUBE_WHITEN: f32 = 0.38;
 /// How much of the hue the dark interior picks up at full power.
 const NEON_INTERIOR_TINT: f32 = 0.07;
-/// Halo strength at the tube, full power, for the brand and the alert hue.
-const NEON_HALO_BRAND: f32 = 0.44;
-const NEON_HALO_ALERT: f32 = 0.58;
-/// The slow brand breath: period and trough. The alert breath is faster and
-/// deeper — urgency without a strobe.
-const NEON_BREATH_MS: u64 = 6_000;
-const NEON_BREATH_FLOOR: f32 = 0.85;
-const NEON_ALERT_BREATH_MS: u64 = 3_000;
-const NEON_ALERT_BREATH_FLOOR: f32 = 0.62;
-/// Daylight washes a neon out: the halo keeps this share at noon, all of it at night.
-const NEON_DAYLIGHT_FLOOR: f32 = 0.5;
-
-/// A 0..1 sine breath with trough `floor`. The ms reduce by INTEGER modulo
-/// before any float cast — at wall-clock magnitude an f32 of the raw ms cannot
-/// tell two frames apart (`neon_breath_advances_at_wall_clock_scale_and_stays_in_band`).
-fn neon_breath(elapsed_ms: u64, period_ms: u64, floor: f32) -> f32 {
-    let phase = (elapsed_ms % period_ms) as f32 / period_ms as f32;
-    floor + (1.0 - floor) * ((std::f32::consts::TAU * phase).sin() * 0.5 + 0.5)
-}
-
-/// Map the sim's theme-free `levels` to this frame's colors. `darkness` is the
-/// time-of-day term ([`NEON_DAYLIGHT_FLOOR`]).
+/// Map the sim's theme-free `levels` to this frame's colors; how strongly the
+/// halo throws them is the [`Lights`](crate::lighting::Lights)' call.
 pub(in crate::pixel_painter) fn neon_look(
     levels: crate::floor::NeonLevels,
-    now: SystemTime,
-    darkness: f32,
     theme: &Theme,
 ) -> NeonLook {
-    let ms = epoch_ms(now);
     let power = levels.power;
     let hue = theme.ui.neon_brand.mix(theme.ui.neon_alert, levels.alert);
-    let brand = NEON_HALO_BRAND * neon_breath(ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
-    let alert = NEON_HALO_ALERT * neon_breath(ms, NEON_ALERT_BREATH_MS, NEON_ALERT_BREATH_FLOOR);
-    let daylight = NEON_DAYLIGHT_FLOOR + (1.0 - NEON_DAYLIGHT_FLOOR) * darkness.clamp(0.0, 1.0);
-    // A tube only throws light ABOVE its starved level — one darker than the wall
-    // it hangs on has none to give.
-    let starved = crate::floor::NeonLevels::EMPTY.power;
-    let throw = ((power - starved) / (1.0 - starved)).max(0.0);
     NeonLook {
         tube: blend_rgb(BLACK, blend_rgb(hue, WHITE, NEON_TUBE_WHITEN), power),
         interior: blend_rgb(theme.office.neon_panel_bg, hue, NEON_INTERIOR_TINT * power),
         halo: hue,
-        halo_strength: throw * (brand + (alert - brand) * levels.alert) * daylight,
     }
 }
 
@@ -219,35 +142,6 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
             buf.put_checked(x + dx, y + dy, color);
         }
     }
-}
-
-/// The sign's halo over everything already painted around the `x,y,w,h` panel —
-/// a LATE pass, so the light lands ON the shelf and the clock instead of hiding
-/// behind them. Falls off with distance to the panel RECT and never enters it
-/// (see `the_interior_is_one_flat_color_the_halo_never_enters`).
-pub(in crate::pixel_painter) fn paint_neon_glow(
-    buf: &mut RgbBuffer,
-    x: u16,
-    y: u16,
-    w: u16,
-    h: u16,
-    look: &NeonLook,
-) {
-    if look.halo_strength <= 0.0 {
-        return;
-    }
-    let r = NEON_HALO_RADIUS;
-    let xs = x.saturating_sub(r)..(x + w + r).min(buf.width());
-    let ys = y.saturating_sub(r)..(y + h + r).min(buf.height());
-    let (left, right) = (x as f32, (x + w - 1) as f32);
-    let (top, bottom) = (y as f32, (y + h - 1) as f32);
-    blend_falloff(buf, xs, ys, look.halo, |px, py| {
-        let dx = (left - px as f32).max(px as f32 - right).max(0.0);
-        let dy = (top - py as f32).max(py as f32 - bottom).max(0.0);
-        let reach = 1.0 - (dx * dx + dy * dy).sqrt() / r as f32;
-        let outside = dx > 0.0 || dy > 0.0;
-        (outside && reach > 0.0).then_some(look.halo_strength * reach * reach)
-    });
 }
 
 /// Live wall clock — a 7x7 face whose hands quantize to 8 directions and are
@@ -392,19 +286,25 @@ mod tests {
     use super::*;
 
     use crate::floor::NeonLevels;
-    use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
-    use std::time::Duration;
+    use crate::layout::{Point, NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
+    use crate::lighting::{EmitterKind, Light, NEON_HALO_RADIUS};
 
-    /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo
-    /// exists for.
-    const WALL_CLOCK_MS: u64 = 1_767_000_000_000;
-
-    fn at_ms(ms: u64) -> SystemTime {
-        SystemTime::UNIX_EPOCH + Duration::from_millis(ms)
+    fn look(levels: NeonLevels) -> NeonLook {
+        neon_look(levels, &crate::theme::NORMAL)
     }
 
-    fn look(levels: NeonLevels, ms: u64, darkness: f32) -> NeonLook {
-        neon_look(levels, at_ms(ms), darkness, &crate::theme::NORMAL)
+    /// A neon halo around the `w`×`h` panel at `(x, y)`, thrown at `strength`.
+    fn glow(x: u16, y: u16, w: u16, h: u16, strength: f32) -> Emitter {
+        Emitter {
+            kind: EmitterKind::NeonGlow,
+            light: Light::Glow {
+                at: Point { x, y },
+                w,
+                h,
+                reach: NEON_HALO_RADIUS,
+            },
+            strength,
+        }
     }
 
     const WALL: Rgb = Rgb {
@@ -415,10 +315,13 @@ mod tests {
     /// Room for the panel plus its whole halo on every side.
     const PANEL_AT: u16 = 12;
 
+    /// A lit sign's halo strength at the tube.
+    const LIT: f32 = 0.5;
+
     fn lit_wall(levels: NeonLevels) -> (RgbBuffer, NeonLook) {
         let side = PANEL_AT * 2 + NEON_PANEL_W;
         let mut buf = RgbBuffer::filled(side, side, WALL);
-        let look = look(levels, WALL_CLOCK_MS, 1.0);
+        let look = look(levels);
         paint_neon_panel(
             &mut buf,
             PANEL_AT,
@@ -427,66 +330,20 @@ mod tests {
             NEON_PANEL_H,
             &look,
         );
-        paint_neon_glow(
+        paint_light(
             &mut buf,
-            PANEL_AT,
-            PANEL_AT,
-            NEON_PANEL_W,
-            NEON_PANEL_H,
-            &look,
+            &glow(PANEL_AT, PANEL_AT, NEON_PANEL_W, NEON_PANEL_H, LIT),
+            look.halo,
         );
         (buf, look)
     }
 
     #[test]
-    fn neon_breath_advances_at_wall_clock_scale_and_stays_in_band() {
-        let a = neon_breath(WALL_CLOCK_MS, NEON_BREATH_MS, NEON_BREATH_FLOOR);
-        let b = neon_breath(WALL_CLOCK_MS + 33, NEON_BREATH_MS, NEON_BREATH_FLOOR);
-        assert_ne!(a, b, "the breath must move across a 33ms frame");
-        for ms in (0..NEON_BREATH_MS).step_by(97) {
-            let v = neon_breath(WALL_CLOCK_MS + ms, NEON_BREATH_MS, NEON_BREATH_FLOOR);
-            assert!((NEON_BREATH_FLOOR..=1.0).contains(&v), "{v} at +{ms}ms");
-        }
-    }
-
-    #[test]
     fn neon_hue_is_the_brand_until_someone_waits() {
         let theme = &crate::theme::NORMAL;
-        assert_eq!(
-            look(NeonLevels::BUSY, WALL_CLOCK_MS, 1.0).halo,
-            theme.ui.neon_brand
-        );
-        assert_eq!(
-            look(NeonLevels::CALM, WALL_CLOCK_MS, 1.0).halo,
-            theme.ui.neon_brand
-        );
-        assert_eq!(
-            look(NeonLevels::ALERT, WALL_CLOCK_MS, 1.0).halo,
-            theme.ui.neon_alert
-        );
-    }
-
-    #[test]
-    fn neon_halo_drops_to_its_daylight_floor_and_a_calm_sign_glows_less_than_a_busy_one() {
-        let night = look(NeonLevels::BUSY, WALL_CLOCK_MS, 1.0).halo_strength;
-        let day = look(NeonLevels::BUSY, WALL_CLOCK_MS, 0.0).halo_strength;
-        assert!(
-            (day - night * NEON_DAYLIGHT_FLOOR).abs() < 1e-6,
-            "{day} vs {night}"
-        );
-        let calm = look(NeonLevels::CALM, WALL_CLOCK_MS, 1.0).halo_strength;
-        assert!(calm > 0.0 && calm < night, "{calm} vs {night}");
-    }
-
-    #[test]
-    fn a_starved_tube_throws_no_halo_and_a_flash_does() {
-        assert_eq!(
-            look(NeonLevels::EMPTY, WALL_CLOCK_MS, 1.0).halo_strength,
-            0.0
-        );
-        assert!(look(NeonLevels::FLASH, WALL_CLOCK_MS, 1.0).halo_strength > 0.0);
-        let (buf, _) = lit_wall(NeonLevels::EMPTY);
-        assert_eq!(buf.get(PANEL_AT - 1, PANEL_AT + NEON_PANEL_H / 2), WALL);
+        assert_eq!(look(NeonLevels::BUSY).halo, theme.ui.neon_brand);
+        assert_eq!(look(NeonLevels::CALM).halo, theme.ui.neon_brand);
+        assert_eq!(look(NeonLevels::ALERT).halo, theme.ui.neon_alert);
     }
 
     /// A terminal text cell shows only its BOTTOM pixel (ratatui keeps the old bg
@@ -528,15 +385,10 @@ mod tests {
     #[test]
     fn an_unpowered_halo_leaves_the_wall_alone() {
         let mut buf = RgbBuffer::filled(60, 40, WALL);
-        let mut dark = look(NeonLevels::EMPTY, 0, 1.0);
-        dark.halo_strength = 0.0;
-        paint_neon_glow(
+        paint_light(
             &mut buf,
-            PANEL_AT,
-            PANEL_AT,
-            NEON_PANEL_W,
-            NEON_PANEL_H,
-            &dark,
+            &glow(PANEL_AT, PANEL_AT, NEON_PANEL_W, NEON_PANEL_H, 0.0),
+            look(NeonLevels::EMPTY).halo,
         );
         assert!((0..40).all(|y| (0..60).all(|x| buf.get(x, y) == WALL)));
     }
@@ -588,7 +440,19 @@ mod tests {
         // Off-centre and clipped by two edges, like a lamp in a corner.
         let (cx, cy, radius) = (36u16, 4u16, 11u16);
         let mut got = RgbBuffer::filled(w, h, fill);
-        paint_warm_halo(&mut got, cx, cy, radius, 0.47, tint);
+        paint_light(
+            &mut got,
+            &Emitter {
+                kind: EmitterKind::FloorLamp,
+                light: Light::Halo {
+                    centre: Point { x: cx, y: cy },
+                    radius,
+                    share: 1.0,
+                },
+                strength: 0.47,
+            },
+            tint,
+        );
         let mut want = RgbBuffer::filled(w, h, fill);
         let r2max = (radius as f32) * (radius as f32);
         for y in cy.saturating_sub(radius)..(cy + radius).min(h) {
@@ -679,17 +543,82 @@ mod tests {
         assert_ne!(buf.get(10, 10), fill, "the ellipse centre must be tinted");
     }
 
+    /// A painter that lights a cell outside an emitter's bounds breaks every
+    /// cache that repaints only what those bounds say changed.
+    #[test]
+    fn every_light_paints_only_inside_its_bounds() {
+        let layout =
+            crate::layout::Layout::compute(192, 80, Some(crate::layout::TEST_DEFAULT_DESKS))
+                .expect("fits");
+        // 07:00 lights the lamps AND leans the sun through the windows.
+        let sky =
+            crate::sky::Sky::at_with(crate::localclock::at_hour(7), crate::sky::Weather::Clear);
+        let lights = crate::lighting::Lights::of(
+            &layout,
+            &crate::atmosphere::Look::resolve(&sky, &crate::theme::NORMAL),
+            &crate::lighting::LightInputs {
+                agents: &[],
+                seated: &std::collections::HashMap::new(),
+                floor_idx: 0,
+                indoor_scale: 1.0,
+                neon: NeonLevels::FLASH,
+                now: SystemTime::UNIX_EPOCH,
+            },
+        );
+        let patch = Emitter {
+            kind: EmitterKind::MonitorHalo(pixtuoid_core::state::ToolKind::Edit),
+            light: Light::Patch {
+                centre: Point { x: 60, y: 20 },
+            },
+            strength: 1.0,
+        };
+        let emitters: Vec<Emitter> = lights
+            .pools
+            .iter()
+            .chain(&lights.floor_lamp)
+            .chain(lights.desks.iter().map(|d| &d.lamp))
+            .chain(std::iter::once(&lights.neon))
+            .chain(&lights.spills)
+            .chain(std::iter::once(&patch))
+            .copied()
+            .collect();
+        assert!(!lights.spills.is_empty() && lights.floor_lamp.is_some());
+        let white = Rgb {
+            r: 255,
+            g: 255,
+            b: 255,
+        };
+        for e in emitters {
+            let e = Emitter { strength: 1.0, ..e };
+            let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, WALL);
+            paint_light(&mut buf, &e, white);
+            let ((x0, y0), (x1, y1)) = e.bounds();
+            let mut lit = 0;
+            for y in 0..buf.height() {
+                for x in 0..buf.width() {
+                    if buf.get(x, y) != WALL {
+                        lit += 1;
+                        assert!(
+                            (x0..x1).contains(&x) && (y0..y1).contains(&y),
+                            "{e:?} lit ({x},{y}) outside {:?}",
+                            e.bounds()
+                        );
+                    }
+                }
+            }
+            assert!(lit > 0, "{e:?} lit nothing");
+        }
+    }
+
     // Off-edge must clip, not panic: the panel through `put_checked`, the glow
     // through its clamped ranges.
     #[test]
     fn neon_panel_off_edge_does_not_panic() {
-        let theme = &crate::theme::NORMAL;
-        let now = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(5);
         let mut buf = RgbBuffer::filled(10, 10, Rgb { r: 0, g: 0, b: 0 });
         // x=8, w=6 → px reaches 13 (>= width 10); y=8, h=5 → py reaches 12.
-        let look = neon_look(crate::floor::NeonLevels::ALERT, now, 1.0, theme);
+        let look = look(NeonLevels::ALERT);
         paint_neon_panel(&mut buf, 8, 8, 6, 5, &look);
-        paint_neon_glow(&mut buf, 8, 8, 6, 5, &look);
+        paint_light(&mut buf, &glow(8, 8, 6, 5, LIT), look.halo);
         assert_ne!(
             buf.get(8, 8),
             Rgb { r: 0, g: 0, b: 0 },
