@@ -229,6 +229,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
             sprite,
             mirrored,
         } => (at, sprite, mirrored).hash(&mut h),
+        PieceKind::PropBand { at, sprite, rows } => (at, sprite, rows).hash(&mut h),
         PieceKind::Table { at } => at.hash(&mut h),
         PieceKind::Appliance { at, kind } => (at, kind).hash(&mut h),
         // `paint_piece` never reads the label or body: they are the caller's.
@@ -298,6 +299,9 @@ fn paint_piece(
             sprite,
             mirrored,
         } => paint_prop(at, sprite, mirrored, pack, theme, scale, buf),
+        PieceKind::PropBand { at, sprite, rows } => {
+            paint_prop_band(at, sprite, rows, pack, theme, scale, buf);
+        }
         PieceKind::Table { at } => paint_table(at, theme, scale, buf),
         PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
         PieceKind::WallSeg { at, w, h } => paint_wall_seg(at, w, h, theme, scale, buf),
@@ -675,7 +679,18 @@ fn occupant_span(body: Span, depth: u16, chair: Option<Span>) -> Span {
     }
 }
 
-/// Queue one `meeting_sofa` body, flipped top-to-bottom when `mirrored`.
+/// The back-view sofa's art: its seat beyond the backrest, the backrest nearest
+/// the viewer.
+const MEETING_SOFA_NORTH: &str = "meeting_sofa_north";
+/// The rows of [`MEETING_SOFA_NORTH`]'s art that lie UNDER its sitter, the seat;
+/// the backrest below them draws OVER the sitter's lap. `scripts/gen-art.py`'s
+/// `SOFA_SEAT_ROWS` draws to it (`the_north_sofas_backrest_starts_on_its_lit_ridge`).
+const NORTH_SOFA_SEAT_ROWS: u16 = 3;
+
+/// Queue one sofa body: the front view, or, `mirrored`, the back view. A pack
+/// that draws [`MEETING_SOFA_NORTH`] gets it as two bands sorted either side of
+/// its sitter ([`NORTH_SOFA_SEAT_ROWS`]); one that does not, `meeting_sofa`
+/// flipped top-to-bottom, as the classic painter draws it.
 ///
 /// NOT `back_couch`: the pack documents that as a character seen from behind, so
 /// it would draw a headless torso where the couch belongs.
@@ -685,6 +700,22 @@ fn push_sofa(
     at: crate::layout::Point,
     mirrored: bool,
 ) {
+    if let Some((w, h)) = art_size(pack, MEETING_SOFA_NORTH).filter(|_| mirrored) {
+        let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+        let split = NORTH_SOFA_SEAT_ROWS.min(h);
+        let band = |rows| PieceKind::PropBand {
+            at,
+            sprite: MEETING_SOFA_NORTH,
+            rows,
+        };
+        order.push((Span::new(tl.x, tl.y, w, split, 0), band((0, split))));
+        // +1 for the contact shadow `paint_prop_band` stamps under the foot.
+        order.push((
+            Span::new(tl.x, tl.y + split, w, h - split, 1),
+            band((split, h)),
+        ));
+        return;
+    }
     if let Some((w, h)) = art_size(pack, "meeting_sofa") {
         order.push((
             piece_span(crate::layout::Anchor::Center, at, w, h, 1),
@@ -810,6 +841,14 @@ pub(crate) enum PieceKind {
         /// Flip rows top-to-bottom, as the classic painter's `MeetingSofa`
         /// does.
         mirrored: bool,
+    },
+    /// Rows `rows` of a centred prop, top inclusive, bottom exclusive, in
+    /// logical rows from the art's top: one band of a piece its sitter sits
+    /// between ([`push_sofa`]).
+    PropBand {
+        at: crate::layout::Point,
+        sprite: &'static str,
+        rows: (u16, u16),
     },
     Table {
         at: crate::layout::Point,
@@ -1411,6 +1450,44 @@ fn paint_prop(
         art,
         scale.to_buffer(x),
         scale.to_buffer(y),
+        dense.blit_at,
+        buf,
+    );
+}
+
+/// Blit rows `rows` of a centred prop ([`PieceKind::PropBand`]), with the ground
+/// contact under the band that holds the art's foot.
+fn paint_prop_band(
+    at: crate::layout::Point,
+    sprite: &str,
+    rows: (u16, u16),
+    pack: &Pack,
+    theme: &Theme,
+    scale: RenderScale,
+    buf: &mut RgbBuffer,
+) {
+    let Some(dense) = crate::pixel_painter::densest_frame(pack, sprite, 0, scale) else {
+        return;
+    };
+    let (w, h) = dense.logical;
+    let tl = crate::layout::anchored_top_left(crate::layout::Anchor::Center, at, w, h);
+    let (r0, r1) = (rows.0.min(h), rows.1.min(h));
+    // The art's own pixels per logical row: its density.
+    let per_row = usize::from(dense.frame.height() / h.max(1));
+    let fw = usize::from(dense.frame.width());
+    let px = dense.frame.as_slice();
+    let band = pixtuoid_core::sprite::Frame::from_pixels(
+        dense.frame.width(),
+        (r1 - r0) * dense.frame.height() / h.max(1),
+        px[usize::from(r0) * per_row * fw..usize::from(r1) * per_row * fw].to_vec(),
+    );
+    if r1 == h {
+        contact_shadow(tl, w, h, theme, scale, buf);
+    }
+    blit_frame_scaled(
+        &band,
+        scale.to_buffer(tl.x),
+        scale.to_buffer(tl.y + r0),
         dense.blit_at,
         buf,
     );
@@ -2456,6 +2533,7 @@ S B B B B B B S
                 "character",
                 "desk",
                 "prop",
+                "prop band",
                 "table",
                 "wall"
             ],
@@ -2782,6 +2860,7 @@ S B B B B B B S
             PieceKind::Desk { .. } => "desk",
             PieceKind::Chair { .. } => "chair",
             PieceKind::Prop { .. } => "prop",
+            PieceKind::PropBand { .. } => "prop band",
             PieceKind::Table { .. } => "table",
             PieceKind::Appliance { .. } => "appliance",
             PieceKind::Character { .. } => "character",
@@ -2865,20 +2944,110 @@ S B B B B B B S
     /// The flip side of `densest_frame`'s "one piece at a time" (its own tests
     /// pin a variant winning): a piece with no variant that lands at the scale
     /// must be untouched by the lookup, or adding one `@Nx` sprite would be a
-    /// flag day for all of them. `plant` ships only 8x art, and 8 does not
-    /// divide 4.
+    /// flag day for all of them.
     #[test]
     fn a_piece_with_no_variant_at_the_scale_renders_exactly_as_it_did_before() {
         let pack = pack();
+        let s = 3;
         assert!(
-            pack.animation("plant@4x").is_none() && pack.animation("plant@2x").is_none(),
-            "this test is only meaningful while no `plant` variant divides 4"
+            pack.density_variants().iter().all(|d| s % d != 0),
+            "this test is only meaningful while no bundled variant divides {s}"
         );
         let (bw, _) = base_size(&pack, "plant");
-        let scale = RenderScale::new(4).expect("nonzero");
+        let scale = RenderScale::new(s).expect("nonzero");
         let d = crate::pixel_painter::densest_frame(&pack, "plant", 0, scale)
             .expect("plant is in the pack");
-        assert_eq!((d.frame.width(), d.blit_at.get()), (bw, 4));
+        assert_eq!((d.frame.width(), d.blit_at.get()), (bw, s));
+    }
+
+    /// A back-view sofa sits its sitter between its two bands: the seat under
+    /// them, the backrest, nearest the viewer, over their lap.
+    #[test]
+    fn a_back_view_sofa_seats_its_sitter_between_its_seat_and_its_backrest() {
+        let pack = pack();
+        let sofa = crate::layout::Point { x: 40, y: 30 };
+        let mut order = Vec::new();
+        push_sofa(&mut order, &pack, sofa, true);
+        let [(seat, PieceKind::PropBand { rows: under, .. }), (back, PieceKind::PropBand { rows: over, .. })] =
+            order.as_slice()
+        else {
+            panic!("a back-view sofa is two bands: {order:?}");
+        };
+        let sitter = sofa.y + crate::pixel_painter::seat::SEATED_Z_OFF;
+        assert!(
+            seat.depth < sitter && sitter < back.depth,
+            "seat {} < sitter {sitter} < backrest {}",
+            seat.depth,
+            back.depth
+        );
+        let (_, h) = base_size(&pack, MEETING_SOFA_NORTH);
+        assert_eq!((under.0, under.1, over.0, over.1), (0, over.0, under.1, h));
+    }
+
+    /// Splitting the back-view sofa loses and moves nothing: its bands paint
+    /// the art whole.
+    #[test]
+    fn a_sofas_bands_paint_its_art_whole() {
+        let pack = pack();
+        let theme = &crate::theme::NORMAL;
+        let sofa = crate::layout::Point { x: 20, y: 10 };
+        let (w, h) = base_size(&pack, MEETING_SOFA_NORTH);
+        for s in [1, pack.max_density_variant()] {
+            let scale = RenderScale::new(s).expect("nonzero");
+            let floor = pixtuoid_core::sprite::Rgb { r: 1, g: 2, b: 3 };
+            let blank =
+                || RgbBuffer::filled(scale.to_buffer(w + 40), scale.to_buffer(h + 20), floor);
+            let (mut whole, mut split) = (blank(), blank());
+            paint_prop(
+                sofa,
+                MEETING_SOFA_NORTH,
+                false,
+                &pack,
+                theme,
+                scale,
+                &mut whole,
+            );
+            let top = NORTH_SOFA_SEAT_ROWS;
+            for rows in [(0, top), (top, h)] {
+                paint_prop_band(
+                    sofa,
+                    MEETING_SOFA_NORTH,
+                    rows,
+                    &pack,
+                    theme,
+                    scale,
+                    &mut split,
+                );
+            }
+            assert!(
+                whole.as_slice() == split.as_slice(),
+                "scale {s}: the bands differ from the art"
+            );
+        }
+    }
+
+    /// The split row is the art's: the back-view sofa's backrest starts on its
+    /// lit ridge, just under the seam where the seat meets it.
+    #[test]
+    fn the_north_sofas_backrest_starts_on_its_lit_ridge() {
+        let pack = pack();
+        let f = pack
+            .animation(MEETING_SOFA_NORTH)
+            .and_then(|a| a.frames().first())
+            .expect("the bundled pack ships the back-view sofa");
+        let x = f.width() / 2;
+        let luma = |y: u16| {
+            let c = f
+                .get(x, y)
+                .copied()
+                .flatten()
+                .expect("the sofa is opaque at its centre");
+            u32::from(c.r) + u32::from(c.g) + u32::from(c.b)
+        };
+        assert!(
+            luma(NORTH_SOFA_SEAT_ROWS) > luma(NORTH_SOFA_SEAT_ROWS - 1),
+            "row {NORTH_SOFA_SEAT_ROWS} must be the ridge, lit over the seam above it"
+        );
     }
 
     /// [`desk_face_rows`]' rule, through the real paint.

@@ -696,6 +696,7 @@ pub const OPTIONAL_FURNITURE_ANIMATIONS: &[&str] = &[
     "lobster_walk",
     "lobster_rest",
     "meeting_sofa",
+    "meeting_sofa_north",
     "meeting_screen",
     "pantry",
     "pantry_small",
