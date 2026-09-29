@@ -44,8 +44,7 @@ pub(in crate::pixel_painter) fn dim_floor_overlay(
 
 /// Warm sunlight LIFT on the floor — the daytime mirror of [`dim_floor_overlay`],
 /// and the lighting's only positive day term (without it a clear noon leaves the
-/// floor at its plain brownish base). Sun enters regardless of occupancy, so —
-/// unlike the dim — this is NOT scaled by the empty-floor boost.
+/// floor at its plain brownish base).
 pub(in crate::pixel_painter) fn daylight_floor_overlay(
     buf: &mut RgbBuffer,
     top_y: u16,

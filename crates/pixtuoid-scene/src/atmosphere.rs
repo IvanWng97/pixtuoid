@@ -107,8 +107,7 @@ pub(crate) struct SunSpot {
 }
 
 /// The azimuths where [`sun_on_wall`]'s spot hands off east wall → window
-/// wall → west wall; the side each lands on is pinned by
-/// `the_wall_spot_and_the_spill_fall_away_from_the_disc`.
+/// wall → west wall.
 const AZ_EAST_MAX: f32 = 0.30;
 const AZ_WEST_MIN: f32 = 0.70;
 
@@ -138,8 +137,7 @@ pub(crate) fn sun_on_wall(sky: &Sky) -> Option<SunSpot> {
     })
 }
 
-/// Multiplicative-ish tint applied to floor cells after the base palette,
-/// driven by current outdoor weather.
+/// The cast the current weather lends the floor.
 pub(crate) fn weather_floor_tint(w: Weather) -> Rgb {
     match w {
         Weather::Clear => Rgb {
@@ -235,14 +233,15 @@ pub(crate) fn glass_veil(w: Weather) -> Option<(Rgb, f32)> {
     }
 }
 
-/// How much of a weather VEIL's own colour the frame's sky brings up (0..1) —
-/// its floor is the city-light scatter that keeps fog reading as fog after dark.
+/// The least of a veil's own colour [`veil_lum`] brings up: the city-light
+/// scatter that keeps fog reading as fog after dark.
+const NIGHT_VEIL_FLOOR: f32 = 0.35;
+
+/// How much of a weather VEIL's own colour the frame's sky brings up (0..1).
 ///
 /// The day term is the emitter's OWN luminance, deliberately NOT
 /// `atmo`/`look.darkness`: those already carry the weather (the veil colour does
 /// too), and folding them in would darken a stormy noon twice.
-const NIGHT_VEIL_FLOOR: f32 = 0.35;
-
 pub(crate) fn veil_lum(e: &Emitter) -> f32 {
     NIGHT_VEIL_FLOOR + (1.0 - NIGHT_VEIL_FLOOR) * e.emitter_lum.clamp(0.0, 1.0)
 }
