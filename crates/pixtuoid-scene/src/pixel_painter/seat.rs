@@ -90,7 +90,6 @@ fn recolor<'c>(
     CharacterFrame {
         frame,
         burn,
-        logical: dense.logical,
         blit_at: dense.blit_at,
         rise,
     }
@@ -160,12 +159,11 @@ fn character_key_at(
 }
 
 /// A recolored character frame and how to draw it at the scale it was picked
-/// for; `logical` and `blit_at` as in [`DenseFrame`](super::dense::DenseFrame).
+/// for; `blit_at` as in [`DenseFrame`](super::dense::DenseFrame).
 pub(crate) struct CharacterFrame<'c> {
     pub(crate) frame: &'c Frame,
     /// The caller owns the flame crown, painted at its own coordinates.
     pub(crate) burn: crate::burn::BurnTier,
-    pub(crate) logical: (u16, u16),
     pub(crate) blit_at: std::num::NonZeroU16,
     /// Art rows the frame reaches above its logical top: its
     /// [`Dress::rise`](super::hair::Dress::rise).
@@ -191,7 +189,6 @@ pub(crate) fn paint_character_at(
     let Some(CharacterFrame {
         frame: cached,
         burn,
-        logical: _,
         blit_at: _,
         rise: _,
     }) = character_frame(

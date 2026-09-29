@@ -205,10 +205,11 @@ const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_
 
 use crate::atmosphere::Look;
 use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
+use crate::ground::Ellipse;
 use anchors::compute_door_frame_idx;
 use background::{
     paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_and_walls,
-    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow, Ellipse,
+    paint_floor_lamp_halo, paint_floor_wash, paint_neon_panel, paint_shadow,
 };
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
@@ -447,7 +448,7 @@ fn ceiling_pool_regions(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
     desks.chain(pantry).chain(corridor)
 }
 
-/// THE authority for the soft floor shadows, in PAINT ORDER — the overlaps
+/// The classic painter's soft floor shadows, in PAINT ORDER — the overlaps
 /// blend, so the order is load-bearing. The per-piece `half_w`/`half_h` are
 /// owner-tuned taste literals.
 fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ {
@@ -473,7 +474,11 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
             // Fit the ellipse to the sprite width — a flat 7 half-width doubles
             // a narrow shelf's shadow; `.min(7)` caps a future wide piece.
             let vis_w = furniture_def(wp.kind.furniture()).visual.w;
-            let half_w = if vis_w > 0 { (vis_w / 2 + 1).min(7) } else { 7 };
+            let half_w = if vis_w > 0 {
+                (vis_w / 2 + crate::ground::CONTACT_REACH).min(7)
+            } else {
+                7
+            };
             Ellipse {
                 cx: wp.pos.x,
                 cy: wp.pos.y + 2,
@@ -486,7 +491,7 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
         Ellipse {
             cx: island.x,
             cy: island.y + center_pin_south_offset(vis.h),
-            half_w: vis.w / 2 + 1,
+            half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
             half_h: 2,
         }
     });
@@ -623,9 +628,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     }
     wash_since(ctx.buf, &pre_floor_fixtures, look.object_wash);
 
-    // Strength is a function of daylight so noon shadows are crisp and night
-    // shadows subtle.
-    let shadow_strength = 0.5 - 0.3 * look.darkness;
+    let shadow_strength = crate::ground::shadow_strength(look.darkness);
     for ell in floor_shadow_ellipses(ctx.layout) {
         paint_shadow(ctx.buf, ell, shadow_strength, ctx.theme);
     }

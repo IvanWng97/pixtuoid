@@ -32,10 +32,12 @@
 /// A piece's painted bounds in LOGICAL units, inclusive on both ends, and the
 /// row it sorts on.
 ///
-/// The bounds hold EVERY pixel the piece paints — a repaint of the pieces whose
-/// bounds meet a damaged rect is only complete if nothing a piece draws falls
-/// outside its own. The depth is a separate fact: a person sorts on the sim's
-/// z-key, which is not the south edge of what they paint.
+/// The bounds hold EVERY pixel the piece's own paint writes — a repaint of the
+/// pieces whose bounds meet a damaged rect is only complete if nothing a piece
+/// draws falls outside its own. Its shadow is laid in a pass of its own under
+/// every piece and reaches further (`paint.rs`'s `Piece::reach`). The depth is
+/// a separate fact: a person sorts on the sim's z-key, which is not the south
+/// edge of what they paint.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct Span {
     /// Westmost column.
@@ -52,8 +54,7 @@ pub(crate) struct Span {
 
 impl Span {
     /// A box of `w`x`h` whose top-left is `(x, y)`, plus `below` extra rows its
-    /// painter draws underneath (a front face, a contact shadow), sorted on its
-    /// south edge.
+    /// painter draws underneath (a front face), sorted on its south edge.
     pub(crate) fn new(x: u16, y: u16, w: u16, h: u16, below: u16) -> Self {
         let y1 = y.saturating_add(h.saturating_sub(1)).saturating_add(below);
         Self {
@@ -68,15 +69,6 @@ impl Span {
     /// The same bounds, sorted on `depth` instead.
     pub(crate) fn with_depth(self, depth: u16) -> Self {
         Self { depth, ..self }
-    }
-
-    /// The same depth, its bounds grown `rows` further south: rows a piece
-    /// paints under the part it sorts on.
-    pub(crate) fn painting_below(self, rows: u16) -> Self {
-        Self {
-            y1: self.y1.saturating_add(rows),
-            ..self
-        }
     }
 
     fn overlaps_x(self, other: Self) -> bool {

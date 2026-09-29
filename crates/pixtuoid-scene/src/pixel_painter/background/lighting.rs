@@ -5,18 +5,10 @@ use std::time::SystemTime;
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
+use crate::ground::Ellipse;
 use crate::pixel_painter::epoch_ms;
 use crate::pixel_painter::palette::{blend_rgb, BLACK, WHITE};
 use crate::theme::Theme;
-
-/// An axis-aligned ellipse for the radial floor pools (light + shadow).
-#[derive(Clone, Copy)]
-pub(in crate::pixel_painter) struct Ellipse {
-    pub cx: u16,
-    pub cy: u16,
-    pub half_w: u16,
-    pub half_h: u16,
-}
 
 /// Float ellipse geometry for [`paint_radial_falloff`] — all `f32`, so a caller
 /// can centre on `(w-1)/2` (half-cell correct) as well as an integer cell.
@@ -51,9 +43,8 @@ fn blend_falloff(
     }
 }
 
-/// Blend `color` over the region with a quadratic radial falloff from the centre
-/// (full `strength`) to the ellipse edge (`r² > 1` skipped), so it reads as a
-/// soft round patch rather than a stamped oval.
+/// Blend `color` over the region by [`crate::ground::falloff`] at `strength`,
+/// so it reads as a soft round patch rather than a stamped oval.
 pub(in crate::pixel_painter) fn paint_radial_falloff(
     buf: &mut RgbBuffer,
     g: RadialFalloff,
@@ -63,8 +54,7 @@ pub(in crate::pixel_painter) fn paint_radial_falloff(
     blend_falloff(buf, g.min_x..g.max_x, g.min_y..g.max_y, color, |x, y| {
         let nx = (x as f32 - g.cx) / g.rx_norm;
         let ny = (y as f32 - g.cy) / g.ry_norm;
-        let r2 = nx * nx + ny * ny;
-        (r2 <= 1.0).then_some((1.0 - r2) * strength)
+        crate::ground::falloff(nx, ny).map(|f| f * strength)
     });
 }
 
@@ -73,10 +63,8 @@ fn paint_ellipse_blend(buf: &mut RgbBuffer, e: Ellipse, strength: f32, color: Rg
     if e.half_w == 0 || e.half_h == 0 || strength <= 0.0 {
         return;
     }
-    let min_x = e.cx.saturating_sub(e.half_w);
-    let max_x = (e.cx + e.half_w).min(buf.width());
-    let min_y = e.cy.saturating_sub(e.half_h);
-    let max_y = (e.cy + e.half_h).min(buf.height());
+    let ((min_x, min_y), (max_x, max_y)) = e.bounds();
+    let (max_x, max_y) = (max_x.min(buf.width()), max_y.min(buf.height()));
     paint_radial_falloff(
         buf,
         RadialFalloff {

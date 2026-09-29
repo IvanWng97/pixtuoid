@@ -17,7 +17,7 @@ pub(super) use floor_wash::paint_floor_wash;
 pub(super) use lighting::{
     neon_look, paint_ceiling_pool, paint_clock, paint_corridor_runner, paint_floor_lamp_halo,
     paint_neon_glow, paint_neon_panel, paint_radial_falloff, paint_shadow, paint_warm_halo,
-    Ellipse, RadialFalloff,
+    RadialFalloff,
 };
 
 use std::time::SystemTime;
