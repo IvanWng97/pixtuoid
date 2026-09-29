@@ -168,6 +168,23 @@ impl MeetingRoom {
         })
     }
 
+    /// The notice board's box, low on the room's west side — `None` on a room
+    /// too small to hang it.
+    pub(crate) fn notice_board_rect(&self) -> Option<Bounds> {
+        const BOARD: crate::layout::Size = crate::layout::Size { w: 8, h: 5 };
+        /// Columns from the room's west edge to the board.
+        const BOARD_DX: u16 = 4;
+        /// Rows from the board's top up from the room's south edge.
+        const BOARD_RISE: u16 = 8;
+        let b = self.bounds;
+        (b.height > 20 && b.width > 15).then(|| Bounds {
+            x: b.x + BOARD_DX,
+            y: b.y + b.height - BOARD_RISE,
+            width: BOARD.w,
+            height: BOARD.h,
+        })
+    }
+
     /// The east edge past which the wall-band bookshelf must drain to clear the
     /// sofa's padded ground — read from the REAL placed sofa, NOT reconstructed
     /// from `bounds`, so a sofa resize can't desync it from `mask`'s

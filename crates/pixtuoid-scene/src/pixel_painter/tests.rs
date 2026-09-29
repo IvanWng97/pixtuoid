@@ -1167,23 +1167,6 @@ fn a_desk_screen_glows_only_for_a_seated_tool_user_facing_north() {
     assert_eq!(glow(None, Facing::North, true), None, "nobody");
 }
 
-/// Pins [`super::desk_chair_top_left`]'s gate: only a back-turned seat's chair
-/// stands in view.
-#[test]
-fn only_a_north_facing_desk_stands_a_chair() {
-    use crate::layout::Facing;
-    let pack = crate::embedded_pack::test_default_pack();
-    let desk = Point { x: 40, y: 30 };
-    assert!(super::desk_chair_top_left(&pack, desk, Facing::North).is_some());
-    for facing in [Facing::South, Facing::East, Facing::West] {
-        assert_eq!(
-            super::desk_chair_top_left(&pack, desk, facing),
-            None,
-            "{facing:?}"
-        );
-    }
-}
-
 #[test]
 fn tool_glow_tint_maps_known_tools() {
     let id = pixtuoid_core::AgentId::from_transcript_path("/t.jsonl");
@@ -1265,18 +1248,6 @@ fn drawables_sort_is_stable_on_ties() {
 }
 
 #[test]
-fn center_pin_south_offset_lands_on_the_sprite_south_row() {
-    for h in 1u16..=16 {
-        let expected_south = h - 1 - h / 2;
-        assert_eq!(
-            center_pin_south_offset(h),
-            expected_south,
-            "h={h}: z-key must land on the sprite south row, not one past it",
-        );
-    }
-}
-
-#[test]
 fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
     let pack = crate::embedded_pack::test_default_pack();
     let pos = Point { x: 40, y: 30 };
@@ -1298,17 +1269,10 @@ fn pet_z_anchor_tracks_the_selected_anim_sprite_height() {
         );
         assert_eq!(
             sleep,
-            pos.y + center_pin_south_offset(sleep_h),
+            pos.y + (sleep_h - 1) / 2,
             "{kind:?}: sleep pet must land on its sprite's south row",
         );
     }
-}
-
-#[test]
-fn floor_lamp_south_offset_is_the_base_row() {
-    // The lamp's halo / shadow / z-anchor all read this, so a visual-height
-    // edit surfaces here rather than as a floating halo.
-    assert_eq!(floor_lamp_south_offset(), 4);
 }
 
 #[test]
@@ -1726,6 +1690,8 @@ fn every_hover_size_is_its_painted_sprite_size() {
         def(Furniture::MeetingSofaBody, "meeting_sofa_north"),
         def(Furniture::SnackShelf, "snack_shelf"),
         def(Furniture::FloorLamp, "floor_lamp"),
+        def(Furniture::DeskChair, super::DESK_CHAIR_SPRITE),
+        def(Furniture::FilingCabinet, "filing_cabinet"),
         (
             "ELEVATOR".into(),
             Size {
@@ -1773,6 +1739,130 @@ fn every_hover_size_is_its_painted_sprite_size() {
                 (art.width(), art.height()),
                 "{name}'s size must be {sprite}'s painted size (frame {i})"
             );
+        }
+    }
+}
+
+/// The classic painter still queues its furniture itself, so the roster's
+/// depths and tie order must be the ones it queues by — or the hover names a
+/// piece the painter drew underneath.
+#[test]
+fn the_roster_sorts_as_the_classic_painter_queues() {
+    use crate::layout::{Depth, FixtureKind};
+    fn roster_tag(kind: FixtureKind) -> &'static str {
+        match kind {
+            FixtureKind::Desk(_) => "desk",
+            FixtureKind::FilingCabinet(_) => "cabinet",
+            FixtureKind::DeskChair(_) => "desk chair",
+            FixtureKind::Station { .. } => "station",
+            FixtureKind::Plant { .. } => "plant",
+            FixtureKind::Pod { .. } => "pod",
+            FixtureKind::Wall { .. } => "wall",
+            FixtureKind::MeetingRug { .. } | FixtureKind::LoungeRug => "rug",
+            FixtureKind::MeetingSofa { .. } | FixtureKind::LoungeCouch => "sofa",
+            FixtureKind::MeetingTable { .. } => "table",
+            FixtureKind::MeetingChair { .. } => "chair",
+            FixtureKind::CoatRack { .. } => "rack",
+            FixtureKind::SideTable => "side table",
+            FixtureKind::FloorLamp => "lamp",
+            FixtureKind::FishTank => "tank",
+            FixtureKind::KitchenIsland => "island",
+            FixtureKind::Door => "door",
+            FixtureKind::Doormat { .. }
+            | FixtureKind::NoticeBoard { .. }
+            | FixtureKind::PantryMat
+            | FixtureKind::IslandMat
+            | FixtureKind::WaterCooler
+            | FixtureKind::TrashBin
+            | FixtureKind::Runner
+            | FixtureKind::NeonSign
+            | FixtureKind::Clock => "backdrop",
+        }
+    }
+    let pack = crate::embedded_pack::test_default_pack();
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let (coffee, motion) = (HashMap::new(), HashMap::new());
+    let scene = SceneState::uniform(16);
+    for (w, h) in [
+        (96u16, 60u16),
+        (160, 120),
+        (192, 158),
+        (240, 160),
+        (320, 180),
+    ] {
+        for seed in 0..12 {
+            let Some(layout) = Layout::compute_with_seed(w, h, None, seed) else {
+                continue;
+            };
+            let now = SystemTime::UNIX_EPOCH;
+            let mut buf = RgbBuffer::filled(w, h, Rgb { r: 0, g: 0, b: 0 });
+            let (mut cache, mut base_fill) = (FrameCache::new(), BaseFillCache::new());
+            let ctx = PaintCtx {
+                scene: &scene,
+                layout: &layout,
+                pack: &pack,
+                now,
+                sky: crate::sky::Sky::at(now),
+                buf: &mut buf,
+                cache: &mut cache,
+                base_fill: &mut base_fill,
+                theme,
+                floor: crate::floor::FloorMeta::ground(),
+                active_pet: None,
+                floor_pet: None,
+                coffee: &coffee,
+                motion: &motion,
+                door_anim_max_ms: 0,
+                debug_walkable: false,
+            };
+            let mut d = Vec::new();
+            enqueue_desk_cubicles(&ctx, &[], &HashMap::new(), 0.0, 0.0, &mut d);
+            enqueue_meeting_furniture(&layout, &mut d);
+            enqueue_lounge_pantry_appliances(&layout, &Default::default(), &mut d);
+            enqueue_pod_decor_and_plants(&layout, &mut d);
+            enqueue_floor_fixtures(&ctx, &[], &mut d);
+            enqueue_wall_decor(&layout, &mut d);
+            enqueue_desk_chairs(&layout, &mut d);
+            let queued: Vec<(u16, &str)> = d
+                .iter()
+                .flat_map(|dr| {
+                    let tags: &[&str] = match &dr.kind {
+                        DrawableKind::DeskCubicle { cabinet, .. } if cabinet.is_some() => {
+                            &["cabinet", "desk"]
+                        }
+                        DrawableKind::DeskCubicle { .. } => &["desk"],
+                        DrawableKind::DeskChair { .. } => &["desk chair"],
+                        DrawableKind::AreaRug(_) => &["rug"],
+                        DrawableKind::MeetingSofa { .. } => &["sofa"],
+                        DrawableKind::MeetingTable { .. } => &["table"],
+                        DrawableKind::KitchenIsland { .. } => &["island"],
+                        DrawableKind::LoungeSideTable { .. } => &["side table"],
+                        DrawableKind::WaypointPantry { .. }
+                        | DrawableKind::VendingMachine { .. }
+                        | DrawableKind::Printer { .. }
+                        | DrawableKind::SnackShelf { .. } => &["station"],
+                        DrawableKind::PodDecorItem { .. } => &["pod"],
+                        DrawableKind::Plant { .. } => &["plant"],
+                        DrawableKind::FloorLamp { .. } => &["lamp"],
+                        DrawableKind::MeetingChair { .. } => &["chair"],
+                        DrawableKind::FishTank { .. } => &["tank"],
+                        DrawableKind::CoatRack { .. } => &["rack"],
+                        DrawableKind::Door { .. } => &["door"],
+                        DrawableKind::WallDecor { .. } => &["wall"],
+                        _ => panic!("the enqueue fns above queue only furniture"),
+                    };
+                    tags.iter().map(move |&t| (dr.anchor_y, t))
+                })
+                .collect();
+            let rostered: Vec<(u16, &str)> = layout
+                .fixtures()
+                .into_iter()
+                .filter_map(|f| match f.depth {
+                    Depth::Sorted(row) => Some((row, roster_tag(f.kind))),
+                    Depth::Backdrop => None,
+                })
+                .collect();
+            assert_eq!(rostered, queued, "{w}x{h} seed {seed}");
         }
     }
 }
@@ -2351,9 +2441,7 @@ fn pet_hearts_skip_dead_and_faded_hearts() {
 
 #[test]
 fn furniture_room_decor_too_small_bounds_are_noops() {
-    use super::furniture::{
-        paint_doormat, paint_notice_board, paint_trash_bin, paint_water_cooler,
-    };
+    use super::furniture::{paint_doormat, paint_trash_bin, paint_water_cooler};
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bg = Rgb { r: 9, g: 9, b: 9 };
     let small = crate::layout::Bounds {
@@ -2380,7 +2468,6 @@ fn furniture_room_decor_too_small_bounds_are_noops() {
             }
         }
     };
-    assert_noop(&|b| paint_notice_board(b, small, theme));
     assert_noop(&|b| paint_doormat(b, &small_meeting, theme));
     assert_noop(&|b| {
         paint_water_cooler(b, &small_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
@@ -2419,7 +2506,9 @@ fn furniture_room_decor_large_bounds_paint() {
             .any(|(x, y)| buf.get(x, y) != bg);
         assert!(painted, "large bounds must paint the decor");
     };
-    assert_paints(&|b| paint_notice_board(b, big, theme));
+    assert_paints(&|b| {
+        paint_notice_board(b, big_meeting.notice_board_rect().expect("fits"), theme)
+    });
     assert_paints(&|b| paint_doormat(b, &big_meeting, theme));
     assert_paints(&|b| {
         paint_water_cooler(b, &big_pantry, std::time::SystemTime::UNIX_EPOCH, theme)
@@ -3177,7 +3266,7 @@ fn pantry_doorway_gets_a_centered_entry_mat() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
-    furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
+    furniture::paint_area_rug(&mut buf, l.pantry_entry_mat().expect("the mat"), theme);
     let cx = (dw.start.x + dw.end.x) / 2;
     let mat_cy = dw.start.y + WALL_THICK_H + 3;
     assert_ne!(buf.get(cx, mat_cy), floor, "mat center row painted");
@@ -3209,7 +3298,7 @@ fn kitchen_island_sits_on_a_bar_mat() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(192, 160, floor);
-    furniture::paint_island_bar_mat(&mut buf, &l, theme);
+    furniture::paint_area_rug(&mut buf, l.island_bar_mat().expect("the mat"), theme);
     assert_ne!(
         buf.get(isl.x, isl.y + 4),
         floor,
@@ -3251,8 +3340,12 @@ fn pantry_mats_stay_inside_the_pantry_bounds() {
         };
         let theme = crate::theme::theme_by_name("normal").expect("theme");
         let mut buf = RgbBuffer::filled(w, h, floor);
-        furniture::paint_pantry_entry_mat(&mut buf, &l, theme);
-        furniture::paint_island_bar_mat(&mut buf, &l, theme);
+        for mat in [l.pantry_entry_mat(), l.island_bar_mat()]
+            .into_iter()
+            .flatten()
+        {
+            furniture::paint_area_rug(&mut buf, mat, theme);
+        }
         let b = p.bounds;
         for y in 0..h {
             for x in 0..w {
@@ -4074,12 +4167,7 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
     }
     if let Some(island) = l.pantry.and_then(|p| p.kitchen_island) {
         let vis = crate::layout::furniture_def(crate::layout::Furniture::KitchenIsland).visual;
-        expected.push((
-            island.x,
-            island.y + center_pin_south_offset(vis.h),
-            vis.w / 2 + 1,
-            2,
-        ));
+        expected.push((island.x, island.y + (vis.h - 1) / 2, vis.w / 2 + 1, 2));
     }
     for wp in l
         .waypoints
@@ -4094,14 +4182,16 @@ fn floor_shadow_ellipses_fit_each_family_in_paint_order() {
     for &PlantItem { kind, pos } in &l.plants {
         expected.push((
             pos.x,
-            pos.y
-                + center_pin_south_offset(crate::layout::furniture_def(kind.furniture()).visual.h),
+            pos.y + (crate::layout::furniture_def(kind.furniture()).visual.h - 1) / 2,
             3,
             1,
         ));
     }
     if let Some(lamp) = l.floor_lamp() {
-        expected.push((lamp.x, lamp.y + floor_lamp_south_offset(), 2, 1));
+        let h = crate::layout::furniture_def(crate::layout::Furniture::FloorLamp)
+            .visual
+            .h;
+        expected.push((lamp.x, lamp.y + (h - 1) / 2, 2, 1));
     }
 
     let got: Vec<_> = floor_shadow_ellipses(&l).map(|el| e(&el)).collect();
@@ -4513,7 +4603,7 @@ fn every_north_facing_desk_enqueues_a_chair_and_no_south_one_does() {
             .expect("desk_chair is in the embedded pack")
             .width();
         let mut drawables = Vec::new();
-        super::enqueue_desk_chairs(&layout, &pack, &mut drawables);
+        super::enqueue_desk_chairs(&layout, &mut drawables);
         // Keyed on the FULL position: desks in one pod column share an x, so an
         // x-only key silently folds a wrongly-chaired south desk onto its
         // north neighbour and the assertion cannot see it.

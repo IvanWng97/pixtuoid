@@ -32,7 +32,7 @@ use crate::pet::PetKind;
 
 /// Coffee-steam plume column offset from the pantry sprite CENTER (`pos.x`), per
 /// size — hand-tuned to the sprite art so the steam sits within
-/// [`super::PANTRY_COFFEE_COLS_LARGE`] / [`super::PANTRY_COFFEE_COLS_SMALL`].
+/// [`coffee_machine_cols`](crate::layout::coffee_machine_cols).
 const PANTRY_STEAM_DX_LARGE: i16 = -2;
 const PANTRY_STEAM_DX_SMALL: i16 = 1;
 
@@ -69,7 +69,8 @@ pub(super) enum DrawableKind<'a> {
         desk: Point,
         /// Which way this desk seats its occupant; picks the art (`desk_sprite_name`).
         facing: crate::layout::Facing,
-        has_cabinet: bool,
+        /// Where its filing cabinet stands, if it has one.
+        cabinet: Option<Point>,
         screen_glow: Option<Rgb>,
         lamp: f32,
         screen_idle: f32,
@@ -295,7 +296,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
         DrawableKind::DeskCubicle {
             desk,
             facing,
-            has_cabinet,
+            cabinet,
             screen_glow,
             lamp,
             screen_idle,
@@ -304,17 +305,11 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             token_tier,
             sheet_fall,
         } => {
-            if *has_cabinet {
-                if let Some(cab) = pack
-                    .animation("filing_cabinet")
-                    .and_then(|a| a.frames().first())
-                {
-                    let cab_x = desk.x.saturating_sub(cab.width() + 1);
-                    let cab_y = desk.y;
-                    if cab_y + cab.height() <= buf.height() {
-                        blit_frame(cab, cab_x, cab_y, buf);
-                    }
-                }
+            if let Some((at, cab)) = cabinet.zip(
+                pack.animation("filing_cabinet")
+                    .and_then(|a| a.frames().first()),
+            ) {
+                blit_frame(cab, at.x, at.y, buf);
             }
             let art = pack
                 .animation_or_source(desk_sprite_name(*facing))
@@ -663,10 +658,8 @@ mod tests {
         // steam_x = pos.x + steam_dx; sprite_x = pos.x - cw/2 → sprite-local
         // steam col = steam_dx + cw/2.
         let large_w = crate::layout::PANTRY_COUNTER_LARGE_W;
-        for (counter_w, (lo, hi)) in [
-            (large_w, crate::pixel_painter::PANTRY_COFFEE_COLS_LARGE),
-            (large_w - 1, crate::pixel_painter::PANTRY_COFFEE_COLS_SMALL),
-        ] {
+        for counter_w in [large_w, large_w - 1] {
+            let (lo, hi) = crate::layout::coffee_machine_cols(counter_w);
             let anim = crate::pixel_painter::pantry_counter_anim(counter_w);
             let steam_col = pantry_steam_dx(anim) + width(anim) / 2;
             assert!(
@@ -693,7 +686,7 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                has_cabinet: false,
+                cabinet: None,
                 screen_glow: None,
                 lamp: 0.0,
                 screen_idle: 0.0,
@@ -885,7 +878,10 @@ mod tests {
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing: crate::layout::Facing::South,
-                has_cabinet: true,
+                cabinet: Some(Point {
+                    x: desk.x.saturating_sub(cab.width() + 1),
+                    y: desk.y,
+                }),
                 screen_glow: None,
                 lamp: 0.0,
                 screen_idle: 0.0,

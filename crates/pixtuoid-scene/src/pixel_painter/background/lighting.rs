@@ -211,7 +211,7 @@ pub(in crate::pixel_painter) fn paint_neon_panel(
 ) {
     // The SAME const the board-text interior derives from (`NEON_PANEL_INNER_*`),
     // so the cells left dark == the cells the text may fill; they can't drift.
-    let b = crate::pixel_painter::NEON_PANEL_BORDER;
+    let b = crate::layout::NEON_PANEL_BORDER;
     for dy in 0..h {
         for dx in 0..w {
             let on_border = dx < b || dx >= w - b || dy < b || dy >= h - b;
@@ -264,8 +264,11 @@ pub(in crate::pixel_painter) fn paint_clock(
     let hand_color = theme.office.clock_hand;
     let hand_min = hand_color;
 
-    // 7x7 disc — `R` rim, `F` face, `.` transparent. Center at x+3, y+3.
-    let rows: &[&[u8]] = &[
+    // The disc — `R` rim, `F` face, `.` transparent — typed to the clock's
+    // layout size, which places it.
+    const W: usize = crate::layout::CLOCK.w as usize;
+    const H: usize = crate::layout::CLOCK.h as usize;
+    let rows: [&[u8; W]; H] = [
         b"..RRR..", b".RFFFR.", b"RFFFFFR", b"RFFFFFR", b"RFFFFFR", b".RFFFR.", b"..RRR..",
     ];
     for (dy, row) in rows.iter().enumerate() {
@@ -389,7 +392,7 @@ mod tests {
     use super::*;
 
     use crate::floor::NeonLevels;
-    use crate::pixel_painter::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
+    use crate::layout::{NEON_PANEL_BORDER, NEON_PANEL_H, NEON_PANEL_W};
     use std::time::Duration;
 
     /// A WALL-CLOCK-scale epoch — the magnitude [`neon_breath`]'s integer modulo

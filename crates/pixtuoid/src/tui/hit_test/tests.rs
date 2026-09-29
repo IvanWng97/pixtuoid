@@ -9,32 +9,16 @@ fn coffee_machine_hit_test_returns_false_for_origin() {
     ));
 }
 
-/// The middle cell of the coffee machine on `layout`'s pantry counter, which
-/// is centred on `counter`.
-fn coffee_mid_cell(layout: &Layout, counter: Point) -> (u16, u16) {
-    use pixtuoid_scene::pixel_painter::{PANTRY_COFFEE_COLS_LARGE, PANTRY_COFFEE_COLS_SMALL};
-    let Size { w: cw, h: ch } = layout.pantry_counter_size();
-    let (c0, c1) = if cw >= pixtuoid_scene::layout::PANTRY_COUNTER_LARGE_W {
-        PANTRY_COFFEE_COLS_LARGE
-    } else {
-        PANTRY_COFFEE_COLS_SMALL
-    };
-    let top = counter.y.saturating_sub(ch / 2);
-    (
-        counter.x.saturating_sub(cw / 2) + (c0 + c1) / 2,
-        (top + ch / 2) / 2,
-    )
+/// The middle cell of the coffee machine on `layout`'s pantry counter.
+fn coffee_mid_cell(layout: &Layout) -> (u16, u16) {
+    let b = layout.coffee_machine().expect("a coffee machine");
+    (b.x + b.width / 2, (b.y + b.height / 2) / 2)
 }
 
 #[test]
 fn coffee_machine_hit_test_returns_true_for_machine_area() {
     let layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let pantry_wp = layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, pantry_wp.pos);
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
         hit_test_coffee_machine(
             &layout,
@@ -481,12 +465,7 @@ fn cat_hit_test_sleep_smaller_box() {
 #[test]
 fn coffee_machine_returns_false_when_no_pantry_waypoint() {
     let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let wp = *layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout, wp.pos);
+    let (mid_x, mid_cell_y) = coffee_mid_cell(&layout);
     assert!(
         hit_test_coffee_machine(
             &layout,
@@ -508,62 +487,6 @@ fn coffee_machine_returns_false_when_no_pantry_waypoint() {
         &layout,
         crate::tui::geometry::CellArea::half_block(0, 0)
     ));
-}
-
-// The large box's last column is the falsifier for the large/small split:
-// outside the small box but inside the large one, so a hit there means the
-// split was dropped.
-#[test]
-fn coffee_machine_small_counter_uses_the_shared_coffee_cols() {
-    let (lo, hi) = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_SMALL;
-    let large_last = pixtuoid_scene::pixel_painter::PANTRY_COFFEE_COLS_LARGE.1 - 1;
-    let mut layout = Layout::compute(160, 200, Some(4)).expect("layout");
-    let wp = *layout
-        .waypoints
-        .iter()
-        .find(|w| w.kind == pixtuoid_scene::layout::WaypointKind::Pantry)
-        .expect("pantry");
-    let h = layout.pantry_counter_size().h;
-    layout.pantry.as_mut().expect("pantry").counter_size = Size { w: 20, h };
-    let sprite_x = wp.pos.x.saturating_sub(20 / 2);
-    let sprite_y = wp.pos.y.saturating_sub(h / 2);
-    let cell_y = (sprite_y + h / 2) / 2;
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + lo - 1, cell_y)
-        ),
-        "the counter col just left of the machine must miss"
-    );
-    assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + lo, cell_y)
-        ),
-        "the machine's left edge must hit"
-    );
-    assert!(
-        hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + hi - 1, cell_y)
-        ),
-        "the machine's right edge must hit"
-    );
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + hi, cell_y)
-        ),
-        "the counter col just right of the machine must miss"
-    );
-    assert!(
-        !hit_test_coffee_machine(
-            &layout,
-            crate::tui::geometry::CellArea::half_block(sprite_x + large_last, cell_y)
-        ),
-        "the large box's last column is outside the small box; a hit means the \
-         large/small split was dropped"
-    );
 }
 
 // The lounge and pod-decor arms below aren't all reachable from
@@ -749,4 +672,43 @@ fn furniture_hit_test_finds_tv_stand_via_synthetic_pod_decor() {
         ),
         Some("TV Stand")
     );
+}
+
+/// Where two fixtures overlap, hover names the one painted over the other:
+/// a back-turned desk's chair sorts past the desk and covers its front edge.
+#[test]
+fn hover_names_the_topmost_fixture() {
+    use pixtuoid_scene::layout::{Depth, Facing, FixtureKind};
+    let layout = Layout::compute(160, 200, Some(16)).expect("layout");
+    let fixtures = layout.fixtures();
+    let chair = fixtures
+        .iter()
+        .find(|f| {
+            matches!(f.kind, FixtureKind::DeskChair(i) if layout.desk_facing(i) == Facing::North)
+        })
+        .expect("a back-turned desk");
+    let FixtureKind::DeskChair(i) = chair.kind else {
+        unreachable!()
+    };
+    let desk = fixtures
+        .iter()
+        .find(|f| f.kind == FixtureKind::Desk(i))
+        .expect("its desk");
+    let (Depth::Sorted(chair_row), Depth::Sorted(desk_row)) = (chair.depth, desk.depth) else {
+        panic!("both stand in the sort")
+    };
+    assert!(chair_row > desk_row, "the chair paints over the desk");
+    let cell = crate::tui::geometry::CellArea::half_block(
+        chair.visual.x + chair.visual.width / 2,
+        chair.visual.y / 2,
+    );
+    assert!(cell.overlaps(
+        Point {
+            x: desk.visual.x,
+            y: desk.visual.y
+        },
+        desk.visual.width,
+        desk.visual.height
+    ));
+    assert_eq!(hit_test_furniture(&layout, cell), Some("Desk Chair"));
 }

@@ -284,7 +284,7 @@ pub fn board_mood_segments(counts: StateCounts) -> Vec<BoardSegment> {
     };
     let full = build(["wait", "work", "idle"]);
     let width: usize = full.iter().map(|s| s.text.chars().count()).sum();
-    if width <= crate::pixel_painter::NEON_PANEL_INNER_W as usize {
+    if width <= crate::layout::NEON_PANEL_INNER_W as usize {
         full
     } else {
         build(["wt", "wk", "id"])
@@ -347,7 +347,7 @@ fn board_persona_segments(mood: OfficeMood, pick: u64) -> Option<Vec<BoardSegmen
         Persona::Says(line) => format!("{glyph} {line}"),
         Persona::Counts(rest) => format!("{glyph} {n} {rest}"),
     };
-    (text.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize)
+    (text.chars().count() <= crate::layout::NEON_PANEL_INNER_W as usize)
         .then(|| vec![BoardSegment::new(text, tone)])
 }
 
@@ -647,7 +647,7 @@ mod tests {
         for ms in (0..2 * FLAP_HALF_MS).step_by(FLAP_TICK_MS as usize / 2) {
             let w = text_of(&board_mood_at(c, ms)).chars().count();
             assert!(
-                w <= crate::pixel_painter::NEON_PANEL_INNER_W as usize,
+                w <= crate::layout::NEON_PANEL_INNER_W as usize,
                 "{w} cols at {ms}ms"
             );
         }
@@ -706,7 +706,7 @@ mod tests {
                     };
                     let line = text_of(&line);
                     assert!(
-                        line.chars().count() <= crate::pixel_painter::NEON_PANEL_INNER_W as usize,
+                        line.chars().count() <= crate::layout::NEON_PANEL_INNER_W as usize,
                         "{mood:?}/{pick}: {line:?}"
                     );
                 }
@@ -765,7 +765,7 @@ mod tests {
             eprintln!("skipping: scripts/media.json not present (packaged build)");
             return;
         };
-        let widest_roll = flap_roll_ms(crate::pixel_painter::NEON_PANEL_INNER_W as usize);
+        let widest_roll = flap_roll_ms(crate::layout::NEON_PANEL_INNER_W as usize);
         for offset in offsets {
             let into_half = offset % FLAP_HALF_MS;
             assert!(
@@ -887,7 +887,7 @@ mod tests {
         let text = mood_text(c);
         let width = text.chars().count();
         assert!(
-            width <= crate::pixel_painter::NEON_PANEL_INNER_W as usize,
+            width <= crate::layout::NEON_PANEL_INNER_W as usize,
             "fits the panel interior: {text} = {width}"
         );
         assert!(text.contains("\u{25b2}150 wt"), "abbreviated big-N: {text}");

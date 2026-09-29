@@ -69,137 +69,42 @@ fn pet_hit_test_resolves_at_pet_position() {
 }
 
 #[test]
-fn furniture_hit_test_covers_every_kind_on_real_layouts() {
+fn furniture_hit_test_names_every_fixture_not_painted_over() {
     use crate::tui::hit_test::hit_test_furniture;
-    use pixtuoid_scene::layout::{
-        Layout, PlantKind, PodDecor, WallDecor, WaypointKind, TEST_DEFAULT_DESKS,
-    };
+    use pixtuoid_scene::layout::{Bounds, Layout, TEST_DEFAULT_DESKS};
     use std::collections::HashSet;
 
-    // Per-item shadowing (a floor lamp under the couch region, a chair under the
-    // pantry table) makes a single center-probe brittle, so scan the WHOLE grid:
-    // an item's non-shadowed cells still yield its label.
-    let labels_on = |layout: &Layout| -> HashSet<&'static str> {
-        let mut set = HashSet::new();
-        for cy in 0..(layout.buf_h / 2) {
-            for cx in 0..layout.buf_w {
-                if let Some(l) =
-                    hit_test_furniture(layout, crate::tui::geometry::CellArea::half_block(cx, cy))
-                {
-                    set.insert(l);
-                }
-            }
-        }
-        set
+    let within = |inner: Bounds, outer: Bounds| {
+        inner.x >= outer.x
+            && inner.y >= outer.y
+            && inner.x + inner.width <= outer.x + outer.width
+            && inner.y + inner.height <= outer.y + outer.height
     };
-
-    // Seeds 0 and 3 between them populate every field (3 brings the PhoneBooth/
-    // StandingDesk pod decor and a coat-rack-only meeting room).
-    let mut covered: HashSet<&'static str> = HashSet::new();
+    // Seeds 0 and 3 between them place every kind the roster has at this size.
     for seed in [0u64, 3] {
         let layout = Layout::compute_with_seed(160, 200, Some(TEST_DEFAULT_DESKS), seed)
             .unwrap_or_else(|| panic!("layout for seed {seed}"));
-        let labels = labels_on(&layout);
-
-        for wp in &layout.waypoints {
-            let want = match wp.kind {
-                WaypointKind::Pantry => Some("Pantry Counter"),
-                WaypointKind::PhoneBooth => Some("Phone Booth"),
-                WaypointKind::StandingDesk => Some("Standing Desk"),
-                WaypointKind::VendingMachine => Some("Vending Machine"),
-                WaypointKind::Printer => Some("Printer"),
-                WaypointKind::SnackShelf => Some("Snack Shelf"),
-                WaypointKind::Couch
-                | WaypointKind::MeetingSofa
-                | WaypointKind::MeetingChair
-                | WaypointKind::Island => None,
-            };
-            if let Some(label) = want {
-                assert!(
-                    labels.contains(label),
-                    "seed {seed}: waypoint {:?} → label {label:?} never resolved",
-                    wp.kind
-                );
+        let mut labels = HashSet::new();
+        for cy in 0..(layout.buf_h / 2) {
+            for cx in 0..layout.buf_w {
+                labels.extend(hit_test_furniture(
+                    &layout,
+                    crate::tui::geometry::CellArea::half_block(cx, cy),
+                ));
             }
         }
-        if layout.meeting_rooms.iter().any(|r| r.trio.is_some()) {
-            assert!(labels.contains("Meeting Sofa"), "seed {seed}: Meeting Sofa");
+        let fixtures = layout.fixtures();
+        for (i, f) in fixtures.iter().enumerate() {
+            let painted_over = fixtures
+                .iter()
+                .enumerate()
+                .any(|(j, g)| (g.depth, j) > (f.depth, i) && within(f.visual, g.visual));
             assert!(
-                labels.contains("Meeting Table"),
-                "seed {seed}: Meeting Table"
+                painted_over || labels.contains(f.kind.name()),
+                "seed {seed}: {:?} never resolves",
+                f.kind
             );
         }
-        if layout.pantry.is_some_and(|p| p.kitchen_island.is_some()) {
-            assert!(
-                labels.contains("Kitchen Island"),
-                "seed {seed}: Kitchen Island"
-            );
-        }
-        if layout.floor_lamp().is_some() {
-            assert!(labels.contains("Floor Lamp"), "seed {seed}: Floor Lamp");
-        }
-        if layout.fish_tank().is_some() {
-            assert!(labels.contains("Fish Tank"), "seed {seed}: Fish Tank");
-        }
-        if layout.couch_sprite_center().is_some() {
-            assert!(labels.contains("Lounge Sofa"), "seed {seed}: Lounge Sofa");
-        }
-        if layout.lounge_side_table().is_some() {
-            assert!(labels.contains("Side Table"), "seed {seed}: Side Table");
-        }
-        for item in &layout.plants {
-            let label = match item.kind {
-                PlantKind::Ficus => "Ficus",
-                PlantKind::Tall => "Tall Plant",
-                PlantKind::Flower => "Flower Pot",
-                PlantKind::Succulent => "Succulent",
-            };
-            assert!(labels.contains(label), "seed {seed}: plant {:?}", item.kind);
-        }
-        for item in &layout.wall_decor {
-            let label = match item.kind {
-                WallDecor::Whiteboard => "Whiteboard",
-                WallDecor::Bookshelf => "Bookshelf",
-                WallDecor::BulletinBoard => "Bulletin Board",
-                WallDecor::ExitSign => "Exit Sign",
-                WallDecor::MeetingScreen => "Meeting Screen",
-            };
-            assert!(
-                labels.contains(label),
-                "seed {seed}: wall decor {:?}",
-                item.kind
-            );
-        }
-        for item in &layout.pod_decor {
-            let label = match item.kind {
-                PodDecor::PlantTall => "Tall Plant",
-                PodDecor::Whiteboard => "Whiteboard",
-                PodDecor::Tv => "TV Stand",
-                PodDecor::PhoneBooth => "Phone Booth",
-                PodDecor::StandingDesk => "Standing Desk",
-            };
-            assert!(
-                labels.contains(label),
-                "seed {seed}: pod decor {:?}",
-                item.kind
-            );
-        }
-        covered.extend(labels);
-    }
-
-    // The procedural room items come from room bounds, not a layout field; seed 0
-    // has both a meeting room and a pantry room at 160×200.
-    for label in [
-        "Coat Rack",
-        "Doormat",
-        "Water Cooler",
-        "Trash Bin",
-        "Elevator",
-    ] {
-        assert!(
-            covered.contains(label),
-            "procedural/room item {label:?} never resolved across seeds"
-        );
     }
 }
 

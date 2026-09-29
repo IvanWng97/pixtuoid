@@ -151,16 +151,6 @@ pub(crate) use sim::{sim_step, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub(crate) use wall::paint_wall;
 
-/// The coffee-machine sub-region within the large pantry counter sprite, as a
-/// sprite-local column range `[start, end)`. THE single source of truth shared
-/// by the steam-anchor painter and the binary's `hit_test_coffee_machine`, so
-/// the clickable box can't drift from the painted art when the sprite is
-/// re-tuned.
-pub const PANTRY_COFFEE_COLS_LARGE: (u16, u16) = (11, 18);
-/// Coffee-machine column range for the compact `pantry_small` sprite (see
-/// [`PANTRY_COFFEE_COLS_LARGE`]).
-pub const PANTRY_COFFEE_COLS_SMALL: (u16, u16) = (9, 12);
-
 /// The pantry counter sprites, compact then large.
 pub(crate) const PANTRY_COUNTER_ANIMS: [&str; 2] = ["pantry_small", "pantry"];
 
@@ -174,34 +164,6 @@ pub(crate) fn pantry_counter_anim(counter_w: u16) -> &'static str {
         compact
     }
 }
-
-/// The neon wall-sign panel geometry, in PIXELS: origin `(X, Y)` and OUTER size
-/// `W×H`, drawn with a `NEON_PANEL_BORDER`-px frame on every side. A pixel
-/// column maps 1:1 to a terminal cell column in the half-block flush, so these
-/// px widths ARE cell widths on the horizontal. The board's TEXT overlay must
-/// pin to the dark INTERIOR (`NEON_PANEL_INNER_*`), not the OUTER `W`, or the
-/// lit text overruns the glowing frame by the border on each side.
-pub(crate) const NEON_PANEL_X: u16 = 1;
-pub(crate) const NEON_PANEL_Y: u16 = 1;
-/// The neon panel's OUTER width in pixels (frame included).
-pub const NEON_PANEL_W: u16 = 30;
-pub(crate) const NEON_PANEL_H: u16 = 8;
-/// The frame thickness `paint_neon_panel` lights on every side — it reads THIS,
-/// so the interior derivations below match the pixels it leaves dark.
-pub(crate) const NEON_PANEL_BORDER: u16 = 1;
-/// The dark interior's left cell-origin — where board text starts.
-pub const NEON_PANEL_INNER_X: u16 = NEON_PANEL_X + NEON_PANEL_BORDER;
-/// The dark interior's cell WIDTH — the board's usable text width.
-pub const NEON_PANEL_INNER_W: u16 = NEON_PANEL_W - 2 * NEON_PANEL_BORDER;
-/// The dark interior's top pixel-origin — where the floating / wasm painters
-/// anchor the board's first text row.
-pub const NEON_PANEL_INNER_Y: u16 = NEON_PANEL_Y + NEON_PANEL_BORDER;
-/// The dark interior's pixel HEIGHT.
-pub const NEON_PANEL_INNER_H: u16 = NEON_PANEL_H - 2 * NEON_PANEL_BORDER;
-// The interior must be a non-empty strict subset of the outer frame (catches a
-// degenerate BORDER=0 / oversized-border config at compile time).
-const _: () = assert!(NEON_PANEL_INNER_W > 0 && NEON_PANEL_INNER_W < NEON_PANEL_W);
-const _: () = assert!(NEON_PANEL_INNER_H > 0 && NEON_PANEL_INNER_H < NEON_PANEL_H);
 
 use crate::atmosphere::Look;
 use crate::creatures::{gateway_mascot_def, mascot_position, pet_position};
@@ -264,25 +226,6 @@ pub fn is_day_at(now: std::time::SystemTime) -> bool {
 
 // A reference to the window `CoffeeState::record` refreshes on, not a copy.
 const COFFEE_STEAM_WINDOW_SECS: u64 = crate::floor::CoffeeState::STEAM_WINDOW_SECS;
-
-/// Z-sort offset from a center-pinned sprite's center to its SOUTH (front) row.
-/// A sprite blitted at `py = center - h/2` souths at `center + (h - 1) / 2` —
-/// correct for BOTH parities, where the naive `h/2 - 1` is one row short for
-/// ODD `h`. The z-key must land ON the south row; one row past it lets the
-/// sprite paint over a character standing immediately in front.
-fn center_pin_south_offset(h: u16) -> u16 {
-    h.saturating_sub(1) / 2
-}
-
-/// South-row (base) offset of the floor-lamp sprite, derived so the halo /
-/// shadow / z-anchor all move together if the lamp's visual height changes.
-fn floor_lamp_south_offset() -> u16 {
-    center_pin_south_offset(
-        crate::layout::furniture_def(crate::layout::Furniture::FloorLamp)
-            .visual
-            .h,
-    )
-}
 
 /// Bundled input for the pixel-painting pass.
 pub struct PixelCtx<'a> {
@@ -490,7 +433,7 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
         let vis = furniture_def(Furniture::KitchenIsland).visual;
         Ellipse {
             cx: island.x,
-            cy: island.y + center_pin_south_offset(vis.h),
+            cy: crate::layout::z_sort_row(Anchor::Center, island, vis.h),
             half_w: vis.w / 2 + crate::ground::CONTACT_REACH,
             half_h: 2,
         }
@@ -518,13 +461,17 @@ fn floor_shadow_ellipses(layout: &Layout) -> impl Iterator<Item = Ellipse> + '_ 
         .iter()
         .map(|&PlantItem { kind, pos }| Ellipse {
             cx: pos.x,
-            cy: pos.y + center_pin_south_offset(furniture_def(kind.furniture()).visual.h),
+            cy: crate::layout::z_sort_row(
+                Anchor::Center,
+                pos,
+                furniture_def(kind.furniture()).visual.h,
+            ),
             half_w: 3,
             half_h: 1,
         });
-    let lamp = layout.floor_lamp().map(|lamp| Ellipse {
-        cx: lamp.x,
-        cy: lamp.y + floor_lamp_south_offset(),
+    let lamp = layout.floor_lamp_base().map(|base| Ellipse {
+        cx: base.x,
+        cy: base.y,
         half_w: 2,
         half_h: 1,
     });
@@ -573,11 +520,11 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
         let strength = (POOL_BASE + POOL_NIGHT_GAIN * look.darkness) * indoor_scale;
         paint_ceiling_pool(ctx.buf, pool, strength, ctx.theme);
     }
-    if let Some(lamp) = ctx.layout.floor_lamp() {
+    if let Some(base) = ctx.layout.floor_lamp_base() {
         paint_floor_lamp_halo(
             ctx.buf,
-            lamp.x,
-            lamp.y + floor_lamp_south_offset(),
+            base.x,
+            base.y,
             look.darkness * 0.55 * indoor_scale,
             ctx.theme,
         );
@@ -586,20 +533,17 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let neon = background::neon_look(frame.neon, ctx.now, look.darkness, ctx.theme);
     paint_neon_panel(
         ctx.buf,
-        NEON_PANEL_X,
-        NEON_PANEL_Y,
-        NEON_PANEL_W,
-        NEON_PANEL_H,
+        crate::layout::NEON_PANEL.x,
+        crate::layout::NEON_PANEL.y,
+        crate::layout::NEON_PANEL.width,
+        crate::layout::NEON_PANEL.height,
         &neon,
     );
 
     // After the wall (so its hands sit on top) but before wall decor (the
-    // bookshelf shouldn't cover it). The clamp keeps it clear of the neon
-    // panel's right edge plus a 1px gap.
-    let clock_x = (buf_w / 2)
-        .saturating_sub(3)
-        .max(NEON_PANEL_X + NEON_PANEL_W + 1);
-    paint_clock(ctx.buf, clock_x, 1, ctx.now, ctx.theme);
+    // bookshelf shouldn't cover it).
+    let clock = ctx.layout.clock_pos();
+    paint_clock(ctx.buf, clock.x, clock.y, ctx.now, ctx.theme);
     // These overwrite the floor, so the overlays above cannot reach them, and
     // they paint before the drawable snapshot, so that pass cannot either — the
     // corridor runner used to stay full-daylight tan in a dimmed office, the
@@ -614,14 +558,20 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // background pass — it would double-paint under its y-sorted copy below.
     // Only these small mask-free items do.
     for room in &ctx.layout.meeting_rooms {
-        furniture::paint_notice_board(ctx.buf, room.bounds, ctx.theme);
+        if let Some(board) = room.notice_board_rect() {
+            furniture::paint_notice_board(ctx.buf, board, ctx.theme);
+        }
         furniture::paint_doormat(ctx.buf, room, ctx.theme);
     }
     // Floor-level mats paint FIRST so they sit under every upright pantry
     // fixture: on a narrow pantry the entry mat's box reaches the water-cooler
     // column, and mats-after-cooler would clip the cooler's west edge.
-    furniture::paint_pantry_entry_mat(ctx.buf, ctx.layout, ctx.theme);
-    furniture::paint_island_bar_mat(ctx.buf, ctx.layout, ctx.theme);
+    for mat in [ctx.layout.pantry_entry_mat(), ctx.layout.island_bar_mat()]
+        .into_iter()
+        .flatten()
+    {
+        furniture::paint_area_rug(ctx.buf, mat, ctx.theme);
+    }
     if let Some(pantry) = &ctx.layout.pantry {
         furniture::paint_water_cooler(ctx.buf, pantry, ctx.now, ctx.theme);
         furniture::paint_trash_bin(ctx.buf, pantry);
@@ -670,7 +620,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     let resolved_mascots = enqueue_gateway_mascots(ctx, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
-    enqueue_desk_chairs(ctx.layout, ctx.pack, &mut drawables);
+    enqueue_desk_chairs(ctx.layout, &mut drawables);
 
     enqueue_room_walls(ctx.layout, &mut drawables);
 
@@ -703,10 +653,10 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     // room it falls on.
     background::paint_neon_glow(
         ctx.buf,
-        NEON_PANEL_X,
-        NEON_PANEL_Y,
-        NEON_PANEL_W,
-        NEON_PANEL_H,
+        crate::layout::NEON_PANEL.x,
+        crate::layout::NEON_PANEL.y,
+        crate::layout::NEON_PANEL.width,
+        crate::layout::NEON_PANEL.height,
         &neon,
     );
 
@@ -785,43 +735,17 @@ pub(super) fn frame_index(anim: &Sprite, idx: usize) -> usize {
 
 /// One chair per NORTH-facing home desk, occupied or not. Keyed to TIE with its
 /// occupant, so the stable sort paints it over them.
-fn enqueue_desk_chairs<'a>(layout: &Layout, pack: &Pack, drawables: &mut Vec<Drawable<'a>>) {
+fn enqueue_desk_chairs<'a>(layout: &Layout, drawables: &mut Vec<Drawable<'a>>) {
     for (i, &desk) in layout.home_desks.iter().enumerate() {
         let facing = layout.desk_facing(FloorLocalDeskIndex(i));
-        let Some(pos) = desk_chair_top_left(pack, desk, facing) else {
+        let Some(pos) = crate::layout::desk_chair_top_left(desk, facing) else {
             continue;
         };
         drawables.push(Drawable {
-            anchor_y: desk_chair_z_key(desk, facing),
+            anchor_y: crate::layout::desk_chair_z_key(desk, facing),
             kind: DrawableKind::DeskChair { pos },
         });
     }
-}
-
-/// Where the pack's task chair stands at `desk`, or `None` for a desk that does
-/// not face north (a viewer-facing occupant sits behind their desk, in front of
-/// their chair) or a pack without the chair. Both profiles place chairs from this.
-pub(crate) fn desk_chair_top_left(
-    pack: &Pack,
-    desk: Point,
-    facing: crate::layout::Facing,
-) -> Option<Point> {
-    /// The backrest crosses the occupant's lower torso deliberately — clearing the sprite would leave a detached slab at their feet.
-    const CHAIR_BACK_TOP_DY: u16 = 6;
-    let chair = drawable::desk_chair_frame(pack)?;
-    (facing == crate::layout::Facing::North).then(|| Point {
-        x: anchors::seated_anchor_facing(desk, chair.width(), facing).x,
-        y: desk.y + CHAIR_BACK_TOP_DY,
-    })
-}
-
-/// The depth a desk's task chair sorts at: its seat's own z-key, which the sim
-/// gives the occupant arriving at, sitting in and leaving the seat alike. A
-/// painter that draws chairs after people on a tie therefore draws the chair
-/// over its occupant throughout — no flip where the walk ends and the sit
-/// begins. Both profiles key chairs by this.
-pub(crate) fn desk_chair_z_key(desk: Point, facing: crate::layout::Facing) -> u16 {
-    crate::layout::desk_walk_anchor_facing(desk, facing).y
 }
 
 pub(super) struct DeskLight {
@@ -911,7 +835,7 @@ fn enqueue_desk_cubicles<'a>(
             kind: DrawableKind::DeskCubicle {
                 desk,
                 facing,
-                has_cabinet: i % 2 == 0,
+                cabinet: ctx.layout.filing_cabinet_top_left(local),
                 screen_glow,
                 lamp: light.lamp,
                 screen_idle: light.screen_idle,
@@ -1259,7 +1183,13 @@ fn enqueue_floor_fixtures<'a>(
 ) {
     if let Some(lamp) = ctx.layout.floor_lamp() {
         drawables.push(Drawable {
-            anchor_y: lamp.y + floor_lamp_south_offset(),
+            anchor_y: z_sort_row(
+                Anchor::Center,
+                lamp,
+                crate::layout::furniture_def(crate::layout::Furniture::FloorLamp)
+                    .visual
+                    .h,
+            ),
             kind: DrawableKind::FloorLamp { pos: lamp },
         });
     }
@@ -1286,7 +1216,7 @@ fn enqueue_floor_fixtures<'a>(
             .visual
             .h;
         drawables.push(Drawable {
-            anchor_y: tank.y + center_pin_south_offset(h),
+            anchor_y: z_sort_row(Anchor::Center, tank, h),
             kind: DrawableKind::FishTank { pos: tank },
         });
     }
