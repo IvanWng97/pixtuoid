@@ -187,17 +187,17 @@ pub(crate) fn weather_floor_tint(w: Weather) -> Rgb {
     }
 }
 
-/// Haze that obscures the city skyline behind the glass, by weather. Returns
-/// `(haze_color, blend_alpha)` or `None` when the skyline is crisp.
-pub(crate) fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
+/// The veil a weather lays over the window glass, as `(color, alpha)` before
+/// [`veil_lum`] lights it, or `None` where the city shows crisp.
+pub(crate) fn glass_veil(w: Weather) -> Option<(Rgb, f32)> {
     match w {
         Weather::Fog => Some((
             Rgb {
-                r: 226,
-                g: 228,
-                b: 233,
+                r: 201,
+                g: 204,
+                b: 211,
             },
-            0.55,
+            0.66,
         )),
         Weather::Storm => Some((
             Rgb {
@@ -217,54 +217,21 @@ pub(crate) fn skyline_haze(w: Weather) -> Option<(Rgb, f32)> {
         )),
         Weather::Smog => Some((
             Rgb {
-                r: 150,
-                g: 138,
+                r: 170,
+                g: 153,
                 b: 110,
             },
-            0.22,
+            0.45,
         )),
         Weather::Overcast => Some((
             Rgb {
-                r: 196,
-                g: 199,
-                b: 206,
-            },
-            0.12,
-        )),
-        Weather::Clear | Weather::Snow | Weather::Windy => None,
-    }
-}
-
-/// The veil a weather lays over the whole glass on top of its
-/// [`skyline_haze`], as `(color, alpha)`, or `None` for a weather the glass
-/// shows as falling particles or not at all.
-pub(crate) fn glass_wash(w: Weather) -> Option<(Rgb, f32)> {
-    match w {
-        Weather::Fog => Some((
-            Rgb {
-                r: 160,
-                g: 165,
-                b: 175,
-            },
-            0.25,
-        )),
-        Weather::Overcast => Some((
-            Rgb {
-                r: 100,
-                g: 105,
-                b: 110,
-            },
-            0.2,
-        )),
-        Weather::Smog => Some((
-            Rgb {
-                r: 180,
-                g: 160,
-                b: 110,
+                r: 131,
+                g: 135,
+                b: 141,
             },
             0.30,
         )),
-        Weather::Clear | Weather::Rain | Weather::Storm | Weather::Snow | Weather::Windy => None,
+        Weather::Clear | Weather::Snow | Weather::Windy => None,
     }
 }
 
@@ -374,18 +341,15 @@ mod tests {
     }
 
     #[test]
-    fn skyline_haze_obscures_fog_and_storm_only_when_expected() {
-        let fog = skyline_haze(Weather::Fog).expect("fog hazes").1;
-        let storm = skyline_haze(Weather::Storm).expect("storm hazes").1;
+    fn glass_veil_obscures_fog_and_storm_only_when_expected() {
+        let fog = glass_veil(Weather::Fog).expect("fog veils").1;
+        let storm = glass_veil(Weather::Storm).expect("storm veils").1;
         assert!(fog > storm, "fog should obscure more than storm");
         assert!(
-            skyline_haze(Weather::Clear).is_none(),
+            glass_veil(Weather::Clear).is_none(),
             "clear skyline is crisp"
         );
-        assert!(
-            skyline_haze(Weather::Snow).is_none(),
-            "snow skyline is crisp"
-        );
+        assert!(glass_veil(Weather::Snow).is_none(), "snow skyline is crisp");
     }
 
     #[test]

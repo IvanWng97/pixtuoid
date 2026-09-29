@@ -29,8 +29,7 @@ use super::epoch_ms;
 use super::palette::{blend, blend_pixel, blend_rgb, RgbLut, BLACK, WHITE};
 
 use crate::atmosphere::{
-    glass_wash, golden_hour_blaze, night_star_strength, skyline_haze, veil_lum, weather_floor_tint,
-    TimeOfDayLook,
+    glass_veil, golden_hour_blaze, night_star_strength, veil_lum, weather_floor_tint, TimeOfDayLook,
 };
 use crate::layout::{Layout, ELEVATOR_W};
 use crate::sky::{Sky, Weather};
@@ -596,13 +595,10 @@ fn paint_floor_to_ceiling_window(
     let weather = sky.weather();
     let veil = veil_lum(sky.emitter());
 
-    // The haze goes on BEFORE the streak/flash effects, so rain/snow/lightning
+    // The veil goes on BEFORE the streak/flash effects, so rain/snow/lightning
     // still read on top of the murk.
-    if let Some((haze, alpha)) = skyline_haze(weather) {
-        wash_glass(buf, x, y, w, h, veil_lit(haze, veil), alpha);
-    }
-    if let Some((veil_color, alpha)) = glass_wash(weather) {
-        wash_glass(buf, x, y, w, h, veil_lit(veil_color, veil), alpha);
+    if let Some((color, alpha)) = glass_veil(weather) {
+        wash_glass(buf, x, y, w, h, veil_lit(color, veil), alpha);
     }
 
     let elapsed_ms = epoch_ms(now);
