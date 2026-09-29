@@ -2,9 +2,7 @@ use super::anchors::{
     back_couch_anchor, seated_anchor_facing, walking_anchor, waypoint_anchor, CHARACTER_SPRITE_W,
 };
 use super::seat::{settle_seat, Seat};
-use super::wall::WALL_THICK_H_PX;
 use super::*;
-use crate::layout::stitch_vertical_wall;
 use crate::pose;
 use pixtuoid_core::sprite::{Frame, Pixel};
 use pixtuoid_core::state::{GlobalDeskIndex, ToolKind};
@@ -12,49 +10,19 @@ use pixtuoid_core::walkable::OccupancyOverlay;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-#[test]
-fn stitch_vertical_wall_connects_each_joint() {
-    let top_margin = 48u16;
-    let top_wall_h = top_margin - 4;
-    let h_y = 90u16;
-    let h_rows = [h_y];
-
-    let (yt, _) = stitch_vertical_wall(top_margin, 70, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yt, top_wall_h,
-        "top segment should connect up to the window band"
-    );
-
-    let (_, yb) = stitch_vertical_wall(60, h_y, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        yb,
-        h_y + (WALL_THICK_H_PX - 1),
-        "bottom should fill the corner"
-    );
-
-    let (yt2, _) = stitch_vertical_wall(h_y + 6, 120, top_margin, top_wall_h, &h_rows);
-    assert_eq!(yt2, h_y, "lower segment should bridge up to the cross wall");
-
-    let (yt3, yb3) = stitch_vertical_wall(h_y + 20, 130, top_margin, top_wall_h, &h_rows);
-    assert_eq!(
-        (yt3, yb3),
-        (h_y + 20, 130),
-        "distant segment must not bridge"
-    );
-    let (yt4, yb4) = stitch_vertical_wall(60, 80, top_margin, top_wall_h, &[]);
-    assert_eq!((yt4, yb4), (60, 80), "no joints → unchanged");
-}
-
-#[test]
-fn vertical_wall_top_raise_lands_on_the_band_row() {
-    let top_margin = 48u16;
-    let tbm = crate::layout::WALL_BAND_TO_TOP_MARGIN;
-    let top_wall_h = top_margin - tbm;
-    let band_row = top_margin.saturating_sub(tbm);
-    let (stitch_raise, _) = stitch_vertical_wall(top_margin, 90, top_margin, top_wall_h, &[]);
-    assert_eq!(
-        stitch_raise, band_row,
-        "the shared stitch must raise a band-rooted vertical wall top to the band row"
+/// Paint all of `piece` in one call, which the classic's bands add up to.
+fn paint_whole_wall(
+    buf: &mut RgbBuffer,
+    theme: &crate::theme::Theme,
+    piece: crate::layout::WallPiece,
+) {
+    let (at, size) = piece.visual();
+    paint_wall(
+        buf,
+        theme,
+        piece,
+        at.y..at.y + size.h,
+        crate::cutaway::pen::Pen::UNIT,
     );
 }
 
@@ -69,10 +37,32 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(20, 60, floor);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 24 - (wall::DOOR_JAMB_PX - 1));
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 38);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 10,
+            north: 10,
+            y_bot: 24,
+            south: 24,
+            jamb_north: false,
+            jamb_south: true,
+        },
+    );
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 38,
+            north: 38,
+            y_bot: 52,
+            south: 52,
+            jamb_north: true,
+            jamb_south: false,
+        },
+    );
     let dark = theme.office.room_wall_trim_dark;
     for y in [23, 24, 38, 39] {
         assert_eq!(
@@ -87,6 +77,46 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
 }
 
 #[test]
+fn h_door_jambs_sit_flush_on_both_cut_ends() {
+    let theme = crate::theme::theme_by_name("normal").expect("theme");
+    let floor = Rgb {
+        r: 150,
+        g: 110,
+        b: 72,
+    };
+    let mut buf = RgbBuffer::filled(60, 30, floor);
+    let y_face = 20;
+    for (x0, x1, jamb_west, jamb_east) in [(5, 19, false, true), (33, 47, true, false)] {
+        paint_whole_wall(
+            &mut buf,
+            theme,
+            crate::layout::WallPiece::Horizontal {
+                x0,
+                x1,
+                y_face,
+                jamb_west,
+                jamb_east,
+            },
+        );
+    }
+    let dark = theme.office.room_wall_trim_dark;
+    for x in [18, 19, 33, 34] {
+        assert_eq!(
+            buf.get(x, y_face),
+            dark,
+            "column {x} must be jamb (posts cover BOTH inclusive cut ends)"
+        );
+    }
+    for x in 20..33 {
+        assert_eq!(
+            buf.get(x, y_face),
+            floor,
+            "column {x} is the OPENING — untouched"
+        );
+    }
+}
+
+#[test]
 fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
     use crate::layout::TEST_DEFAULT_DESKS;
     let l = Layout::compute(215, 98, Some(TEST_DEFAULT_DESKS)).expect("fits");
@@ -96,17 +126,21 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
         .find(|d| d.start.y == d.end.y)
         .expect("the meeting-pantry 60% door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_h(&l, &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallH {
-                x0,
-                x1,
-                jamb_left,
-                jamb_right,
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Horizontal {
+                        x0,
+                        x1,
+                        jamb_west,
+                        jamb_east,
+                        ..
+                    },
                 ..
-            } => Some((x0, x1, jamb_left, jamb_right)),
+            } => Some((x0, x1, jamb_west, jamb_east)),
             _ => None,
         })
         .collect();
@@ -138,17 +172,25 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
         .find(|d| d.start.x == d.end.x)
         .expect("the meeting room's centered vertical door");
     let mut drawables = Vec::new();
-    enqueue_room_walls_v(&l, l.wall_band_h(), &mut drawables);
+    enqueue_room_walls(&l, &mut drawables);
+    // Each wall's southmost band: the one that sorts on the wall's own end.
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallV {
-                x,
-                y_top,
-                y_bot,
-                jamb_north,
-                jamb_south,
-            } if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
+            DrawableKind::RoomWall {
+                piece:
+                    crate::layout::WallPiece::Vertical {
+                        x,
+                        y_top,
+                        y_bot,
+                        jamb_north,
+                        jamb_south,
+                        ..
+                    },
+                ref rows,
+            } if x == dw.start.x && rows.end == y_bot + 1 => {
+                Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south))
+            }
             _ => None,
         })
         .collect();
@@ -196,12 +238,22 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     for x in 4..20 {
         buf.put(x, cap_row, character);
     }
-    paint_glass_wall_h(&mut buf, theme, 0, 47, y_top);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 47,
+            y_face: y_top,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let after = buf.get(8, cap_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -209,9 +261,8 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
 fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let (x_left, y_top, y_bot) = (10u16, 20u16, 40u16);
-    // Row `y_top` is a seam glint (bright specular), so probe the NEXT cap row
-    // at the soft east edge — the coolest column of the strip.
-    let probe_col = x_left + crate::layout::WALL_THICK_V - 1;
+    // The outer columns are frame (rim, post), so probe a pane cell.
+    let probe_col = x_left + 1;
     let probe_row = y_top + 1;
     let character = Rgb {
         r: 220,
@@ -228,12 +279,24 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
         },
     );
     buf.put(probe_col, probe_row, character);
-    paint_glass_wall_v(&mut buf, theme, x_left, y_top, y_bot);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: x_left,
+            y_top,
+            y_bot,
+            north: y_top,
+            south: y_bot,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let after = buf.get(probe_col, probe_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
-        after.r < character.r && after.b > character.b,
-        "frosted glass should cool the occluded pixel (red↓ blue↑): {after:?}"
+        after.r > after.g.max(after.b),
+        "the pane is see-through: the character still reads red: {after:?}"
     );
 }
 
@@ -2174,12 +2237,22 @@ fn paint_character_at_missing_anim_is_a_noop() {
 
 #[test]
 fn glass_wall_h_clamps_below_buffer_bottom() {
-    // y_top near the buffer bottom makes the cap+face span exceed the height,
-    // firing the per-row `y >= bh continue`.
+    // `y_face` at the buffer's last row runs the face past it, so the pen's
+    // clip drops the rows below.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bh = 16u16;
     let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_h(&mut buf, theme, 0, 39, bh - 1);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 39,
+            y_face: bh - 1,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let mut painted = false;
     for y in 0..bh {
         for x in 0..40u16 {
@@ -2193,12 +2266,24 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
 
 #[test]
 fn glass_wall_v_clamps_past_right_edge() {
-    // x_left == bw-1 → x_left+dx for dx>=1 exceeds the width, exercising the
-    // `x >= bw continue`. Must not panic.
+    // `x` at the last column runs the strip past the width, so the pen's clip
+    // drops the columns beyond. Must not panic.
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bw = 12u16;
     let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_v(&mut buf, theme, bw - 1, 5, 20);
+    paint_whole_wall(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: bw - 1,
+            y_top: 5,
+            north: 5,
+            y_bot: 20,
+            south: 20,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let mut painted = false;
     for y in 5..21u16 {
         if buf.get(bw - 1, y) != (Rgb { r: 0, g: 0, b: 0 }) {
@@ -3538,6 +3623,62 @@ fn no_two_agents_ever_occupy_the_same_exclusive_waypoint() {
         }
     }
     assert!(seat_visits > 100, "agents barely sat down ({seat_visits})");
+}
+
+/// The cutaway grounds a figure with a shadow unless `seated`, so a sofa
+/// sitter flagged standing lays a shadow slab across the sofa's front.
+#[test]
+fn a_placement_is_seated_exactly_when_its_figure_sits_on_furniture() {
+    use crate::layout::{WaypointKind, TEST_DEFAULT_DESKS};
+    use crate::pose::Pose;
+    use std::time::Duration;
+
+    let pack = crate::embedded_pack::test_default_pack();
+    let layout = Layout::compute_with_seed(192, 160, Some(TEST_DEFAULT_DESKS), 0).expect("fits");
+    let now0 = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+    let mut scene = SceneState::uniform(64);
+    for i in 0..TEST_DEFAULT_DESKS {
+        let id = pixtuoid_core::AgentId::from_transcript_path(&format!("/p/sit{i}.jsonl"));
+        let mut slot = make_slot(id, ActivityState::Idle);
+        let started = now0 - Duration::from_secs(5 + (i as u64 * 11) % 80);
+        slot.created_at = started;
+        slot.state_started_at = started;
+        slot.last_event_at = started;
+        slot.desk_index = GlobalDeskIndex(i);
+        scene.agents.insert(id, slot);
+    }
+    let coffee = HashMap::new();
+    let mut owned = OwnedSimStores::new();
+    let mut stores = owned.stores();
+    let (mut on_furniture, mut on_foot) = (0usize, 0usize);
+    for step in 0..3_600u64 {
+        let now = now0 + Duration::from_millis(250 * step);
+        let frame = sim_step(&mut stores, &scene, &layout, &pack, &coffee, 0, now);
+        for c in &frame.characters {
+            let id = frame.agents[c.agent_idx].agent_id;
+            let sits = match frame.poses.get(&id) {
+                Some(Some(Pose::SeatedIdle | Pose::SeatedThinking | Pose::SeatedTyping { .. })) => {
+                    true
+                }
+                Some(Some(Pose::AtWaypoint { kind, .. })) => matches!(
+                    kind,
+                    WaypointKind::Couch | WaypointKind::MeetingSofa | WaypointKind::MeetingChair
+                ),
+                _ => false,
+            };
+            if sits && c.seat_desk.is_none() {
+                on_furniture += 1;
+            } else if !sits {
+                on_foot += 1;
+            }
+            assert_eq!(c.seated, sits, "{:?} at step {step}", frame.poses.get(&id));
+        }
+    }
+    assert!(
+        on_furniture > 0,
+        "nobody sat on a couch, sofa or meeting chair"
+    );
+    assert!(on_foot > 0, "nobody stood or walked");
 }
 
 #[test]

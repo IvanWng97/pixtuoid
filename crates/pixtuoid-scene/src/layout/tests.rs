@@ -197,11 +197,14 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
         let h: Vec<_> = l
             .room_walls
             .iter()
-            .filter(|w| w.start.y == split_y && w.end.y == split_y)
+            .filter_map(|w| match *w {
+                WallSegment::Horizontal { y, x0, x1 } if y == split_y => Some((x0, x1)),
+                _ => None,
+            })
             .collect();
         assert_eq!(h.len(), 1, "seed {seed}: ONE solid shared wall, got {h:?}");
         assert_eq!(
-            (h[0].start.x, h[0].end.x),
+            h[0],
             (0, l.meeting_rooms[1].bounds.width),
             "seed {seed}: no inter-meeting door gap"
         );
@@ -211,21 +214,23 @@ fn dense_inter_meeting_wall_is_solid_with_a_corridor_door_each() {
             let mut v: Vec<_> = l
                 .room_walls
                 .iter()
-                .filter(|w| {
-                    w.start.x == vx
-                        && w.end.x == vx
-                        && w.start.y >= b.y
-                        && w.end.y <= b.y + b.height
+                .filter_map(|w| match *w {
+                    WallSegment::Vertical { x, y0, y1 }
+                        if x == vx && y0 >= b.y && y1 <= b.y + b.height =>
+                    {
+                        Some((y0, y1))
+                    }
+                    _ => None,
                 })
                 .collect();
-            v.sort_by_key(|w| w.start.y);
+            v.sort_unstable();
             assert_eq!(
                 v.len(),
                 2,
                 "seed {seed} room {id}: east wall split by its door"
             );
             assert!(
-                v[0].end.y < v[1].start.y,
+                v[0].1 < v[1].0,
                 "seed {seed} room {id}: the corridor door gap must be real"
             );
         }

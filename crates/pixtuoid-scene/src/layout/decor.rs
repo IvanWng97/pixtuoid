@@ -890,8 +890,7 @@ impl WallDecor {
         WallDecor::MeetingScreen,
     ];
 
-    /// Geometry kind in the unified [`Furniture`] table. Wall decor isn't
-    /// mask-stamped, so only `.visual` is read from the row.
+    /// Geometry kind in the unified [`Furniture`] table.
     pub const fn furniture(self) -> Furniture {
         match self {
             WallDecor::Whiteboard => Furniture::Whiteboard,
@@ -900,6 +899,12 @@ impl WallDecor {
             WallDecor::ExitSign => Furniture::ExitSign,
             WallDecor::MeetingScreen => Furniture::MeetingScreen,
         }
+    }
+
+    /// Whether it stands on the floor rather than hanging on the wall: it has a
+    /// footprint, which the mask stamps and a sealed lane can drop it for.
+    pub(crate) fn stands_on_floor(self) -> bool {
+        furniture_def(self.furniture()).footprint.is_some()
     }
 
     /// Pack-animation key for this decor's sprite. The blit lives in

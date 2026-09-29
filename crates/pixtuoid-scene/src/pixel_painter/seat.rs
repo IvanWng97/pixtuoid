@@ -279,7 +279,19 @@ pub(super) struct Seat {
 /// meeting chair) sorts. The classic painter keys a back-view sofa one row
 /// further south, over its sitter, and a front sofa on this row, where
 /// insertion order puts the sitter on top.
-pub(crate) const SEATED_Z_OFF: u16 = 2;
+const SEATED_Z_OFF: u16 = 2;
+
+/// The depth the sitters of a meeting sofa at `sofa` sort at: their seat's own
+/// [`z_key`](Seat::z_key). Both profiles key the sofa by it, so a front sofa,
+/// queued before its sitters, ties them and they sit on it.
+pub(crate) fn sofa_sitter_z_key(sofa: Point) -> u16 {
+    Seat::at_waypoint(
+        crate::layout::WaypointKind::MeetingSofa,
+        sofa,
+        crate::layout::Facing::South,
+    )
+    .z_key()
+}
 
 impl Seat {
     pub(super) fn at_waypoint(
@@ -309,7 +321,7 @@ impl Seat {
     /// feet-row z-key sorts a sitter through their own furniture. The meeting
     /// chair qualifies because its profile sprite shares the front `seated`
     /// sprite's bottom-row geometry.
-    fn seated_furniture(self) -> bool {
+    pub(super) fn seated_furniture(self) -> bool {
         use crate::layout::WaypointKind;
         matches!(
             self.kind,

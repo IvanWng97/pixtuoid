@@ -31,20 +31,20 @@ pub(crate) struct ArtRect {
 /// Colours already stepped `level` stops: a shade crosses a handful of tones
 /// and [`Rgb::ramp`] is an OKLab round trip, so each is stepped once, not once
 /// per pixel.
-struct Stepped {
+pub(crate) struct Stepped {
     level: i8,
     seen: Vec<(Rgb, Rgb)>,
 }
 
 impl Stepped {
-    fn new(level: i8) -> Self {
+    pub(crate) fn new(level: i8) -> Self {
         Self {
             level,
             seen: Vec::new(),
         }
     }
 
-    fn of(&mut self, c: Rgb) -> Rgb {
+    pub(crate) fn of(&mut self, c: Rgb) -> Rgb {
         if let Some(&(_, stepped)) = self.seen.iter().find(|(from, _)| *from == c) {
             return stepped;
         }
@@ -63,6 +63,12 @@ pub(crate) struct Pen {
 }
 
 impl Pen {
+    /// The classic painter's grid: one buffer pixel per logical unit.
+    pub(crate) const UNIT: Self = Self {
+        d: NonZeroU16::MIN,
+        k: NonZeroU16::MIN,
+    };
+
     /// The pen for art authored at density `d`, painted at `scale`; `None` when
     /// `d` does not divide it, since an art pixel would then straddle buffer
     /// pixels.
@@ -156,6 +162,32 @@ impl Pen {
             for x in x0..x1 {
                 let c = stepped.of(buf.get(x, y));
                 buf.put(x, y, c);
+            }
+        }
+    }
+
+    /// Recolour each art pixel of `r` from what lies there, clipped to the
+    /// buffer: `f` gets the pixel's offset in `r` and its colour, and what it
+    /// returns covers the whole art pixel.
+    pub(crate) fn recolour(
+        self,
+        buf: &mut RgbBuffer,
+        r: ArtRect,
+        mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
+    ) {
+        for dy in 0..r.h.0 {
+            for dx in 0..r.w.0 {
+                let at = ArtRect {
+                    x: ArtPx(r.x.0 + dx),
+                    y: ArtPx(r.y.0 + dy),
+                    w: ArtPx(1),
+                    h: ArtPx(1),
+                };
+                let (x, y) = (self.buffer(at.x), self.buffer(at.y));
+                if x < buf.width() && y < buf.height() {
+                    let c = f(dx, dy, buf.get(x, y));
+                    self.fill(buf, at, c);
+                }
             }
         }
     }
@@ -394,6 +426,21 @@ mod tests {
         assert_eq!(buf.get(4, 5), line, "a row");
         assert_eq!(buf.get(5, 3), line, "a column");
         assert_eq!(buf.get(3, 3), BG, "inside a cell");
+    }
+
+    #[test]
+    fn a_recolour_covers_whole_art_pixels_from_their_offset() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        let r = ArtRect {
+            x: ArtPx(1),
+            y: ArtPx(0),
+            w: ArtPx(4),
+            h: ArtPx(1),
+        };
+        pen(2, 1).recolour(&mut buf, r, |dx, _, c| if dx == 1 { LIGHT } else { c });
+        assert_eq!(buf.get(4, 1), LIGHT, "offset 1 is the art pixel at x 2");
+        assert_eq!(buf.get(5, 0), LIGHT, "all of it");
+        assert_eq!(buf.get(2, 0), BG, "offset 0 kept its colour");
     }
 
     #[test]

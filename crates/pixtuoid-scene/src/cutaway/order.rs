@@ -21,7 +21,7 @@
 //!
 //! ## The one thing a graph cannot fix
 //!
-//! A LONG object has no meaningful base row — a room's west wall runs the whole
+//! A LONG object has no meaningful base row — a room's east wall runs the whole
 //! height of the room, so its south edge would sort it in front of everything
 //! inside. No predicate rescues that; the object has to be SPLIT into pieces
 //! each of which does have a base row (the canonical "split a block to prevent

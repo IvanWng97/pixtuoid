@@ -80,6 +80,9 @@ pub struct CharacterPlacement {
     /// anyone not sitting at one (walking, at a waypoint, standing). Carried
     /// because `anchor` is already PROJECTED and cannot yield it back.
     pub seat_desk: Option<Point>,
+    /// Whether this figure sits on furniture — a desk's chair, a couch, a sofa
+    /// or a meeting chair — which grounds it in place of a shadow.
+    pub seated: bool,
 }
 
 /// The immutable outcome of one `sim_step`: the world advanced, observed.
@@ -292,6 +295,7 @@ fn resolve_characters(
                 waiting_bubble: is_waiting,
                 // The one arm that IS seated at a desk — see the field's doc.
                 seat_desk: Some(desk),
+                seated: true,
                 walking_dust_frame: None,
             }
         };
@@ -360,6 +364,7 @@ fn resolve_characters(
                         sleep_z_seed: None,
                         waiting_bubble: false,
                         seat_desk: None,
+                        seated: seat.seated_furniture(),
                         walking_dust_frame: None,
                     });
                 }
@@ -378,6 +383,7 @@ fn resolve_characters(
                     sleep_z_seed: None,
                     waiting_bubble: false,
                     seat_desk: None,
+                    seated: false,
                     walking_dust_frame: None,
                 });
             }
@@ -436,6 +442,7 @@ fn resolve_characters(
                     sleep_z_seed: None,
                     waiting_bubble: false,
                     seat_desk: None,
+                    seated: false,
                     walking_dust_frame: Some(frame),
                 });
             }

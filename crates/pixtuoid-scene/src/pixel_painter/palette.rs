@@ -506,7 +506,7 @@ impl RgbLut {
 }
 
 /// Composite `tint` over the existing buffer pixel at `(x, y)` by `t` — the
-/// frosted-glass / haze / overlay primitive.
+/// haze / overlay primitive.
 pub(super) fn blend_over(buf: &RgbBuffer, x: u16, y: u16, tint: Rgb, t: f32) -> Rgb {
     blend_rgb(buf.get(x, y), tint, t)
 }
