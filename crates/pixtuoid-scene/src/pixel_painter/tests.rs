@@ -1599,6 +1599,7 @@ fn every_hover_size_is_its_painted_sprite_size() {
         |f: Furniture, sprite: &'static str| (format!("{f:?}"), furniture_def(f).visual, sprite);
     let mut pieces: Vec<(String, Size, &str)> = vec![
         def(Furniture::MeetingSofaBody, "meeting_sofa"),
+        def(Furniture::MeetingSofaBody, "meeting_sofa_north"),
         def(Furniture::SnackShelf, "snack_shelf"),
         def(Furniture::FloorLamp, "floor_lamp"),
         (

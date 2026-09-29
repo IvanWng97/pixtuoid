@@ -414,8 +414,12 @@ impl Pack {
 }
 
 /// Furniture drawn to match another piece (`desk_north` is `desk` with its
-/// monitor raised), as `(derived, source)`.
-const DERIVED_PIECES: &[(&str, &str)] = &[("desk_north", "desk")];
+/// monitor raised, `meeting_sofa_north` is `meeting_sofa` from behind), as
+/// `(derived, source)`.
+const DERIVED_PIECES: &[(&str, &str)] = &[
+    ("desk_north", "desk"),
+    ("meeting_sofa_north", "meeting_sofa"),
+];
 
 /// The piece `piece` is drawn to match, if it is a derived one.
 fn derived_source(piece: &str) -> Option<&'static str> {
@@ -1496,7 +1500,9 @@ mod validation_floor_tests {
     /// Pins [`StandIn`] against [`Pack::merge_from`]'s own rule.
     #[test]
     fn a_missing_optional_piece_names_what_draws_in_its_place() {
-        let report = validate(&format!("[animations.desk]\n{ONE}"));
+        let report = validate(&format!(
+            "[animations.desk]\n{ONE}[animations.meeting_sofa]\n{ONE}"
+        ));
         let stand_in = |name: &str| {
             report
                 .missing_optional
@@ -1506,15 +1512,24 @@ mod validation_floor_tests {
                 .stand_in
         };
         assert_eq!(stand_in("desk_north"), StandIn::OwnPiece("desk"));
+        assert_eq!(
+            stand_in("meeting_sofa_north"),
+            StandIn::OwnPiece("meeting_sofa")
+        );
         assert_eq!(stand_in("plant"), StandIn::DefaultPack);
         assert_eq!(stand_in("walking_coffee"), StandIn::OwnPose);
 
-        let mut merged = pack_with(&format!("[animations.desk]\n{ONE}"));
+        let mut merged = pack_with(&format!(
+            "[animations.desk]\n{ONE}[animations.meeting_sofa]\n{ONE}"
+        ));
         merged.merge_from(&pack_with(&format!(
-            "[animations.desk_north]\n{ONE}[animations.plant]\n{ONE}"
+            "[animations.desk_north]\n{ONE}[animations.meeting_sofa_north]\n{ONE}\
+             [animations.plant]\n{ONE}"
         )));
         assert!(
-            merged.animation("desk_north").is_none() && merged.animation("plant").is_some(),
+            merged.animation("desk_north").is_none()
+                && merged.animation("meeting_sofa_north").is_none()
+                && merged.animation("plant").is_some(),
             "the merge must agree with the classification"
         );
     }
