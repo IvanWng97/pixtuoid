@@ -21,10 +21,30 @@ fn v_door_jambs_sit_flush_on_both_cut_ends() {
         b: 72,
     };
     let mut buf = RgbBuffer::filled(20, 60, floor);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 10, 24);
-    wall::paint_glass_wall_v(&mut buf, theme, 5, 38, 52);
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 24 - (wall::DOOR_JAMB_PX - 1));
-    wall::paint_door_jamb_v(&mut buf, theme, 5, 38);
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 10,
+            y_bot: 24,
+            south: 24,
+            jamb_north: false,
+            jamb_south: true,
+        },
+    );
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: 5,
+            y_top: 38,
+            y_bot: 52,
+            south: 52,
+            jamb_north: true,
+            jamb_south: false,
+        },
+    );
     let dark = theme.office.room_wall_trim_dark;
     for y in [23, 24, 38, 39] {
         assert_eq!(
@@ -52,13 +72,13 @@ fn h_wall_jamb_flags_join_on_the_doorway_cut_ends() {
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallH {
+            DrawableKind::RoomWall(crate::layout::WallPiece::Horizontal {
                 x0,
                 x1,
-                jamb_left,
-                jamb_right,
+                jamb_west,
+                jamb_east,
                 ..
-            } => Some((x0, x1, jamb_left, jamb_right)),
+            }) => Some((x0, x1, jamb_west, jamb_east)),
             _ => None,
         })
         .collect();
@@ -94,13 +114,14 @@ fn v_wall_jamb_flags_and_south_anchor_on_the_doorway_cut_ends() {
     let walls: Vec<_> = drawables
         .iter()
         .filter_map(|d| match d.kind {
-            DrawableKind::RoomWallV {
+            DrawableKind::RoomWall(crate::layout::WallPiece::Vertical {
                 x,
                 y_top,
                 y_bot,
                 jamb_north,
                 jamb_south,
-            } if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
+                ..
+            }) if x == dw.start.x => Some((d.anchor_y, y_top, y_bot, jamb_north, jamb_south)),
             _ => None,
         })
         .collect();
@@ -148,7 +169,17 @@ fn glass_wall_h_back_cap_composites_over_a_character_behind_it() {
     for x in 4..20 {
         buf.put(x, cap_row, character);
     }
-    paint_glass_wall_h(&mut buf, theme, 0, 47, y_top);
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 47,
+            y_face: y_top,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let after = buf.get(8, cap_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
@@ -180,7 +211,18 @@ fn glass_wall_v_composites_over_a_character_behind_its_north_cap() {
         },
     );
     buf.put(probe_col, probe_row, character);
-    paint_glass_wall_v(&mut buf, theme, x_left, y_top, y_bot);
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: x_left,
+            y_top,
+            y_bot,
+            south: y_bot,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let after = buf.get(probe_col, probe_row);
     assert_ne!(after, character, "glass must composite over the character");
     assert!(
@@ -2131,7 +2173,17 @@ fn glass_wall_h_clamps_below_buffer_bottom() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bh = 16u16;
     let mut buf = RgbBuffer::filled(40, bh, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_h(&mut buf, theme, 0, 39, bh - 1);
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Horizontal {
+            x0: 0,
+            x1: 39,
+            y_face: bh - 1,
+            jamb_west: false,
+            jamb_east: false,
+        },
+    );
     let mut painted = false;
     for y in 0..bh {
         for x in 0..40u16 {
@@ -2150,7 +2202,18 @@ fn glass_wall_v_clamps_past_right_edge() {
     let theme = crate::theme::theme_by_name("normal").expect("theme");
     let bw = 12u16;
     let mut buf = RgbBuffer::filled(bw, 40, Rgb { r: 0, g: 0, b: 0 });
-    paint_glass_wall_v(&mut buf, theme, bw - 1, 5, 20);
+    paint_partition(
+        &mut buf,
+        theme,
+        crate::layout::WallPiece::Vertical {
+            x: bw - 1,
+            y_top: 5,
+            y_bot: 20,
+            south: 20,
+            jamb_north: false,
+            jamb_south: false,
+        },
+    );
     let mut painted = false;
     for y in 5..21u16 {
         if buf.get(bw - 1, y) != (Rgb { r: 0, g: 0, b: 0 }) {

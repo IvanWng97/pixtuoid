@@ -182,28 +182,10 @@ pub(super) enum DrawableKind<'a> {
         /// Gateway up but model-broken → render the lobster sickly red.
         degraded: bool,
     },
-    /// Horizontal (E-W) frosted-glass room divider, y-sorted at its south
-    /// (front) edge so it composites over a character standing behind it.
-    RoomWallH {
-        x0: u16,
-        x1: u16,
-        y_top: u16,
-        /// This end abuts a doorway ⇒ paint its dark jamb.
-        jamb_left: bool,
-        jamb_right: bool,
-    },
-    /// Vertical (N-S, edge-on) frosted-glass room divider. `y_top`/`y_bot` are
-    /// the stitched PAINT extent (`stitch_vertical_wall`); the z-key is the raw
-    /// south end so a corner-extended `y_bot` doesn't flip H-over-V.
-    RoomWallV {
-        x: u16,
-        y_top: u16,
-        y_bot: u16,
-        /// This segment's north/south end abuts a doorway ⇒ paint its dark jamb
-        /// on that cut end.
-        jamb_north: bool,
-        jamb_south: bool,
-    },
+    /// A frosted-glass room wall, y-sorted on its
+    /// [`sort_row`](crate::layout::WallPiece::sort_row) so it composites over a
+    /// character standing behind it.
+    RoomWall(crate::layout::WallPiece),
     /// Meeting-room coat rack, y-sorted at its base row (the bottom of its
     /// `MeetingRoom::coat_rack_rect`). `pos` is the pole top.
     CoatRack {
@@ -509,48 +491,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 paint_mascot_bubbles(buf, *pos, frame.height(), *run_count, now);
             }
         }
-        DrawableKind::RoomWallH {
-            x0,
-            x1,
-            y_top,
-            jamb_left,
-            jamb_right,
-        } => {
-            super::paint_glass_wall_h(buf, theme, *x0, *x1, *y_top);
-            // Jambs ride the y-sorted glass — the background pass would be
-            // overpainted by it.
-            if *jamb_left {
-                super::paint_door_jamb_h(buf, theme, *x0, *y_top);
-            }
-            if *jamb_right {
-                super::paint_door_jamb_h(
-                    buf,
-                    theme,
-                    x1.saturating_sub(super::DOOR_JAMB_PX - 1),
-                    *y_top,
-                );
-            }
-        }
-        DrawableKind::RoomWallV {
-            x,
-            y_top,
-            y_bot,
-            jamb_north,
-            jamb_south,
-        } => {
-            super::paint_glass_wall_v(buf, theme, *x, *y_top, *y_bot);
-            if *jamb_north {
-                super::paint_door_jamb_v(buf, theme, *x, *y_top);
-            }
-            if *jamb_south {
-                super::paint_door_jamb_v(
-                    buf,
-                    theme,
-                    *x,
-                    y_bot.saturating_sub(super::DOOR_JAMB_PX - 1),
-                );
-            }
-        }
+        DrawableKind::RoomWall(piece) => super::paint_partition(buf, theme, *piece),
         DrawableKind::FishTank { pos } => {
             paint_fish_tank(buf, *pos, now, theme);
         }

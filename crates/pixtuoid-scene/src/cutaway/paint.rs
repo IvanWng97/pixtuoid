@@ -246,12 +246,7 @@ fn fingerprint(kind: &PieceKind) -> u64 {
     let mut h = std::hash::DefaultHasher::new();
     std::mem::discriminant(kind).hash(&mut h);
     match *kind {
-        PieceKind::WallSeg {
-            at,
-            w,
-            h: height,
-            jambs,
-        } => (at, w, height, jambs).hash(&mut h),
+        PieceKind::WallSeg { piece, rows } => (piece, rows).hash(&mut h),
         PieceKind::Desk { at, art, screen } => (at, art, screen).hash(&mut h),
         PieceKind::Chair { at } => at.hash(&mut h),
         PieceKind::Prop {
@@ -334,8 +329,8 @@ fn paint_piece(
         }
         PieceKind::Table { at } => paint_table(at, theme, scale, buf),
         PieceKind::Appliance { at, kind } => paint_appliance(at, kind, theme, scale, buf),
-        PieceKind::WallSeg { at, w, h, jambs } => {
-            paint_wall_seg(at, (w, h), jambs, theme, scale, buf)
+        PieceKind::WallSeg { piece, rows } => {
+            paint_wall_seg(piece, rows, theme, Pen::for_pack(scale, pack), buf);
         }
     }
 }
@@ -818,92 +813,59 @@ const WALL_SEG_H: u16 = 4;
 /// south of its wall's own sort row, where a stitch into a crossing wall would
 /// carry it over that wall.
 fn wall_segments(layout: &Layout, order: &mut Vec<(Span, PieceKind)>) {
-    use crate::layout::WallPiece;
-    let mut push = |x: u16, y: u16, w: u16, h: u16, depth: u16, jambs: (bool, bool)| {
-        order.push((
-            Span::new(x, y, w, h, 0).with_depth(depth),
-            PieceKind::WallSeg {
-                at: crate::layout::Point { x, y },
-                w,
-                h,
-                jambs,
-            },
-        ));
-    };
     for piece in crate::layout::wall_pieces(&layout.room_walls, &layout.doorways, layout.top_margin)
     {
         let (at, size) = piece.visual();
-        match piece {
-            WallPiece::Horizontal {
-                jamb_west,
-                jamb_east,
-                ..
-            } => push(
-                at.x,
-                at.y,
-                size.w,
-                size.h,
-                piece.sort_row(),
-                (jamb_west, jamb_east),
-            ),
-            WallPiece::Vertical {
-                jamb_north,
-                jamb_south,
-                ..
-            } => {
-                let end = at.y + size.h;
-                let mut y = at.y;
-                while y < end {
-                    let h = WALL_SEG_H.min(end - y);
-                    let (first, last) = (y == at.y, y + h == end);
-                    let depth = (y + h - 1).min(piece.sort_row());
-                    push(
-                        at.x,
-                        y,
-                        size.w,
-                        h,
-                        depth,
-                        (first && jamb_north, last && jamb_south),
-                    );
-                    y += h;
-                }
-            }
+        let end = at.y + size.h;
+        let seg_h = match piece {
+            crate::layout::WallPiece::Horizontal { .. } => size.h,
+            crate::layout::WallPiece::Vertical { .. } => WALL_SEG_H,
+        };
+        let mut y = at.y;
+        while y < end {
+            let h = seg_h.min(end - y);
+            let depth = (y + h - 1).min(piece.sort_row());
+            order.push((
+                Span::new(at.x, y, size.w, h, 0).with_depth(depth),
+                PieceKind::WallSeg {
+                    piece,
+                    rows: (y, y + h),
+                },
+            ));
+            y += h;
         }
     }
 }
 
-/// How far a door's jamb runs along its wall, in logical units: a post, not a
-/// panel.
-const DOOR_JAMB: u16 = 1;
-
-/// One wall segment, and the jamb posts at the ends a doorway frames. A
-/// horizontal run gets the top-lit [`slab`] the procedural solids here carry; a
-/// vertical one is seen edge-on, so it is a flat fill — an edge tone on a thin
-/// strip would read as a highlight, not a material.
+/// The `rows` of one room wall: its glass over what is already painted behind
+/// it, then the jamb posts where a doorway cuts it.
 fn paint_wall_seg(
-    at: crate::layout::Point,
-    (w, h): (u16, u16),
-    (jamb_start, jamb_end): (bool, bool),
+    piece: crate::layout::WallPiece,
+    (y0, y1): (u16, u16),
     theme: &Theme,
-    scale: RenderScale,
+    pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let glass = Ramp::from_base(theme.office.room_wall_trim_light);
-    let (x, y) = (scale.to_buffer(at.x), scale.to_buffer(at.y));
-    let (bw, bh) = (scale.to_buffer(w), scale.to_buffer(h));
-    if w > h {
-        slab(buf, x, y, bw, bh, &glass, scale);
-    } else {
-        fill(buf, x, y, bw, bh, glass.base);
-    }
-    let post = scale.to_buffer(DOOR_JAMB);
-    let jamb = theme.office.room_wall_trim_dark;
-    let horizontal = w > h;
-    for (on, far) in [(jamb_start, false), (jamb_end, true)] {
-        match (on, horizontal) {
-            (false, _) => {}
-            (true, true) => fill(buf, if far { x + bw - post } else { x }, y, post, bh, jamb),
-            (true, false) => fill(buf, x, if far { y + bh - post } else { y }, bw, post, jamb),
+    let (at, size) = piece.visual();
+    let glass = crate::glass::Glass::of(theme, piece, pen.art(1).0);
+    let seg = ArtRect {
+        x: pen.art(at.x),
+        y: pen.art(y0),
+        w: pen.art(size.w),
+        h: pen.art(y1 - y0),
+    };
+    let top = pen.art(y0 - at.y).0;
+    pen.recolour(buf, seg, |dx, dy, under| glass.over(under, dx, top + dy));
+    for (post, s) in piece.jambs() {
+        let (from, to) = (post.y.max(y0), (post.y + s.h).min(y1));
+        if from < to {
+            let r = ArtRect {
+                x: pen.art(post.x),
+                y: pen.art(from),
+                w: pen.art(s.w),
+                h: pen.art(to - from),
+            };
+            pen.fill(buf, r, theme.office.room_wall_trim_dark);
         }
     }
 }
@@ -920,13 +882,11 @@ fn paint_wall_seg(
 pub(crate) enum PieceKind {
     /// One segment of a room's wall run.
     WallSeg {
-        /// The logical position, which `paint_wall_seg` scales; walls are pure
-        /// geometry with no sprite to look up.
-        at: crate::layout::Point,
-        w: u16,
-        h: u16,
-        /// Whether a doorway frames its west/north end, and its east/south end.
-        jambs: (bool, bool),
+        piece: crate::layout::WallPiece,
+        /// The logical rows of `piece` this segment paints, `end` exclusive: a
+        /// long run sorts in segments, and each paints its own rows of the one
+        /// wall, so the glass's rhythm runs on across them.
+        rows: (u16, u16),
     },
     Desk {
         at: crate::layout::Point,
@@ -3460,17 +3420,16 @@ S B B B B B B S
                 }
                 checked += 1;
             }
-            let jambs = order
+            let jambs: std::collections::HashSet<_> = order
                 .iter()
                 .filter_map(|(_, k)| match k {
-                    PieceKind::WallSeg { jambs, .. } => {
-                        Some(u32::from(jambs.0) + u32::from(jambs.1))
-                    }
+                    PieceKind::WallSeg { piece, .. } => Some(piece.jambs()),
                     _ => None,
                 })
-                .sum::<u32>();
+                .flatten()
+                .collect();
             assert_eq!(
-                jambs as usize,
+                jambs.len(),
                 2 * layout.doorways.len(),
                 "two jambs a doorway"
             );

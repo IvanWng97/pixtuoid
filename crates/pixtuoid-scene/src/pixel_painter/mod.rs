@@ -145,6 +145,7 @@ pub(crate) use background::BaseFillCache;
 pub(crate) use dense::densest_frame;
 #[cfg(test)]
 pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
+pub(crate) use palette::blend_rgb;
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
 pub(crate) use sim::{sim_step, SimStores};
@@ -212,10 +213,7 @@ use background::{
 use drawable::{paint_drawable, Drawable, DrawableKind};
 use palette::{agent_overrides, outfit_seed_for};
 use seat::paint_character_at;
-use wall::{
-    enqueue_room_walls_h, enqueue_room_walls_v, paint_door_jamb_h, paint_door_jamb_v,
-    paint_glass_wall_h, paint_glass_wall_v, DOOR_JAMB_PX,
-};
+use wall::{enqueue_room_walls_h, enqueue_room_walls_v, paint_partition};
 
 /// The weather names accepted by [`force_weather`], canonical order.
 pub fn weather_names() -> Vec<&'static str> {

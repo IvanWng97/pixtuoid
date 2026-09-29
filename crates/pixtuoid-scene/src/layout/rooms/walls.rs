@@ -21,8 +21,8 @@ use crate::layout::{
 };
 
 /// Walkable footprint (and render face height) of a horizontal (E-W) interior
-/// wall, in px. The renderer derives `WALL_THICK_H_PX` from this so the glass
-/// face and the blocked ground can never drift apart.
+/// wall, in px. [`WallPiece::visual`] draws the glass face from it, so the face
+/// and the blocked ground can never drift apart.
 pub const WALL_THICK_H: u16 = 6;
 /// Thickness of a vertical (N-S) interior wall, in px — its blocked footprint
 /// width AND its drawn width. They are EQUAL by design: seen edge-on, the width
@@ -36,7 +36,7 @@ pub const WALL_THICK_V: u16 = 4;
 /// North-end walk-behind overhang for a FREE vertical terminus (a segment whose
 /// north end is NOT on a joint — e.g. the run below a door): the top rows of the
 /// glass are visual-only, so a character parked behind the wall's top cap is
-/// occluded by the y-sorted `RoomWallV`. Sized to the E-W wall's cap: a 2px cap
+/// occluded by the y-sorted glass. Sized to the E-W wall's cap: a 2px cap
 /// only grazed a walker's feet, so the walk-behind read as clipping, not depth.
 pub(crate) const WALL_TOP_OVERHANG_PX: u16 = WALL_THICK_H;
 
@@ -61,6 +61,10 @@ pub(crate) const WALL_V: WallDef = WallDef {
     thickness: WALL_THICK_V,
     cap: WALL_TOP_OVERHANG_PX,
 };
+
+/// How far a door's jamb runs along its wall: a solid post that reads as one
+/// without eating into the opening.
+pub(crate) const DOOR_JAMB: u16 = 2;
 
 /// How far BELOW a horizontal wall's row a vertical segment's north end may sit
 /// and still bridge UP to it — slack absorbing the off-by-one in the
@@ -203,7 +207,7 @@ pub(crate) fn wall_segment_rect(
 /// [`Layout::doorways`](crate::layout::Layout::doorways), so no painter
 /// re-derives a room's perimeter, closes a doorway, or stands a wall the
 /// layout never cut.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum WallPiece {
     /// An E-W wall seen face-on: its face rows start at `y_face`, its
     /// visual-only cap rises [`WALL_H`]'s `cap` rows above them, and it sorts
@@ -255,6 +259,51 @@ impl WallPiece {
                 },
             ),
         }
+    }
+
+    /// The solid posts where a doorway cuts its ends. Each covers its end's own
+    /// row or column, since the glass is endpoint-inclusive and a post short of
+    /// it would leave a sliver of glass between post and opening.
+    pub(crate) fn jambs(self) -> impl Iterator<Item = (Point, Size)> {
+        let (at, size) = self.visual();
+        let (start, end, far, post) = match self {
+            WallPiece::Horizontal {
+                jamb_west,
+                jamb_east,
+                ..
+            } => (
+                jamb_west,
+                jamb_east,
+                Point {
+                    x: (at.x + size.w).saturating_sub(DOOR_JAMB),
+                    y: at.y,
+                },
+                Size {
+                    w: DOOR_JAMB,
+                    h: size.h,
+                },
+            ),
+            WallPiece::Vertical {
+                jamb_north,
+                jamb_south,
+                ..
+            } => (
+                jamb_north,
+                jamb_south,
+                Point {
+                    x: at.x,
+                    y: (at.y + size.h).saturating_sub(DOOR_JAMB),
+                },
+                Size {
+                    w: size.w,
+                    h: DOOR_JAMB,
+                },
+            ),
+        };
+        start
+            .then_some((at, post))
+            .into_iter()
+            .chain(end.then_some((far, post)))
     }
 
     /// The row this wall sorts on among the office's pieces.

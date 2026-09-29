@@ -160,6 +160,32 @@ impl Pen {
         }
     }
 
+    /// Recolour each art pixel of `r` from what lies there, clipped to the
+    /// buffer: `f` gets the pixel's offset in `r` and its colour, and what it
+    /// returns covers the whole art pixel.
+    pub(crate) fn recolour(
+        self,
+        buf: &mut RgbBuffer,
+        r: ArtRect,
+        mut f: impl FnMut(u16, u16, Rgb) -> Rgb,
+    ) {
+        for dy in 0..r.h.0 {
+            for dx in 0..r.w.0 {
+                let at = ArtRect {
+                    x: ArtPx(r.x.0 + dx),
+                    y: ArtPx(r.y.0 + dy),
+                    w: ArtPx(1),
+                    h: ArtPx(1),
+                };
+                let (x, y) = (self.buffer(at.x), self.buffer(at.y));
+                if x < buf.width() && y < buf.height() {
+                    let c = f(dx, dy, buf.get(x, y));
+                    self.fill(buf, at, c);
+                }
+            }
+        }
+    }
+
     /// Dither a full-width band from `light` at its top to `dark` at its
     /// bottom, `y1` exclusive; a band with no height paints nothing.
     ///
@@ -394,6 +420,21 @@ mod tests {
         assert_eq!(buf.get(4, 5), line, "a row");
         assert_eq!(buf.get(5, 3), line, "a column");
         assert_eq!(buf.get(3, 3), BG, "inside a cell");
+    }
+
+    #[test]
+    fn a_recolour_covers_whole_art_pixels_from_their_offset() {
+        let mut buf = RgbBuffer::filled(8, 4, BG);
+        let r = ArtRect {
+            x: ArtPx(1),
+            y: ArtPx(0),
+            w: ArtPx(4),
+            h: ArtPx(1),
+        };
+        pen(2, 1).recolour(&mut buf, r, |dx, _, c| if dx == 1 { LIGHT } else { c });
+        assert_eq!(buf.get(4, 1), LIGHT, "offset 1 is the art pixel at x 2");
+        assert_eq!(buf.get(5, 0), LIGHT, "all of it");
+        assert_eq!(buf.get(2, 0), BG, "offset 0 kept its colour");
     }
 
     #[test]

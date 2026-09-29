@@ -459,7 +459,7 @@ pub(super) const WHITE: Rgb = Rgb {
 pub(super) const BLACK: Rgb = Rgb { r: 0, g: 0, b: 0 };
 
 /// [`blend`] on each channel of an `Rgb` triple, with one shared `t`.
-pub(super) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
+pub(crate) fn blend_rgb(a: Rgb, b: Rgb, t: f32) -> Rgb {
     Rgb {
         r: blend(a.r, b.r, t),
         g: blend(a.g, b.g, t),
