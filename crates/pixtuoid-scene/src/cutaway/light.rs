@@ -1,10 +1,13 @@
 //! The cutaway's time of day: the room darkens with the sky, and its own lights
-//! ([`crate::lighting`]) lift what they fall on, both in whole [`Rgb::ramp`]
-//! steps on the art grid. A light's edge is an ordered dither between two steps
-//! and its colour a tint at fixed stops, so the room stays a palette: nothing
-//! blends continuously, the rule the rest of the cutaway is drawn by.
-
-use std::collections::HashMap;
+//! ([`crate::lighting`]) lift what they fall on, in whole [`Rgb::ramp`] steps
+//! on the art grid. A light's bands are solid, dithered into the next only at
+//! their seam, and its colour is a tint at fixed stops, so the room stays a
+//! palette: nothing blends continuously, the rule the rest of the cutaway is
+//! drawn by.
+//!
+//! The pieces are painted as by day; one pass ([`net_pass`]) then takes each
+//! pixel `lift − ambient` steps along its ramp in a single step, so a pixel is
+//! never darkened and relit (the ramp does not invert) nor darkened twice.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
 
@@ -21,15 +24,20 @@ const AMBIENT_MAX_STEPS: u8 = 4;
 /// so the night room reads as lit pools in the dark, not as day with stains.
 const LIFT_STOPS_PER_LEVEL: f32 = 7.0;
 
-/// The most a light lifts a room no darker than this: one step shows a lamp is
-/// on at noon, and a second would bleach the floor under it. A darker room it
-/// lifts at most back to its daylight tone, never past.
+/// The most a light lifts the daylit room: one step shows a lamp is on at noon,
+/// and a second would bleach the floor under it.
 const DAYLIGHT_LIFT: u8 = 1;
 
-/// The share of a step, at its top, over which a light dithers into the next:
-/// below it the band is solid, the pixel-art way of lighting, and a whole band
-/// of dither reads as grain.
+/// The share at the top of each step over which a light dithers into the next;
+/// below it the band is solid, since a whole band of dither reads as grain.
 const SEAM: f32 = 0.3;
+
+/// The share of the way to its light's colour a pixel is tinted per step of
+/// lift: the brightest cells take the most colour, as they would.
+const TINT_PER_STEP: f32 = 0.08;
+/// The deepest tint, in steps of [`TINT_PER_STEP`]: past it a lit pixel reads
+/// as painted in the light's colour rather than lit by it.
+const TINT_MAX_STEPS: u8 = 3;
 
 /// The whole steps a light `stops` strong lifts the art pixel at `(x, y)`:
 /// solid through each band, dithered into the next only across its [`SEAM`].
@@ -38,13 +46,6 @@ fn step_at(stops: f32, x: ArtPx, y: ArtPx) -> u8 {
     let into_seam = (stops - whole - (1.0 - SEAM)) / SEAM;
     whole as u8 + u8::from(into_seam > 0.0 && dithered(x, y, into_seam))
 }
-
-/// The share of the way to its light's colour a pixel is tinted per step of
-/// lift: the brightest cells take the most colour, as they would.
-const TINT_PER_STEP: f32 = 0.05;
-/// The deepest tint, in steps of [`TINT_PER_STEP`]: past it a lit pixel reads
-/// as painted in the light's colour rather than lit by it.
-const TINT_MAX_STEPS: u8 = 3;
 
 /// How dark the room is: the sky's darkness in whole steps, so a frame's tone
 /// changes a handful of times a day rather than every frame.
@@ -64,44 +65,73 @@ impl Ambient {
         f32::from(self.0) / f32::from(AMBIENT_MAX_STEPS)
     }
 
-    fn steps(self) -> u8 {
-        self.0
-    }
-
-    /// `c` in a room this dark.
+    /// `c` in a room this dark, unlit.
     pub(crate) fn on(self, c: Rgb) -> Rgb {
         c.ramp(-(self.0 as i8))
     }
+
+    /// The most a light may lift a pixel in a room this dark: back to its
+    /// daylight tone and never past it, or [`DAYLIGHT_LIFT`] by day.
+    fn ceiling(self) -> u8 {
+        if self.0 == 0 {
+            DAYLIGHT_LIFT
+        } else {
+            self.0
+        }
+    }
 }
 
-/// Step every pixel of `buf` down by `ambient`, or only those that differ from
-/// `since`: what a pass painted since it was taken.
-pub(crate) fn wash(buf: &mut RgbBuffer, since: Option<&RgbBuffer>, ambient: Ambient) {
-    if ambient.steps() == 0 {
-        return;
+/// How a painted pixel takes the room's light.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Glow {
+    /// Darkened with the room, lifted by its lights: most of it.
+    Lit,
+    /// Its own light, as painted: the sky in a window, a screen that glows, a
+    /// bulb.
+    Emissive,
+    /// Darkened with the room but never lit: a dark screen's glass, which a
+    /// lamp would show only as a reflection.
+    Shaded,
+}
+
+/// Each buffer pixel's [`Glow`], set by the last piece that painted it, so a
+/// piece in front of a screen takes the room's light over it.
+pub(crate) struct Emission {
+    w: u16,
+    glow: Vec<Glow>,
+}
+
+impl Emission {
+    /// A `w`×`h` buffer's, every pixel [`Glow::Lit`].
+    pub(crate) fn new(w: u16, h: u16) -> Self {
+        Self {
+            w,
+            glow: vec![Glow::Lit; usize::from(w) * usize::from(h)],
+        }
     }
-    let mut memo: HashMap<Rgb, Rgb> = HashMap::new();
-    let mut step = |c: Rgb| *memo.entry(c).or_insert_with(|| ambient.on(c));
-    match since {
-        None => {
-            for p in buf.as_mut_slice() {
-                *p = step(*p);
+
+    pub(crate) fn set(&mut self, x: u16, y: u16, glow: Glow) {
+        if x < self.w {
+            if let Some(g) = self
+                .glow
+                .get_mut(usize::from(y) * usize::from(self.w) + usize::from(x))
+            {
+                *g = glow;
             }
         }
-        Some(since) => {
-            debug_assert_eq!(buf.as_slice().len(), since.as_slice().len());
-            for (p, old) in buf.as_mut_slice().iter_mut().zip(since.as_slice()) {
-                if p != old {
-                    *p = step(*p);
-                }
-            }
-        }
+    }
+
+    pub(crate) fn get(&self, x: u16, y: u16) -> Glow {
+        self.glow
+            .get(usize::from(y) * usize::from(self.w) + usize::from(x))
+            .copied()
+            .unwrap_or(Glow::Lit)
     }
 }
 
 /// One light as the cutaway paints it, resolved when the list is built: how many
-/// steps it lifts each art pixel of its box, row by row from the top-left, and
-/// the colour it tints them toward.
+/// steps it lifts each art pixel of its box, row by row from the top-left, the
+/// colour it tints them toward, and the room it lights, which bounds the lift.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct LightView {
     x: u16,
@@ -109,11 +139,16 @@ pub(crate) struct LightView {
     w: u16,
     lift: Vec<u8>,
     tint: Option<Rgb>,
+    ambient: Ambient,
+    /// Where two lights lift a pixel alike, the lower rank lights it: a total
+    /// order on what the light is, so the list's order cannot decide.
+    rank: (u8, u16, u16),
 }
 
 impl LightView {
     /// `emitter` on `pen`'s grid under `ambient`, clipped to a `buf_w`×`buf_h`
-    /// office, with its [`Span`]; `None` where it lifts nothing.
+    /// office, with its [`Span`]; `None` where it lifts no pixel a whole step,
+    /// since a light with no solid band is only its seam's speckle.
     pub(crate) fn of(
         emitter: &Emitter,
         tint: Option<Rgb>,
@@ -129,18 +164,22 @@ impl LightView {
         let (ax0, ay0) = (pen.art(x0).0, pen.art(y0).0);
         let (ax1, ay1) = (pen.art(x1).0, pen.art(y1).0);
         let d = f32::from(pen.art(1).0);
-        let ceiling = ambient.steps().max(DAYLIGHT_LIFT);
+        // An art pixel's centre, in layout cells: at one art pixel a cell, the
+        // cell itself, as the classic samples it.
+        let at = |a: u16| (f32::from(a) + 0.5) / d - 0.5;
+        let mut solid = false;
         let lift: Vec<u8> = (ay0..ay1)
             .flat_map(|ay| (ax0..ax1).map(move |ax| (ax, ay)))
             .map(|(ax, ay)| {
-                let at = |a: u16| (f32::from(a) + 0.5) / d;
                 let Some(level) = emitter.level_at_f(at(ax), at(ay)) else {
                     return 0;
                 };
-                step_at(level * LIFT_STOPS_PER_LEVEL, ArtPx(ax), ArtPx(ay)).min(ceiling)
+                let stops = level * LIFT_STOPS_PER_LEVEL;
+                solid |= stops >= 1.0;
+                step_at(stops, ArtPx(ax), ArtPx(ay)).min(ambient.ceiling())
             })
             .collect();
-        lift.iter().any(|&l| l > 0).then(|| {
+        solid.then(|| {
             (
                 Span::new(x0, y0, x1 - x0, y1 - y0, 0),
                 Self {
@@ -149,6 +188,8 @@ impl LightView {
                     w: ax1 - ax0,
                     lift,
                     tint,
+                    ambient,
+                    rank: (rank_of(emitter.kind), x0, y0),
                 },
             )
         })
@@ -164,14 +205,41 @@ impl LightView {
             h: ArtPx(h),
         }
     }
+
+    /// The room it lights.
+    pub(crate) fn ambient(&self) -> Ambient {
+        self.ambient
+    }
+
+    /// Its lift at art pixel `(x, y)`, 0 outside its box.
+    pub(crate) fn lift_at(&self, x: u16, y: u16) -> u8 {
+        let (dx, dy) = (x.wrapping_sub(self.x), y.wrapping_sub(self.y));
+        if dx >= self.w {
+            return 0;
+        }
+        self.lift
+            .get(usize::from(dy) * usize::from(self.w) + usize::from(dx))
+            .copied()
+            .unwrap_or(0)
+    }
+}
+
+/// An emitter kind's place in the light order ([`LightView::rank`]).
+fn rank_of(kind: EmitterKind) -> u8 {
+    match kind {
+        EmitterKind::WindowSpill => 0,
+        EmitterKind::CeilingPool => 1,
+        EmitterKind::FloorLamp => 2,
+        EmitterKind::DeskLamp => 3,
+        EmitterKind::MonitorHalo(_) => 4,
+        EmitterKind::NeonGlow => 5,
+    }
 }
 
 /// The colour a light of `kind` tints toward under `theme`, or `None` for one
-/// the cutaway leaves untinted. A monitor's tool light tints only a dark theme's
-/// room, as in the classic ([`paint_ceiling_halos`]): on a light one it reads
-/// as grime.
-///
-/// [`paint_ceiling_halos`]: crate::pixel_painter
+/// the cutaway leaves untinted. A monitor's tool light tints only a dark
+/// theme's room, as in the classic's `pixel_painter::ambient::paint_ceiling_halos`:
+/// on a light one it reads as grime.
 pub(crate) fn tint_of(kind: EmitterKind, theme: &Theme) -> Option<Rgb> {
     let lighting = &theme.lighting;
     match kind {
@@ -185,79 +253,78 @@ pub(crate) fn tint_of(kind: EmitterKind, theme: &Theme) -> Option<Rgb> {
     }
 }
 
-/// Lift what `lights` fall on, clipped to the buffer, leaving every art pixel
-/// of `skip` alone. Where two overlap the brighter one lights the pixel, with
-/// its own tint, rather than the two compounding.
-pub(crate) fn paint_lights<'v>(
-    lights: impl Iterator<Item = &'v LightView> + Clone,
-    skip: &[ArtRect],
+/// Light the art pixels of `rect`, clipped to the buffer: each pixel takes
+/// `lift − ambient` steps along its ramp at once, where its lift is the most
+/// any of `lights` gives it, as its [`Glow`] in `emission` allows. A rect
+/// repainted alone comes out as the whole frame does there, so long as
+/// `lights` holds every light that meets it.
+pub(crate) fn net_pass(
+    rect: ArtRect,
+    lights: &[&LightView],
+    ambient: Ambient,
+    emission: &Emission,
     pen: Pen,
     buf: &mut RgbBuffer,
 ) {
-    let Some(bounds) = lights.clone().map(LightView::rect).reduce(union) else {
-        return;
-    };
-    let (w, h) = (usize::from(bounds.w.0), usize::from(bounds.h.0));
-    let mut best: Vec<(u8, Option<Rgb>)> = vec![(0, None); w * h];
-    for view in lights {
-        let r = view.rect();
-        for (i, &lift) in view.lift.iter().enumerate() {
-            let (dx, dy) = (i % usize::from(r.w.0), i / usize::from(r.w.0));
-            let (x, y) = (
-                usize::from(r.x.0 - bounds.x.0) + dx,
-                usize::from(r.y.0 - bounds.y.0) + dy,
-            );
-            let slot = &mut best[y * w + x];
-            if lift > 0 && lift >= slot.0 {
-                *slot = (lift, view.tint);
+    let mut lights: Vec<&LightView> = lights
+        .iter()
+        .copied()
+        .filter(|l| overlaps(l.rect(), rect))
+        .collect();
+    lights.sort_by_key(|l| l.rank);
+    let mut memo: std::collections::HashMap<(Rgb, Glow, u8, Option<Rgb>), Rgb> =
+        std::collections::HashMap::new();
+    for ay in rect.y.0..rect.y.0.saturating_add(rect.h.0) {
+        for ax in rect.x.0..rect.x.0.saturating_add(rect.w.0) {
+            // The first of the brightest, in rank order.
+            let (lift, tint) = lights.iter().fold((0u8, None), |best, l| {
+                let lift = l.lift_at(ax, ay);
+                if lift > best.0 {
+                    (lift, l.tint)
+                } else {
+                    best
+                }
+            });
+            if lift == 0 && ambient.0 == 0 {
+                continue;
             }
+            let cell = ArtRect {
+                x: ArtPx(ax),
+                y: ArtPx(ay),
+                w: ArtPx(1),
+                h: ArtPx(1),
+            };
+            pen.recolour_px(buf, cell, |x, y, under| {
+                let glow = emission.get(x, y);
+                *memo
+                    .entry((under, glow, lift, tint))
+                    .or_insert_with(|| match glow {
+                        Glow::Lit => net_colour(under, lift, ambient, tint),
+                        Glow::Emissive => under,
+                        Glow::Shaded => ambient.on(under),
+                    })
+            });
         }
-    }
-    let mut memo: HashMap<(Rgb, u8, Option<Rgb>), Rgb> = HashMap::new();
-    for (i, &(lift, tint)) in best.iter().enumerate() {
-        if lift == 0 {
-            continue;
-        }
-        let at = ArtRect {
-            x: ArtPx(bounds.x.0 + (i % w) as u16),
-            y: ArtPx(bounds.y.0 + (i / w) as u16),
-            w: ArtPx(1),
-            h: ArtPx(1),
-        };
-        if skip.iter().any(|s| contains(*s, at.x, at.y)) {
-            continue;
-        }
-        pen.recolour(buf, at, |_, _, under| {
-            *memo
-                .entry((under, lift, tint))
-                .or_insert_with(|| lit(under, lift, tint))
-        });
     }
 }
 
-/// `c` lifted `lift` steps and tinted toward `tint` at that many stops.
-fn lit(c: Rgb, lift: u8, tint: Option<Rgb>) -> Rgb {
-    let lifted = c.ramp(lift as i8);
+/// `c` in a room `ambient` dark, lifted `lift` steps: `lift − ambient` steps
+/// along its ramp in one, then tinted toward `tint` a fixed stop per step of
+/// lift.
+fn net_colour(c: Rgb, lift: u8, ambient: Ambient, tint: Option<Rgb>) -> Rgb {
+    let net = lift.min(ambient.ceiling()) as i8 - ambient.0 as i8;
+    let stepped = c.ramp(net);
     match tint {
-        Some(t) => lifted.mix(t, f32::from(lift.min(TINT_MAX_STEPS)) * TINT_PER_STEP),
-        None => lifted,
+        Some(t) if lift > 0 => stepped.mix(t, f32::from(lift.min(TINT_MAX_STEPS)) * TINT_PER_STEP),
+        _ => stepped,
     }
 }
 
-fn union(a: ArtRect, b: ArtRect) -> ArtRect {
-    let (x0, y0) = (a.x.0.min(b.x.0), a.y.0.min(b.y.0));
-    let x1 = (a.x.0 + a.w.0).max(b.x.0 + b.w.0);
-    let y1 = (a.y.0 + a.h.0).max(b.y.0 + b.h.0);
-    ArtRect {
-        x: ArtPx(x0),
-        y: ArtPx(y0),
-        w: ArtPx(x1 - x0),
-        h: ArtPx(y1 - y0),
-    }
-}
-
-fn contains(r: ArtRect, x: ArtPx, y: ArtPx) -> bool {
-    x.0 >= r.x.0 && x.0 < r.x.0 + r.w.0 && y.0 >= r.y.0 && y.0 < r.y.0 + r.h.0
+fn overlaps(a: ArtRect, b: ArtRect) -> bool {
+    a.x.0 < b.x.0.saturating_add(b.w.0)
+        && b.x.0 < a.x.0.saturating_add(a.w.0)
+        && a.y.0 < b.y.0.saturating_add(b.h.0)
+        && b.y.0 < a.y.0.saturating_add(a.h.0)
 }
 
 #[cfg(test)]
@@ -278,11 +345,11 @@ mod tests {
         b: 150,
     };
 
-    fn lamp(strength: f32) -> Emitter {
+    fn lamp(strength: f32, at: Point) -> Emitter {
         Emitter {
             kind: EmitterKind::DeskLamp,
             light: Light::Halo {
-                centre: Point { x: 10, y: 8 },
+                centre: at,
                 radius: 5,
                 share: 1.0,
             },
@@ -290,37 +357,76 @@ mod tests {
         }
     }
 
-    fn lit_floor(emitter: &Emitter, ambient: Ambient, pen: Pen) -> (RgbBuffer, LightView) {
-        let (_, view) =
-            LightView::of(emitter, Some(WARM), ambient, pen, (20, 16)).expect("it lifts");
-        let (w, h) = (pen.art(20).0, pen.art(16).0);
-        let scale = RenderScale::new(4).expect("nonzero");
-        let mut buf = RgbBuffer::filled(scale.to_buffer(20), scale.to_buffer(16), FLOOR);
-        debug_assert_eq!((w, h), (80, 64));
-        paint_lights(std::iter::once(&view), &[], pen, &mut buf);
-        (buf, view)
+    fn pen() -> Pen {
+        Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4")
+    }
+
+    fn view(e: &Emitter, tint: Option<Rgb>, ambient: Ambient) -> LightView {
+        LightView::of(e, tint, ambient, pen(), (40, 16))
+            .expect("it lifts")
+            .1
+    }
+
+    fn whole(w: u16, h: u16) -> ArtRect {
+        ArtRect {
+            x: ArtPx(0),
+            y: ArtPx(0),
+            w: pen().art(w),
+            h: pen().art(h),
+        }
+    }
+
+    fn lit_floor(views: &[&LightView], ambient: Ambient) -> RgbBuffer {
+        let mut buf = RgbBuffer::filled(160, 64, FLOOR);
+        net_pass(
+            whole(40, 16),
+            views,
+            ambient,
+            &Emission::new(160, 64),
+            pen(),
+            &mut buf,
+        );
+        buf
     }
 
     #[test]
     fn a_lit_lamp_lifts_its_pool_at_night_and_nothing_past_it() {
-        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let night = Ambient(AMBIENT_MAX_STEPS);
-        let (buf, _) = lit_floor(&lamp(0.6), night, pen);
+        let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
+        let buf = lit_floor(&[&lamp], night);
         let luma = |c: Rgb| u32::from(c.r) + u32::from(c.g) + u32::from(c.b);
-        // The bulb's cell, and a corner the halo does not reach.
-        assert!(luma(buf.get(10 * 4 + 1, 8 * 4 + 1)) > luma(FLOOR));
-        assert_eq!(buf.get(0, 0), FLOOR);
+        assert!(luma(buf.get(10 * 4 + 1, 8 * 4 + 1)) > luma(night.on(FLOOR)));
+        assert_eq!(buf.get(0, 0), night.on(FLOOR));
     }
 
-    /// Nothing blends: a lit pixel is its colour some whole steps up the ramp,
+    /// A lit pixel is taken `lift − ambient` steps in one: never darkened, then
+    /// relit, which the ramp would not undo.
+    #[test]
+    fn a_lit_pixel_steps_once_by_its_net() {
+        let night = Ambient(AMBIENT_MAX_STEPS);
+        let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), None, night);
+        let buf = lit_floor(&[&lamp], night);
+        let mut checked = 0;
+        for ay in 0..64u16 {
+            for ax in 0..160u16 {
+                let lift = lamp.lift_at(ax, ay);
+                let want = FLOOR.ramp(lift as i8 - night.0 as i8);
+                assert_eq!(buf.get(ax, ay), want, "({ax}, {ay}) lifted {lift}");
+                checked += usize::from(lift > 0);
+            }
+        }
+        assert!(checked > 0, "the lamp lit nothing");
+    }
+
+    /// Nothing blends: a lit pixel is its colour some whole steps along the ramp,
     /// tinted at that many fixed stops, and nothing between.
     #[test]
     fn a_light_paints_only_whole_steps_and_tint_stops() {
-        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
         let night = Ambient(AMBIENT_MAX_STEPS);
-        let (buf, _) = lit_floor(&lamp(0.6), night, pen);
-        let allowed: std::collections::HashSet<Rgb> = std::iter::once(FLOOR)
-            .chain((1..=AMBIENT_MAX_STEPS).map(|l| lit(FLOOR, l, Some(WARM))))
+        let lamp = view(&lamp(0.6, Point { x: 10, y: 8 }), Some(WARM), night);
+        let buf = lit_floor(&[&lamp], night);
+        let allowed: std::collections::HashSet<Rgb> = (0..=AMBIENT_MAX_STEPS)
+            .map(|l| net_colour(FLOOR, l, night, Some(WARM)))
             .collect();
         let seen: std::collections::HashSet<Rgb> = buf.as_slice().iter().copied().collect();
         assert!(seen.len() > 2, "a pool steps through tones: {seen:?}");
@@ -357,17 +463,98 @@ mod tests {
         }
     }
 
-    /// Noon keeps the room's own tone, a light lifts it at most a step, and
-    /// midnight takes it down the full ramp.
+    /// A light takes the night room back to its daylight tone at most, and the
+    /// daylit room [`DAYLIGHT_LIFT`] past it.
     #[test]
-    fn the_room_steps_down_with_the_dark_and_a_light_back_up() {
-        assert_eq!(Ambient(0).darkness(), 0.0);
-        assert_eq!(Ambient(AMBIENT_MAX_STEPS).darkness(), 1.0);
-        let pen = Pen::new(RenderScale::new(4).expect("nonzero"), 4).expect("4 divides 4");
-        let (_, noon) = lit_floor(&lamp(1.0), Ambient(0), pen);
-        assert_eq!(noon.lift.iter().max(), Some(&DAYLIGHT_LIFT));
-        let mut buf = RgbBuffer::filled(4, 4, FLOOR);
-        wash(&mut buf, None, Ambient(AMBIENT_MAX_STEPS));
-        assert_eq!(buf.get(0, 0), FLOOR.ramp(-(AMBIENT_MAX_STEPS as i8)));
+    fn a_light_lifts_the_night_room_to_daylight_and_the_day_room_a_step() {
+        let night = Ambient(AMBIENT_MAX_STEPS);
+        let bright = lamp(1.0, Point { x: 10, y: 8 });
+        let at_night = view(&bright, None, night);
+        assert_eq!(at_night.lift.iter().max(), Some(&night.0));
+        let by_day = view(&bright, None, Ambient(0));
+        assert_eq!(by_day.lift.iter().max(), Some(&DAYLIGHT_LIFT));
+    }
+
+    /// A light too faint for a solid band is left out: all it would show is its
+    /// seam's speckle.
+    #[test]
+    fn a_light_with_no_solid_band_is_left_out() {
+        let faint = lamp(0.1, Point { x: 10, y: 8 });
+        assert!(LightView::of(&faint, None, Ambient(0), pen(), (40, 16)).is_none());
+    }
+
+    /// Where two lights lift a pixel alike, the same one lights it whatever order
+    /// they come in.
+    #[test]
+    fn overlapping_lights_resolve_alike_in_any_order() {
+        let night = Ambient(AMBIENT_MAX_STEPS);
+        let (a, b) = (
+            view(&lamp(0.8, Point { x: 10, y: 8 }), Some(WARM), night),
+            view(
+                &lamp(0.8, Point { x: 14, y: 8 }),
+                Some(Rgb {
+                    r: 120,
+                    g: 160,
+                    b: 255,
+                }),
+                night,
+            ),
+        );
+        assert_eq!(
+            lit_floor(&[&a, &b], night).as_slice(),
+            lit_floor(&[&b, &a], night).as_slice()
+        );
+    }
+
+    /// A rect repainted alone comes out as the whole frame does there, so the
+    /// canvas may repaint only what changed.
+    #[test]
+    fn a_rect_relit_alone_matches_the_whole_frame() {
+        let night = Ambient(AMBIENT_MAX_STEPS);
+        let (a, b) = (
+            view(&lamp(0.8, Point { x: 10, y: 8 }), Some(WARM), night),
+            view(&lamp(0.7, Point { x: 16, y: 9 }), None, night),
+        );
+        let full = lit_floor(&[&a, &b], night);
+        let rect = ArtRect {
+            x: ArtPx(40),
+            y: ArtPx(20),
+            w: ArtPx(30),
+            h: ArtPx(24),
+        };
+        let mut part = RgbBuffer::filled(160, 64, FLOOR);
+        net_pass(
+            rect,
+            &[&a, &b],
+            night,
+            &Emission::new(160, 64),
+            pen(),
+            &mut part,
+        );
+        for y in rect.y.0..rect.y.0 + rect.h.0 {
+            for x in rect.x.0..rect.x.0 + rect.w.0 {
+                assert_eq!(part.get(x, y), full.get(x, y), "({x}, {y})");
+            }
+        }
+    }
+
+    /// An emissive pixel keeps its colour and a shaded one only darkens, under
+    /// the brightest light.
+    #[test]
+    fn a_glowing_pixel_is_its_own_light() {
+        let night = Ambient(AMBIENT_MAX_STEPS);
+        let lamp = view(&lamp(1.0, Point { x: 10, y: 8 }), Some(WARM), night);
+        let mut emission = Emission::new(160, 64);
+        emission.set(41, 33, Glow::Emissive);
+        emission.set(42, 33, Glow::Shaded);
+        let mut buf = RgbBuffer::filled(160, 64, FLOOR);
+        net_pass(whole(40, 16), &[&lamp], night, &emission, pen(), &mut buf);
+        assert_eq!(buf.get(41, 33), FLOOR);
+        assert_eq!(buf.get(42, 33), night.on(FLOOR));
+        assert_ne!(
+            buf.get(43, 33),
+            night.on(FLOOR),
+            "the lamp lights its bulb's cell"
+        );
     }
 }

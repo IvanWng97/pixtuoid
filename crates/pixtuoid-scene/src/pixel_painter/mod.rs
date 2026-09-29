@@ -93,7 +93,7 @@ pub(crate) use drawable::DESK_BEZEL_RAISE;
 pub(crate) use drawable::{
     desk_art_top, desk_sprite_name, DESK_CHAIR_SPRITE, MEETING_TABLE_SPRITE,
 };
-pub(crate) use palette::{appliance_overrides, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
+pub(crate) use palette::{appliance_overrides, DESK_BULB_KEY, SCREEN_GLASS_KEY, SCREEN_TEXT_KEY};
 
 // The ToolKind→glow-hue seam the binary's footer tints tool segments with. The
 // footer paints this hue RAW; the sprite's glow then takes the hour's wash, so

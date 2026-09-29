@@ -37,7 +37,7 @@ const _: () = assert!(2 * DESK_LAMP_RADIUS < crate::layout::desk_furniture_def()
 const DESK_LAMP_MAX: f32 = 0.42;
 /// The standby screen's ceiling. At parity with [`DESK_LAMP_MAX`] the lamp
 /// pool washes the desk's west half out.
-const SCREEN_IDLE_MAX: f32 = 0.55;
+pub(crate) const SCREEN_IDLE_MAX: f32 = 0.55;
 /// Where the desk lamp's bulb hangs, from its fixture's top-left cell: the
 /// shade spans the two cells above it.
 const DESK_LAMP_BULB: (u16, u16) = (1, 1);
@@ -389,16 +389,16 @@ fn desk_lights(desk: Point, facing: Facing, darkness: f32, indoor: f32) -> DeskL
     DeskLights::new(
         desk,
         darkness * indoor,
-        SCREEN_IDLE_MAX * standby(facing, darkness, indoor),
+        screen_idle(facing, darkness, indoor),
     )
 }
 
-/// How far toward its standby glow a desk's idle screen is, 0..=1: the dark and
-/// the room's own level both wake it, and only a desk that shows the viewer its
-/// screen shows it.
-pub(crate) fn standby(facing: Facing, darkness: f32, indoor: f32) -> f32 {
+/// How strongly a desk's idle screen glows on standby, up to
+/// [`SCREEN_IDLE_MAX`]: the dark and the room's own level both wake it, and
+/// only a desk that shows the viewer its screen shows it.
+pub(crate) fn screen_idle(facing: Facing, darkness: f32, indoor: f32) -> f32 {
     if facing == Facing::North {
-        darkness * indoor
+        SCREEN_IDLE_MAX * darkness * indoor
     } else {
         0.0
     }
