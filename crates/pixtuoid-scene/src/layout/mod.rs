@@ -498,7 +498,7 @@ impl SceneLayout {
         self.desk_facings.get(i.0).copied().unwrap_or(Facing::South)
     }
 
-    /// Whether desk `i` carries a filing cabinet: every other desk.
+    /// Whether desk `i` stands a filing cabinet beside it.
     pub(crate) fn desk_has_cabinet(&self, i: FloorLocalDeskIndex) -> bool {
         i.0.is_multiple_of(2)
     }

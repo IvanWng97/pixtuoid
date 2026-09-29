@@ -13,6 +13,7 @@ use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer};
 
 use super::background::paint_warm_halo;
 use super::palette::{blend_rgb, BLACK, WHITE};
+use super::sim::{Cup, DeskProps};
 use pixtuoid_core::AgentSlot;
 
 use super::effects::{
@@ -73,14 +74,7 @@ pub(super) enum DrawableKind<'a> {
         screen_glow: Option<Rgb>,
         lamp: f32,
         screen_idle: f32,
-        has_coffee: bool,
-        coffee_steam: bool,
-        /// 0 = no tower (the plain desk), else the reams up to
-        /// [`MAX_TIER`](crate::token_meter::MAX_TIER).
-        token_tier: u8,
-        /// A falling sheet's distance FALLEN (px) when a big usage reading
-        /// is mid-drop (`token_meter::sheet_fall_dist`), else `None`.
-        sheet_fall: Option<u16>,
+        props: DeskProps,
     },
     Character {
         agent: &'a AgentSlot,
@@ -299,10 +293,7 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
             screen_glow,
             lamp,
             screen_idle,
-            has_coffee,
-            coffee_steam,
-            token_tier,
-            sheet_fall,
+            props,
         } => {
             if *has_cabinet {
                 if let Some(cab) = pack
@@ -334,8 +325,8 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
                 theme.effects.monitor_idle,
                 *screen_idle,
             );
-            paint_desk_coffee(buf, *desk, *has_coffee, *coffee_steam, now, theme);
-            paint_token_stack(buf, *desk, *token_tier, *sheet_fall, theme);
+            paint_desk_coffee(buf, *desk, props.cup, now, theme);
+            paint_token_stack(buf, *desk, props.token_tier, props.sheet_fall, theme);
             if let Some(tint) = screen_glow {
                 paint_screen_glow(buf, desk.x, sprite_top, now, *tint, theme);
             }
@@ -517,14 +508,13 @@ pub(super) fn paint_drawable(d: &Drawable<'_>, c: &mut DrawableCtx<'_>) {
 fn paint_desk_coffee(
     buf: &mut RgbBuffer,
     desk: Point,
-    has_coffee: bool,
-    coffee_steam: bool,
+    cup: Option<Cup>,
     now: SystemTime,
     theme: &crate::theme::Theme,
 ) {
-    if !has_coffee {
+    let Some(cup) = cup else {
         return;
-    }
+    };
     let put = |buf: &mut RgbBuffer, x: u16, y: u16, c: Rgb| {
         buf.put_checked(x, y, c);
     };
@@ -534,7 +524,7 @@ fn paint_desk_coffee(
     put(buf, cx + 1, cy, theme.furniture.coffee_cup);
     put(buf, cx, cy + 1, theme.furniture.coffee_cup_shadow);
     put(buf, cx + 1, cy + 1, theme.furniture.coffee_cup_shadow);
-    if coffee_steam {
+    if cup == Cup::Steaming {
         paint_coffee_steam(buf, Point { x: cx, y: cy }, now, theme);
     }
 }
@@ -697,10 +687,11 @@ mod tests {
                 screen_glow: None,
                 lamp: 0.0,
                 screen_idle: 0.0,
-                has_coffee: false,
-                coffee_steam: false,
-                token_tier,
-                sheet_fall,
+                props: DeskProps {
+                    cup: None,
+                    token_tier,
+                    sheet_fall,
+                },
             },
         }
     }
@@ -889,10 +880,7 @@ mod tests {
                 screen_glow: None,
                 lamp: 0.0,
                 screen_idle: 0.0,
-                has_coffee: false,
-                coffee_steam: false,
-                token_tier: 0,
-                sheet_fall: None,
+                props: DeskProps::default(),
             },
         };
         paint_drawable(

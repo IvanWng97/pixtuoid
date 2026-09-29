@@ -242,8 +242,9 @@ impl FloorCtx {
 pub struct CoffeeState(HashMap<AgentId, SystemTime>);
 
 impl CoffeeState {
-    /// Desk-cup steam window (secs) — ONE source of truth for the pixel pass's
-    /// steam gate and [`record`](CoffeeState::record)'s refetch-refresh.
+    /// Desk-cup steam window (secs) — ONE source of truth for the sim's
+    /// desk-cup steam gate and [`record`](CoffeeState::record)'s
+    /// refetch-refresh.
     pub const STEAM_WINDOW_SECS: u64 = 120;
 
     /// Empty coffee state — no cups held.
@@ -251,7 +252,7 @@ impl CoffeeState {
         Self::default()
     }
 
-    /// The map view the pixel pass borrows: key = carrier, value = fetch time.
+    /// The map view the sim borrows: key = carrier, value = fetch time.
     pub fn map(&self) -> &HashMap<AgentId, SystemTime> {
         &self.0
     }
@@ -403,9 +404,9 @@ pub struct ObservedFloor {
     pub frame: SimFrame,
 }
 
-/// [`render_floor`] without the classic paint pass: the same layout prologue, sim
-/// tick and bookkeeping epilogue, over the same disjoint per-floor borrows, for a
-/// painter that draws the frame some other way. `None` when the size can't lay
+/// [`render_floor`] without the classic paint pass: the same layout prologue and
+/// bookkeeping epilogue over the same disjoint per-floor borrows, and its sim
+/// tick with no pet, for a painter that draws the frame some other way. `None` when the size can't lay
 /// out; eviction stays the caller's, as there.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn observe_floor(
@@ -434,7 +435,8 @@ pub(crate) fn observe_floor(
             layout: &layout,
             pack,
             coffee: coffee.map(),
-            // Nothing that observes a floor draws its pet yet.
+            // The pet needs the painter's config and click state, which `observe`
+            // does not take; widen it when an observer draws the pet.
             pets: PetInputs::default(),
             floor: floor_meta,
             now,
@@ -721,8 +723,8 @@ impl FloorSession {
     }
 
     /// Advance the world one tick WITHOUT painting: the session's eviction, then
-    /// [`render_floor`]'s layout prologue, sim tick and epilogue, minus its paint
-    /// pass. `size` is the layout's logical extent, whatever scale a painter
+    /// [`render_floor`]'s layout prologue, sim tick (with no pet) and epilogue,
+    /// minus its paint pass. `size` is the layout's logical extent, whatever scale a painter
     /// draws it at.
     pub fn observe(
         &mut self,

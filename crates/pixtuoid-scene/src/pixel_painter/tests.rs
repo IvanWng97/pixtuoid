@@ -2957,8 +2957,8 @@ fn seat_desk_is_set_exactly_when_the_sim_seats_someone_at_a_desk() {
     assert!(seated_seen, "the sweep never observed a seated pose");
 }
 
-/// A desk's props are the sim's call, from its occupant, so every painter
-/// draws the same cup and tower.
+/// A desk's props are the sim's call, from its occupant, so no painter
+/// re-decides the cup or the tower.
 #[test]
 fn sim_step_decides_each_desks_props_from_its_occupant() {
     use std::time::Duration;
@@ -2988,7 +2988,7 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
     };
     let fresh = desks_at(now0);
     assert_eq!(fresh.len(), layout.home_desks.len());
-    assert!(fresh[desk].has_coffee && fresh[desk].coffee_steam);
+    assert_eq!(fresh[desk].cup, Some(sim::Cup::Steaming));
     assert_eq!(fresh[desk].token_tier, 1);
     for (i, props) in fresh.iter().enumerate().filter(|&(i, _)| i != desk) {
         assert_eq!(
@@ -2998,8 +2998,9 @@ fn sim_step_decides_each_desks_props_from_its_occupant() {
         );
     }
     let cold = desks_at(now0 + Duration::from_secs(crate::floor::CoffeeState::STEAM_WINDOW_SECS));
-    assert!(
-        cold[desk].has_coffee && !cold[desk].coffee_steam,
+    assert_eq!(
+        cold[desk].cup,
+        Some(sim::Cup::Cold),
         "the cup stays after it stops steaming"
     );
 }
@@ -3052,6 +3053,20 @@ fn sim_step_roams_the_pet_and_holds_a_petted_one_where_it_was_clicked() {
     assert_eq!(held.pos, clicked);
     assert_eq!(held.anim_name, pet.kind.sit_anim());
     assert_eq!(held.petted_ms, Some(0));
+
+    let upstairs = crate::pet::PetState {
+        floor_idx: floor.floor_idx + 1,
+        ..petting
+    };
+    let elsewhere = step(PetInputs {
+        pet: Some(&pet),
+        petting: Some(&upstairs),
+    })
+    .expect("the cat roams");
+    assert_eq!(
+        elsewhere.petted_ms, None,
+        "a petting on another floor leaves this one roaming"
+    );
 }
 
 #[test]
@@ -4420,6 +4435,22 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
         // both the walking legs and the resting cells get sampled.
         for step in 0..24u64 {
             let now = boot + Duration::from_millis(6_000 + step * 1_700);
+            let mut owned = OwnedSimStores::new();
+            let frame = sim_step(
+                &mut owned.stores(),
+                SimInputs {
+                    scene: &scene,
+                    layout: &layout,
+                    pack: &pack,
+                    coffee: &HashMap::new(),
+                    pets: PetInputs {
+                        pet: Some(&pet),
+                        petting: None,
+                    },
+                    floor,
+                    now,
+                },
+            );
             let mut buf = RgbBuffer::filled(layout.buf_w, layout.buf_h, Rgb { r: 0, g: 0, b: 0 });
             let mut cache = FrameCache::new();
             let mut base_fill = BaseFillCache::new();
@@ -4439,14 +4470,8 @@ fn a_roaming_creature_is_never_sliced_by_the_canvas_edge() {
                 debug_walkable: false,
             };
             let mut drawables = Vec::new();
-            let pets = sim::PetInputs {
-                pet: Some(&pet),
-                petting: None,
-            };
-            let pet_frame = sim::pet_placement(&[], &layout, &pack, pets, floor, now)
-                .and_then(|p| enqueue_pet(&ctx, p, &mut drawables));
-            let mascots = sim::mascot_placements(&scene, &layout, now);
-            for m in enqueue_gateway_mascots(&ctx, &mascots, &mut drawables) {
+            let pet_frame = frame.pet.map(|p| enqueue_pet(&ctx, p, &mut drawables));
+            for m in enqueue_gateway_mascots(&ctx, &frame.mascots, &mut drawables) {
                 let (w, h) = (m.w, m.h);
                 if m.pos.x < w / 2
                     || m.pos.x + w.div_ceil(2) > layout.buf_w

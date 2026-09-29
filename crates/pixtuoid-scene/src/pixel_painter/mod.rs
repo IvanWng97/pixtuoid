@@ -12,7 +12,7 @@ use std::time::SystemTime;
 use pixtuoid_core::sprite::blit::blit_frame;
 use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::{Frame, Rgb, RgbBuffer, Sprite};
-use pixtuoid_core::state::FloorLocalDeskIndex;
+use pixtuoid_core::state::{DaemonState, FloorLocalDeskIndex};
 use pixtuoid_core::{AgentSlot, SceneState};
 
 use crate::chitchat::{ActiveChitchat, ChitchatBubble};
@@ -147,7 +147,7 @@ pub(crate) use dense::densest_frame;
 pub(crate) use furniture::{paint_area_rug, COOLER_WATER};
 // `floor::FloorSession::observe` is the public entry to the sim tick; the step
 // itself and its per-call borrow-set stay crate-internal.
-pub(crate) use sim::{sim_step, PetInputs, SimInputs, SimStores};
+pub(crate) use sim::{desk_occupant, sim_step, PetInputs, SimInputs, SimStores};
 pub use sim::{CharacterGlow, CharacterPlacement, SimFrame};
 pub(crate) use wall::paint_wall;
 
@@ -645,15 +645,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
             + agents.len(),
     );
 
-    enqueue_desk_cubicles(
-        ctx,
-        agents,
-        &frame.seated_agents,
-        &frame.desks,
-        look.darkness,
-        indoor_scale,
-        &mut drawables,
-    );
+    enqueue_desk_cubicles(ctx, frame, look.darkness, indoor_scale, &mut drawables);
 
     enqueue_meeting_furniture(ctx.layout, &mut drawables);
 
@@ -663,9 +655,7 @@ fn paint_frame(ctx: &mut PaintCtx<'_>, frame: &SimFrame) -> (Option<PetFrame>, V
     enqueue_floor_fixtures(ctx, agents, &mut drawables);
     enqueue_wall_decor(ctx.layout, &mut drawables);
 
-    let resolved_pet_pos = frame
-        .pet
-        .and_then(|pet| enqueue_pet(ctx, pet, &mut drawables));
+    let resolved_pet_pos = frame.pet.map(|pet| enqueue_pet(ctx, pet, &mut drawables));
     let resolved_mascots = enqueue_gateway_mascots(ctx, &frame.mascots, &mut drawables);
 
     enqueue_characters(ctx, frame, &mut drawables);
@@ -847,16 +837,6 @@ fn desk_light(facing: crate::layout::Facing, darkness: f32, indoor: f32) -> Desk
     }
 }
 
-/// The agent whose home desk is `local`, while they have not begun to leave.
-pub(crate) fn desk_occupant(
-    agents: &[AgentSlot],
-    local: FloorLocalDeskIndex,
-) -> Option<&AgentSlot> {
-    agents
-        .iter()
-        .find(|a| a.desk_index.single_floor_local() == local && a.exiting_at.is_none())
-}
-
 /// The glow of a desk's screen: its seated occupant's tool, on a desk that
 /// faces north. A far-seated desk shows the monitor's BACK — a glow there would
 /// be light leaking out of a case. Both profiles light screens from this.
@@ -871,34 +851,28 @@ pub(crate) fn desk_screen_glow(
         .and_then(|a| palette::tool_glow_tint(a, &theme.tool_glow))
 }
 
-/// Desk cubicles — each carries its cabinet + lamp + screens. The desk
-/// sorts one row past its visual south row, just past the seated worker's feet,
-/// so the sitter stays visually behind it. Z is a VISUAL property: it tracks
-/// the sprite, not the blocked ground.
+/// Desk cubicles — each one z-unit: the desk, its lamp, screens and props, and a
+/// filing cabinet where [`desk_has_cabinet`](crate::layout::SceneLayout::desk_has_cabinet)
+/// stands one. The desk sorts one row past its visual south row, just past the
+/// seated worker's feet, so the sitter stays visually behind it. Z is a VISUAL
+/// property: it tracks the sprite, not the blocked ground.
 fn enqueue_desk_cubicles<'a>(
     ctx: &PaintCtx<'_>,
-    agents: &[AgentSlot],
-    seated_agents: &HashMap<FloorLocalDeskIndex, bool>,
-    desks: &[sim::DeskProps],
+    frame: &SimFrame,
     darkness: f32,
     indoor_scale: f32,
     drawables: &mut Vec<Drawable<'a>>,
 ) {
-    debug_assert_eq!(
-        desks.len(),
-        ctx.layout.home_desks.len(),
-        "desk props are index-parallel to the home desks"
-    );
-    for ((i, &desk), props) in ctx.layout.home_desks.iter().enumerate().zip(desks) {
+    for (i, &desk) in ctx.layout.home_desks.iter().enumerate() {
         let local = FloorLocalDeskIndex(i);
         let desk_def = crate::layout::desk_furniture_def();
-        let occupant = desk_occupant(agents, local);
+        let occupant = desk_occupant(&frame.agents, local);
         let facing = ctx.layout.desk_facing(local);
         let light = desk_light(facing, darkness, indoor_scale);
         let screen_glow = desk_screen_glow(
             occupant,
             facing,
-            seated_agents.get(&local).copied().unwrap_or(false),
+            frame.seated_agents.get(&local).copied().unwrap_or(false),
             ctx.theme,
         );
         drawables.push(Drawable {
@@ -910,10 +884,7 @@ fn enqueue_desk_cubicles<'a>(
                 screen_glow,
                 lamp: light.lamp,
                 screen_idle: light.screen_idle,
-                has_coffee: props.has_coffee,
-                coffee_steam: props.coffee_steam,
-                token_tier: props.token_tier,
-                sheet_fall: props.sheet_fall,
+                props: frame.desk(local),
             },
         });
     }
@@ -926,7 +897,7 @@ fn enqueue_pet<'a>(
     ctx: &PaintCtx<'_>,
     pet: sim::PetPlacement,
     drawables: &mut Vec<Drawable<'a>>,
-) -> Option<PetFrame> {
+) -> PetFrame {
     /// Fallback when a custom pack lacks the resolved pet anim: the bundled
     /// cat's size, so the z-sort row and the canvas clamp stay sane — the blit
     /// itself no-ops, `paint_drawable` bails.
@@ -958,11 +929,11 @@ fn enqueue_pet<'a>(
             pet_elapsed_ms: pet.petted_ms,
         },
     });
-    Some(PetFrame {
+    PetFrame {
         pos,
         anim: pet.anim_name,
         kind: pet.kind,
-    })
+    }
 }
 
 /// Enqueue the gateway mascots, each fitted to the canvas.
@@ -1004,7 +975,7 @@ fn enqueue_gateway_mascots<'a>(
                     anim_name: m.anim_name,
                     frame_idx: m.frame_idx,
                     run_count: m.run_count,
-                    degraded: m.degraded,
+                    degraded: m.state == DaemonState::Degraded,
                 },
             });
             MascotFrame {
@@ -1013,8 +984,8 @@ fn enqueue_gateway_mascots<'a>(
                 h: mascot_h,
                 name: m.name,
                 instance: m.instance.clone(),
-                busy: m.busy,
-                degraded: m.degraded,
+                busy: m.state == DaemonState::Busy,
+                degraded: m.state == DaemonState::Degraded,
                 active_sessions: m.active_sessions,
             }
         })
