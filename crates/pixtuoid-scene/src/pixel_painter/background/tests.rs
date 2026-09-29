@@ -1,5 +1,6 @@
 use super::*;
 use crate::atmosphere::Look;
+use crate::layout::WINDOW_GAP;
 use crate::sky::{hour_is_day, set_weather_override, ForcedWeather};
 
 #[test]
@@ -616,53 +617,18 @@ fn moon_glow_dims_at_new_moon() {
     );
 }
 
-#[test]
-fn window_columns_tiles_from_the_start_and_keeps_absolute_idx_across_a_skip() {
-    let buf_w = FIRST_WINDOW_X + 4 * (WINDOW_W + WINDOW_GAP) + WINDOW_W + WINDOW_EDGE_MARGIN;
-    let all: Vec<_> = window_columns(buf_w, None).collect();
-    assert!(all.len() >= 3, "expected several panes, got {}", all.len());
-    for (k, w) in all.iter().enumerate() {
-        assert_eq!(w.idx as usize, k, "idx is the 0-based absolute position");
-        assert_eq!(
-            w.x_left,
-            FIRST_WINDOW_X + k as u16 * (WINDOW_W + WINDOW_GAP)
-        );
-        assert_eq!(w.center_x, w.x_left + WINDOW_W / 2);
-        assert!(w.x_left + WINDOW_W + WINDOW_EDGE_MARGIN <= buf_w);
-    }
-
-    // Skip the SECOND pane's x-range — what the elevator door does to the wall.
-    let doomed = all[1];
-    let skip = Some((doomed.x_left, doomed.x_left + WINDOW_W));
-    let kept: Vec<_> = window_columns(buf_w, skip).collect();
-    assert_eq!(
-        kept.len(),
-        all.len() - 1,
-        "exactly the overlapping pane is skipped"
-    );
-    assert!(
-        kept.iter().all(|w| w.idx != doomed.idx),
-        "the skipped pane's idx never appears"
-    );
-    assert!(
-        kept.iter().any(|w| w.idx == 2),
-        "the pane after the door keeps idx 2"
-    );
-}
-
 /// Mean channel value over every PAINTED window pane's glass interior. The
 /// day-over-night invariant is asserted on THIS, not on
 /// [`Look::darkness`]: the weather veils are painted onto the glass
 /// AFTER the light model produced `sky_row`, so a `darkness`-only assertion is
 /// structurally blind to them.
 fn glass_mean_luminance(buf: &RgbBuffer, top_wall_h: u16) -> f32 {
-    let window_y: u16 = 1;
-    let window_h: u16 = top_wall_h.saturating_sub(2).max(8);
+    let rows = window_rows(top_wall_h);
     let mut sum = 0.0f64;
     let mut n = 0u32;
-    for w in window_columns(buf.width(), None) {
-        for y in (window_y + 1)..(window_y + window_h).saturating_sub(1) {
-            for x in (w.x_left + 1)..(w.x_left + WINDOW_W).saturating_sub(1) {
+    for w in window_bays(buf.width(), None) {
+        for y in (rows.start + 1)..rows.end.saturating_sub(1) {
+            for x in (w.x + 1)..w.span().end.saturating_sub(1) {
                 if x < buf.width() && y < buf.height() {
                     let p = buf.get(x, y);
                     sum += f64::from(p.r) + f64::from(p.g) + f64::from(p.b);

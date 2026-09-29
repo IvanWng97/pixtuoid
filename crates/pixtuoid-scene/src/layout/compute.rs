@@ -311,13 +311,14 @@ pub(super) fn compute_with_seed(
     // Elevator door — mounted in the back wall's rightmost window position, BOTTOM-aligned
     // with the windows; above the lounge gate so that gate can check couch↔door clearance.
     let top_wall_h = top_margin.saturating_sub(super::WALL_BAND_TO_TOP_MARGIN);
-    let window_bottom_y = top_wall_h.saturating_sub(3); // matches paint_floor_and_walls' window_h
-    let door = if buf_w >= ELEVATOR_W + 4 && window_bottom_y + 1 >= ELEVATOR_H {
+    // The panes' bottom frame row.
+    let window_line = super::window_rows(top_wall_h).end - 1;
+    let door = if buf_w >= ELEVATOR_W + 4 && window_line >= ELEVATOR_H {
         Some(Point {
             x: buf_w.saturating_sub(ELEVATOR_W + 2),
             // +2 drops the elevator bottom 2 px below the window line, resting it on
             // the floor instead of floating mid-wall.
-            y: window_bottom_y + 1 - ELEVATOR_H + 2,
+            y: window_line - ELEVATOR_H + 2,
         })
     } else {
         None
