@@ -11,4 +11,5 @@
 pub(crate) mod order;
 #[doc(hidden)]
 pub mod paint;
+pub(crate) mod pen;
 pub(crate) mod shade;

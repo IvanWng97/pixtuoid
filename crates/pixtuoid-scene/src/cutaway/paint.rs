@@ -8,7 +8,8 @@ use pixtuoid_core::sprite::format::Pack;
 use pixtuoid_core::sprite::RgbBuffer;
 
 use crate::cutaway::order::{depth_sort, Span};
-use crate::cutaway::shade::{dither_band, fill, slab, Ramp};
+use crate::cutaway::pen::{ArtPx, ArtRect, Pen};
+use crate::cutaway::shade::{fill, slab, Ramp};
 use crate::layout::{Layout, DESK_H};
 use crate::pixel_painter::SimFrame;
 use crate::render_scale::RenderScale;
@@ -94,7 +95,7 @@ fn paint_backdrop(
     scale: RenderScale,
     buf: &mut RgbBuffer,
 ) {
-    paint_floor(layout, theme, scale, buf);
+    paint_floor(layout, theme, Pen::for_pack(scale, pack), buf);
     paint_wall(layout, theme, scale, buf);
     // Wall decor hangs on the north band, so it is NOT floor-sorted: it paints
     // with the wall, before anything standing on the floor can occlude it.
@@ -404,7 +405,7 @@ pub(crate) fn assert_variant_desk_foot(
         scale.to_buffer(layout.buf_h),
         theme.surface.bg_fallback,
     );
-    paint_floor(layout, theme, scale, &mut floor);
+    paint_floor(layout, theme, Pen::for_pack(scale, base_pack), &mut floor);
     let buf_w = usize::from(scale.to_buffer(layout.buf_w));
     let face = desk_front_h();
     // Each desk's columns and the first row below its art, in logical units.
@@ -1036,34 +1037,41 @@ fn push_pantry_counter(layout: &Layout, pack: &Pack, order: &mut Vec<(Span, Piec
     ));
 }
 
-fn paint_floor(layout: &Layout, theme: &Theme, scale: RenderScale, buf: &mut RgbBuffer) {
+/// The carpet, lit near the windows and falling off south, on the art grid:
+/// every edge and dither step lands on an art pixel, whatever the scale.
+fn paint_floor(layout: &Layout, theme: &Theme, pen: Pen, buf: &mut RgbBuffer) {
     let lit = theme.surface.carpet_light;
     let base = theme.surface.carpet_base;
     let dark = theme.surface.carpet_dark;
 
-    let h = scale.to_buffer(layout.buf_h);
-    let w = scale.to_buffer(layout.buf_w);
-    fill(buf, 0, 0, w, h, base);
+    let h = pen.art(layout.buf_h);
+    let w = pen.art(layout.buf_w);
+    let band = |y0: u16, rows: u16| ArtRect {
+        x: ArtPx(0),
+        y: ArtPx(y0),
+        w,
+        h: ArtPx(rows),
+    };
+    pen.fill(buf, band(0, h.0), base);
 
     // Anchored at `top_margin`, where the layout says the floor begins, not
     // buffer row 0: the wall band paints over the top of the buffer, so a lit
     // zone anchored there would start behind it.
-    let floor_top = scale.to_buffer(layout.top_margin);
-    let floor_h = h.saturating_sub(floor_top);
+    let floor_top = pen.art(layout.top_margin).0;
+    let floor_h = h.0.saturating_sub(floor_top);
 
     // The lit share of the floor: its first half solid, dithering to base by its
     // end, then a final fall to dark at the south edge.
     let lit_h = floor_h * FLOOR_LIT_NUMER / FLOOR_LIT_DENOM;
-    fill(buf, 0, floor_top, w, lit_h / 2, lit);
-    dither_band(
+    pen.fill(buf, band(floor_top, lit_h / 2), lit);
+    pen.dither_band(
         buf,
-        floor_top + lit_h / 2,
-        floor_top + lit_h,
+        ArtPx(floor_top + lit_h / 2),
+        ArtPx(floor_top + lit_h),
         base,
         lit,
-        scale,
     );
-    dither_band(buf, h.saturating_sub(lit_h / 2), h, dark, base, scale);
+    pen.dither_band(buf, ArtPx(h.0.saturating_sub(lit_h / 2)), h, dark, base);
 }
 
 fn paint_desk(
@@ -2950,5 +2958,101 @@ S B B B B B B S
         let mut buf = blank();
         paint_chair(at, &pack, theme, scale, &mut buf);
         assert_eq!(drawn(&buf), variant, "chair");
+    }
+
+    /// `frame` painted through the real cutaway at render scale `s`.
+    fn render_at(
+        frame: &SimFrame,
+        layout: &Layout,
+        pack: &Pack,
+        theme: &Theme,
+        s: u16,
+    ) -> RgbBuffer {
+        let scale = RenderScale::new(s).expect("nonzero");
+        let mut buf = RgbBuffer::filled(
+            scale.to_buffer(layout.buf_w),
+            scale.to_buffer(layout.buf_h),
+            theme.surface.bg_fallback,
+        );
+        let mut cache = crate::frame_cache::FrameCache::new();
+        render_cutaway(
+            frame,
+            layout,
+            pack,
+            theme,
+            scale,
+            std::time::SystemTime::UNIX_EPOCH,
+            &mut cache,
+            &mut buf,
+        );
+        buf
+    }
+
+    /// The cutaway paints on ONE grid, the art pixel: at a render scale `k`
+    /// times the art's density, every aligned `k`x`k` block is one colour, and
+    /// the frame is the density render upscaled `k` times. A painter sizing a
+    /// thin feature in buffer pixels, or a band edge that rounds at buffer
+    /// resolution, breaks the second even where the first holds.
+    ///
+    /// Every theme, over a walk and a sit and over an office big enough to gate
+    /// in a pantry and a meeting room.
+    #[test]
+    fn the_cutaway_paints_whole_art_pixels() {
+        use crate::floor::{FloorMeta, FloorSession};
+        let pack = pack();
+        let d = pack.max_density_variant();
+        let (walk_layout, _, frames, _) = sit_down(crate::layout::Facing::North, 2);
+        let walking = &frames[frames.len() / 2];
+        let seated = frames.last().expect("a seated frame");
+        let office = FloorSession::new()
+            .observe(
+                &pixtuoid_core::SceneState::uniform(16),
+                &pack,
+                crate::layout::Size { w: 240, h: 144 },
+                FloorMeta::ground(),
+                std::time::SystemTime::UNIX_EPOCH,
+            )
+            .expect("lays out");
+        assert!(
+            office.layout.pantry.is_some() && !office.layout.meeting_rooms.is_empty(),
+            "the office must gate in the rooms it is here to cover"
+        );
+        let cases = [
+            ("walking", &walk_layout, walking),
+            ("seated", &walk_layout, seated),
+            ("office", &office.layout, &office.frame),
+        ];
+        for theme in crate::theme::ALL_THEMES {
+            for (name, layout, frame) in cases {
+                let at_d = render_at(frame, layout, &pack, theme, d);
+                for k in [2u16, 3] {
+                    let at_s = render_at(frame, layout, &pack, theme, d * k);
+                    let bad_block = (0..at_s.height())
+                        .step_by(usize::from(k))
+                        .flat_map(|y| {
+                            (0..at_s.width())
+                                .step_by(usize::from(k))
+                                .map(move |x| (x, y))
+                        })
+                        .find(|&(x, y)| {
+                            let c = at_s.get(x, y);
+                            (0..k).any(|dy| (0..k).any(|dx| at_s.get(x + dx, y + dy) != c))
+                        });
+                    assert_eq!(
+                        bad_block, None,
+                        "{} {name} at k={k}: a {k}x{k} art pixel is not one colour",
+                        theme.name
+                    );
+                    let off_upscale = (0..at_s.height())
+                        .flat_map(|y| (0..at_s.width()).map(move |x| (x, y)))
+                        .find(|&(x, y)| at_s.get(x, y) != at_d.get(x / k, y / k));
+                    assert_eq!(
+                        off_upscale, None,
+                        "{} {name} at k={k}: the frame is not the density render upscaled",
+                        theme.name
+                    );
+                }
+            }
+        }
     }
 }

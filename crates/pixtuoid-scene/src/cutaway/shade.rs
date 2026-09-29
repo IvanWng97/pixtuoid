@@ -3,10 +3,11 @@
 //! Ratified visually before it was written. The first mock pass was flat fills
 //! and read as a diagram; adding exactly two things — a three-tone ramp per
 //! material under one key light from the north windows, and an ordered dither
-//! for the floor falloff — is what made it read as a room. Those two are what
-//! this module is.
+//! for the floor falloff ([`Pen::dither_band`](crate::cutaway::pen::Pen::dither_band))
+//! — is what made it read as a room. The ramp and the fills it paints with are
+//! this module.
 //!
-//! Neither blends: "lit" is a color of its own and a gradient is a dither — the
+//! Nothing blends: "lit" is a color of its own and a gradient is a dither — the
 //! pixel-art convention the room is drawn in.
 
 use pixtuoid_core::sprite::{Rgb, RgbBuffer};
@@ -98,49 +99,6 @@ pub(crate) fn fill(buf: &mut RgbBuffer, x: u16, y: u16, w: u16, h: u16, c: Rgb) 
                 break;
             }
             buf.put(px, py, c);
-        }
-    }
-}
-
-/// The 4x4 ordered (Bayer) threshold matrix.
-///
-/// Its 16 evenly-spread levels are why a dither reads as a smooth ramp rather
-/// than as noise or as banding — the classic pixel-art answer, and the reason
-/// the floor falloff needs two tones instead of a dozen.
-const BAYER_4X4: [[u8; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
-
-/// Dither a horizontal band from `light` at its top to `dark` at its bottom.
-///
-/// `y1` is exclusive; a band with no height paints nothing.
-///
-/// One matrix cell is one LOGICAL pixel — `scale` buffer pixels square. A fixed
-/// 1px cell would make the pattern finer as the render gets denser, turning a
-/// bold checker matching the art's granularity into a sub-sprite stipple: dirt
-/// on a deliberately chunky office, and the class most likely to moiré once a
-/// terminal composites the image.
-///
-/// The indices stay ABSOLUTE (`/ cell % 4`, not relative to `y0`) so the
-/// pattern tiles seamlessly across every band and object that shares the
-/// buffer, which is what stops a seam appearing at each boundary.
-pub(crate) fn dither_band(
-    buf: &mut RgbBuffer,
-    y0: u16,
-    y1: u16,
-    dark: Rgb,
-    light: Rgb,
-    scale: RenderScale,
-) {
-    if y1 <= y0 {
-        return;
-    }
-    let cell = scale.get();
-    let span = u32::from(y1 - y0);
-    for y in y0..y1.min(buf.height()) {
-        // How far through the transition this row sits, on the matrix's scale.
-        let level = (u32::from(y - y0) * 16 / span) as u8;
-        for x in 0..buf.width() {
-            let threshold = BAYER_4X4[usize::from((y / cell) % 4)][usize::from((x / cell) % 4)];
-            buf.put(x, y, if threshold < level { dark } else { light });
         }
     }
 }
@@ -266,31 +224,6 @@ mod tests {
         }
     }
 
-    /// Pins [`dither_band`]'s cell size.
-    #[test]
-    fn a_dither_cell_is_one_logical_pixel_at_every_scale() {
-        for n in [1u16, 4, 8] {
-            let scale = RenderScale::new(n).expect("nonzero");
-            let w = 16 * n;
-            let mut buf = RgbBuffer::filled(w, 8 * n, BG);
-            dither_band(&mut buf, 0, 8 * n, SHADE, LIT, scale);
-            // Within one logical pixel every buffer pixel is the same tone —
-            // that is what "the cell scales" means.
-            let row = 4 * n;
-            for cell in 0..4u16 {
-                let x0 = cell * n;
-                let first = buf.get(x0, row);
-                for dx in 0..n {
-                    assert_eq!(
-                        buf.get(x0 + dx, row),
-                        first,
-                        "scale {n}: cell {cell} is not solid across its width"
-                    );
-                }
-            }
-        }
-    }
-
     #[test]
     fn a_slab_clips_at_the_buffer_edge_instead_of_wrapping() {
         let mut buf = RgbBuffer::filled(4, 4, BG);
@@ -307,46 +240,6 @@ mod tests {
         let mut buf = RgbBuffer::filled(4, 4, BG);
         slab(&mut buf, 0, 0, 0, 4, &ramp(), RenderScale::ONE);
         slab(&mut buf, 0, 0, 4, 0, &ramp(), RenderScale::ONE);
-        assert!(buf.as_slice().iter().all(|&c| c == BG));
-    }
-
-    #[test]
-    fn a_dither_band_runs_light_at_the_top_to_dark_at_the_bottom() {
-        let mut buf = RgbBuffer::filled(16, 32, BG);
-        dither_band(&mut buf, 0, 32, SHADE, LIT, RenderScale::ONE);
-
-        let dark_in = |y0: u16, y1: u16| {
-            (y0..y1)
-                .flat_map(|y| (0..16).map(move |x| (x, y)))
-                .filter(|&(x, y)| buf.get(x, y) == SHADE)
-                .count()
-        };
-        let (top, bottom) = (dark_in(0, 4), dark_in(28, 32));
-        assert_eq!(top, 0, "the first rows are entirely the light tone");
-        assert!(
-            bottom > top,
-            "the dark tone must dominate by the bottom (top {top}, bottom {bottom})"
-        );
-        // Monotone: each quarter is at least as dark as the one above it.
-        let quarters: Vec<usize> = (0..4).map(|q| dark_in(q * 8, q * 8 + 8)).collect();
-        assert!(
-            quarters.windows(2).all(|w| w[1] >= w[0]),
-            "the ramp must not reverse: {quarters:?}"
-        );
-    }
-
-    #[test]
-    fn a_dither_band_uses_only_its_two_tones() {
-        let mut buf = RgbBuffer::filled(8, 8, BG);
-        dither_band(&mut buf, 0, 8, SHADE, LIT, RenderScale::ONE);
-        assert!(buf.as_slice().iter().all(|&c| c == SHADE || c == LIT));
-    }
-
-    #[test]
-    fn an_inverted_or_empty_band_paints_nothing() {
-        let mut buf = RgbBuffer::filled(4, 4, BG);
-        dither_band(&mut buf, 3, 3, SHADE, LIT, RenderScale::ONE);
-        dither_band(&mut buf, 3, 1, SHADE, LIT, RenderScale::ONE);
         assert!(buf.as_slice().iter().all(|&c| c == BG));
     }
 }

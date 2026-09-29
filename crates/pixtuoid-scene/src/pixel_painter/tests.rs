@@ -663,11 +663,12 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         } else {
             String::new()
         };
+        let (anchor_toml, anchor_art) = grid_anchor(DENSITY, SHIRT_KEY);
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
              \"{SHIRT_KEY}\"=\"#0a141e\"\n\"{HAIR_KEY}\"=\"#28323c\"\n\
              \"{SKIN_KEY}\"=\"#46505a\"\n\"{PANTS_KEY}\"=\"#646e78\"\n\
-             [animations.{anim}]\nframes=[\"f0.sprite\", \"f1.sprite\"]\nframe_ms=100\n{variant}"
+             [animations.{anim}]\nframes=[\"f0.sprite\", \"f1.sprite\"]\nframe_ms=100\n{variant}{anchor_toml}"
         );
         let art = [
             ("f0.sprite", format!("@frame 0\n{}", rows(w, h, HAIR_KEY))),
@@ -675,7 +676,11 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
             ("g0.sprite", format!("@frame 0\n{}", rows(dw, dh, g0))),
             ("g1.sprite", format!("@frame 0\n{}", rows(dw, dh, g1))),
         ];
-        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        let art: Vec<(&str, &str)> = art
+            .iter()
+            .chain(&anchor_art)
+            .map(|(n, t)| (*n, t.as_str()))
+            .collect();
         pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
     };
 
@@ -714,6 +719,25 @@ fn a_person_from_a_faithful_variant_renders_as_their_upscaled_base() {
         other_px != base_px,
         "the cutaway did not draw from the variant"
     );
+}
+
+/// The TOML and art of a pet shipped at `density` too, drawn in palette `key`:
+/// both packs of a with-and-without-variant comparison carry it, so both paint
+/// the room on one art grid ([`Pen::for_pack`](crate::cutaway::pen::Pen::for_pack))
+/// and differ only in the piece compared.
+fn grid_anchor(density: u16, key: char) -> (String, [(&'static str, String); 2]) {
+    let square =
+        |n: u16| vec![vec![key.to_string(); usize::from(n)].join(" "); usize::from(n)].join("\n");
+    (
+        format!(
+            "[animations.cat_sit]\nframes=[\"c.sprite\"]\nframe_ms=100\n\
+             [animations.\"cat_sit@{density}x\"]\nframes=[\"c2.sprite\"]\nframe_ms=100\n"
+        ),
+        [
+            ("c.sprite", format!("@frame 0\n{}", square(1))),
+            ("c2.sprite", format!("@frame 0\n{}", square(density))),
+        ],
+    )
 }
 
 /// A desk drawn from a variant that is exactly its base upscaled lands where the
@@ -757,10 +781,11 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
         } else {
             String::new()
         };
+        let (anchor_toml, anchor_art) = grid_anchor(DENSITY, 'D');
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
              \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"F\"=\"#aa2222\"\n\
-             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}"
+             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}{anchor_toml}"
         );
         let art = [
             ("f.sprite", format!("@frame 0\n{}", rows(w, h, 'D'))),
@@ -772,7 +797,11 @@ fn a_desk_variant_lands_where_the_base_does_and_draws_its_own_front() {
                 ),
             ),
         ];
-        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        let art: Vec<(&str, &str)> = art
+            .iter()
+            .chain(&anchor_art)
+            .map(|(n, t)| (*n, t.as_str()))
+            .collect();
         pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
     };
 
@@ -882,10 +911,11 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
         } else {
             String::new()
         };
+        let (anchor_toml, anchor_art) = grid_anchor(DENSITY, 'D');
         let toml = format!(
             "[pack]\nname=\"t\"\nversion=\"1\"\n[palette]\n\
              \"D\"=\"#6a4a2a\"\n\"E\"=\"#3a2a1a\"\n\"{glass_key}\"=\"#1c2a36\"\n\
-             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}"
+             [animations.desk]\nframes=[\"f.sprite\"]\nframe_ms=100\n{variant}{anchor_toml}"
         );
         let art = [
             ("f.sprite", format!("@frame 0\n{}", rows(w, h, glass_key))),
@@ -897,7 +927,11 @@ fn a_lit_desk_variant_lands_its_screen_where_the_base_does() {
                 ),
             ),
         ];
-        let art: Vec<(&str, &str)> = art.iter().map(|(n, t)| (*n, t.as_str())).collect();
+        let art: Vec<(&str, &str)> = art
+            .iter()
+            .chain(&anchor_art)
+            .map(|(n, t)| (*n, t.as_str()))
+            .collect();
         pixtuoid_core::sprite::format::load_pack_from_strings(&toml, &art).expect("pack builds")
     };
 
