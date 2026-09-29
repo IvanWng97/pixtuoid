@@ -90,20 +90,16 @@ pub fn render_cutaway(
     cache: &mut crate::frame_cache::FrameCache,
     buf: &mut RgbBuffer,
 ) -> Vec<CutawayLabel> {
-    let pen = Pen::for_pack(scale, pack);
-    paint_backdrop(layout, theme, scale, pen, buf);
+    paint_backdrop(layout, theme, scale, Pen::for_pack(scale, pack), buf);
     let look = crate::atmosphere::Look::resolve(&crate::sky::Sky::at(now), theme);
-    paint_view(layout, pack, (&look, theme, now), altitude, pen, buf);
-    paint_hung_decor(layout, pack, scale, buf);
-    let list = build_list(frame, layout, pack, theme, scale, now);
+    let list = build_list(frame, layout, pack, theme, scale, (&look, altitude), now);
     paint_list(&list, cache, buf);
     list.labels().collect()
 }
 
-/// Everything under the floor-standing pieces but their shadows, the windows'
-/// view and the decor hung on the wall: floor, its rugs, and the north wall
-/// band with its window frames. None of it moves within a layout, theme, pack
-/// and scale.
+/// Everything under the list's pieces: floor, its rugs, and the north wall band
+/// with its window frames. None of it moves within a layout, theme, pack and
+/// scale.
 fn paint_backdrop(
     layout: &Layout,
     theme: &Theme,
@@ -117,19 +113,6 @@ fn paint_backdrop(
         paint_rug(rug, theme, pen, buf);
     }
     paint_wall(layout, theme, scale, pen, buf);
-}
-
-/// Decor that only hangs on the north band, over the windows' view and before
-/// anything standing on the floor can occlude it; what stands on the floor
-/// sorts among the floor's pieces ([`push_props`]).
-fn paint_hung_decor(layout: &Layout, pack: &Pack, scale: RenderScale, buf: &mut RgbBuffer) {
-    for item in layout
-        .wall_decor
-        .iter()
-        .filter(|i| !i.kind.stands_on_floor())
-    {
-        paint_wall_decor(item.pos, item.kind.sprite_name(), pack, scale, buf);
-    }
 }
 
 /// One frame's floor-standing pieces, built and ordered but not painted.
@@ -224,17 +207,19 @@ impl<'a> DrawList<'a> {
     }
 }
 
-/// Build `frame`'s [`DrawList`] as of `now`. Every figure is resolved here, so
-/// painting the list reads neither `frame` nor `now` again.
+/// Build `frame`'s [`DrawList`] as of `now`, its windows looking out under
+/// `look` from `altitude`. Every figure and every window's view is resolved
+/// here, so painting the list reads neither `frame`, `look` nor `now` again.
 pub(crate) fn build_list<'a>(
     frame: &SimFrame,
     layout: &Layout,
     pack: &'a Pack,
     theme: &'a Theme,
     scale: RenderScale,
+    (look, altitude): (&crate::atmosphere::Look, f32),
     now: std::time::SystemTime,
 ) -> DrawList<'a> {
-    let collected = collect_pieces(frame, layout, pack, theme, scale, now);
+    let collected = collect_pieces(frame, layout, pack, theme, scale, (look, altitude), now);
     let pieces = depth_sort(
         collected
             .into_iter()
@@ -297,7 +282,7 @@ fn ground_shadow(span: Span, kind: &PieceKind, pack: &Pack) -> Option<crate::gro
         ))
     };
     match *kind {
-        PieceKind::WallSeg { .. } => None,
+        PieceKind::WallSeg { .. } | PieceKind::Glass { .. } | PieceKind::Hung { .. } => None,
         PieceKind::Character {
             ref figure,
             body,
@@ -418,6 +403,8 @@ fn fingerprint(kind: &PieceKind) -> u64 {
             label: _,
             body: _,
         } => (at, shadow, key, chair).hash(&mut h),
+        PieceKind::Glass { ref view } => view.hash(&mut h),
+        PieceKind::Hung { at, sprite } => (at, sprite).hash(&mut h),
     }
     h.finish()
 }
@@ -425,16 +412,27 @@ fn fingerprint(kind: &PieceKind) -> u64 {
 /// Every floor-standing piece of the office, each with its [`Span`]. The push
 /// order breaks depth ties, so it is part of the result: a chair pushed after
 /// the people keeps it over a sitter who shares its depth.
+#[allow(clippy::too_many_arguments)]
 fn collect_pieces(
     frame: &SimFrame,
     layout: &Layout,
     pack: &Pack,
     theme: &Theme,
     scale: RenderScale,
+    (look, altitude): (&crate::atmosphere::Look, f32),
     now: std::time::SystemTime,
 ) -> Vec<(Span, PieceKind)> {
     let mut order: Vec<(Span, PieceKind)> =
         Vec::with_capacity(layout.home_desks.len() + frame.characters.len());
+    push_windows(
+        layout,
+        pack,
+        (look, theme, now),
+        altitude,
+        scale,
+        &mut order,
+    );
+    push_hung_decor(layout, pack, scale, &mut order);
     push_desks(frame, layout, pack, theme, scale, &mut order);
     push_props(layout, pack, &mut order);
     push_appliances(layout, &mut order);
@@ -484,6 +482,8 @@ fn paint_piece(
         } => {
             crate::pixel_painter::paint_wall(buf, theme, piece, y0..y1, Pen::for_pack(scale, pack))
         }
+        PieceKind::Glass { ref view } => paint_glass(view, Pen::for_pack(scale, pack), buf),
+        PieceKind::Hung { at, sprite } => paint_wall_decor(at, sprite, pack, scale, buf),
     }
 }
 
@@ -988,6 +988,15 @@ impl PieceKind {
 /// paint fn writes lies inside its span.
 #[derive(Debug)]
 pub(crate) enum PieceKind {
+    /// One window's glass and what it looks out on.
+    Glass {
+        view: WindowView,
+    },
+    /// Decor hung on the north band, blitted at its top-left `at`.
+    Hung {
+        at: crate::layout::Point,
+        sprite: &'static str,
+    },
     /// One segment of a room's wall run.
     WallSeg {
         piece: crate::layout::WallPiece,
@@ -1134,20 +1143,22 @@ fn paint_wall(layout: &Layout, theme: &Theme, scale: RenderScale, pen: Pen, buf:
     fill(buf, 0, scale.to_buffer(band_h), w, s, contact_tone(theme));
 }
 
-/// Paint what the windows look out on: the one city ([`CityStrip`]) on the
-/// pen's art grid, over a sky dithered from its zenith colour to its
-/// horizon's. It changes with the sky and the city's lights, so it is painted
-/// apart from the backdrop.
+/// Queue each window's glass as a piece: what it looks out on — the one city
+/// ([`CityStrip`]) on the pen's art grid over a sky dithered from its zenith
+/// colour to its horizon's — resolved now, at the very back of the order, so
+/// the view changes with the sky and the city's lights without touching the
+/// backdrop.
 ///
 /// [`CityStrip`]: crate::skyline::CityStrip
-fn paint_view(
+fn push_windows(
     layout: &Layout,
     pack: &Pack,
     (look, theme, now): (&crate::atmosphere::Look, &Theme, std::time::SystemTime),
     altitude: f32,
-    pen: Pen,
-    buf: &mut RgbBuffer,
+    scale: RenderScale,
+    order: &mut Vec<(Span, PieceKind)>,
 ) {
+    let pen = Pen::for_pack(scale, pack);
     let rows = crate::layout::window_rows(layout.wall_band_h());
     let window_h = rows.end - rows.start;
     let glass_h = crate::layout::glass_rows(window_h);
@@ -1163,40 +1174,94 @@ fn paint_view(
         density,
     );
     let d = density.get();
+    let (w, h) = (crate::layout::WINDOW_W * d, window_h * d);
     for bay in layout.window_bays() {
-        for dy in 0..window_h {
-            for dx in 0..crate::layout::WINDOW_W {
-                if crate::layout::window_frame(dx, dy, window_h) {
-                    continue;
+        let (x0, y0) = (pen.art(bay.x).0, pen.art(rows.start).0);
+        let px = (0..h)
+            .flat_map(|ay| (0..w).map(move |ax| (ax, ay)))
+            .map(|(ax, ay)| {
+                if crate::layout::window_frame(ax / d, ay / d, window_h) {
+                    return None;
                 }
-                let (gx, gy) = (bay.x + dx - run.start, dy - 1);
-                for sy in 0..d {
-                    for sx in 0..d {
-                        let (ax, ay) =
-                            (pen.art(bay.x + dx).0 + sx, pen.art(rows.start + dy).0 + sy);
-                        let (cx, cy) = (gx * d + sx, gy * d + sy);
-                        let colour = city.at(cx, cy).unwrap_or_else(|| {
-                            let share = crate::atmosphere::sky_share(
-                                (f32::from(cy) + 0.5) / f32::from(d),
-                                glass_h,
-                            );
-                            if crate::cutaway::pen::dithered(ArtPx(ax), ArtPx(ay), share) {
-                                look.glass_a
-                            } else {
-                                look.glass_b
-                            }
-                        });
-                        let px = ArtRect {
-                            x: ArtPx(ax),
-                            y: ArtPx(ay),
-                            w: ArtPx(1),
-                            h: ArtPx(1),
-                        };
-                        pen.fill(buf, px, colour);
+                // Art pixels from the glass's top-left, one frame row down.
+                let (cx, cy) = ((bay.x - run.start) * d + ax, ay - d);
+                Some(city.at(cx, cy).unwrap_or_else(|| {
+                    let share =
+                        crate::atmosphere::sky_share((f32::from(cy) + 0.5) / f32::from(d), glass_h);
+                    if crate::cutaway::pen::dithered(ArtPx(x0 + ax), ArtPx(y0 + ay), share) {
+                        look.glass_a
+                    } else {
+                        look.glass_b
                     }
-                }
-            }
-        }
+                }))
+            })
+            .collect();
+        order.push((
+            Span::new(bay.x, rows.start, crate::layout::WINDOW_W, window_h, 0).with_depth(0),
+            PieceKind::Glass {
+                view: WindowView {
+                    x: x0,
+                    y: y0,
+                    w,
+                    px,
+                },
+            },
+        ));
+    }
+}
+
+/// What one window shows this frame, resolved when the list is built: the
+/// art pixels of its box from its top-left, row by row, `None` on its frame.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct WindowView {
+    x: u16,
+    y: u16,
+    w: u16,
+    px: Vec<Option<pixtuoid_core::sprite::Rgb>>,
+}
+
+/// Paint a window's [`WindowView`].
+fn paint_glass(view: &WindowView, pen: Pen, buf: &mut RgbBuffer) {
+    for (i, c) in view.px.iter().enumerate() {
+        let Some(c) = *c else { continue };
+        let i = i as u16;
+        let cell = ArtRect {
+            x: ArtPx(view.x + i % view.w),
+            y: ArtPx(view.y + i / view.w),
+            w: ArtPx(1),
+            h: ArtPx(1),
+        };
+        pen.fill(buf, cell, c);
+    }
+}
+
+/// Queue the decor that only hangs on the north band, after the glass it may
+/// cover; what stands on the floor sorts among the floor's pieces
+/// ([`push_props`]).
+fn push_hung_decor(
+    layout: &Layout,
+    pack: &Pack,
+    scale: RenderScale,
+    order: &mut Vec<(Span, PieceKind)>,
+) {
+    for item in layout
+        .wall_decor
+        .iter()
+        .filter(|i| !i.kind.stands_on_floor())
+    {
+        let sprite = item.kind.sprite_name();
+        let Some((w, h)) =
+            crate::pixel_painter::densest_frame(pack, sprite, 0, scale).map(|d| d.logical)
+        else {
+            continue;
+        };
+        order.push((
+            piece_span(crate::layout::Anchor::TopLeft, item.pos, w, h, 0),
+            PieceKind::Hung {
+                at: item.pos,
+                sprite,
+            },
+        ));
     }
 }
 
@@ -2396,6 +2461,7 @@ mod tests {
             pack,
             theme,
             RenderScale::ONE,
+            (&sky(theme), 0.0),
             std::time::UNIX_EPOCH,
         );
         let (person, person_span) = order
@@ -2842,6 +2908,7 @@ mod tests {
                 &pack,
                 theme,
                 RenderScale::ONE,
+                (&sky(theme), 0.0),
                 std::time::UNIX_EPOCH,
             ) {
                 let PieceKind::Character {
@@ -2915,6 +2982,7 @@ mod tests {
             &pack,
             theme,
             scale,
+            (&sky(theme), 0.0),
             std::time::UNIX_EPOCH,
         );
         let mut cast = 0;
@@ -2946,6 +3014,11 @@ mod tests {
             }
         }
         assert!(cast > 0, "the office casts shadows");
+    }
+
+    /// The sky at the tests' fixed `now`, resolved for `theme`.
+    fn sky(theme: &Theme) -> crate::atmosphere::Look {
+        crate::atmosphere::Look::resolve(&crate::sky::Sky::at(std::time::UNIX_EPOCH), theme)
     }
 
     /// The bundled pack.
@@ -2989,7 +3062,20 @@ mod tests {
             theme.surface.bg_fallback,
         );
         paint_backdrop(&layout, theme, scale, pen, &mut buf);
-        paint_view(&layout, &pack, (&look, theme, now), 0.0, pen, &mut buf);
+        let mut order = Vec::new();
+        push_windows(&layout, &pack, (&look, theme, now), 0.0, scale, &mut order);
+        assert_eq!(
+            order.len(),
+            layout.window_bays().count(),
+            "a glass piece a window"
+        );
+        for (span, kind) in &order {
+            let PieceKind::Glass { view } = kind else {
+                panic!("a window is glass: {kind:?}");
+            };
+            assert_eq!(span.depth, 0, "glass sorts at the very back");
+            paint_glass(view, pen, &mut buf);
+        }
         let rows = crate::layout::window_rows(layout.wall_band_h());
         let window_h = rows.end - rows.start;
         let run = crate::layout::window_run(layout.buf_w);
@@ -3098,9 +3184,15 @@ mod tests {
         let mut check = |pack: &Pack, frame: &SimFrame, layout: &Layout, only_people: bool| {
             for s in [1, 3, pack.max_density_variant()] {
                 let scale = RenderScale::new(s).expect("nonzero");
-                for (span, kind) in
-                    collect_pieces(frame, layout, pack, theme, scale, std::time::UNIX_EPOCH)
-                {
+                for (span, kind) in collect_pieces(
+                    frame,
+                    layout,
+                    pack,
+                    theme,
+                    scale,
+                    (&sky(theme), 0.0),
+                    std::time::UNIX_EPOCH,
+                ) {
                     if only_people && !matches!(kind, PieceKind::Character { .. }) {
                         continue;
                     }
@@ -3207,6 +3299,8 @@ S B B B B B B S
                 "chair",
                 "character",
                 "desk",
+                "glass",
+                "hung decor",
                 "prop",
                 "prop band",
                 "table",
@@ -3247,7 +3341,8 @@ S B B B B B B S
                 let scale = RenderScale::new(s).expect("nonzero");
                 let mut last: Option<(u64, u64)> = None;
                 for frame in &frames {
-                    let list = build_list(frame, &layout, &pack, theme, scale, now);
+                    let list =
+                        build_list(frame, &layout, &pack, theme, scale, (&sky(theme), 0.0), now);
                     repeats += same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         s == 1 || matches!(p.kind, PieceKind::Character { .. })
                     });
@@ -3352,7 +3447,15 @@ S B B B B B B S
                 for edit in variants {
                     built += 1;
                     let frame = varied(seated, edit);
-                    let list = build_list(&frame, &layout, &pack, theme, scale, now);
+                    let list = build_list(
+                        &frame,
+                        &layout,
+                        &pack,
+                        theme,
+                        scale,
+                        (&sky(theme), 0.0),
+                        now,
+                    );
                     same_fingerprint_same_pixels(&mut painted, &list, &layout, |p| {
                         matches!(p.kind, PieceKind::Character { .. })
                     });
@@ -3468,6 +3571,7 @@ S B B B B B B S
                 &pack,
                 theme,
                 RenderScale::ONE,
+                (&sky(theme), 0.0),
                 now
             )),
             summary(&build_list(
@@ -3476,6 +3580,7 @@ S B B B B B B S
                 &pack,
                 theme,
                 RenderScale::ONE,
+                (&sky(theme), 0.0),
                 now
             )),
         );
@@ -3494,6 +3599,7 @@ S B B B B B B S
                 &pack,
                 theme,
                 RenderScale::ONE,
+                (&sky(theme), 0.0),
                 std::time::SystemTime::UNIX_EPOCH,
             );
             let pieces: Vec<&Piece> = list
@@ -3540,6 +3646,8 @@ S B B B B B B S
             PieceKind::Table { .. } => "table",
             PieceKind::Appliance { .. } => "appliance",
             PieceKind::Character { .. } => "character",
+            PieceKind::Glass { .. } => "glass",
+            PieceKind::Hung { .. } => "hung decor",
         }
     }
 
