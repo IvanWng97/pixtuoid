@@ -477,14 +477,46 @@ fn agent_overrides_are_deterministic_per_id() {
     );
 }
 
+/// Frame `i` of `anim` as a viewer sees it under `overrides`: recolored and,
+/// where the art marks its head, dressed in each of the pack's hairstyles.
+fn looks(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    overrides: &[(char, pixtuoid_core::sprite::Pixel)],
+) -> Vec<pixtuoid_core::sprite::Frame> {
+    let bare = anim.recolorable(i).expect("frame").recolored(overrides);
+    match anim.head(i) {
+        None => vec![bare],
+        Some(head) => pack
+            .hairstyles()
+            .map(|s| super::hair::dress(&bare, head, s, overrides, pack.hair_outline().flatten()))
+            .collect(),
+    }
+}
+
+/// Whether recoloring `key` changes some pixel of every look of frame `i`.
+fn recolors(
+    pack: &pixtuoid_core::sprite::format::Pack,
+    anim: &pixtuoid_core::sprite::Sprite,
+    i: usize,
+    key: char,
+) -> bool {
+    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
+    looks(pack, anim, i, &[])
+        .iter()
+        .zip(looks(pack, anim, i, &[(key, sentinel)]))
+        .all(|(own, recolored)| own.as_slice() != recolored.as_slice())
+}
+
 /// A key no character frame draws recolors nothing, so every agent would wear
-/// the pack's own color there: `standing` shows all four, at every density.
+/// the pack's own color there: `standing` shows all four, at every density,
+/// dressed in whichever hairstyle.
 #[test]
 #[cfg(feature = "density-art")]
 fn the_embedded_pack_draws_every_key_an_agent_recolors() {
     use pixtuoid_core::sprite::format::density_variant_name;
     let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
     let names = std::iter::once("standing".to_string())
         .chain((2..=pack.max_density_variant()).map(|d| density_variant_name("standing", d)));
     let mut drawn = 0;
@@ -492,17 +524,14 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
         let Some(standing) = pack.animation(&name) else {
             continue;
         };
-        let own = &standing.frames()[0];
-        let frame = standing.recolorable(0).expect("frame 0");
         for key in [
             palette::SHIRT_KEY,
             palette::HAIR_KEY,
             palette::SKIN_KEY,
             palette::PANTS_KEY,
         ] {
-            assert_ne!(
-                frame.recolored(&[(key, sentinel)]).as_slice(),
-                own.as_slice(),
+            assert!(
+                recolors(&pack, standing, 0, key),
                 "no {name} pixel is drawn in {key:?}"
             );
         }
@@ -516,9 +545,9 @@ fn the_embedded_pack_draws_every_key_an_agent_recolors() {
 
 /// Hair and shirt show in every pose, even face-down asleep, and they are how a
 /// viewer tells two agents apart: every frame, base or `@Nx` variant, draws
-/// them in a key the agent's recolor reaches (the key itself or one of its
-/// `[ramps]` shades), or it shows every agent in the pack's own colours. Skin
-/// and pants may be out of sight.
+/// them, dressed in whichever hairstyle, in a key the agent's recolor reaches
+/// (the key itself or one of its `[ramps]` shades), or it shows every agent in
+/// the pack's own colours. Skin and pants may be out of sight.
 #[test]
 #[cfg(feature = "density-art")]
 fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
@@ -526,7 +555,6 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
         density_variant_name, OPTIONAL_CHARACTER_ANIMATIONS, REQUIRED_CHARACTER_ANIMATIONS,
     };
     let pack = crate::embedded_pack::test_default_pack();
-    let sentinel = Some(Rgb { r: 1, g: 2, b: 3 });
     let mut variants = 0;
     for &base in REQUIRED_CHARACTER_ANIMATIONS
         .iter()
@@ -539,12 +567,10 @@ fn every_character_frame_at_every_density_recolors_hair_and_shirt() {
                 continue;
             };
             variants += usize::from(density.is_some());
-            for (i, own) in anim.frames().iter().enumerate() {
-                let frame = anim.recolorable(i).expect("frame");
+            for i in 0..anim.frames().len() {
                 for key in [palette::HAIR_KEY, palette::SHIRT_KEY] {
-                    assert_ne!(
-                        frame.recolored(&[(key, sentinel)]).as_slice(),
-                        own.as_slice(),
+                    assert!(
+                        recolors(&pack, anim, i, key),
                         "{name} frame {i} draws nothing the {key:?} recolor reaches"
                     );
                 }

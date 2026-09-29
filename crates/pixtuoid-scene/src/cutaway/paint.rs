@@ -676,10 +676,22 @@ fn push_characters(
         });
         let at = cutaway_anchor(c);
         let shadow = c.seat_desk.is_none();
+        // The drawn box reaches up over the hair its style dresses it in.
+        let hair = hair_headroom(pack, c.anim_name, c.frame_idx, key.frame.agent_id, scale);
+        let top = crate::layout::Point {
+            x: at.x,
+            y: at.y.saturating_sub(hair),
+        };
         order.push((
             occupant_span(
                 // +1 for the contact shadow `paint_figure` stamps under it.
-                piece_span(crate::layout::Anchor::TopLeft, at, w, h, u16::from(shadow)),
+                piece_span(
+                    crate::layout::Anchor::TopLeft,
+                    top,
+                    w,
+                    h + hair,
+                    u16::from(shadow),
+                ),
                 c.anchor_y,
                 chair.map(|(span, _)| span),
             ),
@@ -688,13 +700,36 @@ fn push_characters(
                 chair: chair.map(|(_, at)| at),
                 label: CutawayLabel {
                     agent_idx: c.agent_idx,
-                    anchor_px: label_anchor(at, w, badge_ceiling, scale),
+                    anchor_px: label_anchor(top, w, badge_ceiling, scale),
                 },
-                body: Span::new(at.x, at.y, w, h, 0),
+                body: Span::new(top.x, top.y, w, h + hair, 0),
             },
         ));
     }
     carried
+}
+
+/// The logical rows a figure's hair reaches above its art's own box at `scale`:
+/// what [`paint_figure`] draws above `at` ([`crate::pixel_painter::hair::rise`]),
+/// rounded up to whole rows.
+fn hair_headroom(
+    pack: &Pack,
+    anim: &str,
+    frame_idx: usize,
+    agent: pixtuoid_core::AgentId,
+    scale: RenderScale,
+) -> u16 {
+    let Some(dense) = crate::pixel_painter::densest_frame(pack, anim, frame_idx, scale) else {
+        return 0;
+    };
+    let density = dense.density.get();
+    dense
+        .head
+        .zip(crate::pixel_painter::hair::pick(pack, agent, density))
+        .map_or(0, |(head, style)| {
+            crate::pixel_painter::hair::rise(head, style, pack.hair_outline().flatten().is_some())
+                .div_ceil(density)
+        })
 }
 
 /// A figure's piece: its drawn bounds, sorted on `depth` — the sim's own z-key,
@@ -1383,10 +1418,12 @@ fn paint_figure(
     if shadow {
         contact_shadow(at, art_w, art_h, theme, scale, buf);
     }
+    // A dressed frame reaches up over its hair: its art's top stays at `at`.
+    let rise = art.rise.saturating_mul(art.blit_at.get());
     blit_frame_scaled(
         art.frame,
         scale.to_buffer(at.x),
-        scale.to_buffer(at.y),
+        scale.to_buffer(at.y).saturating_sub(rise),
         art.blit_at,
         buf,
     );

@@ -289,6 +289,52 @@ impl Frame {
     }
 }
 
+/// Which way a character frame's head faces the viewer: the view a hairstyle
+/// draws its layers for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum HeadView {
+    /// The face toward the viewer.
+    Front,
+    /// The back of the head toward the viewer.
+    Back,
+    /// In profile.
+    Side,
+    /// Seen from above, face down.
+    Crown,
+}
+
+impl HeadView {
+    /// Every view.
+    pub const ALL: [HeadView; 4] = [Self::Front, Self::Back, Self::Side, Self::Crown];
+
+    /// The name a `.sprite` `@head` line and a `[hairstyles]` table call it by.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Front => "front",
+            Self::Back => "back",
+            Self::Side => "side",
+            Self::Crown => "crown",
+        }
+    }
+
+    /// The view called `name`, if there is one.
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|v| v.name() == name)
+    }
+}
+
+/// Where a frame's head is and which way it faces: the point a hairstyle
+/// layer's own mark is laid on, in the frame's own pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct HeadMark {
+    /// Which way the head faces.
+    pub view: HeadView,
+    /// The mark's column.
+    pub x: u16,
+    /// The mark's row.
+    pub y: u16,
+}
+
 /// An animation: its frames in order, the palette indices they were drawn
 /// with, and the per-frame hold time.
 #[derive(Debug, Clone)]
@@ -297,6 +343,8 @@ pub struct Sprite {
     frames: Vec<Frame>,
     /// The same frames as indices into `palette`, for a recolor to resolve again.
     indexed: Vec<IndexedFrame>,
+    /// Each frame's `@head` mark, where it has one.
+    heads: Vec<Option<HeadMark>>,
     /// The palette `indexed` refers to: the sprite's own pack's, which it keeps
     /// when a custom pack inherits it, so a recolor never reads its indices
     /// through another pack's keys.
@@ -305,15 +353,26 @@ pub struct Sprite {
 }
 
 impl Sprite {
-    fn new(indexed: Vec<IndexedFrame>, palette: Arc<Palette>, frame_ms: u32) -> Self {
+    fn new(
+        marked: Vec<(IndexedFrame, Option<HeadMark>)>,
+        palette: Arc<Palette>,
+        frame_ms: u32,
+    ) -> Self {
         let pixels = palette.resolved();
+        let (indexed, heads): (Vec<_>, Vec<_>) = marked.into_iter().unzip();
         let frames = indexed.iter().map(|f| f.resolve(&pixels)).collect();
         Sprite {
             frames,
             indexed,
+            heads,
             palette,
             frame_ms,
         }
+    }
+
+    /// Frame `idx`'s `@head` mark: where a hairstyle dresses it.
+    pub fn head(&self, idx: usize) -> Option<HeadMark> {
+        self.heads.get(idx).copied().flatten()
     }
 
     /// The frames, played in order.

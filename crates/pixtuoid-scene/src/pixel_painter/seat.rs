@@ -42,7 +42,7 @@ pub(crate) fn character_frame<'c>(
         glow_tint,
         now,
     );
-    Some(recolor(dense, &key, cache))
+    Some(recolor(dense, &key, pack, cache))
 }
 
 /// [`character_frame`] for a [`CharacterKey`] resolved at `scale`.
@@ -53,12 +53,13 @@ pub(crate) fn keyed_character_frame<'c>(
     cache: &'c mut FrameCache,
 ) -> Option<CharacterFrame<'c>> {
     let dense = super::densest_frame(pack, key.frame.anim_name, key.frame.frame_idx, scale)?;
-    Some(recolor(dense, key, cache))
+    Some(recolor(dense, key, pack, cache))
 }
 
 fn recolor<'c>(
     dense: super::dense::DenseFrame<'_>,
     key: &CharacterKey,
+    pack: &Pack,
     cache: &'c mut FrameCache,
 ) -> CharacterFrame<'c> {
     let (burn, flip_x) = (key.frame.burn, key.frame.flip_x);
@@ -66,7 +67,24 @@ fn recolor<'c>(
     // change so the cache drops the agent's stale recolors before the lookup.
     cache.note_outfit_seed(key.frame.agent_id, key.outfit);
     let frame = cache.get_or_make(key.frame.clone(), || {
-        let recolored = dense.recolorable.recolored(&key.palette);
+        let bare = dense.recolorable.recolored(&key.palette);
+        // Dressed before the facing flip: a style's layers are drawn for the
+        // art as authored. The agent id alone picks the style, so the cache's
+        // per-agent key already keys it.
+        let recolored = match dense.head.zip(super::hair::pick(
+            pack,
+            key.frame.agent_id,
+            dense.density.get(),
+        )) {
+            Some((head, style)) => super::hair::dress(
+                &bare,
+                head,
+                style,
+                &key.palette,
+                pack.hair_outline().flatten(),
+            ),
+            None => bare,
+        };
         if flip_x {
             // HORIZONTAL: `flip_x` is which way the character FACES.
             recolored.mirror_horizontal()
@@ -74,11 +92,13 @@ fn recolor<'c>(
             recolored
         }
     });
+    let rise = frame.height().saturating_sub(dense.frame.height());
     CharacterFrame {
         frame,
         burn,
         logical: dense.logical,
         blit_at: dense.blit_at,
+        rise,
     }
 }
 
@@ -146,6 +166,9 @@ pub(crate) struct CharacterFrame<'c> {
     pub(crate) burn: crate::burn::BurnTier,
     pub(crate) logical: (u16, u16),
     pub(crate) blit_at: std::num::NonZeroU16,
+    /// Art rows the frame reaches above its logical top: the hair a style
+    /// dresses it in (`pixel_painter::hair::rise`).
+    pub(crate) rise: u16,
 }
 
 /// Paint a character at an arbitrary anchor with per-agent recolor. `glow_tint`
@@ -169,6 +192,7 @@ pub(crate) fn paint_character_at(
         burn,
         logical: _,
         blit_at: _,
+        rise: _,
     }) = character_frame(
         anim_name,
         frame_idx,
